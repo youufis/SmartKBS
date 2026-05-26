@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>信息科技 · 数据的分析 知识纲要</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f9f9f9;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #2980b9;
+      margin-top: 25px;
+      border-left: 4px solid #3498db;
+      padding-left: 10px;
+    }
+    h3 {
+      color: #16a085;
+      margin-top: 20px;
+    }
+    ul, ol {
+      margin: 10px 0 15px 25px;
+    }
+    li {
+      margin-bottom: 8px;
+    }
+    .definition {
+      background-color: #e8f4fc;
+      padding: 12px;
+      border-radius: 6px;
+      margin: 15px 0;
+      border-left: 3px solid #3498db;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+    }
+    th, td {
+      border: 1px solid #bdc3c7;
+      padding: 10px;
+      text-align: left;
+    }
+    th {
+      background-color: #3498db;
+      color: white;
+    }
+    .note {
+      background-color: #fef9e7;
+      padding: 10px;
+      border-radius: 5px;
+      font-style: italic;
+      margin: 15px 0;
+    }
+  </style>
+</head>
+<body>
+
+<h1>数据的分析 —— 高中信息科技知识纲要</h1>
+
+<div class="definition">
+  <strong>数据分析定义：</strong>  
+  数据分析是指运用恰当的工具与方法，对采集到的原始数据进行整理、计算、可视化和解释，以发现规律、支持决策、解决问题的过程。它是从“数据”走向“知识”和“智慧”的关键环节。
+</div>
+
+<h2>一、数据分析的基本流程（依据课程标准）</h2>
+<ol>
+  <li><strong>明确分析目标</strong>：基于真实问题（如“校园早餐营养是否均衡？”），确定需要回答的核心问题。</li>
+  <li><strong>数据整理</strong>：清洗缺失值、异常值、重复项；统一格式；分类编码。</li>
+  <li><strong>选择分析方法与工具</strong>：根据数据类型和任务需求选用电子表格、数据库或专业软件。</li>
+  <li><strong>执行分析操作</strong>：进行统计计算、关联挖掘、趋势预测等。</li>
+  <li><strong>可视化呈现</strong>：用图表直观展示分析结果。</li>
+  <li><strong>撰写分析报告</strong>：解释发现、提出建议、反思过程。</li>
+</ol>
+
+<h2>二、常用数据分析方法</h2>
+
+<h3>1. 描述性分析</h3>
+<ul>
+  <li>目的：总结数据的基本特征</li>
+  <li>常用指标：
+    <ul>
+      <li>集中趋势：平均数、中位数、众数</li>
+      <li>离散程度：最大值、最小值、极差、标准差</li>
+      <li>频数分布：各类别出现次数</li>
+    </ul>
+  </li>
+  <li>示例：计算班级期中考试平均分、及格率、最高/最低分。</li>
+</ul>
+
+<h3>2. 关联分析</h3>
+<ul>
+  <li>目的：发现变量之间的相关关系</li>
+  <li>方法：
+    <ul>
+      <li>交叉表（列联表）：如“性别 vs. 是否喜欢编程”</li>
+      <li>散点图：观察两个数值变量的趋势（如学习时间 vs. 成绩）</li>
+    </ul>
+  </li>
+  <li>注意：相关≠因果！需结合实际情境判断。</li>
+</ul>
+
+<h3>3. 趋势分析</h3>
+<ul>
+  <li>目的：观察数据随时间的变化规律</li>
+  <li>工具：折线图、移动平均</li>
+  <li>应用：分析月度用电量、季度销售额变化。</li>
+</ul>
+
+<h3>4. 分类与聚类（拓展）</h3>
+<ul>
+  <li><strong>分类</strong>：根据已有标签预测新样本类别（如垃圾邮件识别）</li>
+  <li><strong>聚类</strong>：将相似对象自动分组（如学生学习行为分群）</li>
+  <li>说明：高中阶段以理解思想为主，不要求算法实现。</li>
+</ul>
+
+<h2>三、常用数据分析工具</h2>
+<table>
+  <thead>
+    <tr>
+      <th>工具</th>
+      <th>适用场景</th>
+      <th>核心功能</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>电子表格软件<br>（如Excel、WPS）</strong></td>
+      <td>小规模结构化数据<br>（≤10万行）</td>
+      <td>公式计算（SUM、AVERAGE）、排序筛选、数据透视表、图表生成</td>
+    </tr>
+    <tr>
+      <td><strong>数据库管理系统<br>（如Access、MySQL）</strong></td>
+      <td>多表关联、复杂查询</td>
+      <td>SQL语句查询、连接（JOIN）、分组统计（GROUP BY）</td>
+    </tr>
+    <tr>
+      <td><strong>Python（pandas + matplotlib）</strong></td>
+      <td>自动化处理、大数据集</td>
+      <td>数据清洗、统计分析、高级可视化（需选修模块）</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>四、数据可视化原则</h2>
+<ul>
+  <li><strong>图表匹配数据类型</strong>：
+    <ul>
+      <li>分类比较 → 柱状图</li>
+      <li>占比构成 → 饼图（类别≤5）</li>
+      <li>时间趋势 → 折线图</li>
+      <li>两变量关系 → 散点图</li>
+    </ul>
+  </li>
+  <li><strong>清晰标注</strong>：坐标轴名称、单位、图例、标题完整</li>
+  <li><strong>避免误导</strong>：Y轴从0开始（除非有合理理由）、比例真实</li>
+</ul>
+
+<h2>五、数据分析中的伦理与责任</h2>
+<div class="note">
+  ⚠️ 依据《课程标准》学业质量水平2、3要求
+</div>
+<ul>
+  <li>不篡改、不捏造数据，确保分析结果真实可信</li>
+  <li>尊重数据来源者的隐私，匿名化处理个人信息</li>
+  <li>避免“数据偏见”：警惕样本偏差导致的错误结论（如仅调查男生得出全校喜好）</li>
+  <li>批判性看待分析结果，不盲目相信“数据说话”</li>
+</ul>
+
+<h2>六、核心素养关联（依据《普通高中信息科技课程标准》）</h2>
+<ul>
+  <li><strong>信息意识</strong>：能根据问题选择合适的数据分析方法，理解数据价值</li>
+  <li><strong>计算思维</strong>：将现实问题抽象为可计算的数据模型，设计分析路径</li>
+  <li><strong>数字化学习与创新</strong>：熟练使用工具完成从数据到决策的全过程</li>
+  <li><strong>信息社会责任</strong>：在分析中遵守规范，抵制数据滥用</li>
+</ul>
+
+<h2>七、典型教学案例（参考课程标准“教学提示”）</h2>
+<ul>
+  <li>学校运动会比赛成绩分析：排名、破纪录情况、年级对比</li>
+  <li>社会实践调查问卷分析：兴趣分布、满意度评分、交叉分析</li>
+  <li>超市销售记录分析：畅销商品、淡旺季趋势、促销效果评估</li>
+</ul>
+
+<h2>八、实践任务建议</h2>
+<div class="note">
+  <strong>小组项目：</strong>围绕“校园自习室使用情况”，完成以下任务：
+  <ol>
+    <li>设计数据采集方案（问卷+实地观察）</li>
+    <li>使用电子表格整理并分析数据</li>
+    <li>制作2种以上图表可视化结果</li>
+    <li>撰写简要分析报告，提出管理建议</li>
+  </ol>
+</div>
+
+</body>
+</html>

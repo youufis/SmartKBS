@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>算法公平性模拟 - 交互式学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .dot { transition: all 0.5s ease; }
+        .slider { -webkit-appearance: none; width: 100%; height: 6px; background: #cbd5e1; border-radius: 5px; outline: none; }
+        .slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; background: #3b82f6; cursor: pointer; border-radius: 50%; }
+        .chart-container { position: relative; height: 300px; width: 100%; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+
+    <div class="max-w-6xl mx-auto p-4 md:p-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">算法公平性与偏见模拟</h1>
+            <p class="text-slate-600">探索训练数据失衡如何导致系统性歧视，并观察准确性与公平性之间的权衡。</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- 控制面板 -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-xl font-semibold mb-6 flex items-center">
+                    <span class="w-2 h-6 bg-blue-600 rounded-full mr-2"></span>
+                    训练参数设置
+                </h2>
+
+                <div class="mb-8">
+                    <div class="flex justify-between mb-2">
+                        <label class="text-sm font-medium text-slate-700">群体比例 (群体A : 群体B)</label>
+                        <span id="ratio-display" class="text-sm text-blue-600 font-bold">80% : 20%</span>
+                    </div>
+                    <input type="range" id="ratio-slider" min="50" max="95" value="80" class="slider">
+                    <p class="text-xs text-slate-500 mt-2 italic">注：保持总样本量 \( N=400 \) 不变，改变群体构成。</p>
+                </div>
+
+                <div class="mb-8">
+                    <div class="flex justify-between mb-2">
+                        <label class="text-sm font-medium text-slate-700">公平性干预强度</label>
+                        <span id="fairness-display" class="text-sm text-emerald-600 font-bold">0%</span>
+                    </div>
+                    <input type="range" id="fairness-slider" min="0" max="100" value="0" class="slider">
+                    <p class="text-xs text-slate-500 mt-2 italic">调整决策阈值以追求人口统计学一致性 (Demographic Parity)。</p>
+                </div>
+
+                <button id="train-btn" class="w-full py-3 bg-slate-800 text-white rounded-lg font-bold hover:bg-slate-700 transition-colors">
+                    重新训练模型
+                </button>
+
+                <div class="mt-8 p-4 bg-amber-50 rounded-lg border border-amber-100">
+                    <h3 class="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2">核心数学约束</h3>
+                    <div class="text-sm text-amber-900 space-y-2">
+                        <p>经验风险最小化 (ERM):</p>
+                        <p class="font-serif">\[ \min \frac{1}{n} \sum_{i=1}^n L(f(x_i), y_i) \]</p>
+                        <p class="text-xs">当群体A占主导时，模型会优先拟合A以最小化全局损失。</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 可视化画布 -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <div class="flex justify-between items-end mb-4">
+                        <h2 class="text-xl font-semibold">人才选拔模型可视化</h2>
+                        <div class="flex gap-4 text-xs">
+                            <span class="flex items-center"><i class="w-3 h-3 bg-blue-500 rounded-full mr-1"></i> 群体A (多数)</span>
+                            <span class="flex items-center"><i class="w-3 h-3 bg-orange-500 rounded-full mr-1"></i> 群体B (少数)</span>
+                            <span class="flex items-center"><i class="w-3 h-3 border border-slate-400 rounded-full mr-1"></i> 未被选中</span>
+                            <span class="flex items-center"><i class="w-3 h-3 bg-slate-800 rounded-full mr-1"></i> 已被录用</span>
+                        </div>
+                    </div>
+                    
+                    <div id="viz-container" class="relative w-full h-[320px] bg-slate-50 border border-slate-100 rounded-xl overflow-hidden">
+                        <svg id="main-svg" class="w-full h-full">
+                            <!-- 决策边界线 -->
+                            <line id="decision-boundary" x1="0" y1="160" x2="100%" y2="160" stroke="#1e293b" stroke-width="2" stroke-dasharray="5,5" />
+                            <text id="boundary-label" x="10" y="150" font-size="12" fill="#1e293b" font-weight="bold">录取阈值</text>
+                            <g id="points-group"></g>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- 数据指标 -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-white p-4 rounded-xl border border-slate-200">
+                        <p class="text-sm text-slate-500 mb-1">整体准确率 (Accuracy)</p>
+                        <div class="flex items-end justify-between">
+                            <span id="acc-val" class="text-2xl font-bold text-slate-800">0%</span>
+                            <div class="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div id="acc-bar" class="h-full bg-slate-600" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl border border-slate-200">
+                        <p class="text-sm text-slate-500 mb-1">录用率差异 (Selection Gap)</p>
+                        <div class="flex items-end justify-between">
+                            <span id="gap-val" class="text-2xl font-bold text-red-500">0%</span>
+                            <div class="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div id="gap-bar" class="h-full bg-red-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-4 rounded-xl border border-slate-200">
+                        <p class="text-sm text-slate-500 mb-1">均等机会 (Opportunity)</p>
+                        <div class="flex items-end justify-between">
+                            <span id="opp-val" class="text-2xl font-bold text-emerald-500">0%</span>
+                            <div class="w-16 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div id="opp-bar" class="h-full bg-emerald-500" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <section class="mt-12 bg-slate-800 text-white p-8 rounded-2xl">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+                <div>
+                    <h2 class="text-2xl font-bold mb-4">为什么会产生偏见？</h2>
+                    <ul class="space-y-4 text-slate-300">
+                        <li class="flex items-start">
+                            <span class="mr-3 mt-1 text-blue-400 font-bold">01</span>
+                            <p><strong class="text-white">多数群体支配：</strong> 损失函数以整体准确率为导向。模型会自动倾向于拟合数据量更大的群体以最小化总损失，导致少数群体的特征被视为“噪声”。</p>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="mr-3 mt-1 text-blue-400 font-bold">02</span>
+                            <p><strong class="text-white">代理变量机制：</strong> 即使不直接使用“性别”作为特征，算法也会通过居住地、教育经历等与敏感属性高度相关的特征间接学习到偏见。</p>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="mr-3 mt-1 text-blue-400 font-bold">03</span>
+                            <p><strong class="text-white">公平性权衡 (Trade-off)：</strong> 修正偏见通常需要调整决策阈值，这在统计学上必然会导致模型对多数群体的预测准确性下降。</p>
+                        </li>
+                    </ul>
+                </div>
+                <div class="bg-slate-700/50 p-6 rounded-xl border border-slate-600">
+                    <h3 class="text-lg font-semibold mb-4">数学定义：人口统计学一致性</h3>
+                    <p class="text-slate-400 mb-4 text-sm">要求不同群体的预测录取率相等：</p>
+                    <p class="text-xl font-serif text-center py-4 bg-slate-900 rounded-lg">
+                        \[ P(\hat{Y}=1 | G=A) = P(\hat{Y}=1 | G=B) \]
+                    </p>
+                    <p class="mt-4 text-xs text-slate-500">
+                        注意：在现实中，当原始数据存在结构性差异时，强行追求该指标可能会导致“反向歧视”或整体效率损失。
+                    </p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // 常量设置
+        const TOTAL_N = 400;
+        const SVG_NS = "http://www.w3.org/2000/svg";
+        
+        // 状态管理
+        let state = {
+            ratio: 0.8,
+            fairness: 0,
+            data: []
+        };
+
+        // 获取DOM
+        const ratioSlider = document.getElementById('ratio-slider');
+        const fairnessSlider = document.getElementById('fairness-slider');
+        const trainBtn = document.getElementById('train-btn');
+        const pointsGroup = document.getElementById('points-group');
+        const decisionBoundary = document.getElementById('decision-boundary');
+        const boundaryLabel = document.getElementById('boundary-label');
+
+        // 正态分布随机数
+        function randn_bm() {
+            let u = 0, v = 0;
+            while(u === 0) u = Math.random();
+            while(v === 0) v = Math.random();
+            return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        // 生成模拟数据
+        function generateData() {
+            const data = [];
+            const nA = Math.floor(TOTAL_N * state.ratio);
+            const nB = TOTAL_N - nA;
+
+            // 群体A：多数群体，均值较高，方差较小
+            for(let i=0; i<nA; i++) {
+                const score = 0.6 + randn_bm() * 0.15;
+                const groundTruth = score > 0.55 ? 1 : 0; // 真实能力
+                data.push({ group: 'A', score, groundTruth, x: Math.random() * 0.6 });
+            }
+
+            // 群体B：少数群体，分布略有不同（模拟历史偏差）
+            for(let i=0; i<nB; i++) {
+                const score = 0.45 + randn_bm() * 0.2;
+                const groundTruth = score > 0.55 ? 1 : 0;
+                data.push({ group: 'B', score, groundTruth, x: 0.65 + Math.random() * 0.35 });
+            }
+            state.data = data;
+        }
+
+        // 训练/计算结果
+        function updateModel() {
+            const svgHeight = 320;
+            const svgWidth = document.getElementById('viz-container').clientWidth;
+
+            // 1. 寻找最大化总体准确率的基准阈值
+            let bestThreshold = 0.5;
+            let maxAcc = 0;
+            for(let t=0.2; t<0.8; t+=0.01) {
+                let correct = state.data.filter(d => (d.score >= t ? 1 : 0) === d.groundTruth).length;
+                if(correct > maxAcc) {
+                    maxAcc = correct;
+                    bestThreshold = t;
+                }
+            }
+
+            // 2. 公平性干预：调整不同群体的阈值以缩小录取率差距
+            // 默认情况下，群体B的平均分较低，导致其在统一阈值下录取率极低
+            const rateA = state.data.filter(d => d.group === 'A' && d.score >= bestThreshold).length / state.data.filter(d => d.group === 'A').length;
+            const rateB_raw = state.data.filter(d => d.group === 'B' && d.score >= bestThreshold).length / state.data.filter(d => d.group === 'B').length;
+            
+            // 模拟公平性修正：降低群体B的录取门槛
+            const fairnessFactor = state.fairness / 100;
+            const thresholdB = bestThreshold - (bestThreshold - 0.3) * fairnessFactor;
+            const thresholdA = bestThreshold;
+
+            // 3. 计算指标
+            let totalCorrect = 0;
+            let selectedA = 0, selectedB = 0;
+            let truePositiveA = 0, totalPositiveA = 0;
+            let truePositiveB = 0, totalPositiveB = 0;
+
+            pointsGroup.innerHTML = '';
+            
+            state.data.forEach(d => {
+                const threshold = d.group === 'A' ? thresholdA : thresholdB;
+                const prediction = d.score >= threshold ? 1 : 0;
+                const isCorrect = prediction === d.groundTruth;
+                if(isCorrect) totalCorrect++;
+
+                if(d.group === 'A') {
+                    if(prediction === 1) selectedA++;
+                    if(d.groundTruth === 1) {
+                        totalPositiveA++;
+                        if(prediction === 1) truePositiveA++;
+                    }
+                } else {
+                    if(prediction === 1) selectedB++;
+                    if(d.groundTruth === 1) {
+                        totalPositiveB++;
+                        if(prediction === 1) truePositiveB++;
+                    }
+                }
+
+                // 渲染点
+                const circle = document.createElementNS(SVG_NS, "circle");
+                const cx = d.x * svgWidth;
+                const cy = svgHeight - (d.score * svgHeight);
+                circle.setAttribute("cx", cx);
+                circle.setAttribute("cy", cy);
+                circle.setAttribute("r", 4);
+                circle.setAttribute("class", "dot");
+                
+                if(prediction === 1) {
+                    circle.setAttribute("fill", "#1e293b"); // 黑色表示录取
+                } else {
+                    circle.setAttribute("fill", "transparent");
+                    circle.setAttribute("stroke", d.group === 'A' ? "#3b82f6" : "#f97316");
+                    circle.setAttribute("stroke-width", "1");
+                }
+                pointsGroup.appendChild(circle);
+            });
+
+            // 渲染决策线
+            const lineY = svgHeight - (bestThreshold * svgHeight);
+            decisionBoundary.setAttribute("y1", lineY);
+            decisionBoundary.setAttribute("y2", lineY);
+            boundaryLabel.setAttribute("y", lineY - 10);
+
+            // 更新仪表盘
+            const nA = state.data.filter(d => d.group === 'A').length;
+            const nB = TOTAL_N - nA;
+            
+            const accuracy = (totalCorrect / TOTAL_N * 100).toFixed(1);
+            const selectionGap = Math.abs((selectedA/nA - selectedB/nB) * 100).toFixed(1);
+            const oppA = (truePositiveA / totalPositiveA * 100) || 0;
+            const oppB = (truePositiveB / totalPositiveB * 100) || 0;
+            const oppGap = Math.abs(oppA - oppB).toFixed(1);
+
+            document.getElementById('acc-val').innerText = accuracy + '%';
+            document.getElementById('acc-bar').style.width = accuracy + '%';
+            
+            document.getElementById('gap-val').innerText = selectionGap + '%';
+            document.getElementById('gap-bar').style.width = selectionGap + '%';
+            
+            document.getElementById('opp-val').innerText = (100 - oppGap).toFixed(1) + '%';
+            document.getElementById('opp-bar').style.width = (100 - oppGap) + '%';
+        }
+
+        // 初始化与监听
+        function init() {
+            generateData();
+            updateModel();
+        }
+
+        ratioSlider.addEventListener('input', (e) => {
+            state.ratio = e.target.value / 100;
+            document.getElementById('ratio-display').innerText = `${e.target.value}% : ${100-e.target.value}%`;
+            generateData();
+            updateModel();
+        });
+
+        fairnessSlider.addEventListener('input', (e) => {
+            state.fairness = parseInt(e.target.value);
+            document.getElementById('fairness-display').innerText = state.fairness + '%';
+            updateModel();
+        });
+
+        trainBtn.addEventListener('click', () => {
+            generateData();
+            updateModel();
+        });
+
+        window.addEventListener('resize', updateModel);
+
+        init();
+    </script>
+</body>
+</html>

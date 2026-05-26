@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据预处理流水线模拟 - AI 工程学</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .operator-card { transition: all 0.2s ease; cursor: grab; }
+        .operator-card:active { cursor: grabbing; }
+        .pipeline-slot { min-height: 80px; border: 2px dashed #cbd5e1; transition: background-color 0.3s; }
+        .pipeline-slot.drag-over { background-color: #f1f5f9; border-color: #3b82f6; }
+        .data-cell { font-family: 'ui-monospace', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace; }
+        .status-badge { font-size: 0.7rem; padding: 1px 4px; border-radius: 4px; }
+        .is-outlier { color: #ef4444; font-weight: bold; text-decoration: underline; }
+        .is-missing { color: #94a3b8; font-style: italic; }
+        .is-transformed { background-color: #dcfce7; color: #166534; }
+        .ghost { opacity: 0.5; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+    <header class="bg-white border-b p-4 shadow-sm">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold text-slate-800">数据预处理流水线模拟</h1>
+                <p class="text-xs text-slate-500 italic">可视化数据从原始状态到模型特征的演进过程</p>
+            </div>
+            <div class="flex gap-4 text-xs">
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-red-100 border border-red-300 rounded"></span> 异常/缺失</div>
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-green-100 border border-green-300 rounded"></span> 已转换</div>
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-blue-100 border border-blue-300 rounded"></span> 编码列</div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- 左侧：操作算子仓库 -->
+        <div class="lg:col-span-3 space-y-4">
+            <section class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4h-1a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 011-1V4z"></path></svg>
+                    预处理算子库
+                </h2>
+                <div id="operator-palette" class="space-y-2">
+                    <div draggable="true" data-type="impute" class="operator-card p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-indigo-700">缺失值填充 (Impute)</div>
+                        <div class="text-[10px] text-indigo-500 mt-1">\(x_{missing} = \text{mean}(x)\)</div>
+                    </div>
+                    <div draggable="true" data-type="denoise" class="operator-card p-3 bg-red-50 border border-red-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-red-700">异常值处理 (Denoise)</div>
+                        <div class="text-[10px] text-red-500 mt-1">移除/截断离群点 (\(>3\sigma\))</div>
+                    </div>
+                    <div draggable="true" data-type="normalize" class="operator-card p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-emerald-700">归一化 (Normalize)</div>
+                        <div class="text-[10px] text-emerald-500 mt-1">\(x' = \frac{x - \min}{\max - \min}\)</div>
+                    </div>
+                    <div draggable="true" data-type="standardize" class="operator-card p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-teal-700">标准化 (Standardize)</div>
+                        <div class="text-[10px] text-teal-500 mt-1">\(z = \frac{x - \mu}{\sigma}\)</div>
+                    </div>
+                    <div draggable="true" data-type="onehot" class="operator-card p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-amber-700">独热编码 (One-hot)</div>
+                        <div class="text-[10px] text-amber-500 mt-1">\(Cat \to \{0,1\}^n\) 维度扩张</div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="bg-blue-50 border border-blue-100 p-3 rounded-lg text-[11px] text-blue-700 leading-relaxed">
+                <strong>💡 科学提示：</strong>
+                <ul class="list-disc ml-4 mt-1 space-y-1">
+                    <li>必须先处理<b>异常值</b>再进行<b>归一化</b>，否则统计边界会被污染。</li>
+                    <li>数学算子仅能作用于<b>数值型</b>或已完成编码的数据。</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 中间：流水线构建区 -->
+        <div class="lg:col-span-3">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+                <h2 class="text-sm font-semibold mb-3 flex items-center justify-between">
+                    <span>流水线编排</span>
+                    <button id="clear-pipeline" class="text-[10px] text-gray-400 hover:text-red-500">清空重置</button>
+                </h2>
+                <div id="pipeline-container" class="pipeline-slot rounded-lg flex-grow flex flex-col gap-2 p-2">
+                    <!-- 动态放置算子 -->
+                </div>
+                <div class="mt-4 pt-4 border-t text-center">
+                    <div id="pipeline-status" class="text-[10px] text-slate-400">流水线为空，拖入算子开始模拟</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：数据实时预览 -->
+        <div class="lg:col-span-6">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
+                <div class="p-4 border-b bg-slate-50 flex justify-between items-center">
+                    <h2 class="text-sm font-semibold">数据预览 (实时变换)</h2>
+                    <div id="dimension-info" class="text-[10px] bg-white px-2 py-1 border rounded font-mono">
+                        维度: 5x3
+                    </div>
+                </div>
+                <div class="overflow-auto flex-grow">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead id="data-head" class="bg-slate-100 sticky top-0">
+                            <!-- 动态表头 -->
+                        </thead>
+                        <tbody id="data-body">
+                            <!-- 动态数据行 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="p-4 bg-slate-50 border-t">
+                    <div id="stats-display" class="grid grid-cols-3 gap-2 text-[10px]">
+                        <!-- 统计指标 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 原始样本数据
+        const RAW_DATA = [
+            { id: 1, age: 25, income: 5000, city: '北京' },
+            { id: 2, age: 34, income: 7200, city: '上海' },
+            { id: 3, age: null, income: 6100, city: '深圳' }, // 缺失
+            { id: 4, age: 29, income: 150000, city: '北京' }, // 异常 (收入过高)
+            { id: 5, age: 145, income: 8000, city: '广州' }   // 异常 (年龄过大)
+        ];
+
+        let currentPipeline = [];
+        let processedData = JSON.parse(JSON.stringify(RAW_DATA));
+
+        const palette = document.getElementById('operator-palette');
+        const container = document.getElementById('pipeline-container');
+        const dataHead = document.getElementById('data-head');
+        const dataBody = document.getElementById('data-body');
+        const dimInfo = document.getElementById('dimension-info');
+        const statsDisplay = document.getElementById('stats-display');
+
+        // 初始化
+        function init() {
+            renderData(RAW_DATA);
+            setupDragAndDrop();
+            document.getElementById('clear-pipeline').addEventListener('click', () => {
+                currentPipeline = [];
+                updatePipelineUI();
+                runPipeline();
+            });
+        }
+
+        // 拖拽逻辑
+        function setupDragAndDrop() {
+            palette.querySelectorAll('.operator-card').forEach(card => {
+                card.addEventListener('dragstart', e => {
+                    e.dataTransfer.setData('type', card.dataset.type);
+                    e.dataTransfer.setData('name', card.querySelector('.font-bold').innerText);
+                    card.classList.add('ghost');
+                });
+                card.addEventListener('dragend', () => card.classList.remove('ghost'));
+            });
+
+            container.addEventListener('dragover', e => {
+                e.preventDefault();
+                container.classList.add('drag-over');
+            });
+
+            container.addEventListener('dragleave', () => container.classList.remove('drag-over'));
+
+            container.addEventListener('drop', e => {
+                e.preventDefault();
+                container.classList.remove('drag-over');
+                const type = e.dataTransfer.getData('type');
+                const name = e.dataTransfer.getData('name');
+                if (type) {
+                    currentPipeline.push({ type, name, id: Date.now() });
+                    updatePipelineUI();
+                    runPipeline();
+                }
+            });
+        }
+
+        function updatePipelineUI() {
+            container.innerHTML = '';
+            currentPipeline.forEach((op, index) => {
+                const el = document.createElement('div');
+                el.className = `p-2 mb-2 bg-white border-2 border-slate-200 rounded shadow-sm relative group animate-in slide-in-from-left duration-200`;
+                el.innerHTML = `
+                    <div class="flex justify-between items-center">
+                        <span class="text-[10px] font-bold text-slate-400 mr-2">#${index+1}</span>
+                        <span class="text-xs font-semibold flex-grow">${op.name}</span>
+                        <button onclick="removeOp(${index})" class="text-slate-300 hover:text-red-500 text-lg leading-none">&times;</button>
+                    </div>
+                    <div class="absolute -bottom-3 left-1/2 -translate-x-1/2 text-slate-300 z-10 ${index === currentPipeline.length - 1 ? 'hidden' : ''}">↓</div>
+                `;
+                container.appendChild(el);
+            });
+            
+            document.getElementById('pipeline-status').innerText = 
+                currentPipeline.length > 0 ? `流水线包含 ${currentPipeline.length} 个步骤` : "流水线为空，拖入算子开始模拟";
+        }
+
+        window.removeOp = (index) => {
+            currentPipeline.splice(index, 1);
+            updatePipelineUI();
+            runPipeline();
+        };
+
+        // 核心流水线执行逻辑
+        function runPipeline() {
+            let data = JSON.parse(JSON.stringify(RAW_DATA));
+            let columns = ['age', 'income', 'city'];
+            
+            // 按序执行每一个算子
+            currentPipeline.forEach(op => {
+                switch(op.type) {
+                    case 'impute':
+                        data = applyImpute(data);
+                        break;
+                    case 'denoise':
+                        data = applyDenoise(data);
+                        break;
+                    case 'normalize':
+                        data = applyScaling(data, 'minmax');
+                        break;
+                    case 'standardize':
+                        data = applyScaling(data, 'zscore');
+                        break;
+                    case 'onehot':
+                        const res = applyOneHot(data);
+                        data = res.data;
+                        break;
+                }
+            });
+
+            renderData(data);
+        }
+
+        // --- 算子具体实现 ---
+
+        function applyImpute(data) {
+            ['age', 'income'].forEach(col => {
+                const vals = data.map(d => d[col]).filter(v => v !== null && v < 1000); // 简单过滤极端值求均值
+                const mean = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+                data.forEach(d => {
+                    if (d[col] === null) {
+                        d[col] = mean;
+                        d[`_is_${col}_transformed`] = true;
+                    }
+                });
+            });
+            return data;
+        }
+
+        function applyDenoise(data) {
+            data.forEach(d => {
+                if (d.age > 100) { d.age = 35; d._is_age_transformed = true; }
+                if (d.income > 50000) { d.income = 10000; d._is_income_transformed = true; }
+            });
+            return data;
+        }
+
+        function applyScaling(data, type) {
+            const cols = Object.keys(data[0]).filter(k => typeof data[0][k] === 'number' && k !== 'id' && !k.startsWith('_'));
+            
+            cols.forEach(col => {
+                const vals = data.map(d => d[col]);
+                const min = Math.min(...vals);
+                const max = Math.max(...vals);
+                const mean = vals.reduce((a,b) => a+b, 0) / vals.length;
+                const std = Math.sqrt(vals.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / vals.length);
+
+                data.forEach(d => {
+                    if (type === 'minmax') {
+                        d[col] = max === min ? 0 : parseFloat(((d[col] - min) / (max - min)).toFixed(3));
+                    } else {
+                        d[col] = std === 0 ? 0 : parseFloat(((d[col] - mean) / std).toFixed(3));
+                    }
+                    d[`_is_${col}_transformed`] = true;
+                });
+            });
+            return data;
+        }
+
+        function applyOneHot(data) {
+            const categoricalCols = ['city'];
+            let newData = data.map(d => ({...d}));
+
+            categoricalCols.forEach(col => {
+                if (!newData[0].hasOwnProperty(col)) return;
+                const categories = Array.from(new Set(newData.map(d => d[col])));
+                newData.forEach(d => {
+                    const originalVal = d[col];
+                    categories.forEach(cat => {
+                        d[`${col}_${cat}`] = originalVal === cat ? 1 : 0;
+                        d[`_is_${col}_${cat}_encoded`] = true;
+                    });
+                    delete d[col];
+                });
+            });
+            return { data: newData };
+        }
+
+        // 渲染表格
+        function renderData(data) {
+            if (data.length === 0) return;
+            
+            // 提取所有键，排除内部标记位
+            const keys = Object.keys(data[0]).filter(k => !k.startsWith('_'));
+            
+            // 表头
+            dataHead.innerHTML = `<tr>${keys.map(k => `
+                <th class="px-3 py-2 border-b font-bold ${typeof data[0][k] === 'string' ? 'text-amber-600' : 'text-blue-600'}">
+                    ${k}
+                    <span class="status-badge bg-gray-200 text-gray-600 ml-1 uppercase">${typeof data[0][k] === 'number' ? 'Num' : 'Cat'}</span>
+                </th>
+            `).join('')}</tr>`;
+
+            // 内容
+            dataBody.innerHTML = data.map(row => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    ${keys.map(k => {
+                        const val = row[k];
+                        let classes = "px-3 py-2 border-b data-cell ";
+                        let meta = "";
+                        
+                        // 逻辑判断：异常、缺失、已转换
+                        if (val === null) classes += "is-missing";
+                        if (k === 'age' && val > 100) classes += "is-outlier";
+                        if (k === 'income' && val > 50000) classes += "is-outlier";
+                        if (row[`_is_${k}_transformed`]) classes += "is-transformed";
+                        if (row[`_is_${k}_encoded`]) classes += "bg-blue-50";
+
+                        return `<td class="${classes}">${val === null ? 'NaN' : val}</td>`;
+                    }).join('')}
+                </tr>
+            `).join('');
+
+            // 维度信息
+            dimInfo.innerText = `维度: ${data.length} x ${keys.length - 1}`; // 减去ID
+
+            // 统计信息
+            renderStats(data, keys);
+        }
+
+        function renderStats(data, keys) {
+            const numCols = keys.filter(k => typeof data[0][k] === 'number' && k !== 'id');
+            statsDisplay.innerHTML = numCols.slice(0, 3).map(col => {
+                const vals = data.map(d => d[col]);
+                const max = Math.max(...vals);
+                const min = Math.min(...vals);
+                return `
+                    <div class="bg-white p-2 border rounded">
+                        <div class="text-gray-400 truncate">${col}</div>
+                        <div class="flex justify-between font-mono">
+                            <span>Min: ${min}</span>
+                            <span>Max: ${max}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据预处理流水线模拟 - AI 工程学</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .operator-card { transition: all 0.2s ease; cursor: grab; }
+        .operator-card:active { cursor: grabbing; }
+        .pipeline-slot { min-height: 80px; border: 2px dashed #cbd5e1; transition: background-color 0.3s; }
+        .pipeline-slot.drag-over { background-color: #f1f5f9; border-color: #3b82f6; }
+        .data-cell { font-family: 'ui-monospace', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace; }
+        .status-badge { font-size: 0.7rem; padding: 1px 4px; border-radius: 4px; }
+        .is-outlier { color: #ef4444; font-weight: bold; text-decoration: underline; }
+        .is-missing { color: #94a3b8; font-style: italic; }
+        .is-transformed { background-color: #dcfce7; color: #166534; }
+        .ghost { opacity: 0.5; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+    <header class="bg-white border-b p-4 shadow-sm">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold text-slate-800">数据预处理流水线模拟</h1>
+                <p class="text-xs text-slate-500 italic">可视化数据从原始状态到模型特征的演进过程</p>
+            </div>
+            <div class="flex gap-4 text-xs">
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-red-100 border border-red-300 rounded"></span> 异常/缺失</div>
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-green-100 border border-green-300 rounded"></span> 已转换</div>
+                <div class="flex items-center gap-1"><span class="w-3 h-3 bg-blue-100 border border-blue-300 rounded"></span> 编码列</div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- 左侧：操作算子仓库 -->
+        <div class="lg:col-span-3 space-y-4">
+            <section class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1h-3a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4h-1a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 011-1V4z"></path></svg>
+                    预处理算子库
+                </h2>
+                <div id="operator-palette" class="space-y-2">
+                    <div draggable="true" data-type="impute" class="operator-card p-3 bg-indigo-50 border border-indigo-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-indigo-700">缺失值填充 (Impute)</div>
+                        <div class="text-[10px] text-indigo-500 mt-1">\(x_{missing} = \text{mean}(x)\)</div>
+                    </div>
+                    <div draggable="true" data-type="denoise" class="operator-card p-3 bg-red-50 border border-red-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-red-700">异常值处理 (Denoise)</div>
+                        <div class="text-[10px] text-red-500 mt-1">移除/截断离群点 (\(>3\sigma\))</div>
+                    </div>
+                    <div draggable="true" data-type="normalize" class="operator-card p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-emerald-700">归一化 (Normalize)</div>
+                        <div class="text-[10px] text-emerald-500 mt-1">\(x' = \frac{x - \min}{\max - \min}\)</div>
+                    </div>
+                    <div draggable="true" data-type="standardize" class="operator-card p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-teal-700">标准化 (Standardize)</div>
+                        <div class="text-[10px] text-teal-500 mt-1">\(z = \frac{x - \mu}{\sigma}\)</div>
+                    </div>
+                    <div draggable="true" data-type="onehot" class="operator-card p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm hover:shadow-md">
+                        <div class="font-bold text-amber-700">独热编码 (One-hot)</div>
+                        <div class="text-[10px] text-amber-500 mt-1">\(Cat \to \{0,1\}^n\) 维度扩张</div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="bg-blue-50 border border-blue-100 p-3 rounded-lg text-[11px] text-blue-700 leading-relaxed">
+                <strong>💡 科学提示：</strong>
+                <ul class="list-disc ml-4 mt-1 space-y-1">
+                    <li>必须先处理<b>异常值</b>再进行<b>归一化</b>，否则统计边界会被污染。</li>
+                    <li>数学算子仅能作用于<b>数值型</b>或已完成编码的数据。</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- 中间：流水线构建区 -->
+        <div class="lg:col-span-3">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+                <h2 class="text-sm font-semibold mb-3 flex items-center justify-between">
+                    <span>流水线编排</span>
+                    <button id="clear-pipeline" class="text-[10px] text-gray-400 hover:text-red-500">清空重置</button>
+                </h2>
+                <div id="pipeline-container" class="pipeline-slot rounded-lg flex-grow flex flex-col gap-2 p-2">
+                    <!-- 动态放置算子 -->
+                </div>
+                <div class="mt-4 pt-4 border-t text-center">
+                    <div id="pipeline-status" class="text-[10px] text-slate-400">流水线为空，拖入算子开始模拟</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：数据实时预览 -->
+        <div class="lg:col-span-6">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
+                <div class="p-4 border-b bg-slate-50 flex justify-between items-center">
+                    <h2 class="text-sm font-semibold">数据预览 (实时变换)</h2>
+                    <div id="dimension-info" class="text-[10px] bg-white px-2 py-1 border rounded font-mono">
+                        维度: 5x3
+                    </div>
+                </div>
+                <div class="overflow-auto flex-grow">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead id="data-head" class="bg-slate-100 sticky top-0">
+                            <!-- 动态表头 -->
+                        </thead>
+                        <tbody id="data-body">
+                            <!-- 动态数据行 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="p-4 bg-slate-50 border-t">
+                    <div id="stats-display" class="grid grid-cols-3 gap-2 text-[10px]">
+                        <!-- 统计指标 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // 原始样本数据
+        const RAW_DATA = [
+            { id: 1, age: 25, income: 5000, city: '北京' },
+            { id: 2, age: 34, income: 7200, city: '上海' },
+            { id: 3, age: null, income: 6100, city: '深圳' }, // 缺失
+            { id: 4, age: 29, income: 150000, city: '北京' }, // 异常 (收入过高)
+            { id: 5, age: 145, income: 8000, city: '广州' }   // 异常 (年龄过大)
+        ];
+
+        let currentPipeline = [];
+
+        const palette = document.getElementById('operator-palette');
+        const container = document.getElementById('pipeline-container');
+        const dataHead = document.getElementById('data-head');
+        const dataBody = document.getElementById('data-body');
+        const dimInfo = document.getElementById('dimension-info');
+        const statsDisplay = document.getElementById('stats-display');
+
+        // 初始化
+        function init() {
+            renderData(RAW_DATA);
+            setupDragAndDrop();
+            document.getElementById('clear-pipeline').addEventListener('click', () => {
+                currentPipeline = [];
+                updatePipelineUI();
+                runPipeline();
+            });
+        }
+
+        // 拖拽逻辑
+        function setupDragAndDrop() {
+            palette.querySelectorAll('.operator-card').forEach(card => {
+                card.addEventListener('dragstart', e => {
+                    e.dataTransfer.setData('type', card.dataset.type);
+                    e.dataTransfer.setData('name', card.querySelector('.font-bold').innerText);
+                    card.classList.add('ghost');
+                });
+                card.addEventListener('dragend', () => card.classList.remove('ghost'));
+            });
+
+            container.addEventListener('dragover', e => {
+                e.preventDefault();
+                container.classList.add('drag-over');
+            });
+
+            container.addEventListener('dragleave', () => container.classList.remove('drag-over'));
+
+            container.addEventListener('drop', e => {
+                e.preventDefault();
+                container.classList.remove('drag-over');
+                const type = e.dataTransfer.getData('type');
+                const name = e.dataTransfer.getData('name');
+                if (type) {
+                    currentPipeline.push({ type, name, id: Date.now() });
+                    updatePipelineUI();
+                    runPipeline();
+                }
+            });
+        }
+
+        function updatePipelineUI() {
+            container.innerHTML = '';
+            currentPipeline.forEach((op, index) => {
+                const el = document.createElement('div');
+                el.className = `p-2 mb-2 bg-white border-2 border-slate-200 rounded shadow-sm relative group animate-in slide-in-from-left duration-200`;
+                el.innerHTML = `
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-[10px] font-bold text-slate-400 mr-2">#${index+1}</span>
+                        <span class="font-semibold flex-grow">${op.name}</span>
+                        <button onclick="removeOp(${index})" class="text-slate-300 hover:text-red-500 text-lg leading-none">&times;</button>
+                    </div>
+                `;
+                container.appendChild(el);
+            });
+            
+            document.getElementById('pipeline-status').innerText = 
+                currentPipeline.length > 0 ? `流水线包含 ${currentPipeline.length} 个步骤` : "流水线为空，拖入算子开始模拟";
+        }
+
+        window.removeOp = (index) => {
+            currentPipeline.splice(index, 1);
+            updatePipelineUI();
+            runPipeline();
+        };
+
+        // 核心流水线执行逻辑
+        function runPipeline() {
+            let data = JSON.parse(JSON.stringify(RAW_DATA));
+            
+            // 按序执行每一个算子
+            currentPipeline.forEach(op => {
+                switch(op.type) {
+                    case 'impute':
+                        data = applyImpute(data);
+                        break;
+                    case 'denoise':
+                        data = applyDenoise(data);
+                        break;
+                    case 'normalize':
+                        data = applyScaling(data, 'minmax');
+                        break;
+                    case 'standardize':
+                        data = applyScaling(data, 'zscore');
+                        break;
+                    case 'onehot':
+                        data = applyOneHot(data);
+                        break;
+                }
+            });
+
+            renderData(data);
+        }
+
+        // --- 算子具体实现 ---
+
+        function applyImpute(data) {
+            ['age', 'income'].forEach(col => {
+                // 计算均值（排除原始异常值以便更合理，符合实际工程）
+                const vals = data.map(d => d[col]).filter(v => v !== null && v < 100); 
+                const mean = Math.round(vals.reduce((a, b) => a + b, 0) / (vals.length || 1));
+                data.forEach(d => {
+                    if (d[col] === null) {
+                        d[col] = mean;
+                        d[`_is_${col}_transformed`] = true;
+                    }
+                });
+            });
+            return data;
+        }
+
+        function applyDenoise(data) {
+            data.forEach(d => {
+                // 简单的离群点截断
+                if (d.age > 100) { d.age = 35; d._is_age_transformed = true; }
+                if (d.income > 50000) { d.income = 10000; d._is_income_transformed = true; }
+            });
+            return data;
+        }
+
+        function applyScaling(data, type) {
+            const cols = Object.keys(data[0]).filter(k => typeof data[0][k] === 'number' && k !== 'id' && !k.startsWith('_'));
+            
+            cols.forEach(col => {
+                const vals = data.map(d => d[col]);
+                const min = Math.min(...vals);
+                const max = Math.max(...vals);
+                const mean = vals.reduce((a,b) => a+b, 0) / vals.length;
+                const std = Math.sqrt(vals.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / vals.length) || 1;
+
+                data.forEach(d => {
+                    if (type === 'minmax') {
+                        d[col] = max === min ? 0 : parseFloat(((d[col] - min) / (max - min)).toFixed(3));
+                    } else {
+                        d[col] = parseFloat(((d[col] - mean) / std).toFixed(3));
+                    }
+                    d[`_is_${col}_transformed`] = true;
+                });
+            });
+            return data;
+        }
+
+        function applyOneHot(data) {
+            const categoricalCols = ['city'];
+            let newData = data.map(d => {
+                const newRow = {...d};
+                return newRow;
+            });
+
+            categoricalCols.forEach(col => {
+                if (!newData[0].hasOwnProperty(col)) return;
+                const categories = ['北京', '上海', '深圳', '广州']; // 固定域
+                newData.forEach(d => {
+                    const originalVal = d[col];
+                    categories.forEach(cat => {
+                        d[`${col}_${cat}`] = originalVal === cat ? 1 : 0;
+                        d[`_is_${col}_${cat}_encoded`] = true;
+                    });
+                    delete d[col];
+                });
+            });
+            return newData;
+        }
+
+        // 渲染表格
+        function renderData(data) {
+            if (data.length === 0) return;
+            
+            const keys = Object.keys(data[0]).filter(k => !k.startsWith('_'));
+            
+            dataHead.innerHTML = `<tr>${keys.map(k => `
+                <th class="px-3 py-2 border-b font-bold text-slate-700">
+                    <div class="flex flex-col">
+                        <span>${k}</span>
+                        <span class="status-badge ${typeof data[0][k] === 'number' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'} w-fit">
+                            ${typeof data[0][k] === 'number' ? 'Num' : 'Cat'}
+                        </span>
+                    </div>
+                </th>
+            `).join('')}</tr>`;
+
+            dataBody.innerHTML = data.map(row => `
+                <tr class="hover:bg-slate-50 transition-colors">
+                    ${keys.map(k => {
+                        const val = row[k];
+                        let classes = "px-3 py-2 border-b data-cell ";
+                        
+                        if (val === null) classes += "is-missing";
+                        // 逻辑判断：如果流水线里还没去噪，就显示异常样式
+                        const hasDenoise = currentPipeline.some(op => op.type === 'denoise');
+                        if (!hasDenoise) {
+                            if (k === 'age' && val > 100) classes += "is-outlier";
+                            if (k === 'income' && val > 50000) classes += "is-outlier";
+                        }
+                        
+                        if (row[`_is_${k}_transformed`]) classes += "is-transformed";
+                        if (row[`_is_${k}_encoded`]) classes += "bg-blue-50";
+
+                        return `<td class="${classes}">${val === null ? 'NaN' : val}</td>`;
+                    }).join('')}
+                </tr>
+            `).join('');
+
+            dimInfo.innerText = `特征维度: ${data.length} x ${keys.length - 1}`;
+            renderStats(data, keys);
+        }
+
+        function renderStats(data, keys) {
+            const numCols = keys.filter(k => typeof data[0][k] === 'number' && k !== 'id');
+            statsDisplay.innerHTML = numCols.slice(0, 3).map(col => {
+                const vals = data.map(d => d[col]);
+                const max = Math.max(...vals);
+                const min = Math.min(...vals);
+                return `
+                    <div class="bg-white p-2 border rounded border-slate-200">
+                        <div class="text-gray-400 truncate font-bold">${col}</div>
+                        <div class="flex justify-between font-mono text-[9px] mt-1">
+                            <span class="text-blue-500">Min: ${min}</span>
+                            <span class="text-red-500">Max: ${max}</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>特征缩放可视化 - 交互式学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f8fafc; overflow-x: hidden; }
+        .canvas-container { position: relative; width: 100%; height: 500px; }
+        canvas { width: 100%; height: 100%; display: block; border-radius: 0.5rem; background: white; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        .transition-all { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+        .math-card { border-left: 4px solid #3b82f6; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-5xl mx-auto">
+        <!-- 头部 -->
+        <header class="mb-6 text-center">
+            <h1 class="text-3xl font-bold text-gray-800">特征缩放可视化</h1>
+            <p class="text-gray-600 mt-2">观察原始数据如何映射到统一的坐标空间</p>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- 控制面板 -->
+            <div class="lg:col-span-1 space-y-4">
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                    <h2 class="font-semibold text-gray-700 mb-4 flex items-center">
+                        <span class="w-2 h-2 bg-blue-500 rounded-full mr-2"></span>
+                        选择转换方法
+                    </h2>
+                    <div class="space-y-2">
+                        <button onclick="transform('original')" id="btn-original" class="w-full py-2 px-4 rounded-lg bg-gray-800 text-white font-medium transition-all hover:bg-gray-700">
+                            原始数据
+                        </button>
+                        <button onclick="transform('minmax')" id="btn-minmax" class="w-full py-2 px-4 rounded-lg bg-gray-100 text-gray-700 font-medium transition-all hover:bg-gray-200">
+                            归一化 (Min-Max)
+                        </button>
+                        <button onclick="transform('standard')" id="btn-standard" class="w-full py-2 px-4 rounded-lg bg-gray-100 text-gray-700 font-medium transition-all hover:bg-gray-200">
+                            标准化 (Z-Score)
+                        </button>
+                    </div>
+                </div>
+
+                <div id="formula-display" class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 math-card min-h-[120px]">
+                    <h2 class="font-semibold text-gray-700 mb-2">数学公式</h2>
+                    <div id="formula-tex" class="text-sm text-gray-600 italic">
+                        显示原始数据的分布形态。
+                    </div>
+                </div>
+
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                    <h3 class="text-xs font-bold text-blue-800 uppercase tracking-wider mb-2">统计实时数据</h3>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="text-gray-500 text-[10px]">X 范围</div>
+                        <div id="stat-x-range" class="font-mono text-blue-700">0 - 100</div>
+                        <div class="text-gray-500 text-[10px]">X 均值</div>
+                        <div id="stat-x-mean" class="font-mono text-blue-700">50.0</div>
+                        <div class="text-gray-500 text-[10px]">X 标准差</div>
+                        <div id="stat-x-std" class="font-mono text-blue-700">1.0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 可视化画布 -->
+            <div class="lg:col-span-3">
+                <div class="canvas-container">
+                    <canvas id="mainCanvas"></canvas>
+                </div>
+                <div class="mt-4 flex justify-between text-xs text-gray-400 px-2">
+                    <span>* 拖动或切换模式以观察点的线性位移轨迹。</span>
+                    <span id="data-status" class="font-medium text-gray-500 italic">当前状态: 原始数据</span>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        // 数据生成
+        let points = [];
+        const numPoints = 50;
+        let currentMode = 'original';
+        let animationTarget = 'original';
+        let progress = 1; // 0 to 1
+
+        const formulas = {
+            original: "展示数据的原始量纲，通常不同特征间数值差异巨大。",
+            minmax: "\\[x' = \\frac{x - \\min(x)}{\\max(x) - \\min(x)}\\]",
+            standard: "\\[z = \\frac{x - \\mu}{\\sigma}\\]"
+        };
+
+        function initData() {
+            points = [];
+            // 生成一组带有一定相关性的原始数据
+            // X: [100, 500], Y: [1000, 5000]
+            for (let i = 0; i < numPoints; i++) {
+                const rx = Math.random();
+                const ry = rx * 0.7 + Math.random() * 0.3; // 线性相关性
+                points.push({
+                    ox: 100 + rx * 400 + Math.random() * 20, // Original X
+                    oy: 1000 + ry * 4000 + Math.random() * 200, // Original Y
+                    x: 0, y: 0, // Current display coordinates
+                    tx: 0, ty: 0, // Target display coordinates
+                    sx: 0, sy: 0  // Start coordinates for transition
+                });
+            }
+            updatePointsGoal('original');
+            // 初始化当前位置为起始目标
+            points.forEach(p => {
+                p.x = p.tx;
+                p.y = p.ty;
+            });
+        }
+
+        function calculateStats(type) {
+            const xVals = points.map(p => p.ox);
+            const yVals = points.map(p => p.oy);
+            
+            const minX = Math.min(...xVals), maxX = Math.max(...xVals);
+            const minY = Math.min(...yVals), maxY = Math.max(...yVals);
+            const meanX = xVals.reduce((a, b) => a + b) / numPoints;
+            const meanY = yVals.reduce((a, b) => a + b) / numPoints;
+            const stdX = Math.sqrt(xVals.map(x => Math.pow(x - meanX, 2)).reduce((a, b) => a + b) / numPoints);
+            const stdY = Math.sqrt(yVals.map(y => Math.pow(y - meanY, 2)).reduce((a, b) => a + b) / numPoints);
+
+            return { minX, maxX, minY, maxY, meanX, meanY, stdX, stdY };
+        }
+
+        function updatePointsGoal(mode) {
+            const stats = calculateStats();
+            points.forEach(p => {
+                p.sx = p.x;
+                p.sy = p.y;
+                if (mode === 'original') {
+                    p.tx = p.ox;
+                    p.ty = p.oy;
+                } else if (mode === 'minmax') {
+                    p.tx = (p.ox - stats.minX) / (stats.maxX - stats.minX);
+                    p.ty = (p.oy - stats.minY) / (stats.maxY - stats.minY);
+                } else if (mode === 'standard') {
+                    p.tx = (p.ox - stats.meanX) / stats.stdX;
+                    p.ty = (p.oy - stats.meanY) / stats.stdY;
+                }
+            });
+            progress = 0;
+            updateStatDisplay(mode, stats);
+        }
+
+        function updateStatDisplay(mode, stats) {
+            const sxr = document.getElementById('stat-x-range');
+            const sxm = document.getElementById('stat-x-mean');
+            const sxs = document.getElementById('stat-x-std');
+            const status = document.getElementById('data-status');
+
+            if (mode === 'original') {
+                sxr.innerText = `${stats.minX.toFixed(1)} - ${stats.maxX.toFixed(1)}`;
+                sxm.innerText = stats.meanX.toFixed(1);
+                sxs.innerText = stats.stdX.toFixed(1);
+                status.innerText = "当前状态: 原始数据";
+            } else if (mode === 'minmax') {
+                sxr.innerText = "0.0 - 1.0";
+                sxm.innerText = ((0 - 0) / 1).toFixed(2); // 示意
+                sxm.innerText = "变量中";
+                sxs.innerText = "变量中";
+                status.innerText = "当前状态: 归一化 (Min-Max)";
+            } else {
+                sxr.innerText = "约 -2.5 - 2.5";
+                sxm.innerText = "0.00";
+                sxs.innerText = "1.00";
+                status.innerText = "当前状态: 标准化 (StandardScaler)";
+            }
+        }
+
+        function resize() {
+            width = canvas.offsetWidth * window.devicePixelRatio;
+            height = canvas.offsetHeight * window.devicePixelRatio;
+            canvas.width = width;
+            canvas.height = height;
+        }
+
+        function transform(mode) {
+            animationTarget = mode;
+            updatePointsGoal(mode);
+            document.getElementById('formula-tex').innerHTML = formulas[mode];
+            
+            // UI Button states
+            ['original', 'minmax', 'standard'].forEach(m => {
+                const btn = document.getElementById(`btn-${m}`);
+                if (m === mode) {
+                    btn.classList.replace('bg-gray-100', 'bg-gray-800');
+                    btn.classList.replace('text-gray-700', 'text-white');
+                } else {
+                    btn.classList.replace('bg-gray-800', 'bg-gray-100');
+                    btn.classList.replace('text-white', 'text-gray-700');
+                }
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+            
+            if (progress < 1) {
+                progress += 0.04;
+                if (progress > 1) progress = 1;
+                points.forEach(p => {
+                    p.x = p.sx + (p.tx - p.sx) * progress;
+                    p.y = p.sy + (p.ty - p.sy) * progress;
+                });
+            }
+
+            // 动态视口计算
+            let minX, maxX, minY, maxY;
+            if (animationTarget === 'original') {
+                minX = 0; maxX = 600; minY = 0; maxY = 6000;
+            } else if (animationTarget === 'minmax') {
+                minX = -0.2; maxX = 1.2; minY = -0.2; maxY = 1.2;
+            } else {
+                minX = -3.5; maxX = 3.5; minY = -3.5; maxY = 3.5;
+            }
+
+            const margin = 60;
+            const plotW = width - margin * 2;
+            const plotH = height - margin * 2;
+
+            function mapX(val) { return margin + ((val - minX) / (maxX - minX)) * plotW; }
+            function mapY(val) { return height - margin - ((val - minY) / (maxY - minY)) * plotH; }
+
+            // 绘制网格和轴
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            
+            // X 轴刻度
+            for (let i = 0; i <= 5; i++) {
+                const val = minX + (maxX - minX) * (i / 5);
+                const px = mapX(val);
+                ctx.moveTo(px, margin);
+                ctx.lineTo(px, height - margin);
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '12px sans-serif';
+                ctx.fillText(val.toFixed(animationTarget === 'original' ? 0 : 1), px - 10, height - margin + 20);
+            }
+            // Y 轴刻度
+            for (let i = 0; i <= 5; i++) {
+                const val = minY + (maxY - minY) * (i / 5);
+                const py = mapY(val);
+                ctx.moveTo(margin, py);
+                ctx.lineTo(width - margin, py);
+                ctx.fillStyle = '#94a3b8';
+                ctx.fillText(val.toFixed(animationTarget === 'original' ? 0 : 1), margin - 45, py + 5);
+            }
+            ctx.stroke();
+
+            // 绘制主轴线
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(margin, mapY(0)); ctx.lineTo(width - margin, mapY(0));
+            ctx.moveTo(mapX(0), margin); ctx.lineTo(mapX(0), height - margin);
+            ctx.stroke();
+
+            // 绘制点
+            points.forEach((p, i) => {
+                const px = mapX(p.x);
+                const py = mapY(p.y);
+                
+                // 绘制点阴影
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+                ctx.beginPath();
+                ctx.arc(px, py, 6, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 绘制核心点
+                ctx.fillStyle = '#3b82f6';
+                ctx.beginPath();
+                ctx.arc(px, py, 4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // 绘制连线(如果是最后一个模式，可以显示聚类中心，这里简化)
+            });
+
+            requestAnimationFrame(draw);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        initData();
+        draw();
+    </script>
+</body>
+</html>

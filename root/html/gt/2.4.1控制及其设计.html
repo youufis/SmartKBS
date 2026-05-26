@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>通用技术：控制及其设计 知识纲要</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      margin: 2rem;
+      background-color: #f9f9f9;
+      color: #333;
+    }
+    h1, h2, h3 {
+      color: #2c3e50;
+    }
+    h1 {
+      text-align: center;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 0.5rem;
+    }
+    ul, ol {
+      margin-left: 1.5rem;
+    }
+    .section {
+      margin-bottom: 2rem;
+      padding: 1rem;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .highlight {
+      background-color: #ecf0f1;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .example {
+      background-color: #f8f9fa;
+      border-left: 4px solid #3498db;
+      padding: 0.8rem 1rem;
+      margin: 0.8rem 0;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+<h1>通用技术 · 必修2：控制及其设计 知识纲要</h1>
+
+<div class="section">
+  <h2>一、控制的基本概念</h2>
+  <p><strong>1. 控制的定义：</strong></p>
+  <ul>
+    <li>人们按照自己的意愿或目的，通过一定的手段，使事物向期望的目标发展，这一过程称为<strong>控制</strong>。</li>
+  </ul>
+
+  <p><strong>2. 控制的三种基本方式：</strong></p>
+  <ol>
+    <li><strong>手动控制</strong>：需人在直接干预下完成（如开关水龙头、骑自行车）；</li>
+    <li><strong>自动控制</strong>：无需人实时干预，系统自动运行（如全自动洗衣机、扫地机器人）；</li>
+    <li><strong>智能控制</strong>：具备信息感知、反馈和决策能力，能自主适应环境（如智能家居、自动驾驶）。</li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>二、控制系统的基本类型</h2>
+  <p><strong>1. 开环控制系统</strong></p>
+  <ul>
+    <li>特点：输出量<strong>不反馈</strong>到输入端，无法修正误差；</li>
+    <li>结构简单、成本低，但精度和抗干扰能力弱；</li>
+    <li class="example">典型实例：红绿灯定时控制系统、音乐喷泉、火灾报警器。</li>
+  </ul>
+
+  <p><strong>2. 闭环控制系统</strong></p>
+  <ul>
+    <li>特点：将输出量通过<strong>反馈环节</strong>返回输入端，与设定值比较后调整控制作用；</li>
+    <li>具有自我调节能力，稳定性与精度更高；</li>
+    <li class="example">典型实例：空调温控系统、电冰箱温度控制、土壤湿度自动灌溉系统。</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>三、控制系统的组成</h2>
+  <p>无论是开环还是闭环系统，通常包含以下核心要素：</p>
+  <ul>
+    <li><span class="highlight">给定量（基准量）</span>：期望的目标值（如设定温度25℃）；</li>
+    <li><span class="highlight">控制器</span>：处理信号并发出指令（如温控芯片、PLC）；</li>
+    <li><span class="highlight">执行器</span>：执行控制命令的装置（如电机、电磁阀、继电器）；</li>
+    <li><span class="highlight">被控对象</span>：需要被控制的实体（如房间、水箱、LED灯）；</li>
+    <li><span class="highlight">被控量</span>：被控制对象的实际状态（如实际温度、水位、亮度）；</li>
+    <li><span class="highlight">反馈环节（仅闭环）</span>：检测被控量并送回控制器。</li>
+  </ul>
+
+  <p><strong>系统框图表示：</strong></p>
+  <ul>
+    <li><strong>开环系统</strong>：  
+      给定量 → 控制器 → 执行器 → 被控对象 → 被控量</li>
+    <li><strong>闭环系统</strong>：  
+      给定量 → 控制器 → 执行器 → 被控对象 → 被控量 →（反馈）→ 控制器</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>四、控制系统的设计与实施</h2>
+  <p><strong>设计一般流程：</strong></p>
+  <ol>
+    <li>明确控制目的与需求；</li>
+    <li>确定被控对象与被控量；</li>
+    <li>选择控制方式（手动/自动/智能；开环/闭环）；</li>
+    <li>分析系统组成，选配传感器、控制器、执行器等元件；</li>
+    <li>绘制控制框图或电路原理图；</li>
+    <li>制作模型或原型并调试；</li>
+    <li>测试性能，评估效果，优化改进。</li>
+  </ol>
+
+  <p><strong>典型案例任务（教材参考）：</strong></p>
+  <ul>
+    <li>设计雨水收集池水位控制系统（闭环）；</li>
+    <li>制作重力不平衡式自动冲水装置（开环）；</li>
+    <li>LED数码管显示控制系统（可拓展为自动/编程控制）。</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>五、干扰与系统稳定性</h2>
+  <ul>
+    <li><strong>干扰</strong>：指影响控制系统正常工作的外部或内部因素（如电压波动、环境温度变化）；</li>
+    <li>闭环系统可通过反馈机制<strong>抑制干扰</strong>，提高稳定性；</li>
+    <li>设计时应考虑抗干扰措施（如屏蔽、滤波、冗余设计）。</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>六、核心素养关联</h2>
+  <ul>
+    <li><strong>技术意识</strong>：理解控制在生活与生产中的普遍性与价值；</li>
+    <li><strong>工程思维</strong>：运用系统方法分析控制问题，权衡方案优劣；</li>
+    <li><strong>创新设计</strong>：根据需求提出新颖、可行的控制方案；</li>
+    <li><strong>图样表达</strong>：能用方框图准确描述控制系统结构；</li>
+    <li><strong>物化能力</strong>：动手制作并调试控制模型，验证设计效果。</li>
+  </ul>
+</div>
+
+<footer style="text-align: center; margin-top: 2rem; color: #7f8c8d; font-size: 0.9em;">
+  依据《通用技术·技术与设计2》（苏教版/豫科版）整理 | 高二年级 | 符合新课标核心素养要求
+</footer>
+
+</body>
+</html>

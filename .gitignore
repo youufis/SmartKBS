@@ -1,0 +1,18 @@
+# ── 密钥 / 配置 ──
+backend/system_config.json
+.env
+**/.env
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# ── Node ──
+node_modules/
+frontend/dist/
+
+# ── 运行时 ──
+LogFiles/
+temp_uploads/

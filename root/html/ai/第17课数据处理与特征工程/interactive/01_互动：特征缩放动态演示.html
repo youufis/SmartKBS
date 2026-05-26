@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据无量纲化可视化 - 数据科学交互学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f8fafc; overflow: hidden; }
+        .canvas-container { position: relative; width: 100%; height: 60vh; background: white; border-radius: 0.5rem; box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.05); }
+        .draggable { cursor: grab; }
+        .draggable:active { cursor: grabbing; }
+        .math-card { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(4px); }
+        .dot { transition: fill 0.3s; }
+        .axis-label { font-size: 12px; fill: #64748b; }
+        .grid-line { stroke: #e2e8f0; stroke-width: 1; }
+        .origin-line { stroke: #94a3b8; stroke-width: 2; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="flex flex-col h-screen p-4 md:p-8">
+
+    <!-- Header -->
+    <header class="mb-6 text-center">
+        <h1 class="text-3xl font-bold text-slate-800">数据无量纲化可视化</h1>
+        <p class="text-slate-500 mt-2">观察不同缩放方法如何处理数据特征分布与离群点</p>
+    </header>
+
+    <main class="flex-grow flex flex-col md:flex-row gap-6 max-w-7xl mx-auto w-full">
+        
+        <!-- Sidebar Controls -->
+        <div class="w-full md:w-1/4 flex flex-col gap-4">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="font-semibold text-slate-700 mb-4 flex items-center">
+                    <span class="w-2 h-6 bg-blue-500 rounded-full mr-2"></span>
+                    选择转换模式
+                </h2>
+                <div class="flex flex-col gap-2">
+                    <button onclick="setMode('original')" id="btn-original" class="mode-btn px-4 py-3 rounded-lg border-2 text-left transition-all bg-blue-50 border-blue-500 text-blue-700 font-medium">
+                        原始数据 (Original)
+                    </button>
+                    <button onclick="setMode('minmax')" id="btn-minmax" class="mode-btn px-4 py-3 rounded-lg border-2 text-left transition-all border-slate-100 text-slate-600 hover:bg-slate-50">
+                        Min-Max 归一化
+                    </button>
+                    <button onclick="setMode('zscore')" id="btn-zscore" class="mode-btn px-4 py-3 rounded-lg border-2 text-left transition-all border-slate-100 text-slate-600 hover:bg-slate-50">
+                        Z-score 标准化
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex-grow">
+                <h2 class="font-semibold text-slate-700 mb-3 text-sm">当前公式</h2>
+                <div id="formula-display" class="p-3 bg-slate-50 rounded text-sm text-slate-600 min-h-[80px] flex items-center justify-center">
+                    \( x' = x \)
+                </div>
+                <div class="mt-4 text-xs text-slate-400 space-y-2">
+                    <p>● 蓝色点：普通样本点</p>
+                    <p>● 红色点：可拖动的离群点 (Outlier)</p>
+                    <p>● 虚线：当前坐标系参考</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Visualization Area -->
+        <div class="flex-grow relative bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+            <div class="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <span class="text-xs font-mono text-slate-400" id="stats-info">Stats: Loading...</span>
+                <span class="text-xs text-blue-500 font-medium">交互提示：请尝试拖动红色数据点</span>
+            </div>
+            <div id="canvas-wrapper" class="flex-grow relative">
+                <svg id="viz-svg" class="w-full h-full">
+                    <!-- Grid and Axes will be rendered here -->
+                    <g id="grid-group"></g>
+                    <g id="axes-group"></g>
+                    <g id="points-group"></g>
+                </svg>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const svg = document.getElementById('viz-svg');
+        const pointsGroup = document.getElementById('points-group');
+        const gridGroup = document.getElementById('grid-group');
+        const axesGroup = document.getElementById('axes-group');
+        const formulaDisplay = document.getElementById('formula-display');
+        const statsInfo = document.getElementById('stats-info');
+
+        let width, height;
+        let mode = 'original'; // original, minmax, zscore
+        let points = [];
+        const numPoints = 30;
+        let isDragging = false;
+        let draggedPoint = null;
+
+        // Formula templates
+        const formulas = {
+            original: '\\[ x\' = x \\]',
+            minmax: '\\[ x\' = \\frac{x - \\min(X)}{\\max(X) - \\min(X)} \\]',
+            zscore: '\\[ z = \\frac{x - \\mu}{\\sigma} \\]'
+        };
+
+        // Initialize points
+        function initPoints() {
+            points = [];
+            // Create a cluster
+            for (let i = 0; i < numPoints; i++) {
+                points.push({
+                    id: i,
+                    x: 150 + Math.random() * 100,
+                    y: 150 + Math.random() * 100,
+                    targetX: 0,
+                    targetY: 0,
+                    curX: 0,
+                    curY: 0,
+                    isOutlier: false
+                });
+            }
+            // Add a specific outlier
+            points.push({
+                id: numPoints,
+                x: 400,
+                y: 400,
+                targetX: 0,
+                targetY: 0,
+                curX: 0,
+                curY: 0,
+                isOutlier: true
+            });
+
+            // Initialize current positions
+            points.forEach(p => {
+                p.curX = p.x;
+                p.curY = p.y;
+            });
+        }
+
+        function getStats() {
+            const xs = points.map(p => p.x);
+            const ys = points.map(p => p.y);
+            const meanX = xs.reduce((a, b) => a + b) / xs.length;
+            const meanY = ys.reduce((a, b) => a + b) / ys.length;
+            
+            const stdX = Math.sqrt(xs.map(x => Math.pow(x - meanX, 2)).reduce((a, b) => a + b) / xs.length);
+            const stdY = Math.sqrt(ys.map(y => Math.pow(y - meanY, 2)).reduce((a, b) => a + b) / ys.length);
+
+            return {
+                minX: Math.min(...xs),
+                maxX: Math.max(...xs),
+                minY: Math.min(...ys),
+                maxY: Math.max(...ys),
+                meanX, meanY,
+                stdX: stdX || 1, // Avoid division by zero
+                stdY: stdY || 1
+            };
+        }
+
+        function updateLayout() {
+            const rect = svg.getBoundingClientRect();
+            width = rect.width;
+            height = rect.height;
+            updateTargets();
+        }
+
+        function updateTargets() {
+            const stats = getStats();
+            const padding = 60;
+            const drawW = width - padding * 2;
+            const drawH = height - padding * 2;
+
+            statsInfo.innerText = `Mean: (${stats.meanX.toFixed(1)}, ${stats.meanY.toFixed(1)}) | Std: (${stats.stdX.toFixed(1)}, ${stats.stdY.toFixed(1)})`;
+
+            points.forEach(p => {
+                if (mode === 'original') {
+                    // Map original data to a reasonable view range (roughly 0-600 range)
+                    p.targetX = padding + (p.x / 600) * drawW;
+                    p.targetY = height - padding - (p.y / 600) * drawH;
+                } else if (mode === 'minmax') {
+                    // Strict [0, 1] mapping
+                    const nx = (p.x - stats.minX) / (stats.maxX - stats.minX);
+                    const ny = (p.y - stats.minY) / (stats.maxY - stats.minY);
+                    p.targetX = padding + nx * drawW;
+                    p.targetY = height - padding - ny * drawH;
+                } else if (mode === 'zscore') {
+                    // Center at 0, scale by std. 
+                    // To visualize, we consider -3 to 3 as the standard view window
+                    const zx = (p.x - stats.meanX) / stats.stdX;
+                    const zy = (p.y - stats.meanY) / stats.stdY;
+                    // Map [-3, 3] to viewport
+                    p.targetX = (width / 2) + (zx * (drawW / 6));
+                    p.targetY = (height / 2) - (zy * (drawH / 6));
+                }
+            });
+            
+            renderGrid(stats, padding, drawW, drawH);
+        }
+
+        function renderGrid(stats, padding, drawW, drawH) {
+            gridGroup.innerHTML = '';
+            axesGroup.innerHTML = '';
+
+            if (mode === 'minmax') {
+                // Draw 0 and 1 boundaries
+                const lines = [
+                    {x1: padding, y1: padding, x2: padding, y2: height - padding},
+                    {x1: padding + drawW, y1: padding, x2: padding + drawW, y2: height - padding},
+                    {x1: padding, y1: padding, x2: padding + drawW, y2: padding},
+                    {x1: padding, y1: height - padding, x2: padding + drawW, y2: height - padding}
+                ];
+                lines.forEach(l => {
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute('x1', l.x1); line.setAttribute('y1', l.y1);
+                    line.setAttribute('x2', l.x2); line.setAttribute('y2', l.y2);
+                    line.setAttribute('class', 'origin-line');
+                    line.setAttribute('stroke-dasharray', '4');
+                    gridGroup.appendChild(line);
+                });
+                addLabel(padding, height - padding + 20, "0");
+                addLabel(padding + drawW, height - padding + 20, "1");
+                addLabel(padding - 20, height - padding, "0");
+                addLabel(padding - 20, padding, "1");
+            } else if (mode === 'zscore') {
+                // Draw X and Y origin (0, 0)
+                const hLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                hLine.setAttribute('x1', padding); hLine.setAttribute('y1', height/2);
+                hLine.setAttribute('x2', width - padding); hLine.setAttribute('y2', height/2);
+                hLine.setAttribute('class', 'origin-line');
+                gridGroup.appendChild(hLine);
+
+                const vLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                vLine.setAttribute('x1', width/2); vLine.setAttribute('y1', padding);
+                vLine.setAttribute('x2', width/2); vLine.setAttribute('y2', height - padding);
+                vLine.setAttribute('class', 'origin-line');
+                gridGroup.appendChild(vLine);
+                
+                addLabel(width/2 + 5, height/2 + 15, "0 (μ)");
+            }
+        }
+
+        function addLabel(x, y, text) {
+            const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            t.setAttribute('x', x); t.setAttribute('y', y);
+            t.setAttribute('class', 'axis-label');
+            t.setAttribute('text-anchor', 'middle');
+            t.textContent = text;
+            axesGroup.appendChild(t);
+        }
+
+        function setMode(newMode) {
+            mode = newMode;
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('bg-blue-50', 'border-blue-500', 'text-blue-700', 'font-medium');
+                btn.classList.add('border-slate-100', 'text-slate-600');
+            });
+            const activeBtn = document.getElementById('btn-' + newMode);
+            activeBtn.classList.remove('border-slate-100', 'text-slate-600');
+            activeBtn.classList.add('bg-blue-50', 'border-blue-500', 'text-blue-700', 'font-medium');
+            
+            formulaDisplay.innerHTML = formulas[newMode];
+            updateTargets();
+        }
+
+        // Mouse interactions
+        svg.addEventListener('mousedown', e => {
+            const rect = svg.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            // Find outlier point
+            const outlier = points.find(p => p.isOutlier);
+            const dist = Math.hypot(outlier.curX - mx, outlier.curY - my);
+            
+            if (dist < 20) {
+                isDragging = true;
+                draggedPoint = outlier;
+            }
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (isDragging && draggedPoint) {
+                const rect = svg.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+
+                // Reverse engineer original data based on mode
+                const padding = 60;
+                const drawW = width - padding * 2;
+                const drawH = height - padding * 2;
+                const stats = getStats();
+
+                if (mode === 'original') {
+                    draggedPoint.x = ((mx - padding) / drawW) * 600;
+                    draggedPoint.y = ((height - padding - my) / drawH) * 600;
+                } else if (mode === 'minmax') {
+                    const nx = (mx - padding) / drawW;
+                    const ny = (height - padding - my) / drawH;
+                    draggedPoint.x = nx * (stats.maxX - stats.minX) + stats.minX;
+                    draggedPoint.y = ny * (stats.maxY - stats.minY) + stats.minY;
+                } else if (mode === 'zscore') {
+                    const zx = (mx - width / 2) / (drawW / 6);
+                    const zy = (height / 2 - my) / (drawH / 6);
+                    draggedPoint.x = zx * stats.stdX + stats.meanX;
+                    draggedPoint.y = zy * stats.stdY + stats.meanY;
+                }
+                updateTargets();
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDragging = false;
+            draggedPoint = null;
+        });
+
+        // Animation Loop
+        function animate() {
+            points.forEach(p => {
+                // Lerp current positions to target
+                p.curX += (p.targetX - p.curX) * 0.15;
+                p.curY += (p.targetY - p.curY) * 0.15;
+            });
+
+            // Update SVG elements
+            pointsGroup.innerHTML = '';
+            points.forEach(p => {
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute('cx', p.curX);
+                circle.setAttribute('cy', p.curY);
+                circle.setAttribute('r', p.isOutlier ? 8 : 4);
+                circle.setAttribute('fill', p.isOutlier ? '#ef4444' : '#3b82f6');
+                circle.setAttribute('fill-opacity', p.isOutlier ? '1' : '0.6');
+                if (p.isOutlier) circle.setAttribute('class', 'draggable shadow-lg');
+                pointsGroup.appendChild(circle);
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        // Init
+        window.addEventListener('resize', updateLayout);
+        initPoints();
+        updateLayout();
+        animate();
+
+    </script>
+</body>
+</html>

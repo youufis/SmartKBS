@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartKB 教学资源中心</title>
+<style>
+/* ===== Reset & Base ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f0f4f8;--surface:#ffffff;--text:#1a2332;--text-secondary:#5a6a7e;
+  --radius:16px;--radius-sm:10px;--shadow:0 2px 12px rgba(0,0,0,.06);
+  --shadow-lg:0 8px 32px rgba(0,0,0,.10);
+  /* category colors */
+  --gt:#2563eb;--gt-light:#dbeafe;--gt-bg:linear-gradient(135deg,#1e40af,#3b82f6);
+  --it:#059669;--it-light:#d1fae5;--it-bg:linear-gradient(135deg,#047857,#10b981);
+  --ai:#7c3aed;--ai-light:#ede9fe;--ai-bg:linear-gradient(135deg,#6d28d9,#8b5cf6);
+  --tool:#d97706;--tool-light:#fef3c7;--tool-bg:linear-gradient(135deg,#b45309,#f59e0b);
+  --puzzle:#db2777;--puzzle-light:#fce7f3;--puzzle-bg:linear-gradient(135deg,#be185d,#ec4899);
+  --dl:#0d9488;--dl-light:#ccfbf1;--dl-bg:linear-gradient(135deg,#0f766e,#14b8a6);
+  --tab-height:64px;
+}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,"Microsoft YaHei","PingFang SC",system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+a{text-decoration:none;color:inherit}
+
+/* ===== Header ===== */
+.header{
+  background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%);
+  color:#fff;padding:28px 24px 20px;text-align:center;
+  position:relative;overflow:hidden;
+}
+.header::before{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse at 30% 50%,rgba(59,130,246,.12) 0%,transparent 60%),
+             radial-gradient(ellipse at 70% 50%,rgba(139,92,246,.10) 0%,transparent 60%);
+}
+.header h1{font-size:clamp(1.5rem,3.5vw,2.2rem);font-weight:700;position:relative;letter-spacing:1px}
+.header h1 span{background:linear-gradient(90deg,#60a5fa,#a78bfa,#60a5fa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.header p{font-size:.92rem;color:#94a3b8;margin-top:4px;position:relative}
+.header-badge{
+  display:inline-block;margin-top:8px;padding:3px 14px;border-radius:20px;
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+  font-size:.78rem;color:#94a3b8;position:relative;
+}
+
+/* ===== Tabs ===== */
+.tabs{
+  display:flex;background:var(--surface);border-bottom:1px solid #e2e8f0;
+  position:sticky;top:0;z-index:100;
+  overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;
+  box-shadow:0 1px 4px rgba(0,0,0,.04);
+}
+.tabs::-webkit-scrollbar{display:none}
+.tab-btn{
+  flex-shrink:0;padding:0 20px;height:var(--tab-height);
+  display:flex;align-items:center;gap:8px;
+  font-size:.92rem;font-weight:500;color:var(--text-secondary);
+  background:none;border:none;cursor:pointer;
+  position:relative;transition:color .25s;
+  white-space:nowrap;
+}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:inherit}
+.tab-btn .tab-icon{font-size:1.15rem}
+.tab-btn .tab-count{
+  font-size:.7rem;padding:1px 8px;border-radius:10px;
+  background:#f1f5f9;color:var(--text-secondary);font-weight:600;
+}
+.tab-btn .active-bar{
+  position:absolute;bottom:0;left:12px;right:12px;height:3px;
+  border-radius:3px 3px 0 0;opacity:0;
+  transition:opacity .3s,transform .3s;
+}
+.tab-btn.active .active-bar{opacity:1}
+.tab-btn.active .tab-count{color:#fff}
+
+/* color-specific tab styles */
+.tab-gt .active-bar{background:var(--gt)}.tab-gt.active .tab-count{background:var(--gt);color:#fff}
+.tab-it .active-bar{background:var(--it)}.tab-it.active .tab-count{background:var(--it);color:#fff}
+.tab-ai .active-bar{background:var(--ai)}.tab-ai.active .tab-count{background:var(--ai);color:#fff}
+.tab-tool .active-bar{background:var(--tool)}.tab-tool.active .tab-count{background:var(--tool);color:#fff}
+.tab-puzzle .active-bar{background:var(--puzzle)}.tab-puzzle.active .tab-count{background:var(--puzzle);color:#fff}
+.tab-dl .active-bar{background:var(--dl)}.tab-dl.active .tab-count{background:var(--dl);color:#fff}
+
+/* ===== Tab Content ===== */
+.tab-content{display:none;padding:24px;max-width:1440px;margin:0 auto}
+.tab-content.active{display:block}
+@view-transition{navigation:auto}
+::view-transition-old(tab-group){animation:slideOut .35s ease both}
+::view-transition-new(tab-group){animation:slideIn .35s ease both}
+@keyframes slideOut{to{opacity:0;transform:translateY(8px)}}
+@keyframes slideIn{from{opacity:0;transform:translateY(8px)}}
+
+/* ===== Section Title ===== */
+.section-title{
+  font-size:1.15rem;font-weight:700;margin:28px 0 16px;
+  display:flex;align-items:center;gap:10px;
+}
+.section-title:first-child{margin-top:4px}
+.section-title .title-line{flex:1;height:2px;border-radius:1px}
+
+/* ===== Card Grid ===== */
+.card-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+  gap:14px;margin-bottom:8px;
+}
+.card{
+  background:var(--surface);border-radius:var(--radius-sm);
+  padding:16px 18px;border:1px solid #e8edf4;
+  transition:all .25s cubic-bezier(.4,0,.2,1);
+  cursor:pointer;position:relative;overflow:hidden;
+}
+.card:hover{
+  transform:translateY(-3px);box-shadow:var(--shadow-lg);
+  border-color:transparent;
+}
+.card:active{transform:translateY(-1px)}
+
+.card .card-title{
+  font-size:.95rem;font-weight:600;margin-bottom:6px;
+  display:flex;align-items:center;gap:8px;
+}
+.card .card-title .ch-num{
+  font-size:.7rem;padding:0 7px;border-radius:4px;
+  background:#f1f5f9;color:var(--text-secondary);font-weight:700;
+  flex-shrink:0;
+}
+.card .card-desc{font-size:.82rem;color:var(--text-secondary);line-height:1.45}
+.card .card-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.card .badge{
+  font-size:.7rem;padding:2px 9px;border-radius:6px;
+  background:#f1f5f9;color:var(--text-secondary);
+  transition:all .2s;
+}
+.card .badge:hover{filter:brightness(.92)}
+
+/* GT Blue */
+.gt-card:hover{border-color:var(--gt);box-shadow:0 8px 24px rgba(37,99,235,.12)}
+.gt-card:hover .ch-num{background:var(--gt);color:#fff}
+.gt-section .section-title{color:var(--gt)}
+.gt-section .title-line{background:linear-gradient(90deg,var(--gt-light),transparent)}
+.gt-badge{background:var(--gt-light)!important;color:var(--gt)!important}
+/* IT Green */
+.it-card:hover{border-color:var(--it);box-shadow:0 8px 24px rgba(5,150,105,.12)}
+.it-card:hover .ch-num{background:var(--it);color:#fff}
+.it-section .section-title{color:var(--it)}
+.it-section .title-line{background:linear-gradient(90deg,var(--it-light),transparent)}
+.it-badge{background:var(--it-light)!important;color:var(--it)!important}
+/* AI Purple */
+.ai-card:hover{border-color:var(--ai);box-shadow:0 8px 24px rgba(124,58,237,.12)}
+.ai-card:hover .ch-num{background:var(--ai);color:#fff}
+.ai-section .section-title{color:var(--ai)}
+.ai-section .title-line{background:linear-gradient(90deg,var(--ai-light),transparent)}
+.ai-badge{background:var(--ai-light)!important;color:var(--ai)!important}
+/* Tool Orange */
+.tool-card:hover{border-color:var(--tool);box-shadow:0 8px 24px rgba(217,119,6,.12)}
+.tool-card:hover .ch-num{background:var(--tool);color:#fff}
+.tool-section .section-title{color:var(--tool)}
+.tool-section .title-line{background:linear-gradient(90deg,var(--tool-light),transparent)}
+.tool-badge{background:var(--tool-light)!important;color:var(--tool)!important}
+/* Puzzle Pink */
+.puzzle-card:hover{border-color:var(--puzzle);box-shadow:0 8px 24px rgba(219,39,119,.12)}
+.puzzle-card:hover .ch-num{background:var(--puzzle);color:#fff}
+.puzzle-section .section-title{color:var(--puzzle)}
+.puzzle-section .title-line{background:linear-gradient(90deg,var(--puzzle-light),transparent)}
+.puzzle-badge{background:var(--puzzle-light)!important;color:var(--puzzle)!important}
+/* DL Teal */
+.dl-card:hover{border-color:var(--dl);box-shadow:0 8px 24px rgba(13,148,136,.12)}
+.dl-card:hover .ch-num{background:var(--dl);color:#fff}
+.dl-section .section-title{color:var(--dl)}
+.dl-section .title-line{background:linear-gradient(90deg,var(--dl-light),transparent)}
+.dl-badge{background:var(--dl-light)!important;color:var(--dl)!important}
+
+/* ===== Hero Card (featured) ===== */
+.hero-card{
+  grid-column:1/-1;border-radius:var(--radius);
+  padding:24px 28px;background:linear-gradient(135deg,#f8faff,#eef2ff);
+  border:1px solid #e0e7ff;
+}
+.hero-card:hover{border-color:#a5b4fc}
+.hero-card .hero-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.hero-card .hero-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:10px 24px;border-radius:var(--radius-sm);font-weight:600;
+  font-size:.9rem;transition:all .25s;border:none;cursor:pointer;
+}
+.hero-card .hero-btn:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.12)}
+.hero-btn-primary{background:var(--gt-bg);color:#fff}
+.hero-btn-secondary{background:var(--it-bg);color:#fff}
+.hero-btn-ai{background:var(--ai-bg);color:#fff}
+.hero-btn-tool{background:var(--tool-bg);color:#fff}
+.hero-btn-puzzle{background:var(--puzzle-bg);color:#fff}
+.hero-btn-dl{background:var(--dl-bg);color:#fff}
+
+/* ===== Footer ===== */
+.footer{
+  text-align:center;padding:20px;color:var(--text-secondary);
+  font-size:.82rem;border-top:1px solid #e2e8f0;margin-top:16px;
+}
+
+/* ===== Responsive ===== */
+@media(max-width:768px){
+  .tabs{gap:0}
+  .tab-btn{padding:0 14px;font-size:.84rem}
+  .card-grid{grid-template-columns:1fr}
+  .tab-content{padding:16px}
+  .header{padding:20px 16px}
+}
+
+/* ===== Entrance animations ===== */
+@starting-style{
+  .card{opacity:0;transform:translateY(12px)}
+}
+.card{animation:fadeUp .4s ease both}
+.card:nth-child(1){animation-delay:0s}
+.card:nth-child(2){animation-delay:.03s}
+.card:nth-child(3){animation-delay:.06s}
+
+/* clickable card with data-href */
+.card[data-href]{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.card[data-href]:active{transform:scale(.98)}
+.card-main{text-decoration:none;color:inherit;display:block}
+.card-main:hover{text-decoration:none}
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<header class="header">
+  <h1>📚 <span>SmartKB</span> 教学资源中心</h1>
+  <p>通用技术 · 信息技术 · 人工智能 · 课堂互动 · 益智探索</p>
+  <div class="header-badge">共 220+ 个教学资源 · 持续更新</div>
+</header>
+
+<!-- ===== Tabs ===== -->
+<nav class="tabs" role="tablist">
+  <button class="tab-btn tab-gt active" data-tab="gt" role="tab" aria-selected="true">
+    <span class="tab-icon">🛠️</span> 通用技术
+    <span class="tab-count">32</span>
+    <span class="active-bar"></span>
+  </button>
+  <button class="tab-btn tab-it" data-tab="it" role="tab">
+    <span class="tab-icon">💻</span> 信息技术
+    <span class="tab-count">23</span>
+    <span class="active-bar"></span>
+  </button>
+  <button class="tab-btn tab-ai" data-tab="ai" role="tab">
+    <span class="tab-icon">🤖</span> 人工智能通识
+    <span class="tab-count">30</span>
+    <span class="active-bar"></span>
+  </button>
+  <button class="tab-btn tab-tool" data-tab="tool" role="tab">
+    <span class="tab-icon">🎯</span> 课堂互动
+    <span class="tab-count">16</span>
+    <span class="active-bar"></span>
+  </button>
+  <button class="tab-btn tab-puzzle" data-tab="puzzle" role="tab">
+    <span class="tab-icon">🧩</span> Puzzle 益智
+    <span class="tab-count">21</span>
+    <span class="active-bar"></span>
+  </button>
+  <button class="tab-btn tab-dl" data-tab="dl" role="tab">
+    <span class="tab-icon">📁</span> 下载中心
+    <span class="tab-count">0</span>
+    <span class="active-bar"></span>
+  </button>
+</nav>
+
+<!-- ================================================================ -->
+<!-- TAB 1: 通用技术 -->
+<!-- ================================================================ -->
+<section class="tab-content active" id="tab-gt" role="tabpanel">
+  <!-- 快速入口 -->
+  <div class="card-grid">
+    <div class="hero-card gt-card">
+      <div class="hero-row">
+        <span style="font-weight:700;font-size:1rem;flex:1">📖 通用技术资源总览</span>
+        <a class="hero-btn hero-btn-primary" href="通用技术知识纲要.html" target="_blank">📋 知识纲要</a>
+        <a class="hero-btn hero-btn-primary" href="通用技术必修一-知识森林.html" target="_blank">🌳 必修一·知识森林</a>
+        <a class="hero-btn hero-btn-primary" href="通用技术必修二-科技蓝.html" target="_blank">🔷 必修二·科技蓝</a>
+        <a class="hero-btn hero-btn-primary" href="0.12技术与设计-章节小结.html" target="_blank">📝 章节小结</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 必修一 -->
+  <div class="section-title gt-section">
+    必修一 · 技术与设计1 <div class="title-line"></div>
+  </div>
+
+  <!-- 第1篇：走进技术世界 -->
+  <div class="section-title gt-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第1篇 · 走进技术世界 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">§1.1〜1.3</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card gt-card" data-href="1.1.1技术的发展.html">
+      <div class="card-title"><span class="ch-num">§1.1</span> 技术的发展</div>
+      <div class="card-desc">从石器时代到智能时代的演进脉络</div>
+      <div class="card-badges"><a class="badge" href="1.1.1技术的发展_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.1.1技术的发展-蓝图.html" target="_blank">📐 蓝图</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.1.2技术的价值.html">
+      <div class="card-title"><span class="ch-num">§1.2</span> 技术的价值</div>
+      <div class="card-desc">技术如何改变生活、推动社会进步</div>
+      <div class="card-badges"><a class="badge" href="1.1.2技术的价值_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.1.2技术的价值-孟菲斯.html" target="_blank">🎨 孟菲斯</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.1.3技术的性质.html">
+      <div class="card-title"><span class="ch-num">§1.3</span> 技术的性质</div>
+      <div class="card-desc">目的性、创新性、综合性、两面性</div>
+      <div class="card-badges"><a class="badge" href="1.1.3技术的性质_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.1.3技术的性质-波普.html" target="_blank">🎨 波普</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.1走进技术世界练习题.html">
+      <div class="card-title"><span class="ch-num">📝</span> 走进技术世界练习题</div>
+      <div class="card-desc">章节知识巩固自测</div>
+      <div class="card-badges"><span class="badge gt-badge">练习</span></div>
+    </div>
+  </div>
+
+  <!-- 第2篇：技术世界中的设计 -->
+  <div class="section-title gt-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第2篇 · 技术世界中的设计 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">§2.1〜2.4</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card gt-card" data-href="1.2.1技术与设计的关系.html">
+      <div class="card-title"><span class="ch-num">§2.1</span> 技术与设计的关系</div>
+      <div class="card-desc">设计驱动技术，技术支撑设计</div>
+      <div class="card-badges"><a class="badge" href="1.2.1技术与设计的关系_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.2.1技术与设计的关系-蒸汽波.html" target="_blank">🎨 蒸汽波</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.2.2设计的一般原则.html">
+      <div class="card-title"><span class="ch-num">§2.2</span> 设计的一般原则</div>
+      <div class="card-desc">创新、实用、经济、美观、道德等原则</div>
+      <div class="card-badges"><a class="badge" href="1.2.2设计的一般原则_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.2.2设计的一般原则-星际.html" target="_blank">🚀 星际</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.2.3设计的一般过程.html">
+      <div class="card-title"><span class="ch-num">§2.3</span> 设计的一般过程</div>
+      <div class="card-desc">发现需求 → 方案构思 → 制作 → 评价</div>
+      <div class="card-badges"><a class="badge" href="1.2.3设计的一般过程_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.2.3设计的一般过程-未来教室.html" target="_blank">🏫 未来教室</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.2.4技术试验及其方法.html">
+      <div class="card-title"><span class="ch-num">§2.4</span> 技术试验及其方法</div>
+      <div class="card-desc">模拟试验、性能试验、优化试验</div>
+      <div class="card-badges"><a class="badge" href="1.2.4技术试验及其方法_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.2.4技术试验及其方法-竞技场.html" target="_blank">🎪 竞技场</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.2技术世界中的设计练习题.html">
+      <div class="card-title"><span class="ch-num">📝</span> 技术世界中的设计练习题</div>
+      <div class="card-desc">章节知识巩固自测</div>
+      <div class="card-badges"><span class="badge gt-badge">练习</span></div>
+    </div>
+  </div>
+
+  <!-- 第3篇：发现与构思 -->
+  <div class="section-title gt-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第3篇 · 发现与构思 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">§3〜§4</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card gt-card" data-href="1.3.1发现与明确问题.html">
+      <div class="card-title"><span class="ch-num">§3</span> 发现与明确问题</div>
+      <div class="card-desc">从需求洞察到问题定义</div>
+      <div class="card-badges"><a class="badge" href="1.3.1发现与明确问题_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.3发现与明确问题-赛博终端.html" target="_blank">🤖 赛博终端</a><a class="badge gt-badge" href="1.3发现与明确问题练习题.html" target="_blank">📝 练习</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.4.1设计中的人机关系.html">
+      <div class="card-title"><span class="ch-num">§4</span> 方案的构思及方法</div>
+      <div class="card-desc">人机关系 · 构思过程 · 常用方法</div>
+      <div class="card-badges"><a class="badge" href="1.4.1设计中的人机关系_动画讲解.html" target="_blank">▶ 人机关系</a><a class="badge" href="1.4.2方案的构思过程_动画讲解.html" target="_blank">▶ 构思过程</a><a class="badge" href="1.4.3常用的构思方法_动画讲解.html" target="_blank">▶ 构思方法</a><a class="badge gt-badge" href="1.4.1设计中的人机关系-极简.html" target="_blank">🎨 极简</a><a class="badge gt-badge" href="1.4.2方案的构思过程-像素风.html" target="_blank">🎨 像素风</a><a class="badge gt-badge" href="1.4.3常用的构思方法-森系.html" target="_blank">🎨 森系</a><a class="badge gt-badge" href="1.4方案的构思及方法练习题.html" target="_blank">📝 练习</a></div>
+    </div>
+  </div>
+
+  <!-- 第4篇：图样·模型·评价 -->
+  <div class="section-title gt-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第4篇 · 图样·模型·评价 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">§5〜§7</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card gt-card" data-href="1.5.1设计图样的绘制.html">
+      <div class="card-title"><span class="ch-num">§5</span> 设计图样的绘制</div>
+      <div class="card-desc">三视图、草图、效果图技法</div>
+      <div class="card-badges"><a class="badge" href="1.5.1设计图样的绘制_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.5.1设计图样的绘制-速写风.html" target="_blank">✏️ 速写风</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.6.1模型或原型的制作.html">
+      <div class="card-title"><span class="ch-num">§6</span> 模型或原型的制作</div>
+      <div class="card-desc">模型分类、手工制作、3D打印</div>
+      <div class="card-badges"><a class="badge" href="1.6.1模型或原型的制作_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.6.1模型或原型的制作-木工坊.html" target="_blank">🪵 木工坊</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.7.1技术交流与评价.html">
+      <div class="card-title"><span class="ch-num">§7</span> 技术交流与评价</div>
+      <div class="card-desc">技术文档、展示汇报、评价标准</div>
+      <div class="card-badges"><a class="badge" href="1.7.1技术交流与评价_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="1.7.1技术交流与评价-发布会.html" target="_blank">🎤 发布会</a></div>
+    </div>
+    <div class="card gt-card" data-href="1.567图样模型评价练习题.html">
+      <div class="card-title"><span class="ch-num">📝</span> 图样·模型·评价练习题</div>
+      <div class="card-desc">§5-§7 综合练习</div>
+      <div class="card-badges"><span class="badge gt-badge">综合练习</span></div>
+    </div>
+  </div>
+
+  <!-- 必修二 -->
+  <div class="section-title gt-section">
+    必修二 · 技术与设计2 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card gt-card" data-href="2.1.1结构及其设计.html">
+      <div class="card-title"><span class="ch-num">§1</span> 结构及其设计</div>
+      <div class="card-desc">结构类型、稳定性、强度、结构设计</div>
+      <div class="card-badges"><a class="badge" href="2.1.1结构及其设计_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="2.1.1结构及其设计-工程蓝图.html" target="_blank">📐 工程蓝图</a><a class="badge gt-badge" href="2.1.1结构及其设计-探究式学习系统.html" target="_blank">🔬 探究式</a><a class="badge gt-badge" href="2.1结构及其设计练习题.html" target="_blank">📝 练习</a></div>
+    </div>
+    <div class="card gt-card" data-href="2.2.1流程及其设计.html">
+      <div class="card-title"><span class="ch-num">§2</span> 流程及其设计</div>
+      <div class="card-desc">流程图、时序、环节、工艺流程</div>
+      <div class="card-badges"><a class="badge" href="2.2.1流程及其设计_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="2.2.1流程及其设计-流程图风.html" target="_blank">📊 流程图风</a><a class="badge gt-badge" href="2.2.1流程及其设计-探究式学习系统.html" target="_blank">🔬 探究式</a><a class="badge gt-badge" href="2.2流程及其设计练习题.html" target="_blank">📝 练习</a></div>
+    </div>
+    <div class="card gt-card" data-href="2.3.1系统及其设计.html">
+      <div class="card-title"><span class="ch-num">§3</span> 系统及其设计</div>
+      <div class="card-desc">系统特性、系统分析、系统优化</div>
+      <div class="card-badges"><a class="badge" href="2.3.1系统及其设计_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="2.3.1系统及其设计-电路板风.html" target="_blank">⚡ 电路板风</a><a class="badge gt-badge" href="2.3.1系统及其设计-探究式学习系统.html" target="_blank">🔬 探究式</a><a class="badge gt-badge" href="2.3系统及其设计练习题.html" target="_blank">📝 练习</a></div>
+    </div>
+    <div class="card gt-card" data-href="2.4.1控制及其设计.html">
+      <div class="card-title"><span class="ch-num">§4</span> 控制及其设计</div>
+      <div class="card-desc">开环/闭环控制、控制系统设计</div>
+      <div class="card-badges"><a class="badge" href="2.4.1控制及其设计_动画讲解.html" target="_blank">▶ 动画讲解</a><a class="badge gt-badge" href="2.4.1控制及其设计-仪表盘风.html" target="_blank">📟 仪表盘风</a><a class="badge gt-badge" href="2.4.1控制及其设计-探究式学习系统.html" target="_blank">🔬 探究式</a><a class="badge gt-badge" href="2.4控制及其设计练习题.html" target="_blank">📝 练习</a></div>
+    </div>
+  </div>
+
+  <!-- 互动答题 -->
+  <div class="section-title gt-section">
+    ⚡ 互动答题 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card gt-card" data-href="1.0技术与设计1-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🏆</span> 技术与设计1 · 挑战答题</div>
+      <div class="card-desc">必修一全章节综合挑战</div>
+    </div>
+    <div class="card gt-card" data-href="1.0技术与设计1-单双答题.html">
+      <div class="card-title"><span class="ch-num">🎯</span> 技术与设计1 · 单双答题</div>
+      <div class="card-desc">双人竞技模式，课堂互动首选</div>
+    </div>
+    <div class="card gt-card" data-href="1.0技术与设计1-简单答题.html">
+      <div class="card-title"><span class="ch-num">📝</span> 技术与设计1 · 简单答题</div>
+      <div class="card-desc">轻松自测模式，适合复习巩固</div>
+    </div>
+    <div class="card gt-card" data-href="1.0技术与设计2-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🏆</span> 技术与设计2 · 挑战答题</div>
+      <div class="card-desc">必修二全章节综合挑战</div>
+    </div>
+    <div class="card gt-card" data-href="1.0技术与设计2-单双答题.html">
+      <div class="card-title"><span class="ch-num">🎯</span> 技术与设计2 · 单双答题</div>
+      <div class="card-desc">必修二双人竞技模式</div>
+    </div>
+    <div class="card gt-card" data-href="1.0通用技术-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🏆</span> 通用技术 · 总挑战</div>
+      <div class="card-desc">通用技术综合大挑战</div>
+    </div>
+    <div class="card gt-card" data-href="1.0通用技术12-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🏆</span> 通用技术12 · 联合挑战</div>
+      <div class="card-desc">必修一二联合大挑战</div>
+    </div>
+  </div>
+</section>
+<!-- TAB 2: 信息技术 -->
+<!-- ================================================================ -->
+<section class="tab-content" id="tab-it" role="tabpanel">
+  <!-- 快速入口 -->
+  <div class="card-grid">
+    <div class="hero-card it-card">
+      <div class="hero-row">
+        <span style="font-weight:700;font-size:1rem;flex:1">📖 信息技术资源总览</span>
+        <a class="hero-btn hero-btn-secondary" href="信息技术知识纲要.html" target="_blank">📋 知识纲要</a>
+        <a class="hero-btn hero-btn-secondary" href="1.0信息技术-挑战答题.html" target="_blank">🏆 挑战答题</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数据与计算 -->
+  <div class="section-title it-section">
+    必修一 · 数据与计算 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card it-card" data-href="it\3.1.1数据及其特征.html">
+      <div class="card-title"><span class="ch-num">§1</span> 数据及其特征</div>
+      <div class="card-desc">数据的概念、特征与表示</div>
+      <div class="card-badges">
+        <a class="badge it-badge" href="it\3.1.2数据编码.html">数据编码</a>
+        <a class="badge it-badge" href="it\3.1.3信息及其特征.html">信息及其特征</a>
+      </div>
+    </div>
+    <div class="card it-card" data-href="it\3.2.1知识与智慧.html">
+      <div class="card-title"><span class="ch-num">§2</span> 知识与智慧</div>
+      <div class="card-desc">数据→信息→知识→智慧的DIKW模型</div>
+      <div class="card-badges">
+        <a class="badge it-badge" href="it\3.2.2数字化学习与创新.html">数字化学习</a>
+      </div>
+    </div>
+    <div class="card it-card" data-href="it\3.3.1体验计算机解决问题的过程.html">
+      <div class="card-title"><span class="ch-num">§3</span> 计算机解决问题</div>
+      <div class="card-desc">问题分析→算法设计→编程实现</div>
+      <div class="card-badges">
+        <a class="badge it-badge" href="it\3.3.2算法及其描述.html">算法描述</a>
+        <a class="badge it-badge" href="it\3.3.3计算机程序与程序设计语言.html">编程语言</a>
+      </div>
+    </div>
+    <div class="card it-card" data-href="it\3.4.1程序设计语言的基础知识.html">
+      <div class="card-title"><span class="ch-num">§4</span> 程序设计语言</div>
+      <div class="card-desc">变量、数据类型、基本语法</div>
+      <div class="card-badges">
+        <a class="badge it-badge" href="it\3.4.2运用顺序结构描述问题求解过程.html">顺序结构</a>
+        <a class="badge it-badge" href="it\3.4.3运用选择结构描述问题求解过程.html">选择结构</a>
+        <a class="badge it-badge" href="it\3.4.4运用循环结构描述问题求解过程.html">循环结构</a>
+      </div>
+    </div>
+    <div class="card it-card" data-href="it\3.5.1认识大数据.html">
+      <div class="card-title"><span class="ch-num">§5</span> 认识大数据</div>
+      <div class="card-desc">大数据特征、采集、分析、可视化</div>
+      <div class="card-badges">
+        <a class="badge it-badge" href="it\3.5.2数据的采集.html">数据采集</a>
+        <a class="badge it-badge" href="it\3.5.3数据的分析.html">数据分析</a>
+        <a class="badge it-badge" href="it\3.5.4数据的可视化表达.html">可视化</a>
+      </div>
+    </div>
+    <div class="card it-card" data-href="it\3.6.1认识人工智能.html">
+      <div class="card-title"><span class="ch-num">§6</span> 认识人工智能</div>
+      <div class="card-desc">AI概念、发展、典型应用</div>
+      <div class="card-badges">
+        <a class="badge it-badge" href="it\3.6.2人工智能的应用.html">AI应用</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 信息系统与社会 -->
+  <div class="section-title it-section">
+    必修二 · 信息系统与社会 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card it-card" data-href="it\4.1走进信息社会.html">
+      <div class="card-title"><span class="ch-num">§1</span> 走进信息社会</div>
+      <div class="card-desc">信息化浪潮、数字生活、信息社会特征</div>
+    </div>
+    <div class="card it-card" data-href="it\4.2信息系统的组成与功能.html">
+      <div class="card-title"><span class="ch-num">§2</span> 信息系统组成与功能</div>
+      <div class="card-desc">硬件、软件、数据、通信、人的协同</div>
+    </div>
+    <div class="card it-card" data-href="it\4.3信息系统的网络组建.html">
+      <div class="card-title"><span class="ch-num">§3</span> 网络组建</div>
+      <div class="card-desc">局域网搭建、IP配置、网络设备</div>
+    </div>
+    <div class="card it-card" data-href="it\4.4信息系统的软件与应用.html">
+      <div class="card-title"><span class="ch-num">§4</span> 软件与应用</div>
+      <div class="card-desc">系统软件、应用软件、开发工具</div>
+    </div>
+    <div class="card it-card" data-href="it\4.5信息系统的安全风险防范.html">
+      <div class="card-title"><span class="ch-num">§5</span> 安全风险防范</div>
+      <div class="card-desc">信息安全威胁、防护策略、法律法规</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<!-- TAB 3: 人工智能通识 -->
+<!-- ================================================================ -->
+<section class="tab-content" id="tab-ai" role="tabpanel">
+  <div class="card-grid">
+    <div class="hero-card ai-card">
+      <div class="hero-row">
+        <span style="font-weight:700;font-size:1rem;flex:1">🤖 人工智能通识课程</span>
+        <a class="hero-btn hero-btn-ai" href="ai\index.html" target="_blank">📚 AI通识24课</a>
+        <a class="hero-btn hero-btn-ai" href="人工智能通识课.html" target="_blank">📖 AIGK通识课</a>
+        <a class="hero-btn hero-btn-ai" href="人工智能通识知识检测.html" target="_blank">📝 知识检测</a>
+        <a class="hero-btn hero-btn-ai" href="ai\人工智能通识知识检测.html" target="_blank">📝 AI24课检测</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- AIGK 通识课 -->
+  <div class="section-title ai-section">
+    AIGK 通识课 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card ai-card" data-href="AIGK\chapter1.html">
+      <div class="card-title"><span class="ch-num">01</span> 解锁人工智能</div>
+      <div class="card-desc">AI起源、发展历程、现状与未来展望</div>
+      <div class="card-badges"><span class="badge ai-badge">AIGK</span></div>
+    </div>
+    <div class="card ai-card" data-href="AIGK\chapter2.html">
+      <div class="card-title"><span class="ch-num">02</span> 人工智能的力量</div>
+      <div class="card-desc">AI典型应用场景与前沿技术</div>
+      <div class="card-badges"><span class="badge ai-badge">AIGK</span></div>
+    </div>
+    <div class="card ai-card" data-href="AIGK\chapter13.html">
+      <div class="card-title"><span class="ch-num">13</span> 科技向善 伦理先行</div>
+      <div class="card-desc">AI伦理问题与治理策略</div>
+      <div class="card-badges"><span class="badge ai-badge">AIGK</span></div>
+    </div>
+  </div>
+
+  <!-- AI通识24课 -->
+  <div class="section-title ai-section">
+    AI通识24课 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card ai-card" data-href="ai\index.html">
+      <div class="card-title"><span class="ch-num">📚</span> AI通识24课 · 全部课程</div>
+      <div class="card-desc">第1课~第24课，覆盖AI认知、技术、应用、伦理全维度</div>
+      <div class="card-badges"><span class="badge ai-badge">每课含PPT + 课堂链接 + 交互实验</span></div>
+    </div>
+  </div>
+
+  <!-- 第1篇：认知基础 -->
+  <div class="section-title ai-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第1篇 · 认知基础篇 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">第1~4课</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card ai-card" data-href="ai\第1课人工智能发展现状\第1课人工智能发展现状.pptx">
+      <div class="card-title"><span class="ch-num">01</span> 人工智能发展现状</div>
+      <div class="card-desc">AI历史、主流技术路线、产业格局</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第1课人工智能发展现状\interactive\01_交互体验：神经网络如何思考.html" target="_blank">🧪 交互实验</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第2课人工智能前沿应用领域\第2课人工智能前沿应用领域.pptx">
+      <div class="card-title"><span class="ch-num">02</span> 人工智能前沿应用领域</div>
+      <div class="card-desc">医疗、教育、金融、制造等跨行业案例</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第2课人工智能前沿应用领域\interactive\01_交互探索：卷积神经网络是如何工作的？.html" target="_blank">🧪 交互探索</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第3课人工智能的未来\第3课人工智能的未来.pptx">
+      <div class="card-title"><span class="ch-num">03</span> 人工智能的未来</div>
+      <div class="card-desc">AGI展望、AI风险与社会治理</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第3课人工智能的未来\interactive\01_交互体验：AGI 智能水平模拟.html" target="_blank">🧪 AGI模拟</a><a class="badge" href="ai\第3课人工智能的未来\interactive\02_伦理沙盒：AI 决策权衡.html" target="_blank">⚖️ 伦理沙盒</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第4课人工智能数学基础知识\第4课人工智能数学基础知识.pptx">
+      <div class="card-title"><span class="ch-num">04</span> 数学基础知识</div>
+      <div class="card-desc">向量、矩阵、概率统计等AI数学基础</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第4课人工智能数学基础知识\interactive\01_向量空间的线性变换.html" target="_blank">🧪 向量变换</a></div>
+    </div>
+  </div>
+
+  <!-- 第2篇：核心技术 -->
+  <div class="section-title ai-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第2篇 · 核心技术篇 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">第5~9课</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card ai-card" data-href="ai\第5课特征工程\第5课特征工程.pptx">
+      <div class="card-title"><span class="ch-num">05</span> 特征工程</div>
+      <div class="card-desc">特征提取、归一化、PCA降维核心技术</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第5课特征工程\interactive\01_交互探索：数据归一化与标准化.html" target="_blank">🧪 归一化</a><a class="badge" href="ai\第5课特征工程\interactive\02_交互探索：主成分分析 (PCA) 降维.html" target="_blank">🧪 PCA</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第6课机器学习基础\第6课机器学习基础.pptx">
+      <div class="card-title"><span class="ch-num">06</span> 机器学习基础</div>
+      <div class="card-desc">监督/无监督学习、回归与分类</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第6课机器学习基础\interactive\01_直观体验：线性回归模拟.html" target="_blank">🧪 线性回归</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第7课神经网络入门\第7课神经网络入门.pptx">
+      <div class="card-title"><span class="ch-num">07</span> 神经网络入门</div>
+      <div class="card-desc">感知机、激活函数、反向传播原理</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第7课神经网络入门\interactive\01_动手实验：调节你的神经元.html" target="_blank">🧪 神经元实验</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第8课卷积神经网络\第8课卷积神经网络.pptx">
+      <div class="card-title"><span class="ch-num">08</span> 卷积神经网络</div>
+      <div class="card-desc">卷积、池化、特征图与图像识别</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第8课卷积神经网络\interactive\01_动手实验：卷积核探测器.html" target="_blank">🧪 卷积核</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第9课人工智能赋能千行百业\第9课人工智能赋能千行百业.pptx">
+      <div class="card-title"><span class="ch-num">09</span> 人工智能赋能千行百业</div>
+      <div class="card-desc">AI在工业、农业、医疗等领域的落地</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第9课人工智能赋能千行百业\interactive\01_交互体验：工业缺陷智能检测模拟.html" target="_blank">🧪 缺陷检测</a></div>
+    </div>
+  </div>
+
+  <!-- 第3篇：应用实践 -->
+  <div class="section-title ai-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第3篇 · 应用实践篇 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">第10~15课</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card ai-card" data-href="ai\第10课自主可控与开源共享\第10课自主可控与开源共享.pptx">
+      <div class="card-title"><span class="ch-num">10</span> 自主可控与开源共享</div>
+      <div class="card-desc">AI开源生态、国产框架与自主创新</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第10课自主可控与开源共享\interactive\01_交互体验：开源协作模拟.html" target="_blank">🧪 开源协作</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第11课算力共享\第11课算力共享.pptx">
+      <div class="card-title"><span class="ch-num">11</span> 算力共享</div>
+      <div class="card-desc">分布式计算、GPU资源调度与共享</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第11课算力共享\interactive\01_互动模拟：动态资源调度.html" target="_blank">🧪 资源调度</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第12课人工智能赋能下的未来与人才\第12课人工智能赋能下的未来与人才.pptx">
+      <div class="card-title"><span class="ch-num">12</span> 未来与人才</div>
+      <div class="card-desc">AI时代职业变革与人才培养路径</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第12课人工智能赋能下的未来与人才\interactive\01_职业AI冲击力探索器.html" target="_blank">🧪 职业探索</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第13课智能感知技术\第13课智能感知技术.pptx">
+      <div class="card-title"><span class="ch-num">13</span> 智能感知技术</div>
+      <div class="card-desc">计算机视觉、传感器融合与环境感知</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第13课智能感知技术\interactive\01_视觉感知交互实验室.html" target="_blank">🧪 视觉感知</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第14课自然语言处理\第14课自然语言处理.pptx">
+      <div class="card-title"><span class="ch-num">14</span> 自然语言处理</div>
+      <div class="card-desc">词向量、Transformer、大语言模型</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第14课自然语言处理\interactive\01_探索词语的距离.html" target="_blank">🧪 词语距离</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第15课生成式人工智能\第15课生成式人工智能.pptx">
+      <div class="card-title"><span class="ch-num">15</span> 生成式人工智能</div>
+      <div class="card-desc">GAN、Diffusion、Prompt工程应用</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第15课生成式人工智能\interactive\01_交互体验：提示词工程模拟.html" target="_blank">🧪 提示词工程</a></div>
+    </div>
+  </div>
+
+  <!-- 第4篇：前沿治理 -->
+  <div class="section-title ai-section" style="font-size:.95rem;margin-top:4px;margin-bottom:12px">
+    第4篇 · 前沿治理篇 <span style="font-weight:400;color:var(--text-secondary);font-size:.8rem">第16~24课</span>
+    <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card ai-card" data-href="ai\第16课智能体与具身智能\第16课智能体与具身智能.pptx">
+      <div class="card-title"><span class="ch-num">16</span> 智能体与具身智能</div>
+      <div class="card-desc">Agent架构、感知-决策-执行闭环</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第16课智能体与具身智能\interactive\01_感知与避障交互模拟.html" target="_blank">🧪 避障模拟</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第17课数据处理与特征工程\第17课数据处理与特征工程.pptx">
+      <div class="card-title"><span class="ch-num">17</span> 数据处理与特征工程</div>
+      <div class="card-desc">数据清洗、特征缩放、特征选择</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第17课数据处理与特征工程\interactive\01_互动：特征缩放动态演示.html" target="_blank">🧪 特征缩放</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第18课模型训练与评估\第18课模型训练与评估.pptx">
+      <div class="card-title"><span class="ch-num">18</span> 模型训练与评估</div>
+      <div class="card-desc">梯度下降、过拟合、模型评估指标</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第18课模型训练与评估\interactive\01_交互体验：梯度下降模拟.html" target="_blank">🧪 梯度下降</a><a class="badge" href="ai\第18课模型训练与评估\interactive\02_交互体验：指标权衡模拟.html" target="_blank">🧪 指标权衡</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第19课人工智能系统运维\第19课人工智能系统运维.pptx">
+      <div class="card-title"><span class="ch-num">19</span> 系统运维</div>
+      <div class="card-desc">模型部署监控、GPU资源与性能优化</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第19课人工智能系统运维\interactive\01_资源监控实验室：GPU状态可视化.html" target="_blank">🧪 GPU监控</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第20课模型部署与应用集成\第20课模型部署与应用集成.pptx">
+      <div class="card-title"><span class="ch-num">20</span> 模型部署与应用集成</div>
+      <div class="card-desc">API部署、边缘计算、推理优化</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第20课模型部署与应用集成\interactive\01_推理性能模拟探索.html" target="_blank">🧪 性能模拟</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第21课人工智能工程设计\第21课人工智能工程设计.pptx">
+      <div class="card-title"><span class="ch-num">21</span> AI工程设计</div>
+      <div class="card-desc">MLOps、数据流水线、CI/CD for AI</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第21课人工智能工程设计\interactive\01_交互式数据流模拟.html" target="_blank">🧪 数据流</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第22课算法公平性与偏见治理\第22课算法公平性与偏见治理.pptx">
+      <div class="card-title"><span class="ch-num">22</span> 算法公平性与偏见治理</div>
+      <div class="card-desc">算法偏差检测、公平性评估与缓解</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第22课算法公平性与偏见治理\interactive\01_互动探索：调节公平性天平.html" target="_blank">⚖️ 公平性</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第23课人工智能安全与隐私保护\第23课人工智能安全与隐私保护.pptx">
+      <div class="card-title"><span class="ch-num">23</span> 安全与隐私保护</div>
+      <div class="card-desc">对抗攻击、差分隐私、联邦学习</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第23课人工智能安全与隐私保护\interactive\01_互动模拟：对抗性噪声挑战.html" target="_blank">🛡️ 对抗噪声</a></div>
+    </div>
+    <div class="card ai-card" data-href="ai\第24课人工智能伦理与社会责任\第24课人工智能伦理与社会责任.pptx">
+      <div class="card-title"><span class="ch-num">24</span> 伦理与社会责任</div>
+      <div class="card-desc">AI伦理原则、法规治理与社会责任</div>
+      <div class="card-badges"><span class="badge ai-badge">PPT</span><a class="badge" href="ai\第24课人工智能伦理与社会责任\interactive\01_公平性模拟实验室.html" target="_blank">⚖️ 公平实验室</a></div>
+    </div>
+  </div>
+</section>
+<!-- ================================================================ -->
+<!-- TAB 4: 课堂互动 -->
+<!-- ================================================================ -->
+<section class="tab-content" id="tab-tool" role="tabpanel">
+  <div class="card-grid">
+    <div class="hero-card tool-card">
+      <div class="hero-row">
+        <span style="font-weight:700;font-size:1rem;flex:1">🎯 课堂互动工具集</span>
+        <a class="hero-btn hero-btn-tool" href="互动小活动.html" target="_blank">🎮 互动小活动</a>
+        <a class="hero-btn hero-btn-tool" href="puzzle\index.html" target="_blank">🧩 Puzzle 益智</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 课堂工具 -->
+  <div class="section-title tool-section">
+    课堂工具 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card tool-card" data-href="0.00智能随机点名.html">
+      <div class="card-title"><span class="ch-num">🎯</span> 智能随机点名</div>
+      <div class="card-desc">公平随机抽取学生，支持多班级名单</div>
+    </div>
+    <div class="card tool-card" data-href="0.02课堂随机点名.html">
+      <div class="card-title"><span class="ch-num">🎲</span> 课堂随机点名</div>
+      <div class="card-desc">简洁版随机点名，快速上手</div>
+    </div>
+    <div class="card tool-card" data-href="0.01课堂积分激励.html">
+      <div class="card-title"><span class="ch-num">⭐</span> 课堂积分激励</div>
+      <div class="card-desc">课堂表现积分系统，激发学习热情</div>
+    </div>
+    <div class="card tool-card" data-href="score_system\index.html">
+      <div class="card-title"><span class="ch-num">📊</span> 积分系统管理</div>
+      <div class="card-desc">积分数据管理后台</div>
+    </div>
+  </div>
+
+  <!-- 挑战答题 -->
+  <div class="section-title tool-section">
+    挑战答题 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card tool-card" data-href="1.0信息技术-挑战答题.html">
+      <div class="card-title"><span class="ch-num">💻</span> 信息技术 · 挑战答题</div>
+      <div class="card-desc">信息技术全章节挑战</div>
+    </div>
+    <div class="card tool-card" data-href="1.0技术与设计1-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🛠️</span> 技术与设计1 · 挑战答题</div>
+      <div class="card-desc">必修一综合挑战</div>
+    </div>
+    <div class="card tool-card" data-href="1.0技术与设计1-单双答题.html">
+      <div class="card-title"><span class="ch-num">👥</span> 技术与设计1 · 单双答题</div>
+      <div class="card-desc">课堂竞技模式</div>
+    </div>
+    <div class="card tool-card" data-href="1.0技术与设计1-简单答题.html">
+      <div class="card-title"><span class="ch-num">📝</span> 技术与设计1 · 简单答题</div>
+      <div class="card-desc">轻松自测模式</div>
+    </div>
+    <div class="card tool-card" data-href="1.0技术与设计2-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🛠️</span> 技术与设计2 · 挑战答题</div>
+      <div class="card-desc">必修二综合挑战</div>
+    </div>
+    <div class="card tool-card" data-href="1.0技术与设计2-单双答题.html">
+      <div class="card-title"><span class="ch-num">👥</span> 技术与设计2 · 单双答题</div>
+      <div class="card-desc">必修二竞技模式</div>
+    </div>
+    <div class="card tool-card" data-href="1.0通用技术-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🏆</span> 通用技术 · 总挑战</div>
+      <div class="card-desc">通用技术全领域大挑战</div>
+    </div>
+    <div class="card tool-card" data-href="1.0通用技术12-挑战答题.html">
+      <div class="card-title"><span class="ch-num">🏆</span> 通用技术12 · 联合挑战</div>
+      <div class="card-desc">必修一二联合大挑战</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<!-- TAB 5: Puzzle 益智 -->
+<!-- ================================================================ -->
+<section class="tab-content" id="tab-puzzle" role="tabpanel">
+  <div class="card-grid">
+    <div class="hero-card puzzle-card">
+      <div class="hero-row">
+        <span style="font-weight:700;font-size:1rem;flex:1">🧩 Puzzle 益智游戏库</span>
+        <a class="hero-btn hero-btn-puzzle" href="puzzle\index.html" target="_blank">🎮 打开完整播放器</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-title puzzle-section">
+    经典益智游戏 <div class="title-line"></div>
+  </div>
+  <div class="card-grid">
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=hanoi">
+      <div class="card-title"><span class="ch-num">🧩</span> 汉诺塔</div>
+      <div class="card-desc">经典递归思维训练 · Tower of Hanoi</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=queens">
+      <div class="card-title"><span class="ch-num">👑</span> N皇后问题</div>
+      <div class="card-desc">经典回溯算法益智游戏 · 8 Queens</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=4knights">
+      <div class="card-title"><span class="ch-num">♞</span> 四骑士</div>
+      <div class="card-desc">棋盘交换谜题 · 4 Knights Puzzle</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=frogs">
+      <div class="card-title"><span class="ch-num">🐸</span> 青蛙过河</div>
+      <div class="card-desc">经典跳跃交换谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=river1">
+      <div class="card-title"><span class="ch-num">🌊</span> 过河问题 I</div>
+      <div class="card-desc">狼羊菜过河经典逻辑谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=river2">
+      <div class="card-title"><span class="ch-num">🌊</span> 过河问题 II</div>
+      <div class="card-desc">传教士与食人魔过河</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=IQ_Test">
+      <div class="card-title"><span class="ch-num">🧠</span> IQ测试</div>
+      <div class="card-desc">智力挑战 · IQ Test</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=4Picture">
+      <div class="card-title"><span class="ch-num">🖼️</span> 四格猜图</div>
+      <div class="card-desc">看图猜词 · 4 Pictures</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=scaleslogic">
+      <div class="card-title"><span class="ch-num">⚖️</span> 天平逻辑</div>
+      <div class="card-desc">天平称重逻辑谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=bags_signs">
+      <div class="card-title"><span class="ch-num">🏷️</span> 袋子标签</div>
+      <div class="card-desc">标签推理谜题 · Bags & Signs</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=matchesb">
+      <div class="card-title"><span class="ch-num">🔥</span> 火柴谜题</div>
+      <div class="card-desc">火柴棍移动谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=bottle">
+      <div class="card-title"><span class="ch-num">🍾</span> 瓶子分水</div>
+      <div class="card-desc">水量测量经典谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=brakemachine1">
+      <div class="card-title"><span class="ch-num">⚙️</span> 刹车机制 I</div>
+      <div class="card-desc">机械逻辑谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=brakemachine2">
+      <div class="card-title"><span class="ch-num">⚙️</span> 刹车机制 II</div>
+      <div class="card-desc">进阶机械逻辑谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=elevator">
+      <div class="card-title"><span class="ch-num">🛗</span> 电梯调度</div>
+      <div class="card-desc">电梯运行逻辑模拟</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=Coins">
+      <div class="card-title"><span class="ch-num">🪙</span> 硬币谜题</div>
+      <div class="card-desc">硬币称重推理游戏</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=golointhecave">
+      <div class="card-title"><span class="ch-num">🗿</span> 洞穴探险</div>
+      <div class="card-desc">探索与推理 · Go lo in the Cave</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=knight">
+      <div class="card-title"><span class="ch-num">♘</span> 骑士巡游</div>
+      <div class="card-desc">马的遍历 · Knight's Tour</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=family">
+      <div class="card-title"><span class="ch-num">👨‍👩‍👧‍👦</span> 家庭过桥</div>
+      <div class="card-desc">限时过桥逻辑谜题</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=dinner">
+      <div class="card-title"><span class="ch-num">🍽️</span> 餐桌安排</div>
+      <div class="card-desc">座位安排逻辑推理</div>
+    </div>
+    <div class="card puzzle-card" data-href="puzzle\index.html?game=turningsqure">
+      <div class="card-title"><span class="ch-num">🔲</span> 翻转方块</div>
+      <div class="card-desc">方块翻转路径谜题</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================ -->
+<!-- TAB 6: 文件下载 -->
+<!-- ================================================================ -->
+<section class="tab-content" id="tab-dl" role="tabpanel">
+  <!-- 导航面包屑 -->
+  <div id="dlNav" style="margin-bottom:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.82rem;color:var(--text-secondary);min-height:28px;">
+    <span id="dlBackBtn" onclick="dlGoUp()" style="display:none;color:var(--dl);cursor:pointer;font-weight:600;padding:2px 8px;border-radius:4px;">⬆ 返回上级</span>
+  </div>
+  <div style="margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <span style="font-weight:600;font-size:1rem;">📁 下载中心</span>
+    <span id="dlFileCount" style="font-size:.82rem;color:var(--text-secondary);">加载中...</span>
+    <span style="flex:1;"></span>
+    <input id="dlSearch" type="text" placeholder="🔍 搜索..." oninput="renderDLList()"
+      style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;font-size:.82rem;width:160px;outline:none;color:var(--text);">
+    <a class="hero-btn hero-btn-dl" href="downloads/index.html" target="_blank" style="font-size:.78rem;padding:5px 12px;">📂 完整页面</a>
+  </div>
+  <div id="dlFileList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;">
+    <div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--text-secondary);">加载中...</div>
+  </div>
+</section>
+
+<style>
+.dl-item {
+  display:flex;align-items:center;gap:10px;
+  background:var(--surface);border:1px solid #e8edf4;border-radius:10px;
+  padding:10px 14px;transition:all .2s;
+}
+.dl-item:hover {border-color:var(--dl);box-shadow:0 4px 12px rgba(13,148,136,.10);}
+.dl-item.dir {cursor:pointer;}
+.dl-item.dir:hover {background:#f0fdfa;}
+.dl-item .icon {
+  width:34px;height:34px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;flex-shrink:0;
+  background:#f1f5f9;
+}
+.dl-item .info {flex:1;min-width:0;}
+.dl-item .info .name {font-size:.85rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dl-item .info .meta {font-size:.73rem;color:var(--text-secondary);margin-top:1px;}
+.dl-item .dl-btn {
+  background:var(--dl-bg);border:none;color:#fff;
+  padding:3px 10px;border-radius:6px;cursor:pointer;font-size:.75rem;
+  text-decoration:none;flex-shrink:0;transition:all .2s;
+}
+.dl-item .dl-btn:hover {transform:translateY(-1px);box-shadow:0 4px 12px rgba(13,148,136,.3);}
+.dl-nav-item {color:var(--text-secondary);cursor:pointer;padding:1px 5px;border-radius:4px;transition:all .2s;white-space:nowrap;}
+.dl-nav-item:hover {color:var(--dl);background:rgba(13,148,136,.08);}
+.dl-nav-item.curr {color:var(--text);cursor:default;font-weight:500;}
+.dl-nav-item.curr:hover {background:transparent;}
+.dl-nav-sep {color:#d0d5dd;font-size:10px;}
+
+.gear-icon{display:none}/* hidden */
+</style>
+
+<script>
+// ── 嵌入列表：目录浏览 ──
+var _dlCurDir = '';
+function dlGetContents(dir) {
+  var list = window._dlFiles || [];
+  var prefix = dir ? dir + '/' : '';
+  var seen = {}, items = [];
+  for (var i = 0; i < list.length; i++) {
+    var f = list[i];
+    var p = f.path || f.name;
+    if (p.indexOf(prefix) !== 0) continue;
+    var rest = p.substring(prefix.length);
+    if (!rest) continue;
+    var slash = rest.indexOf('/');
+    if (slash === -1) {
+      if (!f.is_dir) items.push({_isDir:false, _disp:rest, path:p, name:f.name, size:f.size, mtime:f.mtime});
+    } else {
+      var d = rest.substring(0, slash);
+      if (!seen[d]) { seen[d]=1; items.push({_isDir:true, _disp:d, path:prefix+d}); }
+    }
+  }
+  items.sort(function(a,b){
+    if (a._isDir !== b._isDir) return a._isDir ? -1 : 1;
+    return a._disp.toLowerCase() < b._disp.toLowerCase() ? -1 : 1;
+  });
+  return items;
+}
+function dlRenderNav() {
+  var nav = document.getElementById('dlNav');
+  var back = document.getElementById('dlBackBtn');
+  if (!_dlCurDir) { back.style.display='none'; nav.innerHTML='<span id="dlBackBtn" onclick="dlGoUp()" style="display:none;color:var(--dl);cursor:pointer;font-weight:600;padding:2px 8px;border-radius:4px;">⬆ 返回上级</span>'; return; }
+  back.style.display='inline-flex';
+  var parts = _dlCurDir.split('/');
+  var html = '<span id="dlBackBtn" onclick="dlGoUp()" style="display:inline-flex;color:var(--dl);cursor:pointer;font-weight:600;padding:2px 8px;border-radius:4px;">⬆ 返回上级</span>';
+  html += '<span class="dl-nav-item" onclick="dlEnterDir(\'\')">📁 根目录</span><span class="dl-nav-sep">›</span>';
+  var cum='';
+  for (var i=0;i<parts.length;i++) {
+    cum = i===0 ? parts[i] : cum+'/'+parts[i];
+    if (i===parts.length-1) html += '<span class="dl-nav-item curr">📂 '+parts[i]+'</span>';
+    else { html += '<span class="dl-nav-item" onclick="dlEnterDir(\''+cum.replace(/'/g,"\\'")+'\')">📂 '+parts[i]+'</span><span class="dl-nav-sep">›</span>'; }
+  }
+  nav.innerHTML = html;
+}
+function dlEnterDir(d) { _dlCurDir=d; dlRenderNav(); renderDLList(); }
+function dlGoUp() { if (!_dlCurDir) return; var i=_dlCurDir.lastIndexOf('/'); _dlCurDir=i===-1?'':_dlCurDir.substring(0,i); dlRenderNav(); renderDLList(); }
+
+async function loadDLList() {
+  var container = document.getElementById('dlFileList');
+  try {
+    var resp = await fetch('/downloads-api/list?_=' + Date.now());
+    if (!resp.ok) throw new Error('API error');
+    var data = await resp.json();
+    if (!data || !Array.isArray(data.files)) throw new Error('bad data');
+    window._dlFiles = data.files;
+    // 更新徽标
+    var fc = data.files.filter(function(f){return !f.is_dir;}).length;
+    document.querySelector('.tab-dl .tab-count').textContent = fc;
+    document.getElementById('dlFileCount').textContent = '共 '+fc+' 个文件';
+    dlRenderNav();
+    renderDLList();
+  } catch(e) {
+    container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--text-secondary);">⚠️ 无法加载文件列表</div>';
+  }
+}
+function formatSize(b) {
+  if (!b && b!==0) return '';
+  if (b===0) return '0 B';
+  var k=1024,s=['B','KB','MB','GB'],i=Math.floor(Math.log(b)/Math.log(k));
+  return (b/Math.pow(k,i)).toFixed(i>0?1:0)+' '+s[i];
+}
+function renderDLList() {
+  var container = document.getElementById('dlFileList');
+  var search = (document.getElementById('dlSearch').value||'').trim().toLowerCase();
+  var items = dlGetContents(_dlCurDir);
+  items = search ? items.filter(function(f){return f._disp.toLowerCase().indexOf(search)!==-1;}) : items;
+  if (items.length===0) {
+    container.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 0;color:var(--text-secondary);">'+
+      (!_dlCurDir && (!window._dlFiles||window._dlFiles.filter(function(f){return !f.is_dir;}).length===0) ? '📂 暂无文件' : '🔍 没有匹配的内容')+'</div>';
+    return;
+  }
+  container.innerHTML = items.map(function(f){
+    if (f._isDir) {
+      return '<div class="dl-item dir" onclick="dlEnterDir(\''+f.path.replace(/'/g,"\\'")+'\')">'+
+        '<div class="icon">📁</div><div class="info"><div class="name">'+f._disp+'</div><div class="meta">文件夹</div></div>'+
+        '<span style="color:var(--text-secondary);font-size:11px;">›</span></div>';
+    }
+    var ext='',ei='📄';
+    if (f.name.indexOf('.')!==-1) ext=f.name.split('.').pop().toLowerCase();
+    if (['zip','rar','7z','tar','gz'].indexOf(ext)!==-1) ei='📦';
+    else if (['png','jpg','jpeg','gif','webp','svg'].indexOf(ext)!==-1) ei='🖼️';
+    else if (['pdf'].indexOf(ext)!==-1) ei='📕';
+    else if (['doc','docx','xls','xlsx','ppt','pptx'].indexOf(ext)!==-1) ei='📝';
+    else if (['mp4','avi','mkv','mov','webm'].indexOf(ext)!==-1) ei='🎬';
+    var sz=formatSize(f.size), dt=f.mtime||'', meta=[sz,dt].filter(Boolean).join(' · ');
+    var p = encodeURIComponent(f.path||f.name);
+    var n = f.name.replace(/"/g,'&quot;');
+    return '<div class="dl-item"><div class="icon">'+ei+'</div><div class="info"><div class="name" title="'+(f.path||f.name).replace(/"/g,'&quot;')+'">'+f._disp+'</div>'+(meta?'<div class="meta">'+meta+'</div>':'')+'</div>'+
+      '<a class="dl-btn" href="/gradio_api/file=root/html/downloads/'+p+'" download="'+n+'">⬇ 下载</a></div>';
+  }).join('');
+}
+loadDLList();
+
+// 切换到该 Tab 时自动刷新
+(function(){
+  var btn = document.querySelector('.tab-dl');
+  if (btn) btn.addEventListener('click', function(){
+    setTimeout(loadDLList, 100);
+  });
+})();
+</script>
+
+<!-- ===== Footer ===== -->
+<footer class="footer">
+  SmartKB 教学资源中心 · 通用技术 / 信息技术 / 人工智能通识 / 课堂互动 / Puzzle益智 / 下载中心
+</footer>
+
+<script>
+// ===== Tab切换逻辑（兼容低版本浏览器） =====
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', function() {
+    if (btn.classList.contains('active')) return;
+
+    // 低版本浏览器兼容：直接切换，不使用 View Transitions API
+    function switchTab() {
+      document.querySelectorAll('.tab-btn.active').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content.active').forEach(function(c) { c.classList.remove('active'); });
+
+      btn.classList.add('active');
+      var tabId = btn.dataset.tab;
+      var content = document.getElementById('tab-' + tabId);
+      if (content) content.classList.add('active');
+    }
+
+    // 尝试使用 View Transitions API，不支持则直接切换
+    var transition = null;
+    if (typeof document.startViewTransition === 'function') {
+      transition = document.startViewTransition(switchTab);
+    } else {
+      switchTab();
+    }
+  });
+});
+</script>
+
+<script>
+document.addEventListener('click', function(e){
+  var card = e.target.closest('.card[data-href]');
+  if(card && !e.target.closest('a, button, span.badge, input')) {
+    window.open(card.getAttribute('data-href'), '_blank');
+  }
+});
+
+
+</script>
+</body>
+</html>

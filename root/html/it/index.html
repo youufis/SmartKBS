@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>信息技术知识纲要导航</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: "Microsoft YaHei", sans-serif;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            color: #333;
+            line-height: 1.6;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(120deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+        }
+        
+        .content-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 40px;
+        }
+        
+        .chapter {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .chapter:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 12px 20px rgba(0, 0, 0, 0.15);
+        }
+        
+        .chapter-header {
+            background: linear-gradient(120deg, #27ae60 0%, #2ecc71 100%);
+            color: white;
+            padding: 20px;
+            font-size: 1.4rem;
+        }
+        
+        .chapter-content {
+            padding: 20px;
+        }
+        
+        .section-list {
+            list-style-type: none;
+        }
+        
+        .section-list li {
+            padding: 12px 0;
+            border-bottom: 1px dashed #eee;
+        }
+        
+        .section-list li:last-child {
+            border-bottom: none;
+        }
+        
+        .section-link {
+            text-decoration: none;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s;
+        }
+        
+        .section-link:hover {
+            color: #27ae60;
+            transform: translateX(5px);
+        }
+        
+        .section-link::before {
+            content: "▶";
+            margin-right: 10px;
+            font-size: 0.8rem;
+            transition: transform 0.2s;
+        }
+        
+        .section-link:hover::before {
+            transform: translateX(3px);
+        }
+        
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #7f8c8d;
+            font-size: 0.9rem;
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>信息技术知识纲要</h1>
+            <div class="subtitle">高中信息技术必修课程知识点导航</div>
+        </header>
+        
+        <div class="content-grid">
+            <div class="chapter">
+                <div class="chapter-header">第三章 信息系统概论</div>
+                <div class="chapter-content">
+                    <ul class="section-list">
+                        <li><a href="3.1.1数据及其特征.html" class="section-link">第一节 数据及其特征</a></li>
+                        <li><a href="3.1.2数据编码.html" class="section-link">第二节 数据编码</a></li>
+                        <li><a href="3.1.3信息及其特征.html" class="section-link">第三节 信息及其特征</a></li>
+                        <li><a href="3.2.1知识与智慧.html" class="section-link">第四节 知识与智慧</a></li>
+                        <li><a href="3.2.2数字化学习与创新.html" class="section-link">第五节 数字化学习与创新</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="chapter">
+                <div class="chapter-header">第四章 计算机与程序设计</div>
+                <div class="chapter-content">
+                    <ul class="section-list">
+                        <li><a href="3.3.1体验计算机解决问题的过程.html" class="section-link">第一节 体验计算机解决问题的过程</a></li>
+                        <li><a href="3.3.2算法及其描述.html" class="section-link">第二节 算法及其描述</a></li>
+                        <li><a href="3.3.3计算机程序与程序设计语言.html" class="section-link">第三节 计算机程序与程序设计语言</a></li>
+                        <li><a href="3.4.1程序设计语言的基础知识.html" class="section-link">第四节 程序设计语言的基础知识</a></li>
+                        <li><a href="3.4.2运用顺序结构描述问题求解过程.html" class="section-link">第五节 运用顺序结构描述问题求解过程</a></li>
+                        <li><a href="3.4.3运用选择结构描述问题求解过程.html" class="section-link">第六节 运用选择结构描述问题求解过程</a></li>
+                        <li><a href="3.4.4运用循环结构描述问题求解过程.html" class="section-link">第七节 运用循环结构描述问题求解过程</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="chapter">
+                <div class="chapter-header">第五章 数据与大数据</div>
+                <div class="chapter-content">
+                    <ul class="section-list">
+                        <li><a href="3.5.1认识大数据.html" class="section-link">第一节 认识大数据</a></li>
+                        <li><a href="3.5.2数据的采集.html" class="section-link">第二节 数据的采集</a></li>
+                        <li><a href="3.5.3数据的分析.html" class="section-link">第三节 数据的分析</a></li>
+                        <li><a href="3.5.4数据的可视化表达.html" class="section-link">第四节 数据的可视化表达</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="chapter">
+                <div class="chapter-header">第六章 人工智能</div>
+                <div class="chapter-content">
+                    <ul class="section-list">
+                        <li><a href="3.6.1认识人工智能.html" class="section-link">第一节 认识人工智能</a></li>
+                        <li><a href="3.6.2人工智能的应用.html" class="section-link">第二节 人工智能的应用</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="chapter">
+                <div class="chapter-header">第七章 信息系统与社会</div>
+                <div class="chapter-content">
+                    <ul class="section-list">
+                        <li><a href="4.1走进信息社会.html" class="section-link">第一节 走进信息社会</a></li>
+                        <li><a href="4.2信息系统的组成与功能.html" class="section-link">第二节 信息系统的组成与功能</a></li>
+                        <li><a href="4.3信息系统的网络组建.html" class="section-link">第三节 信息系统的网络组建</a></li>
+                        <li><a href="4.4信息系统的软件与应用.html" class="section-link">第四节 信息系统的软件与应用</a></li>
+                        <li><a href="4.5信息系统的安全风险防范.html" class="section-link">第五节 信息系统的安全风险防范</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <footer>
+            <p>© 2025 伦教中学 SmartKB 教育智能体</p>
+            <p>依据《普通高中信息技术课程标准》及教材整理</p>
+        </footer>
+    </div>
+</body>
+</html>

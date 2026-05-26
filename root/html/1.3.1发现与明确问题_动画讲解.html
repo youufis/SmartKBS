@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>发现与明确问题 · 案件档案</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Detective / Evidence Board Theme
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#1a1410;
+  --bg-board:#2c241e;
+  --text:#f5e6d0;
+  --text-dim:#a8927a;
+  --amber:#f59e0b;
+  --amber-light:#fbbf24;
+  --cream:#fef3c7;
+  --brown:#78350f;
+  --red:#dc2626;
+  --blue:#3b82f6;
+  --green:#22c55e;
+  --card-bg:rgba(44,36,30,0.75);
+  --pin-shadow:rgba(0,0,0,0.4);
+  --radius:4px;
+  --font-hand:'KaiTi','STKaiti','FangSong','Microsoft YaHei',serif;
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.7;
+}
+
+/* ===== Cork/Wood Board Background ===== */
+body::before {
+  content:''; position:fixed; inset:0;
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(245,158,11,0.02) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 30%, rgba(245,158,11,0.015) 0%, transparent 50%);
+  background-color:var(--bg-board);
+  background-image:
+    repeating-linear-gradient(90deg,
+      transparent 0px, transparent 1px,
+      rgba(101,84,68,0.3) 1px, rgba(101,84,68,0.3) 2px,
+      transparent 2px, transparent 4px);
+  background-size:4px 4px;
+  pointer-events:none; z-index:0;
+}
+
+/* Pushpin decoration dots */
+body::after {
+  content:''; position:fixed;
+  width:100%; height:100%;
+  background-image:
+    radial-gradient(circle 3px, rgba(245,158,11,0.04) 50%, transparent 50%);
+  background-size:80px 80px;
+  pointer-events:none; z-index:0;
+}
+
+/* ============================================================
+   SCROLL-DRIVEN ANIMATIONS
+   ============================================================ */
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) {
+    .anime { animation-timeline:view(); }
+  }
+}
+
+/* ============================================================
+   PROGRESS — Case tape
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:6px;
+  z-index:999; overflow:visible;
+}
+.progress-wrap::after {
+  content:'⚠ CAUTION ⚠  CAUTION ⚠  CAUTION ⚠';
+  position:absolute; top:6px; left:0; right:0;
+  font-family:monospace; font-size:0.5rem; letter-spacing:4px;
+  color:rgba(220,38,38,0.15); text-align:center;
+  overflow:hidden; white-space:nowrap;
+}
+.progress-bar {
+  height:100%; width:0;
+  background:repeating-linear-gradient(45deg,
+    var(--red), var(--red) 20px,
+    var(--amber) 20px, var(--amber) 40px);
+  animation:progGrow both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+  position:relative;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO — Case File cover
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  position:relative; overflow:hidden; padding:2rem;
+  z-index:1;
+}
+
+.hero-seal {
+  position:absolute; top:3rem; right:3rem;
+  width:80px; height:80px; border-radius:50%;
+  border:3px solid rgba(220,38,38,0.3);
+  display:flex; align-items:center; justify-content:center;
+  font-size:0.6rem; color:rgba(220,38,38,0.25);
+  font-family:monospace; letter-spacing:2px;
+  transform:rotate(-15deg);
+  animation:sealFade 1s 0.8s both;
+}
+.hero-seal::before {
+  content:'TOP SECRET';
+  position:absolute;
+  font-size:0.5rem; letter-spacing:3px;
+}
+@keyframes sealFade { from { opacity:0; transform:rotate(-15deg) scale(0.5); } to { opacity:1; transform:rotate(-15deg) scale(1); } }
+
+/* Tape strips */
+.hero-tape {
+  position:absolute; width:120px; height:20px;
+  background:rgba(245,158,11,0.12);
+  transform:rotate(-5deg);
+}
+.hero-tape.t1 { top:5%; left:-10px; }
+.hero-tape.t2 { bottom:8%; right:-20px; transform:rotate(8deg); }
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  background:rgba(245,158,11,0.08);
+  border:1px solid rgba(245,158,11,0.15);
+  padding:0.4rem 1rem;
+  font-family:monospace; font-size:0.8rem;
+  color:var(--amber); letter-spacing:3px;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; } to { opacity:1; } }
+
+.hero h1 {
+  font-size:clamp(2rem,5vw,4rem); font-weight:800;
+  letter-spacing:6px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 .line1 { color:var(--text); }
+.hero h1 .line2 {
+  background:linear-gradient(135deg, var(--amber-light), var(--amber));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+  font-size:clamp(1.2em,1.5em,1.5em);
+  position:relative;
+}
+.hero h1 .line2::after {
+  content:'?'; position:relative; margin-left:3px;
+  -webkit-text-fill-color:var(--amber);
+  animation:qMark 3s infinite;
+}
+@keyframes qMark { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+@keyframes titleIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(0.9rem,1.5vw,1.1rem);
+  color:var(--text-dim);
+  font-style:italic;
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2rem;
+  display:flex; align-items:center; gap:10px;
+  color:var(--text-dim); font-size:0.8rem; font-family:monospace;
+  animation:scrollPulse 0.8s 1.5s both, bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(8px); } }
+.hero-scroll span { letter-spacing:3px; }
+
+/* ============================================================
+   SECTION — Case evidence board
+   ============================================================ */
+.section {
+  position:relative; z-index:1;
+  min-height:100vh; padding:5rem 1.5rem;
+  display:flex; align-items:center; justify-content:center;
+}
+
+.section-inner { max-width:1100px; width:100%; }
+
+/* Section header — like case divider tabs */
+.section-header {
+  margin-bottom:2.5rem; position:relative;
+  animation:headerIn 0.8s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 60%;
+}
+@keyframes headerIn { from { opacity:0; transform:translateX(-20px); } to { opacity:1; transform:translateX(0); } }
+
+.section-tag {
+  display:inline-block;
+  font-family:monospace; font-size:0.75rem;
+  letter-spacing:3px; text-transform:uppercase;
+  color:var(--amber); margin-bottom:0.3rem;
+}
+.section-title {
+  font-size:clamp(1.4rem,3vw,2.2rem); font-weight:700;
+  font-family:var(--font-hand);
+}
+
+/* ===== EVIDENCE CARD ===== */
+.evidence {
+  background:var(--card-bg);
+  border:1px solid rgba(245,158,11,0.1);
+  border-radius:var(--radius);
+  padding:1.5rem 2rem; margin-bottom:2rem;
+  position:relative;
+  animation:evidIn 0.8s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 50%;
+  box-shadow:0 4px 20px rgba(0,0,0,0.3);
+}
+@keyframes evidIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+/* Pushpin on evidence */
+.evidence::before {
+  content:'📍'; position:absolute; top:-10px; left:50%;
+  transform:translateX(-50%);
+  font-size:1.3rem;
+  filter:drop-shadow(0 2px 4px var(--pin-shadow));
+}
+
+.evidence h3 {
+  display:flex; align-items:center; gap:8px;
+  color:var(--cream); font-size:1.05rem;
+  margin-bottom:0.8rem;
+  font-family:var(--font-hand);
+}
+.evidence p, .evidence li {
+  color:var(--text-dim); font-size:0.92rem; line-height:1.8;
+}
+.evidence li { padding:0.15rem 0; }
+.evidence strong { color:var(--text); }
+
+/* Sticky note style */
+.sticky-note {
+  position:relative;
+  background:rgba(253,230,138,0.08);
+  border-left:3px solid var(--amber);
+  padding:0.8rem 1rem;
+  margin-top:1rem;
+  font-style:italic;
+  color:var(--cream);
+}
+.sticky-note::before { content:'📌 '; }
+
+/* ===== GRID ===== */
+.evi-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+.evi-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; }
+
+/* ===== SOURCE CARD (三种来源) ===== */
+.source-card {
+  background:var(--card-bg);
+  border:1px solid rgba(245,158,11,0.1);
+  border-radius:var(--radius);
+  padding:1.5rem;
+  position:relative;
+  animation:evidIn 0.8s both;
+  animation-timeline:view();
+}
+.source-card:nth-child(1) { animation-range:entry 0% entry 55%; }
+.source-card:nth-child(2) { animation-range:entry 0% entry 45%; }
+.source-card:nth-child(3) { animation-range:entry 0% entry 35%; }
+
+.source-card .src-icon { font-size:2rem; text-align:center; margin-bottom:0.5rem; }
+.source-card h4 {
+  color:var(--cream); font-size:1rem; margin-bottom:0.5rem;
+  font-family:var(--font-hand);
+  text-align:center;
+}
+.source-card .src-num {
+  display:block; text-align:center;
+  font-family:monospace; font-size:2rem;
+  color:rgba(245,158,11,0.12);
+  margin-bottom:0.3rem;
+}
+.source-card p, .source-card li {
+  color:var(--text-dim); font-size:0.85rem; line-height:1.7;
+}
+.source-card .example {
+  margin-top:0.5rem; padding:0.5rem;
+  background:rgba(245,158,11,0.04);
+  border-radius:3px;
+  font-style:italic; font-size:0.82rem;
+}
+.source-card .example::before { content:'🔍 案例：'; color:var(--amber); }
+
+.source-card .src-tag {
+  display:inline-block; margin-top:0.6rem;
+  padding:0.15rem 0.5rem; border-radius:2px;
+  font-family:monospace; font-size:0.65rem; letter-spacing:1px;
+}
+.src-tag-life { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.15); }
+.src-tag-other { background:rgba(59,130,246,0.1); color:var(--blue); border:1px solid rgba(59,130,246,0.15); }
+.src-tag-self { background:rgba(245,158,11,0.1); color:var(--amber); border:1px solid rgba(245,158,11,0.15); }
+
+/* ===== PATHWAY CARD (途径) ===== */
+.path-card {
+  background:var(--card-bg);
+  border:1px solid rgba(245,158,11,0.1);
+  border-radius:var(--radius);
+  padding:1.5rem; text-align:center;
+  position:relative;
+  animation:evidIn 0.8s both;
+  animation-timeline:view();
+}
+.path-card:nth-child(1) { animation-range:entry 0% entry 55%; }
+.path-card:nth-child(2) { animation-range:entry 0% entry 45%; }
+.path-card:nth-child(3) { animation-range:entry 0% entry 35%; }
+
+.path-card .path-icon { font-size:2.5rem; margin-bottom:0.3rem; }
+.path-card .path-num {
+  font-family:monospace; font-size:0.7rem;
+  color:rgba(245,158,11,0.2); letter-spacing:2px;
+}
+.path-card h4 {
+  color:var(--cream); font-size:1rem; margin:0.3rem 0;
+  font-family:var(--font-hand);
+}
+.path-card p { color:var(--text-dim); font-size:0.85rem; line-height:1.7; }
+.path-card .tools {
+  margin-top:0.8rem; display:flex; gap:0.4rem; justify-content:center; flex-wrap:wrap;
+}
+.path-card .tools span {
+  background:rgba(245,158,11,0.06);
+  border:1px solid rgba(245,158,11,0.1);
+  padding:0.15rem 0.5rem; border-radius:2px;
+  font-family:monospace; font-size:0.65rem;
+  color:var(--amber);
+}
+
+/* ===== CONSTRAINT CARD ===== */
+.constraint-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; }
+.constraint-item {
+  background:var(--card-bg);
+  border:1px solid rgba(245,158,11,0.1);
+  border-radius:var(--radius);
+  padding:1.5rem; text-align:center;
+  animation:evidIn 0.8s both;
+  animation-timeline:view();
+}
+.constraint-item .ci-icon { font-size:2rem; margin-bottom:0.3rem; }
+.constraint-item h4 { color:var(--amber); font-size:0.9rem; margin-bottom:0.3rem; }
+.constraint-item p { color:var(--text-dim); font-size:0.8rem; }
+
+/* ============================================================
+   FOOTER — Case closed
+   ============================================================ */
+.footer {
+  min-height:50vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem; position:relative; z-index:1;
+}
+.footer h2 {
+  font-size:clamp(1.5rem,3vw,2.3rem);
+  font-family:var(--font-hand);
+  margin-bottom:1rem;
+  animation:evidIn 0.8s both; animation-timeline:view();
+}
+.footer p {
+  color:var(--text-dim); font-style:italic;
+  animation:evidIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+.footer .final-stamp {
+  margin-top:2rem; display:inline-block;
+  border:2px solid rgba(220,38,38,0.2);
+  padding:0.5rem 2rem; border-radius:50px;
+  font-family:monospace; font-size:0.7rem; letter-spacing:4px;
+  color:rgba(220,38,38,0.3);
+  animation:evidIn 1.2s both; animation-timeline:view(); animation-range:entry 0% entry 40%;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .evi-grid-2, .evi-grid-3, .constraint-grid { grid-template-columns:1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  .hero-seal { width:50px; height:50px; top:1rem; right:1rem; }
+  .hero-seal::before { font-size:0.35rem; }
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after {
+    animation-duration:0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.01ms !important;
+  }
+}
+
+/* ============================================================
+   SCROLLBAR
+   ============================================================ */
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:rgba(245,158,11,0.12); border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:rgba(245,158,11,0.25); }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<!-- Progress -->
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- =============================================================
+     HERO
+     ============================================================= -->
+<section class="hero">
+  <div class="hero-seal"></div>
+  <div class="hero-tape t1"></div>
+  <div class="hero-tape t2"></div>
+  <div class="hero-badge">⌕ CASE NO. 1.3.1</div>
+  <h1>
+    <span class="line1">发现与</span><br>
+    <span class="line2">明确问题</span>
+  </h1>
+  <p class="hero-sub">— 每个伟大的设计，都始于一个被发现的问号 —</p>
+  <div class="hero-scroll">
+    <span>▼ OPEN CASE FILE ▼</span>
+  </div>
+</section>
+
+<!-- =============================================================
+     SECTION 1: 什么是技术问题
+     ============================================================= -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-tag">⟡ 证据 A</div>
+      <h2 class="section-title">什么是"技术问题"？</h2>
+    </div>
+
+    <div class="evidence">
+      <h3>🔧 技术问题 — 回答"做什么"和"怎么做"</h3>
+      <p>在技术活动中，那些关于<strong>改造人工世界、解决实际需求</strong>的未解之谜，就是技术问题。它不同于科学问题（探索自然规律）和社会问题（调整社会关系）。</p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-top:1rem;">
+        <div style="background:rgba(59,130,246,0.05);border:1px solid rgba(59,130,246,0.1);border-radius:4px;padding:0.8rem;text-align:center;">
+          <div style="font-size:1.5rem;">🧪</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:0.3rem;">科学问题</div>
+          <div style="font-size:0.7rem;color:var(--text-dim);">宇宙怎么形成？</div>
+        </div>
+        <div style="background:rgba(220,38,38,0.05);border:1px solid rgba(220,38,38,0.1);border-radius:4px;padding:0.8rem;text-align:center;">
+          <div style="font-size:1.5rem;">🏛️</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:0.3rem;">社会问题</div>
+          <div style="font-size:0.7rem;color:var(--text-dim);">如何缩小贫富差距？</div>
+        </div>
+        <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.15);border-radius:4px;padding:0.8rem;text-align:center;">
+          <div style="font-size:1.5rem;">🔧</div>
+          <div style="font-size:0.75rem;color:var(--cream);margin-top:0.3rem;">技术问题 ✓</div>
+          <div style="font-size:0.7rem;color:var(--amber);">怎样让台灯更护眼？</div>
+        </div>
+      </div>
+
+      <div class="sticky-note" style="margin-top:1rem;">
+        冬天吃饭冷得快 → 设计一款保温碗！这就是我们学通用技术要解决的核心问题。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     SECTION 2: 三种来源
+     ============================================================= -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-tag">⟡ 证据 B — 核心线索</div>
+      <h2 class="section-title">问题的三种来源</h2>
+    </div>
+
+    <div class="evi-grid-3">
+      <div class="source-card">
+        <div class="src-num">01</div>
+        <div class="src-icon">🌍</div>
+        <h4>生存活动必然遇到</h4>
+        <p>衣食住行中的不便——吃饭冷、夜间无照明、走路慢……从古至今推动人类不断发明创造。</p>
+        <div class="example">原始人用手抓饭太烫 → 发明筷子🥢</div>
+        <span class="src-tag src-tag-life">// 本能驱动</span>
+      </div>
+      <div class="source-card">
+        <div class="src-num">02</div>
+        <div class="src-icon">👥</div>
+        <h4>由他人提出</h4>
+        <p>老板、老师、用户反馈问题——不是主动发现，而是被动接受解决任务。</p>
+        <div class="example">老师说"教室雨伞架不好用，你们设计一个新的"</div>
+        <span class="src-tag src-tag-other">// 被动任务</span>
+      </div>
+      <div class="source-card">
+        <div class="src-num">03</div>
+        <div class="src-icon">💡</div>
+        <h4>主动发现</h4>
+        <p>最高级的方式！主动观察、思考、发现并解决问题——这就是设计师的日常。</p>
+        <div class="example">鲁班被草割伤 → 主动思考 → 发明了锯子🪚</div>
+        <span class="src-tag src-tag-self">// 主动创造</span>
+      </div>
+    </div>
+
+    <div class="evidence" style="margin-top:2rem;">
+      <h3>📜 经典案例：屠呦呦 & 青蒿素</h3>
+      <p>屠呦呦团队从古籍和实践中发现"青蒿素提取效率低"的技术问题，历经 191 次试验，终于用乙醚低温萃取法成功提取，获得诺贝尔奖。这不是运气，是<strong>主动发现并解决技术问题</strong>的典范！</p>
+      <div class="sticky-note">记住了：<strong>发现问题比解决问题更重要</strong> — 爱因斯坦</div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     SECTION 3: 三大途径
+     ============================================================= -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-tag">⟡ 证据 C — 侦查工具</div>
+      <h2 class="section-title">发现问题的三大途径</h2>
+    </div>
+
+    <div class="evi-grid-3">
+      <div class="path-card">
+        <div class="path-num">PATH.01</div>
+        <div class="path-icon">👀</div>
+        <h4>观察日常生活</h4>
+        <p>有意识观察或无意注意，捕捉生活中的不便与缺陷。</p>
+        <div class="example" style="margin-top:0.5rem;font-size:0.8rem;text-align:left;">伽利略观察吊灯摆动 → 发现摆的等时性 → 发明体温计🌡️</div>
+        <div class="tools"><span>观察力</span><span>好奇心</span><span>敏感度</span></div>
+      </div>
+      <div class="path-card">
+        <div class="path-num">PATH.02</div>
+        <div class="path-icon">📊</div>
+        <h4>收集分析信息</h4>
+        <p>查文献、做问卷、访谈询问——用数据发现问题。</p>
+        <div class="example" style="margin-top:0.5rem;font-size:0.8rem;text-align:left;">兴趣小组设计教室雨具架：询问痛点 → 发问卷 → 查资料</div>
+        <div class="tools"><span>文献法</span><span>问卷</span><span>询问法</span></div>
+      </div>
+      <div class="path-card">
+        <div class="path-num">PATH.03</div>
+        <div class="path-icon">🔬</div>
+        <h4>技术研究与试验</h4>
+        <p>在实验和研究的过程中，发现新的技术问题。</p>
+        <div class="example" style="margin-top:0.5rem;font-size:0.8rem;text-align:left;">材料试验中发现在 70°C 时强度骤降 → 引发耐热材料研究</div>
+        <div class="tools"><span>实验</span><span>数据</span><span>发现</span></div>
+      </div>
+    </div>
+
+    <div class="evidence" style="margin-top:2rem;">
+      <h3>🧩 完整侦查流程</h3>
+      <p style="text-align:center;font-size:1rem;">
+        👀 观察生活 → 📋 收集信息 → 🔬 技术研究
+      </p>
+      <p style="text-align:center;color:var(--text-dim);font-size:0.85rem;margin-top:0.5rem;">
+        ⬇ 发现提问 ⬇ 明确方向 ⬇ 动手设计
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     SECTION 4: 明确问题 & 限制条件
+     ============================================================= -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-tag">⟡ 证据 D — 锁定目标</div>
+      <h2 class="section-title">明确问题 · 限制条件 · 编写计划</h2>
+    </div>
+
+    <div class="evidence">
+      <h3>🎯 明确问题的内容与价值</h3>
+      <ul>
+        <li><strong>问题是否明确？</strong> — 具体化：不是"写作业太累"，而是"如何设计一款防疲劳书写笔"</li>
+        <li><strong>问题是否有价值？</strong> — 科学性、创新性、实用性、可行性、人类需求</li>
+        <li><strong>问题是否值得解决？</strong> — 投入产出比有多大？解决后能带来什么改变？</li>
+      </ul>
+      <div class="sticky-note">一个好问题 = 明确 + 有价值 + 可落地</div>
+    </div>
+
+    <div class="evidence">
+      <h3>⛓️ 设计限制条件</h3>
+      <p>明确问题后，还要清楚设计的"边界"在哪里：</p>
+    </div>
+
+    <div class="constraint-grid">
+      <div class="constraint-item">
+        <div class="ci-icon">💰</div>
+        <h4>成本限制</h4>
+        <p>预算多少？材料费、加工费不能超</p>
+      </div>
+      <div class="constraint-item">
+        <div class="ci-icon">⏰</div>
+        <h4>时间限制</h4>
+        <p>多长时间内必须完成</p>
+      </div>
+      <div class="constraint-item">
+        <div class="ci-icon">📐</div>
+        <h4>技术限制</h4>
+        <p>现有的设备、技术能否实现</p>
+      </div>
+      <div class="constraint-item">
+        <div class="ci-icon">📏</div>
+        <h4>规范标准</h4>
+        <p>必须符合哪些国家标准/行业规范</p>
+      </div>
+      <div class="constraint-item">
+        <div class="ci-icon">♻️</div>
+        <h4>可持续性</h4>
+        <p>环保要求、材料可回收性</p>
+      </div>
+      <div class="constraint-item">
+        <div class="ci-icon">🛡️</div>
+        <h4>安全要求</h4>
+        <p>使用安全、无健康隐患</p>
+      </div>
+    </div>
+
+    <div class="evidence" style="margin-top:2rem;">
+      <h3>📝 设计计划 = 问题说明书</h3>
+      <p>最后把以上所有内容整理成一份<strong>设计计划书</strong>，包含：</p>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.8rem;">
+        <span style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.1);padding:0.2rem 0.7rem;border-radius:2px;font-size:0.8rem;color:var(--text-dim);">问题描述</span>
+        <span style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.1);padding:0.2rem 0.7rem;border-radius:2px;font-size:0.8rem;color:var(--text-dim);">设计要求</span>
+        <span style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.1);padding:0.2rem 0.7rem;border-radius:2px;font-size:0.8rem;color:var(--text-dim);">限制条件</span>
+        <span style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.1);padding:0.2rem 0.7rem;border-radius:2px;font-size:0.8rem;color:var(--text-dim);">时间节点</span>
+        <span style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.1);padding:0.2rem 0.7rem;border-radius:2px;font-size:0.8rem;color:var(--text-dim);">资源分配</span>
+        <span style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.1);padding:0.2rem 0.7rem;border-radius:2px;font-size:0.8rem;color:var(--text-dim);">预期成果</span>
+      </div>
+      <div class="sticky-note" style="margin-top:0.8rem;">明确问题就像给侦探锁定嫌疑人——方向对了，后续才不会白费力气</div>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     FOOTER
+     ============================================================= -->
+<section class="footer">
+  <h2>🔍 每个伟大的设计，都始于一个问号</h2>
+  <p>—— 从今天开始，像侦探一样观察世界吧 ——</p>
+  <div class="final-stamp">CASE CLOSED · 交给设计师了 ✦</div>
+</section>
+
+</body>
+</html>

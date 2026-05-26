@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图像特征提取与分类交互实验室</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .pixel-grid { display: grid; grid-template-columns: repeat(28, 1fr); gap: 1px; }
+        .pixel { aspect-ratio: 1; background: #eee; }
+        input[type="range"] { accent-color: #3b82f6; }
+        canvas { image-rendering: pixelated; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+
+    <div class="max-w-6xl mx-auto p-4 md:p-8">
+        <!-- Header -->
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">卷积神经网络：特征提取与分类</h1>
+            <p class="text-slate-600">探索从边缘检测到语义分类的层级演化</p>
+        </header>
+
+        <!-- Scientific Context (Collapsible/Small) -->
+        <section class="bg-white p-4 rounded-xl shadow-sm mb-8 border-l-4 border-blue-500">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                    <h3 class="font-bold mb-2">核心数学原理</h3>
+                    <p class="mb-1 text-slate-700">卷积运算：\(S(i, j) = \sum_{m,n} I(i+m, j+n)K(m, n)\)</p>
+                    <p class="mb-1 text-slate-700">激活函数 (ReLU)：\(f(x) = \max(0, x)\)</p>
+                </div>
+                <div>
+                    <h3 class="font-bold mb-2">输出层机制</h3>
+                    <p class="mb-1 text-slate-700">Softmax 归一化：\(P(y=i|x) = \frac{e^{z_i}}{\sum_{j=1}^{K} e^{z_j}}\)</p>
+                    <p class="mb-1 text-slate-700">输出尺寸：\(O = \lfloor\frac{W - K + 2P}{S}\rfloor + 1\)</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Interaction Area -->
+        <main class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            
+            <!-- Controls (Left) -->
+            <div class="lg:col-span-3 space-y-6 bg-white p-6 rounded-2xl shadow-md border border-slate-100">
+                <div>
+                    <label class="block text-sm font-bold mb-3">1. 选择输入图像</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="setImage('cat')" class="p-2 border-2 rounded-lg hover:border-blue-400 transition img-btn active border-blue-600" id="btn-cat">
+                            <svg class="w-full h-auto" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2L10.5,4.5C8.5,4.5 7,6 7,8V9L5,11V14C5,15.1 5.9,16 7,16H17C18.1,16 19,15.1 19,14V11L17,9V8C17,6 15.5,4.5 13.5,4.5L12,2M12,8.5C12.8,8.5 13.5,9.2 13.5,10C13.5,10.8 12.8,11.5 12,11.5C11.2,11.5 10.5,10.8 10.5,10C10.5,9.2 11.2,8.5 12,8.5Z"/></svg>
+                            <span class="text-xs block text-center mt-1">猫</span>
+                        </button>
+                        <button onclick="setImage('car')" class="p-2 border-2 rounded-lg hover:border-blue-400 transition img-btn border-slate-200" id="btn-car">
+                            <svg class="w-full h-auto" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92,6.01C18.72,5.42 18.16,5 17.5,5H6.5C5.84,5 5.28,5.42 5.08,6.01L3,12V20A1,1 0 0,0 4,21H5A1,1 0 0,0 6,20V19H18V20A1,1 0 0,0 19,21H20A1,1 0 0,0 21,20V12L18.92,6.01M6.5,16A1.5,1.5 0 1,1 5,14.5A1.5,1.5 0 0,1 6.5,16M17.5,16A1.5,1.5 0 1,1 16,14.5A1.5,1.5 0 0,1 17.5,16M5,11L6.5,6.5H17.5L19,11H5Z"/></svg>
+                            <span class="text-xs block text-center mt-1">汽车</span>
+                        </button>
+                        <button onclick="setImage('tree')" class="p-2 border-2 rounded-lg hover:border-blue-400 transition img-btn border-slate-200" id="btn-tree">
+                            <svg class="w-full h-auto" viewBox="0 0 24 24" fill="currentColor"><path d="M11,19V13H7L12,3L17,13H13V19H17V21H7V19H11Z"/></svg>
+                            <span class="text-xs block text-center mt-1">树</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-bold mb-3">2. 卷积核 (Kernel)</label>
+                    <select id="kernel-select" onchange="processImage()" class="w-full p-2 border border-slate-200 rounded-md text-sm">
+                        <option value="sobel-h">水平边缘检测 (Sobel H)</option>
+                        <option value="sobel-v">垂直边缘检测 (Sobel V)</option>
+                        <option value="laplacian">纹理提取 (Laplacian)</option>
+                        <option value="gaussian">高斯模糊 (平滑层)</option>
+                        <option value="sharpen">细节强化 (Sharpen)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-bold mb-3">3. 激活函数阈值 (ReLU)</label>
+                    <input type="range" id="relu-threshold" min="0" max="100" value="0" oninput="processImage()" class="w-full">
+                    <div class="flex justify-between text-xs text-slate-500 mt-1">
+                        <span>弱信号抑制</span>
+                        <span>强信号保留</span>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100">
+                    <p class="text-[11px] text-slate-400 italic">
+                        提示：卷积层提取的特征质量直接决定了后端 Softmax 的分类置信度。
+                    </p>
+                </div>
+            </div>
+
+            <!-- Visualization (Center) -->
+            <div class="lg:col-span-6 space-y-8">
+                <div class="flex flex-col md:flex-row items-center justify-around bg-white p-6 rounded-2xl shadow-md border border-slate-100 gap-4">
+                    <!-- Input Canvas -->
+                    <div class="text-center">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">原始输入 \(I\)</span>
+                        <canvas id="canvas-input" width="128" height="128" class="border border-slate-200 shadow-inner rounded bg-white w-32 h-32"></canvas>
+                    </div>
+
+                    <!-- Arrow -->
+                    <div class="text-blue-500 animate-pulse hidden md:block">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </div>
+
+                    <!-- Feature Map Canvas -->
+                    <div class="text-center">
+                        <span class="text-xs font-bold text-blue-500 uppercase tracking-wider mb-2 block">特征图 \(S = f(I * K)\)</span>
+                        <canvas id="canvas-feature" width="128" height="128" class="border border-blue-200 shadow-md rounded bg-black w-32 h-32"></canvas>
+                    </div>
+                </div>
+
+                <!-- Global View -->
+                <div class="bg-slate-800 p-6 rounded-2xl shadow-xl text-white">
+                    <h3 class="text-sm font-bold mb-4 flex items-center gap-2">
+                        <span class="w-2 h-2 bg-green-400 rounded-full"></span>
+                        分类器实时推理 (Softmax 输出)
+                    </h3>
+                    <div id="softmax-results" class="space-y-4">
+                        <!-- Bars will be injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Theory/Labels (Right) -->
+            <div class="lg:col-span-3 bg-white p-6 rounded-2xl shadow-md border border-slate-100">
+                <h3 class="text-sm font-bold mb-4">特征响应分析</h3>
+                <div id="feature-stats" class="text-xs space-y-4 leading-relaxed">
+                    <div class="bg-blue-50 p-3 rounded-lg">
+                        <p class="font-bold text-blue-800 mb-1">局部感受野</p>
+                        卷积核在 \(128 \times 128\) 图像上以步长 \(S=1\) 滑动，通过点积捕捉空间相关性。
+                    </div>
+                    <div class="bg-purple-50 p-3 rounded-lg">
+                        <p class="font-bold text-purple-800 mb-1">因果律</p>
+                        当前激活的特征：<span id="active-feature-name" class="font-mono text-purple-600">无</span>。当该特征与模型权重的匹配度越高，分类置信度越强。
+                    </div>
+                    <div class="bg-orange-50 p-3 rounded-lg">
+                        <p class="font-bold text-orange-800 mb-1">概率守恒</p>
+                        所有输出置信度之和 \(\sum P = 1.0\)。
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        const ctxInput = document.getElementById('canvas-input').getContext('2d');
+        const ctxFeature = document.getElementById('canvas-feature').getContext('2d');
+        let currentImageKey = 'cat';
+
+        const kernels = {
+            'sobel-h': [[-1, -2, -1], [0, 0, 0], [1, 2, 1]],
+            'sobel-v': [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+            'laplacian': [[0, -1, 0], [-1, 4, -1], [0, -1, 0]],
+            'gaussian': [[1/16, 2/16, 1/16], [2/16, 4/16, 2/16], [1/16, 2/16, 1/16]],
+            'sharpen': [[0, -1, 0], [-1, 5, -1], [0, -1, 0]]
+        };
+
+        const classes = [
+            { id: 'cat', label: '猫 (Cat)', weights: { 'sobel-h': 0.2, 'sobel-v': 0.2, 'laplacian': 0.8, 'gaussian': 0.1, 'sharpen': 0.9 } },
+            { id: 'car', label: '汽车 (Car)', weights: { 'sobel-h': 0.9, 'sobel-v': 0.5, 'laplacian': 0.3, 'gaussian': 0.1, 'sharpen': 0.7 } },
+            { id: 'tree', label: '树 (Tree)', weights: { 'sobel-h': 0.1, 'sobel-v': 0.9, 'laplacian': 0.6, 'gaussian': 0.2, 'sharpen': 0.5 } }
+        ];
+
+        function setImage(key) {
+            currentImageKey = key;
+            document.querySelectorAll('.img-btn').forEach(btn => btn.classList.remove('border-blue-600'));
+            document.getElementById(`btn-${key}`).classList.add('border-blue-600');
+            
+            drawInputShape(key);
+            processImage();
+        }
+
+        function drawInputShape(key) {
+            const ctx = ctxInput;
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, 128, 128);
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            
+            if (key === 'cat') {
+                // Simplified cat face
+                ctx.arc(64, 70, 30, 0, Math.PI * 2);
+                ctx.moveTo(40, 50); ctx.lineTo(35, 20); ctx.lineTo(60, 45); // ear L
+                ctx.moveTo(88, 50); ctx.lineTo(93, 20); ctx.lineTo(68, 45); // ear R
+            } else if (key === 'car') {
+                ctx.rect(30, 60, 70, 30);
+                ctx.rect(45, 40, 40, 20);
+                ctx.moveTo(40, 90); ctx.arc(40, 95, 8, 0, Math.PI*2); // Wheel L
+                ctx.moveTo(90, 90); ctx.arc(90, 95, 8, 0, Math.PI*2); // Wheel R
+            } else {
+                ctx.moveTo(64, 20); ctx.lineTo(30, 100); ctx.lineTo(98, 100); ctx.closePath();
+                ctx.fillRect(60, 100, 8, 20);
+            }
+            ctx.stroke();
+        }
+
+        function processImage() {
+            const kernelKey = document.getElementById('kernel-select').value;
+            const kernel = kernels[kernelKey];
+            const threshold = document.getElementById('relu-threshold').value / 100 * 255;
+            
+            document.getElementById('active-feature-name').innerText = document.getElementById('kernel-select').options[document.getElementById('kernel-select').selectedIndex].text;
+
+            const inputData = ctxInput.getImageData(0, 0, 128, 128);
+            const outputData = ctxFeature.createImageData(128, 128);
+            
+            // Core Convolution + ReLU logic
+            // To keep JS responsive, we process grayscale
+            const getPixel = (x, y) => {
+                if (x < 0 || x >= 128 || y < 0 || y >= 128) return 255; // White padding
+                return inputData.data[(y * 128 + x) * 4];
+            };
+
+            let sumIntensity = 0;
+
+            for (let y = 0; y < 128; y++) {
+                for (let x = 0; x < 128; x++) {
+                    let acc = 0;
+                    for (let ky = 0; ky < 3; ky++) {
+                        for (let kx = 0; kx < 3; kx++) {
+                            acc += getPixel(x + kx - 1, y + ky - 1) * kernel[ky][kx];
+                        }
+                    }
+                    
+                    // ReLU & Invert for visual clarity (Darker is more feature)
+                    let val = Math.max(0, acc);
+                    val = val > threshold ? val : 0; 
+                    
+                    const idx = (y * 128 + x) * 4;
+                    outputData.data[idx] = val;
+                    outputData.data[idx+1] = val;
+                    outputData.data[idx+2] = val;
+                    outputData.data[idx+3] = 255;
+                    
+                    sumIntensity += val;
+                }
+            }
+            ctxFeature.putImageData(outputData, 0, 0);
+            updateClassification(sumIntensity, kernelKey);
+        }
+
+        function updateClassification(intensity, kernelKey) {
+            // Pseudo-inference based on image-kernel matching
+            // Calculate base scores z_i
+            const scores = classes.map(cls => {
+                // If the selected image matches the class, give it a base boost
+                let base = (cls.id === currentImageKey) ? 5.0 : 1.0;
+                // Add weighting based on the current filter's effectiveness for that object
+                let weight = cls.weights[kernelKey] || 0.5;
+                // If kernel is blur, confidence drops significantly
+                if(kernelKey === 'gaussian') weight *= 0.2;
+                
+                return base * weight;
+            });
+
+            // Softmax: P = exp(zi) / sum(exp(zj))
+            const exps = scores.map(s => Math.exp(s));
+            const sumExps = exps.reduce((a, b) => a + b, 0);
+            const probs = exps.map(e => e / sumExps);
+
+            const container = document.getElementById('softmax-results');
+            container.innerHTML = '';
+
+            classes.forEach((cls, i) => {
+                const p = (probs[i] * 100).toFixed(1);
+                const isWinner = probs[i] === Math.max(...probs);
+                
+                const barHtml = `
+                    <div class="relative">
+                        <div class="flex justify-between text-xs mb-1 ${isWinner ? 'text-green-400 font-bold' : 'text-slate-400'}">
+                            <span>${cls.label}</span>
+                            <span>${p}%</span>
+                        </div>
+                        <div class="w-full bg-slate-700 h-2 rounded-full overflow-hidden">
+                            <div class="bg-blue-500 h-full transition-all duration-500" style="width: ${p}%; background-color: ${isWinner ? '#4ade80' : '#3b82f6'}"></div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += barHtml;
+            });
+        }
+
+        // Init
+        window.onload = () => {
+            setImage('cat');
+        };
+    </script>
+</body>
+</html>

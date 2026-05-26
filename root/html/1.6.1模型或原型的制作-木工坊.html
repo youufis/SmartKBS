@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>模型或原型的制作 · 木工坊</title>
+<style>
+:root{
+  --mw-bg:#e8dcc8; --mw-card:#d4c4a8;
+  --mw-dark:#3d2b1f; --mw-text:#2b1f14;
+  --mw-dim:#8b7355; --mw-gold:#c8963e;
+  --mw-orange:#e07c3c; --mw-green:#5a7d3a;
+  --mw-red:#b84a3a; --mw-blue:#4a6fa5;
+  --mw-warm:#f5e6c8;
+  --font:'Georgia','Times New Roman',serif;
+  --font-body:'Segoe UI',system-ui,sans-serif;
+  --font-mono:'Courier New',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:var(--font-body);background:var(--mw-bg);
+  color:var(--mw-text);min-height:100vh;padding:20px;
+  background-image:repeating-linear-gradient(90deg,transparent,transparent 60px,rgba(139,115,85,.05) 60px,rgba(139,115,85,.05) 61px),
+    repeating-linear-gradient(0deg,transparent,transparent 60px,rgba(139,115,85,.05) 60px,rgba(139,115,85,.05) 61px);
+}
+.container{max-width:680px;margin:0 auto}
+.mw-header{text-align:center;padding:14px 0 8px;position:relative}
+.mw-header h1{
+  font-family:var(--font);font-size:1.8rem;font-weight:700;
+  color:var(--mw-dark);letter-spacing:2px;
+  display:inline-block;padding:0 16px 6px;
+  border-bottom:3px solid var(--mw-gold);
+}
+.mw-header .mw-sub{
+  font-size:.72rem;color:var(--mw-dim);margin-top:4px;
+  font-family:var(--font);
+}
+/* 工具条装饰 */
+.mw-tools{display:flex;gap:6px;justify-content:center;margin-bottom:8px;flex-wrap:wrap}
+.mw-tool{font-size:.9rem;color:var(--mw-dim);opacity:.4}
+.mw-card{
+  background:var(--mw-card);border:2px solid var(--mw-dim);
+  border-radius:4px;padding:18px 20px;margin-bottom:12px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 2px 6px rgba(61,43,31,.12);
+  position:relative;
+}
+.mw-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--mw-gold),var(--mw-orange),var(--mw-gold))}
+.mw-title{
+  font-family:var(--font);font-size:1rem;font-weight:700;
+  color:var(--mw-dark);margin-bottom:12px;
+  display:flex;align-items:center;gap:8px;
+}
+.mw-title .mw-tag{
+  font-family:var(--font-mono);font-size:.7rem;color:var(--mw-gold);
+  border:1px solid var(--mw-gold);padding:1px 6px;border-radius:0;
+}
+/* 设置 */
+.setup-group{display:flex;flex-direction:column;gap:10px}
+.setup-row{display:flex;align-items:center;gap:10px}
+.setup-row label{font-family:var(--font);font-size:.85rem;font-weight:600;min-width:50px;color:var(--mw-dark)}
+.setup-row select,.setup-row button{
+  flex:1;padding:8px 10px;font-family:var(--font-body);font-size:.82rem;
+  border:2px solid var(--mw-dim);background:var(--mw-warm);color:var(--mw-text);
+  border-radius:2px;cursor:pointer;
+}
+.setup-row select:disabled{opacity:.4}
+.mw-btn{font-size:1rem;padding:12px 28px;border-radius:8px;cursor:pointer;border:2px solid var(--mw-wood);background:var(--mw-bg);color:var(--mw-text);font-weight:600;transition:all .15s;box-shadow:0 3px 0 var(--mw-wood);
+  padding:10px 32px;font-family:var(--font);font-size:.82rem;font-weight:700;
+  border:2px solid var(--mw-dim);background:var(--mw-warm);color:var(--mw-dark);
+  cursor:pointer;transition:all .15s;border-radius:2px;
+  box-shadow:0 2px 0 var(--mw-dim);
+}
+.mw-btn:hover{background:var(--mw-gold);color:#fff;border-color:var(--mw-gold)}
+.mw-btn:active{transform:translateY(1px);box-shadow:none}
+.mw-btn:disabled{opacity:.3;cursor:not-allowed;transform:none;box-shadow:0 2px 0 var(--mw-dim)}
+.mw-btn-primary{background:var(--mw-gold);color:#fff;border-color:var(--mw-gold);font-size:1rem;padding:12px 28px;border-radius:8px;cursor:pointer;font-weight:600;transition:all .15s;box-shadow:0 3px 0 var(--mw-orange)}
+.mw-btn-primary:hover{background:var(--mw-orange);border-color:var(--mw-orange)}
+.mw-btn-green{background:var(--mw-green);color:#fff;border-color:var(--mw-green);font-size:1rem;padding:12px 28px;border-radius:8px;cursor:pointer;font-weight:600;transition:all .15s;box-shadow:0 3px 0 var(--mw-wood)}
+.hidden{display:none!important}
+/* 点名 */
+.pick-area{text-align:center;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.pick-name{font-size:3rem;font-weight:700;
+  font-family:var(--font);font-size:2.5rem;font-weight:700;
+  color:var(--mw-dark);transition:all .1s;
+  background:var(--mw-warm);padding:8px 24px;border:2px solid var(--mw-dim);
+  display:inline-block;
+}
+.pick-name.rolling{animation:mw-hammer .1s infinite}
+@keyframes mw-hammer{0%,100%{transform:rotate(0)}25%{transform:rotate(-3deg)}75%{transform:rotate(3deg)}}
+.pick-name.result{color:var(--mw-orange);border-color:var(--mw-gold);animation:mw-rise .4s ease}
+@keyframes mw-rise{0%{opacity:0;transform:translateY(20px)scale(.8)}100%{opacity:1;transform:translateY(0)scale(1)}}
+.pick-hint,.pick-class{font-size:.9rem;color:var(--mw-dim);margin-top:6px}
+.pick-class{font-weight:600;color:var(--mw-blue)}
+/* 答题 */
+.quiz-area{text-align:center;font-size:1.05rem;line-height:1.7}
+.q-info{font-size:.9rem;color:var(--mw-dim);margin-bottom:6px}
+.q-princ{color:var(--mw-green);font-weight:600;font-size:.9rem}
+.q-text{
+  font-size:1.1rem;line-height:1.8;text-align:left;
+  padding:18px 20px;background:var(--mw-warm);border:2px solid var(--mw-dim);
+  margin:8px 0 14px;border-radius:4px;
+}
+.opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.opt-btn{
+  padding:14px 16px;border:2px solid var(--mw-dim);
+  background:var(--mw-warm);text-align:left;cursor:pointer;
+  font-family:var(--font-body);font-size:.95rem;line-height:1.5;
+  display:flex;align-items:flex-start;gap:10px;transition:all .12s;
+  border-radius:4px;
+}
+.opt-btn .ol{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;font-family:var(--font);font-size:.85rem;font-weight:700;flex-shrink:0;border:2px solid var(--mw-dim);background:var(--mw-card);color:var(--mw-dark)}
+.opt-btn:hover{border-color:var(--mw-gold);background:var(--mw-card)}
+.opt-btn.disabled{opacity:.6;pointer-events:none}
+.opt-btn.correct{border-color:var(--mw-green);background:rgba(90,125,58,.08)}
+.opt-btn.correct .ol{background:var(--mw-green);color:#fff;border-color:var(--mw-green)}
+.opt-btn.wrong{border-color:var(--mw-red);background:rgba(184,74,58,.08)}
+.opt-btn.wrong .ol{background:var(--mw-red);color:#fff;border-color:var(--mw-red)}
+.opt-btn.selected{border-color:var(--mw-dark)}
+.feedback{font-size:.95rem;padding:10px 16px;margin-top:12px}
+.feedback.correct{color:var(--mw-green)}
+.feedback.wrong{color:var(--mw-red)}
+/* 计分 */
+.score-section{text-align:center}
+.score-student{font-family:var(--font);font-size:1.1rem;color:var(--mw-blue)}
+.score-points{font-family:var(--font);font-size:2.2rem;font-weight:700;color:var(--mw-orange);margin:6px 0}
+.score-label{font-size:.75rem;color:var(--mw-dim)}
+.bar-wrap{display:flex;align-items:center;gap:8px;margin-top:10px}
+.bar-bg{flex:1;height:10px;background:var(--mw-dim);border-radius:2px;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--mw-gold),var(--mw-orange));transition:width .5s;border-radius:2px}
+.bar-text{font-size:.8rem;color:var(--mw-dim);min-width:30px;font-family:var(--font-mono)}
+/* 排名 */
+.final-table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.82rem}
+.final-table th{background:var(--mw-dark);color:var(--mw-warm);padding:8px 10px;font-family:var(--font);font-size:.72rem;text-align:left}
+.final-table td{padding:7px 10px;border-bottom:1px solid rgba(61,43,31,.1)}
+.rank-num{font-family:var(--font-mono);font-weight:700;color:var(--mw-dim)}
+.rank-score{font-weight:700;color:var(--mw-orange)}
+/* 粒子 */
+.particle-container{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999}
+.particle{position:absolute;border-radius:2px;pointer-events:none}
+/* 错题解析 */
+.review-section{text-align:left;margin-top:10px;border-top:2px solid var(--mw-dim);padding-top:14px;max-height:400px;overflow-y:auto}
+.rev-empty{text-align:center;color:var(--mw-green);font-family:var(--font);font-size:.82rem;padding:20px 0}
+.rev-student{font-family:var(--font);font-size:.82rem;font-weight:700;color:var(--mw-orange);margin:10px 0 6px;padding-bottom:4px;border-bottom:1px solid rgba(61,43,31,.12)}
+.rev-item{padding:10px 12px;margin-bottom:8px;background:var(--mw-warm);border-left:4px solid var(--mw-red);border-radius:2px}
+.rev-q{font-size:.82rem;line-height:1.5;margin-bottom:6px}
+.rev-princ{display:inline-block;font-family:var(--font-mono);font-size:.72rem;color:var(--mw-dim);border:1px solid var(--mw-dim);padding:1px 6px;margin-bottom:6px;background:var(--mw-card)}
+.rev-opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px}
+.rev-opt{padding:5px 8px;font-size:.72rem;line-height:1.4;border:1px solid rgba(61,43,31,.15);background:var(--mw-card);display:flex;align-items:flex-start;gap:6px}
+.rev-opt .rol{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:.72rem;font-weight:700;flex-shrink:0;border:1px solid rgba(61,43,31,.2);color:var(--mw-dim)}
+.rev-opt.rev-chosen{background:rgba(184,74,58,.08);border-color:var(--mw-red)}
+.rev-opt.rev-chosen .rol{background:var(--mw-red);color:#fff;border-color:var(--mw-red)}
+.rev-opt.rev-right{background:rgba(90,125,58,.08);border-color:var(--mw-green)}
+.rev-opt.rev-right .rol{background:var(--mw-green);color:#fff;border-color:var(--mw-green)}
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+<div class="container" id="app">
+<div class="mw-header">
+  <div class="mw-tools"><span class="mw-tool">🔨</span><span class="mw-tool">🖪</span><span class="mw-tool">📐</span><span class="mw-tool">⚒️</span><span class="mw-tool">🗒</span></div>
+  <h1>模型与原型的制作</h1>
+  <div class="mw-sub">—— 工坊手制记 ——</div>
+</div>
+<div class="mw-card" id="sceneSetup">
+  <div class="mw-title"><span class="mw-tag">①</span>设置</div>
+  <div class="setup-group">
+    <div class="setup-row"><label>年级</label><select id="gradeSelect"><option value="高一">高一</option><option value="高二">高二</option></select></div>
+    <div class="setup-row"><label>班级</label><select id="classSelect" disabled><option value="">—</option></select></div>
+    <div class="setup-row" style="margin-top:6px"><button class="mw-btn mw-btn-primary" id="btnStart" disabled>开始</button></div>
+  </div>
+</div>
+<div class="mw-card hidden" id="scenePick">
+  <div class="mw-title"><span class="mw-tag">②</span><span id="pickTitle">抽取</span></div>
+  <div class="pick-area">
+    <div class="pick-hint" id="pickHint">点击抽取</div>
+    <div class="pick-name" id="pickName">—</div>
+    <div class="pick-class hidden" id="pickClassTag"></div>
+    <button class="mw-btn hidden" id="btnPickStart" style="margin-top:8px">🔨 抽取</button>
+    <button class="mw-btn mw-btn-green hidden" id="btnPickConfirm" style="margin-top:4px">✔ 确认</button>
+    <button class="mw-btn mw- hidden" id="btnRepick" style="margin-top:4px">↻ 重抽</button>
+  </div>
+</div>
+<div class="mw-card hidden" id="sceneQuiz">
+  <div class="mw-title" id="quizTitle"><span class="mw-tag">③</span>答题</div>
+  <div class="quiz-area">
+    <div class="q-info"><span id="qNumber">1/2</span> &middot; <span class="q-princ" id="qPrinciple"></span></div>
+    <div class="q-text" id="qText">—</div>
+    <div class="opt-grid" id="optionsGrid"></div>
+    <div class="feedback hidden" id="feedbackBox"></div>
+    <button class="mw-btn hidden" id="btnNextQ" style="margin-top:8px">下一题</button>
+  </div>
+</div>
+<div class="mw-card hidden" id="sceneScore">
+  <div class="mw-title"><span class="mw-tag">④</span>成绩</div>
+  <div class="score-section">
+    <div class="score-label">学生</div>
+    <div class="score-student" id="scoreStudent"></div>
+    <div class="score-points" id="scorePoints">+10</div>
+    <div class="score-label" id="scoreLabel">正确 1 题</div>
+    <div class="score-label" id="scoreDetail" style="margin-top:2px;font-size:.68rem"></div>
+    <div class="bar-wrap"><div class="bar-bg"><div class="bar-fill" id="energyBar" style="width:0%"></div></div><span class="bar-text" id="energyText">0%</span></div>
+    <button class="mw-btn" id="btnNextRound" style="margin-top:8px">下一组</button>
+  </div>
+</div>
+<div class="mw-card hidden" id="sceneFinal">
+  <div class="mw-title"><span class="mw-tag">★</span>排名榜</div>
+  <div style="overflow-x:auto"><table class="final-table"><thead><tr><th>#</th><th>姓名</th><th>班级</th><th>答对</th><th>积分</th></tr></thead><tbody id="finalBody"></tbody></table></div>
+  <button class="mw-btn mw-btn-primary" id="btnReview" style="margin-top:8px">📋 查看错题解析</button>
+  <div class="review-section hidden" id="reviewSection"></div>
+  <button class="mw-btn" onclick="location.reload()" style="margin-top:10px">🔄 重新开始</button>
+</div>
+</div>
+<div class="particle-container" id="particleContainer"></div>
+<script>// 从 URL 路径自动提取教师用户名
+const pathMatch = window.location.pathname.match(/\/api\/files\/([^\/]+)\/html\//);
+const TEACHER = (pathMatch ? pathMatch[1] : '') || '';
+const Q=[
+  {question:"在台灯设计过程中，小明想对台灯的性能以及人机关系进行研究，应该制作哪种模型？",options:{A:"概念模型",B:"结构模型",C:"功能模型",D:"展示模型"},answer:"C",principle:"模型分类与作用"},
+  {question:"设计人员用立体模型将设计构思简单地表示出来，这种模型属于？",options:{A:"草模",B:"概念模型",C:"结构模型",D:"展示模型"},answer:"A",principle:"草模的作用"},
+  {question:"制作木质书架时，为研究结构强度需要制作哪种模型？",options:{A:"草模",B:"概念模型",C:"结构模型",D:"功能模型"},answer:"C",principle:"结构模型的作用"},
+  {question:"关于模型与原型，下列说法错误的是？",options:{A:"模型是按比例制成的与实物相似的物体",B:"模型能帮助分析设计可能性",C:"模型制作是产品设计的重要环节",D:"模型就是原型，两者没有区别"},answer:"D",principle:"模型与原型的区别"},
+  {question:"在车展上展示的新车・1:1尺尺模型属于？",options:{A:"草模",B:"概念模型",C:"结构模型",D:"展示模型"},answer:"D",principle:"展示模型"},
+  {question:"下列关于模型制作的说法正确的是？",options:{A:"只能用木材制作",B:"可以使用纸张、塑料、木材等多种材料",C:"越精细越好，不需考虑时间成本",D:"只能在计算机上完成"},answer:"B",principle:"模型制作材料"},
+  {question:"为了测试一个新设计的纸飞机的飞行性能，应该制作什么类型的模型？",options:{A:"草模",B:"功能模型",C:"展示模型",D:"结构模型"},answer:"B",principle:"功能模型"},
+  {question:"制作模型时，下列工具中最适合切割木板的是？",options:{A:"剪刀",B:"铁锯",C:"钻头",D:"锤子"},answer:"B",principle:"工具的选择"},
+  {question:"在产品设计的后期，为了展示产品的外观造型和结构，通常制作？",options:{A:"草模",B:"功能模型",C:"结构模型",D:"展示模型"},answer:"D",principle:"产品展示"},
+  {question:"制作模型的主要目的不包括？",options:{A:"验证设计方案",B:"发现设计问题",C:"直接批量生产",D:"优化设计方案"},answer:"C",principle:"模型制作目的"}
+];
+const G=[];for(let i=0;i<5;i++)G.push(Q.slice(i*2,i*2+2));
+
+let S={grade:'高一',class:'',students:[],available:[],picks:[],cr:0,cq:0,sa:'',ans:false,rr:[],total:0},_c=0;
+function $(i){return document.getElementById(i)}
+function sh(i){$(i).classList.remove('hidden')}
+function hd(i){$(i).classList.add('hidden')}
+function sf(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b}
+function st(i,m,s){const t=document.createElement('div');t.className='toast';t.innerHTML='<span class="toast-icon">'+i+'</span>'+m+(s?' <span class="toast-pts">'+s+'</span>':'');$('toastContainer').appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),250)},3000)}
+function fp(x,y,c,cnt){const pc=$('particleContainer');for(let i=0;i<cnt;i++){const e=document.createElement('div');e.className='cele-particle';const a=Math.random()*Math.PI*2,d=60+Math.random()*130;e.style.cssText='left:'+(x||innerWidth/2)+'px;top:'+(y||innerHeight/2)+'px;width:'+(5+Math.random()*7)+'px;height:'+(5+Math.random()*7)+'px;background:'+(c||'var(--bp-cyan)')+';--dx:'+(Math.cos(a)*d)+'px;--dy:'+(Math.sin(a)*d)+'px';pc.appendChild(e);setTimeout(()=>e.remove(),1200)}}
+function ud(){try{const h=$('bpBlocks')||$('memBlocks')||$('progressDots')||$('popDots');if(!h)return;h.innerHTML='';for(let i=0;i<5;i++){const e=document.createElement('div');e.className='bp-block'+(i<S.cr?' done':i===S.cr?' active':'');e.innerHTML='';h.appendChild(e)}}catch(e){}}
+function sv(g,c,n,p){fetch('/score-api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,name:n,points:p,teacher:TEACHER})}).then(r=>r.ok?st('💰','保存','+'+p):st('⚠️','异常')).catch(()=>st('📝','本地'))}
+function saveRecord(g,c,s,cc,t,pts,ans,title){fetch('/rollcall-api/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[],teacher:TEACHER})}).catch(()=>{})}
+async function lc(){const g=$('gradeSelect').value;S.grade=g;const cs=$('classSelect');cs.disabled=true;cs.innerHTML='<option value="">...</option>';try{const r=await fetch('/rollcall-api/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);const cls=await r.json();cs.innerHTML='<option value="">— 选择 —</option>';cls.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o)});cs.disabled=false}catch(e){cs.innerHTML='<option value="">失败</option>'}}
+$('gradeSelect').addEventListener('change',lc);$('classSelect').addEventListener('change',async function(){const c=this.value;S.class=c;$('btnStart').disabled=!c;if(c){try{const r=await fetch('/rollcall-api/students?grade='+encodeURIComponent(S.grade)+'&class='+encodeURIComponent(c)+'&teacher='+TEACHER);const data=await r.json();S.students=data.map(s=>s.name)}catch(e){S.students=[];st('⚠️','加载学生失败')}}});
+$('btnStart').addEventListener('click',function(){if(!S.class||S.students.length<5){st('⚠️','人数不足');return}hd('sceneSetup');sr(0)});
+function sr(ri){S.cr=ri;S.cq=0;_c=0;if(!S.rr[ri])S.rr[ri]={correctCount:0,points:0,answers:[]};S.rr[ri].answers=[];ud();sp()}
+function sp(){sh('scenePick');hd('sceneQuiz');hd('sceneScore');hd('sceneFinal');$('pickTitle').textContent=(S.cr+1)+'/5';$('pickHint').textContent='点击抽取';$('pickHint').classList.remove('hidden');$('pickClassTag').classList.add('hidden');$('btnPickStart').classList.remove('hidden');$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('pickName').textContent='——';$('pickName').className='pick-name';$('btnPickStart').disabled=false;$('btnPickStart').textContent='🎲 抽取'}
+function rp(){const pool=S.students.length>0?S.students:['---'];const pn=$('pickName');pn.className='pick-name rolling';$('pickHint').textContent='抽取中...';$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('btnPickStart').disabled=true;let rc=0,mx=18+Math.floor(Math.random()*10);let iv=setInterval(()=>{pn.textContent=pool[Math.floor(Math.random()*pool.length)];rc++;if(rc>=mx){clearInterval(iv);fetch('/rollcall-api/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,teacher:TEACHER})}).then(d=>d.json()).then(d=>{if(d.error){st('⚠️',d.error);pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false;return}const c=d.student;pn.textContent=c;pn.className='pick-name result';$('pickHint').classList.add('hidden');$('pickClassTag').textContent=S.grade+' · '+S.class;$('pickClassTag').classList.remove('hidden');$('btnPickConfirm').classList.remove('hidden');$('btnRepick').classList.remove('hidden');fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',30);st('🎯','已选',c);S.picks[S.cr]=c}).catch(()=>{st('⚠️','服务异常');pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false})}},60+Math.random()*40)}
+
+$('btnPickStart').addEventListener('click',function(){this.disabled=true;rp()});
+$('btnRepick').addEventListener('click',rp);
+
+$('btnPickConfirm').addEventListener('click',function(){hd('scenePick');sq()});
+function sq(){sh('sceneQuiz');S.cq=0;sQ()}
+function sQ(){const g=G[S.cr],q=g[S.cq];$('quizTitle').textContent='第'+(S.cr+1)+'组';$('qNumber').textContent=(S.cq+1)+'/2';$('qPrinciple').textContent=q.principle;$('qText').textContent=q.question;S.sa='';S.ans=false;$('feedbackBox').classList.add('hidden');$('btnNextQ').classList.add('hidden');const grid=$('optionsGrid');grid.innerHTML='';['A','B','C','D'].forEach(l=>{const b=document.createElement('button');b.className='option-btn';b.innerHTML='<span class="opt-label">'+l+'</span><span>'+q.options[l]+'</span>';b.dataset.label=l;b.addEventListener('click',()=>hA(l));grid.appendChild(b)})}
+function hA(l){if(S.ans)return;S.ans=true;const g=G[S.cr],q=g[S.cq],c=q.answer,ic=l===c;if(ic)_c++;S.rr[S.cr].correctCount=_c;let p=5;if(_c===1)p=10;else if(_c===2)p=15;S.rr[S.cr].points=p;S.rr[S.cr].answers.push({question:q.question,options:q.options,correctAnswer:c,yourAnswer:l,principle:q.principle,isCorrect:ic});const btns=$('optionsGrid').querySelectorAll('.option-btn');btns.forEach(b=>{b.classList.add('disabled');if(b.dataset.label===c)b.classList.add('correct');if(b.dataset.label===l&&!ic)b.classList.add('wrong');if(b.dataset.label===l&&ic)b.classList.add('selected')});const fb=$('feedbackBox');fb.classList.remove('hidden');if(ic){fb.className='feedback-box correct-fb';fb.textContent='✅ '+c+'. '+q.options[c];fp(innerWidth/2,innerHeight-80,'var(--bp-green)',12)}else{fb.className='feedback-box wrong-fb';fb.textContent='❌ 正确答案：'+c+'. '+q.options[c]}$('btnNextQ').classList.remove('hidden');$('btnNextQ').textContent=S.cq===0?'下一题 ▸':'结算'}
+$('btnNextQ').addEventListener('click',function(){if(S.cq===0){S.cq=1;sQ()}else{hd('sceneQuiz');sSc()}});
+function sSc(){sh('sceneScore');const s=S.picks[S.cr];$('scoreStudent').textContent=s+' · '+S.class;const cr=S.rr[S.cr],cc=cr?.correctCount||0,pts=cr?.points||5;$('scorePoints').textContent='+'+pts;$('scoreLabel').textContent='正确 '+cc+' 题';$('scoreDetail').innerHTML='<div class="score-stat">正确 <strong>'+cc+'</strong></div><div class="score-stat">错误 <strong>'+(2-cc)+'</strong></div><div class="score-stat">保底 <strong>5</strong></div>';sv(S.grade,S.class,s,pts);S.total+=pts;fetch('/rollcall-api/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,student:s,result:'quiz',teacher:TEACHER})}).catch(()=>{});saveRecord(S.grade,S.class,s,cc,2,pts,S.rr[S.cr]?.answers,'技术的发展-蓝图');fp(innerWidth/2,innerHeight/2-100,'var(--bp-gold)',25);$('btnNextRound').textContent=S.cr<4?'下一轮 ▸':'完成'}
+$('btnNextRound').addEventListener('click',function(){if(S.cr<4){hd('sceneScore');sr(S.cr+1)}else{hd('sceneScore');sF()}});
+function sF(){sh('sceneFinal');$('reviewSection').classList.add('hidden');$('btnReview').textContent='📋 查看错题解析';const tb=$('finalBody');tb.innerHTML='';const rows=S.picks.map((n,i)=>{const cr=S.rr[i];return{name:n,correct:cr?.correctCount||0,points:cr?.points||5}}).sort((a,b)=>b.points-a.points);rows.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML='<td class="rank-num">#'+(i+1)+'</td><td>'+r.name+'</td><td>'+r.correct+'/2</td><td class="rank-score">+'+r.points+'</td>';tb.appendChild(tr)});fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',50);setTimeout(()=>fp(innerWidth/2,innerHeight/2,'var(--bp-gold)',30),400)}
+$('btnReview').addEventListener('click',function(){const rs=$('reviewSection');if(!rs.classList.contains('hidden')){rs.classList.add('hidden');this.textContent='📋 查看错题解析';return}this.textContent='📋 收起解析';buildReview();rs.classList.remove('hidden')});
+function buildReview(){const rs=$('reviewSection');rs.innerHTML='';let hasWrong=false;const labels=['A','B','C','D'];S.picks.forEach((n,ri)=>{const cr=S.rr[ri];if(!cr||!cr.answers)return;const wrongs=cr.answers.filter(a=>!a.isCorrect);if(!wrongs.length)return;hasWrong=true;let h='<div class="rev-student">⚙ '+n+' · '+S.class+'</div>';wrongs.forEach(a=>{h+='<div class="rev-item"><span class="rev-princ">'+a.principle+'</span><div class="rev-q">'+a.question+'</div><div class="rev-opt-grid">';labels.forEach(l=>{let cls='rev-opt';if(l===a.yourAnswer)cls+=' rev-chosen';if(l===a.correctAnswer)cls+=' rev-right';h+='<div class="'+cls+'"><span class="rev-opt-label">'+l+'</span><span>'+a.options[l]+'</span></div>'});h+='</div></div>'});rs.innerHTML+=h});if(!hasWrong)rs.innerHTML='<div class="rev-empty">\u2705 \u6240\u6709\u540c\u5b66\u5168\u90e8\u7b54\u5bf9\uff01</div>'}
+lc();sh('sceneSetup');ud();
+</script>
+<div class="toast-container" id="toastContainer"></div>
+</body>
+</html>

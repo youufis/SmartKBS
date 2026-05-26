@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>数据及其特征 - 高中信息技术必修一</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      margin: 20px auto;
+      max-width: 960px;
+      background-color: #f9f9f9;
+      color: #333;
+    }
+    h1, h2, h3 {
+      color: #2c3e50;
+    }
+    h1 {
+      text-align: center;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+    .section {
+      background: white;
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    ul, ol {
+      margin-left: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background-color: #ecf0f1;
+    }
+    code {
+      background-color: #f1f1f1;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>数据及其特征</h1>
+<p><em>——高中信息技术必修一 · 第一章第一节</em></p>
+
+<div class="section">
+  <h2>一、什么是数据？</h2>
+  <p>数据是现实世界客观事物的符号记录，是信息的载体，也是计算机加工的对象。</p>
+  <h3>核心定义：</h3>
+  <ul>
+    <li>数据是对客观事物（如身高、体重、温度、速度等）的符号化表示。</li>
+    <li>在计算机科学中，数据是所有被计算机识别、存储和处理的符号的总称。</li>
+    <li>数据本身没有意义，只有在特定情境下对实体行为产生影响时才转化为信息。</li>
+  </ul>
+
+  <h3>常见数据形式：</h3>
+  <ul>
+    <li><strong>数值型</strong>：如 180 cm、70 kg、36.5℃、120 km/h</li>
+    <li><strong>非数值型</strong>：
+      <ul>
+        <li>文本（文字、数字、字符）</li>
+        <li>图形与图像</li>
+        <li>音频</li>
+        <li>视频</li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>二、数据的特征</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>特征</th>
+        <th>说明</th>
+        <th>示例</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>多样性</td>
+        <td>数据可表现为多种形式（数字、文字、图像、声音等）</td>
+        <td>一段视频包含图像、声音、时间戳等多种数据</td>
+      </tr>
+      <tr>
+        <td>可记录性</td>
+        <td>数据可通过符号系统被记录和保存</td>
+        <td>结绳记事 → 纸质档案 → 数字存储</td>
+      </tr>
+      <tr>
+        <td>可加工性</td>
+        <td>数据可被采集、存储、传输、计算和转换</td>
+        <td>原始传感器数据 → 清洗 → 分析 → 可视化图表</td>
+      </tr>
+      <tr>
+        <td>依附性</td>
+        <td>数据必须依附于某种载体存在</td>
+        <td>文字依附于纸张或屏幕；声音依附于声波或数字文件</td>
+      </tr>
+      <tr>
+        <td>无意义性（原始状态）</td>
+        <td>孤立的数据本身不具意义，需结合上下文</td>
+        <td>“99” 可能是分数、价格、温度或学号</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="section">
+  <h2>三、数据与信息的关系</h2>
+  <h3>基本关系链：</h3>
+  <p style="text-align:center; font-size:1.2em;">
+    <strong>数据 → 信息 → 知识 → 智慧</strong>
+  </p>
+
+  <ul>
+    <li><strong>数据</strong>：原始符号记录（如：180）</li>
+    <li><strong>信息</strong>：经过加工处理、具有意义的数据（如：“小明身高180 cm”）</li>
+    <li><strong>知识</strong>：对信息的归纳、总结和应用（如：“成年男性平均身高约175 cm，180 cm属于偏高”）</li>
+    <li><strong>智慧</strong>：基于知识的判断与决策能力</li>
+  </ul>
+
+  <blockquote>
+    “信息是经过加工处理的、具有意义的数据。”<br>
+    ——《信息技术 必修1：数据与计算》
+  </blockquote>
+</div>
+
+<div class="section">
+  <h2>四、数据在计算机中的表示</h2>
+  <ul>
+    <li>所有现实世界的符号（文字、图像、声音等）均可被转换为<strong>二进制数</strong>（0 和 1）。</li>
+    <li>计算机通过二进制进行逻辑运算，再将结果转换为人可感知的形式（视觉、听觉等）。</li>
+    <li>例如：十进制数字 <code>180</code> 在计算机中以二进制 <code>10110100</code> 形式存储。</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>五、典型生活实例</h2>
+  <ol>
+    <li><strong>健康监测</strong>：智能手环采集心率（数据）→ 分析是否异常（信息）→ 建议就医（知识应用）</li>
+    <li><strong>交通导航</strong>：GPS定位坐标（数据）→ 计算最优路线（信息）→ 实时避堵（智慧服务）</li>
+    <li><strong>社交媒体</strong>：用户点赞数（数据）→ 推荐热门内容（信息）→ 平台优化算法（知识沉淀）</li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>六、学习提示（新课标核心素养导向）</h2>
+  <ul>
+    <li>✅ <strong>信息意识</strong>：能区分数据与信息，理解其价值</li>
+    <li>✅ <strong>数字化学习与创新</strong>：尝试用数字工具记录和分析身边的数据</li>
+    <li>✅ <strong>计算思维</strong>：思考数据如何被计算机处理</li>
+    <li>✅ <strong>信息社会责任</strong>：认识数据隐私与安全的重要性</li>
+  </ul>
+</div>
+
+<footer style="text-align:center; margin-top:30px; color:#7f8c8d; font-size:0.9em;">
+  <p>依据粤教版《信息技术 必修1：数据与计算》整理 | 适用于高中信息技术课程</p>
+</footer>
+
+</body>
+</html>

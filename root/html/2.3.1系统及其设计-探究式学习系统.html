@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第三单元：系统及其设计 | 高中通用技术探究式学习系统</title>
+<style>
+/* ========================================
+   专业教育软件风格 - 去游戏化设计
+   ======================================== */
+* { padding: 0; margin: 0; box-sizing: border-box; }
+body { 
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; 
+  background: #f5f7fa; 
+  overflow-x: hidden;
+  color: #2c3e50;
+}
+
+/* ===== 启动/欢迎页面 ===== */
+#splash {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: #ffffff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 1000; transition: opacity 0.8s ease;
+  overflow-y: auto;
+}
+#splash.hidden { opacity: 0; pointer-events: none; }
+
+.splash-content { text-align: center; max-width: 90vw; width: 100%; padding: clamp(20px, 5vw, 40px); }
+.splash-icon { font-size: clamp(3em, 8vw, 5em); margin-bottom: 20px; animation: float 3s ease-in-out infinite; }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+
+.splash-title {
+  font-size: clamp(1.8em, 5vw, 2.8em); color: #2563eb; font-weight: bold; margin-bottom: 15px;
+}
+.splash-subtitle { font-size: clamp(1em, 3vw, 1.4em); color: #6b7280; margin-bottom: 30px; }
+.splash-desc { 
+  font-size: clamp(0.9em, 2vw, 1.1em); color: #374151; line-height: 1.8; 
+  margin-bottom: 40px; text-align: left; background: #f8fafc;
+  padding: clamp(15px, 3vw, 25px); border-radius: 12px; border-left: 4px solid #3B82F6;
+}
+
+.learning-modules { 
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+  gap: clamp(10px, 2vw, 15px); margin: 30px 0; text-align: left; 
+}
+.module-card {
+  background: #ffffff; padding: clamp(10px, 2vw, 15px); border-radius: 8px;
+  border-left: 3px solid #3B82F6; transition: all 0.3s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.module-card:hover { background: #eff6ff; transform: translateX(5px); }
+.module-card strong { color: #2563eb; display: block; margin-bottom: 5px; }
+.module-card span { color: #6b7280; font-size: 0.9em; }
+
+.start-btn {
+  padding: clamp(12px, 3vw, 18px) clamp(30px, 8vw, 60px); font-size: clamp(1em, 2.5vw, 1.3em); border: none;
+  background: #3B82F6; color: #fff; border-radius: 8px;
+  cursor: pointer; transition: all 0.3s; font-weight: bold;
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.35);
+}
+.start-btn:hover { background: #2563eb; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.45); }
+
+/* ===== 主界面布局 ===== */
+#app-container { display: none; width: 100vw; height: 100vh; }
+#sidebar {
+  width: 280px; height: 100vh; background: #fff; 
+  border-right: 1px solid #dbeafe; padding: 20px 0;
+  position: fixed; left: 0; top: 0; z-index: 100;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+  overflow-y: auto;
+}
+#main-content {
+  margin-left: 280px; padding: 0; height: 100vh;
+  position: relative; background: #f5f7fa;
+}
+
+/* ===== 侧边栏 ===== */
+.sidebar-head {
+  padding: 20px; border-bottom: 1px solid #e5e7eb; margin-bottom: 15px;
+}
+.sidebar-head h2 { font-size: 1.1em; color: #1e40af; margin-bottom: 5px; }
+.sidebar-head p { font-size: 0.85em; color: #6b7280; }
+
+.nav-menu { list-style: none; padding: 0 10px; }
+.nav-item {
+  margin: 5px 0;
+}
+.nav-link {
+  display: flex; align-items: center; padding: 12px 15px;
+  color: #374151; text-decoration: none; border-radius: 8px;
+  transition: all 0.3s; cursor: pointer;
+}
+.nav-link:hover { background: #eff6ff; }
+.nav-link.active { background: #dbeafe; color: #1e40af; font-weight: bold; }
+.nav-icon { margin-right: 10px; font-size: 1.2em; width: 24px; text-align: center; }
+
+.sidebar-stats {
+  margin-top: 30px; padding: 15px; background: #f0f9ff;
+  border-radius: 8px; border: 1px solid #bae6fd;
+}
+.stat-row { display: flex; justify-content: space-between; margin: 8px 0; font-size: 0.9em; }
+.stat-label { color: #6b7280; }
+.stat-value { font-weight: bold; color: #1e40af; }
+
+/* ===== 主内容区 ===== */
+.main-body { padding: 30px; overflow-y: auto; height: calc(100vh - 0px); }
+.module-section { display: none; animation: fadeIn 0.4s ease; }
+.module-section.active { display: block; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+.page-header { margin-bottom: 30px; padding-bottom: 15px; border-bottom: 2px solid #e5e7eb; }
+.page-title { font-size: 2em; color: #1e40af; margin-bottom: 10px; }
+.page-subtitle { font-size: 1.1em; color: #6b7280; }
+
+.content-block {
+  background: #fff; border-radius: 12px; padding: 25px;
+  margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.block-title { font-size: 1.5em; color: #1e40af; margin-bottom: 15px; display: flex; align-items: center; }
+.block-title::before { content: "📌"; margin-right: 10px; }
+
+.info-box {
+  padding: 20px; border-radius: 8px; margin: 15px 0;
+  border-left: 4px solid #3b82f6; background: #eff6ff;
+}
+.warning-box {
+  padding: 20px; border-radius: 8px; margin: 15px 0;
+  border-left: 4px solid #f59e0b; background: #fef3c7;
+}
+.success-box {
+  padding: 20px; border-radius: 8px; margin: 15px 0;
+  border-left: 4px solid #10b981; background: #d1fae5;
+}
+
+.data-table {
+  width: 100%; border-collapse: collapse; margin: 15px 0;
+}
+.data-table th, .data-table td {
+  padding: 12px 15px; text-align: left; border: 1px solid #e5e7eb;
+}
+.data-table th { background: #eff6ff; color: #1e40af; font-weight: bold; }
+.data-table tr:nth-child(even) { background: #f9fafb; }
+
+.equation-box {
+  text-align: center; padding: 25px; background: #f0f9ff;
+  border-radius: 8px; margin: 20px 0; font-size: 1.3em; font-weight: bold; color: #1e40af;
+}
+
+.quiz-container { margin: 20px 0; }
+.quiz-question { font-size: 1.2em; font-weight: bold; margin-bottom: 20px; }
+.quiz-options { display: flex; flex-direction: column; gap: 10px; }
+.quiz-option {
+  padding: 15px 20px; border: 2px solid #e5e7eb; border-radius: 8px;
+  cursor: pointer; transition: all 0.3s; background: #fff;
+}
+.quiz-option:hover { border-color: #3b82f6; background: #eff6ff; }
+.quiz-option.selected { border-color: #3b82f6; background: #dbeafe; }
+.quiz-option.correct { border-color: #10b981; background: #d1fae5; }
+.quiz-option.incorrect { border-color: #ef4444; background: #fee2e2; }
+
+.feedback-msg {
+  margin-top: 15px; padding: 15px; border-radius: 8px;
+  display: none; font-weight: bold;
+}
+.feedback-msg.show { display: block; }
+.feedback-msg.correct { background: #d1fae5; color: #065f46; }
+.feedback-msg.incorrect { background: #fee2e2; color: #991b1b; }
+
+.btn {
+  padding: 12px 30px; font-size: 1em; border: none; border-radius: 8px;
+  cursor: pointer; transition: all 0.3s; font-weight: bold;
+}
+.btn-primary { background: #3b82f6; color: #fff; }
+.btn-primary:hover { background: #2563eb; }
+.btn-success { background: #10b981; color: #fff; }
+.btn-success:hover { background: #059669; }
+
+.filter-tabs { display: flex; gap: 10px; margin: 20px 0; flex-wrap: wrap; }
+.filter-tab {
+  padding: 10px 20px; border: 2px solid #3b82f6; border-radius: 8px;
+  cursor: pointer; transition: all 0.3s; background: #fff; color: #3b82f6;
+}
+.filter-tab:hover { background: #eff6ff; }
+.filter-tab.active { background: #3b82f6; color: #fff; }
+
+/* ===== 流程图样式 ===== */
+flow-diagram {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 20px; background: #fafafa; border-radius: 8px; margin: 15px 0;
+  justify-content: center;
+}
+.flow-box {
+  padding: 15px 25px; border: 2px solid #3b82f6; border-radius: 8px;
+  background: #fff; font-weight: bold; text-align: center;
+}
+.flow-arrow { font-size: 1.5em; color: #3b82f6; }
+
+@media (max-width: 768px) {
+  #sidebar { width: 100%; height: auto; position: relative; }
+  #main-content { margin-left: 0; }
+  .main-body { padding: 15px; }
+}
+
+.bp-block{background: #fff;}/* block alias */
+.bp-block.done{}
+.bp-block.active{}
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+<!-- 启动页面 -->
+<div id="splash">
+  <div class="splash-content">
+    <div class="splash-icon">🔗</div>
+    <h1 class="splash-title">系统及其设计的探究式学习系统</h1>
+    <p class="splash-subtitle">高中通用技术必修 2 · 第三单元</p>
+    
+    <div class="splash-desc">
+      <strong>📚 学习内容概览：</strong><br>
+      • 系统的概念与构成条件<br>
+      • 系统的五大基本特性（整体性、相关性、目的性、动态性、环境适应性）<br>
+      • 系统的分类方法<br>
+      • 系统设计原则与方法<br>
+      • 系统优化技术与案例分析<br>
+      • 经典案例（鸟巢、嫦娥一号、校园节水系统）
+    </div>
+    
+    <div class="learning-modules">
+      <div class="module-card">
+        <strong>📖 概念解析</strong>
+        <span>理解系统本质</span>
+      </div>
+      <div class="module-card">
+        <strong>🎯 系统特性</strong>
+        <span>掌握五大特性</span>
+      </div>
+      <div class="module-card">
+        <strong>📊 系统分类</strong>
+        <span>认识系统类型</span>
+      </div>
+      <div class="module-card">
+        <strong>✏️ 系统设计</strong>
+        <span>学习设计原则</span>
+      </div>
+      <div class="module-card">
+        <strong>🔄 系统优化</strong>
+        <span>提升系统性能</span>
+      </div>
+      <div class="module-card">
+        <strong>🌟 案例分析</strong>
+        <span>典型实例剖析</span>
+      </div>
+      <div class="module-card">
+        <strong>📝 巩固练习</strong>
+        <span>分层训练检测</span>
+      </div>
+    </div>
+    
+    <button class="start-btn" onclick="enterSystem()">进入学习系统 →</button>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="app-container">
+  <!-- 左侧导航栏 -->
+  <div id="sidebar">
+    <div class="sidebar-head">
+      <h2>系统及其设计的探究式学习系统</h2>
+      <p>高中通用技术 · 必修 2</p>
+    </div>
+    
+    <ul class="nav-menu">
+      <li class="nav-item">
+        <a class="nav-link active" data-module="intro" onclick="switchModule('intro')">
+          <span class="nav-icon">🏠</span>课程导学
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-module="concept" onclick="switchModule('concept')">
+          <span class="nav-icon">📖</span>概念解析
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-module="properties" onclick="switchModule('properties')">
+          <span class="nav-icon">🎯</span>系统特性
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-module="classification" onclick="switchModule('classification')">
+          <span class="nav-icon">📊</span>系统分类
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-module="design" onclick="switchModule('design')">
+          <span class="nav-icon">✏️</span>系统设计
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-module="optimization" onclick="switchModule('optimization')">
+          <span class="nav-icon">🔄</span>系统优化
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-module="cases" onclick="switchModule('cases')">
+          <span class="nav-icon">🌟</span>案例分析
+        </a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-module="practice" onclick="switchModule('practice')">
+          <span class="nav-icon">📝</span>巩固练习
+        </a>
+      </li>
+    </ul>
+    
+    <div class="sidebar-stats">
+      <div class="stat-row">
+        <span class="stat-label">学习进度</span>
+        <span class="stat-value" id="progress-val">0%</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">得分</span>
+        <span class="stat-value" id="score-val">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">正确率</span>
+        <span class="stat-value" id="accuracy-val">-</span>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 右侧内容区 -->
+  <div id="main-content">
+    <div class="main-body">
+      
+      <!-- 课程导学模块 -->
+      <div id="module-intro" class="module-section active">
+        <div class="page-header">
+          <h1 class="page-title">第三单元：系统及其设计</h1>
+          <p class="page-subtitle">高中通用技术必修 2 · 探究式学习系统</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">🎯 学习目标</div>
+          <ul style="padding-left: 25px; line-height: 2;">
+            <li>理解系统的概念和构成条件，能识别生活中的系统</li>
+            <li>掌握系统的五大基本特性，能用系统思想分析问题</li>
+            <li>了解系统的多种分类方法</li>
+            <li>掌握系统设计的基本原则和方法</li>
+            <li>学会运用系统优化方法改进实际系统</li>
+            <li>能通过典型案例培养系统思维和工程思维</li>
+          </ul>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">📚 本节内容简介</div>
+          <p style="line-height: 1.8;">本系统将引导你通过<strong>概念解析 → 系统特性 → 系统分类 → 系统设计 → 系统优化 → 案例分析</strong>的路径，系统学习系统的核心知识。每个模块都配有丰富的实例和互动练习，帮助你深入理解并灵活运用。</p>
+          
+          <div class="info-box" style="margin-top: 20px;">
+            <strong>💡 为什么学习系统？</strong><br>
+            从古至今，系统思维无处不在：一张渔网、一个鸟巢、嫦娥一号卫星、校园节水系统……理解系统，就是理解事物之间普遍联系的本质！
+          </div>
+        </div>
+        
+        <div class="success-box" style="text-align: center; padding: 40px;">
+          <h3 style="color: #065f46; margin-bottom: 15px;">✨ 准备好开启系统思维之旅了吗？</h3>
+          <p style="font-size: 1.1em; color: #047857; margin-bottom: 20px;">点击下方按钮开始学习吧！</p>
+          <button class="btn btn-success" onclick="switchModule('concept')">开始学习 →</button>
+        </div>
+      </div>
+      
+      <!-- 概念解析模块 -->
+      <div id="module-concept" class="module-section">
+        <div class="page-header">
+          <h1 class="page-title">一、系统的概念</h1>
+          <p class="page-subtitle">什么是系统？系统由什么构成？</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">📖 系统的定义</div>
+          <div class="info-box">
+            <strong>系统</strong>：由相互联系、相互作用、相互依赖、相互制约的若干要素或部分组成的具有特定功能的有机整体。
+          </div>
+          
+          <div class="equation-box">
+            系统 = 要素 + 联系 + 功能
+          </div>
+          
+          <table class="data-table">
+            <tr><th>要点</th><th>说明</th></tr>
+            <tr><td>两个或两个以上要素</td><td>单一要素不能构成系统</td></tr>
+            <tr><td>要素间相互作用</td><td>按一定方式构成有机整体</td></tr>
+            <tr><td>整体功能独特</td><td>各要素不具备的整体功能</td></tr>
+          </table>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">🔍 生活实例对照表</div>
+          <table class="data-table">
+            <tr><th>实例</th><th>要素</th><th>功能</th><th>是否为系统</th></tr>
+            <tr><td>自行车</td><td>车架、车轮、车把等</td><td>骑行代步</td><td>✅ 是系统</td></tr>
+            <tr><td>一堆零件</td><td>相同零件</td><td>无整体功能</td><td>❌ 不是系统</td></tr>
+            <tr><td>学校</td><td>师生、教室、设备</td><td>教育教学</td><td>✅ 是系统</td></tr>
+            <tr><td>长江流域</td><td>河道、支流、植被</td><td>生态系统</td><td>✅ 是系统</td></tr>
+          </table>
+          
+          <div class="warning-box">
+            ⚠️ <strong>关键理解</strong>：必须同时满足三个条件才能称为系统！单独散落的自行车零件不能构成系统，只有组装起来才成为系统。
+          </div>
+        </div>
+        
+        <div class="quiz-container" id="concept-quiz">
+          <div class="block-title">📝 随堂检测</div>
+          <div class="quiz-question">下列选项中属于系统的是（ ）</div>
+          <div class="quiz-options" id="q-concept-options"></div>
+          <div class="feedback-msg" id="q-concept-feedback"></div>
+        </div>
+      </div>
+      
+      <!-- 系统特性模块 -->
+      <div id="module-properties" class="module-section">
+        <div class="page-header">
+          <h1 class="page-title">二、系统的五大基本特性</h1>
+          <p class="page-subtitle">理解系统行为的关键特征</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">🎯 五大特性总览</div>
+          <table class="data-table">
+            <tr><th>特性</th><th>核心含义</th><th>关键要点</th></tr>
+            <tr><td><strong>整体性</strong></td><td>系统最基本的特性</td><td>①整体功能＞各部分之和<br>②任一要素变化影响整体<br>③不能离开整体分析部分</td></tr>
+            <tr><td><strong>相关性</strong></td><td>要素之间相互关联</td><td>各要素之间或整体与部分之间相互作用、相互联系</td></tr>
+            <tr><td><strong>目的性</strong></td><td>区别不同系统的标志</td><td>任何系统都有特定目的，要实现一定功能</td></tr>
+            <tr><td><strong>动态性</strong></td><td>系统处于变化发展中</td><td>任何系统都处在运动、变化、发展之中</td></tr>
+            <tr><td><strong>环境适应性</strong></td><td>系统适应外部环境</td><td>系统能随外部环境变化而调整</td></tr>
+          </table>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">💡 整体性详解</div>
+          <div class="info-box">
+            <strong>名言引入</strong>："得鸟者一目也。今为一目之罗，无时得鸟矣。"<br>
+            单个网眼≠整张网！只有各网眼相互配合才能捕鸟。
+          </div>
+          <ul style="padding-left: 25px; line-height: 2;">
+            <li><strong>木桶原理</strong>：最短木板决定整体容量</li>
+            <li><strong>三人行必有我师</strong>：团队协作优势</li>
+            <li><strong>蚂蚁搬家</strong>：个体弱，群体强</li>
+          </ul>
+        </div>
+        
+        <div class="quiz-container" id="property-quiz">
+          <div class="block-title">📝 随堂检测</div>
+          <div class="quiz-question">"一个和尚挑水喝，两个和尚抬水喝，三个和尚没水喝"体现了系统的（ ）</div>
+          <div class="quiz-options" id="q-property-options"></div>
+          <div class="feedback-msg" id="q-property-feedback"></div>
+        </div>
+      </div>
+      
+      <!-- 系统分类模块 -->
+      <div id="module-classification" class="module-section">
+        <div class="page-header">
+          <h1 class="page-title">三、系统的分类</h1>
+          <p class="page-subtitle">从不同角度认识系统</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">📊 四种分类方法</div>
+          <table class="data-table">
+            <tr><th>分类依据</th><th>类型</th><th>特点</th><th>实例</th></tr>
+            <tr><td rowspan="2"><strong>按人类干预</strong></td><td>自然系统</td><td>自然形成</td><td>太阳系、生态系统</td></tr>
+            <tr><td>人造系统</td><td>人类建造</td><td>计算机系统、交通系统</td></tr>
+            <tr><td rowspan="2"><strong>按抽象程度</strong></td><td>实体系统</td><td>物质组成</td><td>机械系统、建筑系统</td></tr>
+            <tr><td>抽象系统</td><td>观念组成</td><td>数学系统、法律系统</td></tr>
+            <tr><td rowspan="2"><strong>按与环境关系</strong></td><td>开放系统</td><td>与环境交换</td><td>生物体、企业</td></tr>
+            <tr><td>封闭系统</td><td>独立运行</td><td>密封装置、理想气体</td></tr>
+            <tr><td rowspan="2"><strong>按系统状态</strong></td><td>静态系统</td><td>相对稳定</td><td>建筑物、桥梁</td></tr>
+            <tr><td>动态系统</td><td>持续变化</td><td>经济系统、天气系统</td></tr>
+          </table>
+        </div>
+        
+        <div class="info-box">
+          💡 <strong>思考题</strong>：你的学校是什么类型的系统？请从不同角度分类并说明理由。
+        </div>
+        
+        <div class="quiz-container" id="classify-quiz">
+          <div class="block-title">📝 随堂检测</div>
+          <div class="quiz-question">下列属于人造系统的是（ ）</div>
+          <div class="quiz-options" id="q-classify-options"></div>
+          <div class="feedback-msg" id="q-classify-feedback"></div>
+        </div>
+      </div>
+      
+      <!-- 系统设计模块 -->
+      <div id="module-design" class="module-section">
+        <div class="page-header">
+          <h1 class="page-title">四、系统设计原则</h1>
+          <p class="page-subtitle">科学设计系统的方法论</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">✏️ 三大设计原则</div>
+          <table class="data-table">
+            <tr><th>原则</th><th>内涵</th><th>应用示例</th></tr>
+            <tr><td><strong>整体性原则</strong></td><td>从整体出发，统筹各部分</td><td>设计校园节水系统时考虑整体水资源利用</td></tr>
+            <tr><td><strong>科学性原则</strong></td><td>运用科学方法分析论证</td><td>经过大量技术试验与数据分析选择材料</td></tr>
+            <tr><td><strong>综合性原则</strong></td><td>综合考虑多方面因素</td><td>兼顾成本、性能、环保、安全等</td></tr>
+          </table>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">📐 系统设计一般步骤</div>
+          <div flow-diagram>
+            <div class="flow-box">确定目标</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">收集资料</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">分析研究</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">方案设计</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">评价优化</div>
+          </div>
+          
+          <div class="success-box">
+            ✅ <strong>设计要点</strong>：
+            <ul style="margin-top: 10px; padding-left: 25px;">
+              <li>始终把握整体目标</li>
+              <li>多方案比较择优</li>
+              <li>重视可行性分析</li>
+              <li>留出优化空间</li>
+            </ul>
+          </div>
+        </div>
+        
+        <div class="quiz-container" id="design-quiz">
+          <div class="block-title">📝 随堂检测</div>
+          <div class="quiz-question">系统设计中最基本的原则是（ ）</div>
+          <div class="quiz-options" id="q-design-options"></div>
+          <div class="feedback-msg" id="q-design-feedback"></div>
+        </div>
+      </div>
+      
+      <!-- 系统优化模块 -->
+      <div id="module-optimization" class="module-section">
+        <div class="page-header">
+          <h1 class="page-title">五、系统优化</h1>
+          <p class="page-subtitle">如何让系统更高效、更智能</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">🔄 系统优化的含义</div>
+          <div class="info-box">
+            <strong>系统优化</strong>：在系统设计中，通过不断优化方案，使系统在给定条件下达到最佳效果。
+          </div>
+          
+          <table class="data-table">
+            <tr><th>要素</th><th>说明</th><th>示例</th></tr>
+            <tr><td>目标函数</td><td>追求的目标</td><td>经济效益最大化、成本最小化</td></tr>
+            <tr><td>约束条件</td><td>限制因素</td><td>预算、时间、技术、资源</td></tr>
+            <tr><td>影响因素</td><td>可控变量</td><td>工艺参数、材料选择、人员配置</td></tr>
+          </table>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">📊 优化方法</div>
+          <table class="data-table">
+            <tr><th>方法</th><th>适用场景</th><th>实例</th></tr>
+            <tr><td>经验分析法</td><td>简单系统</td><td>凭经验调整生产工艺</td></tr>
+            <tr><td>头脑风暴法</td><td>创意需求</td><td>团队讨论提出优化方案</td></tr>
+            <tr><td>定量分析法</td><td>复杂系统</td><td>运用数学模型计算最优解</td></tr>
+            <tr><td>仿真模拟法</td><td>高风险系统</td><td>计算机模拟验证方案</td></tr>
+          </table>
+        </div>
+        
+        <div class="quiz-container" id="optimize-quiz">
+          <div class="block-title">📝 随堂检测</div>
+          <div class="quiz-question">系统优化的目标是（ ）</div>
+          <div class="quiz-options" id="q-optimize-options"></div>
+          <div class="feedback-msg" id="q-optimize-feedback"></div>
+        </div>
+      </div>
+      
+      <!-- 案例分析模块 -->
+      <div id="module-cases" class="module-section">
+        <div class="page-header">
+          <h1 class="page-title">六、典型案例分析</h1>
+          <p class="page-subtitle">从实践中理解系统思想</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">🏟️ 案例一：鸟巢国家体育场</div>
+          <table class="data-table">
+            <tr><th>维度</th><th>分析</th></tr>
+            <tr><td>系统构成</td><td>钢结构、看台、屋面、配套设施等数千个部件</td></tr>
+            <tr><td>整体性体现</td><td>看似杂乱的钢构架形成稳定支撑体系</td></tr>
+            <tr><td>创新性</td><td>世界首次将钢结构做成"鸟巢"形态</td></tr>
+            <tr><td>环境适应性</td><td>抗震 8 度、抗风雪荷载能力强</td></tr>
+            <tr><td>综合性设计</td><td>兼顾赛事、商业、观光等多种功能</td></tr>
+          </table>
+          
+          <div class="success-box">
+            💡 <strong>启示</strong>：鸟巢的设计充分运用了系统思维和整体性原则，将结构与功能、形式与美学的统一完美结合。
+          </div>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">🛰️ 案例二：嫦娥一号探月卫星</div>
+          <table class="data-table">
+            <tr><th>子系统</th><th>功能</th></tr>
+            <tr><td>有效载荷分系统</td><td>搭载 8 种探测仪器，完成绕月探测任务</td></tr>
+            <tr><td>卫星平台分系统</td><td>提供能源、控制姿态、通信联络</td></tr>
+            <tr><td>地面测控分系统</td><td>发射监测、轨道测量、数据接收</td></tr>
+          </table>
+          
+          <div class="info-box">
+            🌙 嫦娥一号成功发射标志着我国深空探测技术的重大突破，是系统工程管理的典范之作！
+          </div>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">💧 案例三：校园节水系统</div>
+          <table class="data-table">
+            <tr><th>问题</th><td>校园用水浪费严重</td></tr>
+            <tr><th>系统方案</th><td>①安装智能水表；②建立监控平台；③设置分级报警；④实施分区管理</td></tr>
+            <tr><th>优化效果</th><td>节水率达 30% 以上，每年节省数万元</td></tr>
+          </table>
+        </div>
+        
+        <div class="quiz-container" id="case-quiz">
+          <div class="block-title">📝 随堂检测</div>
+          <div class="quiz-question">鸟巢建筑设计主要体现了系统的（ ）</div>
+          <div class="quiz-options" id="q-case-options"></div>
+          <div class="feedback-msg" id="q-case-feedback"></div>
+        </div>
+      </div>
+      
+      <!-- 巩固练习模块 -->
+      <div id="module-practice" class="module-section">
+        <div class="page-header">
+          <h1 class="page-title">七、巩固练习</h1>
+          <p class="page-subtitle">分层训练，查漏补缺</p>
+        </div>
+        
+        <div class="content-block">
+          <div class="block-title">📊 练习概况</div>
+          <div class="info-box" style="display: flex; justify-content: space-around; flex-wrap: wrap;">
+            <span>📝 总题数：<strong id="total-q">30</strong>题</span>
+            <span>✓ 已答题：<strong id="answered">0</strong></span>
+            <span>🎯 正确率：<strong id="accuracy">-</strong></span>
+            <span>⭐ 当前得分：<strong id="current-score">0</strong></span>
+          </div>
+          
+          <div class="filter-tabs">
+            <button class="filter-tab active" onclick="filterQuestions('all')">全部题目</button>
+            <button class="filter-tab" onclick="filterQuestions('basic')">基础题 (10)</button>
+            <button class="filter-tab" onclick="filterQuestions('advanced')">提高题 (10)</button>
+            <button class="filter-tab" onclick="filterQuestions('challenge')">挑战题 (10)</button>
+          </div>
+        </div>
+        
+        <div id="question-display" class="content-block quiz-container">
+          <!-- 问题将通过 JS 动态加载 -->
+        </div>
+      </div>
+      
+    </div>
+  </div>
+</div>
+
+<script>
+// ========================================
+// 系统状态管理
+// ========================================
+let currentState = {
+  currentModule: 'intro',
+  progress: 0,
+  score: 0,
+  answered: 0,
+  correct: 0,
+  currentQuestionIndex: 0,
+  currentFilter: 'all',
+  modulesAnswered: new Set()
+};
+
+// ========================================
+// 题库数据（30 题分层）
+// ========================================
+const questionBank = [
+  // 基础题（10 题）
+  {
+    type: 'basic',
+    question: '下列属于系统的是（ ）',
+    options: ['A. 一辆自行车', 'B. 一堆散放的零件', 'C. 一个书包里的物品', 'D. 天空中的云朵'],
+    answer: 0,
+    explanation: '自行车各部件组装在一起具有特定功能，是系统；散放零件无整体功能，不是系统'
+  },
+  {
+    type: 'basic',
+    question: '系统的基本特性不包括（ ）',
+    options: ['A. 整体性', 'B. 相关性', 'C. 随机性', 'D. 目的性'],
+    answer: 2,
+    explanation: '系统五大特性：整体性、相关性、目的性、动态性、环境适应性'
+  },
+  {
+    type: 'basic',
+    question: '"一个和尚挑水喝，两个和尚抬水喝，三个和尚没水喝"说明了系统的（ ）',
+    options: ['A. 目的性', 'B. 整体性', 'C. 动态性', 'D. 环境适应性'],
+    answer: 1,
+    explanation: '强调各要素必须协调配合才能实现整体功能'
+  },
+  {
+    type: 'basic',
+    question: '太阳系的中心是天体，这体现了系统的（ ）',
+    options: ['A. 相关性', 'B. 目的性', 'C. 动态性', 'D. 环境适应性'],
+    answer: 1,
+    explanation: '行星围绕太阳运行有明确目的和秩序'
+  },
+  {
+    type: 'basic',
+    question: '生态系统会随着环境变化而调整，体现了系统的（ ）',
+    options: ['A. 整体性', 'B. 目的性', 'C. 动态性', 'D. 环境适应性'],
+    answer: 3,
+    explanation: '环境适应性是指系统能适应外部环境变化'
+  },
+  {
+    type: 'basic',
+    question: '下列属于自然系统的是（ ）',
+    options: ['A. 计算机系统', 'B. 汽车发动机', 'C. 河流生态系统', 'D. 教学楼'],
+    answer: 2,
+    explanation: '河流生态系统是自然界形成的系统'
+  },
+  {
+    type: 'basic',
+    question: '下列属于封闭系统的是（ ）',
+    options: ['A. 人体', 'B. 企业', 'C. 密封容器中的气体', 'D. 地球生态系统'],
+    answer: 2,
+    explanation: '封闭系统与外界没有物质能量交换'
+  },
+  {
+    type: 'basic',
+    question: '系统设计首先要遵循的原则是（ ）',
+    options: ['A. 科学性原则', 'B. 整体性原则', 'C. 综合性原则', 'D. 经济性原则'],
+    answer: 1,
+    explanation: '整体性是系统最基本、最重要的特性'
+  },
+  {
+    type: 'basic',
+    question: '系统优化的目标不包括（ ）',
+    options: ['A. 效益最大化', 'B. 成本最小化', 'C. 随意改变', 'D. 效率最优化'],
+    answer: 2,
+    explanation: '系统优化是有目标、有约束的科学过程'
+  },
+  {
+    type: 'basic',
+    question: '木桶理论说明了系统的（ ）',
+    options: ['A. 相关性', 'B. 整体性', 'C. 目的性', 'D. 动态性'],
+    answer: 1,
+    explanation: '整体功能受制于最薄弱环节，体现了整体性'
+  },
+  
+  // 提高题（10 题）
+  {
+    type: 'advanced',
+    question: '关于系统的相关性，下列说法正确的是（ ）',
+    options: [
+      'A. 要素之间可以没有任何联系',
+      'B. 整体与部分之间不存在相互作用',
+      'C. 要素之间存在相互联系、相互作用',
+      'D. 相关性只存在于人造系统中'
+    ],
+    answer: 2,
+    explanation: '相关性是系统的基本特征，指要素之间或要素与整体之间的相互作用'
+  },
+  {
+    type: 'advanced',
+    question: '嫦娥一号卫星包含多个子系统，这主要体现了系统设计的（ ）',
+    options: ['A. 科学性原则', 'B. 综合性原则', 'C. 经济性原则', 'D. 艺术性原则'],
+    answer: 1,
+    explanation: '综合考虑多方面因素，兼顾各子系统的协同工作'
+  },
+  {
+    type: 'advanced',
+    question: '关于开环系统和闭环系统，以下说法正确的是（ ）',
+    options: [
+      'A. 开环系统比闭环系统更精确',
+      'B. 闭环系统必须有反馈环节',
+      'C. 开环系统成本更高',
+      'D. 所有系统都是闭环系统'
+    ],
+    answer: 1,
+    explanation: '闭环系统的核心特征是存在反馈回路'
+  },
+  {
+    type: 'advanced',
+    question: '城市交通系统属于（ ）',
+    options: [
+      'A. 自然系统、实体系统',
+      'B. 人造系统、开放系统',
+      'C. 抽象系统、封闭系统',
+      'D. 静态系统、自然系统'
+    ],
+    answer: 1,
+    explanation: '人造系统、动态系统、开放系统、实体系统'
+  },
+  {
+    type: 'advanced',
+    question: '在设计校园网络系统时，应该优先遵循（ ）',
+    options: ['A. 先进性原则', 'B. 整体性原则', 'C. 美观性原则', 'D. 灵活性原则'],
+    answer: 1,
+    explanation: '系统设计的整体性原则是最基本的'
+  },
+  {
+    type: 'advanced',
+    question: '工厂流水线的优化改造属于系统优化的（ ）',
+    options: ['A. 定性分析', 'B. 定量分析', 'C. 经验分析', 'D. 无需分析'],
+    answer: 1,
+    explanation: '涉及生产效率、成本等可量化指标'
+  },
+  {
+    type: 'advanced',
+    question: '下列关于系统动态性的例子，最合适的是（ ）',
+    options: [
+      'A. 建筑物的外形设计',
+      'B. 经济发展与市场的变化',
+      'C. 桥梁的结构强度',
+      'D. 书本的内容编排'
+    ],
+    answer: 1,
+    explanation: '经济和市场的不断变化体现了动态性'
+  },
+  {
+    type: 'advanced',
+    question: '鸟巢体育馆的抗震设计主要考虑了系统的（ ）',
+    options: ['A. 目的性', 'B. 环境适应性', 'C. 相关性', 'D. 静态性'],
+    answer: 1,
+    explanation: '抗震是系统对地震这种外部环境的适应能力'
+  },
+  {
+    type: 'advanced',
+    question: '系统优化的约束条件不包括（ ）',
+    options: ['A. 可用资金', 'B. 技术水平', 'C. 最终目标', 'D. 资源限制'],
+    answer: 2,
+    explanation: '目标是优化的方向，不是约束条件'
+  },
+  {
+    type: 'advanced',
+    question: '对于复杂的系统优化问题，最适合采用的方法是（ ）',
+    options: ['A. 经验分析法', 'B. 头脑风暴法', 'C. 定量分析法', 'D. 试错法'],
+    answer: 2,
+    explanation: '定量分析适用于处理复杂系统的多变量优化'
+  },
+  
+  // 挑战题（10 题）
+  {
+    type: 'challenge',
+    question: '某企业要优化生产流程，现有工序 A(3h)、B(5h)、C(2h)、D(4h)，其中 B 必须在 A 后，C 和 D 可并行，最短完工时间为（ ）',
+    options: ['A. 8 小时', 'B. 10 小时', 'C. 14 小时', 'D. 9 小时'],
+    answer: 1,
+    explanation: '路径 A+B=8h，C 和 D 并行取最大值 4h，总时长=max(8,4)=8h 但需顺序执行=8+2=10h'
+  },
+  {
+    type: 'challenge',
+    question: '某校园信息系统包含硬件层、数据层、应用层、展示层四层架构，这体现了系统设计的（ ）',
+    options: [
+      'A. 层次化思想',
+      'B. 模块化思想',
+      'C. 整体性思想',
+      'D. 以上皆是'
+    ],
+    answer: 3,
+    explanation: '多层架构同时体现层次化、模块化和整体协同的思想'
+  },
+  {
+    type: 'challenge',
+    question: '关于反馈在系统中的作用，下列说法错误的是（ ）',
+    options: [
+      'A. 正反馈会增强系统偏差',
+      'B. 负反馈有助于系统稳定',
+      'C. 所有系统都需要正反馈',
+      'D. 反馈是闭环控制的核心'
+    ],
+    answer: 2,
+    explanation: '并非所有系统都需要正反馈，很多系统主要依靠负反馈维持稳定'
+  },
+  {
+    type: 'challenge',
+    question: '某生产线原来日产能 1000 件，瓶颈工序耗时 5h。优化后该工序减至 3h，同时增加了 20% 的其他投入，则产能提升率为（ ）',
+    options: ['A. 20%', 'B. 40%', 'C. 60%', 'D. 66.7%'],
+    answer: 3,
+    explanation: '新产能=1000×(5/3)=1666.7，提升率=(1666.7-1000)/1000≈66.7%'
+  },
+  {
+    type: 'challenge',
+    question: '某公司要开发新产品，采用并行工程方法相比串行工程的主要优势是（ ）',
+    options: [
+      'A. 质量更好',
+      'B. 成本更低',
+      'C. 周期更短',
+      'D. 风险更小'
+    ],
+    answer: 2,
+    explanation: '并行工程让设计和制造同步进行，显著缩短开发周期'
+  },
+  {
+    type: 'challenge',
+    question: '生态系统的自我调节能力体现了系统的（ ）',
+    options: ['A. 目的性与相关性', 'B. 动态性与环境适应性', 'C. 整体性与目的性', 'D. 相关性与整体性'],
+    answer: 1,
+    explanation: '自我调节既体现动态性，也体现环境适应性'
+  },
+  {
+    type: 'challenge',
+    question: '若某系统的输入量增加 10%，输出量随之增加 8%，则该系统的增益为（ ）',
+    options: ['A. 0.8', 'B. 1.0', 'C. 1.25', 'D. 0.9'],
+    answer: 0,
+    explanation: '增益=输出变化率/输入变化率=8%/10%=0.8'
+  },
+  {
+    type: 'challenge',
+    question: '某智慧城市项目整合了交通、环保、安防等多个子系统，最核心的技术支撑是（ ）',
+    options: [
+      'A. 互联网技术',
+      'B. 物联网与大数据',
+      'C. 5G 通信技术',
+      'D. 人工智能算法'
+    ],
+    answer: 1,
+    explanation: '物联网实现万物互联，大数据分析提供决策支持，是智慧城市的核心'
+  },
+  {
+    type: 'challenge',
+    question: '在系统设计中，当局部最优与全局最优冲突时，应遵循（ ）',
+    options: ['A. 局部最优优先', 'B. 全局最优优先', 'C. 两者同等重要', 'D. 视情况而定'],
+    answer: 1,
+    explanation: '系统性思维要求以全局最优为目标，必要时牺牲局部利益'
+  },
+  {
+    type: 'challenge',
+    question: '某制造企业采用精益生产方式，消除浪费、持续改进，这是运用了系统优化的（ ）',
+    options: ['A. 经验分析法', 'B. 定量分析法', 'C. 仿真实验法', 'D. 头脑风暴法'],
+    answer: 0,
+    explanation: '精益生产源于实践经验总结，属于经验分析方法的应用'
+  }
+];
+
+// ========================================
+// 初始化随堂检测题
+// ========================================
+const quickQuizzes = {
+  concept: {
+    question: '下列选项中属于系统的是（ ）',
+    options: ['A. 一辆组装好的自行车', 'B. 一堆散放的零件', 'C. 天空中的云彩', 'D. 地上的石头'],
+    answer: 0,
+    feedbackId: 'q-concept-feedback',
+    optionsId: 'q-concept-options'
+  },
+  property: {
+    question: '"一个和尚挑水喝，两个和尚抬水喝，三个和尚没水喝"体现了系统的（ ）',
+    options: ['A. 目的性', 'B. 相关性', 'C. 整体性', 'D. 动态性'],
+    answer: 2,
+    feedbackId: 'q-property-feedback',
+    optionsId: 'q-property-options'
+  },
+  classify: {
+    question: '下列属于人造系统的是（ ）',
+    options: ['A. 森林生态系统', 'B. 太阳系', 'C. 计算机网络', 'D. 大气循环系统'],
+    answer: 2,
+    feedbackId: 'q-classify-feedback',
+    optionsId: 'q-classify-options'
+  },
+  design: {
+    question: '系统设计中最基本的原则是（ ）',
+    options: ['A. 经济性原则', 'B. 整体性原则', 'C. 时效性原则', 'D. 美观性原则'],
+    answer: 1,
+    feedbackId: 'q-design-feedback',
+    optionsId: 'q-design-options'
+  },
+  optimize: {
+    question: '系统优化的目标是（ ）',
+    options: ['A. 尽可能复杂', 'B. 在约束条件下达到最佳效果', 'C. 完全消除约束', 'D. 保持现状不变'],
+    answer: 1,
+    feedbackId: 'q-optimize-feedback',
+    optionsId: 'q-optimize-options'
+  },
+  case: {
+    question: '鸟巢建筑设计主要体现了系统的（ ）',
+    options: ['A. 整体性原则', 'B. 随意性原则', 'C. 单一性原则', 'D. 分离性原则'],
+    answer: 0,
+    feedbackId: 'q-case-feedback',
+    optionsId: 'q-case-options'
+  }
+};
+
+// ========================================
+// 系统功能函数
+// ========================================
+
+function enterSystem() {
+  document.getElementById('splash').classList.add('hidden');
+  document.getElementById('app-container').style.display = 'block';
+  initQuickQuizzes();
+}
+
+function switchModule(moduleName) {
+  // 更新导航状态
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.classList.remove('active');
+    if (link.dataset.module === moduleName) {
+      link.classList.add('active');
+    }
+  });
+  
+  // 显示对应模块
+  document.querySelectorAll('.module-section').forEach(section => {
+    section.classList.remove('active');
+  });
+  document.getElementById('module-' + moduleName).classList.add('active');
+  
+  // 更新模块状态
+  currentState.currentModule = moduleName;
+  
+  // 记录已完成的模块
+  if (!currentState.modulesAnswered.has(moduleName)) {
+    currentState.modulesAnswered.add(moduleName);
+    updateProgress();
+  }
+}
+
+function updateProgress() {
+  const totalModules = 7; // 不包括 intro
+  const completed = Math.min(currentState.modulesAnswered.size, totalModules);
+  currentState.progress = Math.round((completed / totalModules) * 100);
+  document.getElementById('progress-val').textContent = currentState.progress + '%';
+}
+
+function initQuickQuizzes() {
+  Object.keys(quickQuizzes).forEach(key => {
+    renderQuickQuiz(key, quickQuizzes[key]);
+  });
+}
+
+function renderQuickQuiz(type, quiz) {
+  const container = document.getElementById(quiz.optionsId);
+  container.innerHTML = '';
+  
+  quiz.options.forEach((opt, idx) => {
+    const btn = document.createElement('div');
+    btn.className = 'quiz-option';
+    btn.textContent = opt;
+    btn.onclick = () => checkQuickQuiz(type, idx, quiz);
+    container.appendChild(btn);
+  });
+}
+
+function checkQuickQuiz(type, selectedIndex, quiz) {
+  const options = document.getElementById(quiz.optionsId).children;
+  const feedback = document.getElementById(quiz.feedbackId);
+  
+  // 禁用所有选项
+  Array.from(options).forEach(opt => opt.style.pointerEvents = 'none');
+  
+  if (selectedIndex === quiz.answer) {
+    options[selectedIndex].classList.add('correct');
+    feedback.textContent = '✅ 回答正确！' + quiz.explanation || '';
+    feedback.className = 'feedback-msg show correct';
+    addToScore(10);
+  } else {
+    options[selectedIndex].classList.add('incorrect');
+    options[quiz.answer].classList.add('correct');
+    feedback.textContent = '❌ 回答错误。正确答案是' + quiz.options[quiz.answer] + '\n' + (quiz.explanation || '');
+    feedback.className = 'feedback-msg show incorrect';
+  }
+}
+
+function addToScore(points) {
+  currentState.score += points;
+  currentState.answered++;
+  currentState.correct++;
+  currentState.accuracy = Math.round((currentState.correct / currentState.answered) * 100) + '%';
+  
+  document.getElementById('score-val').textContent = currentState.score;
+  document.getElementById('answered').textContent = currentState.answered;
+  document.getElementById('accuracy-val').textContent = currentState.accuracy;
+  document.getElementById('current-score').textContent = currentState.score;
+}
+
+// ========================================
+// 练习题功能
+// ========================================
+function filterQuestions(filterType) {
+  currentState.currentFilter = filterType;
+  currentState.currentQuestionIndex = 0;
+  
+  // 更新 tab 状态
+  document.querySelectorAll('.filter-tab').forEach(tab => {
+    tab.classList.remove('active');
+    if (tab.textContent.toLowerCase().includes(filterType === 'all' ? '全部' : 
+        filterType === 'basic' ? '基础' : 
+        filterType === 'advanced' ? '提高' : '挑战')) {
+      tab.classList.add('active');
+    }
+  });
+  
+  loadQuestion();
+}
+
+function loadQuestion() {
+  const questions = questionBank.filter(q => 
+    currentState.currentFilter === 'all' ? true : q.type === currentState.currentFilter
+  );
+  
+  const index = currentState.currentQuestionIndex;
+  
+  if (index >= questions.length) {
+    document.getElementById('question-display').innerHTML = `
+      <div class="success-box" style="text-align: center; padding: 40px;">
+        <h3>🎉 恭喜！已完成本组所有题目</h3>
+        <p style="margin-top: 15px;">您的最终得分：<strong>${currentState.score}</strong>分</p>
+        <button class="btn btn-primary" style="margin-top: 20px;" onclick="filterQuestions('${currentState.currentFilter}')">重新开始</button>
+      </div>
+    `;
+    return;
+  }
+  
+  const q = questions[index];
+  const display = document.getElementById('question-display');
+  
+  let difficultyLabel = '';
+  if (q.type === 'basic') difficultyLabel = '<span style="background:#d1fae5;color:#065f46;padding:4px 12px;border-radius:12px;font-size:0.85em">基础</span>';
+  else if (q.type === 'advanced') difficultyLabel = '<span style="background:#fef3c7;color:#92400e;padding:4px 12px;border-radius:12px;font-size:0.85em">提高</span>';
+  else difficultyLabel = '<span style="background:#fce7f3;color:#be185d;padding:4px 12px;border-radius:12px;font-size:0.85em">挑战</span>';
+  
+  display.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+      ${difficultyLabel}
+      <span style="color:#6b7280;">第${index+1}题</span>
+    </div>
+    <div class="quiz-question">${q.question}</div>
+    <div class="quiz-options" id="practice-options"></div>
+    <div class="feedback-msg" id="practice-feedback"></div>
+    <div style="margin-top: 20px; text-align: right;">
+      <button class="btn btn-primary" onclick="nextQuestion()" id="next-btn" style="display:none;">下一题 →</button>
+    </div>
+  `;
+  
+  const optionsContainer = document.getElementById('practice-options');
+  q.options.forEach((opt, idx) => {
+    const btn = document.createElement('div');
+    btn.className = 'quiz-option';
+    btn.textContent = opt;
+    btn.onclick = () => checkPracticeQuestion(idx, q);
+    optionsContainer.appendChild(btn);
+  });
+}
+
+function checkPracticeQuestion(selectedIndex, question) {
+  const options = document.getElementById('practice-options').children;
+  const feedback = document.getElementById('practice-feedback');
+  const nextBtn = document.getElementById('next-btn');
+  
+  Array.from(options).forEach(opt => opt.style.pointerEvents = 'none');
+  
+  if (selectedIndex === question.answer) {
+    options[selectedIndex].classList.add('correct');
+    feedback.innerHTML = `✅ <strong>回答正确！</strong><br>${question.explanation}`;
+    feedback.className = 'feedback-msg show correct';
+    addToScore(question.type === 'basic' ? 10 : question.type === 'advanced' ? 20 : 30);
+  } else {
+    options[selectedIndex].classList.add('incorrect');
+    options[question.answer].classList.add('correct');
+    feedback.innerHTML = `❌ <strong>回答错误</strong><br>正确答案：${question.options[question.answer]}<br>${question.explanation}`;
+    feedback.className = 'feedback-msg show incorrect';
+    currentState.answered++;
+    currentState.accuracy = Math.round((currentState.correct / currentState.answered) * 100) + '%';
+    document.getElementById('answered').textContent = currentState.answered;
+    document.getElementById('accuracy-val').textContent = currentState.accuracy;
+  }
+  
+  nextBtn.style.display = 'inline-block';
+}
+
+function nextQuestion() {
+  currentState.currentQuestionIndex++;
+  loadQuestion();
+}
+
+// ========================================
+// 页面初始化
+// ========================================
+window.onload = function() {
+  // 自动滚动到合适位置
+  document.getElementById('practice-options').addEventListener('click', function(e) {
+    if (e.target.classList.contains('quiz-option')) {
+      e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  });
+};
+</script>
+</body>
+</html>

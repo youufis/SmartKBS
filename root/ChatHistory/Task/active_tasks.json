@@ -1,0 +1,24 @@
+{
+  "tasks": [
+    {
+      "id": "root_数学_1779585457",
+      "creator": "root",
+      "name": "数学",
+      "description": "完成P9的作业",
+      "status": "active",
+      "created_time": "2026-05-24 09:19:05",
+      "submissions": [
+        "s11002"
+      ]
+    },
+    {
+      "id": "root_数学_1779585662",
+      "creator": "root",
+      "name": "数学",
+      "description": "完成P8的练习",
+      "status": "active",
+      "created_time": "2026-05-24 09:21:02",
+      "submissions": []
+    }
+  ]
+}

@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>开源协作流程演进交互式学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+        .node-new { animation: pulse-ring 1s cubic-bezier(0.24, 0, 0.38, 1) infinite; }
+        .commit-node { transition: all 0.3s ease; cursor: pointer; }
+        .commit-node:hover { r: 10; stroke-width: 4; }
+        .path-link { stroke-dasharray: 1000; stroke-dashoffset: 1000; animation: draw 0.8s forwards; }
+        @keyframes draw { to { stroke-dashoffset: 0; } }
+        .glass-panel { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(8px); }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans min-h-screen overflow-hidden">
+
+    <div class="max-w-6xl mx-auto h-screen flex flex-col p-4 space-y-4">
+        <!-- 头部信息 -->
+        <header class="flex justify-between items-end border-b pb-2">
+            <div>
+                <h1 class="text-2xl font-bold text-indigo-700">开源协作流程演进</h1>
+                <p class="text-xs text-slate-500">基于有向无环图 (DAG) 的代码仓库演进模型</p>
+            </div>
+            <div class="flex space-x-4 text-right">
+                <div>
+                    <span class="block text-[10px] uppercase tracking-wider text-slate-400">当前版本</span>
+                    <span id="version-display" class="font-mono font-bold text-lg text-indigo-600">v1.0.0</span>
+                </div>
+                <div>
+                    <span class="block text-[10px] uppercase tracking-wider text-slate-400">社区规模 (\(n\))</span>
+                    <span id="contributor-count" class="font-mono font-bold text-lg text-emerald-600">1</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主交互区域 -->
+        <main class="flex-grow relative bg-white rounded-xl shadow-inner border border-slate-200 overflow-hidden">
+            <!-- 统计浮层 -->
+            <div class="absolute top-4 left-4 z-10 flex flex-col gap-2">
+                <div class="glass-panel p-3 rounded-lg border border-slate-200 shadow-sm">
+                    <h3 class="text-xs font-semibold mb-1 text-slate-500">梅特卡夫定律 (网络价值)</h3>
+                    <p class="text-sm font-mono text-indigo-700">\(V = k \cdot n^2 \approx\) <span id="network-value">1</span></p>
+                </div>
+                <div class="glass-panel p-3 rounded-lg border border-slate-200 shadow-sm">
+                    <h3 class="text-xs font-semibold mb-1 text-slate-500">并行加速 (阿姆达尔定律)</h3>
+                    <p class="text-sm font-mono text-emerald-700">\(S = \frac{1}{(1-p) + \frac{p}{n}} \approx\) <span id="speedup-factor">1.0</span>x</p>
+                </div>
+            </div>
+
+            <!-- 协作提示 -->
+            <div id="status-msg" class="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-slate-800 text-white text-xs opacity-0 transition-opacity">
+                新贡献已提交到 Fork 分支
+            </div>
+
+            <!-- SVG 绘图区 -->
+            <svg id="git-graph" class="w-full h-full">
+                <defs>
+                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="#cbd5e1" />
+                    </marker>
+                </defs>
+                <g id="links-layer"></g>
+                <g id="nodes-layer"></g>
+            </svg>
+        </main>
+
+        <!-- 控制栏 -->
+        <footer class="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="flex flex-col gap-1">
+                <button onclick="commitMain()" class="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition">
+                    主干提交 (Commit)
+                </button>
+                <p class="text-[10px] text-slate-400 text-center">直接维护 Upstream 代码</p>
+            </div>
+            
+            <div class="flex flex-col gap-1 border-l pl-4">
+                <button onclick="createFork()" class="w-full py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition">
+                    创建分叉 (Fork)
+                </button>
+                <p class="text-[10px] text-slate-400 text-center">复制独立开发链路</p>
+            </div>
+
+            <div class="flex flex-col gap-1">
+                <button onclick="commitFork()" id="btn-fork-commit" disabled class="w-full py-2 px-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition disabled:opacity-30 disabled:cursor-not-allowed">
+                    分支贡献 (Push)
+                </button>
+                <p class="text-[10px] text-slate-400 text-center">在分叉空间并行开发</p>
+            </div>
+
+            <div class="flex flex-col gap-1 border-l pl-4">
+                <button onclick="mergePR()" id="btn-merge" disabled class="w-full py-2 px-4 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition disabled:opacity-30 disabled:cursor-not-allowed">
+                    合并请求 (PR Merge)
+                </button>
+                <p class="text-[10px] text-slate-400 text-center">三方合并至主干演进版本</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const svg = document.getElementById('git-graph');
+        const nodesLayer = document.getElementById('nodes-layer');
+        const linksLayer = document.getElementById('links-layer');
+        
+        let nodes = [];
+        let forks = []; // { id, headId, yOffset }
+        let currentMainHead = null;
+        let selectedFork = null;
+        let contributors = 1;
+        let version = { major: 1, minor: 0, patch: 0 };
+
+        const CONFIG = {
+            nodeSpacing: 80,
+            mainY: 0,
+            forkSpacing: 60,
+            nodeRadius: 6
+        };
+
+        // 初始化
+        function init() {
+            const centerX = 60;
+            const centerY = svg.clientHeight / 2;
+            CONFIG.mainY = centerY;
+            
+            const root = createNode(centerX, centerY, 'main', null, "Initial Commit");
+            nodes.push(root);
+            currentMainHead = root;
+            updateUI();
+            render();
+        }
+
+        function createNode(x, y, type, parentIds, label) {
+            return {
+                id: 'node-' + Date.now() + Math.random().toString(36).substr(2, 5),
+                x, y, type,
+                parentIds: parentIds ? (Array.isArray(parentIds) ? parentIds : [parentIds]) : [],
+                timestamp: Date.now(),
+                label: label
+            };
+        }
+
+        function commitMain() {
+            const nextX = currentMainHead.x + CONFIG.nodeSpacing;
+            const newNode = createNode(nextX, CONFIG.mainY, 'main', currentMainHead.id, "Feature");
+            nodes.push(newNode);
+            currentMainHead = newNode;
+            
+            version.minor++;
+            updateUI();
+            render();
+            showMsg("主干代码已更新");
+        }
+
+        function createFork() {
+            const forkId = 'fork-' + forks.length;
+            const yOffset = (forks.length % 2 === 0 ? 1 : -1) * (Math.floor(forks.length / 2) + 1) * CONFIG.forkSpacing;
+            const y = CONFIG.mainY + yOffset;
+            
+            const newNode = createNode(currentMainHead.x + 40, y, 'fork', currentMainHead.id, "Fork Base");
+            nodes.push(newNode);
+            
+            const newFork = { id: forkId, headId: newNode.id, yOffset: yOffset };
+            forks.push(newFork);
+            selectedFork = newFork;
+            contributors++;
+            
+            updateUI();
+            render();
+            showMsg("建立了新的独立分叉空间");
+        }
+
+        function commitFork() {
+            if (!selectedFork) return;
+            const parent = nodes.find(n => n.id === selectedFork.headId);
+            const nextX = parent.x + CONFIG.nodeSpacing;
+            const newNode = createNode(nextX, parent.y, 'fork', parent.id, "Contribution");
+            nodes.push(newNode);
+            selectedFork.headId = newNode.id;
+            
+            updateUI();
+            render();
+            showMsg("贡献者正在并行工作...");
+        }
+
+        function mergePR() {
+            if (!selectedFork) return;
+            const forkHead = nodes.find(n => n.id === selectedFork.headId);
+            
+            // 严禁无基准合并：Fork Head 必须存在
+            // 因果一致性：Merge 节点时间戳必晚于双亲
+            const nextX = Math.max(currentMainHead.x, forkHead.x) + CONFIG.nodeSpacing;
+            const mergeNode = createNode(nextX, CONFIG.mainY, 'main', [currentMainHead.id, forkHead.id], "Merge PR");
+            
+            nodes.push(mergeNode);
+            currentMainHead = mergeNode;
+            
+            // 版本演进逻辑 (SemVer)
+            version.patch++;
+            
+            // 合并后该 Fork 完成使命，从待合并队列移除
+            forks = forks.filter(f => f.id !== selectedFork.id);
+            selectedFork = forks.length > 0 ? forks[0] : null;
+
+            updateUI();
+            render();
+            showMsg("代码审计通过，合并入主干版本");
+        }
+
+        function updateUI() {
+            document.getElementById('version-display').textContent = `v${version.major}.${version.minor}.${version.patch}`;
+            document.getElementById('contributor-count').textContent = contributors;
+            
+            // 梅特卡夫定律: 价值与用户数平方成正比
+            const val = Math.pow(contributors, 2);
+            document.getElementById('network-value').textContent = val;
+
+            // 阿姆达尔定律: 假设并行比例 p = 0.8
+            const p = 0.8;
+            const speedup = 1 / ((1 - p) + p / contributors);
+            document.getElementById('speedup-factor').textContent = speedup.toFixed(1);
+
+            document.getElementById('btn-fork-commit').disabled = forks.length === 0;
+            document.getElementById('btn-merge').disabled = !selectedFork;
+        }
+
+        function render() {
+            nodesLayer.innerHTML = '';
+            linksLayer.innerHTML = '';
+
+            // 绘制边
+            nodes.forEach(node => {
+                node.parentIds.forEach(pid => {
+                    const parent = nodes.find(n => n.id === pid);
+                    if (parent) {
+                        const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                        const d = `M ${parent.x} ${parent.y} C ${(parent.x + node.x)/2} ${parent.y}, ${(parent.x + node.x)/2} ${node.y}, ${node.x} ${node.y}`;
+                        line.setAttribute("d", d);
+                        line.setAttribute("fill", "none");
+                        line.setAttribute("stroke", node.type === 'main' ? "#94a3b8" : "#94a3b8");
+                        line.setAttribute("stroke-width", "2");
+                        line.setAttribute("marker-end", "url(#arrowhead)");
+                        line.classList.add("path-link");
+                        linksLayer.appendChild(line);
+                    }
+                });
+            });
+
+            // 绘制节点
+            nodes.forEach(node => {
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute("cx", node.x);
+                circle.setAttribute("cy", node.y);
+                circle.setAttribute("r", CONFIG.nodeRadius);
+                circle.setAttribute("fill", node.type === 'main' ? "#4f46e5" : "#10b981");
+                circle.setAttribute("stroke", "#fff");
+                circle.setAttribute("stroke-width", "2");
+                circle.classList.add("commit-node");
+                
+                // 如果是最新节点，添加动画
+                if (node.id === currentMainHead.id || forks.some(f => f.headId === node.id)) {
+                    const ring = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                    ring.setAttribute("cx", node.x);
+                    ring.setAttribute("cy", node.y);
+                    ring.setAttribute("r", CONFIG.nodeRadius);
+                    ring.setAttribute("fill", node.type === 'main' ? "#4f46e5" : "#10b981");
+                    ring.classList.add("node-new");
+                    g.appendChild(ring);
+                }
+
+                g.appendChild(circle);
+                
+                // 简单的版本/文字标签
+                if (node.id === currentMainHead.id) {
+                    const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                    text.setAttribute("x", node.x);
+                    text.setAttribute("y", node.y - 15);
+                    text.setAttribute("text-anchor", "middle");
+                    text.setAttribute("class", "text-[10px] font-bold fill-indigo-600");
+                    text.textContent = "HEAD";
+                    g.appendChild(text);
+                }
+
+                nodesLayer.appendChild(g);
+            });
+
+            // 自动滚动 SVG (简单实现)
+            const maxXRendering = Math.max(...nodes.map(n => n.x));
+            if (maxXRendering > svg.clientWidth - 100) {
+                const viewBoxX = maxXRendering - (svg.clientWidth - 100);
+                svg.setAttribute("viewBox", `${viewBoxX} 0 ${svg.clientWidth} ${svg.clientHeight}`);
+            } else {
+                svg.setAttribute("viewBox", `0 0 ${svg.clientWidth} ${svg.clientHeight}`);
+            }
+        }
+
+        function showMsg(txt) {
+            const el = document.getElementById('status-msg');
+            el.textContent = txt;
+            el.style.opacity = '1';
+            setTimeout(() => { el.style.opacity = '0'; }, 2000);
+        }
+
+        window.addEventListener('resize', () => {
+            const centerY = svg.clientHeight / 2;
+            const diff = centerY - CONFIG.mainY;
+            nodes.forEach(n => n.y += diff);
+            CONFIG.mainY = centerY;
+            render();
+        });
+
+        init();
+    </script>
+</body>
+</html>

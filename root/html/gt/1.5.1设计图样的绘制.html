@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>通用技术：设计图样的绘制 知识纲要</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f8f9fa;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      color: #1a5276;
+      border-bottom: 2px solid #2980b9;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #2874a6;
+      margin-top: 25px;
+    }
+    .section {
+      background: #eaf7ff;
+      padding: 15px;
+      margin: 20px 0;
+      border-left: 4px solid #2980b9;
+      border-radius: 4px;
+    }
+    ul, ol {
+      margin-left: 20px;
+    }
+    .example {
+      background: #f0f8ff;
+      padding: 8px;
+      margin: 8px 0;
+      border-left: 2px solid #aad5ff;
+      font-style: italic;
+      color: #555;
+    }
+    .note {
+      font-size: 0.95em;
+      color: #666;
+    }
+    .highlight {
+      background-color: #fffacd;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>通用技术 · 设计图样的绘制</h1>
+<p class="note">依据苏教版《技术与设计1》第五章及学业水平考试要求整理</p>
+
+<div class="section">
+  <h2>一、技术语言及其应用</h2>
+  <p><strong>技术语言</strong>：在技术活动中进行信息交流的特有语言形式。</p>
+  <ul>
+    <li><strong>常见类型</strong>：
+      <ul>
+        <li>口头语言（方案讨论、评价）</li>
+        <li>技术图样（三视图、电路图等）</li>
+        <li>图表（表格、效果图、流程图）</li>
+        <li>模型（实物/数字模型）</li>
+        <li>符号（电子元件符号、安全标识）</li>
+        <li>计算机演示（动态仿真）</li>
+      </ul>
+    </li>
+    <li><strong>特点</strong>：
+      <ul>
+        <li>言简意赅</li>
+        <li>通俗直观</li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>二、设计表现图：草图的绘制</h2>
+  
+  <h3>1. 草图的分类</h3>
+  <ul>
+    <li><strong>构思草图</strong>：快速记录设计灵感，形式自由</li>
+    <li><strong>设计草图</strong>：经整理、修改后的正式方案草图</li>
+  </ul>
+
+  <h3>2. 徒手绘图要领</h3>
+  <ul>
+    <li>握笔姿势正确，线条流畅</li>
+    <li>先画大轮廓，再细化细节</li>
+  </ul>
+
+  <h3>3. 网格法徒手画技巧</h3>
+  <ul>
+    <li>与地面<strong>垂直</strong>的线 → <strong>垂直画</strong></li>
+    <li>与地面<strong>平行</strong>的线 → 按<strong>网格斜线方向</strong>画</li>
+    <li>利用网格小格确定比例关系</li>
+  </ul>
+
+  <h3>4. 草图绘制步骤</h3>
+  <ol>
+    <li>选用合适铅笔（如2H）</li>
+    <li>画出产品外观比例关系</li>
+    <li>在网格纸上画透视轮廓</li>
+    <li>添加中间色调</li>
+    <li>描画亮部与高光</li>
+    <li>绘制放置平面的阴影</li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>三、常见的技术图样</h2>
+
+  <h3>1. 正投影与三视图</h3>
+  <p><strong>正投影法</strong>：投影光线与投影面垂直，真实反映物体形状。</p>
+  <p><strong>三视图组成</strong>：
+    <ul>
+      <li><strong>主视图</strong>：从前向后投影，反映长和高</li>
+      <li><strong>俯视图</strong>：从上向下投影，反映长和宽</li>
+      <li><strong>左视图</strong>：从左向右投影，反映高和宽</li>
+    </ul>
+  </p>
+  <p><strong>三视图安置方式</strong>：
+    <ul>
+      <li>俯视图在主视图正下方</li>
+      <li>左视图在主视图正右方</li>
+    </ul>
+  </p>
+  <p><strong>投影规律（必记口诀）</strong>：</p>
+  <div class="highlight">主、俯视图 —— 长对正<br>
+  主、左视图 —— 高平齐<br>
+  俯、左视图 —— 宽相等</div>
+
+  <h3>2. 正等轴测图</h3>
+  <ul>
+    <li>能表现物体三维立体效果</li>
+    <li>三坐标轴夹角均为120°</li>
+    <li>Z轴垂直，X、Y轴与水平成30°</li>
+    <li>常用于产品效果图、概念展示</li>
+  </ul>
+
+  <h3>3. 其他技术图样</h3>
+  <ul>
+    <li><strong>剖视图</strong>：切开物体展示内部结构，用45°斜线表示材料</li>
+    <li><strong>机械加工图</strong>：包含三视图、标题栏、文字说明，是制造依据</li>
+    <li><strong>零件图与装配图</strong>：分别用于单个零件加工和整体组装</li>
+    <li><strong>电子线路图</strong>：用标准符号表示电路连接关系（需掌握常用元件符号）</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>四、形体的尺寸标注</h2>
+  
+  <h3>1. 尺寸标注三要素</h3>
+  <ul>
+    <li><strong>尺寸界线</strong>：从轮廓线、轴线或对称中心线引出</li>
+    <li><strong>尺寸线</strong>：必须单独画出，终端用箭头</li>
+    <li><strong>尺寸数字</strong>：表示真实大小，单位为毫米（mm）时可省略</li>
+  </ul>
+
+  <h3>2. 标注规则</h3>
+  <ul>
+    <li>水平尺寸：数字在尺寸线上方，字头朝上</li>
+    <li>垂直尺寸：数字在尺寸线左侧，字头朝左</li>
+    <li>整圆或大于半圆：标注直径，前加“⌀”</li>
+    <li>半圆或小于半圆：标注半径，前加“R”</li>
+    <li>做到：<strong>正确、完整、清晰、合理</strong></li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>五、计算机辅助设计（CAD）</h2>
+  
+  <h3>1. 特点与优势</h3>
+  <ul>
+    <li>生成虚拟三维模型</li>
+    <li>提高设计效率，降低成本</li>
+    <li>便于修改与优化，减小试错风险</li>
+    <li>激发设计灵感，支持多方案比选</li>
+  </ul>
+
+  <h3>2. 应用领域</h3>
+  <ul>
+    <li>建筑设计</li>
+    <li>产品设计（如大飞机、汽车）</li>
+    <li>服装设计</li>
+    <li>广告与工业造型</li>
+  </ul>
+
+  <h3>3. 绘图一般步骤</h3>
+  <ol>
+    <li>建立数字模型</li>
+    <li>渲染效果图</li>
+    <li>输出工程图样（含三视图、尺寸标注）</li>
+  </ol>
+</div>
+
+<p class="note" style="text-align: right; margin-top: 30px;">
+  整理时间：2025年12月3日<br>
+  适用年级：高中通用技术必修1（高一/高二）<br>
+  参考资料：苏教版《技术与设计1》第五章、学考专题复习课件、知识清单
+</p>
+
+</body>
+</html>

@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 人工智能通识课知识检测</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            --error: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+            --dark: #1a1a2e;
+            --darker: #16213e;
+            --card-bg: rgba(255, 255, 255, 0.08);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.7);
+            --border: rgba(255, 255, 255, 0.1);
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        /* 动态背景 */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            overflow: hidden;
+        }
+        
+        .bg-animation::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 80%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(240, 147, 251, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 40% 40%, rgba(118, 75, 162, 0.1) 0%, transparent 40%);
+            animation: bgFloat 20s ease-in-out infinite;
+        }
+        
+        @keyframes bgFloat {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(30px, -30px) rotate(5deg); }
+            66% { transform: translate(-20px, 20px) rotate(-5deg); }
+        }
+        
+        /* 主容器 */
+        .container {
+            display: flex;
+            min-height: 100vh;
+        }
+        
+        /* 侧边栏导航 */
+        .sidebar {
+            width: 300px;
+            background: var(--darker);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border);
+            padding: 20px;
+            overflow-y: auto;
+            max-height: 100vh;
+            position: sticky;
+            top: 0;
+        }
+        
+        .sidebar-header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 1.5em;
+            background: var(--primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+        
+        .score-display {
+            font-size: 2.5em;
+            font-weight: bold;
+            background: var(--secondary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .score-label {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+        
+        .course-list {
+            list-style: none;
+        }
+        
+        .course-item {
+            margin-bottom: 8px;
+        }
+        
+        .course-btn {
+            width: 100%;
+            padding: 14px 18px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .course-btn:hover {
+            background: rgba(102, 126, 234, 0.2);
+            border-color: rgba(102, 126, 234, 0.5);
+            transform: translateX(5px);
+        }
+        
+        .course-btn.active {
+            background: var(--primary);
+            border-color: transparent;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.4);
+        }
+        
+        .course-btn.completed {
+            border-left: 3px solid #38ef7d;
+        }
+        
+        .course-name {
+            font-size: 0.95em;
+        }
+        
+        .course-count {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+        
+        /* 主内容区 */
+        .main-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+            max-height: 100vh;
+        }
+        
+        .lesson-header {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 30px;
+            border: 1px solid var(--border);
+        }
+        
+        .lesson-title {
+            font-size: 1.8em;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea, #f093fb);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .lesson-progress {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .progress-bar {
+            flex: 1;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: var(--primary);
+            border-radius: 4px;
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .progress-text {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+        
+        /* 题目卡片 */
+        .question-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 25px;
+            border: 1px solid var(--border);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0;
+            transform: translateY(30px);
+            animation: slideIn 0.5s forwards;
+        }
+        
+        @keyframes slideIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .question-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .question-number {
+            display: inline-block;
+            background: var(--primary);
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+        
+        .question-type {
+            display: inline-block;
+            background: var(--secondary);
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            margin-left: 10px;
+        }
+        
+        .question-stem {
+            font-size: 1.1em;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            border-left: 4px solid var(--primary);
+        }
+        
+        /* 选择题选项 */
+        .options-list {
+            list-style: none;
+            margin-bottom: 20px;
+        }
+        
+        .option-item {
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .option-item:hover:not(.disabled) {
+            background: rgba(102, 126, 234, 0.15);
+            border-color: rgba(102, 126, 234, 0.5);
+            transform: translateX(10px);
+        }
+        
+        .option-item.selected {
+            background: rgba(102, 126, 234, 0.25);
+            border-color: #667eea;
+        }
+        
+        .option-item.correct {
+            background: rgba(56, 239, 125, 0.25);
+            border-color: #38ef7d;
+        }
+        
+        .option-item.wrong {
+            background: rgba(235, 51, 73, 0.25);
+            border-color: #eb3349;
+        }
+        
+        .option-item.disabled {
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        
+        .option-marker {
+            width: 35px;
+            height: 35px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        
+        .option-item.selected .option-marker {
+            background: #667eea;
+        }
+        
+        .option-item.correct .option-marker {
+            background: #38ef7d;
+        }
+        
+        .option-item.wrong .option-marker {
+            background: #eb3349;
+        }
+        
+        /* 简答题输入框 */
+        .short-answer-input {
+            width: 100%;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 1em;
+            resize: vertical;
+            min-height: 100px;
+            transition: all 0.3s;
+        }
+        
+        .short-answer-input:focus {
+            outline: none;
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.1);
+        }
+        
+        .short-answer-input.disabled {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        
+        /* 提交按钮 */
+        .submit-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 12px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .submit-btn:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.5);
+        }
+        
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .submit-btn.submitted {
+            background: var(--success);
+        }
+        
+        /* 答案解析 */
+        .answer-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: rgba(56, 239, 125, 0.1);
+            border-radius: 12px;
+            border-left: 4px solid #38ef7d;
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .answer-section.show {
+            display: block;
+        }
+        
+        .answer-title {
+            font-weight: bold;
+            color: #38ef7d;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .answer-content {
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+        
+        .wrong-answer-section {
+            background: rgba(235, 51, 73, 0.1);
+            border-left-color: #eb3349;
+        }
+        
+        .wrong-answer-section .answer-title {
+            color: #eb3349;
+        }
+        
+        /* 完成徽章 */
+        .completion-badge {
+            display: none;
+            text-align: center;
+            padding: 40px;
+            background: var(--card-bg);
+            border-radius: 16px;
+            margin-top: 30px;
+        }
+        
+        .completion-badge.show {
+            display: block;
+            animation: celebrate 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+        
+        @keyframes celebrate {
+            0% { transform: scale(0.5); opacity: 0; }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .badge-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+        
+        .badge-title {
+            font-size: 1.8em;
+            background: var(--secondary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 15px;
+        }
+        
+        /* 分数动画 */
+        .score-anim {
+            display: inline-block;
+            animation: scorePop 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+        
+        @keyframes scorePop {
+            0% { transform: scale(0.5); }
+            50% { transform: scale(1.3); }
+            100% { transform: scale(1); }
+        }
+        
+        /* 响应式 */
+        @media (max-width: 1024px) {
+            .container {
+                flex-direction: column;
+            }
+            
+            .sidebar {
+                width: 100%;
+                max-height: 300px;
+                position: relative;
+            }
+            
+            .main-content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    
+    <div class="container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>🎯 知识检测</h1>
+                <div class="score-display" id="totalScore">0</div>
+                <div class="score-label">总分 / 1100 分</div>
+            </div>
+            <ul class="course-list" id="courseList">
+                <li class="course-item">
+                    <button class="course-btn active" onclick="loadCourse(&quot;第1课_人工智能发展现状&quot;)">
+                        <span class="course-name">第1课_人工智能发展现状</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第2课_人工智能前沿应用领域&quot;)">
+                        <span class="course-name">第2课_人工智能前沿应用领域</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第3课_人工智能的未来&quot;)">
+                        <span class="course-name">第3课_人工智能的未来</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第4课_人工智能数学基础知识&quot;)">
+                        <span class="course-name">第4课_人工智能数学基础知识</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第5课_特征工程&quot;)">
+                        <span class="course-name">第5课_特征工程</span>
+                        <span class="course-count">7题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第6课_机器学习基础&quot;)">
+                        <span class="course-name">第6课_机器学习基础</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第7课_神经网络入门&quot;)">
+                        <span class="course-name">第7课_神经网络入门</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第8课_卷积神经网络&quot;)">
+                        <span class="course-name">第8课_卷积神经网络</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第9课_人工智能赋能千行百业&quot;)">
+                        <span class="course-name">第9课_人工智能赋能千行百业</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第10课_自主可控与开源共享&quot;)">
+                        <span class="course-name">第10课_自主可控与开源共享</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第11课_算力共享&quot;)">
+                        <span class="course-name">第11课_算力共享</span>
+                        <span class="course-count">6题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第12课_人工智能赋能下的未来与人才&quot;)">
+                        <span class="course-name">第12课_人工智能赋能下的未来与人才</span>
+                        <span class="course-count">3题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第13课_智能感知技术&quot;)">
+                        <span class="course-name">第13课_智能感知技术</span>
+                        <span class="course-count">7题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第14课_自然语言处理&quot;)">
+                        <span class="course-name">第14课_自然语言处理</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第15课_生成式人工智能&quot;)">
+                        <span class="course-name">第15课_生成式人工智能</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第16课_智能体与具身智能&quot;)">
+                        <span class="course-name">第16课_智能体与具身智能</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第17课_数据处理与特征工程&quot;)">
+                        <span class="course-name">第17课_数据处理与特征工程</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第18课_模型训练与评估&quot;)">
+                        <span class="course-name">第18课_模型训练与评估</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第19课_人工智能系统运维&quot;)">
+                        <span class="course-name">第19课_人工智能系统运维</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第20课_模型部署与应用集成&quot;)">
+                        <span class="course-name">第20课_模型部署与应用集成</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第21课_人工智能工程设计&quot;)">
+                        <span class="course-name">第21课_人工智能工程设计</span>
+                        <span class="course-count">5题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第22课_算法公平性与偏见治理&quot;)">
+                        <span class="course-name">第22课_算法公平性与偏见治理</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第23课_人工智能安全与隐私保护&quot;)">
+                        <span class="course-name">第23课_人工智能安全与隐私保护</span>
+                        <span class="course-count">6题</span>
+                    </button>
+                </li>
+                <li class="course-item">
+                    <button class="course-btn " onclick="loadCourse(&quot;第24课_人工智能伦理与社会责任&quot;)">
+                        <span class="course-name">第24课_人工智能伦理与社会责任</span>
+                        <span class="course-count">4题</span>
+                    </button>
+                </li>
+            </ul>
+        </aside>
+        
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <div id="lessonContent">
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        // 题库数据
+        const quizData = {"第1课_人工智能发展现状": [{"题型": "单选", "题干": "在人工智能领域，关于生成式AI（Generative AI）与判别式AI（Discriminative AI）的核心区别，下列描述最准确的是？", "选项": {"A": "判别式AI的目标是学习数据的概率分布并创造新样本，而生成式AI用于分类", "B": "生成式AI侧重于学习特征与标签之间的边界，判别式AI侧重于理解事物的内在生成逻辑", "C": "生成式AI通过学习数据的联合概率分布来生成新内容，判别式AI通过学习条件概率来预测标签", "D": "判别式AI只能处理文本数据，而生成式AI只能处理图像和音视频数据"}, "正确答案": "C", "答案解析": "生成式AI（如GPT、Stable Diffusion）旨在学习数据的分布特征并尝试模拟生成新数据（联合概率）；判别式AI（如情感分类器、人脸识别）则是在已知特征的情况下判断其所属类别（条件概率）。A和B选项将两者概念混淆，D选项关于数据类型的限制不符合事实。"}, {"题型": "多选", "题干": "现代大语言模型（LLM）通常基于Transformer架构。关于该架构及其核心机制，下列哪些描述是正确的？", "选项": {"A": "自注意力机制（Self-Attention）是Transformer捕捉长距离依赖关系的关键", "B": "Transformer架构完全摒弃了RNN的递归结构，显著提升了训练的并行化能力", "C": "位置编码（Positional Encoding）的作用是向模型提供序列中词汇的相对或绝对位置信息", "D": "大模型仅由Encoder（编码器）组成，完全不需要Decoder（解码器）部分"}, "正确答案": "A、B、C", "答案解析": "A、B、C均为Transformer的核心特性。自注意力解决了长距离信息丢失问题，并行化提升了训练效率，位置编码弥补了模型对顺序感知的缺失。选项D错误，因为大模型架构多样，GPT系列主要是基于Decoder-only架构，而BERT是基于Encoder架构，T5则是完整的Encoder-Decoder架构。"}, {"题型": "单选", "题干": "在多模态大模型的实际应用中，以下哪一个场景最能体现其跨模态理解与生成的核心能力？", "选项": {"A": "将一篇中文长文章翻译成英文并保持语意一致", "B": "根据用户输入的复杂文字描述自动生成符合主题的绘画作品", "C": "在电子表格中通过输入公式自动计算多列数据的总和", "D": "在海量 PDF 文档中通过关键词快速定位特定的知识点"}, "正确答案": "B", "答案解析": "多模态 AI 的核心在于理解和处理不同类型（模态）的数据。B 选项涉及从文本模态到图像模态的跨越，体现了模型对文字语意的深层理解以及转化为视觉表象的生成能力。A 选项属于单模态（文本）的自然语言处理，C 和 D 属于传统的数据处理和信息检索。"}
+, {"题型": "简答", "题干": "请简述 AI Agent（人工智能智能体）相比于传统自动化脚本（Script）的核心特征，并说明其在复杂任务处理中的优势。", "选项": null, "正确答案": "AI Agent 的核心特征包括自主性、反应性、目标导向和工具使用能力。", "答案解析": "AI Agent 的核心特征包括自主性、反应性、目标导向和工具使用能力。与传统脚本依靠预定义的线性逻辑（If-Then）不同，Agent 能够基于大模型的推理能力，根据环境反馈动态拆解任务并规划路径。其优势在于能够处理具有不确定性的复杂任务，自主调用外部工具（如搜索、API 等）来解决脚本无法覆盖的边界案例。"}], "第2课_人工智能前沿应用领域": [{"题型": "单选", "题干": "在医疗影像分析领域，计算机视觉技术目前最核心的应用价值体现为？", "选项": {"A": "完全取代放射科医生进行独立的临床诊断", "B": "利用算法辅助医生进行病灶的自动检测与分割", "C": "通过软件算法直接提升CT设备的物理扫描速度", "D": "主要用于优化医院挂号系统的用户界面设计"}, "正确答案": "B", "答案解析": "在医疗领域，计算机视觉通过卷积神经网络等技术，能够高效地在CT、MRI等影像中识别出疑似病灶并进行精确的边界分割，从而辅助医生提高诊断效率和准确率，但目前的定位仍是辅助诊断而非完全替代医生。"}, {"题型": "多选", "题干": "在自动驾驶的环境感知系统中，以下哪些任务属于典型的计算机视觉应用？", "选项": {"A": "前方行人和动态车辆的目标检测", "B": "车道线识别与交通标志分类", "C": "基于语义分割的道路可行驶区域划定", "D": "通过车载诊断系统(OBD)监测发动机水温"}, "正确答案": "A、B、C", "答案解析": "自动驾驶的环境感知依赖摄像头捕获图像，核心视觉任务包括目标检测（识别行人车辆）、车道线/标志识别以及语义分割（理解场景中的道路区域）。发动机水温监测属于车辆自身的传感器数据采集，不涉及计算机视觉图像处理。"}, {"题型": "单选", "题干": "在Transformer架构中，哪项技术使其能够克服循环神经网络（RNN）在处理长序列时的并行化瓶颈？", "选项": {"A": "卷积神经层（CNN Layer）的引入", "B": "自注意力机制（Self-Attention Mechanism）", "C": "隐藏状态（Hidden State）的序列传递", "D": "最大池化（Max Pooling）技术"}, "正确答案": "B", "答案解析": "Transformer的核心是自注意力机制，它允许模型在处理序列时同时考虑所有位置的信息，实现了并行化计算，而传统的RNN必须按顺序逐个处理词元，难以并行且容易丢失长程依赖信息。"}, {"题型": "简答", "题干": "请列举出在AI for Science领域中，用于预测蛋白质三维结构的代表性AI模型名称，并简述该技术对生物医学研究的意义。", "选项": null, "正确答案": "AlphaFold（或AlphaFold2）", "答案解析": "代表性模型为DeepMind开发的AlphaFold。其意义在于通过AI极大提升了蛋白质结构预测的精度和速度，解决了困扰生物学界数十年的蛋白质折叠难题，对新药研发、酶工程和基础生命科学研究具有划时代的推动作用。"}], "第3课_人工智能的未来": [{"题型": "单选", "题干": "通用人工智能（AGI）与目前广泛应用的弱人工智能（Narrow AI）最核心的区别在于什么？", "选项": {"A": "是否具备跨领域的知识迁移、推理与自主学习能力", "B": "底层硬件是否使用了最先进的GPU或TPU加速芯片", "C": "处理特定任务（如图像识别）的准确率是否超过人类", "D": "是否能够通过图灵测试并与人类进行流畅的文本对话"}, "正确答案": "A", "答案解析": "AGI（通用人工智能）的目标是使机器能够像人类一样在多领域执行任务并具有通用认知能力。弱人工智能（Narrow AI）仅能在特定领域执行单一任务。选项B涉及硬件，C是弱人工智能也能达到的性能指标，D是衡量智能的一种手段而非AGI定义的本质区别。"}, {"题型": "多选", "题干": "在硬科技融合背景下，关于脑机接口（BCI）的基本原理与实现方式，以下表述正确的有？", "选项": {"A": "基本流程包括脑电信号的采集、预处理、特征提取与解码控制", "B": "必须通过开颅手术将电极植入大脑皮层方可获取神经信号", "C": "利用机器学习或深度学习算法将神经电信号转化为计算机可识别的指令", "D": "旨在建立大脑与外部设备（如机械臂、电脑）之间的直接通信链路"}, "正确答案": "A、C、D", "答案解析": "BCI的核心是信号的获取、解码与反馈（A/C/D）。B项错误，因为脑机接口分为侵入式、半侵入式和非侵入式，非侵入式（如佩戴式EEG头盔）无需手术即可采集脑电信号。"},  {
+    "题型": "单选",
+    "题干": "在高级人工智能系统的语境下，关于“算法偏见”（Algorithmic Bias）的深度理解，以下哪项描述最为准确？",
+    "选项": {
+      "A": "算法偏见仅产生于数据采集阶段，通过严格的数据清洗和标注即可从技术层面彻底根除",
+      "B": "算法偏见是源于训练数据的不均衡、算法架构的逻辑限制以及社会反馈循环的系统性产物",
+      "C": "算法中立性意味着只要代码逻辑在数学上是客观的，其输出结果就不会产生伦理风险",
+      "D": "算法偏见主要由程序员在编写核心代码时的个人主观倾向决定，而非受外部环境影响"
+    },
+    "正确答案": "B",
+    "答案解析": "算法偏见并非单一维度的错误，而是涉及从问题定义、数据收集、特征选择到模型部署后的社会反馈闭环。选项A、D过于片面，选项C忽视了数学逻辑本身可能承载的社会偏见。B选项完整描述了偏见的系统性来源。"
+  },
+  {
+    "题型": "多选",
+    "题干": "AI伦理对齐（Ethical Alignment）被认为是实现负责任AI最关键的挑战，以下哪些因素属于对齐过程中的核心障碍？",
+    "选项": {
+      "A": "人类价值观具有跨文化的多样性和动态演变性，难以转化为模型可处理的标量奖励函数",
+      "B": "模型可能出现“奖励黑客”（Reward Hacking）现象，即通过非预期的手段钻规则漏洞来获取高分",
+      "C": "在多目标优化中，技术效率、安全边界与社会公平之间往往存在难以调和的帕累托冲突",
+      "D": "现代大语言模型已经具备了完备的自我道德审查机制，不再需要人工参与对齐工作"
+    },
+    "正确答案": "A,B,C",
+    "答案解析": "对齐难题在于价值定义的模糊性（A）、优化目标的错位（B）以及复杂社会决策中的目标冲突（C）。选项D错误，因为目前的AI并不具备自主的道德意识，对齐仍需大量人工反馈（RLHF）和持续监督。"
+  },
+  {
+    "题型": "简答",
+    "题干": "面对生成式人工智能（AIGC）引发的大规模职业转型压力，请从政府治理、企业责任和个人适应三个维度，阐述应如何构建应对方案并兼顾公平伦理。",
+    "选项": null,
+    "正确答案": "政府应推动教育体系由“知识驱动”转向“创造力驱动”并建立韧性社会保障网.",
+    "答案解析": "优秀的回答应涵盖：政府应推动教育体系由“知识驱动”转向“创造力驱动”，并建立韧性社会保障网；企业应探索“人机协作”新型工作流程，在技术提效的同时关注员工职业尊严；个人需构建终身学习机制。核心伦理点在于防止技术红利被少数人垄断，通过政策引导实现包容性增长，避免数字鸿沟进一步拉大劳动力市场的不平等。"
+  }], "第4课_人工智能数学基础知识": [{"题型": "单选", "题干": "假设矩阵 A 的维度为 3x4，矩阵 B 的维度为 4x2，矩阵 C 的维度为 2x5。请问复合运算 ABC 的结果矩阵其维度是多少？", "选项": {"A": "3x2", "B": "4x5", "C": "3x5", "D": "4x2"}, "正确答案": "C", "答案解析": "根据矩阵乘法的维度匹配规则，一个 m x n 的矩阵与一个 n x p 的矩阵相乘，结果矩阵的维度为 m x p。计算 A(3x4) 乘以 B(4x2) 得到一个 3x2 的矩阵，该结果再乘以 C(2x5)，最终结果的维度为 3x5。"}, {"题型": "多选", "题干": "在数据分析和机器学习中，将数据点表示为向量。关于向量作为特征表示的意义，以下哪些说法是正确的？", "选项": {"A": "向量的每一个维度（分量）通常对应数据的一个特定属性或特征", "B": "向量在多维空间中的几何距离（如欧几里得距离）可以用来衡量样本间的相似性", "C": "所有的特征向量都必须经过单位化处理（模长为1）才能进行矩阵运算", "D": "矩阵与向量相乘可以看作是对该特征向量进行了一种线性变换，如旋转或缩放"}, "正确答案": "A、B、D", "答案解析": "A选项正确，向量的分量即代表特征空间中的坐标；B选项正确，空间距离是衡量数据相似度的常用指标；C选项错误，单位化是常用的预处理手段但并非矩阵运算的强制前提；D选项正确，矩阵作用于向量在几何上表现为线性变换。"}, {"题型": "单选", "题干": "在多元函数的优化问题中，梯度向量在某一点处的方向具有明确的几何含义，下列描述正确的是：", "选项": {"A": "该点处函数值减小最快的方向", "B": "该点处函数值增加最快的方向", "C": "该点处等高线的切线方向", "D": "该点处二阶导数最大的方向"}, "正确答案": "B", "答案解析": "梯度向量的定义决定了它指向函数值增长速度最快的方向。在梯度下降算法中，我们取其反方向（负梯度方向）来寻找函数的极小值点。"}, {"题型": "单选", "题干": "在贝叶斯推理中，当我们获得新的观测数据并希望更新对某个随机变量分布的认知时，'后验概率'的直观理解是：", "选项": {"A": "在没有任何数据支持下的主观猜测", "B": "新数据本身发生的独立概率", "C": "综合了先验知识与新观测证据后的修正认知", "D": "与先验概率完全无关的实验频率值"}, "正确答案": "C", "答案解析": "贝叶斯公式的核心逻辑是将'先验概率'（旧的认知）与'似然度'（新证据提供的支持）相结合，从而得到更新后的'后验概率'（新的认知）。"}, {"题型": "简答", "题干": "请结合梯度下降算法的原理，解释为什么在训练机器学习模型时，通常将参数沿着'梯度的反方向'进行更新？", "选项": null, "正确答案": "沿梯度负方向更新可最小化损失函数。", "答案解析": "在机器学习中，我们的目标是最小化损失函数。由于梯度向量指向的是函数值上升（增加）最快的方向，为了达到'下降'到极小值的目的，我们必须反其道而行之，即沿着梯度的负方向更新参数。这种移动方式在局部范围内保证了函数值能够以最快的效率降低。"}], "第5课_特征工程": [{"题型": "单选", "题干": "在处理数值型连续变量的缺失值时，如果原始数据分布呈现明显的偏态（存在极端大值或小值），为了保证填充策略的稳健性，通常优先选择哪种统计量进行填充？", "选项": {"A": "算术平均值", "B": "中位数", "C": "众数", "D": "随机固定值"}, "正确答案": "B", "答案解析": "算术平均值极易受到极端异常值的影响，而中位数作为分位数的一种，能够更好地代表偏态分布数据的集中趋势，具有更强的鲁棒性（稳健性）。"}, {"题型": "多选", "题干": "未处理的异常值（Outliers）通常会给数据分析和模型建模带来哪些负面影响？", "选项": {"A": "导致线性回归模型的拟合直线偏离绝大多数数据点的趋势", "B": "使得基于距离计算的算法（如K-Means聚类）结果失效", "C": "人为夸大数据的方差，降低模型预测的稳定性", "D": "自动提高分类模型的准确率"}, "正确答案": "A、B、C", "答案解析": "异常值会拉动均值和方差，直接干扰线性回归的最小二乘法估计（A项）；由于其数值巨大或极小，会显著改变欧氏距离的计算，影响聚类中心（B项）；异常值产生的额外噪声会增大模型方差，降低泛化能力（C项）。D项描述错误，异常值通常会降低模型表现。"}, {"题型": "单选", "题干": "在特征工程中，关于One-Hot编码（独热编码）的适用性，下列说法最准确的是：", "选项": {"A": "适用于处理具有高基数（类别数量极多）的定类特征，以保留所有细节", "B": "适用于处理类别之间存在明显等级、顺序关系的定序特征", "C": "适用于类别数量较少且各类别之间不存在逻辑顺序关系的定类特征", "D": "适用于将连续型数值特征直接转化为多个二进制特征以提高模型非线性表达"}, "正确答案": "C", "答案解析": "One-Hot编码主要用于无序的分类特征。如果类别过多（高基数），会导致特征空间过于稀疏，不建议直接使用；如果特征有顺序关系（如等级），使用序号编码（Label Encoding）更能保留特征含义；对于连续变量，通常采用分桶而非直接独热编码。因此类别较少且无序的场景是其最佳适用范围。"}, {"题型": "简答", "题干": "假设你正在为一个外卖平台设计'用户复购预测'模型。现有业务数据包含：用户最近三笔订单的'下单时间'和'订单金额'。请结合业务场景，利用这些原始数据构造两个能反映用户消费习惯的衍生特征，并简述其构造逻辑。", "选项": null, "正确答案": "平均下单间隔、订单金额变动趋势（或其他合理特征）", "答案解析": "特征1：平均下单间隔。构造逻辑：计算最近三笔订单两两之间的时间差，再求平均值。该特征反映了用户的消费频率。特征2：订单金额变动趋势。构造逻辑：用最近一笔订单金额减去前两笔的平均金额。该特征反映了用户消费力的变化情况。"}, {"题型": "单选", "题干": "在构建高维数据的机器学习模型时，为了在保留数据物理含义的同时提升泛化能力，以下哪种特征工程的操作序列在逻辑上最为严谨且最能有效避免信息泄露与冗余？", "选项": {"A": "特征衍生（交叉项）→ 缺失值填充 → 极大极小标准化 → 主成分分析（PCA）", "B": "数据清洗（去噪/填充）→ 包装法特征选择（Wrapper）→ 特征标准化 → 模型训练", "C": "缺失值填充 → 特征衍生 → 特征标准化 → 过滤法特征选择（Filter）→ 模型评估", "D": "特征标准化 → 缺失值填充 → 嵌入法特征选择（Embedded）→ 维度重构"}, "正确答案": "C", "答案解析": "C选项遵循了最严谨的特征工程逻辑：1. 缺失值填充是数据可用的前提；2. 特征衍生应在标准化前，利用原始数值含义捕捉交互信息；3. 标准化消除量纲影响，是后续特征选择（如基于相关系数的过滤法）的必要步骤；4. 过滤法能在进入模型前快速去除无关特征，降低复杂度。"}, {"题型": "多选", "题干": "关于降维（Dimensionality Reduction）与特征选择（Feature Selection）的区别与联系，下列描述中正确的有哪些？", "选项": {"A": "特征选择后的特征是原始特征集的子集，不改变特征的物理坐标轴含义", "B": "降维技术（如PCA、LDA）通过数学变换产生新的特征空间，通常会丢失原始特征的可解释性", "C": "特征选择主要用于解决过拟合，而降维主要用于加速模型训练，二者目的截然不同", "D": "两者都能在一定程度上缓解维度灾难（Curse of Dimensionality），降低计算资源消耗"}, "正确答案": "A、B、D", "答案解析": "A和B准确描述了二者的本质区别：特征选择是'选子集'，物理意义不变；降维是'空间映射'，会产生含义模糊的新特征。D描述了它们的共同点。C错误，因为两者的共同目标都包括了减少过拟合、加速训练和降低计算复杂度，而非截然不同。"}, {"题型": "多选", "题干": "在应用基于欧氏距离（Euclidean Distance）的算法（如KNN、K-Means、SVM等）前，如果没有对数据进行特征标准化（Standardization），可能会引发哪些严重问题？", "选项": {"A": "数值量纲较大的特征在距离计算中占据绝对主导地位，使小量纲特征的信息被掩盖", "B": "梯度下降法在寻找最优解时，其等高线会呈细长椭圆状，导致收敛速度极慢甚至无法收敛", "C": "模型会错误地认为单位不同但数值差异大的特征对预测结果的影响更大", "D": "会导致模型自动识别并剔除那些方差较小的特征，造成严重的欠拟合"}, "正确答案": "A、B、C", "答案解析": "A和C描述了量纲对距离计算的负面影响：距离敏感算法会将大数值视为'距离远'，从而忽视小数值特征的区分度。B描述了标准化对优化算法的影响，未标准化的数据会增加优化难度。D错误，标准化本身不会剔除特征，且方差小不代表特征无效。"}], "第6课_机器学习基础": [{"题型": "单选", "题干": "下列场景中，哪一个是典型的机器学习应用而非传统编程逻辑？", "选项": {"A": "财务软件根据国家法律规定的固定公式计算个人所得税", "B": "电子邮箱通过分析数百万封已知垃圾邮件的特征，自动拦截新的可疑邮件", "C": "文字处理软件在用户按下快捷键后将选中的文本加粗", "D": "计算器根据输入的数字执行加减乘除运算"}, "正确答案": "B", "答案解析": "机器学习的核心特征是从数据中学习。选项B中，系统通过分析数据（垃圾邮件特征）来自动识别新邮件，而非由人编写死板的拦截规则。选项A、C、D均为基于固定指令和规则的传统编程应用。"}, {"题型": "多选", "题干": "在机器学习中，关于'模型（Model）'的角色和特征，以下描述正确的有：", "选项": {"A": "模型是机器学习算法在训练数据上运行后生成的产物", "B": "模型可以被看作是从输入数据到输出结果的映射函数", "C": "模型一旦生成，其预测的准确性通常取决于训练数据的质量", "D": "模型是指运行机器学习算法时所使用的计算机硬件配置"}, "正确答案": "A、B、C", "答案解析": "模型是算法从数据中提取出的规律的载体（A），它表现为一种数学上的映射关系（B），且其表现受数据质量的直接影响（C）。选项D混淆了软件层面的数学模型与硬件设备的概念。"}, {"题型": "单选", "题干": "以下哪种场景属于典型的无监督学习（Unsupervised Learning）应用案例？", "选项": {"A": "根据历史气温和湿度数据预测明天的降水量", "B": "根据已标注的邮件样本将新邮件自动分类为垃圾邮件或正常邮件", "C": "根据电商平台用户的购买记录，将具有相似消费习惯的用户自动聚类为不同群体", "D": "通过大量带有'猫'或'狗'标签的图片训练模型，使其能识别新图片中的动物"}, "正确答案": "C", "答案解析": "无监督学习的主要特点是处理没有标签（Label）的数据，旨在发现数据内部的结构或模式。选项C中的用户聚类（Clustering）不需要预先标注分类标签，而是根据特征相似度进行自动划分，属于典型的无监督学习。"}, {"题型": "单选", "题干": "在标准的机器学习开发流程中，以下步骤的先后逻辑排序最合理的是：", "选项": {"A": "模型训练 → 数据清洗 → 特征工程 → 模型评估", "B": "数据采集 → 数据清洗 → 特征工程 → 模型训练 → 模型评估", "C": "特征工程 → 模型评估 → 数据采集 → 数据清洗", "D": "数据清洗 → 数据采集 → 模型训练 → 模型部署"}, "正确答案": "B", "答案解析": "科学的机器学习流程通常遵循：1. 数据采集（获取原始素材）；2. 数据清洗（处理异常、缺失和噪声）；3. 特征工程（将数据转化为模型更易理解的格式）；4. 模型训练（通过算法拟合数据）；5. 模型评估（验证模型效果）。"}, {"题型": "简答", "题干": "请简述监督学习（Supervised Learning）与无监督学习（Unsupervised Learning）的核心区别，并简要解释为什么在模型训练之前必须进行'特征工程'？", "选项": null, "正确答案": "核心区别在于是否有标签；特征工程用于筛选转换特征以提升模型表现。", "答案解析": "1. 核心区别：监督学习的数据集包含输入和对应的正确答案（标签），目标是学习输入到输出的映射；无监督学习的数据集不包含标签，目标是探索数据本身的分布规律或结构。 2. 特征工程的重要性：原始数据往往包含大量无关信息或格式不规范，特征工程通过筛选、转换和提取关键特征，能够显著提高模型的训练速度和预测准确度，是决定模型性能上限的关键步骤。"}], "第7课_神经网络入门": [{"题型": "单选", "题干": "在人工神经元模型中，哪一个部分最能体现'不同因素对决策影响程度不同'这一特点？", "选项": {"A": "输入特征", "B": "权重", "C": "激活函数", "D": "输出结果"}, "正确答案": "B", "答案解析": "权重（Weight）的大小决定了输入信号对最终结果的影响力。在模拟决策时，权重数值越大代表该项因素越被重视，这与生物神经元中突触连接强度的概念相类比。"}, {"题型": "多选", "题干": "在模拟'是否购买某件商品'的神经元决策模型中，以下哪些项属于该模型的核心组成部分？", "选项": {"A": "商品的单价、评分等基础数据作为输入", "B": "用户对价格或品牌偏好程度的权重", "C": "将各项加权结果汇总并决定是否购买的逻辑（激活函数）", "D": "存储数据的电脑硬件外观设计"}, "正确答案": "A、B、C", "答案解析": "一个完整的人工神经元模型包含：1.输入特征（数据）；2.权重（对数据的重视程度）；3.求和与激活函数（决策处理）。选项D属于外部物理环境，不属于神经元数学模型的组成部分。"}, {"题型": "单选", "题干": "在深度神经网络架构中，如果将隐藏层的非线性激活函数全部替换为线性函数，其后果是什么？", "选项": {"A": "模型将无法通过反向传播算法更新权重", "B": "整个多层网络在数学上将等同于一个单层的线性模型", "C": "模型的计算复杂度会大幅增加，导致训练速度变慢", "D": "模型会自动获得更强的抗过拟合能力"}, "正确答案": "B", "答案解析": "根据线性代数的性质，多个线性变换的复合仍然是一个线性变换。如果隐藏层没有非线性激活函数，无论堆叠多少层，其表达能力都仅限于线性映射，无法处理非线性可分的问题，这使得深层架构失去了意义。"}, {"题型": "简答", "题干": "请简述神经网络中'输入层'、'隐藏层'和'输出层'各自的主要功能，并说明为什么隐藏层通常被认为是特征提取的核心？", "选项": null, "正确答案": "输入层接收数据，隐藏层映射提取抽象特征，输出层映射任务目标。", "答案解析": "输入层负责接收原始数据（如像素值）；隐藏层通过权重矩阵和非线性激活函数，将原始数据从低维度空间映射到高维度特征空间，逐层提取更抽象、更有利于分类或回归的特征，因此是特征提取的核心；输出层则将最后得到的特征表示映射到具体的任务目标（如分类概率或预测数值）。"}], "第8课_卷积神经网络": [{"题型": "单选", "题干": "在卷积神经网络中，卷积核（Kernel/Filter）的主要作用是什么？", "选项": {"A": "提取输入数据的局部特征", "B": "随机打乱输入数据的排列顺序", "C": "将多维矩阵压缩为一维向量以减少计算", "D": "仅用于增加神经网络的深度而不改变特征"}, "正确答案": "A", "答案解析": "卷积核通过在输入图像或特征图上滑动并执行点积运算，其核心目的在于捕捉局部空间特征，如边缘、纹理、形状等。这是卷积层最基础且最重要的功能。"}, {"题型": "单选", "题干": "在卷积层进行前向传播计算时，同一个卷积核在图像不同位置滑动过程中，其参数（权重）是如何变化的？", "选项": {"A": "参数会根据所覆盖像素的亮度自动调整", "B": "每移动一个步幅，参数都会被重新随机初始化", "C": "参数在整个滑动过程中保持不变（权值共享）", "D": "参数会随着滑动位置的右移而逐渐增大"}, "正确答案": "C", "答案解析": "卷积神经网络具有'权值共享'的特性。这意味着在同一次前向传播中，同一个卷积核在遍历整张图像时使用的是完全相同的参数。这一特性极大减少了模型的参数数量，并赋予了模型平移不变性。"}, {"题型": "单选", "题干": "在对比卷积神经网络（CNN）与传统计算机视觉识别方法时，关于 CNN 能够有效提取图像特征的核心机制，以下描述最完整且准确的是：", "选项": {"A": "CNN 依赖人工预设的多种滤波器模板", "B": "CNN 通过局部感受野、权值共享以及多层级联结构，实现了平移不变性并能自动构建从低级到高级的特征层次", "C": "CNN 的全连接层负责提取图像的空间拓扑结构，而卷积层仅负责线性组合", "D": "CNN 通过大幅增加神经元连接数量记录所有图像变换"}, "正确答案": "B", "答案解析": "CNN 的核心优势在于其架构设计：局部感受野利用了图像的空间相关性；权值共享显著减少了参数量并提供了平移不变性；多层结构则实现了从简单纹理到复杂语义特征的自动学习。"}, {"题型": "单选", "题干": "在设计用于复杂场景下特定物体识别的 CNN 架构时，为了同时兼顾捕捉多尺度特征信息并缓解深层网络中的梯度消失问题，以下哪种组合策略最为科学？", "选项": {"A": "所有层后使用 Sigmoid，仅采用大尺寸卷积核", "B": "移除所有池化层，改用全连接层直接处理像素", "C": "引入残差连接（Residual Connection）结构，并结合不同感受野大小的并行卷积分支（如 Inception 模块）", "D": "限制网络层数在 5 层以内，使用 L1 正则化"}, "正确答案": "C", "答案解析": "残差连接通过恒等映射为梯度提供了捷径，有效解决了深层网络的梯度消失问题；并行不同尺寸的卷积核则允许网络在同一层提取不同尺度的空间特征。"}, {"题型": "简答", "题干": "结合具体应用场景，从'算法公平性'与'隐私保护'两个维度，阐述部署 AI 识别系统时应如何预防潜在风险，并提出至少两项具体的技术或管理改进建议。", "选项": null, "正确答案": "数据多样性/偏见审计；最小必要原则/联邦学习/差分隐私；第三方审计/透明度公开。", "答案解析": "1. 公平性：分析训练数据是否包含偏差，建议引入多样化数据集并进行偏见审计，确保不同群体下的识别准确率一致。2. 隐私：强调采集数据必须遵循'最小必要原则'并获得授权，建议采用联邦学习或差分隐私技术保护原始数据。3. 管理：建立第三方审计机制和算法透明度公开制度，确保决策过程可回溯、可解释。"}], "第9课_人工智能赋能千行百业": [{"题型": "单选", "题干": "与传统的'定期维护'相比，智能制造中的'预测性维护'最核心的特征是什么？", "选项": {"A": "按照预设的固定时间间隔强制停机检查", "B": "仅在设备出现明显故障并停机后才介入维修", "C": "利用传感器实时监控状态并基于算法模型在故障发生前预警", "D": "通过增加备品备件的仓储量来减少故障停机时间"}, "正确答案": "C", "答案解析": "预测性维护的核心在于'状态监测'与'主动预判'。它通过物理传感器收集设备的振动、温度等实时数据，利用AI模型评估设备健康度并预测故障风险，从而在故障发生前精准干预。"}, {"题型": "多选", "题干": "在智能工厂的质量检测环节中，计算机视觉技术主要用于实现哪些核心功能？", "选项": {"A": "对产品表面微小划痕、裂纹等缺陷进行自动识别", "B": "利用图像识别技术对零件的几何尺寸进行高精度测量", "C": "根据视觉识别结果将产品自动分拨至合格品或次品区域", "D": "通过分析历史质量数据自动生成销售预测报告"}, "正确答案": "A、B、C", "答案解析": "计算机视觉在质检中的核心应用包括：缺陷检测（A）、几何测量（B）、目标分类（C）。选项D属于商业智能（BI）功能，并非CV直接应用。"}, {"题型": "单选", "题干": "在新药研发过程中，AI 辅助药物设计（AIDD）在先导化合物发现阶段最核心的战略价值体现在以下哪一方面？", "选项": {"A": "完全取代体外生化实验和动物实验", "B": "利用深度学习对海量分子库进行虚拟筛选，显著降低进入湿实验环节的候选分子基数并提升命中率", "C": "自动化生成临床三期试验报告", "D": "直接确定药物的长期毒副作用"}, "正确答案": "B", "答案解析": "AI 在新药研发早期的核心价值在于通过虚拟筛选和性质预测，从数以亿计的化学空间中快速缩小候选范围，提升湿实验命中率。"}, {"题型": "简答", "题干": "在金融风控场景中，当面临严格的隐私保护法规与提升模型预测准确性之间的矛盾时，请论述如何利用联邦学习技术平衡数据安全与模型性能，并简述其在实际落地中的主要挑战。", "选项": null, "正确答案": "数据不出域交换梯度联合建模；挑战包括算力不均、通信压力、Non-IID数据分布、激励机制设计。", "答案解析": "1. 技术原理：联邦学习允许各参与方在原始数据不离开本地的前提下，通过交换模型梯度或中间参数进行联合建模，解决数据孤岛问题。2. 价值权衡：通过引入更多维度的特征，模型能更好地捕捉欺诈特征，提升AUC等性能指标，同时满足合规要求。3. 落地挑战：包括各节点算力不对等导致的同步瓶颈、海量参数传输带来的通信压力、各方数据分布不均（Non-IID）对模型收敛的影响，以及如何设计公平的贡献度评估与激励机制。"}], "第10课_自主可控与开源共享": [{"题型": "单选", "题干": "关于'自主可控'的核心内涵，下列描述最准确的是：", "选项": {"A": "只要是在国内工厂组装生产的产品即为自主可控", "B": "指对核心技术拥有知识产权，且具备持续改进与独立发展的能力", "C": "通过购买国外先进专利获取的使用权即等同于自主可控", "D": "自主可控意味着完全排斥任何形式的国际技术合作"}, "正确答案": "B", "答案解析": "自主可控的核心不仅是地理上的国产化，更重要的是对核心技术的掌控力（知识产权）和独立演进能力。"}, {"题型": "多选", "题干": "如果关键核心技术长期受制于人，在复杂多变的国际环境下可能面临哪些风险？", "选项": {"A": "遭遇'卡脖子'危机，导致产业链断供或停摆", "B": "核心设备可能被预置'后门'，威胁国家信息安全", "C": "产业利润被严重压缩，缺乏技术迭代的议价权", "D": "在技术演进路线上失去话语权，被动追随他国标准"}, "正确答案": "A、B、C、D", "答案解析": "核心技术受制于人会带来供应链安全风险（A）、网络信息安全风险（B）、经济竞争风险（C）及战略发展主动权丧失（D）。"}, {"题型": "单选", "题干": "根据开源定义（OSD），下列关于开源软件许可证的要求中，哪一项描述是错误的？", "选项": {"A": "许可证不得限制任何人在特定的工作范围中使用该程序", "B": "源代码必须随程序一起分发，或者提供一个合理的获取源码的方式", "C": "许可证可以要求衍生作品必须以与原软件不同的名称或版本号发布", "D": "为了保护原创者的劳动成果，许可证可以禁止将该软件用于商业盈利活动"}, "正确答案": "D", "答案解析": "开源定义明确规定'不得歧视工作范围'，这意味着许可证不能禁止程序被用于商业活动。因此D项是错误的。"}, {"题型": "简答", "题干": "请简述 GPL 与 MIT 协议在处理'衍生作品'时的主要区别，并说明这种差异如何影响开发者的协议选择。", "选项": null, "正确答案": "GPL具传染性强制开源，MIT宽松允许闭源。", "答案解析": "主要区别在于约束力：GPL 协议具有'传染性'，要求任何包含 GPL 代码的衍生作品在分发时必须同样采用 GPL 协议开源；而 MIT 协议属于'宽松型'协议，仅要求保留原作者版权声明和许可文本，允许衍生作品闭源或以任何协议发布。希望建立强制性开源生态选GPL，希望代码最广泛使用或兼顾商业化选MIT。"}], "第11课_算力共享": [{"题型": "单选", "题干": "在衡量人工智能算力规模时，以下哪项是国际通用的主要性能指标单位？", "选项": {"A": "FLOPS（每秒浮点运算次数）", "B": "BPS（每秒传输比特数）", "C": "IOPS（每秒输入/输出操作次数）", "D": "PPI（每英寸像素密度）"}, "正确答案": "A", "答案解析": "FLOPS 是衡量计算能力（尤其是高性能计算和AI训练）的核心单位。"}, {"题型": "多选", "题干": "推动算力资源'共享'与构建'算力网络'的主要目的包括哪些？", "选项": {"A": "解决各地区算力资源分布不均、部分机房闲置的问题", "B": "降低中小企业和科研机构获取高性能计算资源的成本门槛", "C": "通过跨地域调度，实现计算任务与绿色能源供应的匹配", "D": "强制要求所有个人用户放弃本地显卡，全部改用云端计算"}, "正确答案": "A、B、C", "答案解析": "算力共享和算力网络的核心目标在于优化资源配置（A）、普惠化资源获取（B）以及实现绿色可持续发展（C）。"}, {"题型": "单选", "题干": "行业内常将算力类比为工业时代的'电力'，这种类比主要强调了算力基础设施的哪种发展趋势？", "选项": {"A": "算力将主要通过高压电缆进行物理传输", "B": "算力将成为一种像水、电一样随用随取、按需付费的公共基础设施", "C": "算力设备只能在发电厂附近大规模部署", "D": "算力的使用成本将永远保持恒定不变"}, "正确答案": "B", "答案解析": "将算力类比为电力，意在说明算力正在从昂贵的专用产品转型为泛在的、标准化的社会基础资源，用户可按需调用。"}, {"题型": "单选", "题干": "在企业数字化转型架构中，关于区块链技术与虚拟化技术的本质区别与应用逻辑，下列描述中最准确的是？", "选项": {"A": "区块链通过分布式共识机制在无信环境中建立透明性，而虚拟化旨在通过抽象物理硬件来提高资源利用率与隔离性", "B": "虚拟化技术是区块链去中心化架构的必要前提", "C": "区块链侧重于通过冗余存储提升单点计算性能", "D": "区块链的去中心化共识效率始终高于传统中心化数据库"}, "正确答案": "A", "答案解析": "A准确描述了二者核心目的：区块链解决多方协作中的'信任'与'一致性'问题；虚拟化解决'资源效率'与'环境隔离'问题。"}, {"题型": "单选", "题干": "针对我国'东数西算'工程的资源匹配逻辑，下列哪项分析是错误的？", "选项": {"A": "西部数据中心适合承接对网络时延要求不高的'冷数据'处理", "B": "东部数据中心应主要负责对数据反馈速度要求极高的实时业务", "C": "该工程的核心目标是通过将东部所有存量数据中心整体迁移至西部", "D": "通过跨区域算力调度，有效平衡东部电力压力与西部能源消纳"}, "正确答案": "C", "答案解析": "C表述错误。'东数西算'强调的是'分层分类'调度（冷数据西算、热数据东算），而非'全量迁移'。"}, {"题型": "简答", "题干": "请分析建立'全国性算力共享调度平台'对解决当前算力供需矛盾的意义，并列举在实现跨厂商、跨地域算力共享时需克服的三个主要技术挑战。", "选项": null, "正确答案": "意义：降门槛/提效率/战略协同；挑战：异构兼容/通信延迟/安全保障/度量标准。", "答案解析": "意义：1. 降低门槛：使中小企业能够以低成本租用算力训练模型；2. 效率提升：将闲置算力动态分配给高负载需求，避免资源浪费；3. 战略协同：支撑国家数字经济均衡发展。技术挑战：1. 异构兼容；2. 通信瓶颈；3. 安全保障；4. 度量标准。"}], "第12课_人工智能赋能下的未来与人才": [{"题型": "单选", "题干": "在人工智能技术广泛普及的背景下，关于职业稳定性的描述，以下哪项最为准确？", "选项": {"A": "只要拥有高学历和专业证书，在AI时代就能保持绝对的职业稳定性", "B": "职业稳定性将从依赖特定的'岗位定义'转向依赖'个体的持续学习与人机协作能力'", "C": "所有涉及数据分析的岗位都将消失", "D": "只有从事体力劳动的蓝领工作才不会受到AI的影响"}, "正确答案": "B", "答案解析": "在AI时代，真正的稳定性来自于个体能否快速学习新工具，并利用AI提升产出效率，即从'岗位本位'转向'能力本位'。"}, {"题型": "多选", "题干": "随着AI工具的广泛应用，职场核心竞争力的重心正在发生转移，以下哪些能力在未来的权重将显著提升？", "选项": {"A": "定义问题与向AI精准发问的能力（提示词工程思维）", "B": "大规模重复性基础数据的搜集与录入能力", "C": "跨领域的综合判断力与批判性思维", "D": "深度的人际沟通、情感共鸣与复杂团队协同能力"}, "正确答案": "A、C、D", "答案解析": "AI擅长标准化信息采集和初级运算（B被弱化）。人类优势集中在：精准提问驱动AI、高阶决策（批判性思维）、复杂情感协作。"}, {"题型": "多选", "题干": "面对AI时代的挑战，职场人士在进行职业规划时应考虑哪些策略？", "选项": {"A": "积极拥抱AI工具，将其作为'外脑'来优化现有的工作流程", "B": "深耕AI难以触达的领域，如涉及高度个性化情感或复杂审美决策的工作", "C": "拒绝使用一切AI相关软件，以确保个人产出的原创性与纯粹性", "D": "构建'T型'能力结构，在专业深度基础上拓展对AI技术边界的认知广度"}, "正确答案": "A、B、D", "答案解析": "拒绝AI会导致生产力脱节。有效策略包括：利用AI增效（A）、寻找人类特有优势区位（B）、培养复合型能力理解AI边界（D）。"}], "第13课_智能感知技术": [{"题型": "单选", "题干": "在智能家居场景中，若要实现'天黑自动关窗帘'的功能，最核心需要使用的传感器是哪一种？", "选项": {"A": "压力传感器", "B": "光敏传感器", "C": "超声波传感器", "D": "加速度传感器"}, "正确答案": "B", "答案解析": "光敏传感器能够感知环境光线的强弱变化，是实现光控自动化的基础。"}, {"题型": "多选", "题干": "智能感知过程通常包含多个步骤，下列哪些属于智能感知系统的关键环节？", "选项": {"A": "信息采集（通过传感器获取数据）", "B": "特征提取（从数据中找出关键信息）", "C": "分类与识别（对感知对象进行判断）", "D": "机械结构的定期润滑与保养"}, "正确答案": "A、B、C", "答案解析": "智能感知核心流程包括信息采集、特征提取、分类与识别。机械保养属于硬件维护，不属于感知处理流程。"}, {"题型": "单选", "题干": "在计算机视觉领域，数字图像处理的最基本几何单元是什么？", "选项": {"A": "卷积核 (Kernel)", "B": "像素 (Pixel)", "C": "特征向量 (Feature Vector)", "D": "感受野 (Receptive Field)"}, "正确答案": "B", "答案解析": "像素（Pixel）是数字图像中最小的完整单元，包含位置坐标和亮度/颜色信息。"}, {"题型": "简答", "题干": "在听觉感知处理中，将原始语音信号转化为计算机可识别的特征（如梅尔倒谱系数 MFCC）通常需要经过哪些关键步骤？请简要说明其物理意义。", "选项": null, "正确答案": "预加重、分帧加窗、FFT、梅尔滤波、DCT。", "答案解析": "1. 预加重：提升高频部分，平衡频谱；2. 分帧与加窗：由于语音信号的短时平稳性，需切分为小段并减少边缘效应；3. 快速傅里叶变换 (FFT)：将信号从时域转换到频域以分析频率成分；4. 梅尔滤波器组处理：模拟人耳对低频敏感、对高频不敏感的非线性听觉特性；5. 离散余弦变换 (DCT)：对对数能量谱进行去相关，提取倒谱系数。"}, {"题型": "单选", "题干": "从信息论与系统架构的角度看，以下关于多模态融合必要性的描述中，哪项最具深度？", "选项": {"A": "多模态融合主要是通过硬件冗余来简单叠加系统的平均无故障时间", "B": "利用不同模态在特征空间的互补性，在贝叶斯框架下降低感知结果的不确定性后验概率", "C": "多模态融合能够完全消除单一传感器由于物理特性导致的感知盲区，实现零误差", "D": "通过融合不同频率的传感器信号，主要目的是降低功耗负载"}, "正确答案": "B", "答案解析": "多模态融合的核心价值在于'互补'与'去噪'。通过融合，系统能在数学逻辑（如贝叶斯推理）上将单一模态的不确定性转化为更高置信度的全局状态估计。"}, {"题型": "多选", "题干": "在设计一套面向极端环境的智能安防感知方案时，为了确保逻辑匹配与系统鲁棒性，以下哪些技术组合或考量是合理的？", "选项": {"A": "优先采用热成像配合毫米波雷达", "B": "在特征融合层引入注意力机制动态调整各模态权重", "C": "完全弃用可见光相机", "D": "部署边缘计算节点完成特征提取与数据脱敏"}, "正确答案": "A、B、D", "答案解析": "A热成像与雷达穿透力强；B动态加权是高级策略；D边缘计算符合低延迟需求。C错误，可见光在近场或补光下仍能提供辅助语义，完全弃用不符合冗余思想。"}, {"题型": "简答", "题干": "请阐述在开发高精度感知系统时，应如何构建'以人为本'的伦理评估框架，并至少说明三个核心原则。", "选项": null, "正确答案": "比例原则、告知同意与知情权、数据安全与主权。", "答案解析": "1. 比例原则：数据收集的深度应与安全目的成正比，避免过度采集；2. 告知同意与知情权：用户应被明确告知感知的范围与用途；3. 数据安全与主权：采用差分隐私或联邦学习技术确保敏感生物特征不被逆向工程还原。"}], "第14课_自然语言处理": [{"题型": "单选", "题干": "在句子'他走了一个多小时了'中，关键词'走'产生的歧义主要体现在什么地方？", "选项": {"A": "指'行走'这一动作持续的时间，或指'离开'这一动作发生后的时长", "B": "指'步行'的速度快慢，或指'跑步'的速度快慢", "C": "指'去哪里'的目的地不明确", "D": "指'他'这个代词指代的人物对象不明确"}, "正确答案": "A", "答案解析": "'走'可作为延续性动词表示动作持续时长，也可作为瞬间动词表示动作发生后的时长，属于词义歧义。"}, {"题型": "多选", "题干": "短语'学习文件'在没有上下文的情况下可以产生哪些理解？", "选项": {"A": "作为一个动宾短语，表示'阅读并领会文件内容'的动作", "B": "作为一个偏正短语，表示'用于学习的材料或文件'", "C": "作为一个主谓短语，表示'文件正在进行学习'", "D": "该短语存在结构歧义，取决于'学习'是动词还是定语"}, "正确答案": "A、B、D", "答案解析": "'学习文件'是典型的结构歧义短语。作动词时为动宾关系（A）；作定语时为偏正关系（B）。这体现了语法结构对语义的影响（D）。"}, {"题型": "单选", "题干": "在词向量技术中，相比于传统的独热编码，分布式表示的核心优势是什么？", "选项": {"A": "可以显著增加向量的维度以存储更多词汇信息", "B": "通过稠密向量在空间中的距离来表征词语之间的语义相似性", "C": "保证了每个词的向量表示在所有维度上都是正交的", "D": "完全消除了模型训练过程中对大规模语料库的依赖"}, "正确答案": "B", "答案解析": "分布式表示将词映射到低维稠密空间，语义相近的词在空间中的距离更近，这是其最核心的优势。"}, {"题型": "单选", "题干": "在深度学习模型从RNN向Transformer演进的过程中，Attention机制起到的最关键作用是：", "选项": {"A": "通过固定的滑动窗口限制，减少了模型需要处理的上下文长度", "B": "通过权重分配打破了序列处理的递归限制，实现了并行计算并捕捉长距离依赖", "C": "取代了激活函数，使模型能够处理更加复杂的非线性变换", "D": "将模型参数量降低到了原来的十分之一"}, "正确答案": "B", "答案解析": "Attention允许模型在计算当前位置时同时观察序列中的所有其他位置，根据相关性分配权重，从而实现了并行化并有效解决了长距离依赖问题。"}, {"题型": "简答", "题干": "请简述从静态词向量到动态词向量的演变如何解决了'一词多义'问题，并说明其背后的技术原理。", "选项": null, "正确答案": "静态为固定向量，动态利用自注意力结合上下文生成不同向量。", "答案解析": "静态词向量为每个词分配唯一的固定向量，无法区分不同语境下的语义。动态词向量（如BERT）利用Transformer中的自注意力机制，在生成当前词的表示时会参考句子中其他词的信息。因此，同一个词在不同的语境下会生成不同的向量表示，从而精准地捕捉了一词多义现象。"}], "第15课_生成式人工智能": [{"题型": "单选", "题干": "在人工智能领域，AIGC 这一缩写代表的核心含义是？", "选项": {"A": "AI 生成内容 (AI Generated Content)", "B": "AI 通用计算 (AI General Computation)", "C": "AI 全球中心 (AI Global Cloud)", "D": "AI 图形处理 (AI Graphics Core)"}, "正确答案": "A", "答案解析": "AIGC 全称是 Artificial Intelligence Generated Content，即利用人工智能技术来自动生产内容。"}, {"题型": "多选", "题干": "生成式 AI 的核心特征是能够创造新的数据或内容。以下哪些应用场景属于生成式 AI 的范畴？", "选项": {"A": "根据用户提供的故事大纲撰写一部短篇小说", "B": "通过摄像头识别人脸并进行身份验证", "C": "根据文字描述自动生成一段风格匹配的背景音乐", "D": "输入一张低分辨率照片并将其修复成高清图像"}, "正确答案": "A、C、D", "答案解析": "A（生成文本）、C（生成音频）、D（生成高像素图像数据）均涉及创造或重构新的内容。B 属于判别式 AI。"}, {"题型": "单选", "题干": "在Transformer架构中，自注意力机制的核心作用是以下哪一项？", "选项": {"A": "仅能计算序列中相邻单词之间的局部统计特征", "B": "捕捉序列中不同位置单词之间的全局依赖关系", "C": "完全替代前馈神经网络以实现非线性变换", "D": "主要用于将离散变量转换为连续向量空间"}, "正确答案": "B", "答案解析": "自注意力机制允许模型在处理序列中的每个位置时，都能够动态地考虑到序列中所有其他位置的信息，从而有效捕捉长距离的依赖关系。"}, {"题型": "多选", "题干": "在进行提示词工程时，以下哪些方法通常能显著提升大语言模型生成结果的质量和稳定性？", "选项": {"A": "为模型设定特定的专家角色（Role Prompting）", "B": "提供几个输入与输出的参考示例（Few-shot Learning）", "C": "明确规定输出内容的格式，如JSON或Markdown", "D": "通过增加重复的感叹号来强调任务的重要性"}, "正确答案": "A、B、C", "答案解析": "设定角色引导语境；少样本示例模仿逻辑风格；明确格式便于解析。标点重复无法改善逻辑输出。"}, {"题型": "简答", "题干": "若要开发一个'根据文字描述生成商业摄影大片'的应用，请阐述在此场景下应如何结合大语言模型与扩散模型各自的优势？", "选项": null, "正确答案": "LLM负责意图理解与提示词扩充，扩散模型负责像素级图像生成。", "答案解析": "LLM作为意图理解层，将用户简单的文字描述扩充为包含光影、构图、镜头参数的复杂提示词；扩散模型作为图像生成层，根据LLM生成的详细提示词进行像素级计算，生成高质量的视觉图像。这种组合利用了LLM强大的语义理解能力和扩散模型在视觉细节生成上的优势。"}], "第16课_智能体与具身智能": [{"题型": "单选", "题干": "在人工智能领域，一个'智能体'区别于普通自动化程序的核心特征是什么？", "选项": {"A": "拥有极高的运算速度和海量的数据存储能力", "B": "能够感知外部环境变化，并自主采取行动以达成特定目标", "C": "必须具备类人的语言沟通能力和情感表达能力", "D": "完全依赖于预设的硬编码规则执行，不具备任何灵活性"}, "正确答案": "B", "答案解析": "智能体强调自主性、感知能力和交互性，具备'感知-决策-行动'的循环，能够根据环境反馈自主调整行为以实现目标。"}, {"题型": "多选", "题干": "关于'具身智能'的内涵及其与传统人工智能的区别，以下表述正确的有？", "选项": {"A": "具身智能认为智能不仅来源于算法，还受限于且受益于主体的物理形态", "B": "智能体必须通过与物理世界（或高度仿真的模拟环境）的实时交互来获取智能", "C": "具身智能的本质是脱离物理实体，仅在大规模互联网文本数据上进行逻辑训练", "D": "'身体'为智能体提供了感知边界和行动约束，是智能产生的必要条件之一"}, "正确答案": "A、B、D", "答案解析": "具身智能强调智能是在主体的身体与环境的交互中涌现的，反对将智能视为纯粹的离线推理，主张通过实时探索进化。"}, {"题型": "单选", "题干": "在复杂的家庭室内动态环境中，具身机器人需要同时完成避障导航与精细物体抓取任务。以下哪种传感器组合最能体现'感知闭环'在处理非结构化环境时的鲁棒性？", "选项": {"A": "单目摄像头与超声波传感器", "B": "激光雷达与二维平面地图建模", "C": "RGB-D深度相机、触觉传感器与惯性测量单元（IMU）", "D": "全球定位系统（GPS）与轮式里程计"}, "正确答案": "C", "答案解析": "RGB-D提供深度信息用于3D建模，触觉传感器提供抓取力反馈（精细控制闭环关键），IMU辅助本体感知。这是实现复杂交互任务的最优配置。"}, {"题型": "单选", "题干": "关于大模型在输出底层控制指令时的主要局限性，描述最准确的是：", "选项": {"A": "大模型缺乏基本的逻辑推理能力", "B": "推理延迟较高，难以满足物理层实时性的反馈控制要求", "C": "大模型无法通过视觉标记理解环境的几何特征", "D": "大模型无法生成符合自然语言逻辑的步骤拆解"}, "正确答案": "B", "答案解析": "尽管大模型擅长高层逻辑规划，但受限于自回归生成机制，其推理频率远低于物理电机控制所需的实时频率。因此通常采用大模型做任务规划，底层控制器执行具体动作。"}, {"题型": "简答", "题干": "请详细分析在大模型驱动的具身智能'感知-决策-执行'闭环中，多模态感知反馈如何影响决策的动态修正？并阐述如果系统处于'开环'状态，在执行长程复杂任务时会面临哪些核心挑战。", "选项": null, "正确答案": "闭环反馈修正Context实现纠偏；开环面临误差累积与无法感知动态变化导致崩溃。", "答案解析": "1. 多模态反馈将实时环境状态回传至决策层，使大模型能根据执行结果更新Context，实现闭环纠偏。2. 开环系统的核心风险在于'误差累积'，微小的执行偏差会导致后续步骤完全脱离目标；同时无法感知动态环境变化，导致任务崩溃。"}], "第17课_数据处理与特征工程": [{"题型": "单选", "题干": "在处理一份包含1000条记录的数据集时，发现'年龄'字段存在约1%的缺失值，且该字段数据分布呈现明显的右偏态。以下哪种处理方式最为合理？", "选项": {"A": "删除所有包含缺失值的观测行", "B": "使用该字段的中位数进行填充", "C": "使用该字段的算术平均数进行填充", "D": "直接剔除'年龄'这一变量列"}, "正确答案": "B", "答案解析": "对于偏态分布的数据，中位数比平均数更能代表数据的中心位置，对极端值具有更好的鲁棒性。中位数填充是平衡完整性和准确性的最优选择。"}, {"题型": "多选", "题干": "在利用箱线图进行数据清洗和异常值检测时，下列描述正确的有：", "选项": {"A": "四分位距（IQR）是指上四分位数与下四分位数之差", "B": "位于 Q3 + 1.5倍IQR 之上的数据点通常被定义为高位异常值", "C": "位于 Q1 - 1.5倍IQR 之下的数据点通常被定义为低位异常值", "D": "箱线图检测出的所有异常值都属于测量误差，必须在建模前全部删除"}, "正确答案": "A、B、C", "答案解析": "A、B、C准确描述了箱线图判定逻辑。D错误，异常值可能是真实业务极端情况，应先分析原因再决定处理方式。"}, {"题型": "单选", "题干": "在应用带有L2正则化的线性模型时，如果没有进行特征缩放，以下哪种描述最准确地反映了由此产生的负面影响？", "选项": {"A": "由于正则化项的存在，模型对特征尺度的敏感性会自动消失", "B": "正则化项会无差别地惩罚所有权重的平方和，导致量纲较小的特征由于其对应的权重值通常较大而受到不成比例的过度惩罚", "C": "特征缩放只会影响梯度下降的收敛速度", "D": "如果使用正规方程求解，特征尺度对带正则化的模型表现没有影响"}, "正确答案": "B", "答案解析": "正则化直接作用于权重大小。量纲小的特征为产生同等影响需分配更大权重，在L2中会被过度惩罚，导致模型偏差。特征缩放是确保公平惩罚的前提。"}, {"题型": "简答", "题干": "请详细阐述目标编码的优势，并列举出至少两种在实际应用中防止目标编码引起标签泄露或严重过拟合的技术手段。", "选项": null, "正确答案": "优势：降维防爆炸。防过拟合：平滑处理、K折交叉编码、加扰动。", "答案解析": "优势：目标编码将类别特征映射为目标变量的统计值，将特征维度固定为1，避免独热编码带来的维度爆炸。防过拟合手段：1. 平滑处理；2. K折交叉编码；3. 加入扰动。"}], "第18课_模型训练与评估": [{"题型": "单选", "题干": "在机器学习模型训练过程中，损失函数的主要作用是什么？", "选项": {"A": "衡量模型预测值与真实标签之间的差异程度", "B": "根据预设逻辑自动更新模型的权重参数", "C": "决定神经网络中隐藏层的层数和神经元数量", "D": "增加输入数据的特征维度以提升拟合能力"}, "正确答案": "A", "答案解析": "损失函数量化预测输出与实际真实值之间的差距，是模型优化的反馈信号。更新参数由优化器完成。"}, {"题型": "单选", "题干": "在通过梯度下降法进行训练时，模型参数变化的核心目标是：", "选项": {"A": "使学习率在训练过程中不断增大以加快收敛", "B": "确保存储模型参数所需的内存空间保持恒定", "C": "寻找一组参数使损失函数的值达到局部或全局最小值", "D": "使模型权重的绝对值尽可能增大以捕捉更多信息"}, "正确答案": "C", "答案解析": "训练的本质是优化过程，目标是调整参数以最小化损失函数。"}, {"题型": "单选", "题干": "某医院开发筛查模型。1000人中10名患者。模型判定50人阳性，其中8人确诊。请计算精确率与召回率，并判断分析最合理的是？", "选项": {"A": "精确率为16%，召回率为80%。应优先关注召回率。", "B": "精确率为80%，召回率为16%。应优先关注精确率。", "C": "精确率为16%，召回率为80%。无需调整。", "D": "精确率为8%，召回率为16%。完全不可用。"}, "正确答案": "A", "答案解析": "精确率 = 8/50 = 16%，召回率 = 8/10 = 80%。重大疾病筛查中，漏诊代价远高于误诊，因此召回率更为关键。"}, {"题型": "简答", "题干": "对比奢侈品定制营销（场景一）与短视频违规过滤（场景二）。若有模型A（高精确率、低召回率）和模型B（低精确率、高召回率），请说明各场景应优先选择哪个模型，并阐述理由。", "选项": null, "正确答案": "场景一选A保ROI/体验；场景二选B保合规/防漏。", "答案解析": "场景一选A：单次营销成本极高且不精准推送会损害品牌形象，必须保证推送人群极大概率购买（保精确率）。场景二选B：违规内容漏检面临巨大法律风险，必须尽可能筛查出所有内容（保召回率）。"}], "第19课_人工智能系统运维": [{"题型": "单选", "题干": "在构建大规模深度学习训练集群时，为解决多机多卡之间海量梯度交换带来的通信延迟问题，通常优先采用以下哪种基础设施技术？", "选项": {"A": "万兆以太网", "B": "RDMA技术", "C": "基于RAID 10的本地磁盘阵列", "D": "常规三层架构的交换网络"}, "正确答案": "B", "答案解析": "RDMA技术允许节点直接访问远程内存，无需经过内核协议栈，能显著降低延迟并减轻CPU负载，是AI基础设施核心要求。"}, {"题型": "多选", "题干": "在AI全栈架构的运维职责划分中，底层基础设施运维人员通常需要关注的任务包括哪些？", "选项": {"A": "物理GPU服务器的供电及环境散热监控", "B": "深度学习模型超参数的自动搜索策略", "C": "InfiniBand网络拓扑的稳定性与拥塞控制", "D": "计算节点底层固件的版本一致性管理"}, "正确答案": "A、C、D", "答案解析": "底层运维关注硬件可用性及资源交付（A/C/D）。B属于算法层工程师职责。"}, {"题型": "单选", "题干": "在生产环境的推理服务部署中，关于NVIDIA驱动与CUDA Toolkit版本的兼容性匹配逻辑，以下描述正确的是：", "选项": {"A": "驱动版本必须严格等于CUDA Toolkit的版本号", "B": "驱动版本必须高于或等于CUDA Toolkit版本所要求的最低驱动版本", "C": "只要安装了最新版的CUDA Toolkit，即使不安装驱动也能运行推理", "D": "驱动版本越高，推理框架的性能就一定会线性提升"}, "正确答案": "B", "答案解析": "CUDA设计具有向后兼容性。通常需确保宿主机驱动版本高于或等于该CUDA版本要求的基准线。"}, {"题型": "单选", "题干": "某大模型推理服务希望先将5%的生产流量切给新模型验证后再逐渐替换旧版本。这种模型发布策略被称为：", "选项": {"A": "蓝绿发布", "B": "金丝雀发布/灰度发布", "C": "滚动发布", "D": "冷启动发布"}, "正确答案": "B", "答案解析": "金丝雀发布先将小部分流量引流至新版本验证稳定性，确认无误后再分阶段扩大比例。"}, {"题型": "简答", "题干": "在实时监控AI推理服务的运维过程中，请列举至少三个关键的监控指标，并简要说明其作用。", "选项": null, "正确答案": "推理延迟(P99)、吞吐量(QPS)、GPU显存占用、GPU利用率。", "答案解析": "1. 推理延迟（特别是P99）反映用户体验；2. 吞吐量衡量处理能力，用于扩缩容；3. 显存占用防止OOM；4. 利用率反映资源瓶颈。"}], "第20课_模型部署与应用集成": [{"题型": "单选", "题干": "在蓝绿部署中，关于新旧版本切换的描述，以下哪项最为准确？", "选项": {"A": "通过逐步增加流向新版本的流量百分比来实现平滑过渡", "B": "同时维护两套完全相同的生产环境，通过负载均衡器瞬间切换流量指向", "C": "在同一套服务器集群中逐个替换旧版本的实例或容器", "D": "只有在旧版本环境完全关闭并释放资源后，才能启动新版本环境"}, "正确答案": "B", "答案解析": "蓝绿部署核心是维护两套独立生产环境，通过负载均衡器一次性切换，实现快速切换与瞬间回滚。"}, {"题型": "多选", "题干": "在构建标准化的持续部署（CD）流水线时，通常需要包含以下哪些关键环节？", "选项": {"A": "自动化的制品构建与镜像打包", "B": "在预发布环境进行自动化的验收测试", "C": "对代码进行自动化的静态安全扫描", "D": "部署完成后的人工手动环境一致性检查"}, "正确答案": "A、B、C", "答案解析": "CD强调全流程自动化。A、B、C分别涵盖构建、测试和安全扫描。D违背减少人工干预的初衷。"}, {"题型": "单选", "题干": "关于激活感知权重量化（AWQ）的核心原理，以下描述最准确的是哪一项？", "选项": {"A": "AWQ 通过引入额外的参数进行反向传播训练", "B": "AWQ 通过观察推理时的激活值分布，识别出仅占 1% 左右的显著权重，并对这些权重进行缩放保护以减少量化误差", "C": "AWQ 主要通过将权重矩阵分解为两个低秩矩阵的乘积", "D": "AWQ 强制要求所有激活值必须量化为 INT4 格式"}, "正确答案": "B", "答案解析": "AWQ核心发现是权重并非同等重要，通过观察激活值规模识别显著权重并缩放保护，减少量化误差，无需重训练即可提升性能。"}, {"题型": "简答", "题干": "请详细说明'语义缓存'与'流式响应'结合后的工作流逻辑，并阐述在处理缓存未命中时的最佳性能优化策略。", "选项": null, "正确答案": "请求向量化检索->命中直接返回/未命中并发LLM流式输出->异步存缓存；优化：Redis/动态阈值/异步队列。", "答案解析": "工作流：1. Prompt转向量检索；2. 命中则直接提取结果（可模拟流式）；3. 未命中则并发调用LLM开启流式传输，实时推送Token；4. 流式完成同时异步将完整响应及Embedding存入缓存。优化策略：使用内存级数据库、设置动态相似度阈值、利用异步队列避免阻塞主流程。"}], "第21课_人工智能工程设计": [{"题型": "单选", "题干": "在AI工程实践中，与纯粹的算法研究相比，AI工程化更核心的关注点在于？", "选项": {"A": "追求模型在特定基准数据集上的极致精度", "B": "复杂数学理论的推导与全新算法框架的理论发明", "C": "系统的高可用性、可伸缩性以及在生产环境中的全生命周期管理", "D": "仅关注模型训练阶段的计算资源消耗优化"}, "正确答案": "C", "答案解析": "AI工程关注如何将模型转化为稳定、可靠、可扩展的工业级系统，涵盖部署、监控、维护的全生命周期。"}, {"题型": "多选", "题干": "在AI生命周期中，以下哪些场景体现了典型的'反馈与迭代'机制？", "选项": {"A": "根据在线监控发现的模型性能漂移触发自动重训流水线", "B": "收集用户对模型预测结果的纠错信息，并将其转化为新的训练数据", "C": "基于模型推理延迟的线上表现，反向调整模型的量化策略或算力配置", "D": "在项目启动之初对原始数据集进行的单次离线清洗操作"}, "正确答案": "A、B、C", "答案解析": "反馈机制强调基于运行结果驱动前序调整。A是监控反馈，B是业务反馈，C是性能反馈。D为一次性预处理。"}, {"题型": "单选", "题干": "在面向移动端低功耗芯片部署大规模 Transformer 模型时，若需在保证推理吞吐量的同时，最大限度减少模型权重的内存占用并降低缓存失效，以下哪种方案在工程实践中最具可行性且效果最优？", "选项": {"A": "采用非结构化剪枝配合动态 16-bit 浮点量化", "B": "采用 4-bit 权重量化并结合结构化剪枝", "C": "仅使用知识蒸馏产生一个浅层模型，不进行任何量化处理", "D": "应用权重共享技术，通过哈希表映射减少参数冗余"}, "正确答案": "B", "答案解析": "结构化剪枝使内存访问连续显著降低 Cache Miss；4-bit量化极大压缩体积。非结构化剪枝难以提升实际吞吐量。"}, {"题型": "单选", "题干": "某金融级实时风控系统需在不影响现有流量的前提下评估新模型，且不能接受任何业务资损。风险等级最低的部署策略是：", "选项": {"A": "金丝雀发布", "B": "蓝绿部署", "C": "影子部署", "D": "分层实验"}, "正确答案": "C", "答案解析": "影子部署将生产流量复制给新模型，输出不返回用户，完全不影响业务逻辑，最适合零风险观察。"}, {"题型": "简答", "题干": "请设计一套应对'模型退化'与'部署风险'的闭环工程方案。涵盖：(1) 如何检测特征分布偏移；(2) 模型量化后应设计怎样的多阶段发布策略。", "选项": null, "正确答案": "数据流水线监控(KL散度等)；离线验证->影子部署->AB测试逐步放量+自动回滚阈值。", "答案解析": "1. 在数据流水线部署统计监控模块，利用KL散度等指标对比在线流量与训练集分布差异。2. 量化模型发布策略：先通过离线Benchmark验证，随后进入影子部署阶段比对推理一致性，最后通过AB测试逐步提高流量比例，并设置自动回滚阈值（如业务指标下跌超2%触发回滚）。"}], "第22课_算法公平性与偏见治理": [{"题型": "单选", "题干": "某公司使用过去十年招聘数据训练AI筛选系统，结果更倾向推荐男性，即使隐去性别信息。这种情况最能体现哪种偏见来源？", "选项": {"A": "采样偏见", "B": "历史数据偏见", "C": "测量偏见", "D": "算法偏见"}, "正确答案": "B", "答案解析": "历史数据偏见指模型学习并固化了过去社会中的偏见。即便删除性别标签，模型仍能通过关联特征识别模式，导致偏差延续。"}, {"题型": "多选", "题干": "在开发信贷审批模型时，移除'族裔'特征后，系统仍可能通过'代理变量'产生间接歧视。以下哪些做法极易导致此类间接歧视？", "选项": {"A": "将'居住地邮政编码'作为评估特征（在存在种族居住隔离的地区）", "B": "使用'移动支付的活跃时间段'作为用户行为特征", "C": "引入与特定族群文化传统强相关的'社交圈消费偏好'", "D": "使用'历史还款逾期次数'作为违约预测的关键指标"}, "正确答案": "A、C", "答案解析": "间接歧视通常通过代理变量实现。A项邮编与族裔重合；C项文化消费习惯映射族裔。B/D不属于典型间接歧视诱因。"}, {"题型": "单选", "题干": "某银行强制要求不同性别申请人的获批比例完全一致，但数据显示女性实际违约率远低于男性。该银行采用的是哪种公平性指标，且局限性是什么？", "选项": {"A": "人口统计学平价；局限性在于忽略了不同群体间实际信用水平的差异，可能损害模型准确性。", "B": "相等赔率；局限性在于要求真阳性率和假阳性率必须相等。", "C": "预测平价；局限性在于只关注预测值的准确性。", "D": "机会均等；局限性在于仅关注真正有还款能力的群体。"}, "正确答案": "A", "答案解析": "强制获批比例一致符合人口统计学平价定义（独立于实际标签）。局限性：若现实还款能力分布确有差异，强制一致会导致对高风险过度授信或低风险压缩信贷，降低模型效用。"}, {"题型": "简答", "题干": "请论述：为什么在医疗筛查场景下，追求'相等赔率'通常比'人口统计学平价'更符合公平性要求？如果模型在不同族裔间的假阴性率存在显著差异，会引发哪些具体的伦理与社会问题？", "选项": null, "正确答案": "相等赔率保真正患者检出率一致；假阴性差异导致生命权分配不公/健康差异/信任危机/固化歧视。", "答案解析": "1. 相等赔率要求在给定真实患病前提下，预测结果独立于敏感属性，确保真正患病者无论族裔被诊断出的概率一致。人口统计学平价忽略实际患病率。2. 假阴性差异意味着某族裔患病者被遗漏风险更大，是分配正义缺失。后果包括：加剧健康差异、损害公众信任、将历史性医疗歧视通过算法固化放大。"}], "第23课_人工智能安全与隐私保护": [{"题型": "单选", "题干": "关于'对抗攻击'与'数据投毒'的本质区别，以下描述正确的是？", "选项": {"A": "对抗攻击主要发生在模型训练阶段", "B": "数据投毒主要发生在模型推理阶段", "C": "对抗攻击在推理阶段对输入样本添加精心设计的扰动，旨在使模型产生错误的预测结果", "D": "两者都要求攻击者必须完全掌握模型的内部参数和梯度信息"}, "正确答案": "C", "答案解析": "对抗攻击发生在推理阶段，通过修改测试样本欺骗已部署模型；数据投毒发生在训练阶段，污染训练数据。两者均可在黑盒条件下进行。"}, {"题型": "多选", "题干": "针对机器学习模型的隐私泄露威胁，以下哪些属于常见的攻击手段？", "选项": {"A": "成员推理攻击", "B": "模型逆向攻击", "C": "属性推理攻击", "D": "梯度泄露攻击"}, "正确答案": "A、B、C、D", "答案解析": "四项均属隐私攻击：成员推理针对数据归属，模型逆向针对数据重构，属性推理针对敏感特征推断，梯度泄露针对分布式学习数据还原。"}, {"题型": "单选", "题干": "攻击者通过向API接口发送大量查询并分析返回的置信度得分，最终成功生成了一张酷似训练集中某位用户的面部照片。这种攻击行为最可能属于？", "选项": {"A": "逃逸攻击", "B": "数据投毒", "C": "模型逆向攻击", "D": "对抗攻击"}, "正确答案": "C", "答案解析": "模型逆向攻击核心目标是利用模型输出来恢复或推断训练数据信息。'还原面部照片'是典型表现。"}, {"题型": "单选", "题干": "在纵向联邦学习场景中，为了在不泄露原始数据的前提下完成不同参与方之间的样本对齐，通常采用的技术手段是：", "选项": {"A": "基于差分隐私的随机梯度下降", "B": "基于同态加密的隐私集合交集", "C": "基于拉普拉斯噪声的本地差分隐私", "D": "基于安全多方计算的加权平均聚合"}, "正确答案": "B", "答案解析": "纵向联邦适用于用户重叠高但特征不同的场景。实现数据对齐且不泄露原始ID，必须使用隐私集合交集（PSI）技术。"}, {"题型": "单选", "题干": "关于差分隐私中的隐私预算及其在连续多轮迭代任务中的特性，下列说法错误的是：", "选项": {"A": "隐私预算 Epsilon 越小，注入的噪声强度通常越大，隐私保护水平越高", "B": "差分隐私具有组合性，多次查询后的总隐私消耗可以通过各次消耗的预算累加计算", "C": "在联邦学习中，通过对梯度添加差分隐私噪声，可以有效防御针对全局模型的成员推理攻击", "D": "差分隐私可以确保攻击者即便拥有任何背景知识，也无法从输出结果中以超过 100% 的概率判定某个样本是否存在"}, "正确答案": "D", "答案解析": "D错误。差分隐私是基于概率比值限制，将判定风险控制在一个可量化范围内，而非'完全无法判定'。"}, {"题型": "简答", "题干": "请结合中国《个人信息保护法》中关于'匿名化'的定义，深入分析在联邦学习系统中引入差分隐私技术是否足以使处理后的数据直接豁免于个人信息保护法律的约束？", "选项": null, "正确答案": "不能直接等同。法律匿名化要求不可复原；差分隐私是概率性去标识化；仍需履行告知/最小化/安全评估义务。", "答案解析": "1. 法律维度：《个保法》匿名化要求极高（无法识别且不能复原）。2. 技术维度：差分隐私是概率性保护，隐私预算累积可能降低保护力。结论：不能直接等同于法律匿名化，企业仍需履行告知、最小化处理及安全评估等合规义务。"}], "第24课_人工智能伦理与社会责任": [{"题型": "单选", "题干": "关于'数据偏差'与'算法歧视'的关系，以下表述最准确的是：", "选项": {"A": "数据偏差是算法歧视的唯一来源", "B": "数据偏差主要指输入训练数据集的不平衡或代表性不足，而算法歧视是指算法输出结果对特定群体造成的不公平对待。", "C": "两者是完全等价的概念", "D": "算法歧视仅发生在程序员有意识加入排他性逻辑的情况下"}, "正确答案": "B", "答案解析": "数据偏差通常指原始数据不公平；算法歧视是模型在这些数据上训练后产生的系统性偏见结果。即使无主观恶意，偏差也会被放大为歧视。"}, {"题型": "多选", "题干": "为了减少或缓解机器学习模型中的算法偏见，可以采用以下哪些技术手段？", "选项": {"A": "在预处理阶段对代表性不足的群体进行过采样或重新加权", "B": "在模型训练过程中引入公平性约束作为损失函数的一部分", "C": "在后处理阶段针对不同群体设置不同的分类决策阈值", "D": "简单地剔除性别、种族等敏感属性字段"}, "正确答案": "A、B、C", "答案解析": "A、B、C分别对应去偏的预处理、处理中、后处理三个阶段。D被称为'盲视公平'，因存在代理变量通常无法消除偏见。"}, {"题型": "单选", "题干": "在隐私保护相关法律中，'数据最小化'原则的核心含义是：", "选项": {"A": "尽可能缩短个人数据的存储期限", "B": "仅收集和处理为实现特定目的所必需的个人数据", "C": "通过技术手段将数据集的大小压缩到最小", "D": "限制能够接触到个人数据的员工数量"}, "正确答案": "B", "答案解析": "数据最小化要求数据收集应当充分、相关，且仅限于达到处理目的所必需的范围。"}, {"题型": "简答", "题干": "请结合金融风控或医疗诊断等高风险应用场景，简述'可解释人工智能'的主要价值，并分析其对提升用户信任的作用。", "选项": null, "正确答案": "合规问责/纠错调试；消除黑箱/理解决策逻辑边界/建立制度性信任。", "答案解析": "1. 价值：满足监管'受解释权'要求（合规问责）；帮助识别模型偏差或数据异常（纠错调试）。2. 信任作用：消除'黑箱'，使用户理解决策逻辑边界，确信系统基于合理特征而非随机/歧视因素判断，从而建立制度性信任与心理认同。"}]};
+        
+        // 当前状态
+        let currentCourse = Object.keys(quizData)[0];
+        let courseScores = {};
+        let totalScore = 0;
+        const POINTS_PER_QUESTION = 10;
+        
+        // 页面加载时初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCourse(currentCourse);
+            updateTotalScore();
+        });
+        
+        // 加载课程
+        function loadCourse(courseKey) {
+            currentCourse = courseKey;
+            
+            // 更新侧边栏激活状态
+            document.querySelectorAll('.course-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.querySelector('.course-name').textContent === courseKey) {
+                    btn.classList.add('active');
+                }
+            });
+            
+            const questions = quizData[courseKey];
+            if (!questions) {
+                console.error('课程未找到:', courseKey);
+                return;
+            }
+            const lessonHeader = `
+                <div class="lesson-header">
+                    <h2 class="lesson-title">${courseKey}</h2>
+                    <div class="lesson-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <span class="progress-text">完成度：<span id="progressCount">0</span>/<span id="totalCount">${questions.length}</span></span>
+                    </div>
+                </div>
+            `;
+            
+            let questionsHtml = '';
+            questions.forEach((q, index) => {
+                const qNum = index + 1;
+                const isCompleted = courseScores[`${courseKey}-${qNum}`] !== undefined;
+                
+                if (q.题型 === '简答') {
+                    questionsHtml += generateShortAnswerQuestion(q, qNum, isCompleted);
+                } else {
+                    questionsHtml += generateChoiceQuestion(q, qNum, isCompleted);
+                }
+            });
+            
+            const completionBadge = `
+                <div class="completion-badge" id="completionBadge">
+                    <div class="badge-icon">🏆</div>
+                    <h3 class="badge-title">恭喜完成本课!</h3>
+                    <p>得分：<span id="lessonScore">0</span>/${questions.length * POINTS_PER_QUESTION} 分</p>
+                </div>
+            `;
+            
+            document.getElementById('lessonContent').innerHTML = lessonHeader + questionsHtml + completionBadge;
+            updateProgress();
+        }
+        
+        // 生成选择题 HTML
+        function generateChoiceQuestion(q, qNum, isCompleted) {
+            const isMulti = q.题型 === '多选';
+            
+            const optionsHtml = Object.entries(q.选项).map(([key, value]) => {
+                const clickHandler = isCompleted ? '' : (isMulti 
+                    ? `selectOption(${qNum}, '${key}', true)` 
+                    : `selectOption(${qNum}, '${key}', false)`);
+                return `
+                <li class="option-item ${isCompleted ? 'disabled' : ''}" 
+                    data-option="${key}" 
+                    onclick="${clickHandler}">
+                    <span class="option-marker">${key}</span>
+                    <span>${value}</span>
+                </li>`;
+            }).join('');
+            
+            return `
+                <div class="question-card" id="question-${qNum}">
+                    <div>
+                        <span class="question-number">第${qNum}题</span>
+                        <span class="question-type">${q.题型}</span>
+                    </div>
+                    <div class="question-stem">${q.题干}</div>
+                    ${isMulti ? '<p style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 15px;">💡 提示：多选题可以选中多个选项</p>' : ''}
+                    <ul class="options-list">${optionsHtml}</ul>
+                    <button class="submit-btn ${isCompleted ? 'submitted' : ''}" 
+                            id="submit-${qNum}" 
+                            onclick="submitAnswer(${qNum})"
+                            ${isCompleted ? 'disabled' : ''}>
+                        ${isCompleted ? '已提交' : '提交答案'}
+                    </button>
+                    <div class="answer-section" id="answer-${qNum}">
+                        <div class="answer-title">✓ 正确答案：${q.正确答案}</div>
+                        <div class="answer-content">${q.答案解析}</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 生成简答题 HTML
+        function generateShortAnswerQuestion(q, qNum, isCompleted) {
+            const inputValue = isCompleted ? '' : q.正确答案;
+            const inputClass = isCompleted || !inputValue ? 'short-answer-input disabled' : 'short-answer-input';
+            // 处理题干显示
+            const questionTitle = q.题干 ? `<div class="question-stem">${q.题干}</div>` : '';
+            
+            return `
+                <div class="question-card" id="question-${qNum}">
+                    <div>
+                        <span class="question-number">第${qNum}题</span>
+                        <span class="question-type">${q.题型}</span>
+                    </div>
+                    ${questionTitle}
+                    <textarea class="${inputClass}" 
+                              id="input-${qNum}" 
+                              placeholder="${isCompleted ? '参考答案如下:' : '请输入你的答案...'}"
+                              ${isCompleted || !inputValue ? 'readonly' : ''}>${inputValue}</textarea>
+                    <button class="submit-btn ${isCompleted ? 'submitted' : ''}" 
+                            id="submit-${qNum}" 
+                            onclick="submitShortAnswer(${qNum})"
+                            ${isCompleted ? 'disabled' : ''}>
+                        ${isCompleted ? '已提交' : '提交答案'}
+                    </button>
+                    <div class="answer-section ${isCompleted ? 'show' : ''}" id="answer-${qNum}">
+                        <div class="answer-title">✓ 参考答案</div>
+                        <div class="answer-content">${q.正确答案}</div>
+                        <div class="answer-content" style="margin-top: 10px;">${q.答案解析}</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 选择选项（单选只选一个，多选可以选多个）
+        function selectOption(qNum, option, isMulti) {
+            const questionCard = document.getElementById(`question-${qNum}`);
+            
+            if (isMulti) {
+                // 多选题：切换选中状态
+                const optionItem = questionCard.querySelector(`.option-item[data-option="${option}"]`);
+                optionItem.classList.toggle('selected');
+            } else {
+                // 单选题：清除其他，只选当前
+                questionCard.querySelectorAll('.option-item').forEach(item => {
+                    item.classList.remove('selected');
+                    if (item.dataset.option === option) {
+                        item.classList.add('selected');
+                    }
+                });
+            }
+        }
+        
+        // 提交选择题答案
+        function submitAnswer(qNum) {
+            const questionCard = document.getElementById(`question-${qNum}`);
+            // 获取所有选中的选项（支持多选题）
+            const selectedOptions = questionCard.querySelectorAll('.option-item.selected');
+            
+            if (selectedOptions.length === 0) {
+                alert('请先选择答案！');
+                return;
+            }
+            
+            // 将所有选中的选项组合成一个字符串
+            const userAnswers = Array.from(selectedOptions).map(item => item.dataset.option);
+            const userAnswer = userAnswers.join(',');
+            const correctAnswer = quizData[currentCourse][qNum - 1].正确答案;
+            const answerSection = document.getElementById(`answer-${qNum}`);
+            const submitBtn = document.getElementById(`submit-${qNum}`);
+            
+            // 标记选项
+            questionCard.querySelectorAll('.option-item').forEach(item => {
+                item.classList.add('disabled');
+                if (item.dataset.option.trim() === correctAnswer.trim()) {
+                    item.classList.add('correct');
+                } else if (item.dataset.option === userAnswer && userAnswer !== correctAnswer) {
+                    item.classList.add('wrong');
+                }
+            });
+            
+            // 显示答案
+            answerSection.classList.add('show');
+            
+            // 计算分数
+            const isCorrect = checkMultiAnswer(userAnswer, correctAnswer);
+            if (isCorrect) {
+                answerSection.classList.remove('wrong-answer-section');
+                courseScores[`${currentCourse}-${qNum}`] = POINTS_PER_QUESTION;
+                showScoreAnimation(questionCard, POINTS_PER_QUESTION);
+            } else {
+                answerSection.classList.add('wrong-answer-section');
+                answerSection.querySelector('.answer-title').innerHTML = '✗ 很遗憾，回答错误';
+                courseScores[`${currentCourse}-${qNum}`] = 0;
+            }
+            
+            // 更新按钮
+            submitBtn.disabled = true;
+            submitBtn.textContent = '已提交';
+            submitBtn.classList.add('submitted');
+            
+            updateProgress();
+            updateTotalScore();
+        }
+        
+        // 提交简答题答案
+        function submitShortAnswer(qNum) {
+            const input = document.getElementById(`input-${qNum}`);
+            const userAnswer = input.value.trim();
+            const correctAnswer = quizData[currentCourse][qNum - 1].正确答案;
+            const answerSection = document.getElementById(`answer-${qNum}`);
+            const submitBtn = document.getElementById(`submit-${qNum}`);
+            
+            // 禁用输入
+            input.disabled = true;
+            input.readOnly = true;
+            input.classList.add('disabled');
+            input.placeholder = '参考答案如下:';
+            
+            // 显示答案
+            answerSection.classList.add('show');
+            
+            // 简答题给予满分（因为参考了答案）
+            courseScores[`${currentCourse}-${qNum}`] = POINTS_PER_QUESTION;
+            showScoreAnimation(document.getElementById(`question-${qNum}`), POINTS_PER_QUESTION);
+            
+            // 更新按钮
+            submitBtn.disabled = true;
+            submitBtn.textContent = '已提交';
+            submitBtn.classList.add('submitted');
+            
+            updateProgress();
+            updateTotalScore();
+        }
+        
+        // 检查多选题答案
+        function checkMultiAnswer(user, correct) {
+            // 支持英文逗号、分号、中文逗号、中文顿号等多种分隔符
+            const userSet = new Set(user.split(/[,;,、]/).map(s => s.trim()).filter(Boolean));
+            const correctSet = new Set(correct.split(/[,;,、]/).map(s => s.trim()).filter(Boolean));
+            
+            if (userSet.size !== correctSet.size) return false;
+            for (let item of correctSet) {
+                if (!userSet.has(item)) return false;
+            }
+            return true;
+        }
+        
+        // 显示分数动画
+        function showScoreAnimation(card, score) {
+            const existing = card.querySelector('.score-anim');
+            if (existing) existing.remove();
+            
+            const scoreEl = document.createElement('div');
+            scoreEl.className = 'score-anim';
+            scoreEl.style.cssText = 'position: absolute; right: 20px; top: 20px; font-size: 1.5em; color: #38ef7d; font-weight: bold;';
+            scoreEl.textContent = `+${score}分`;
+            card.style.position = 'relative';
+            card.appendChild(scoreEl);
+            
+            setTimeout(() => scoreEl.remove(), 1500);
+        }
+        
+        // 更新进度
+        function updateProgress() {
+            const questions = quizData[currentCourse];
+            const completed = questions.filter((_, i) => courseScores[`${currentCourse}-${i+1}`] !== undefined).length;
+            
+            document.getElementById('progressCount').textContent = completed;
+            document.querySelector('.progress-fill').style.width = `${(completed / questions.length) * 100}%`;
+            
+            // 更新完成徽章
+            const badge = document.getElementById('completionBadge');
+            if (badge && completed === questions.length) {
+                const lessonScore = questions.reduce((sum, _, i) => sum + (courseScores[`${currentCourse}-${i+1}`] || 0), 0);
+                document.getElementById('lessonScore').textContent = lessonScore;
+                badge.classList.add('show');
+                
+                // 标记侧边栏为已完成
+                document.querySelectorAll('.course-btn').forEach(btn => {
+                    if (btn.querySelector('.course-name').textContent === currentCourse) {
+                        btn.classList.add('completed');
+                    }
+                });
+            } else if (badge) {
+                badge.classList.remove('show');
+            }
+        }
+        
+        // 更新总分
+        function updateTotalScore() {
+            totalScore = Object.values(courseScores).reduce((sum, score) => sum + score, 0);
+            document.getElementById('totalScore').textContent = totalScore;
+        }
+    </script>
+</body>
+</html>
