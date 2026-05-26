@@ -172,7 +172,9 @@ const DownloadsPage: React.FC = () => {
   const buildDownloadUrl = (record: DownloadFile) => {
     const dir = record.path.replace('/' + record.name, '')
     const sep = dir ? `${dir}/${record.name}` : record.name
-    return `/api/files/${encodeURIComponent(`${username}/downloads/${sep}`)}`
+    const token = localStorage.getItem('smartkb_token') || ''
+    const baseUrl = `/api/files/${encodeURIComponent(`${username}/downloads/${sep}`)}`
+    return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
   }
 
   const columns = [

@@ -49,7 +49,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         ):
             is_public = True
 
+        # 尝试从多个来源提取 token
         token = extract_token(request)
+
+        # 从 Cookie 中提取（用于浏览器直接导航到资源文件）
+        if not token:
+            token = request.cookies.get("smartkb_token")
+
+        # 从 URL 查询参数中提取（用于开发环境或特殊场景）
+        if not token:
+            token = request.query_params.get("token")
 
         if token:
             payload = decode_jwt_token(token)
