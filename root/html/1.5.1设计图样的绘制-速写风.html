@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>设计图样的绘制 · 速写本</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&display=swap');
+:root{
+  --sk-paper:#f7f3eb; --sk-card:#f0e9da;
+  --sk-ink:#2a2018; --sk-ink-dim:#8a7a6a;
+  --sk-accent:#d4a030; --sk-line:#c4b8a8;
+  --sk-green:#4a7c3f; --sk-red:#c04040;
+  --sk-blue:#3a6fa5;
+  --font-hand:'Caveat','Comic Sans MS',cursive;
+  --font-body:'Segoe UI',system-ui,sans-serif;
+  --font-mono:'Courier New',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  font-family:var(--font-body);background:var(--sk-paper);
+  color:var(--sk-ink);min-height:100vh;padding:20px;
+  background-image:
+    repeating-linear-gradient(0deg,transparent,transparent 21px,rgba(180,160,140,.18) 21px,rgba(180,160,140,.18) 22px),
+    repeating-linear-gradient(90deg,transparent,transparent 21px,rgba(180,160,140,.08) 21px,rgba(180,160,140,.08) 22px);
+}
+.container{max-width:680px;margin:0 auto}
+.sk-spiral{position:fixed;left:14px;top:80px;width:18px;height:70%;pointer-events:none;z-index:0;opacity:.12}
+.sk-spiral div{width:10px;height:2px;background:var(--sk-ink-dim);margin:14px 0;border-radius:2px;transform-origin:50% 50%}
+.sk-spiral div:nth-child(odd){margin-left:4px;width:8px}
+.mw-header{text-align:center;padding:18px 0 6px;position:relative;margin-bottom:4px;z-index:1}
+.mw-header h1{
+  font-family:var(--font-hand);font-size:2rem;font-weight:700;
+  color:var(--sk-ink);display:inline-block;padding:0 10px 4px;
+  position:relative;
+}
+.mw-header h1::after{
+  content:'';position:absolute;bottom:-2px;left:0;right:0;height:3px;
+  background:var(--sk-accent);
+  background-image:linear-gradient(90deg,var(--sk-accent) 25%,transparent 25%,transparent 50%,var(--sk-accent) 50%,var(--sk-accent) 75%,transparent 75%);
+}
+.mw-header .mw-sub{
+  font-family:var(--font-hand);font-size:.8rem;color:var(--sk-ink-dim);
+  margin-top:2px;letter-spacing:2px;
+}
+.mw-tools{display:flex;gap:6px;justify-content:center;margin-bottom:6px;flex-wrap:wrap}
+.mw-tool{font-size:.85rem;color:var(--sk-ink-dim);opacity:.35}
+.mw-card{
+  background:var(--sk-card);
+  padding:20px 22px;margin-bottom:14px;
+  position:relative;z-index:1;
+  box-shadow:0 1px 3px rgba(42,32,24,.08);
+}
+.mw-card::before{
+  content:'';position:absolute;top:-1px;left:-1px;right:-1px;bottom:-1px;
+  border:1.5px solid var(--sk-ink-dim);opacity:.25;pointer-events:none;
+}
+.mw-card::after{
+  content:'';position:absolute;top:6px;right:6px;width:16px;height:16px;
+  border-right:2px solid var(--sk-accent);border-top:2px solid var(--sk-accent);opacity:.5;
+}
+.mw-title{
+  font-family:var(--font-hand);font-size:1.1rem;font-weight:700;
+  color:var(--sk-ink);margin-bottom:14px;
+  display:flex;align-items:center;gap:10px;
+  border-bottom:1px dashed rgba(138,122,106,.25);padding-bottom:6px;
+}
+.mw-title .mw-tag{
+  font-family:var(--font-mono);font-size:.85rem;font-weight:400;
+  color:var(--sk-accent);background:rgba(212,160,48,.06);
+  padding:2px 8px;border-left:3px solid var(--sk-accent);
+}
+.setup-group{display:flex;flex-direction:column;gap:12px}
+.setup-row{display:flex;align-items:center;gap:10px}
+.setup-row label{font-family:var(--font-hand);font-size:.9rem;font-weight:700;min-width:50px;color:var(--sk-ink)}
+.setup-row select,.setup-row button{
+  flex:1;padding:9px 12px;font-family:var(--font-body);font-size:.82rem;
+  border:1px solid var(--sk-ink-dim);background:#fff;color:var(--sk-ink);
+  cursor:pointer;
+}
+.setup-row select:disabled{opacity:.35}
+.mw-btn{font-size:1rem;padding:12px 28px;border-radius:8px;cursor:pointer;border:2px solid var(--sk-ink);background:var(--sk-paper);color:var(--sk-ink);font-family:var(--font-hand);font-weight:700;transition:all .15s;box-shadow:3px 3px 0 var(--sk-ink);
+  padding:9px 30px;font-family:var(--font-hand);font-size:.9rem;font-weight:700;
+  border:1px solid var(--sk-ink-dim);background:#fff;color:var(--sk-ink);
+  cursor:pointer;transition:all .1s;
+  box-shadow:1px 1px 0 var(--sk-ink-dim);
+}
+.mw-btn:hover{background:var(--sk-paper);border-color:var(--sk-ink)}
+.mw-btn:active{transform:translate(1px,1px);box-shadow:none}
+.mw-btn:disabled{opacity:.3;cursor:not-allowed;transform:none}
+.mw-btn-primary{background:var(--sk-accent);color:#fff;border-color:var(--sk-accent);font-size:1rem;padding:12px 28px;border-radius:8px;cursor:pointer;font-family:var(--font-hand);font-weight:700;transition:all .15s;box-shadow:3px 3px 0 var(--sk-ink-dim)}
+.mw-btn-green{background:var(--sk-green);color:#fff;border-color:var(--sk-green);font-size:1rem;padding:12px 28px;border-radius:8px;cursor:pointer;font-family:var(--font-hand);font-weight:700;transition:all .15s;box-shadow:3px 3px 0 var(--sk-ink-dim)}
+.hidden{display:none!important}
+.pick-area{text-align:center;min-height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.pick-name{font-size:3rem;font-weight:700;
+  font-family:var(--font-hand);font-size:2.8rem;font-weight:700;
+  color:var(--sk-ink);background:#fff;padding:10px 28px;display:inline-block;position:relative;
+}
+.pick-name.rolling{animation:sk-shake .08s infinite}
+@keyframes sk-shake{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)translateX(3px)}}
+.pick-name.result{animation:sk-draw .5s cubic-bezier(.34,1.56,.64,1)}
+@keyframes sk-draw{0%{opacity:0;transform:scale(.3)rotate(-8deg)}100%{opacity:1;transform:scale(1)rotate(0)}}
+.pick-hint,.pick-class{font-family:var(--font-hand);font-size:.95rem;color:var(--sk-ink-dim);margin-top:6px}
+.pick-class{font-weight:700;color:var(--sk-blue)}
+.quiz-area{text-align:center;font-size:1.05rem;line-height:1.7}
+.q-info{font-family:var(--font-hand);font-size:.95rem;color:var(--sk-ink-dim);margin-bottom:6px}
+.q-princ{color:var(--sk-green);font-weight:700;font-size:.9rem}
+.q-text{
+  font-size:1.1rem;line-height:1.8;text-align:left;
+  padding:18px 20px;background:#fff;
+  margin:8px 0 16px;border-left:4px solid var(--sk-accent);
+  box-shadow:inset 0 0 0 1px var(--sk-line);
+}
+.q-text::after{content:'';position:absolute;bottom:-6px;left:10%;width:80%;height:1px;background:repeating-linear-gradient(90deg,var(--sk-ink-dim),var(--sk-ink-dim) 4px,transparent 4px,transparent 8px);opacity:.2;pointer-events:none}
+.opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.opt-btn{
+  padding:14px 16px;border:1px solid var(--sk-line);background:#fff;text-align:left;cursor:pointer;
+  font-size:.95rem;line-height:1.5;display:flex;align-items:flex-start;gap:12px;transition:all .1s;
+}
+.opt-btn .ol{
+  display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;
+  font-family:var(--font-hand);font-size:.7rem;font-weight:700;flex-shrink:0;
+  background:var(--sk-paper);color:var(--sk-ink-dim);border:1px solid var(--sk-line);
+}
+.opt-btn:hover{border-color:var(--sk-ink)}.opt-btn:hover .ol{border-color:var(--sk-ink);color:var(--sk-ink)}
+.opt-btn.disabled{opacity:.6;pointer-events:none}
+.opt-btn.correct{border-color:var(--sk-green);background:rgba(74,124,63,.06)}
+.opt-btn.correct .ol{background:var(--sk-green);color:#fff;border-color:var(--sk-green)}
+.opt-btn.wrong{border-color:var(--sk-red);background:rgba(192,64,64,.06)}
+.opt-btn.wrong .ol{background:var(--sk-red);color:#fff;border-color:var(--sk-red)}
+.opt-btn.selected{border-color:var(--sk-ink)}
+.feedback{font-size:.95rem;padding:10px 16px;margin-top:12px}
+.feedback.correct{color:var(--sk-green)}.feedback.wrong{color:var(--sk-red)}
+.score-section{text-align:center}
+.score-student{font-family:var(--font-hand);font-size:1.2rem;color:var(--sk-blue)}
+.score-points{font-family:var(--font-hand);font-size:2.2rem;font-weight:700;color:var(--sk-accent);margin:6px 0}
+.score-label{font-size:.75rem;color:var(--sk-ink-dim)}
+.bar-wrap{display:flex;align-items:center;gap:8px;margin-top:10px}
+.bar-bg{flex:1;height:6px;background:var(--sk-line)}
+.bar-fill{height:100%;background:var(--sk-accent);transition:width .5s}
+.bar-text{font-size:.8rem;color:var(--sk-ink-dim);min-width:30px;font-family:var(--font-mono)}
+.final-table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.82rem}
+.final-table th{background:var(--sk-ink);color:var(--sk-paper);padding:8px 10px;font-family:var(--font-hand);font-size:.75rem;text-align:left}
+.final-table td{padding:7px 10px;border-bottom:1px dashed rgba(42,32,24,.1)}
+.rank-num{font-family:var(--font-mono);font-weight:700;color:var(--sk-ink-dim)}
+.rank-score{font-weight:700;color:var(--sk-accent)}
+.particle-container{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999}
+.particle{position:absolute;pointer-events:none}
+.review-section{text-align:left;margin-top:10px;border-top:2px dashed rgba(138,122,106,.3);padding-top:14px;max-height:400px;overflow-y:auto}
+.rev-empty{text-align:center;color:var(--sk-green);font-family:var(--font-hand);font-size:.85rem;padding:20px 0}
+.rev-student{font-family:var(--font-hand);font-size:.85rem;font-weight:700;color:var(--sk-accent);margin:10px 0 6px;padding-bottom:4px;border-bottom:1px dashed rgba(42,32,24,.12)}
+.rev-item{padding:10px 12px;margin-bottom:8px;background:#fff;border-left:3px solid var(--sk-red)}
+.rev-q{font-size:.82rem;line-height:1.5;margin-bottom:6px}
+.rev-princ{display:inline-block;font-family:var(--font-mono);font-size:.7rem;color:var(--sk-ink-dim);border:1px solid var(--sk-ink-dim);padding:1px 6px;margin-bottom:6px;background:var(--sk-paper)}
+.rev-opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px}
+.rev-opt{padding:5px 8px;font-size:.72rem;line-height:1.4;border:1px solid rgba(42,32,24,.1);background:var(--sk-paper);display:flex;align-items:flex-start;gap:6px}
+.rev-opt .rol{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;flex-shrink:0;border:1px solid rgba(42,32,24,.15);color:var(--sk-ink-dim)}
+.rev-opt.rev-chosen{background:rgba(192,64,64,.08);border-color:var(--sk-red)}
+.rev-opt.rev-chosen .rol{background:var(--sk-red);color:#fff;border-color:var(--sk-red)}
+.rev-opt.rev-right{background:rgba(74,124,63,.08);border-color:var(--sk-green)}
+.rev-opt.rev-right .rol{background:var(--sk-green);color:#fff;border-color:var(--sk-green)}
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+<div class="container" id="app">
+<div class="mw-header">
+  <div class="mw-tools"><span class="mw-tool">✏️</span><span class="mw-tool">📏</span><span class="mw-tool">📐</span><span class="mw-tool">🖍️</span><span class="mw-tool">📝</span></div>
+  <h1>设计图样的绘制</h1>
+  <div class="mw-sub">—— 速写本上的技术课 ——</div>
+</div>
+<div class="mw-card" id="sceneSetup">
+  <div class="mw-title"><span class="mw-tag">✎</span>设置</div>
+  <div class="setup-group">
+    <div class="setup-row"><label>年级</label><select id="gradeSelect"><option value="高一">高一</option><option value="高二">高二</option></select></div>
+    <div class="setup-row"><label>班级</label><select id="classSelect" disabled><option value="">—</option></select></div>
+    <div class="setup-row" style="margin-top:6px"><button class="mw-btn mw-btn-primary" id="btnStart" disabled>开始</button></div>
+  </div>
+</div>
+<div class="mw-card hidden" id="scenePick">
+  <div class="mw-title"><span class="mw-tag">🎯</span><span id="pickTitle">抽取</span></div>
+  <div class="pick-area">
+    <div class="pick-hint" id="pickHint">点击抽取</div>
+    <div class="pick-name" id="pickName">—</div>
+    <div class="pick-class hidden" id="pickClassTag"></div>
+    <button class="mw-btn hidden" id="btnPickStart" style="margin-top:8px">🎲 抽取</button>
+    <button class="mw-btn mw-btn-green hidden" id="btnPickConfirm" style="margin-top:4px">✔ 确认</button>
+    <button class="mw-btn hidden" id="btnRepick" style="margin-top:4px">↻ 重抽</button>
+  </div>
+</div>
+<div class="mw-card hidden" id="sceneQuiz">
+  <div class="mw-title" id="quizTitle"><span class="mw-tag">✍️</span>答题</div>
+  <div class="quiz-area">
+    <div class="q-info"><span id="qNumber">1/2</span> &middot; <span class="q-princ" id="qPrinciple"></span></div>
+    <div class="q-text" id="qText">—</div>
+    <div class="opt-grid" id="optionsGrid"></div>
+    <div class="feedback hidden" id="feedbackBox"></div>
+    <button class="mw-btn hidden" id="btnNextQ" style="margin-top:8px">下一题</button>
+  </div>
+</div>
+<div class="mw-card hidden" id="sceneScore">
+  <div class="mw-title"><span class="mw-tag">📊</span>成绩</div>
+  <div class="score-section">
+    <div class="score-label">学生</div>
+    <div class="score-student" id="scoreStudent"></div>
+    <div class="score-points" id="scorePoints">+10</div>
+    <div class="score-label" id="scoreLabel">正确 1 题</div>
+    <div class="score-label" id="scoreDetail" style="margin-top:2px;font-size:.68rem"></div>
+    <div class="bar-wrap"><div class="bar-bg"><div class="bar-fill" id="energyBar" style="width:0%"></div></div><span class="bar-text" id="energyText">0%</span></div>
+    <button class="mw-btn" id="btnNextRound" style="margin-top:8px">下一组</button>
+  </div>
+</div>
+<div class="mw-card hidden" id="sceneFinal">
+  <div class="mw-title"><span class="mw-tag">★</span>排名榜</div>
+  <div style="overflow-x:auto"><table class="final-table"><thead><tr><th>#</th><th>姓名</th><th>班级</th><th>答对</th><th>积分</th></tr></thead><tbody id="finalBody"></tbody></table></div>
+  <button class="mw-btn mw-btn-primary" id="btnReview" style="margin-top:8px">📋 查看错题解析</button>
+  <div class="review-section hidden" id="reviewSection"></div>
+  <button class="mw-btn" onclick="location.reload()" style="margin-top:10px">🔄 重新开始</button>
+</div>
+</div>
+<div class="particle-container" id="particleContainer"></div>
+<script>// 从 URL 路径自动提取教师用户名
+const pathMatch = window.location.pathname.match(/\/api\/files\/([^\/]+)\/html\//);
+const TEACHER = (pathMatch ? pathMatch[1] : '') || '';
+const Q=[{"question": "在技术图样中，用于表达物体形状和大小，并作为制造依据的图样是？", "options": {"A": "正等轴测图", "B": "三视图", "C": "效果图", "D": "构思草图"}, "answer": "B", "principle": "三视图"}, {"question": "小明设计了一个零件，在标注尺寸时，下列哪种做法是正确的？", "options": {"A": "不需要考虑尺寸基准", "B": "尺寸数字可以标注在任意位置", "C": "尺寸线必须用细实线单独画出", "D": "相同直径只需标注一处"}, "answer": "C", "principle": "尺寸标注规范"}, {"question": "三视图的投影规律为？", "options": {"A": "主俯视图宽相等", "B": "主左视图长对正", "C": "俯左视图高平齐", "D": "长对正、高平齐、宽相等"}, "answer": "D", "principle": "三视图投影规律"}, {"question": "下列形体中，左视图和主视图不一样的是？", "options": {"A": "圆柱体", "B": "正方体", "C": "圆锥体", "D": "L形块"}, "answer": "D", "principle": "左视图与主视图"}, {"question": "某设计师绘制一张图纸，标注比例是10:1，某边长的实际长度200cm，在图形中标注此边长时应标注？", "options": {"A": "20cm", "B": "200cm", "C": "2000cm", "D": "无需标注"}, "answer": "B", "principle": "尺寸以实际为准"}, {"question": "用特殊的投影方法显示物体三个方向投影图的方法叫？", "options": {"A": "轴测投影", "B": "正投影", "C": "立体投影", "D": "视图投影"}, "answer": "B", "principle": "正投影法"}, {"question": "在绘图板上绘制技术图样时，下列线型使用正确的是？", "options": {"A": "轮廓线用细实线", "B": "尺寸线用粗实线", "C": "隐藏线用虚线", "D": "辅助线用粗实线"}, "answer": "C", "principle": "图线规范"}, {"question": "下列关于尺寸标注的说法中，错误的是？", "options": {"A": "尺寸数字不可被任何图线穿过", "B": "尺寸线终端必须画箭头", "C": "尺寸可以标在轮廓线上", "D": "直径符号为Φ"}, "answer": "C", "principle": "尺寸标注规则"}, {"question": "下列图样中，能同时看到物体长、宽、高三个方向的是？", "options": {"A": "主视图", "B": "俯视图", "C": "正等轴测图", "D": "左视图"}, "answer": "C", "principle": "轴测图特点"}, {"question": "绘制一个长方体的三视图时，主视图为长方形，则俯视图和左视图是？", "options": {"A": "都是长方形", "B": "都是正方形", "C": "俯视图为长方形，左视图为正方形", "D": "无法确定"}, "answer": "A", "principle": "三视图形状"}];
+const G=[];for(let i=0;i<1;i++)G.push(Q.slice(i*2,i*2+2));
+
+let S={grade:'高一',class:'',students:[],available:[],picks:[],cr:0,cq:0,sa:'',ans:false,rr:[],total:0},_c=0;
+function $(i){return document.getElementById(i)}
+function sh(i){$(i).classList.remove('hidden')}
+function hd(i){$(i).classList.add('hidden')}
+function sf(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b}
+function st(i,m,s){const t=document.createElement('div');t.className='toast';t.innerHTML='<span class="toast-icon">'+i+'</span>'+m+(s?' <span class="toast-pts">'+s+'</span>':'');$('toastContainer').appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),250)},3000)}
+function fp(x,y,c,cnt){const pc=$('particleContainer');for(let i=0;i<cnt;i++){const e=document.createElement('div');e.className='cele-particle';const a=Math.random()*Math.PI*2,d=60+Math.random()*130;e.style.cssText='left:'+(x||innerWidth/2)+'px;top:'+(y||innerHeight/2)+'px;width:'+(5+Math.random()*7)+'px;height:'+(5+Math.random()*7)+'px;background:'+(c||'var(--bp-cyan)')+';--dx:'+(Math.cos(a)*d)+'px;--dy:'+(Math.sin(a)*d)+'px';pc.appendChild(e);setTimeout(()=>e.remove(),1200)}}
+function ud(){try{const h=$('bpBlocks')||$('memBlocks')||$('progressDots')||$('popDots');if(!h)return;h.innerHTML='';for(let i=0;i<5;i++){const e=document.createElement('div');e.className='bp-block'+(i<S.cr?' done':i===S.cr?' active':'');e.innerHTML='';h.appendChild(e)}}catch(e){}}
+function sv(g,c,n,p){fetch('/score-api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,name:n,points:p,teacher:TEACHER})}).then(r=>r.ok?st('💰','保存','+'+p):st('⚠️','异常')).catch(()=>st('📝','本地'))}
+function saveRecord(g,c,s,cc,t,pts,ans,title){fetch('/rollcall-api/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[],teacher:TEACHER})}).catch(()=>{})}
+async function lc(){const g=$('gradeSelect').value;S.grade=g;const cs=$('classSelect');cs.disabled=true;cs.innerHTML='<option value="">...</option>';try{const r=await fetch('/rollcall-api/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);const cls=await r.json();cs.innerHTML='<option value="">— 选择 —</option>';cls.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o)});cs.disabled=false}catch(e){cs.innerHTML='<option value="">失败</option>'}}
+$('gradeSelect').addEventListener('change',lc);$('classSelect').addEventListener('change',async function(){const c=this.value;S.class=c;$('btnStart').disabled=!c;if(c){try{const r=await fetch('/rollcall-api/students?grade='+encodeURIComponent(S.grade)+'&class='+encodeURIComponent(c)+'&teacher='+TEACHER);const data=await r.json();S.students=data.map(s=>s.name)}catch(e){S.students=[];st('⚠️','加载学生失败')}}});
+$('btnStart').addEventListener('click',function(){if(!S.class||S.students.length<5){st('⚠️','人数不足');return}hd('sceneSetup');sr(0)});
+function sr(ri){S.cr=ri;S.cq=0;_c=0;if(!S.rr[ri])S.rr[ri]={correctCount:0,points:0,answers:[]};S.rr[ri].answers=[];ud();sp()}
+function sp(){sh('scenePick');hd('sceneQuiz');hd('sceneScore');hd('sceneFinal');$('pickTitle').textContent=(S.cr+1)+'/5';$('pickHint').textContent='点击抽取';$('pickHint').classList.remove('hidden');$('pickClassTag').classList.add('hidden');$('btnPickStart').classList.remove('hidden');$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('pickName').textContent='——';$('pickName').className='pick-name';$('btnPickStart').disabled=false;$('btnPickStart').textContent='🎲 抽取'}
+function rp(){const pool=S.students.length>0?S.students:['---'];const pn=$('pickName');pn.className='pick-name rolling';$('pickHint').textContent='抽取中...';$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('btnPickStart').disabled=true;let rc=0,mx=18+Math.floor(Math.random()*10);let iv=setInterval(()=>{pn.textContent=pool[Math.floor(Math.random()*pool.length)];rc++;if(rc>=mx){clearInterval(iv);fetch('/rollcall-api/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,teacher:TEACHER})}).then(d=>d.json()).then(d=>{if(d.error){st('⚠️',d.error);pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false;return}const c=d.student;pn.textContent=c;pn.className='pick-name result';$('pickHint').classList.add('hidden');$('pickClassTag').textContent=S.grade+' · '+S.class;$('pickClassTag').classList.remove('hidden');$('btnPickConfirm').classList.remove('hidden');$('btnRepick').classList.remove('hidden');fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',30);st('🎯','已选',c);S.picks[S.cr]=c}).catch(()=>{st('⚠️','服务异常');pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false})}},60+Math.random()*40)}
+
+$('btnPickStart').addEventListener('click',function(){this.disabled=true;rp()});
+$('btnRepick').addEventListener('click',rp);
+
+$('btnPickConfirm').addEventListener('click',function(){hd('scenePick');sq()});
+function sq(){sh('sceneQuiz');S.cq=0;sQ()}
+function sQ(){const g=G[S.cr],q=g[S.cq];$('quizTitle').textContent='第'+(S.cr+1)+'组';$('qNumber').textContent=(S.cq+1)+'/2';$('qPrinciple').textContent=q.principle;$('qText').textContent=q.question;S.sa='';S.ans=false;$('feedbackBox').classList.add('hidden');$('btnNextQ').classList.add('hidden');const grid=$('optionsGrid');grid.innerHTML='';['A','B','C','D'].forEach(l=>{const b=document.createElement('button');b.className='option-btn';b.innerHTML='<span class="opt-label">'+l+'</span><span>'+q.options[l]+'</span>';b.dataset.label=l;b.addEventListener('click',()=>hA(l));grid.appendChild(b)})}
+function hA(l){if(S.ans)return;S.ans=true;const g=G[S.cr],q=g[S.cq],c=q.answer,ic=l===c;if(ic)_c++;S.rr[S.cr].correctCount=_c;let p=5;if(_c===1)p=10;else if(_c===2)p=15;S.rr[S.cr].points=p;S.rr[S.cr].answers.push({question:q.question,options:q.options,correctAnswer:c,yourAnswer:l,principle:q.principle,isCorrect:ic});const btns=$('optionsGrid').querySelectorAll('.option-btn');btns.forEach(b=>{b.classList.add('disabled');if(b.dataset.label===c)b.classList.add('correct');if(b.dataset.label===l&&!ic)b.classList.add('wrong');if(b.dataset.label===l&&ic)b.classList.add('selected')});const fb=$('feedbackBox');fb.classList.remove('hidden');if(ic){fb.className='feedback-box correct-fb';fb.textContent='✅ '+c+'. '+q.options[c];fp(innerWidth/2,innerHeight-80,'var(--bp-green)',12)}else{fb.className='feedback-box wrong-fb';fb.textContent='❌ 正确答案：'+c+'. '+q.options[c]}$('btnNextQ').classList.remove('hidden');$('btnNextQ').textContent=S.cq===0?'下一题 ▸':'结算'}
+$('btnNextQ').addEventListener('click',function(){if(S.cq===0){S.cq=1;sQ()}else{hd('sceneQuiz');sSc()}});
+function sSc(){sh('sceneScore');const s=S.picks[S.cr];$('scoreStudent').textContent=s+' · '+S.class;const cr=S.rr[S.cr],cc=cr?.correctCount||0,pts=cr?.points||5;$('scorePoints').textContent='+'+pts;$('scoreLabel').textContent='正确 '+cc+' 题';$('scoreDetail').innerHTML='<div class="score-stat">正确 <strong>'+cc+'</strong></div><div class="score-stat">错误 <strong>'+(2-cc)+'</strong></div><div class="score-stat">保底 <strong>5</strong></div>';sv(S.grade,S.class,s,pts);S.total+=pts;fetch('/rollcall-api/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,student:s,result:'quiz',teacher:TEACHER})}).catch(()=>{});saveRecord(S.grade,S.class,s,cc,2,pts,S.rr[S.cr]?.answers,'技术的发展-蓝图');fp(innerWidth/2,innerHeight/2-100,'var(--bp-gold)',25);$('btnNextRound').textContent=S.cr<4?'下一轮 ▸':'完成'}
+$('btnNextRound').addEventListener('click',function(){if(S.cr<4){hd('sceneScore');sr(S.cr+1)}else{hd('sceneScore');sF()}});
+function sF(){sh('sceneFinal');$('reviewSection').classList.add('hidden');$('btnReview').textContent='📋 查看错题解析';const tb=$('finalBody');tb.innerHTML='';const rows=S.picks.map((n,i)=>{const cr=S.rr[i];return{name:n,correct:cr?.correctCount||0,points:cr?.points||5}}).sort((a,b)=>b.points-a.points);rows.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML='<td class="rank-num">#'+(i+1)+'</td><td>'+r.name+'</td><td>'+r.correct+'/2</td><td class="rank-score">+'+r.points+'</td>';tb.appendChild(tr)});fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',50);setTimeout(()=>fp(innerWidth/2,innerHeight/2,'var(--bp-gold)',30),400)}
+$('btnReview').addEventListener('click',function(){const rs=$('reviewSection');if(!rs.classList.contains('hidden')){rs.classList.add('hidden');this.textContent='📋 查看错题解析';return}this.textContent='📋 收起解析';buildReview();rs.classList.remove('hidden')});
+function buildReview(){const rs=$('reviewSection');rs.innerHTML='';let hasWrong=false;const labels=['A','B','C','D'];S.picks.forEach((n,ri)=>{const cr=S.rr[ri];if(!cr||!cr.answers)return;const wrongs=cr.answers.filter(a=>!a.isCorrect);if(!wrongs.length)return;hasWrong=true;let h='<div class="rev-student">⚙ '+n+' · '+S.class+'</div>';wrongs.forEach(a=>{h+='<div class="rev-item"><span class="rev-princ">'+a.principle+'</span><div class="rev-q">'+a.question+'</div><div class="rev-opt-grid">';labels.forEach(l=>{let cls='rev-opt';if(l===a.yourAnswer)cls+=' rev-chosen';if(l===a.correctAnswer)cls+=' rev-right';h+='<div class="'+cls+'"><span class="rev-opt-label">'+l+'</span><span>'+a.options[l]+'</span></div>'});h+='</div></div>'});rs.innerHTML+=h});if(!hasWrong)rs.innerHTML='<div class="rev-empty">\u2705 \u6240\u6709\u540c\u5b66\u5168\u90e8\u7b54\u5bf9\uff01</div>'}
+lc();sh('sceneSetup');ud();
+</script>
+<div class="toast-container" id="toastContainer"></div>
+</body>
+</html>

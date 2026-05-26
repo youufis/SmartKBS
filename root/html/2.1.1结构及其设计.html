@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>通用技术 · 第一单元 结构及其设计 — 知识纲要</title>
+<style>
+:root{--primary:#4f46e5;--primary-2:#6366f1;--secondary:#0891b2;--accent:#d97706;--success:#059669;--warning:#dc2626;--bg-light:#f8fafc;--text:#1e293b;--text-muted:#64748b;--glass:rgba(255,255,255,0.6);--glass-border:rgba(0,0,0,0.06);--radius:20px;--ease-out:cubic-bezier(0.4,0,0.2,1)}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:"Chinese Quote","Inter","Microsoft YaHei",-apple-system,sans-serif;background:var(--bg-light);color:var(--text);line-height:1.85;overflow-x:hidden}
+.particles{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.particle{position:absolute;border-radius:50%;background:radial-gradient(circle at 30% 30%,rgba(99,102,241,0.12),transparent);animation:particle-drift linear infinite}
+.p1{width:300px;height:300px;top:5%;left:-5%;animation-duration:35s;opacity:.5}
+.p2{width:200px;height:200px;top:40%;right:-3%;animation-duration:28s;opacity:.4;background:radial-gradient(circle at 30% 30%,rgba(6,182,212,0.1),transparent)}
+.p3{width:250px;height:250px;bottom:10%;left:10%;animation-duration:32s;opacity:.3;background:radial-gradient(circle at 30% 30%,rgba(245,158,11,0.1),transparent)}
+.p4{width:180px;height:180px;top:60%;left:50%;animation-duration:40s;opacity:.25}
+.p5{width:120px;height:120px;top:20%;left:60%;animation-duration:25s;opacity:.35;background:radial-gradient(circle at 30% 30%,rgba(16,185,129,0.1),transparent)}
+.p6{width:350px;height:350px;bottom:-10%;right:-5%;animation-duration:38s;opacity:.2}
+@keyframes particle-drift{0%{transform:translate(0,0)scale(1)rotate(0deg)}25%{transform:translate(60px,-40px)scale(1.05)rotate(90deg)}50%{transform:translate(-40px,60px)scale(.95)rotate(180deg)}75%{transform:translate(-60px,-20px)scale(1.02)rotate(270deg)}100%{transform:translate(0,0)scale(1)rotate(360deg)}}
+.progress-bar{position:fixed;top:0;left:0;height:3px;z-index:100;background:linear-gradient(90deg,var(--primary-2),var(--secondary),var(--accent));animation:progress-grow linear;animation-timeline:scroll(root);transform-origin:left}
+@keyframes progress-grow{from{width:0}to{width:100%}}
+.side-nav{position:fixed;right:24px;top:50%;transform:translateY(-50%);z-index:50;display:flex;flex-direction:column;gap:10px}
+.side-nav a{display:block;width:12px;height:12px;border-radius:50%;background:rgba(79,70,229,0.1);border:2px solid rgba(79,70,229,0.2);transition:all .5s var(--ease-out);position:relative;text-decoration:none}
+.side-nav a::after{content:attr(data-label);position:absolute;right:20px;top:50%;transform:translateY(-50%);white-space:nowrap;font-size:12px;color:var(--text-muted);opacity:0;transition:opacity .3s;pointer-events:none}
+.side-nav a:hover::after{opacity:1}
+.side-nav a.active{background:var(--primary-2);border-color:var(--primary-2);box-shadow:0 0 12px rgba(99,102,241,0.5);transform:scale(1.3)}
+main{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 32px 120px}
+.hero{text-align:center;padding:120px 40px 80px;margin-bottom:60px;background:var(--glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--glass-border);border-radius:var(--radius);animation:hero-enter 1s var(--ease-out)}
+.hero h1{font-size:clamp(2rem,5vw,3.2rem);font-weight:800;background:linear-gradient(135deg,#4f46e5,#0891b2,#d97706);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:12px;animation:hero-txt-in .8s .3s both}
+.hero .subtitle{font-size:1.1rem;color:var(--text-muted);animation:hero-txt-in .8s .5s both}
+.hero .meta{margin-top:16px;display:flex;justify-content:center;gap:24px;flex-wrap:wrap;font-size:.85rem;color:var(--text-muted);animation:hero-txt-in .8s .7s both}
+.hero .meta span{display:flex;align-items:center;gap:6px}
+@keyframes hero-enter{from{opacity:0;transform:translateY(-30px)scale(.98)}to{opacity:1;transform:translateY(0)scale(1)}}
+@keyframes hero-txt-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.section-card{background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--glass-border);border-radius:var(--radius);padding:40px;margin-bottom:40px;opacity:0;transform:translateY(40px);transition:opacity .8s var(--ease-out),transform .8s var(--ease-out);animation:card-reveal 1s var(--ease-out) both;animation-timeline:view();animation-range:entry 0% entry 40%}
+.section-card.visible{opacity:1;transform:translateY(0)}
+.section-card:hover{box-shadow:0 8px 40px rgba(79,70,229,0.08)}
+@keyframes card-reveal{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
+.section-card h2{font-size:1.5rem;font-weight:700;margin-bottom:24px;padding-bottom:12px;border-bottom:2px solid rgba(99,102,241,0.3);display:flex;align-items:center;gap:12px}
+.section-card h2 .num{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--primary-2),var(--secondary));font-size:.9rem;font-weight:800;flex-shrink:0}
+.section-card h3{font-size:1.1rem;font-weight:600;color:var(--primary);margin:24px 0 10px}
+.section-card h3:first-of-type{margin-top:0}
+.section-card h4{font-size:.95rem;font-weight:600;color:#475569;margin:16px 0 6px}
+.section-card p{margin-bottom:10px;color:var(--text-muted)}
+.section-card ul,.section-card ol{margin:6px 0 14px 20px;color:var(--text-muted)}
+.section-card li{margin-bottom:5px}
+.section-card strong{color:var(--text);font-weight:600}
+.section-card .tag{display:inline-block;background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.15);border-radius:20px;padding:4px 14px;margin:3px;font-size:.82rem;color:var(--primary);transition:all .3s var(--ease-out)}
+.section-card .tag:hover{background:rgba(99,102,241,0.25);border-color:var(--primary-2);transform:translateY(-2px);box-shadow:0 4px 16px rgba(99,102,241,0.2)}
+.tags-wrap{display:flex;flex-wrap:wrap;gap:4px;margin-top:14px}
+.example-box{background:rgba(6,182,212,0.04);border-left:3px solid var(--secondary);border-radius:0 12px 12px 0;padding:14px 18px;margin:14px 0}
+.example-box p{margin-bottom:3px}
+.example-box .label{font-size:.78rem;text-transform:uppercase;color:var(--secondary);letter-spacing:1px;font-weight:600;margin-bottom:4px}
+.example-box.warn{border-left-color:var(--accent)}
+.example-box.warn .label{color:var(--accent)}
+.example-box.err{border-left-color:var(--warning)}
+.example-box.err .label{color:var(--warning)}
+.def-box{background:rgba(99,102,241,0.04);border:1px solid rgba(99,102,241,0.12);border-radius:12px;padding:18px 20px;margin:16px 0}
+.def-box .def-label{font-size:.75rem;color:var(--primary-2);font-weight:600;letter-spacing:1px;margin-bottom:4px}
+.def-box p{margin-bottom:4px}
+.compare-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:.88rem}
+.compare-table th,.compare-table td{padding:10px 14px;text-align:left;border-bottom:1px solid rgba(0,0,0,0.06)}
+.compare-table th{background:rgba(99,102,241,0.06);color:var(--primary);font-weight:600}
+.compare-table tr.highlight td{background:rgba(245,158,11,0.06)}
+.compare-table td:first-child{font-weight:600;color:var(--text)}
+.elements-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:16px 0}
+@media(max-width:600px){.elements-grid{grid-template-columns:1fr}}
+.element-card{background:rgba(255,255,255,0.5);border-radius:14px;padding:20px;text-align:center;border:1px solid var(--glass-border);transition:all .3s var(--ease-out)}
+.element-card:hover{border-color:var(--primary-2);transform:translateY(-4px);box-shadow:0 8px 24px rgba(99,102,241,0.15)}
+.element-card .icon{font-size:2rem;margin-bottom:8px}
+.element-card h4{font-size:.95rem;margin-bottom:4px;color:var(--text)}
+.element-card p{font-size:.82rem;color:var(--text-muted);margin:0}
+.force-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin:16px 0}
+.force-card{background:rgba(255,255,255,0.5);border-radius:14px;padding:18px;text-align:center;border:1px solid var(--glass-border);transition:all .3s var(--ease-out)}
+.force-card:hover{border-color:var(--primary-2);transform:translateY(-4px);box-shadow:0 8px 24px rgba(99,102,241,0.15)}
+.force-card .icon{font-size:1.8rem;margin-bottom:6px}
+.force-card h4{font-size:.9rem;margin-bottom:4px;color:var(--text)}
+.force-card p{font-size:.8rem;color:var(--text-muted);margin:0}
+.steps-timeline{position:relative;padding-left:32px;margin:16px 0}
+.steps-timeline::before{content:'';position:absolute;left:11px;top:0;bottom:0;width:2px;background:linear-gradient(to bottom,var(--primary-2),var(--secondary))}
+.step-item{position:relative;margin-bottom:20px;padding-left:8px}
+.step-item::before{content:attr(data-step);position:absolute;left:-32px;top:2px;width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--primary-2),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;border:2px solid var(--bg-light)}
+.step-item h4{font-size:1rem;color:var(--text);margin-bottom:2px}
+.step-item p{font-size:.88rem;color:var(--text-muted);margin:0}
+.methods-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:16px 0}
+@media(max-width:640px){.methods-grid,.force-grid{grid-template-columns:1fr}}
+.method-card{background:rgba(255,255,255,0.5);border-radius:14px;padding:24px;border:1px solid var(--glass-border);transition:all .3s var(--ease-out)}
+.method-card:hover{border-color:var(--secondary);transform:translateY(-4px);box-shadow:0 8px 24px rgba(6,182,212,0.12)}
+.method-card .icon{font-size:1.8rem;margin-bottom:6px}
+.method-card h4{font-size:1rem;margin-bottom:6px}
+.method-card p{font-size:.85rem;color:var(--text-muted);margin-bottom:4px}
+.method-card .eg{font-size:.82rem;color:var(--secondary);font-style:italic}
+footer{text-align:center;padding:40px 20px 60px;color:var(--text-muted);font-size:.85rem;max-width:960px;margin:0 auto}
+@media(prefers-reduced-motion:reduce){.particle{animation:none!important}.section-card{animation:none!important;opacity:1;transform:none}html{scroll-behavior:auto}.progress-bar{display:none}}
+@media(max-width:640px){main{padding:0 16px 80px}.hero{padding:80px 20px 60px}.section-card{padding:24px}.side-nav{right:10px}.side-nav a{width:10px;height:10px}.side-nav a::after{display:none}}
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="particles" aria-hidden="true">
+  <div class="particle p1"></div><div class="particle p2"></div>
+  <div class="particle p3"></div><div class="particle p4"></div>
+  <div class="particle p5"></div><div class="particle p6"></div>
+</div>
+<div class="progress-bar" aria-hidden="true"></div>
+
+<nav class="side-nav" aria-label="章节导航">
+  <a href="#s1" data-label="认识结构" class="active"></a>
+  <a href="#s2" data-label="结构与力"></a>
+  <a href="#s3" data-label="结构的设计"></a>
+  <a href="#s4" data-label="结构的欣赏"></a>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>第一单元 · 结构及其设计</h1>
+  <p class="subtitle">高中通用技术必修2 — 精确知识纲要</p>
+  <div class="meta">
+    <span>📚 4 大节</span><span>📖 教材级知识点</span><span>🔍 20+ 典型实例</span>
+  </div>
+</header>
+
+<!-- ===== 第一节：认识结构 ===== -->
+<section class="section-card" id="s1">
+  <h2><span class="num">1</span> 认识结构</h2>
+
+  <h3>一、结构的概念</h3>
+  <div class="def-box">
+    <div class="def-label">📌 广义定义</div>
+    <p><strong>结构</strong>是指事物的各个组成部分之间的<strong>有序搭配和排列</strong>。它决定着事物存在的性质。</p>
+  </div>
+  <div class="def-box">
+    <div class="def-label">📌 力学定义</div>
+    <p>从力学角度看，结构是指<strong>可承受一定力的架构形态</strong>，它可以抵抗能引起形状和大小改变的力。</p>
+  </div>
+
+  <div class="example-box">
+    <div class="label">💡 结构无处不在</div>
+    <p>• <strong>自然界：</strong>蜂巢的六边形结构、大树的主干与分支、人体骨骼结构</p>
+    <p>• <strong>技术领域：</strong>自行车的车架结构、桥梁的拱形结构、摩天大楼的框架结构</p>
+    <p>• <strong>社会领域：</strong>班级的组织结构、公司的管理结构、议论文的"总-分-总"结构</p>
+  </div>
+
+  <h3>二、结构的分类</h3>
+  <p>根据结构体的形态和受力特点，通常分为三种基本类型：</p>
+
+  <div class="elements-grid">
+    <div class="element-card">
+      <div class="icon">🧱</div>
+      <h4>实体结构</h4>
+      <p>结构体本身是实心的。外力分布在整个体积中，主要承受压力。</p>
+      <p style="margin-top:6px;font-size:.75rem;color:var(--secondary);">实例：实心墙、三峡大坝、菜板</p>
+    </div>
+    <div class="element-card">
+      <div class="icon">🏗️</div>
+      <h4>框架结构</h4>
+      <p>由细长构件（杆、柱、梁）组成。支撑空间而不充满空间。</p>
+      <p style="margin-top:6px;font-size:.75rem;color:var(--secondary);">实例：脚手架、自行车车架、埃菲尔铁塔</p>
+    </div>
+    <div class="element-card">
+      <div class="icon">🥚</div>
+      <h4>壳体结构</h4>
+      <p>层状结构，外形呈曲面。将外力均匀分散到整个表面。</p>
+      <p style="margin-top:6px;font-size:.75rem;color:var(--secondary);">实例：头盔、鸡蛋壳、飞机外壳</p>
+    </div>
+  </div>
+  <div class="example-box warn">
+    <div class="label">💡 组合结构</div>
+    <p>生活中的许多结构是三种基本类型的组合。例如，教学楼整体是框架结构，楼顶圆球可能是壳体结构，而墙面又是实体结构。</p>
+  </div>
+
+  <div class="tags-wrap">
+    <span class="tag">结构的概念</span><span class="tag">实体结构</span>
+    <span class="tag">框架结构</span><span class="tag">壳体结构</span><span class="tag">组合结构</span>
+  </div>
+</section>
+
+<!-- ===== 第二节：结构与力 ===== -->
+<section class="section-card" id="s2">
+  <h2><span class="num">2</span> 结构与力</h2>
+
+  <h3>一、构件的基本受力形式</h3>
+  <p>构件在承受外力时，会产生五种基本的受力与变形形式：</p>
+
+  <div class="force-grid">
+    <div class="force-card">
+      <div class="icon">↔️</div>
+      <h4>拉力</h4>
+      <p>构件承受拉拽力，沿轴线方向伸长</p>
+      <p class="eg" style="font-size:.75rem;margin-top:6px;">例：打水时绳子受拉</p>
+    </div>
+    <div class="force-card">
+      <div class="icon">⬇️</div>
+      <h4>压力</h4>
+      <p>构件承受挤压，沿轴线方向缩短</p>
+      <p class="eg" style="font-size:.75rem;margin-top:6px;">例：桥墩受压力</p>
+    </div>
+    <div class="force-card">
+      <div class="icon">✂️</div>
+      <h4>剪切力</h4>
+      <p>两个相距很近、反向的平行力使构件错动</p>
+      <p class="eg" style="font-size:.75rem;margin-top:6px;">例：用剪刀剪铁皮</p>
+    </div>
+    <div class="force-card">
+      <div class="icon">🌀</div>
+      <h4>扭转力</h4>
+      <p>反方向均匀施力，使构件发生扭转变形</p>
+      <p class="eg" style="font-size:.75rem;margin-top:6px;">例：拧毛巾、拧螺丝</p>
+    </div>
+    <div class="force-card">
+      <div class="icon">〰️</div>
+      <h4>弯曲力</h4>
+      <p>作用于物体上，使其产生弯曲</p>
+      <p class="eg" style="font-size:.75rem;margin-top:6px;">例：人吊单杠使杠弯曲</p>
+    </div>
+  </div>
+
+  <h3>二、结构的稳定性</h3>
+  <div class="def-box">
+    <div class="def-label">📌 定义</div>
+    <p><strong>稳定性</strong>：结构在负载的作用下维持其原有平衡状态的能力。</p>
+  </div>
+
+  <div class="methods-grid">
+    <div class="method-card">
+      <div class="icon">⬇️</div>
+      <h4>重心位置</h4>
+      <p>重心越低越稳定。不倒翁底部重、重心低，所以推不倒。</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">📐</div>
+      <h4>支撑面大小</h4>
+      <p>所有支撑点连线围成的面越大，结构越稳定。塔上小下大就是为增大支撑面。</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">📏</div>
+      <h4>重心垂线位置</h4>
+      <p>重心垂线必须在支撑面内，结构才能稳定。比萨斜塔虽斜但重心仍在支撑面内。</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🔺</div>
+      <h4>结构的形状</h4>
+      <p>三角形具有很好的稳定性。自行车车架、电线塔大量采用三角形结构。</p>
+    </div>
+  </div>
+
+  <h3>三、结构的强度</h3>
+  <div class="def-box">
+    <div class="def-label">📌 定义</div>
+    <p><strong>强度</strong>：结构具有的抵抗被外力破坏的能力。强度是衡量结构是否牢固的指标。</p>
+  </div>
+
+  <h4>影响强度的因素</h4>
+  <div class="methods-grid">
+    <div class="method-card">
+      <div class="icon">🧱</div>
+      <h4>材料</h4>
+      <p>不同材料的强度不同。钢材的强度远高于木材。</p>
+      <p class="eg">钢筋混凝土比纯砖石更坚固</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">⬡</div>
+      <h4>形状</h4>
+      <p>在相同材料用量下，改变截面形状（工字形、空心圆管）可显著提高强度。</p>
+      <p class="eg">工字钢比同重量的实心钢棒抗弯更强</p>
+    </div>
+    <div class="method-card" style="grid-column:1/-1">
+      <div class="icon">🔗</div>
+      <h4>连接方式</h4>
+      <p>构件之间的连接方式（铰连接、刚连接、焊接等）直接影响整体强度。</p>
+      <p class="eg">焊接的金属框架比螺栓连接更牢固，但不易拆卸</p>
+    </div>
+  </div>
+
+  <div class="tags-wrap">
+    <span class="tag">拉力</span><span class="tag">压力</span><span class="tag">剪切力</span>
+    <span class="tag">扭转力</span><span class="tag">弯曲力</span>
+    <span class="tag">稳定性</span><span class="tag">强度</span><span class="tag">应力</span>
+  </div>
+</section>
+
+<!-- ===== 第三节：结构的设计 ===== -->
+<section class="section-card" id="s3">
+  <h2><span class="num">3</span> 结构的设计</h2>
+
+  <h3>一、结构设计的一般过程</h3>
+
+  <div class="steps-timeline">
+    <div class="step-item" data-step="1">
+      <h4>发现与明确问题</h4>
+      <p>明确要设计什么结构，解决什么问题，满足什么需求。</p>
+      <p class="eg">发现教室后排看不清黑板 → 设计可调节高度的讲台</p>
+    </div>
+    <div class="step-item" data-step="2">
+      <h4>制定设计方案</h4>
+      <p>收集信息、构思方案、绘制草图、选择最佳方案。</p>
+      <p class="eg">构思升降式/折叠式/固定阶梯式讲台，评估可行性</p>
+    </div>
+    <div class="step-item" data-step="3">
+      <h4>模型或原型的制作</h4>
+      <p>根据设计方案，制作实物模型或原型用于测试验证。</p>
+    </div>
+    <div class="step-item" data-step="4">
+      <h4>测试、评估及优化</h4>
+      <p>测试模型是否达标，针对问题提出改进方案。</p>
+      <p class="eg">发现讲台摇晃 → 增加三角形支撑结构优化</p>
+    </div>
+    <div class="step-item" data-step="5">
+      <h4>产品的使用和维护说明</h4>
+      <p>编写产品说明书，告知正确使用方法和维护注意事项。</p>
+    </div>
+  </div>
+
+  <h3>二、结构设计的主要因素</h3>
+  <div class="methods-grid">
+    <div class="method-card">
+      <div class="icon">🎯</div>
+      <h4>功能</h4>
+      <p>结构必须满足预期的使用功能。结构决定功能。</p>
+      <p class="eg">雨伞结构决定遮雨功能</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🛡️</div>
+      <h4>稳固性</h4>
+      <p>保证结构具有足够的稳定性和强度，安全可靠。</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🧱</div>
+      <h4>材料</h4>
+      <p>直接影响强度、成本、重量、外观和加工方式。</p>
+      <p class="eg">户外座椅选塑木而非普通木材</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🔗</div>
+      <h4>连接方式</h4>
+      <p>影响结构的整体刚度和稳定性。</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">💰</div>
+      <h4>成本</h4>
+      <p>在满足功能和安全下尽量控制成本。</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🏞️</div>
+      <h4>环境与审美</h4>
+      <p>考虑所在环境，兼顾美观和人性化。</p>
+    </div>
+  </div>
+
+  <div class="tags-wrap">
+    <span class="tag">结构设计</span><span class="tag">设计过程</span>
+    <span class="tag">功能</span><span class="tag">稳固性</span><span class="tag">材料</span><span class="tag">连接方式</span>
+  </div>
+</section>
+
+<!-- ===== 第四节：结构的欣赏 ===== -->
+<section class="section-card" id="s4">
+  <h2><span class="num">4</span> 结构的欣赏</h2>
+
+  <h3>一、技术角度欣赏</h3>
+  <p>从结构的科学性、合理性、功能实现、材料运用、工艺水平等方面评价。</p>
+  <div class="methods-grid">
+    <div class="method-card">
+      <div class="icon">💪</div>
+      <h4>功能与强度</h4>
+      <p>结构是否有效实现功能？是否足够坚固？</p>
+      <p class="eg">赵州桥"敞肩拱"结构巧传荷载</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🧱</div>
+      <h4>材料使用</h4>
+      <p>选材是否合理？是否发挥材料特性？</p>
+      <p class="eg">悉尼歌剧院用混凝土+陶瓷砖造壳体</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">⚙️</div>
+      <h4>工艺与创新</h4>
+      <p>制作工艺是否精湛？设计有何创新？</p>
+      <p class="eg">埃菲尔铁塔的锻铁+铆接工艺</p>
+    </div>
+  </div>
+
+  <h3>二、文化角度欣赏</h3>
+  <p>从结构蕴含的文化内涵、历史背景、美学价值等方面评价。</p>
+  <div class="methods-grid">
+    <div class="method-card">
+      <div class="icon">🎨</div>
+      <h4>美学价值</h4>
+      <p>是否具有对称、均衡、韵律等形式美感？</p>
+      <p class="eg">北京故宫的中轴对称与秩序美</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🏮</div>
+      <h4>文化象征</h4>
+      <p>是否代表某种文化符号或精神寓意？</p>
+      <p class="eg">天坛祈年殿"天圆地方"的意象</p>
+    </div>
+    <div class="method-card">
+      <div class="icon">🏠</div>
+      <h4>历史与地域</h4>
+      <p>是否反映特定时期的技术和地域文化？</p>
+      <p class="eg">福建土楼体现客家聚族而居和文化</p>
+    </div>
+  </div>
+
+  <div class="tags-wrap">
+    <span class="tag">技术欣赏</span><span class="tag">文化欣赏</span>
+    <span class="tag">美学价值</span><span class="tag">功能与强度</span><span class="tag">材料工艺</span>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <p>高中通用技术必修2 — 第一单元 结构及其设计 知识纲要</p>
+  <p style="margin-top:4px;opacity:0.5">Scroll-Driven 知识旅程 · SmartKB 赋能</p>
+</footer>
+
+<script>
+(function(){'use strict';const pR=window.matchMedia('(prefers-reduced-motion:reduce)').matches;const t=document.querySelectorAll('.section-card');if(!pR&&t.length){const o=new IntersectionObserver(e=>{e.forEach(e=>{if(e.isIntersecting){const s=getComputedStyle(e.target),tl=s.animationTimeline||s.webkitAnimationTimeline;if(!tl||tl==='none'||tl==='auto')e.target.classList.add('visible')}})},{threshold:.1,rootMargin:'0px 0px -50px 0px'});t.forEach(e=>o.observe(e));setTimeout(()=>{t.forEach(e=>{const r=e.getBoundingClientRect();if(r.top<window.innerHeight-100&&r.bottom>0){const s=getComputedStyle(e),tl=s.animationTimeline||s.webkitAnimationTimeline;if(!tl||tl==='none'||tl==='auto')e.classList.add('visible')}})},100)}else if(pR){t.forEach(e=>{e.style.opacity='1';e.style.transform='none'})}
+const s=document.querySelectorAll('section[id]'),l=document.querySelectorAll('.side-nav a');
+function u(){let c='';const sy=window.scrollY+200;s.forEach(s=>{const t=s.offsetTop,b=t+s.offsetHeight;if(sy>=t&&sy<b)c=s.id});if(!c&&s.length){const l=s[s.length-1];if(window.scrollY+window.innerHeight>=l.offsetTop+l.offsetHeight/2)c=l.id}l.forEach(l=>l.classList.toggle('active','#'+l.getAttribute('href')==='#'+c))}
+let n=false;window.addEventListener('scroll',()=>{if(!n){window.requestAnimationFrame(()=>{u();n=false});n=true}});setTimeout(u,150);window.addEventListener('load',u)
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>信息系统的网络组建 — 知识纲要</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      margin: 20px;
+      background-color: #f9f9f9;
+      color: #333;
+    }
+    h1, h2, h3 {
+      color: #2c3e50;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 10px;
+    }
+    .chapter {
+      background: white;
+      padding: 15px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    ul {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 8px;
+    }
+    code {
+      background: #eee;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>信息系统的网络组建 — 各章节知识纲要</h1>
+
+<div class="chapter">
+  <h2>第三章 信息系统的网络组建</h2>
+
+  <h3>3.1 信息系统与外部世界的连接方式</h3>
+  <ul>
+    <li><strong>全面感知</strong>：利用无线射频识别（RFID）、传感器、定位器、二维码等技术，随时随地采集物理世界信息，扩展人类感知能力。</li>
+    <li><strong>传感技术</strong>：
+      <ul>
+        <li>光敏传感器 → 视觉（如红外、紫外、色彩传感器）</li>
+        <li>声敏传感器 → 听觉（检测气体/液体/固体中的振动）</li>
+        <li>气敏传感器 → 嗅觉（检测气体浓度与成分）</li>
+        <li>化学传感器 → 味觉（检测化学物质及浓度）</li>
+        <li>温敏、湿敏、压敏传感器 → 触觉（感知温度、湿度、压力等）</li>
+      </ul>
+    </li>
+    <li><strong>条码与二维码技术</strong>：
+      <ul>
+        <li>一维条形码：由黑白条按规则排列，表达数字/字母信息；需依赖数据库解析物品信息。</li>
+        <li>二维条码（二维码）：在横向和纵向均编码信息，可直接包含图像、文字、声音；具备错误修正与防伪功能，无需依赖外部数据库。</li>
+        <li>优势：输入速度快、准确度高、成本低、可靠性强。</li>
+      </ul>
+    </li>
+    <li><strong>可靠传递</strong>：通过有线/无线通信网络，对感知数据进行实时、准确的远程传输，实现信息交互、共享与处理。物联网依托互联网和传感器网络实现此功能。</li>
+  </ul>
+</div>
+
+<div class="chapter">
+  <h3>3.2 网络组建基础设备</h3>
+  <ul>
+    <li><strong>无线网卡</strong>：
+      <ul>
+        <li>作用：使计算机或移动终端接入无线网络。</li>
+        <li>类型：
+          <ul>
+            <li>USB无线网卡（外置，通用性强）</li>
+            <li>PCI接口无线网卡（台式机内置）</li>
+            <li>PCMCIA网卡（笔记本专用）</li>
+          </ul>
+        </li>
+        <li>现代移动设备通常已内置无线网卡。</li>
+      </ul>
+    </li>
+    <li><strong>路由器（Router）</strong>：
+      <ul>
+        <li>功能：连接不同网络，根据信道状况自动选择最佳路径转发数据包。</li>
+        <li>核心作用：判断网络地址、选择IP路径。</li>
+        <li>类型：
+          <ul>
+            <li>有线路由器</li>
+            <li>无线路由器（家庭/小型办公常用，可直连ADSL Modem并自动拨号上网）</li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+<div class="chapter">
+  <h3>3.3 组建小型无线网络</h3>
+  <ul>
+    <li><strong>项目目标</strong>：在物理连接基础上完成逻辑配置，分配IP地址，测试连通性，实现设备间正常通信。</li>
+    <li><strong>TCP/IP协议簇</strong>：
+      <ul>
+        <li>组成：上百个协议构成的协议体系，是互联网通信的核心。</li>
+        <li>分层模型：类似邮政系统，各层职责分明（应用层、传输层、网络层、网络接口层）。</li>
+      </ul>
+    </li>
+    <li><strong>IP地址</strong>：
+      <ul>
+        <li>作用：唯一标识网络中的设备（相当于“家庭住址”）。</li>
+        <li>与MAC地址区别：MAC是设备物理标识（如“身份证”），用于局域网内部识别。</li>
+        <li>IPv4格式：由4个用“.”分隔的十进制数组成，每段范围0–255（如 <code>192.168.1.1</code>）。</li>
+      </ul>
+    </li>
+    <li><strong>配置与测试流程</strong>：
+      <ol>
+        <li>查询现有网络参数（使用命令：<code>ipconfig</code>）</li>
+        <li>记录：IPv4地址、子网掩码、计算网络号</li>
+        <li>为新设备手动配置IP地址（路径：网络设置 → 以太网属性 → IPv4属性）</li>
+        <li>使用 <code>ping</code> 命令测试网络连通性</li>
+      </ol>
+    </li>
+  </ul>
+</div>
+
+<div class="chapter">
+  <h3>补充：网络基本概念（依据权威教材与课程标准）</h3>
+  <ul>
+    <li><strong>计算机网络定义</strong>：通过通信设备和线路，将地理位置分散的独立计算机系统互联，按统一协议实现资源共享与高速通信。</li>
+    <li><strong>网络分类</strong>：
+      <ul>
+        <li>按范围：局域网（LAN）、城域网（MAN）、广域网（WAN）</li>
+        <li>按介质：有线网、无线网</li>
+        <li>按拓扑：星型、总线型、环形、树形、网状</li>
+      </ul>
+    </li>
+    <li><strong>通信方式</strong>：单工、半双工、全双工；串行 vs 并行通信。</li>
+    <li><strong>新技术融合</strong>：物联网（IoT）、云计算、5G等推动信息系统向智能化、泛在化发展。</li>
+  </ul>
+</div>
+
+</body>
+</html>
+```</div>

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>$ 赛博终端 · 发现与明确问题 · 交互答题</title>
+<style>
+/* ═══════════════════════════════════════
+   赛博朋克 Terminal 风格
+   CRT 扫描线 · 矩阵雨 · 绿色终端
+   ═══════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg: #0a0e0a;
+  --green: #00ff41;
+  --green-dim: rgba(0,255,65,.12);
+  --green-glow: rgba(0,255,65,.3);
+  --orange: #ff8800;
+  --amber: #ffb000;
+  --red: #ff3355;
+  --cyan: #00ccff;
+  --text: #c0c0b0;
+  --text-dim: #556655;
+  --text-bright: #e0e0d0;
+  --border: rgba(0,255,65,.15);
+  --radius: 0px;
+  --font: 'Share Tech Mono','Courier New',monospace;
+}
+html{font-size:20px}
+body{
+  font-family:var(--font);
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  overflow-x:hidden;
+  display:flex;
+  justify-content:center;
+  position:relative;
+}
+/* CRT 扫描线 */
+body::after{
+  content:'';position:fixed;inset:0;z-index:9999;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.08) 2px,rgba(0,0,0,.08) 4px);
+}
+
+#app{
+  position:relative;z-index:1;
+  width:100%;max-width:920px;
+  min-height:100vh;
+  padding:24px 20px 50px;
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+}
+
+/* 终端头部 */
+.term-header{
+  width:100%;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 18px;
+  background:rgba(0,255,65,.04);
+  border:1px solid var(--border);
+  position:relative;
+}
+.term-header h1{
+  font-size:1rem;font-weight:400;color:var(--green);
+  letter-spacing:2px;text-transform:uppercase;
+}
+.term-header h1::before{content:'> ';color:var(--amber);}
+.term-status{
+  font-size:.7rem;color:var(--text-dim);
+  letter-spacing:1px;
+}
+.term-status .blink{animation:blink 1s step-end infinite;}
+@keyframes blink{50%{opacity:0}}
+
+/* 回合指示灯 */
+.term-dots{display:flex;gap:6px;}
+.term-dot{
+  width:14px;height:14px;border-radius:50%;
+  background:rgba(0,255,65,.06);border:1px solid var(--border);
+  transition:all .4s;
+}
+.term-dot.done{background:var(--green);border-color:var(--green);box-shadow:0 0 8px var(--green-glow);}
+.term-dot.active{background:var(--amber);border-color:var(--amber);box-shadow:0 0 12px rgba(255,176,0,.3);animation:dot-amber 1s ease infinite;}
+.term-dot.future{background:rgba(0,255,65,.03);}
+@keyframes dot-amber{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* 终端卡片 */
+.term-card{
+  width:100%;
+  background:rgba(0,20,0,.4);
+  border:1px solid var(--border);
+  padding:24px 22px;
+  position:relative;
+  animation:term-in .4s ease-out;
+}
+.term-card::before{
+  content:'┌─ ' attr(data-label) ' ';position:absolute;top:-10px;left:12px;
+  background:var(--bg);padding:0 8px;font-size:.7rem;
+  color:var(--text-dim);letter-spacing:1px;
+}
+@keyframes term-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.scene-title{
+  font-size:1.1rem;font-weight:400;text-align:center;margin-bottom:14px;
+  color:var(--amber);letter-spacing:2px;text-transform:uppercase;
+}
+.scene-title::before{content:'# ';color:var(--green);}
+
+/* 设置 */
+.setup-group{display:flex;flex-direction:column;gap:12px;max-width:400px;margin:0 auto;}
+.setup-row{display:flex;flex-direction:column;gap:4px;}
+.setup-row label{font-size:.75rem;color:var(--green);letter-spacing:2px;text-transform:uppercase;}
+.setup-row select,.setup-row button{
+  width:100%;padding:12px 16px;
+  background:rgba(0,255,65,.03);
+  border:1px solid var(--border);
+  color:var(--text);font-size:.9rem;font-family:var(--font);
+  cursor:pointer;transition:all .3s;outline:none;
+}
+.setup-row select:hover,.setup-row select:focus{border-color:var(--green);box-shadow:0 0 12px var(--green-glow);}
+.setup-row select option{background:#0a0e0a;color:var(--text);}
+.btn-term{
+  background:transparent!important;
+  border:1px solid var(--green)!important;
+  color:var(--green)!important;font-weight:400!important;
+  font-size:.9rem!important;letter-spacing:3px;text-transform:uppercase;
+  transition:all .3s!important;
+}
+.btn-term:hover{background:rgba(0,255,65,.08)!important;box-shadow:0 0 20px var(--green-glow)!important;}
+.btn-term:disabled{opacity:.25;cursor:not-allowed;border-color:var(--text-dim)!important;color:var(--text-dim)!important;}
+
+/* 点名 */
+.pick-section{text-align:center;min-height:270px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.pick-term-area{position:relative;width:100%;max-width:460px;min-height:140px;display:flex;align-items:center;justify-content:center;margin:6px 0;}
+.pick-term-ring{
+  position:absolute;width:200px;height:200px;border-radius:50%;
+  border:1px solid rgba(0,255,65,.1);
+  animation:term-spin 4s linear infinite;
+}
+.pick-term-ring:nth-child(2){width:160px;height:160px;border-color:rgba(255,136,0,.08);animation-direction:reverse;animation-duration:5s;border-style:dashed;}
+.pick-term-ring:nth-child(3){width:240px;height:240px;border-color:rgba(0,204,255,.06);animation-duration:6s;border-style:dotted;}
+@keyframes term-spin{to{transform:rotate(360deg)}}
+.pick-term-name{
+  font-size:3.8rem;font-weight:400;z-index:2;font-family:var(--font);
+  color:var(--amber);text-shadow:0 0 20px rgba(255,176,0,.2);
+  min-width:160px;text-align:center;letter-spacing:4px;
+}
+.pick-term-name.rolling{animation:term-flicker .08s infinite;}
+@keyframes term-flicker{0%,100%{opacity:1}50%{opacity:.2}}
+.pick-term-name.result{
+  animation:term-reveal .6s cubic-bezier(.34,1.56,.64,1);
+  color:var(--green);text-shadow:0 0 30px var(--green-glow);
+  font-size:4.2rem;
+}
+@keyframes term-reveal{
+  0%{transform:scale(.8);opacity:0;filter:blur(4px)}
+  50%{transform:scale(1.1)}
+  100%{transform:scale(1);opacity:1;filter:blur(0)}
+}
+.pick-hint{color:var(--text-dim);font-size:.8rem;margin-top:4px;letter-spacing:1px;}
+.pick-class-tag{
+  display:inline-block;padding:3px 14px;
+  border:1px solid var(--border);color:var(--text-dim);
+  font-size:.7rem;margin-top:4px;letter-spacing:2px;
+}
+.btn-term-pick{
+  margin-top:14px;padding:12px 40px;
+  background:transparent;border:1px solid var(--green);
+  color:var(--green);font-family:var(--font);font-size:.85rem;
+  cursor:pointer;letter-spacing:3px;text-transform:uppercase;transition:all .3s;
+}
+.btn-term-pick:hover{background:rgba(0,255,65,.08);box-shadow:0 0 20px var(--green-glow);}
+.btn-term-pick:disabled{opacity:.25;cursor:not-allowed;}
+
+/* 答题 */
+.quiz-section{text-align:center;}
+.q-num{
+  display:inline-block;padding:2px 12px;
+  border:1px solid var(--border);color:var(--text-dim);
+  font-size:.85rem;letter-spacing:2px;margin-bottom:6px;
+}
+.q-princ{
+  display:inline-block;padding:2px 12px;
+  border:1px solid rgba(0,204,255,.2);color:var(--cyan);
+  font-size:.8rem;margin-left:6px;letter-spacing:1px;
+}
+.q-text{
+  font-size:1rem;line-height:1.6;margin:8px 0 14px;
+  text-align:left;padding:14px 18px;
+  background:rgba(0,255,65,.03);
+  border-left:2px solid var(--green);color:var(--text-bright);
+}
+.options-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.option-btn{
+  padding:12px 14px;
+  background:rgba(0,255,65,.02);
+  border:1px solid var(--border);
+  color:var(--text);font-size:.95rem;text-align:left;cursor:pointer;
+  transition:all .2s;font-family:var(--font);line-height:1.4;
+  display:flex;align-items:flex-start;gap:8px;
+}
+.option-btn .opt-label{
+  display:inline-flex;width:24px;height:24px;
+  align-items:center;justify-content:center;
+  font-size:.85rem;flex-shrink:0;
+  border:1px solid var(--border);color:var(--text-dim);
+}
+.option-btn:hover{border-color:var(--green);background:rgba(0,255,65,.05);}
+.option-btn.selected{border-color:var(--amber);background:rgba(255,176,0,.06);}
+.option-btn.selected .opt-label{border-color:var(--amber);color:var(--amber);}
+.option-btn.correct{border-color:var(--green)!important;background:var(--green-dim)!important;}
+.option-btn.correct .opt-label{border-color:var(--green);color:var(--green);}
+.option-btn.wrong{border-color:var(--red)!important;background:rgba(255,51,85,.06)!important;animation:term-shake .4s;}
+.option-btn.wrong .opt-label{border-color:var(--red);color:var(--red);}
+.option-btn.disabled{pointer-events:none;opacity:.4;}
+@keyframes term-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+.feedback-box{margin-top:12px;padding:10px 18px;font-size:.95rem;animation:term-fade .3s;}
+@keyframes term-fade{from{opacity:0}to{opacity:1}}
+.feedback-box.correct-fb{border:1px solid var(--green);color:var(--green);background:var(--green-dim);}
+.feedback-box.wrong-fb{border:1px solid var(--red);color:var(--red);background:rgba(255,51,85,.06);}
+.btn-term-next{
+  margin-top:12px;padding:10px 32px;
+  background:transparent;border:1px solid var(--green);
+  color:var(--green);font-family:var(--font);font-size:.8rem;cursor:pointer;
+  letter-spacing:3px;text-transform:uppercase;transition:all .3s;
+}
+.btn-term-next:hover{background:rgba(0,255,65,.08);box-shadow:0 0 15px var(--green-glow);}
+
+/* 计分 */
+.score-section{text-align:center;}
+.score-big{
+  font-size:4rem;font-weight:400;font-family:var(--font);
+  color:var(--amber);text-shadow:0 0 30px rgba(255,176,0,.3);
+  animation:score-term .8s cubic-bezier(.34,1.56,.64,1);
+  margin:6px 0;
+}
+@keyframes score-term{0%{transform:scale(.5);opacity:0}60%{transform:scale(1.2)}100%{transform:scale(1);opacity:1}}
+.score-label{color:var(--text-dim);font-size:.95rem;letter-spacing:2px;}
+.score-detail{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin:10px 0;}
+.score-stat{padding:6px 16px;border:1px solid var(--border);color:var(--text-dim);font-size:.9rem;}
+.score-stat strong{color:var(--green);font-size:1.1rem;}
+.term-bar-wrap{width:100%;max-width:440px;margin:8px auto;}
+.term-bar-bg{width:100%;height:8px;background:rgba(0,255,65,.06);border:1px solid var(--border);}
+.term-bar-fill{height:100%;background:var(--green);transition:width 1s;box-shadow:0 0 10px var(--green-glow);}
+.term-bar-label{display:flex;justify-content:space-between;font-size:.85rem;color:var(--text-dim);margin-top:2px;}
+
+/* 最终 */
+.final-section{text-align:center;}
+.final-title{
+  font-size:1.4rem;font-weight:400;font-family:var(--font);margin-bottom:4px;
+  color:var(--amber);letter-spacing:3px;
+}
+.final-sub{color:var(--text-dim);margin-bottom:16px;font-size:.85rem;}
+.final-table{width:100%;border-collapse:collapse;margin:6px 0 16px;}
+.final-table th{padding:8px 10px;text-align:left;font-size:.75rem;color:var(--green);border-bottom:1px solid var(--border);letter-spacing:2px;}
+.final-table td{padding:8px 10px;border-bottom:1px solid rgba(0,255,65,.04);font-size:.82rem;}
+.final-table tr:hover td{background:rgba(0,255,65,.03);}
+.final-table .rank-num{color:var(--amber);}
+.final-table .rank-score{color:var(--green);}
+
+.hidden{display:none!important;}
+.toast-container{
+  position:fixed;top:20px;right:20px;z-index:1000;display:flex;flex-direction:column;gap:6px;pointer-events:none;
+}
+.toast{
+  padding:10px 20px;
+  background:rgba(0,10,0,.92);
+  border:1px solid var(--border);
+  font-family:var(--font);font-size:.8rem;color:var(--text);
+  animation:toast-term .3s forwards;display:flex;align-items:center;gap:8px;letter-spacing:1px;
+}
+.toast .toast-icon{font-size:1rem;}
+.toast .toast-score{color:var(--amber);}
+.toast.out{animation:toast-term-out .25s forwards;}
+@keyframes toast-term{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes toast-term-out{from{opacity:1}to{transform:translateX(100%);opacity:0}}
+.particle-container{position:fixed;inset:0;pointer-events:none;z-index:999;}
+.cele-particle{
+  position:fixed;pointer-events:none;
+  animation:particle-term 1s cubic-bezier(.25,.46,.45,.94) forwards;
+}
+@keyframes particle-term{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(0)}}
+
+@media(max-width:640px){
+  #app{padding:14px 10px 30px;}
+  .term-card{padding:18px 14px;}
+  .pick-term-name{font-size:3rem;}
+  .pick-term-name.result{font-size:3.4rem;}
+  .pick-term-ring{width:170px;height:170px;}
+  .pick-term-ring:nth-child(2){width:140px;height:140px;}
+  .pick-term-ring:nth-child(3){width:200px;height:200px;}
+  .options-grid{grid-template-columns:1fr;}
+  .q-text{font-size:.88rem;}
+  .score-big{font-size:3rem;}
+}
+
+/* 错题解析 */
+.review-section{text-align:left;margin-top:10px;border-top:1px solid rgba(255,255,255,.12);padding-top:14px;max-height:400px;overflow-y:auto}
+.rev-empty{text-align:center;color:#4ecdc4;font-family:var(--font-mono);font-size:.75rem;padding:20px 0}
+.rev-student{font-family:var(--font-mono);font-size:.85rem;font-weight:600;color:#d4a843;margin:10px 0 6px;padding-bottom:4px;border-bottom:1px dashed rgba(255,255,255,.1)}
+.rev-item{padding:10px 12px;margin-bottom:8px;background:rgba(0,0,0,.15);border-left:3px solid #ff6b6b;border-radius:0 4px 4px 0}
+.rev-q{font-size:.88rem;line-height:1.5;margin-bottom:6px}
+.rev-princ{display:inline-block;font-family:var(--font-mono);font-size:.75rem;color:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.1);padding:1px 6px;margin-bottom:6px}
+.rev-opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px}
+.rev-opt{padding:6px 8px;font-size:.78rem;line-height:1.4;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.08);border-radius:2px;display:flex;align-items:flex-start;gap:6px;color:inherit}
+.rev-opt .rev-opt-label{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:.8rem;font-weight:700;flex-shrink:0;border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.4)}
+.rev-opt.rev-chosen{background:rgba(255,107,107,.1);border-color:#ff6b6b}
+.rev-opt.rev-chosen .rev-opt-label{background:#ff6b6b;color:#fff;border-color:#ff6b6b}
+.rev-opt.rev-right{background:rgba(78,205,196,.1);border-color:#4ecdc4}
+.rev-opt.rev-right .rev-opt-label{background:#4ecdc4;color:#1a1a2e;border-color:#4ecdc4}
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+<div class="toast-container" id="toastContainer"></div>
+<div class="particle-container" id="particleContainer"></div>
+<div id="app">
+  <header class="term-header">
+    <h1>$ 赛博终端 · 发现与明确问题</h1>
+    <span class="term-status">SYS: ONLINE <span class="blink">▌</span></span>
+    <div class="term-dots" id="termDots"></div>
+  </header>
+  <div class="term-card" data-label="BOOT" id="sceneSetup">
+    <div class="scene-title"># 初始化系统</div>
+    <div class="setup-group">
+      <div class="setup-row"><label>> 选择年级</label><select id="gradeSelect"><option value="高一">高一年级</option><option value="高二">高二年级</option></select></div>
+      <div class="setup-row"><label>> 选择班级</label><select id="classSelect" disabled><option value="">-- 加载中 --</option></select></div>
+      <div class="setup-row" style="margin-top:6px"><button class="btn-term" id="btnStart" disabled>> 启动交互终端</button></div>
+    </div>
+  </div>
+  <div class="term-card hidden" data-label="PICK" id="scenePick">
+    <div class="scene-title" id="pickTitle"># 第1组 · 终端抽选</div>
+    <div class="pick-section">
+      <div class="pick-hint" id="pickHint">>> 正在扫描用户池...</div>
+      <div class="pick-term-area">
+        <div class="pick-term-ring"></div><div class="pick-term-ring"></div><div class="pick-term-ring"></div>
+        <div class="pick-term-name" id="pickName">✨</div>
+      </div>
+      <div class="pick-class-tag hidden" id="pickClassTag"></div>
+      <button class="btn-term-pick hidden" id="btnPickStart">> 抽选</button>
+      <button class="btn-term-pick hidden" id="btnPickConfirm" style="border-color:var(--amber);color:var(--amber)">> 确认执行</button>
+    <button class="btn-term-pick hidden" id="btnRepick" style="border-color:var(--amber);color:var(--amber)">↻ 重抽</button>
+    </div>
+  </div>
+  <div class="term-card hidden" data-label="QUIZ" id="sceneQuiz">
+    <div class="scene-title" id="quizTitle"># 第1组 · 知识检索</div>
+    <div class="quiz-section">
+      <div><span class="q-num" id="qNumber">Q1/2</span><span class="q-princ" id="qPrinciple">途径</span></div>
+      <div class="q-text" id="qText">加载中...</div>
+      <div class="options-grid" id="optionsGrid"></div>
+      <div class="feedback-box hidden" id="feedbackBox"></div>
+      <button class="btn-term-next hidden" id="btnNextQ">> 下一题</button>
+    </div>
+  </div>
+  <div class="term-card hidden" data-label="SCORE" id="sceneScore">
+    <div class="scene-title"># 系统结算</div>
+    <div class="score-section">
+      <div class="score-label">>> 目标用户</div>
+      <div style="font-size:1.3rem;color:var(--amber);margin:3px 0 8px" id="scoreStudent"></div>
+      <div class="score-big" id="scorePoints">+10</div>
+      <div class="score-label" id="scoreLabel">>> 得分记录</div>
+      <div class="score-detail" id="scoreDetail"></div>
+      <div class="term-bar-wrap">
+        <div class="term-bar-bg"><div class="term-bar-fill" id="energyBar" style="width:0%"></div></div>
+        <div class="term-bar-label"><span>进度</span><span id="energyText">0%</span></div>
+      </div>
+      <button class="btn-term-next" id="btnNextRound">> 下一任务</button>
+    </div>
+  </div>
+  <div class="term-card hidden" data-label="DONE" id="sceneFinal">
+    <div class="scene-title final-title"># 系统完成</div>
+    <div class="final-sub">>> 终端日志输出</div>
+    <div style="overflow-x:auto"><table class="final-table"><thead><tr><th>#</th><th>用户</th><th>班级</th><th>正确</th><th>得分</th></tr></thead><tbody id="finalBody"></tbody></table></div>
+        <button class="rev-btn" id="btnReview" style="padding:10px 36px;font-size:.8rem;margin-top:6px;cursor:pointer;border:2px solid #5bc0eb;background:transparent;color:#5bc0eb;font-family:var(--font-mono);border-radius:6px">📋 查看错题解析</button>
+    <div class="review-section hidden" id="reviewSection"></div>
+<button class="btn-term" style="padding:10px 36px;font-size:.8rem;cursor:pointer;border:none;border-radius:0;letter-spacing:2px;" onclick="location.reload()">> 重启系统</button>
+  </div>
+</div>
+<script>// 从 URL 路径自动提取教师用户名
+const pathMatch = window.location.pathname.match(/\/api\/files\/([^\/]+)\/html\//);
+const TEACHER = (pathMatch ? pathMatch[1] : '') || '';
+const Q=[{question:"某同学注意到冬季天冷儿童吃饭慢，设计了注水保温碗。发现问题的途径是",options:{A:"观察日常生活",B:"收集和分析信息",C:"技术研究与技术试验",D:"奇特性构思法"},answer:"A"},{question:"小黄设计'方便采桑树器'，该想法主要来源于",options:{A:"对桑叶进行技术研究",B:"对桑叶进行技术试验",C:"采桑叶过程中的观察",D:"桑叶的结构"},answer:"C"},{question:"法国将军查阅伤亡数据发现头部中弹比例高达70%，于是设计钢盔。发现问题的方法是",options:{A:"观察日常生活",B:"技术研究和试验",C:"收集和分析信息",D:"设计者的奇思妙想"},answer:"C"},{question:"某小组通过个别询问、发放问卷收集雨具架资料，发现问题的途径是",options:{A:"观察日常生活",B:"技术研究与技术试验",C:"收集和分析信息",D:"模仿法"},answer:"C"},{question:"小明发现LED台灯只照明，想设计智能台灯，但查资料发现已有类似产品。他忽视的环节是",options:{A:"发现问题",B:"方案筛选",C:"技术试验",D:"明确问题"},answer:"D"},{question:"陈晓丽设计儿童自行车，链轮链条裸露违反技术规范。出现失误是因为",options:{A:"没有进行问卷调查",B:"没有明确童车的设计要求",C:"没有进行模型制作",D:"没有进行技术试验"},answer:"B"},{question:"小明发现衣服难找，想设计分类收纳装置。他在网络检索相关产品是为了明确",options:{A:"问题的价值",B:"问题的内容",C:"解决问题受到的限制",D:"解决问题的可能性"},answer:"C"},{question:"某同学通过网络问卷了解同学们对文具盒的需求，这属于发现问题的途径中的",options:{A:"观察日常生活",B:"技术试验",C:"收集和分析信息",D:"灵感闪现"},answer:"C"},{question:"明确设计问题后，接下来首先要做的是",options:{A:"制作模型",B:"设计分析",C:"对设计需求进行调查研究",D:"编写说明书"},answer:"C"},{question:"关于发现与明确问题阶段，以下说法正确的是",options:{A:"所有问题都应立即着手解决",B:"发现问题后不需要分析问题的价值",C:"要明确解决问题的限制条件和技术规范",D:"发现问题后可直接进入制作阶段"},answer:"C"}];
+const G=[];for(let i=0;i<5;i++)G.push(Q.slice(i*2,i*2+2));
+
+let S={grade:'高一',class:'',students:[],available:[],picks:[],cr:0,cq:0,sa:'',ans:false,rr:[],total:0},_c=0;
+function $(i){return document.getElementById(i)}
+function sh(i){$(i).classList.remove('hidden')}
+function hd(i){$(i).classList.add('hidden')}
+function sf(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b}
+function st(i,m,s){const t=document.createElement('div');t.className='toast';t.innerHTML='<span class="toast-icon">'+i+'</span>'+m+(s?' <span class="toast-pts">'+s+'</span>':'');$('toastContainer').appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),250)},3000)}
+function fp(x,y,c,cnt){const pc=$('particleContainer');for(let i=0;i<cnt;i++){const e=document.createElement('div');e.className='cele-particle';const a=Math.random()*Math.PI*2,d=60+Math.random()*130;e.style.cssText='left:'+(x||innerWidth/2)+'px;top:'+(y||innerHeight/2)+'px;width:'+(5+Math.random()*7)+'px;height:'+(5+Math.random()*7)+'px;background:'+(c||'var(--bp-cyan)')+';--dx:'+(Math.cos(a)*d)+'px;--dy:'+(Math.sin(a)*d)+'px';pc.appendChild(e);setTimeout(()=>e.remove(),1200)}}
+function ud(){try{const h=$('bpBlocks')||$('memBlocks')||$('progressDots')||$('popDots');if(!h)return;h.innerHTML='';for(let i=0;i<5;i++){const e=document.createElement('div');e.className='bp-block'+(i<S.cr?' done':i===S.cr?' active':'');e.innerHTML='';h.appendChild(e)}}catch(e){}}
+function sv(g,c,n,p){fetch('/score-api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,name:n,points:p,teacher:TEACHER})}).then(r=>r.ok?st('💰','保存','+'+p):st('⚠️','异常')).catch(()=>st('📝','本地'))}
+function saveRecord(g,c,s,cc,t,pts,ans,title){fetch('/rollcall-api/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[],teacher:TEACHER})}).catch(()=>{})}
+async function lc(){const g=$('gradeSelect').value;S.grade=g;const cs=$('classSelect');cs.disabled=true;cs.innerHTML='<option value="">...</option>';try{const r=await fetch('/rollcall-api/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);const cls=await r.json();cs.innerHTML='<option value="">— 选择 —</option>';cls.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o)});cs.disabled=false}catch(e){cs.innerHTML='<option value="">失败</option>'}}
+$('gradeSelect').addEventListener('change',lc);$('classSelect').addEventListener('change',async function(){const c=this.value;S.class=c;$('btnStart').disabled=!c;if(c){try{const r=await fetch('/rollcall-api/students?grade='+encodeURIComponent(S.grade)+'&class='+encodeURIComponent(c)+'&teacher='+TEACHER);const data=await r.json();S.students=data.map(s=>s.name)}catch(e){S.students=[];st('⚠️','加载学生失败')}}});
+$('btnStart').addEventListener('click',function(){if(!S.class||S.students.length<5){st('⚠️','人数不足');return}hd('sceneSetup');sr(0)});
+function sr(ri){S.cr=ri;S.cq=0;_c=0;if(!S.rr[ri])S.rr[ri]={correctCount:0,points:0,answers:[]};S.rr[ri].answers=[];ud();sp()}
+function sp(){sh('scenePick');hd('sceneQuiz');hd('sceneScore');hd('sceneFinal');$('pickTitle').textContent=(S.cr+1)+'/5';$('pickHint').textContent='点击抽取';$('pickHint').classList.remove('hidden');$('pickClassTag').classList.add('hidden');$('btnPickStart').classList.remove('hidden');$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('pickName').textContent='——';$('pickName').className='pick-name';$('btnPickStart').disabled=false;$('btnPickStart').textContent='🎲 抽取'}
+function rp(){const pool=S.students.length>0?S.students:['---'];const pn=$('pickName');pn.className='pick-name rolling';$('pickHint').textContent='抽取中...';$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('btnPickStart').disabled=true;let rc=0,mx=18+Math.floor(Math.random()*10);let iv=setInterval(()=>{pn.textContent=pool[Math.floor(Math.random()*pool.length)];rc++;if(rc>=mx){clearInterval(iv);fetch('/rollcall-api/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,teacher:TEACHER})}).then(d=>d.json()).then(d=>{if(d.error){st('⚠️',d.error);pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false;return}const c=d.student;pn.textContent=c;pn.className='pick-name result';$('pickHint').classList.add('hidden');$('pickClassTag').textContent=S.grade+' · '+S.class;$('pickClassTag').classList.remove('hidden');$('btnPickConfirm').classList.remove('hidden');$('btnRepick').classList.remove('hidden');fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',30);st('🎯','已选',c);S.picks[S.cr]=c}).catch(()=>{st('⚠️','服务异常');pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false})}},60+Math.random()*40)}
+
+$('btnPickStart').addEventListener('click',function(){this.disabled=true;rp()});
+$('btnRepick').addEventListener('click',rp);
+
+$('btnPickConfirm').addEventListener('click',function(){hd('scenePick');sq()});
+function sq(){sh('sceneQuiz');S.cq=0;sQ()}
+function sQ(){const g=G[S.cr],q=g[S.cq];$('quizTitle').textContent='第'+(S.cr+1)+'组';$('qNumber').textContent=(S.cq+1)+'/2';$('qPrinciple').textContent=q.principle;$('qText').textContent=q.question;S.sa='';S.ans=false;$('feedbackBox').classList.add('hidden');$('btnNextQ').classList.add('hidden');const grid=$('optionsGrid');grid.innerHTML='';['A','B','C','D'].forEach(l=>{const b=document.createElement('button');b.className='option-btn';b.innerHTML='<span class="opt-label">'+l+'</span><span>'+q.options[l]+'</span>';b.dataset.label=l;b.addEventListener('click',()=>hA(l));grid.appendChild(b)})}
+function hA(l){if(S.ans)return;S.ans=true;const g=G[S.cr],q=g[S.cq],c=q.answer,ic=l===c;if(ic)_c++;S.rr[S.cr].correctCount=_c;let p=5;if(_c===1)p=10;else if(_c===2)p=15;S.rr[S.cr].points=p;S.rr[S.cr].answers.push({question:q.question,options:q.options,correctAnswer:c,yourAnswer:l,principle:q.principle,isCorrect:ic});const btns=$('optionsGrid').querySelectorAll('.option-btn');btns.forEach(b=>{b.classList.add('disabled');if(b.dataset.label===c)b.classList.add('correct');if(b.dataset.label===l&&!ic)b.classList.add('wrong');if(b.dataset.label===l&&ic)b.classList.add('selected')});const fb=$('feedbackBox');fb.classList.remove('hidden');if(ic){fb.className='feedback-box correct-fb';fb.textContent='✅ '+c+'. '+q.options[c];fp(innerWidth/2,innerHeight-80,'var(--bp-green)',12)}else{fb.className='feedback-box wrong-fb';fb.textContent='❌ 正确答案：'+c+'. '+q.options[c]}$('btnNextQ').classList.remove('hidden');$('btnNextQ').textContent=S.cq===0?'下一题 ▸':'结算'}
+$('btnNextQ').addEventListener('click',function(){if(S.cq===0){S.cq=1;sQ()}else{hd('sceneQuiz');sSc()}});
+function sSc(){sh('sceneScore');const s=S.picks[S.cr];$('scoreStudent').textContent=s+' · '+S.class;const cr=S.rr[S.cr],cc=cr?.correctCount||0,pts=cr?.points||5;$('scorePoints').textContent='+'+pts;$('scoreLabel').textContent='正确 '+cc+' 题';$('scoreDetail').innerHTML='<div class="score-stat">正确 <strong>'+cc+'</strong></div><div class="score-stat">错误 <strong>'+(2-cc)+'</strong></div><div class="score-stat">保底 <strong>5</strong></div>';sv(S.grade,S.class,s,pts);S.total+=pts;fetch('/rollcall-api/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,student:s,result:'quiz',teacher:TEACHER})}).catch(()=>{});saveRecord(S.grade,S.class,s,cc,2,pts,S.rr[S.cr]?.answers,'技术的发展-蓝图');fp(innerWidth/2,innerHeight/2-100,'var(--bp-gold)',25);$('btnNextRound').textContent=S.cr<4?'下一轮 ▸':'完成'}
+$('btnNextRound').addEventListener('click',function(){if(S.cr<4){hd('sceneScore');sr(S.cr+1)}else{hd('sceneScore');sF()}});
+function sF(){sh('sceneFinal');$('reviewSection').classList.add('hidden');$('btnReview').textContent='📋 查看错题解析';const tb=$('finalBody');tb.innerHTML='';const rows=S.picks.map((n,i)=>{const cr=S.rr[i];return{name:n,correct:cr?.correctCount||0,points:cr?.points||5}}).sort((a,b)=>b.points-a.points);rows.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML='<td class="rank-num">#'+(i+1)+'</td><td>'+r.name+'</td><td>'+r.correct+'/2</td><td class="rank-score">+'+r.points+'</td>';tb.appendChild(tr)});fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',50);setTimeout(()=>fp(innerWidth/2,innerHeight/2,'var(--bp-gold)',30),400)}
+$('btnReview').addEventListener('click',function(){const rs=$('reviewSection');if(!rs.classList.contains('hidden')){rs.classList.add('hidden');this.textContent='📋 查看错题解析';return}this.textContent='📋 收起解析';buildReview();rs.classList.remove('hidden')});
+function buildReview(){const rs=$('reviewSection');rs.innerHTML='';let hasWrong=false;const labels=['A','B','C','D'];S.picks.forEach((n,ri)=>{const cr=S.rr[ri];if(!cr||!cr.answers)return;const wrongs=cr.answers.filter(a=>!a.isCorrect);if(!wrongs.length)return;hasWrong=true;let h='<div class="rev-student">⚙ '+n+' · '+S.class+'</div>';wrongs.forEach(a=>{h+='<div class="rev-item"><span class="rev-princ">'+a.principle+'</span><div class="rev-q">'+a.question+'</div><div class="rev-opt-grid">';labels.forEach(l=>{let cls='rev-opt';if(l===a.yourAnswer)cls+=' rev-chosen';if(l===a.correctAnswer)cls+=' rev-right';h+='<div class="'+cls+'"><span class="rev-opt-label">'+l+'</span><span>'+a.options[l]+'</span></div>'});h+='</div></div>'});rs.innerHTML+=h});if(!hasWrong)rs.innerHTML='<div class="rev-empty">\u2705 \u6240\u6709\u540c\u5b66\u5168\u90e8\u7b54\u5bf9\uff01</div>'}
+lc();sh('sceneSetup');ud();
+</script>
+</body>
+</html>

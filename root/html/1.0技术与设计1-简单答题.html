@@ -1,0 +1,306 @@
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>技术与设计答题游戏</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: #fff;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            position: relative;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+        }
+        .question {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
+        }
+        .options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .option {
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1.1em;
+            transition: background 0.3s ease, transform 0.2s ease;
+        }
+        .option:hover {
+            background: rgba(255, 255, 255, 0.4);
+            transform: scale(1.05);
+        }
+        .lifelines {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-around;
+        }
+        .lifeline {
+            padding: 10px 20px;
+            background: #ff6f61;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background 0.3s ease, transform 0.2s ease;
+        }
+        .lifeline:hover {
+            background: #ff3b2f;
+            transform: scale(1.05);
+        }
+        .score {
+            margin-top: 20px;
+            font-size: 1.2em;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
+        }
+        .lifeline.disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .correct {
+            background: #4CAF50 !important;
+        }
+        .wrong {
+            background: #f44336 !important;
+        }
+        .animated {
+            animation: pop 0.5s ease;
+        }
+        @keyframes pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        /* 自定义弹窗样式 */
+        .custom-alert {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            z-index: 1000;
+            animation: fadeIn 0.5s ease;
+        }
+        .custom-alert button {
+            padding: 10px 20px;
+            background: #ff6f61;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-top: 10px;
+            transition: background 0.3s ease;
+        }
+        .custom-alert button:hover {
+            background: #ff3b2f;
+        }
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: translate(-50%, -60%); }
+            100% { opacity: 1; transform: translate(-50%, -50%); }
+        }
+    
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+    <div class="container">
+        <h1>技术与设计答题游戏</h1>
+        <div class="question" id="question">问题加载中...</div>
+        <div class="options" id="options">
+            <button class="option" id="option1">选项1</button>
+            <button class="option" id="option2">选项2</button>
+            <button class="option" id="option3">选项3</button>
+            <button class="option" id="option4">选项4</button>
+        </div>
+        <div class="lifelines">
+            <button class="lifeline" id="fiftyFifty">50:50</button>
+            <button class="lifeline" id="audiencePoll">观众投票</button>
+            <button class="lifeline" id="phoneAFriend">打电话给朋友</button>
+        </div>
+        <div class="score" id="score">得分: 0</div>
+    </div>
+
+    <script>
+        const questions = [
+            { question: "设计的一般过程的第一步是什么？", options: ["发现与明确问题", "制作模型或原型", "制定设计方案", "测试、评估及优化"], answer: 0 },
+            { question: "设计中的人机关系主要考虑哪些因素？", options: ["信息交互", "普通人群与特殊人群", "静态人与动态人", "人的心理需求"], answer: 1 },
+            { question: "设计任何产品都应综合考虑哪些方面？", options: ["产品本身", "使用者", "使用环境", "以上都是"], answer: 3 },
+            { question: "技术设计的核心是什么？", options: ["功能", "结构", "材料", "工艺"], answer: 0 },
+            { question: "艺术设计侧重于哪些方面？", options: ["色彩", "造型", "审美", "以上都是"], answer: 3 },
+            { question: "设计的一般原则中，创新原则的核心是什么？", options: ["引入新概念", "降低成本", "提高效率", "以上都是"], answer: 0 },
+            { question: "经济原则强调什么？", options: ["最低费用", "最佳效果", "两者兼顾", "以上都不是"], answer: 2 },
+            { question: "道德原则要求设计考虑哪些关系？", options: ["人与社会", "人与环境", "社会与环境", "以上都是"], answer: 3 },
+            { question: "技术规范原则的作用是什么？", options: ["统一标准", "提高效率", "降低成本", "以上都是"], answer: 0 },
+            { question: "设计的一般过程中，制定设计方案的下一步是什么？", options: ["制作模型或原型", "测试、评估及优化", "明确产品的使用说明", "以上都不是"], answer: 0 },
+            { question: "技术试验的重要性体现在哪里？", options: ["验证设计", "优化设计", "发现问题", "以上都是"], answer: 3 },
+            { question: "设计分析的主要目的是什么？", options: ["找出主要问题", "制定解决方案", "优化设计方案", "以上都是"], answer: 0 },
+            { question: "技术进步对设计的影响是什么？", options: ["提供新材料", "提供新方法", "丰富设计手段", "以上都是"], answer: 3 },
+            { question: "设计的一般原则中，实用原则的核心是什么？", options: ["基本功能", "外观设计", "成本控制", "以上都不是"], answer: 0 },
+            { question: "设计的一般过程中，测试、评估及优化的下一步是什么？", options: ["明确产品的使用说明", "制定设计方案", "制作模型或原型", "以上都不是"], answer: 0 }
+        ];
+
+        let currentQuestion = 0;
+        let score = 0;
+        let lifelines = {
+            fiftyFifty: true,
+            audiencePoll: true,
+            phoneAFriend: true
+        };
+
+        const questionElement = document.getElementById('question');
+        const optionsElements = [
+            document.getElementById('option1'),
+            document.getElementById('option2'),
+            document.getElementById('option3'),
+            document.getElementById('option4')
+        ];
+        const scoreElement = document.getElementById('score');
+        const fiftyFiftyButton = document.getElementById('fiftyFifty');
+        const audiencePollButton = document.getElementById('audiencePoll');
+        const phoneAFriendButton = document.getElementById('phoneAFriend');
+
+        function showCustomAlert(message, callback) {
+            const alertBox = document.createElement('div');
+            alertBox.className = 'custom-alert';
+            alertBox.innerHTML = `
+                <p>${message}</p>
+                <button onclick="this.parentElement.remove()">确定</button>
+            `;
+            document.body.appendChild(alertBox);
+            if (callback) {
+                alertBox.querySelector('button').addEventListener('click', callback);
+            }
+        }
+
+        function loadQuestion() {
+            const q = questions[currentQuestion];
+            questionElement.textContent = q.question;
+            optionsElements.forEach((option, index) => {
+                option.textContent = q.options[index];
+                option.style.display = 'block';
+                option.disabled = false;
+                option.classList.remove('correct', 'wrong', 'animated');
+            });
+        }
+
+        function checkAnswer(selectedIndex) {
+            const q = questions[currentQuestion];
+            const selectedOption = optionsElements[selectedIndex];
+            selectedOption.classList.add('animated');
+
+            if (selectedIndex === q.answer) {
+                selectedOption.classList.add('correct');
+                score += 10;
+                currentQuestion++;
+                if (currentQuestion < questions.length) {
+                    setTimeout(() => {
+                        loadQuestion();
+                    }, 1000);
+                } else {
+                    setTimeout(() => {
+                        showCustomAlert(`恭喜你完成所有题目！你的最终得分是: ${score}`, () => {
+                            currentQuestion = 0;
+                            score = 0;
+                            loadQuestion();
+                        });
+                    }, 1000);
+                }
+            } else {
+                selectedOption.classList.add('wrong');
+                setTimeout(() => {
+                    showCustomAlert(`回答错误！游戏结束。你的最终得分是: ${score}`, () => {
+                        currentQuestion = 0;
+                        score = 0;
+                        loadQuestion();
+                    });
+                }, 1000);
+            }
+            scoreElement.textContent = `得分: ${score}`;
+        }
+
+        function fiftyFifty() {
+            if (lifelines.fiftyFifty) {
+                const q = questions[currentQuestion];
+                let wrongOptions = [0, 1, 2, 3].filter(index => index !== q.answer);
+                wrongOptions = wrongOptions.sort(() => Math.random() - 0.5).slice(0, 2);
+                wrongOptions.forEach(index => {
+                    optionsElements[index].style.display = 'none';
+                });
+                lifelines.fiftyFifty = false;
+                fiftyFiftyButton.classList.add('disabled');
+                fiftyFiftyButton.disabled = true;
+            }
+        }
+
+        function audiencePoll() {
+            if (lifelines.audiencePoll) {
+                const q = questions[currentQuestion];
+                const pollResults = [0, 0, 0, 0];
+                pollResults[q.answer] = Math.floor(Math.random() * 50 + 50);
+                for (let i = 0; i < 4; i++) {
+                    if (i !== q.answer) {
+                        pollResults[i] = Math.floor(Math.random() * (100 - pollResults[q.answer]) / 3);
+                    }
+                }
+                showCustomAlert(`观众投票结果: A: ${pollResults[0]}%, B: ${pollResults[1]}%, C: ${pollResults[2]}%, D: ${pollResults[3]}%`);
+                lifelines.audiencePoll = false;
+                audiencePollButton.classList.add('disabled');
+                audiencePollButton.disabled = true;
+            }
+        }
+
+        function phoneAFriend() {
+            if (lifelines.phoneAFriend) {
+                const q = questions[currentQuestion];
+                const friendAnswer = Math.random() < 0.8 ? q.answer : Math.floor(Math.random() * 4);
+                showCustomAlert(`你的朋友建议选择: ${String.fromCharCode(65 + friendAnswer)}`);
+                lifelines.phoneAFriend = false;
+                phoneAFriendButton.classList.add('disabled');
+                phoneAFriendButton.disabled = true;
+            }
+        }
+
+        optionsElements.forEach((option, index) => {
+            option.addEventListener('click', () => checkAnswer(index));
+        });
+
+        fiftyFiftyButton.addEventListener('click', fiftyFifty);
+        audiencePollButton.addEventListener('click', audiencePoll);
+        phoneAFriendButton.addEventListener('click', phoneAFriend);
+
+        loadQuestion();
+    </script>
+</body>
+</html>
