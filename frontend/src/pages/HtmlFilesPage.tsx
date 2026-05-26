@@ -30,12 +30,15 @@ const HtmlFilesPage: React.FC = () => {
           <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-          {files.map((f) => (
+          {files.map((f) => {
+            const token = localStorage.getItem('smartkb_token') || ''
+            const fileUrl = `/api/files/${f.url_path || f.name}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+            return (
             <Card key={f.path} size="small" hoverable style={{ fontSize: 14 }}>
               <Card.Meta
                 avatar={<FileOutlined style={{ fontSize: 16 }} />}
                 title={
-                  <a href={`/api/files/${f.url_path || f.name}`} target="_blank" rel="noreferrer"
+                  <a href={fileUrl} target="_blank" rel="noreferrer"
                     title={f.display_name}
                     style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', fontSize: 14 }}>
                     {f.display_name}
@@ -43,7 +46,8 @@ const HtmlFilesPage: React.FC = () => {
                 }
               />
             </Card>
-          ))}
+            )
+          })}
           {files.length === 0 && <Typography.Text type="secondary">暂无资源文件</Typography.Text>}
         </div>
       </Space>

@@ -46,19 +46,23 @@ const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ su
           <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {files.map((f) => (
+          {files.map((f) => {
+            const token = localStorage.getItem('smartkb_token') || ''
+            const fileUrl = `/api/files/${f.url_path || f.name}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+            return (
             <Card key={f.path} size="small" hoverable style={{ width: 280 }}>
               <Card.Meta
                 avatar={<FileOutlined />}
                 title={
-                  <a href={`/api/files/${f.url_path || f.name}`} target="_blank" rel="noreferrer"
+                  <a href={fileUrl} target="_blank" rel="noreferrer"
                     style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>
                     {f.display_name}
                   </a>
                 }
               />
             </Card>
-          ))}
+            )
+          })}
           {files.length === 0 && <Typography.Text type="secondary">暂无文件</Typography.Text>}
         </div>
       </Space>

@@ -15,6 +15,7 @@ from backend.auth import (
     remove_active_token,
     get_online_count,
 )
+from backend.config import JWT_EXPIRATION_HOURS
 from backend.logger import logger
 
 router = APIRouter()
@@ -80,7 +81,8 @@ async def login(req: LoginRequest):
 
     logger.info(f"用户登录成功: {username}")
 
-    return {
+    # 设置 Cookie，使浏览器直接导航到 /api/files/ 资源时能携带身份信息
+    response = JSONResponse(content={
         "token": token,
         "user": {
             "username": username,
@@ -90,14 +92,24 @@ async def login(req: LoginRequest):
             "role": role_name,
             "grade": grade_val or "",
         },
-    }
+    })
+    response.set_cookie(
+        key="smartkb_token",
+        value=token,
+        httponly=True,      # 防止 XSS 窃取
+        samesite="lax",     # 允许同站导航携带
+        max_age=JWT_EXPIRATION_HOURS * 3600,  # 与 JWT 过期时间一致
+        path="/",
+    )
+    return response
 
 
 @router.post("/logout")
 async def logout():
-    """登出"""
-    # 前端清除 token 即可，服务端不做强制处理
-    return {"message": "已登出"}
+    """登出（清除 cookie）"""
+    response = JSONResponse(content={"message": "已登出"})
+    response.delete_cookie(key="smartkb_token", path="/")
+    return response
 
 
 @router.get("/me")
