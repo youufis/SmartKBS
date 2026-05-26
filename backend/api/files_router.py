@@ -112,11 +112,16 @@ async def cleanup_temp_files(request: Request, all: bool = False):
 
 
 @router.get("/{path:path}")
-async def serve_static_file(path: str):
-    """静态文件服务（无需认证，替代 Gradio 的 /gradio_api/file=）
+async def serve_static_file(path: str, request: Request):
+    """静态文件服务（需登录，按用户角色隔离）
     
     URL 示例: /api/files/root/html/some/file.html
-    安全限制：只允许访问 root/html/ 和 stu/ 等公开目录。
+    
+    访问权限规则：
+    - 管理员 (role=0): 可访问所有目录
+    - 教师 (role=1): 可访问 root/（共享资源）和自己目录下的资源
+    - 学生 (role=2): 仅可访问 stu/自己学号/ 下的资源
+    - 未登录: 仅可访问 about_help.md 等公开文件
     """
     requested_path = os.path.abspath(os.path.join(str(BASE_DIR), path))
     base_dir_abs = os.path.abspath(str(BASE_DIR))
@@ -125,34 +130,50 @@ async def serve_static_file(path: str):
     if not requested_path.startswith(base_dir_abs):
         raise HTTPException(status_code=403, detail="无权访问该文件")
     
-    # 额外限制：只允许访问特定公开目录
-    allowed_prefixes = [
-        os.path.join(base_dir_abs, "root", "html"),
-        os.path.join(base_dir_abs, "root", "imgs"),
-        os.path.join(base_dir_abs, "root", "downloads"),
-        os.path.join(base_dir_abs, "backend", "data"),
-    ]
-    # 允许访问 stu/ 和 教师/管理员 个人目录中的 html 和 downloads 文件
-    for entry in os.listdir(base_dir_abs):
-        for sub in ("html", "downloads"):
-            entry_path = os.path.join(base_dir_abs, entry, sub)
-            if os.path.isdir(entry_path):
-                allowed_prefixes.append(entry_path)
-    stu_path = os.path.join(base_dir_abs, "stu")
-    if os.path.isdir(stu_path):
-        for entry in os.listdir(stu_path):
-            for sub in ("html", "downloads"):
-                entry_sub = os.path.join(stu_path, entry, sub)
-                if os.path.isdir(entry_sub):
-                    allowed_prefixes.append(entry_sub)
-    # 允许项目根目录下的特定文件
-    allowed_root_files = ["about_help.md"]
-    is_allowed = any(requested_path.startswith(p) for p in allowed_prefixes)
-    is_allowed = is_allowed or os.path.basename(requested_path) in allowed_root_files
-    if not is_allowed:
-        raise HTTPException(status_code=403, detail="无权访问该文件")
-    
     if not os.path.exists(requested_path):
         raise HTTPException(status_code=404, detail="文件不存在")
+    
+    # ── 用户隔离检查 ──
+    user = request.state.user  # 由中间件注入
+    basename = os.path.basename(requested_path)
+    
+    # 公开文件：未登录也可访问
+    public_files = {"about_help.md"}
+    if basename in public_files:
+        return FileResponse(requested_path)
+    
+    # 必须登录
+    if user is None:
+        raise HTTPException(status_code=401, detail="需要登录才能访问资源文件")
+    
+    username = user.get("username", "")
+    role = user.get("role", 2)  # 默认学生
+    rel_path = os.path.relpath(requested_path, base_dir_abs).replace("\\", "/")
+    path_parts = rel_path.split("/")
+    
+    # 管理员：可访问所有文件
+    if role == 0:
+        pass  # 放行
+    
+    # 教师：可访问 root/（共享）和自己名下的资源
+    elif role == 1:
+        if path_parts[0] == "root":
+            pass  # root/ 共享资源，教师可访问
+        elif path_parts[0] == "backend" and len(path_parts) > 1 and path_parts[1] == "data":
+            pass  # backend/data/ 系统数据，教师可访问
+        elif path_parts[0] == username:
+            pass  # 自己的目录
+        else:
+            raise HTTPException(status_code=403, detail="无权访问其他用户的资源")
+    
+    # 学生：仅可访问 stu/自己学号/ 下的资源
+    elif role == 2:
+        if len(path_parts) >= 3 and path_parts[0] == "stu" and path_parts[1] == username:
+            pass  # 自己的 stu/学号/ 目录
+        else:
+            raise HTTPException(status_code=403, detail="无权访问该资源")
+    
+    else:
+        raise HTTPException(status_code=403, detail="无权访问该资源")
     
     return FileResponse(requested_path)
