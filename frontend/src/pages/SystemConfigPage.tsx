@@ -1,0 +1,274 @@
+import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
+  Spin, Typography, Divider, Space, Alert, Tag,
+} from 'antd'
+import {
+  SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined,
+} from '@ant-design/icons'
+import apiClient from '../api/client'
+import { useAuthStore } from '../stores/authStore'
+
+const { Title, Text } = Typography
+
+// ── 全局配置表单 ──
+
+const GLOBAL_CONFIG_FIELDS = [
+  // 品牌信息
+  { key: 'AGENT_NAME', label: '智能体名称', type: 'text', group: 'brand',
+    desc: '显示在登录页面的智能体名称，例如"高中信通版"、"高中数学版"等' },
+  { key: 'ORG_NAME', label: '单位名称', type: 'text', group: 'brand', required: false,
+    desc: '显示在登录页面和界面顶部的单位/学校名称，为空则不显示' },
+  // API 密钥
+  { key: 'dashscope_api_key', label: 'DashScope API Key', type: 'password', group: 'api',
+    desc: '全局兜底密钥，用户未配置时使用。如已设置环境变量 DASHSCOPE_API_KEY 则优先使用，此处可不填' },
+  // 模型与应用配置
+  { key: 'APPID', label: 'APPID', type: 'text', group: 'model',
+    desc: 'DashScope 应用 ID' },
+  { key: 'QWEN_OPENAI_API_BASE', label: 'API 基础地址', type: 'text', group: 'model' },
+  { key: 'MODEL_LONG_NAME', label: '长文本模型', type: 'text', group: 'model' },
+  { key: 'MODEL_VL_NAME', label: '视觉模型', type: 'text', group: 'model' },
+  { key: 'MODEL_NAME', label: '默认对话模型', type: 'text', group: 'model' },
+  // 系统限制
+  { key: 'MAX_DOC_SIZE_MB', label: '文档大小限制 (MB)', type: 'number', group: 'limit' },
+  { key: 'MAX_IMAGE_SIZE_MB', label: '图片大小限制 (MB)', type: 'number', group: 'limit' },
+  { key: 'JWT_EXPIRATION_HOURS', label: 'Token 有效期 (小时)', type: 'number', group: 'limit' },
+  { key: 'ONLINE_USER_TIMEOUT_SECONDS', label: '在线超时 (秒)', type: 'number', group: 'limit' },
+  { key: 'ENABLE_REQUEST_LIMIT', label: '启用请求频率限制', type: 'boolean', group: 'limit' },
+  { key: 'MAX_ALLOWED_REQUESTS', label: '每日最大请求数', type: 'number', group: 'limit' },
+  { key: 'TEACHER_DOWNLOAD_QUOTA_GB', label: '教师下载配额 (GB)', type: 'number', group: 'limit',
+    desc: '每位教师下载中心的最大存储空间' },
+]
+
+const GROUP_LABELS: Record<string, string> = {
+  brand: '🏷️ 品牌信息',
+  api: '🔑 API 密钥',
+  model: '🤖 模型与应用配置',
+  limit: '⚙️ 系统限制',
+}
+
+const SystemConfigPage: React.FC = () => {
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const [activeTab, setActiveTab] = useState('global')
+  const [config, setConfig] = useState<Record<string, unknown>>({})
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [apikeyStatus, setApikeyStatus] = useState<{ status: string; source: string; hint: string; configured: boolean } | null>(null)
+  const [form] = Form.useForm()
+
+  // ── 加载 API Key 状态 ──
+  const loadApikeyStatus = useCallback(async () => {
+    try {
+      const { data } = await apiClient.get('/api/config/apikey-status')
+      setApikeyStatus(data)
+    } catch {
+      // 忽略，非关键信息
+    }
+  }, [])
+
+  // ── 加载全局配置 ──
+  const loadConfig = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/config')
+      setConfig(data)
+      form.setFieldsValue(data)
+      // 同时刷新 API Key 状态
+      loadApikeyStatus()
+    } catch {
+      message.error('加载系统配置失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [form, loadApikeyStatus])
+
+  // ── 保存全局配置 ──
+  const handleSave = async () => {
+    try {
+      await form.validateFields()
+      setSaving(true)
+      // 使用 getFieldsValue 确保所有字段（包括空值）都被提交
+      const allValues = form.getFieldsValue()
+      await apiClient.put('/api/config', { config: allValues })
+      message.success('系统配置已保存（部分配置需重启服务生效）')
+      loadConfig()
+    } catch (err: unknown) {
+      const e = err as { errorFields?: unknown; response?: { data?: { detail?: string } }; message?: string }
+      if (e?.errorFields) return // 表单校验未通过
+      message.error('保存失败: ' + (e?.response?.data?.detail || e?.message || '未知错误'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  useEffect(() => {
+    if (user?.role !== 'admin') return
+
+    const init = async () => {
+      setLoading(true)
+      try {
+        const { data } = await apiClient.get('/api/config')
+        setConfig(data)
+        form.setFieldsValue(data)
+        loadApikeyStatus()
+      } catch {
+        message.error('加载系统配置失败')
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
+  }, [user, form, loadApikeyStatus])
+
+  // 非管理员重定向到 AI 对话
+  if (user?.role !== 'admin') {
+    navigate('/chat', { replace: true })
+    return null
+  }
+
+  // ── 全局配置表单各分组 ──
+  const renderGroup = (group: string) => {
+    const fields = GLOBAL_CONFIG_FIELDS.filter((f) => f.group === group)
+    return (
+      <div key={group} style={{ marginBottom: 32 }}>
+        <Title level={5}>{GROUP_LABELS[group]}</Title>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16 }}>
+          {fields.map((field) => (
+            <div key={field.key}>
+              {field.type === 'boolean' ? (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
+              ) : field.type === 'number' ? (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  rules={[{ required: true, message: `请输入${field.label}` }]}
+                >
+                  <InputNumber style={{ width: '100%' }} min={0} />
+                </Form.Item>
+              ) : field.type === 'password' ? (
+                <Form.Item
+                  name={field.key}
+                  label={
+                    <Space size={4}>
+                      <span>{field.label}</span>
+                      {field.key === 'dashscope_api_key' && apikeyStatus && (
+                        apikeyStatus.status === 'env' ? (
+                          <Tag color="green" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 4 }}>
+                            ✅ 环境变量
+                          </Tag>
+                        ) : apikeyStatus.status === 'config' ? (
+                          <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 4 }}>
+                            📋 系统配置
+                          </Tag>
+                        ) : (
+                          <Tag color="red" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 4 }}>
+                            ❌ 未配置
+                          </Tag>
+                        )
+                      )}
+                    </Space>
+                  }
+                  extra={field.desc}
+                >
+                  <Input.Password placeholder={apikeyStatus?.configured ? '留空则不覆盖已有值' : '请输入 API Key'} />
+                </Form.Item>
+              ) : (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  rules={field.required !== false ? [{ required: true, message: `请输入${field.label}` }] : undefined}
+                  extra={field.desc}
+                >
+                  <Input />
+                </Form.Item>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <Card>
+        <Space style={{ marginBottom: 16 }}>
+          <SettingOutlined style={{ fontSize: 24, color: '#1677ff' }} />
+          <Title level={4} style={{ margin: 0 }}>系统配置</Title>
+        </Space>
+
+        {apikeyStatus && !apikeyStatus.configured && (
+          <Alert
+            message="API Key 未配置"
+            description={
+              <span>
+                {apikeyStatus.hint}。配置后 AI 对话功能方可正常使用。
+                {user?.role === 'admin' && ' 也可在服务器设置环境变量 DASHSCOPE_API_KEY 以全局生效。'}
+              </span>
+            }
+            type="warning"
+            showIcon
+            icon={<WarningOutlined />}
+            style={{ marginBottom: 16 }}
+            action={
+              <Button size="small" onClick={() => setActiveTab('global')}>
+                去配置
+              </Button>
+            }
+          />
+        )}
+
+        <Tabs activeKey={activeTab} onChange={setActiveTab}>
+          {/* ── 全局配置 Tab ── */}
+          <Tabs.TabPane
+            tab={<span><SettingOutlined /> 全局配置</span>}
+            key="global"
+          >
+            <Spin spinning={loading}>
+              <Form
+                form={form}
+                layout="vertical"
+                initialValues={config}
+                style={{ maxWidth: 900 }}
+              >
+                {['brand', 'api', 'model', 'limit'].map(renderGroup)}
+
+                <Divider />
+                <Space>
+                  <Button
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    loading={saving}
+                    onClick={handleSave}
+                  >
+                    保存配置
+                  </Button>
+                  <Button icon={<ReloadOutlined />} onClick={loadConfig}>
+                    重新加载
+                  </Button>
+                </Space>
+                <div style={{ marginTop: 8 }}>
+                  <Text type="secondary">
+                    ⚠️ 部分配置项（如 APPID、模型名称）需重启服务方可生效
+                  </Text>
+                </div>
+              </Form>
+            </Spin>
+          </Tabs.TabPane>
+
+        </Tabs>
+      </Card>
+
+    </div>
+  )
+}
+
+export default SystemConfigPage

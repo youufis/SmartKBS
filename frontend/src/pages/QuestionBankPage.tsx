@@ -1,0 +1,593 @@
+import React, { useState, useEffect, useCallback } from 'react'
+import {
+  Layout, Card, Table, Button, message, Modal, Form, Input, Select,
+  InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty,
+} from 'antd'
+import {
+  PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined,
+  LoadingOutlined, BookOutlined, FilterOutlined,
+} from '@ant-design/icons'
+import * as questionsApi from '../api/questions'
+import { useAuthStore } from '../stores/authStore'
+import type { QuestionInfo } from '../types'
+
+const { TextArea } = Input
+const { Option } = Select
+
+const TYPE_COLORS: Record<string, string> = {
+  single: 'blue',
+  multiple: 'purple',
+  true_false: 'orange',
+  short: 'green',
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  single: '单选题',
+  multiple: '多选题',
+  true_false: '判断题',
+  short: '简答题',
+}
+
+const DIFFICULTY_COLORS: Record<string, string> = {
+  easy: 'green',
+  medium: 'gold',
+  hard: 'red',
+}
+
+const DIFFICULTY_LABELS: Record<string, string> = {
+  easy: '简单',
+  medium: '中等',
+  hard: '困难',
+}
+
+const subjectOptions = ['信息技术', '通用技术']
+
+const QuestionBankPage: React.FC = () => {
+  const user = useAuthStore((s) => s.user)
+  // ── 生成试题表单 ──
+  const [generateForm] = Form.useForm()
+  const [generating, setGenerating] = useState(false)
+  const [generatedQuestions, setGeneratedQuestions] = useState<QuestionInfo[]>([])
+  const [showGeneratePanel, setShowGeneratePanel] = useState(false)
+
+  // ── 题库列表 ──
+  const [questions, setQuestions] = useState<QuestionInfo[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [filters, setFilters] = useState<{
+    type?: string
+    keyword?: string
+    difficulty?: string
+    subject?: string
+  }>({})
+
+  // ── 编辑弹窗 ──
+  const [editModal, setEditModal] = useState(false)
+  const [editingQuestion, setEditingQuestion] = useState<QuestionInfo | null>(null)
+  const [editForm] = Form.useForm()
+  const [saving, setSaving] = useState(false)
+
+  // ── 加载题库列表 ──
+  const loadQuestions = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await questionsApi.listQuestions({
+        ...filters,
+        page,
+        page_size: pageSize,
+      })
+      setQuestions(res.questions)
+      setTotal(res.total)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '加载题库失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [filters, page, pageSize])
+
+  useEffect(() => { loadQuestions() }, [loadQuestions])
+
+  // ── 生成试题 ──
+  const handleGenerate = async () => {
+    try {
+      const values = await generateForm.validateFields()
+      setGenerating(true)
+      setGeneratedQuestions([])
+
+      const res = await questionsApi.generateQuestions({
+        subject: values.subject,
+        knowledge_points: values.knowledge_points,
+        question_type: values.question_type,
+        count: values.count,
+        difficulty: values.difficulty || 'medium',
+      })
+
+      setGeneratedQuestions(res.questions)
+      message.success(res.message)
+      // 刷新题库列表
+      loadQuestions()
+    } catch (err: any) {
+      if (err?.response?.data?.detail) {
+        message.error(err.response.data.detail)
+      } else if (err?.errorFields) {
+        // Form validation error, ignore
+      } else {
+        message.error('生成失败，请重试')
+      }
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  // ── 编辑题目 ──
+  const handleEdit = (q: QuestionInfo) => {
+    setEditingQuestion(q)
+    editForm.setFieldsValue({
+      question_text: q.question_text,
+      correct_answer: q.correct_answer,
+      explanation: q.explanation,
+      knowledge_points: q.knowledge_points,
+      difficulty: q.difficulty,
+      options: q.options ? JSON.stringify(q.options, null, 2) : '',
+    })
+    setEditModal(true)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingQuestion) return
+    try {
+      const values = await editForm.validateFields()
+      setSaving(true)
+
+      const updates: any = {
+        question_text: values.question_text,
+        correct_answer: values.correct_answer,
+        explanation: values.explanation,
+        knowledge_points: values.knowledge_points,
+        difficulty: values.difficulty,
+      }
+
+      // 如果有 options（非简答题），解析 JSON 后提交
+      if (values.options && editingQuestion.type !== 'short') {
+        try {
+          JSON.parse(values.options)
+          updates.options = values.options
+        } catch {
+          message.warning('选项格式不是合法 JSON，将保持原值')
+        }
+      }
+
+      await questionsApi.updateQuestion(editingQuestion.id, updates)
+      message.success('修改成功')
+      setEditModal(false)
+      loadQuestions()
+    } catch (err: any) {
+      if (err?.response?.data?.detail) {
+        message.error(err.response.data.detail)
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── 删除题目 ──
+  const handleDelete = async (id: number) => {
+    try {
+      await questionsApi.deleteQuestion(id)
+      message.success('已删除')
+      loadQuestions()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '删除失败')
+    }
+  }
+
+  // ── 表格列定义 ──
+  const columns = [
+    {
+      title: '题型',
+      dataIndex: 'type',
+      key: 'type',
+      width: 80,
+      render: (type: string) => (
+        <Tag color={TYPE_COLORS[type]}>{TYPE_LABELS[type] || type}</Tag>
+      ),
+    },
+    {
+      title: '题目内容',
+      dataIndex: 'question_text',
+      key: 'question_text',
+      ellipsis: true,
+      render: (text: string) => (
+        <Tooltip title={text}>
+          <span style={{ cursor: 'pointer' }}>
+            {text.length > 60 ? text.slice(0, 60) + '...' : text}
+          </span>
+        </Tooltip>
+      ),
+    },
+    {
+      title: '知识点',
+      dataIndex: 'knowledge_points',
+      key: 'knowledge_points',
+      width: 150,
+      ellipsis: true,
+      render: (text: string) => text ? (
+        <span style={{ fontSize: 13, color: '#666' }}>{text}</span>
+      ) : '-',
+    },
+    {
+      title: '难度',
+      dataIndex: 'difficulty',
+      key: 'difficulty',
+      width: 80,
+      render: (d: string) => (
+        <Tag color={DIFFICULTY_COLORS[d]}>{DIFFICULTY_LABELS[d] || d}</Tag>
+      ),
+    },
+    {
+      title: '创建者',
+      dataIndex: 'creator_name',
+      key: 'creator_name',
+      width: 100,
+      render: (name: string, record: QuestionInfo) => (
+        <span style={{ fontSize: 13, color: '#888' }}>
+          {name || record.creator_username}
+        </span>
+      ),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 150,
+      render: (t: string) => t ? t.slice(0, 16) : '-',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 100,
+      render: (_: any, record: QuestionInfo) => {
+        // 权限：管理员（role=0）可操作全部，教师只能操作自己的
+        const canEdit = user?.role === 'admin' || record.creator_username === user?.username
+        if (!canEdit) return <span style={{ color: '#ccc', fontSize: 12 }}>仅创建者可操作</span>
+        return (
+          <Space size="small">
+            <Tooltip title="编辑">
+              <Button type="link" size="small" icon={<EditOutlined />}
+                onClick={() => handleEdit(record)} />
+            </Tooltip>
+            <Popconfirm
+              title="确认删除？"
+              description="删除后将无法恢复"
+              onConfirm={() => handleDelete(record.id)}
+              okText="确认"
+              cancelText="取消"
+            >
+              <Tooltip title="删除">
+                <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+              </Tooltip>
+            </Popconfirm>
+          </Space>
+        )
+      },
+    },
+  ]
+
+  return (
+    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 20, fontSize: 14 }}>
+      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+        {/* ── 标题和操作栏 ── */}
+        <Row justify="space-between" align="middle">
+          <Col>
+            <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
+              📝 试题管理
+            </Typography.Title>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+              通过 AI 智能生成试题，统一管理题库
+            </Typography.Text>
+          </Col>
+          <Col>
+            <Space>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => setShowGeneratePanel(!showGeneratePanel)}
+              >
+                {showGeneratePanel ? '收起生成面板' : '生成试题'}
+              </Button>
+              <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}>
+                刷新
+              </Button>
+            </Space>
+          </Col>
+        </Row>
+
+        {/* ── 试题生成面板 ── */}
+        {showGeneratePanel && (
+          <Card
+            title={<Space><BookOutlined />AI 智能生成试题</Space>}
+            style={{ border: '1px solid #1677ff22', background: '#fafaff' }}
+          >
+            <Form
+              form={generateForm}
+              layout="vertical"
+              initialValues={{
+                subject: '信息技术',
+                question_type: 'single',
+                count: 5,
+                difficulty: 'medium',
+                knowledge_points: '',
+              }}
+              style={{ maxWidth: 800 }}
+            >
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item label="科目" name="subject" rules={[{ required: true }]}>
+                    <Select>
+                      {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="题型" name="question_type" rules={[{ required: true }]}>
+                    <Select>
+                      <Option value="single">单选题</Option>
+                      <Option value="multiple">多选题</Option>
+                      <Option value="true_false">判断题</Option>
+                      <Option value="short">简答题</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+                <Col span={4}>
+                  <Form.Item label="数量" name="count" rules={[{ required: true }]}>
+                    <InputNumber min={1} max={50} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col span={4}>
+                  <Form.Item label="难度" name="difficulty">
+                    <Select>
+                      <Option value="easy">简单</Option>
+                      <Option value="medium">中等</Option>
+                      <Option value="hard">困难</Option>
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Form.Item
+                label="知识点"
+                name="knowledge_points"
+                rules={[{ required: true, message: '请输入知识点' }]}
+              >
+                <TextArea
+                  rows={2}
+                  placeholder="输入知识点，如：TCP/IP协议、IP地址分类、子网掩码（多个知识点用逗号分隔）"
+                />
+              </Form.Item>
+              <Form.Item>
+                <Button
+                  type="primary"
+                  onClick={handleGenerate}
+                  loading={generating}
+                  icon={generating ? <LoadingOutlined /> : <BookOutlined />}
+                >
+                  {generating ? 'AI 正在生成中...' : '开始生成'}
+                </Button>
+                {generating && (
+                  <Typography.Text type="secondary" style={{ marginLeft: 12, fontSize: 13 }}>
+                    正在调用 AI 生成试题，请稍候...
+                  </Typography.Text>
+                )}
+              </Form.Item>
+            </Form>
+
+            {/* ── 生成结果预览 ── */}
+            {generatedQuestions.length > 0 && (
+              <>
+                <Divider style={{ fontSize: 14 }}>
+                  ✅ 已生成 {generatedQuestions.length} 道题（已自动保存到题库）
+                </Divider>
+                {generatedQuestions.map((q, idx) => (
+                  <Card
+                    key={q.id}
+                    size="small"
+                    style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
+                    title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
+                  >
+                    <Typography.Text style={{ fontSize: 14, fontWeight: 500 }}>
+                      {q.question_text}
+                    </Typography.Text>
+                    {q.options && Object.entries(q.options).map(([k, v]) => (
+                      <div key={k} style={{ margin: '4px 0 0 16px', fontSize: 13 }}>
+                        <Tag>{k}</Tag> {v as string}
+                      </div>
+                    ))}
+                    <div style={{ marginTop: 8, fontSize: 13 }}>
+                      <Tag color="green">答案：{q.correct_answer}</Tag>
+                      {q.explanation && (
+                        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                          📖 {q.explanation}
+                        </Typography.Text>
+                      )}
+                    </div>
+                  </Card>
+                ))}
+              </>
+            )}
+          </Card>
+        )}
+
+        {/* ── 筛选栏 ── */}
+        <Row gutter={12} align="middle" style={{ marginTop: 8 }}>
+          <Col>
+            <span style={{ fontSize: 13, color: '#888' }}><FilterOutlined /> 筛选：</span>
+          </Col>
+          <Col span={3}>
+            <Select
+              allowClear
+              placeholder="题型"
+              style={{ width: '100%' }}
+              value={filters.type}
+              onChange={(val) => { setFilters(f => ({ ...f, type: val })); setPage(1) }}
+            >
+              <Option value="single">单选题</Option>
+              <Option value="multiple">多选题</Option>
+              <Option value="true_false">判断题</Option>
+              <Option value="short">简答题</Option>
+            </Select>
+          </Col>
+          <Col span={3}>
+            <Select
+              allowClear
+              placeholder="难度"
+              style={{ width: '100%' }}
+              value={filters.difficulty}
+              onChange={(val) => { setFilters(f => ({ ...f, difficulty: val })); setPage(1) }}
+            >
+              <Option value="easy">简单</Option>
+              <Option value="medium">中等</Option>
+              <Option value="hard">困难</Option>
+            </Select>
+          </Col>
+          <Col span={3}>
+            <Select
+              allowClear
+              placeholder="科目"
+              style={{ width: '100%' }}
+              value={filters.subject}
+              onChange={(val) => { setFilters(f => ({ ...f, subject: val })); setPage(1) }}
+            >
+              {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
+            </Select>
+          </Col>
+          <Col span={6}>
+            <Input.Search
+              placeholder="搜索题目内容或知识点..."
+              allowClear
+              onSearch={(val) => { setFilters(f => ({ ...f, keyword: val || undefined })); setPage(1) }}
+            />
+          </Col>
+          <Col>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+              共 {total} 题
+            </Typography.Text>
+          </Col>
+        </Row>
+
+        {/* ── 题库表格 ── */}
+        <Table
+          dataSource={questions}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          size="small"
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 题`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps) },
+          }}
+          locale={{ emptyText: <Empty description="题库为空，点击上方「生成试题」开始创建" /> }}
+          expandable={{
+            expandedRowRender: (record) => (
+              <div style={{ padding: '8px 0', maxWidth: 800 }}>
+                <Typography.Text strong style={{ fontSize: 14 }}>{record.question_text}</Typography.Text>
+                {record.type !== 'short' && record.options && Object.entries(record.options).map(([k, v]) => (
+                  <div key={k} style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
+                    <Tag>{k}</Tag> {v as string}
+                  </div>
+                ))}
+                {record.type === 'short' && (
+                  <div style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
+                    参考答案：{record.correct_answer}
+                  </div>
+                )}
+                <div style={{ marginTop: 8 }}>
+                  <Tag color="green">正确答案：{record.correct_answer}</Tag>
+                  {record.explanation && (
+                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                      📖 解析：{record.explanation}
+                    </Typography.Text>
+                  )}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#aaa' }}>
+                  知识点：{record.knowledge_points || '-'} | 创建者：{record.creator_name || record.creator_username}
+                </div>
+              </div>
+            ),
+          }}
+        />
+      </Space>
+
+      {/* ── 编辑弹窗 ── */}
+      <Modal
+        title={`编辑题目 #${editingQuestion?.id}`}
+        open={editModal}
+        onOk={handleSaveEdit}
+        onCancel={() => setEditModal(false)}
+        confirmLoading={saving}
+        width={700}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item label="题型">
+            <Typography.Text>
+              <Tag color={TYPE_COLORS[editingQuestion?.type || '']}>
+                {TYPE_LABELS[editingQuestion?.type || '']}
+              </Tag>
+            </Typography.Text>
+          </Form.Item>
+          <Form.Item
+            label="题目内容"
+            name="question_text"
+            rules={[{ required: true, message: '请输入题目内容' }]}
+          >
+            <TextArea rows={3} />
+          </Form.Item>
+          {editingQuestion?.type !== 'short' && (
+            <Form.Item
+              label="选项（JSON 格式）"
+              name="options"
+              rules={[{ required: true, message: '请输入选项 JSON' }]}
+              extra='格式：{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}'
+            >
+              <TextArea rows={4} placeholder='{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}' />
+            </Form.Item>
+          )}
+          <Form.Item
+            label={editingQuestion?.type === 'short' ? '参考答案' : '正确答案'}
+            name="correct_answer"
+            rules={[{ required: true, message: '请输入正确答案' }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item label="解析" name="explanation">
+            <TextArea rows={2} placeholder="选填，题目的解析说明" />
+          </Form.Item>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label="知识点" name="knowledge_points">
+                <Input placeholder="逗号分隔" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="难度" name="difficulty">
+                <Select>
+                  <Option value="easy">简单</Option>
+                  <Option value="medium">中等</Option>
+                  <Option value="hard">困难</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Modal>
+    </Layout>
+  )
+}
+
+export default QuestionBankPage
