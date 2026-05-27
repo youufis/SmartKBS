@@ -2,7 +2,7 @@
 
 > 面向高中信息技术与通用技术课程的 AI 智能问答与教学管理平台
 
-![版本](https://img.shields.io/badge/版本-1.3.0-blue)
+![版本](https://img.shields.io/badge/版本-1.4.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
