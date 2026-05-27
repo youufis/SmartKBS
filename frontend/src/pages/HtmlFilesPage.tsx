@@ -84,7 +84,7 @@ const HtmlFilesPage: React.FC = () => {
 
   const sharedItems = receivedShares.map(s => ({
     name: s.file_name,
-    urlPath: s.file_path,
+    urlPath: s.url_path || s.file_path,
     owner: s.owner_username,
   }))
 
