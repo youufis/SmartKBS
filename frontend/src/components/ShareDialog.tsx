@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Modal, message, Space, Typography, Button, Radio, Select, Divider } from 'antd'
-import { ShareAltOutlined, StopOutlined, TeamOutlined, GlobalOutlined, BookOutlined } from '@ant-design/icons'
+import { Modal, message, Space, Typography, Button, Radio, Select, Divider, Tag } from 'antd'
+import { ShareAltOutlined, StopOutlined, TeamOutlined, GlobalOutlined, BookOutlined, UserOutlined } from '@ant-design/icons'
 import * as sharingApi from '../api/sharing'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -11,7 +11,6 @@ interface ShareDialogProps {
   filePath: string
   fileName: string
   resourceType: 'html' | 'download'
-  /** 编辑已有共享时传入 */
   existingShare?: sharingApi.ShareItem | null
   onSuccess?: () => void
 }
@@ -27,30 +26,37 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
   const [loading, setLoading] = useState(false)
   const isShared = !!existingShare
 
-  // 共享范围状态
   const [scope, setScope] = useState<ShareScope>('all')
-  const [targetGrade, setTargetGrade] = useState('')
-  const [targetClass, setTargetClass] = useState('')
+  const [selectedTeachers, setSelectedTeachers] = useState<string[]>([])
+  const [selectedGrades, setSelectedGrades] = useState<string[]>([])
+  const [selectedClasses, setSelectedClasses] = useState<string[]>([])
+  const [teachers, setTeachers] = useState<sharingApi.UserItem[]>([])
   const [grades, setGrades] = useState<string[]>([])
-  const [classes, setClasses] = useState<string[]>([])
+  const [classOptions, setClassOptions] = useState<{ grade: string; classes: string[] }[]>([])
+
+  // 从逗号分隔字符串解析数组
+  const parseCSV = (csv: string): string[] => csv ? csv.split(',').filter(Boolean) : []
 
   // 打开时初始化
   useEffect(() => {
     if (open) {
       if (existingShare) {
         setScope(existingShare.share_scope)
-        setTargetGrade(existingShare.target_grade)
-        setTargetClass(existingShare.target_class)
+        setSelectedTeachers(parseCSV(existingShare.target_users))
+        setSelectedGrades(parseCSV(existingShare.target_grade))
+        setSelectedClasses(parseCSV(existingShare.target_class))
       } else {
-        // 默认选项
-        if (isAdmin) {
-          setScope('all')
-        } else if (isTeacher) {
-          setScope('staff')
-        }
-        setTargetGrade('')
-        setTargetClass('')
+        if (isAdmin) setScope('all')
+        else if (isTeacher) setScope('staff')
+        setSelectedTeachers([])
+        setSelectedGrades([])
+        setSelectedClasses([])
       }
+      // 加载教师列表
+      apiClient.get('/api/users', { params: { keyword: '' } }).then(res => {
+        const allUsers: sharingApi.UserItem[] = res.data?.users || []
+        setTeachers(allUsers.filter(u => u.role === '教师'))
+      }).catch(() => {})
       // 加载年级列表
       apiClient.get('/api/rollcall/grades').then(res => {
         setGrades(Array.isArray(res.data) ? res.data : [])
@@ -58,17 +64,16 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
     }
   }, [open, existingShare, isAdmin, isTeacher])
 
-  // 选择年级时加载班级
+  // 加载所有班级（按年级分组）
   useEffect(() => {
-    if (targetGrade) {
-      apiClient.get('/api/rollcall/classes', { params: { grade: targetGrade } }).then(res => {
-        setClasses(Array.isArray(res.data) ? res.data : [])
-      }).catch(() => setClasses([]))
-    } else {
-      setClasses([])
+    if (open) {
+      Promise.all(grades.map(g =>
+        apiClient.get('/api/rollcall/classes', { params: { grade: g } })
+          .then(res => ({ grade: g, classes: Array.isArray(res.data) ? res.data : [] }))
+          .catch(() => ({ grade: g, classes: [] }))
+      )).then(setClassOptions)
     }
-    setTargetClass('')
-  }, [targetGrade])
+  }, [open, grades])
 
   const handleShare = async () => {
     setLoading(true)
@@ -78,8 +83,9 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
         file_name: fileName,
         resource_type: resourceType,
         share_scope: scope,
-        target_grade: scope === 'class' ? targetGrade : '',
-        target_class: scope === 'class' ? targetClass : '',
+        target_users: scope === 'teacher' ? selectedTeachers : [],
+        target_grades: scope === 'class' ? selectedGrades : [],
+        target_classes: scope === 'class' ? selectedClasses : [],
       }
       await sharingApi.shareResource(body)
       message.success('共享成功')
@@ -109,9 +115,9 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
 
   // ── 管理员选项 ──
   const adminScopeOptions = [
-    { value: 'all', label: <><GlobalOutlined /> 所有人</>, desc: '所有用户（管理员、教师、学生）可见' },
-    { value: 'teacher', label: <><TeamOutlined /> 教师</>, desc: '仅对教师可见' },
-    { value: 'class', label: <><BookOutlined /> 指定年级/班级</>, desc: '对指定年级或班级的学生可见' },
+    { value: 'all', label: <><GlobalOutlined /> 所有人</>, desc: '所有用户可见' },
+    { value: 'teacher', label: <><TeamOutlined /> 指定教师</>, desc: '仅对选中的教师用户可见' },
+    { value: 'class', label: <><BookOutlined /> 指定年级/班级</>, desc: '对选中的年级或班级的学生可见' },
   ]
 
   // ── 教师选项 ──
@@ -121,6 +127,8 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
   ]
 
   const options = isAdmin ? adminScopeOptions : teacherScopeOptions
+
+  const canShare = scope !== 'class' || selectedGrades.length > 0 || selectedClasses.length > 0
 
   return (
     <Modal
@@ -140,17 +148,17 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             <Button onClick={onClose}>关闭</Button>
             {!isShared && (
               <Button type="primary" icon={<ShareAltOutlined />} onClick={handleShare} loading={loading}
-                disabled={scope === 'class' && !targetGrade}>
+                disabled={!canShare}>
                 确认共享
               </Button>
             )}
           </Space>
         </Space>
       }
-      width={480}
+      width={520}
     >
       <Space direction="vertical" style={{ width: '100%' }} size={16}>
-        <Typography.Text ellipsis style={{ maxWidth: 440 }}>
+        <Typography.Text ellipsis style={{ maxWidth: 480 }}>
           <strong>文件：</strong>{fileName}
         </Typography.Text>
 
@@ -164,7 +172,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             <Typography.Text strong>共享范围</Typography.Text>
             <Radio.Group
               value={scope}
-              onChange={(e) => setScope(e.target.value)}
+              onChange={(e) => setScope(e.target.value as ShareScope)}
               style={{ width: '100%' }}
             >
               <Space direction="vertical" style={{ width: '100%' }} size={8}>
@@ -173,7 +181,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
                     border: scope === opt.value ? '1px solid #1677ff' : '1px solid #d9d9d9',
                     borderRadius: 8, padding: '10px 14px', cursor: 'pointer',
                     background: scope === opt.value ? '#f0f5ff' : '#fff',
-                  }} onClick={() => setScope(opt.value)}>
+                  }} onClick={() => setScope(opt.value as ShareScope)}>
                     <Radio value={opt.value}>{opt.label}</Radio>
                     <div style={{ fontSize: 12, color: '#999', marginTop: 4, marginLeft: 24 }}>
                       {opt.desc}
@@ -183,29 +191,80 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
               </Space>
             </Radio.Group>
 
+            {scope === 'teacher' && isAdmin && (
+              <div style={{ paddingLeft: 8 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                  <UserOutlined /> 选择教师（可多选）：
+                </Typography.Text>
+                <Select
+                  mode="multiple"
+                  placeholder="搜索并选择教师"
+                  value={selectedTeachers}
+                  onChange={setSelectedTeachers}
+                  style={{ width: '100%', marginTop: 8 }}
+                  showSearch
+                  filterOption={(input, option) =>
+                    (option?.label as string || '').toLowerCase().includes(input.toLowerCase())
+                  }
+                  options={teachers.map(t => ({
+                    value: t.username,
+                    label: `${t.name} (${t.username})`,
+                  }))}
+                  tagRender={(props) => {
+                    const { label, closable, onClose } = props
+                    return <Tag closable={closable} onClose={onClose} style={{ margin: 2 }}>{label}</Tag>
+                  }}
+                />
+              </div>
+            )}
+
             {scope === 'class' && (
-              <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                <Typography.Text type="secondary" style={{ fontSize: 13 }}>选择年级/班级：</Typography.Text>
-                <Space>
-                  <Select
-                    placeholder="选择年级"
-                    value={targetGrade || undefined}
-                    onChange={setTargetGrade}
-                    style={{ width: 160 }}
-                    options={grades.map(g => ({ value: g, label: g }))}
-                  />
-                  {targetGrade && (
+              <div style={{ paddingLeft: 8 }}>
+                {isAdmin ? (
+                  <>
+                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                      <BookOutlined /> 选择年级（可多选）：
+                    </Typography.Text>
                     <Select
-                      placeholder="选择班级（可选）"
-                      value={targetClass || undefined}
-                      onChange={setTargetClass}
-                      style={{ width: 160 }}
-                      allowClear
-                      options={classes.map(c => ({ value: c, label: c }))}
+                      mode="multiple"
+                      placeholder="选择年级"
+                      value={selectedGrades}
+                      onChange={(vals) => {
+                        setSelectedGrades(vals)
+                        // 清除不属于选中年级的班级
+                        setSelectedClasses(prev => prev.filter(c =>
+                          classOptions.some(opt => vals.includes(opt.grade) && opt.classes.includes(c))
+                        ))
+                      }}
+                      style={{ width: '100%', marginTop: 8 }}
+                      options={grades.map(g => ({ value: g, label: g }))}
                     />
-                  )}
-                </Space>
-              </Space>
+                    {selectedGrades.length > 0 && (
+                      <>
+                        <Typography.Text type="secondary" style={{ fontSize: 13, display: 'block', marginTop: 12 }}>
+                          <BookOutlined /> 选择班级（可多选）：
+                        </Typography.Text>
+                        <Select
+                          mode="multiple"
+                          placeholder="选择班级"
+                          value={selectedClasses}
+                          onChange={setSelectedClasses}
+                          style={{ width: '100%', marginTop: 8 }}
+                          options={classOptions
+                            .filter(opt => selectedGrades.includes(opt.grade))
+                            .flatMap(opt => opt.classes.map(c => ({ value: c, label: `${opt.grade} ${c}` })))}
+                        />
+                      </>
+                    )}
+                  </>
+                ) : (
+                  // 教师只能看到自己的班级
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                    将自动共享给您的班级学生。
+                    {user?.grade && <Tag style={{ marginLeft: 8 }}>{user.grade} {user.class}</Tag>}
+                  </Typography.Text>
+                )}
+              </div>
             )}
           </>
         )}
