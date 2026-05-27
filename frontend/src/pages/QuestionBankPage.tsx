@@ -4,7 +4,7 @@ import {
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty,
 } from 'antd'
 import {
-  PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined,
+  PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
   LoadingOutlined, BookOutlined, FilterOutlined,
 } from '@ant-design/icons'
 import * as questionsApi from '../api/questions'
@@ -47,6 +47,7 @@ const QuestionBankPage: React.FC = () => {
   // ── 生成试题表单 ──
   const [generateForm] = Form.useForm()
   const [generating, setGenerating] = useState(false)
+  const [genProgress, setGenProgress] = useState({ step: 0, text: '', count: 0, total: 0 })
   const [generatedQuestions, setGeneratedQuestions] = useState<QuestionInfo[]>([])
   const [showGeneratePanel, setShowGeneratePanel] = useState(false)
 
@@ -90,35 +91,73 @@ const QuestionBankPage: React.FC = () => {
   useEffect(() => { loadQuestions() }, [loadQuestions])
 
   // ── 生成试题 ──
+  const [genError, setGenError] = useState<string | null>(null)
+
   const handleGenerate = async () => {
     try {
       const values = await generateForm.validateFields()
       setGenerating(true)
+      setGenError(null)
       setGeneratedQuestions([])
+
+      const totalCount = values.count || 5
+      setGenProgress({ step: 1, text: '正在连接 AI 服务...', count: 0, total: totalCount })
+
+      await new Promise(r => setTimeout(r, 100))
+      setGenProgress({ step: 2, text: `AI 正在生成 ${totalCount} 道试题...`, count: 0, total: totalCount })
 
       const res = await questionsApi.generateQuestions({
         subject: values.subject,
         knowledge_points: values.knowledge_points,
         question_type: values.question_type,
-        count: values.count,
+        count: totalCount,
         difficulty: values.difficulty || 'medium',
       })
 
       setGeneratedQuestions(res.questions)
+      setGenProgress({ step: 0, text: '', count: 0, total: 0 })
       message.success(res.message)
-      // 刷新题库列表
       loadQuestions()
-    } catch (err: any) {
-      if (err?.response?.data?.detail) {
-        message.error(err.response.data.detail)
-      } else if (err?.errorFields) {
-        // Form validation error, ignore
-      } else {
-        message.error('生成失败，请重试')
-      }
-    } finally {
       setGenerating(false)
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.detail || err?.message || '生成失败，请重试'
+      if (!err?.errorFields) {
+        setGenError(errMsg)
+        setGenProgress({ step: -1, text: '', count: 0, total: 0 })
+        setGenerating(false)
+      } else {
+        setGenerating(false)
+      }
     }
+  }
+
+  // ── 删除重复试题 ──
+  const [dedupResult, setDedupResult] = useState<{
+    total_deleted: number;
+    groups: { question_text: string; count: number }[];
+    message: string;
+  } | null>(null)
+  const [dedupLoading, setDedupLoading] = useState(false)
+
+  const handleDedup = async () => {
+    Modal.confirm({
+      title: '确认去重',
+      content: '将查找并删除完全重复的试题（基于题目文本），仅保留最早创建的那条。确定继续？',
+      onOk: async () => {
+        setDedupLoading(true)
+        try {
+          const res = await questionsApi.dedupQuestions()
+          setDedupResult(res)
+          if (res.total_deleted > 0) {
+            loadQuestions()
+          }
+        } catch {
+          message.error('去重失败')
+        } finally {
+          setDedupLoading(false)
+        }
+      },
+    })
   }
 
   // ── 编辑题目 ──
@@ -300,6 +339,9 @@ const QuestionBankPage: React.FC = () => {
               <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}>
                 刷新
               </Button>
+              <Button icon={<ClearOutlined />} onClick={handleDedup} loading={dedupLoading}>
+                去重
+              </Button>
             </Space>
           </Col>
         </Row>
@@ -342,7 +384,11 @@ const QuestionBankPage: React.FC = () => {
                 </Col>
                 <Col span={4}>
                   <Form.Item label="数量" name="count" rules={[{ required: true }]}>
-                    <InputNumber min={1} max={50} style={{ width: '100%' }} />
+                    <InputNumber min={1} max={100} style={{ width: '100%' }}
+                      onChange={(v) => {
+                        if (v && v > 20) message.warning('超过 20 题生成时间较长，建议减少数量')
+                      }}
+                    />
                   </Form.Item>
                 </Col>
                 <Col span={4}>
@@ -366,19 +412,27 @@ const QuestionBankPage: React.FC = () => {
                 />
               </Form.Item>
               <Form.Item>
-                <Button
-                  type="primary"
-                  onClick={handleGenerate}
-                  loading={generating}
-                  icon={generating ? <LoadingOutlined /> : <BookOutlined />}
-                >
-                  {generating ? 'AI 正在生成中...' : '开始生成'}
-                </Button>
-                {generating && (
-                  <Typography.Text type="secondary" style={{ marginLeft: 12, fontSize: 13 }}>
-                    正在调用 AI 生成试题，请稍候...
-                  </Typography.Text>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <Button
+                    type="primary"
+                    onClick={handleGenerate}
+                    loading={generating}
+                    icon={generating ? <LoadingOutlined /> : <BookOutlined />}
+                    disabled={generating}
+                  >
+                    {generating ? 'AI 生成中...' : '开始生成'}
+                  </Button>
+                  {generating && genProgress.text && (
+                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                      {genProgress.text}
+                    </Typography.Text>
+                  )}
+                  {genError && (
+                    <Typography.Text type="danger" style={{ fontSize: 13 }}>
+                      ❌ {genError}
+                    </Typography.Text>
+                  )}
+                </div>
               </Form.Item>
             </Form>
 
@@ -585,6 +639,45 @@ const QuestionBankPage: React.FC = () => {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* ── 生成进度弹窗（已改为内联显示） ── */}
+
+      {/* ── 去重结果弹窗 ── */}
+      <Modal
+        title="🧹 去重结果"
+        open={dedupResult !== null}
+        onCancel={() => setDedupResult(null)}
+        footer={<Button onClick={() => setDedupResult(null)}>关闭</Button>}
+        width={600}
+      >
+        {dedupResult && (
+          <div>
+            <Typography.Title level={4} style={{ color: dedupResult.total_deleted > 0 ? '#52c41a' : '#999' }}>
+              {dedupResult.total_deleted > 0
+                ? `已删除 ${dedupResult.total_deleted} 条重复试题`
+                : '未发现重复试题'}
+            </Typography.Title>
+            {dedupResult.groups.length > 0 && (
+              <>
+                <Divider />
+                <Typography.Text strong>重复组详情：</Typography.Text>
+                <div style={{ maxHeight: 300, overflow: 'auto', marginTop: 12 }}>
+                  {dedupResult.groups.map((g, i) => (
+                    <div key={i} style={{
+                      padding: '8px 12px', marginBottom: 6,
+                      background: '#fffbe6', borderRadius: 6,
+                      border: '1px solid #ffe58f',
+                    }}>
+                      <Typography.Text style={{ fontSize: 13 }}>{g.question_text}</Typography.Text>
+                      <Tag color="red" style={{ marginLeft: 8 }}>重复 {g.count} 次</Tag>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </Modal>
     </Layout>
   )

@@ -406,6 +406,67 @@ async def delete_question(question_id: int, request: Request):
     return {"message": "删除成功"}
 
 
+@router.post("/dedup")
+async def dedup_questions(request: Request):
+    """查找并删除重复试题（基于题目文本完全匹配），保留最早创建的那条"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+
+    # 查找重复的 question_text（只统计 active 状态的）
+    rows = execute_query(
+        """SELECT question_text, COUNT(*) as cnt, GROUP_CONCAT(id) as ids
+           FROM question_bank
+           WHERE status = 'active'
+           GROUP BY question_text
+           HAVING cnt > 1"""
+    )
+
+    results = []
+    total_deleted = 0
+
+    for row in rows:
+        question_text = row["question_text"]
+        id_list = sorted([int(x) for x in row["ids"].split(",")])
+        keep_id = id_list[0]  # 保留 ID 最小的（最早创建的）
+        delete_ids = id_list[1:]
+
+        # 检查权限：只删除当前用户有权限的
+        allowed_delete = []
+        for did in delete_ids:
+            q = execute_query_one(
+                "SELECT creator_username FROM question_bank WHERE id = ?", (did,)
+            )
+            if q and (role == 0 or q["creator_username"] == username):
+                allowed_delete.append(did)
+
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for did in allowed_delete:
+            execute_update(
+                "UPDATE question_bank SET status = 'deleted', updated_at = ? WHERE id = ?",
+                (now, did),
+            )
+
+        if allowed_delete:
+            results.append({
+                "question_text": question_text[:60] + ("..." if len(question_text) > 60 else ""),
+                "keep_id": keep_id,
+                "deleted_ids": allowed_delete,
+                "count": len(allowed_delete),
+            })
+            total_deleted += len(allowed_delete)
+
+    logger.info(f"去重完成: 删除 {total_deleted} 条重复试题, by={username}")
+    return {
+        "total_deleted": total_deleted,
+        "groups": results,
+        "message": f"共删除 {total_deleted} 条重复试题",
+    }
+
+
 @router.get("/types/list")
 async def list_question_types():
     """获取支持的题型列表"""
