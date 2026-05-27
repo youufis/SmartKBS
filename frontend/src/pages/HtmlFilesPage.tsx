@@ -1,29 +1,42 @@
 import React, { useState, useEffect } from 'react'
-import { Layout, Card, Space, Button, Typography, message, Tabs, Tag } from 'antd'
+import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip } from 'antd'
 import { ReloadOutlined, FileOutlined, ShareAltOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
 import type { ResourceFile } from '../types'
 import { useAuthStore } from '../stores/authStore'
+import ShareDialog from '../components/ShareDialog'
 
 const HtmlFilesPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const [files, setFiles] = useState<ResourceFile[]>([])
   const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
+  const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
   const [loading, setLoading] = useState(false)
+
+  // ── 共享弹窗状态 ──
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [shareFile, setShareFile] = useState<{ path: string; name: string }>({ path: '', name: '' })
+  const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
 
   const loadData = async () => {
     setLoading(true)
     try {
       if (isAdminOrTeacher) {
-        const res = await resourcesApi.listResources()
+        const [res, shareRes, myRes] = await Promise.all([
+          resourcesApi.listResources(),
+          sharingApi.getReceivedShares(),
+          sharingApi.getMyShares(),
+        ])
         setFiles(res.files)
+        setMyShares(myRes.shares)
+        setReceivedShares(shareRes.shares.filter(s => s.resource_type === 'html'))
       } else {
         setFiles([])
+        const shareRes = await sharingApi.getReceivedShares()
+        setReceivedShares(shareRes.shares.filter(s => s.resource_type === 'html'))
       }
-      const shareRes = await sharingApi.getReceivedShares()
-      setReceivedShares(shareRes.shares.filter(s => s.resource_type === 'html'))
     } catch {
       message.error('加载失败')
     } finally {
@@ -35,8 +48,25 @@ const HtmlFilesPage: React.FC = () => {
 
   const token = localStorage.getItem('smartkb_token') || ''
 
-  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string) => (
-    <Card key={urlPath} size="small" hoverable style={{ fontSize: 14 }}>
+  const isFileShared = (nodeKey: string) => myShares.some(s => s.file_path === nodeKey)
+
+  const openShare = (filePath: string, fileName: string) => {
+    setShareFile({ path: filePath, name: fileName })
+    setShareExisting(myShares.find(s => s.file_path === filePath) || null)
+    setShareDialogOpen(true)
+  }
+
+  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false) => (
+    <Card key={urlPath} size="small" hoverable style={{ fontSize: 14 }}
+      actions={showShareBtn ? [
+        <Tooltip key="share" title={isFileShared(urlPath) ? '已共享 - 点击修改' : '点击共享'}>
+          <ShareAltOutlined
+            style={{ color: isFileShared(urlPath) ? '#1677ff' : '#999' }}
+            onClick={() => openShare(urlPath, name)}
+          />
+        </Tooltip>,
+      ] : undefined}
+    >
       <Card.Meta
         avatar={<FileOutlined style={{ fontSize: 16, color: isShared ? '#1677ff' : undefined }} />}
         title={
@@ -75,7 +105,7 @@ const HtmlFilesPage: React.FC = () => {
               label: <span><FileOutlined /> 我的资源</span>,
               children: (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                  {files.map((f) => renderFileCard(f.display_name, f.url_path || f.name, false))}
+                  {files.map((f) => renderFileCard(f.display_name, f.url_path || f.name, false, undefined, true))}
                   {files.length === 0 && <Typography.Text type="secondary">暂无资源文件</Typography.Text>}
                 </div>
               ),
@@ -97,6 +127,17 @@ const HtmlFilesPage: React.FC = () => {
             {sharedItems.length === 0 && <Typography.Text type="secondary">暂无共享资源</Typography.Text>}
           </div>
         )}
+
+        {/* 共享弹窗 */}
+        <ShareDialog
+          open={shareDialogOpen}
+          onClose={() => setShareDialogOpen(false)}
+          filePath={shareFile.path}
+          fileName={shareFile.name}
+          resourceType="html"
+          existingShare={shareExisting}
+          onSuccess={loadData}
+        />
       </Space>
     </Layout>
   )
