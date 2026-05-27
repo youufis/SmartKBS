@@ -46,8 +46,6 @@ const HtmlFilesPage: React.FC = () => {
 
   useEffect(() => { loadData() }, [isAdminOrTeacher])
 
-  const token = localStorage.getItem('smartkb_token') || ''
-
   const isFileShared = (nodeKey: string) => myShares.some(s => s.file_path === nodeKey)
 
   const openShare = (filePath: string, fileName: string) => {
@@ -62,7 +60,7 @@ const HtmlFilesPage: React.FC = () => {
         avatar={<FileOutlined style={{ fontSize: 16, color: isShared ? '#1677ff' : undefined }} />}
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
-            <a href={`/api/files/${urlPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`}
+            <a href={`/api/files/${urlPath}`}
               target="_blank" rel="noreferrer"
               title={name}
               style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, fontSize: 14 }}>

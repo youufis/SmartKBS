@@ -276,7 +276,6 @@ async def rename_resource(request: Request):
 
 def _rewrite_html_links(html_content: str, base_url: str, token: str = "") -> str:
     """重写 HTML 中的相对链接为可访问的绝对链接，并添加 target=_blank"""
-    token_suffix = f"?token={token}" if token else ""
 
     def _rewrite_attr(match):
         prefix = match.group(1)  # href="
@@ -286,8 +285,8 @@ def _rewrite_html_links(html_content: str, base_url: str, token: str = "") -> st
         if url.startswith(("/api/", "/gradio_api/", "/uploads/")):
             # 已是绝对路径，加 target
             return f'{prefix}{url}" target="_blank"'
-        # 重写相对路径为绝对路径并加 target（附上 token 以便新标签页访问）
-        return f'{prefix}{base_url}{url}{token_suffix}" target="_blank"'
+        # 重写相对路径为绝对路径并加 target（Cookie 自动认证，无需 URL token）
+        return f'{prefix}{base_url}{url}" target="_blank"'
 
     # 先处理已有的 target，避免重复
     html_content = re.sub(r'\s+target="[^"]*"', '', html_content)
@@ -320,14 +319,7 @@ async def get_nav_html(request: Request):
                 content = f.read()
             base_url_path = html_dir.replace("\\", "/") + "/"
             base_url = "/api/files/" + urllib.parse.quote(base_url_path)
-            # 从请求中获取 token，注入到链接中以便新标签页直接访问
-            nav_token = ""
-            auth_header = request.headers.get("Authorization", "")
-            if auth_header.startswith("Bearer "):
-                nav_token = auth_header[7:]
-            if not nav_token:
-                nav_token = request.cookies.get("smartkb_token", "")
-            content = _rewrite_html_links(content, base_url, nav_token)
+            content = _rewrite_html_links(content, base_url)
             return HTMLResponse(content=content)
         else:
             # 自动创建默认导航（含文件列表）
