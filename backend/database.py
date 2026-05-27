@@ -3,14 +3,17 @@
 替代 AgentSmartKBXS.py 中裸 sqlite3.connect() 调用
 提供上下文管理器，自动管理连接生命周期
 """
+import json
+import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
 from backend.logger import logger
 
 # 数据库文件路径（backend 目录下）
-DB_PATH = Path(__file__).resolve().parent / "users.db"
+DB_PATH = Path(__file__).resolve().parent / "smartkb.db"
 
 
 def init_db():
@@ -71,8 +74,100 @@ def init_db():
                 )"""
             )
 
+            # ── 课堂积分表（替代 score_system JSON） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS scores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_username TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                student_name TEXT NOT NULL,
+                score INTEGER DEFAULT 0,
+                updated_at TEXT,
+                UNIQUE(teacher_username, grade, class_name, student_name)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_scores_teacher ON scores(teacher_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_scores_lookup ON scores(teacher_username, grade, class_name)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 点名权重表（替代 rollcall_data JSON） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS rollcall_weights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_username TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                student_name TEXT NOT NULL,
+                weight REAL DEFAULT 10,
+                UNIQUE(teacher_username, grade, class_name, student_name)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rcw_class ON rollcall_weights(teacher_username, grade, class_name)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 点名轮次元数据 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS rollcall_meta (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_username TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                last_time REAL,
+                picked_in_round TEXT DEFAULT '[]',
+                updated_at TEXT,
+                UNIQUE(teacher_username, grade, class_name)
+            )""")
+
+            # ── 点名历史记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS rollcall_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_username TEXT NOT NULL,
+                grade TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                student_name TEXT,
+                result TEXT,
+                points INTEGER DEFAULT 0,
+                created_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rch_class ON rollcall_history(teacher_username, grade, class_name)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 任务表（替代 ChatHistory/Task JSON） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                creator_username TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                status TEXT DEFAULT 'active',
+                created_at TEXT,
+                updated_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 任务提交记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS task_submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                student_username TEXT NOT NULL,
+                submitted_at TEXT,
+                UNIQUE(task_id, student_username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ts_task ON task_submissions(task_id)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.info("数据库初始化完成")
+
+            # 迁移旧版 JSON 数据（仅首次运行自动导入）
+            _migrate_from_json()
     except Exception as e:
         logger.error(f"数据库初始化失败: {e}")
         raise
@@ -135,3 +230,106 @@ def get_transaction():
         raise
     finally:
         conn.close()
+
+
+# ── 旧版 JSON → 数据库 数据迁移 ──
+
+def _migrate_from_json():
+    """将旧版 JSON 文件数据迁移到数据库（仅首次运行自动执行）"""
+    BASE_DIR = Path(__file__).resolve().parent.parent
+
+    # 检查是否已迁移（scores 表有数据则跳过）
+    with get_connection() as conn:
+        if conn.execute("SELECT COUNT(*) FROM scores").fetchone()[0] > 0:
+            return
+
+    migrated_any = False
+
+    # ── 1. 迁移积分数据（root/html/score_system/score.json） ──
+    score_path = BASE_DIR / "root" / "html" / "score_system" / "score.json"
+    if score_path.exists():
+        try:
+            with open(score_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            with get_connection() as conn:
+                for key, score in raw.items():
+                    parts = key.split("|")
+                    if len(parts) == 4:
+                        c = conn.cursor()
+                        c.execute(
+                            "INSERT OR REPLACE INTO scores (teacher_username, grade, class_name, student_name, score, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                            (parts[0], parts[1], parts[2], parts[3], score),
+                        )
+                conn.commit()
+            migrated_any = True
+            logger.info(f"[迁移] 积分数据: {len(raw)} 条")
+        except Exception as e:
+            logger.warning(f"[迁移] 积分数据失败: {e}")
+
+    # ── 2. 迁移点名数据（root/html/rollcall_data/*.json） ──
+    rc_dir = BASE_DIR / "root" / "html" / "rollcall_data"
+    if rc_dir.exists():
+        try:
+            with get_connection() as conn:
+                for fpath in sorted(rc_dir.glob("*.json")):
+                    parts = fpath.stem.split("_", 1)
+                    if len(parts) != 2:
+                        continue
+                    grade, cls = parts
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    teacher = "root"
+                    c = conn.cursor()
+                    for sname, weight in data.get("weights", {}).items():
+                        c.execute(
+                            "INSERT OR REPLACE INTO rollcall_weights (teacher_username, grade, class_name, student_name, weight) VALUES (?, ?, ?, ?, ?)",
+                            (teacher, grade, cls, sname, weight),
+                        )
+                    picked = json.dumps(data.get("picked_in_round", []), ensure_ascii=False)
+                    c.execute(
+                        "INSERT OR REPLACE INTO rollcall_meta (teacher_username, grade, class_name, last_time, picked_in_round, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                        (teacher, grade, cls, data.get("last_time"), picked),
+                    )
+                    for entry in data.get("history", []):
+                        c.execute(
+                            "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name, result, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (teacher, grade, cls, entry.get("student", ""), entry.get("result", ""), entry.get("points", 0), entry.get("time", "")),
+                        )
+                conn.commit()
+            migrated_any = True
+            logger.info(f"[迁移] 点名数据完成")
+        except Exception as e:
+            logger.warning(f"[迁移] 点名数据失败: {e}")
+
+    # ── 3. 迁移任务数据（root/ChatHistory/Task/*/active_tasks.json） ──
+    task_base = BASE_DIR / "root" / "ChatHistory" / "Task"
+    if task_base.exists():
+        try:
+            with get_connection() as conn:
+                for user_dir in task_base.iterdir():
+                    if not user_dir.is_dir():
+                        continue
+                    task_file = user_dir / "active_tasks.json"
+                    if not task_file.exists():
+                        continue
+                    username = user_dir.name
+                    with open(task_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    for task in data.get("tasks", []):
+                        conn.cursor().execute(
+                            "INSERT OR REPLACE INTO tasks (id, creator_username, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (task.get("id", ""), task.get("creator", username), task.get("name", ""), task.get("description", ""), task.get("status", "active"), task.get("created_time", ""), task.get("created_time", "")),
+                        )
+                        for su in task.get("submissions", []):
+                            conn.cursor().execute(
+                                "INSERT OR IGNORE INTO task_submissions (task_id, student_username, submitted_at) VALUES (?, ?, datetime('now'))",
+                                (task.get("id", ""), su),
+                            )
+                conn.commit()
+            migrated_any = True
+            logger.info(f"[迁移] 任务数据完成")
+        except Exception as e:
+            logger.warning(f"[迁移] 任务数据失败: {e}")
+
+    if migrated_any:
+        logger.info("数据库迁移完成：旧版 JSON → SQLite")

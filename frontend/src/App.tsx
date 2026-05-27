@@ -11,6 +11,7 @@ import UserMgmtPage from './pages/UserMgmtPage'
 import TaskPage from './pages/TaskPage'
 import SystemConfigPage from './pages/SystemConfigPage'
 import ScorePage from './pages/ScorePage'
+import RollcallManagePage from './pages/RollcallManagePage'
 import AboutPage from './pages/AboutPage'
 import QuestionBankPage from './pages/QuestionBankPage'
 import ExamPage from './pages/ExamPage'
@@ -40,6 +41,7 @@ function App() {
         <Route path="question-bank" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankPage /> : <Navigate to="/chat" />} />
         <Route path="exam" element={<ExamPage />} />
         <Route path="score" element={<ScorePage />} />
+        <Route path="rollcall" element={<RollcallManagePage />} />
         <Route path="about" element={<AboutPage />} />
         <Route index element={<Navigate to="/chat" />} />
       </Route>

@@ -49,7 +49,7 @@ const ScorePage: React.FC = () => {
 
   useEffect(() => {
     if (isAdmin) {
-      apiClient.get('/score-api/teachers').then(({ data }) => {
+      apiClient.get('/api/scores/teachers').then(({ data }) => {
         if (Array.isArray(data)) setTeacherList(data)
       }).catch(() => {})
     }
@@ -57,7 +57,7 @@ const ScorePage: React.FC = () => {
 
   // 加载当前教师可查看的年级列表
   useEffect(() => {
-    apiClient.get('/score-api/my-grades', { params: { teacher: currentTeacher } })
+    apiClient.get('/api/scores/my-grades', { params: { teacher: currentTeacher } })
       .then(({ data }) => {
         if (Array.isArray(data) && data.length > 0) {
           setAllowedGrades(data)
@@ -70,7 +70,7 @@ const ScorePage: React.FC = () => {
   // 加载当前教师的任教信息
   const [teacherInfo, setTeacherInfo] = useState<string>('')
   useEffect(() => {
-    apiClient.get('/score-api/teacher-info', { params: { teacher: currentTeacher } })
+    apiClient.get('/api/scores/teacher-info', { params: { teacher: currentTeacher } })
       .then(({ data }) => setTeacherInfo(data.teaching || ''))
       .catch(() => setTeacherInfo(''))
   }, [currentTeacher])
@@ -98,7 +98,7 @@ const ScorePage: React.FC = () => {
   // ── 加载班级列表 ──
   const loadClasses = useCallback(async () => {
     try {
-      const { data } = await apiClient.get('/score-api/classes', { params: { grade, teacher: currentTeacher } })
+      const { data } = await apiClient.get('/api/scores/classes', { params: { grade, teacher: currentTeacher } })
       setClasses(Array.isArray(data) ? data : [])
     } catch {
       setClasses([])
@@ -110,7 +110,7 @@ const ScorePage: React.FC = () => {
     if (!cls) return
     setLoading(true)
     try {
-      const { data } = await apiClient.get('/score-api/students', {
+      const { data } = await apiClient.get('/api/scores/students', {
         params: scoreParams({ grade, class: cls }),
       })
       setStudents(Array.isArray(data) ? data : [])
@@ -126,7 +126,7 @@ const ScorePage: React.FC = () => {
   const loadStats = useCallback(async () => {
     if (!cls) return
     try {
-      const { data } = await apiClient.get('/score-api/stats', {
+      const { data } = await apiClient.get('/api/scores/stats', {
         params: scoreParams({ grade, class: cls }),
       })
       setStats(data)
@@ -144,7 +144,7 @@ const ScorePage: React.FC = () => {
     try {
       const params: Record<string, any> = scoreParams({ grade })
       if (cls) params.class = cls
-      const { data } = await apiClient.get('/score-api/ranking', { params })
+      const { data } = await apiClient.get('/api/scores/ranking', { params })
       setRanking(Array.isArray(data) ? data : [])
     } catch {
       setRanking([])
@@ -160,7 +160,7 @@ const ScorePage: React.FC = () => {
   useEffect(() => {
     if (isStudent && user?.name) {
       setMyScoreLoading(true)
-      apiClient.get('/score-api/my-score', { params: { name: user.name, teacher: currentTeacher } })
+      apiClient.get('/api/scores/my-score', { params: { name: user.name, teacher: currentTeacher } })
         .then(({ data }) => {
           if (data.score !== undefined && data.score !== null) {
             setMyScore(data)
@@ -183,7 +183,7 @@ const ScorePage: React.FC = () => {
   // ── 加减分 ──
   const handleScore = async (student: Student, points: number) => {
     try {
-      const { data } = await apiClient.post('/score-api/score', {
+      const { data } = await apiClient.post('/api/scores/score', {
         grade, class: cls, name: student.name, points, teacher: currentTeacher,
       })
       message.success(`${student.name} ${points > 0 ? '+' : ''}${points} 分 (当前 ${data.total} 分)`)
@@ -198,12 +198,12 @@ const ScorePage: React.FC = () => {
   const handleReset = async (student?: Student) => {
     try {
       if (student) {
-        await apiClient.post('/score-api/reset', {
+        await apiClient.post('/api/scores/reset', {
           grade, class: cls, name: student.name, teacher: currentTeacher,
         })
         message.success(`已重置 ${student.name} 的积分`)
       } else {
-        await apiClient.post('/score-api/reset', { grade, class: cls, teacher: currentTeacher })
+        await apiClient.post('/api/scores/reset', { grade, class: cls, teacher: currentTeacher })
         message.success(`已重置 ${cls} 全部积分`)
       }
       loadStudents()
@@ -244,7 +244,7 @@ const ScorePage: React.FC = () => {
         body.originalName = editStudent.name
         body.originalClass = editStudent.class
       }
-      await apiClient.post('/score-api/student', { ...body, teacher: currentTeacher })
+      await apiClient.post('/api/scores/student', { ...body, teacher: currentTeacher })
       message.success(editStudent ? '学生信息已更新' : '学生已添加')
       setEditModal(false)
       loadStudents()
@@ -256,7 +256,7 @@ const ScorePage: React.FC = () => {
   // ── 删除学生 ──
   const handleDeleteStudent = async (s: Student) => {
     try {
-      await apiClient.delete('/score-api/student', {
+      await apiClient.delete('/api/scores/student', {
         data: { grade, name: s.name, class: s.class, teacher: currentTeacher },
       })
       message.success(`已删除 ${s.name}`)

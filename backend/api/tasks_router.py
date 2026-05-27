@@ -3,27 +3,21 @@
 创建/激活/提交/汇总
 移植自 AgentSmartKBXS.py
 """
-import json
 import os
 import time
 
-from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.auth import can_create_task, is_teacher, is_admin
 from backend.config import (
-    ROOT_DIR,
-    CHAT_HISTORY_DIR,
-    TASK_DIR_NAME,
     SUMMARY_DIR_NAME,
     TEACHERS_SUMMARY_DIR,
     ADMIN_SUMMARY_DIR,
-    ACTIVE_TASKS_FILE,
 )
-from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir, get_user_base_dir
-from backend.database import execute_query
+from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
+from backend.database import execute_query, execute_insert_update, get_connection, execute_insert_update, get_connection
 from backend.logger import logger
 
 router = APIRouter()
@@ -39,74 +33,70 @@ class SubmitTaskRequest(BaseModel):
     conversation_content: str
 
 
-# ── 辅助函数 ──
+# ── 辅助函数（数据库版）──
 
-def _load_user_active_tasks(username: str) -> dict[str, Any]:
-    task_file = _get_user_task_file(username)
-    if os.path.exists(task_file):
-        try:
-            with open(task_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"tasks": []}
-
-
-def _get_user_task_file(username: str) -> str:
-    chat_dir = get_admin_chat_history_dir()
-    task_dir = os.path.join(chat_dir, TASK_DIR_NAME, username)
-    os.makedirs(task_dir, exist_ok=True)
-    return os.path.join(task_dir, ACTIVE_TASKS_FILE)
-
-
-def _save_user_active_tasks(username: str, data: dict):
-    # 管理员目录
-    admin_file = _get_user_task_file(username)
-    with open(admin_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    # 用户自己的目录（副本）
-    user_chat_dir = get_account_chat_history_dir(username)
-    user_task_dir = os.path.join(user_chat_dir, TASK_DIR_NAME)
-    os.makedirs(user_task_dir, exist_ok=True)
-    user_file = os.path.join(user_task_dir, ACTIVE_TASKS_FILE)
-    with open(user_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict:
+    """将 tasks 表行转换为前端期望的 dict 格式"""
+    task = {
+        "id": row[0],
+        "creator": row[1],
+        "name": row[2],
+        "description": row[3] or "",
+        "status": row[4],
+        "created_time": row[5],
+    }
+    if submissions is not None:
+        task["submissions"] = submissions
+    else:
+        sub_rows = execute_query(
+            "SELECT student_username FROM task_submissions WHERE task_id=?", (row[0],)
+        )
+        task["submissions"] = [s[0] for s in sub_rows]
+    return task
 
 
-def _update_unified_tasks_file():
-    """更新统一任务文件"""
-    all_tasks = []
-    # 管理员任务
-    admin_tasks = _load_user_active_tasks("root")
-    all_tasks.extend([t for t in admin_tasks["tasks"] if t["status"] == "active"])
-    # 教师任务
-    rows = execute_query("SELECT username FROM users WHERE role = 1")
-    for (teacher_username,) in rows:
-        teacher_tasks = _load_user_active_tasks(teacher_username)
-        all_tasks.extend([t for t in teacher_tasks["tasks"] if t["status"] == "active"])
-    unified_path = os.path.join(
-        get_admin_chat_history_dir(), TASK_DIR_NAME, "all_active_tasks.json"
+def _get_all_tasks() -> list[dict]:
+    """从数据库获取所有活跃任务"""
+    rows = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE status='active' ORDER BY created_at DESC"
     )
-    os.makedirs(os.path.dirname(unified_path), exist_ok=True)
-    with open(unified_path, "w", encoding="utf-8") as f:
-        json.dump({"tasks": all_tasks}, f, ensure_ascii=False, indent=2)
+    return [_task_row_to_dict(row) for row in rows]
+
+
+def _get_all_tasks_raw() -> list[dict]:
+    """从数据库获取所有任务（含非活跃）"""
+    rows = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at FROM tasks ORDER BY created_at DESC"
+    )
+    return [_task_row_to_dict(row) for row in rows]
+
+
+def _get_creator_tasks(username: str) -> list[dict]:
+    """获取指定创建者的所有任务"""
+    rows = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE creator_username=? ORDER BY created_at DESC",
+        (username,),
+    )
+    return [_task_row_to_dict(row) for row in rows]
+
+
+def _check_task_ownership(task_id: str, username: str) -> dict | None:
+    """验证当前用户是否有权操作该任务，返回任务信息或 None"""
+    for task in _get_all_tasks_raw():
+        if task["id"] == task_id:
+            if is_admin(username) or task.get("creator") == username:
+                return task
+            return None
+    return None
 
 
 def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:
-    """解析教师的年级和班级字段，返回 {年级: [班级列表]} 的映射
-
-    格式说明:
-    - grade: "高一|高二" 表示教两个年级
-    - class: "1,2,3,4|1,2,7,8" 表示高一教1,2,3,4班，高二教1,2,7,8班
-    - 如果只有单个年级/班级列表，不加 | 分隔
-    """
+    """解析教师的年级和班级字段，返回 {年级: [班级列表]} 的映射"""
     result = {}
     if not grade or not grade.strip():
         return result
-
     grade_parts = [g.strip() for g in grade.split("|")]
     class_parts = [c.strip() for c in class_str.split("|")] if class_str else []
-
     for i, g in enumerate(grade_parts):
         if not g:
             continue
@@ -116,31 +106,6 @@ def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str
         else:
             result[g] = []
     return result
-
-
-def _check_task_ownership(task_id: str, username: str) -> dict | None:
-    """验证当前用户是否有权操作该任务，返回任务信息或 None"""
-    all_data = _get_all_active_tasks_raw()
-    for task in all_data:
-        if task["id"] == task_id:
-            if is_admin(username) or task.get("creator") == username:
-                return task
-            return None
-    return None
-
-
-def _get_all_active_tasks_raw() -> list:
-    """获取统一任务文件中的原始数据"""
-    unified_path = os.path.join(
-        get_admin_chat_history_dir(), TASK_DIR_NAME, "all_active_tasks.json"
-    )
-    if os.path.exists(unified_path):
-        try:
-            with open(unified_path, "r", encoding="utf-8") as f:
-                return json.load(f).get("tasks", [])
-        except Exception:
-            pass
-    return []
 
 
 def _get_user_relevant_tasks(student_user: str, active_tasks: list) -> list:
@@ -222,11 +187,11 @@ async def get_active_tasks(request: Request):
 
     # 如果是学生，返回筛选后的任务
     if not is_admin(target_user) and not is_teacher(target_user):
-        all_tasks = _get_all_active_tasks()
+        all_tasks = _get_all_tasks()
         relevant = _get_user_relevant_tasks(target_user, all_tasks)
         return {"tasks": relevant, "total": len(relevant)}
 
-    tasks = _get_all_active_tasks()
+    tasks = _get_all_tasks()
     # 教师只能看到自己的任务，管理员看到所有
     if not is_admin(target_user):
         tasks = [t for t in tasks if t.get("creator") == target_user]
@@ -248,19 +213,6 @@ async def get_active_tasks(request: Request):
     return {"tasks": tasks, "total": 0}
 
 
-def _get_all_active_tasks() -> list:
-    unified_path = os.path.join(
-        get_admin_chat_history_dir(), TASK_DIR_NAME, "all_active_tasks.json"
-    )
-    if os.path.exists(unified_path):
-        try:
-            with open(unified_path, "r", encoding="utf-8") as f:
-                return json.load(f).get("tasks", [])
-        except Exception:
-            pass
-    return []
-
-
 @router.post("/create")
 async def create_task(req: CreateTaskRequest, request: Request):
     """创建新任务（管理员/教师）"""
@@ -274,9 +226,13 @@ async def create_task(req: CreateTaskRequest, request: Request):
     if not task_name:
         raise HTTPException(status_code=400, detail="任务名称不能为空")
 
-    user_tasks = _load_user_active_tasks(username)
-
     task_id = f"{username}_{task_name}_{int(time.time())}"
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    execute_insert_update(
+        "INSERT INTO tasks (id, creator_username, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)",
+        (task_id, username, task_name, req.description.strip(), now, now),
+    )
 
     new_task = {
         "id": task_id,
@@ -284,12 +240,9 @@ async def create_task(req: CreateTaskRequest, request: Request):
         "name": task_name,
         "description": req.description.strip(),
         "status": "active",
-        "created_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "created_time": now,
         "submissions": [],
     }
-    user_tasks["tasks"].append(new_task)
-    _save_user_active_tasks(username, user_tasks)
-    _update_unified_tasks_file()
 
     logger.info(f"任务已创建: {task_name}, creator={username}")
     return {"task": new_task, "message": f"任务 '{task_name}' 创建成功"}
@@ -301,36 +254,31 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    # 查找任务
-    all_tasks = _get_all_active_tasks()
-    task_info = None
-    for t in all_tasks:
-        if t["id"] == req.task_id:
-            task_info = t
-            break
-
-    if not task_info:
+    # 查找任务（数据库）
+    rows = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE id=? AND status='active'",
+        (req.task_id,),
+    )
+    if rows:
+        task_info = _task_row_to_dict(rows[0])
+    else:
         # 兼容按名称查找
-        all_user_tasks = _load_user_active_tasks(username)
-        for t in all_user_tasks["tasks"]:
-            if t["name"] == req.task_id and t["status"] == "active":
-                task_info = t
-                break
+        rows2 = execute_query(
+            "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE name=? AND status='active' LIMIT 1",
+            (req.task_id,),
+        )
+        if rows2:
+            task_info = _task_row_to_dict(rows2[0])
+        else:
+            raise HTTPException(status_code=404, detail="任务未找到")
 
-    if not task_info:
-        raise HTTPException(status_code=404, detail="任务未找到")
-
-    # 更新任务提交列表
     creator = task_info["creator"]
-    creator_tasks = _load_user_active_tasks(creator)
-    for task in creator_tasks["tasks"]:
-        if task["id"] == task_info["id"]:
-            if username not in task["submissions"]:
-                task["submissions"].append(username)
-            break
-    _save_user_active_tasks(creator, creator_tasks)
-    # 同步更新统一任务文件，确保各端数据一致
-    _update_unified_tasks_file()
+
+    # 记录提交（幂等）
+    execute_insert_update(
+        "INSERT OR IGNORE INTO task_submissions (task_id, student_username, submitted_at) VALUES (?, ?, datetime('now'))",
+        (task_info["id"], username),
+    )
 
     # 保存到汇总文件
     _save_to_summary(creator, task_info["name"], username, req.conversation_content)
@@ -366,7 +314,7 @@ async def get_user_tasks(request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    active_tasks = _get_all_active_tasks()
+    active_tasks = _get_all_tasks()
     relevant = _get_user_relevant_tasks(username, active_tasks)
 
     return {"tasks": relevant}
@@ -390,32 +338,19 @@ async def delete_task(request: Request):
     if not task_id:
         raise HTTPException(status_code=400, detail="缺少 task_id")
 
-    # 所有权验证：教师只能删除自己的任务
+    # 所有权验证
     task_info = _check_task_ownership(task_id, username)
     if not task_info:
         raise HTTPException(status_code=404, detail="任务未找到或无权限删除")
-    creator = task_info["creator"]
 
-    # 从统一任务文件中删除
-    unified_path = os.path.join(
-        get_admin_chat_history_dir(), TASK_DIR_NAME, "all_active_tasks.json"
-    )
-    if os.path.exists(unified_path):
-        try:
-            with open(unified_path, "r", encoding="utf-8") as f:
-                all_data = json.load(f)
-            all_data["tasks"] = [t for t in all_data["tasks"] if t["id"] != task_id]
-            with open(unified_path, "w", encoding="utf-8") as f:
-                json.dump(all_data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+    # 从数据库删除
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM task_submissions WHERE task_id=?", (task_id,))
+        c.execute("DELETE FROM tasks WHERE id=?", (task_id,))
+        conn.commit()
 
-    # 从创建者的个人任务文件中删除
-    candidate_tasks = _load_user_active_tasks(creator)
-    candidate_tasks["tasks"] = [t for t in candidate_tasks["tasks"] if t["id"] != task_id]
-    _save_user_active_tasks(creator, candidate_tasks)
-
-    logger.info(f"任务已删除: {task_id}, by={username}, creator={creator}")
+    logger.info(f"任务已删除: {task_id}, by={username}")
     return {"message": "任务已删除"}
 
 
@@ -433,38 +368,17 @@ async def end_task(request: Request):
     if not task_id:
         raise HTTPException(status_code=400, detail="缺少 task_id")
 
-    # 所有权验证：教师只能结束自己的任务
+    # 所有权验证
     task_info = _check_task_ownership(task_id, username)
     if not task_info:
         raise HTTPException(status_code=404, detail="任务未找到或无权限结束")
-    creator = task_info["creator"]
 
-    # 在统一任务文件中将状态设为 inactive
-    unified_path = os.path.join(
-        get_admin_chat_history_dir(), TASK_DIR_NAME, "all_active_tasks.json"
+    # 数据库更新状态
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE tasks SET status='inactive', updated_at=? WHERE id=?",
+        (now, task_id),
     )
-    if os.path.exists(unified_path):
-        try:
-            with open(unified_path, "r", encoding="utf-8") as f:
-                all_data = json.load(f)
-            for task in all_data.get("tasks", []):
-                if task["id"] == task_id:
-                    task["status"] = "inactive"
-                    task["ended_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                    break
-            with open(unified_path, "w", encoding="utf-8") as f:
-                json.dump(all_data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"结束任务失败: {str(e)}")
-
-    # 同时更新创建者的个人任务文件
-    creator_tasks = _load_user_active_tasks(creator)
-    for task in creator_tasks["tasks"]:
-        if task["id"] == task_id:
-            task["status"] = "inactive"
-            task["ended_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            _save_user_active_tasks(creator, creator_tasks)
-            break
 
     logger.info(f"任务已结束: {task_id}, by={username}")
     return {"message": "任务已结束"}
@@ -478,17 +392,18 @@ async def get_task_submissions(task_id: str, request: Request):
     if not can_create_task(username):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    # 所有权验证：教师只能查看自己的任务
-    task_info = _check_task_ownership(task_id, username)
-    if not task_info:
-        # 也可能是已结束的任务，在个人任务文件中查找
-        user_tasks = _load_user_active_tasks(username)
-        for t in user_tasks.get("tasks", []):
-            if t["id"] == task_id:
-                task_info = t
-                break
-        if not task_info:
-            raise HTTPException(status_code=404, detail="任务未找到或无权限查看")
+    # 从数据库查找任务
+    rows = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE id=?",
+        (task_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="任务未找到")
+    task_info = _task_row_to_dict(rows[0])
+
+    # 权限验证
+    if not is_admin(username) and task_info["creator"] != username:
+        raise HTTPException(status_code=403, detail="无权限查看此任务")
 
     creator = task_info["creator"]
     submissions = task_info.get("submissions", [])
