@@ -1,4 +1,4 @@
-/** 教学资源 API */
+/** 资源中心 API */
 import apiClient from './client';
 import type { ResourceFile, TreeNode } from '../types';
 
