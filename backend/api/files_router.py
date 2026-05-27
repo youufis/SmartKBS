@@ -200,7 +200,12 @@ async def serve_static_file(path: str, request: Request):
                 file_rel = rel_path[idx + len(dir_type) + 1:]  # 去掉 "html/" 或 "downloads/"
             else:
                 file_rel = ""
+            # 同时尝试两种路径格式：
+            # 1. 截短后的相对路径（来自资源管理页 tree node.key）
+            # 2. 完整 rel_path（来自资源中心页 f.url_path）
             if is_file_shared_with_user(file_rel, res_type, owner, username):
+                allowed = True
+            elif is_file_shared_with_user(rel_path, res_type, owner, username):
                 allowed = True
     
     if not allowed:
