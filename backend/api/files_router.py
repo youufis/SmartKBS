@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.config import IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BASE_DIR
+from backend.api.sharing_router import is_file_shared_with_user
 from backend.logger import logger
 
 router = APIRouter()
@@ -111,6 +112,19 @@ async def cleanup_temp_files(request: Request, all: bool = False):
         return {"message": "已清理"}
 
 
+def _parse_file_owner_and_type(rel_path: str):
+    """从相对路径解析文件的所有者和资源类型"""
+    parts = rel_path.split("/")
+    if len(parts) >= 3:
+        if parts[0] == "stu":
+            return parts[1], parts[2]  # stu/s110005/html/... → (s110005, html)
+        elif parts[0] == "root":
+            return parts[0], parts[1]  # root/html/... → (root, html)
+        else:
+            return parts[0], parts[1]  # youufis/html/... → (youufis, html)
+    return None, None
+
+
 @router.get("/{path:path}")
 async def serve_static_file(path: str, request: Request):
     """静态文件服务（需登录，按用户角色隔离）
@@ -120,8 +134,10 @@ async def serve_static_file(path: str, request: Request):
     访问权限规则：
     - 管理员 (role=0): 可访问所有目录
     - 教师 (role=1): 可访问 root/（共享资源）和自己目录下的资源
-    - 学生 (role=2): 仅可访问 stu/自己学号/ 下的资源
+    - 学生 (role=2): 仅可访问 stu/自己学号/ 下的资源 + 共享给该学生的资源
     - 未登录: 仅可访问 about_help.md 等公开文件
+    
+    共享覆盖：管理员共享给所有人的资源、教师共享给对应年级/班级的资源也可访问。
     """
     requested_path = os.path.abspath(os.path.join(str(BASE_DIR), path))
     base_dir_abs = os.path.abspath(str(BASE_DIR))
@@ -151,29 +167,43 @@ async def serve_static_file(path: str, request: Request):
     rel_path = os.path.relpath(requested_path, base_dir_abs).replace("\\", "/")
     path_parts = rel_path.split("/")
     
+    # 标记是否允许访问
+    allowed = False
+    
     # 管理员：可访问所有文件
     if role == 0:
-        pass  # 放行
+        allowed = True
     
     # 教师：可访问 root/（共享）和自己名下的资源
     elif role == 1:
         if path_parts[0] == "root":
-            pass  # root/ 共享资源，教师可访问
+            allowed = True
         elif path_parts[0] == "backend" and len(path_parts) > 1 and path_parts[1] == "data":
-            pass  # backend/data/ 系统数据，教师可访问
+            allowed = True
         elif path_parts[0] == username:
-            pass  # 自己的目录
-        else:
-            raise HTTPException(status_code=403, detail="无权访问其他用户的资源")
+            allowed = True
     
     # 学生：仅可访问 stu/自己学号/ 下的资源
     elif role == 2:
         if len(path_parts) >= 3 and path_parts[0] == "stu" and path_parts[1] == username:
-            pass  # 自己的 stu/学号/ 目录
-        else:
-            raise HTTPException(status_code=403, detail="无权访问该资源")
+            allowed = True
     
-    else:
+    # ── 共享覆盖检查：如果普通检查未通过，检查是否为共享资源 ──
+    if not allowed:
+        owner, dir_type = _parse_file_owner_and_type(rel_path)
+        resource_type_map = {"html": "html", "downloads": "download"}
+        if owner and dir_type in resource_type_map:
+            res_type = resource_type_map[dir_type]
+            # 构建相对于所有者目录的文件路径
+            if dir_type in ("html", "downloads"):
+                idx = rel_path.index(dir_type)
+                file_rel = rel_path[idx + len(dir_type) + 1:]  # 去掉 "html/" 或 "downloads/"
+            else:
+                file_rel = ""
+            if is_file_shared_with_user(file_rel, res_type, owner, username):
+                allowed = True
+    
+    if not allowed:
         raise HTTPException(status_code=403, detail="无权访问该资源")
     
     return FileResponse(requested_path)

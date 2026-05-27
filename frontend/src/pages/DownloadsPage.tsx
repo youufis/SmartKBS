@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined } from '@ant-design/icons'
+import * as sharingApi from '../api/sharing'
+import ShareDialog from '../components/ShareDialog'
 import apiClient from '../api/client'
 
 interface DownloadFile {
@@ -26,13 +28,54 @@ const DownloadsPage: React.FC = () => {
   const dirInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // 学生无权访问
-  if (user?.role === 'student') {
-    navigate('/chat', { replace: true })
-    return null
+  // ── 共享 ──
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [shareFile, setShareFile] = useState<{ path: string; name: string }>({ path: '', name: '' })
+  const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
+  const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
+  const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
+  const token = localStorage.getItem('smartkb_token') || ''
+
+  const loadShares = async () => {
+    try {
+      const res = await sharingApi.getMyShares()
+      setMyShares(res.shares)
+      const receivedRes = await sharingApi.getReceivedShares()
+      setReceivedShares(receivedRes.shares)
+    } catch { /* ignore */ }
   }
 
+  const isFileShared = (filePath: string) => {
+    return myShares.some(s => s.file_path === filePath)
+  }
+
+  const openShare = (filePath: string, fileName: string) => {
+    setShareFile({ path: filePath, name: fileName })
+    const existing = myShares.find(s => s.file_path === filePath) || null
+    setShareExisting(existing)
+    setShareDialogOpen(true)
+  }
+
+  const isStudent = user?.role === 'student'
+
   const loadFiles = useCallback(async () => {
+    setLoading(true)
+    try {
+      if (!isStudent) {
+        const { data } = await apiClient.get('/downloads-api/list')
+        setFiles(data.files || [])
+        setUsage(data.usage || 0)
+        setQuota(data.quota || 0)
+        setUsageStr(data.usage_str || '')
+        setQuotaStr(data.quota_str || '')
+      }
+      loadShares()
+    } catch {
+      message.error('加载文件列表失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [isStudent])
     setLoading(true)
     try {
       const { data } = await apiClient.get('/downloads-api/list')
@@ -213,7 +256,7 @@ const DownloadsPage: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 150,
       render: (_: any, record: DownloadFile) =>
         record.is_dir ? null : (
           <Space>
@@ -221,6 +264,12 @@ const DownloadsPage: React.FC = () => {
               <Button type="link" icon={<DownloadOutlined />}
                 href={buildDownloadUrl(record)}
                 target="_blank" />
+            </Tooltip>
+            <Tooltip title={isFileShared(record.path) ? '已共享 - 点击修改' : '点击共享'}>
+              <Button type="link" size="small"
+                icon={<ShareAltOutlined />}
+                style={{ color: isFileShared(record.path) ? '#1677ff' : '#999' }}
+                onClick={() => openShare(record.path, record.name)} />
             </Tooltip>
             <Tooltip title="删除">
               <Button type="link" danger icon={<DeleteOutlined />}
@@ -239,50 +288,97 @@ const DownloadsPage: React.FC = () => {
           <Button icon={<ReloadOutlined />} onClick={loadFiles} loading={loading}>刷新</Button>
         </div>
 
-        <Card size="small">
-          <Space wrap>
-            <Typography.Text>上传到子目录：</Typography.Text>
-            <Typography.Text
-              editable={{ onChange: (val) => setUploadDir(val) }}
-              style={{ fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 8px', borderRadius: 4 }}
-            >
-              {uploadDir || '(根目录)'}
-            </Typography.Text>
-            <input ref={fileInputRef} type="file" multiple onChange={handleUploadFiles} style={{ display: 'none' }} />
-            <input ref={dirInputRef} type="file" multiple
-              {...({ webkitdirectory: '', directory: '' } as any)}
-              onChange={handleUploadDir} style={{ display: 'none' }} />
-            <Dropdown.Button
-              type="primary"
-              icon={<UploadOutlined />}
-              menu={{
-                items: [
-                  { key: 'dir', icon: <FolderOpenOutlined />, label: '上传目录' },
-                ],
-                onClick: ({ key }) => {
-                  if (key === 'dir') dirInputRef.current?.click();
-                },
-              }}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              上传文件
-            </Dropdown.Button>
-          </Space>
-        </Card>
+        {!isStudent ? (
+          <>
+            <Card size="small">
+              <Space wrap>
+                <Typography.Text>上传到子目录：</Typography.Text>
+                <Typography.Text
+                  editable={{ onChange: (val) => setUploadDir(val) }}
+                  style={{ fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 8px', borderRadius: 4 }}
+                >
+                  {uploadDir || '(根目录)'}
+                </Typography.Text>
+                <input ref={fileInputRef} type="file" multiple onChange={handleUploadFiles} style={{ display: 'none' }} />
+                <input ref={dirInputRef} type="file" multiple
+                  {...({ webkitdirectory: '', directory: '' } as any)}
+                  onChange={handleUploadDir} style={{ display: 'none' }} />
+                <Dropdown.Button
+                  type="primary"
+                  icon={<UploadOutlined />}
+                  menu={{
+                    items: [
+                      { key: 'dir', icon: <FolderOpenOutlined />, label: '上传目录' },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === 'dir') dirInputRef.current?.click();
+                    },
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  上传文件
+                </Dropdown.Button>
+              </Space>
+            </Card>
 
-        <Table
-          dataSource={files.filter(f => f.name !== 'index.html')}
-          columns={columns}
-          rowKey="path"
-          loading={loading}
-          pagination={{ pageSize: 50, size: 'small' }}
-          size="small"
-          footer={() => (
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              已用 {usageStr}
-              {quota > 0 ? ` / 配额 ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / 配额 ${quotaStr}`}
-            </Typography.Text>
-          )}
+            <Table
+              dataSource={files.filter(f => f.name !== 'index.html')}
+              columns={columns}
+              rowKey="path"
+              loading={loading}
+              pagination={{ pageSize: 50, size: 'small' }}
+              size="small"
+              footer={() => (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  已用 {usageStr}
+                  {quota > 0 ? ` / 配额 ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / 配额 ${quotaStr}`}
+                </Typography.Text>
+              )}
+            />
+          </>
+        ) : (
+          <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>
+            以下为共享给您的文件：
+          </Typography.Text>
+        )}
+
+        {/* 共享文件列表 */}
+        {receivedShares.length > 0 && (
+          <Card size="small" title={<><ShareAltOutlined style={{ color: '#1677ff' }} /> 共享文件 ({receivedShares.length})</>}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+              {receivedShares.filter(s => s.resource_type === 'download').map((s) => {
+                const fileUrl = `/api/files/${s.file_path}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+                return (
+                  <Card key={s.id} size="small" hoverable>
+                    <Card.Meta
+                      avatar={<FileOutlined style={{ color: '#1677ff' }} />}
+                      title={
+                        <a href={fileUrl} target="_blank" rel="noreferrer"
+                          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                          {s.file_name}
+                        </a>
+                      }
+                      description={<span style={{ fontSize: 11 }}>来自 {s.owner_username}</span>}
+                    />
+                  </Card>
+                )
+              })}
+            </div>
+          </Card>
+        )}
+        {!isStudent && receivedShares.filter(s => s.resource_type === 'download').length === 0 && (
+          <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>暂无共享文件</Typography.Text>
+        )}
+
+        {/* 共享弹窗 */}
+        <ShareDialog
+          open={shareDialogOpen}
+          onClose={() => setShareDialogOpen(false)}
+          filePath={shareFile.path}
+          fileName={shareFile.name}
+          resourceType="download"
+          existingShare={shareExisting}
+          onSuccess={loadShares}
         />
       </Space>
     </Layout>

@@ -61,6 +61,7 @@ from backend.api.files_router import router as files_router
 from backend.api.config_router import router as config_router
 from backend.api.question_router import router as question_router
 from backend.api.exam_router import router as exam_router
+from backend.api.sharing_router import router as sharing_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
@@ -73,6 +74,7 @@ app.include_router(files_router, prefix="/api/files", tags=["文件服务"])
 app.include_router(config_router, prefix="/api/config", tags=["系统配置"])
 app.include_router(question_router, prefix="/api/questions", tags=["试题库"])
 app.include_router(exam_router, prefix="/api/exams", tags=["考试发布"])
+app.include_router(sharing_router, prefix="/api/sharing", tags=["资源共享"])
 
 
 @app.get("/api/health")
