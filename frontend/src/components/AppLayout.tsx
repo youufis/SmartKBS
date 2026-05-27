@@ -55,14 +55,14 @@ const AppLayout: React.FC = () => {
     : // ── 教师/管理员菜单 ──
       [
         { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-        { key: '/html-files', icon: <FileOutlined />, label: '教学资源', adminOrTeacherOnly: true },
+        { key: '/html-files', icon: <FileOutlined />, label: '资源中心', adminOrTeacherOnly: true },
         { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
         { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },
         { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
         { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
         { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
         { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
-        { key: '/downloads', icon: <DownloadOutlined />, label: '下载中心', adminOrTeacherOnly: true },
+        { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心', adminOrTeacherOnly: true },
         { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
         { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
       ]

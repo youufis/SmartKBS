@@ -26,7 +26,7 @@ const HtmlFilesPage: React.FC = () => {
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 20, fontSize: 14 }}>
       <Space direction="vertical" style={{ width: '100%' }} size={14}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>📄 教学资源</Typography.Title>
+          <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>📄 资源中心</Typography.Title>
           <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>

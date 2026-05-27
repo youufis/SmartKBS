@@ -1,5 +1,5 @@
 """
-教学资源 API 路由
+资源中心 API 路由
 HTML 文件列表/上传/删除/导航
 移植自 AgentSmartKBXS.py
 """
@@ -308,7 +308,7 @@ async def get_nav_html(request: Request):
 <head><meta charset="UTF-8"><title>请登录</title>
 <style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;color:#999;text-align:center}
 </style></head>
-<body><div><h2>🔒 请先登录</h2><p>您需要登录后才能查看自己的教学资源。</p></div></body></html>""")
+<body><div><h2>🔒 请先登录</h2><p>您需要登录后才能查看自己的资源。</p></div></body></html>""")
 
     username = user["username"]
     html_dir = get_account_html_dir(username)
@@ -351,7 +351,7 @@ def _generate_default_nav_html(html_dir: str = "") -> str:
             and f.endswith('.html') and f != 'index.html'
         ])
         if files:
-            file_links = '<h2>📄 教学资源列表</h2><div class="grid">'
+            file_links = '<h2>📄 资源中心</h2><div class="grid">'
             for f in files:
                 rel = os.path.relpath(os.path.join(html_dir, f), str(BASE_DIR)).replace("\\", "/")
                 display = os.path.splitext(f)[0]
@@ -363,7 +363,7 @@ def _generate_default_nav_html(html_dir: str = "") -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>教学资源导航</title>
+<title>资源中心</title>
 <style>
 body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:900px;margin:0 auto;padding:30px 20px;color:#333}}
 h1{{color:#1677ff;border-bottom:2px solid #1677ff;padding-bottom:10px}}
@@ -375,8 +375,8 @@ h1{{color:#1677ff;border-bottom:2px solid #1677ff;padding-bottom:10px}}
 </style>
 </head>
 <body>
-<h1>📚 教学资源导航</h1>
+<h1>📚 资源中心</h1>
 <div class="tip"><strong>💡 提示：</strong>点击下方资源文件即可在新标签页中打开查看。</div>
-{file_links if file_links else '<p style="color:#999;text-align:center;padding:40px">暂无教学资源文件，请在「资源管理」中上传。</p>'}
-<div class="footer"><p>SmartKB 教学资源中心</p></div>
+{file_links if file_links else '<p style="color:#999;text-align:center;padding:40px">暂无资源文件，请在「资源管理」中上传。</p>'}
+<div class="footer"><p>SmartKB 资源中心</p></div>
 </body></html>"""

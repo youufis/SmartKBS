@@ -11,7 +11,7 @@ const CATEGORY_MAP: Record<string, string> = {
   ai: '人工智能通识',
   puzzle: 'PUZZLE益智',
   AIGK: '课堂互动',
-  downloads: '下载中心',
+  downloads: '文件中心',
 }
 
 const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ subdir, title }) => {
