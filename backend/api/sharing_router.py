@@ -170,7 +170,7 @@ async def received_shares(request: Request):
         )
     else:
         # 学生：看到管理员共享(scope=all) + 匹配自己年级/班级的教师共享
-        # 教师可能有多个年级/班级（用 | 分隔），需要逐一匹配
+        # 教师可能有多个年级/班级（用逗号分隔），需要逐一匹配
         rows = execute_query(
             """SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
                       s.share_scope, s.target_grade, s.target_class, s.created_at
@@ -179,9 +179,9 @@ async def received_shares(request: Request):
                WHERE s.share_scope='all'
                   OR (s.share_scope='class'
                       AND (s.target_grade='' OR s.target_grade=u.grade
-                           OR ',' || s.target_grade || ',' LIKE '%,' || u.grade || ',%')
+                           OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
                       AND (s.target_class='' OR s.target_class=u.class
-                           OR ',' || s.target_class || ',' LIKE '%,' || u.class || ',%'))
+                           OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))
                ORDER BY s.created_at DESC""",
             (username,),
         )
@@ -235,19 +235,20 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
     if not viewer_rows:
         return False
 
-    viewer_grade, viewer_class = viewer_rows[0]
+    viewer_grade = str(viewer_rows[0][0] or "")
+    viewer_class = str(viewer_rows[0][1] or "")
 
-    # 年级匹配（支持 | 分隔）
+    # 年级匹配（支持逗号分隔的多值匹配）
     grade_ok = not target_grade or (
         viewer_grade == target_grade
-        or f'|{target_grade}|'.find(f'|{viewer_grade}|') != -1
+        or f',{target_grade},'.find(f',{viewer_grade},') != -1
     )
     if not grade_ok:
         return False
 
-    # 班级匹配（支持 | 分隔）
+    # 班级匹配（支持逗号分隔的多值匹配）
     class_ok = not target_class or (
         viewer_class == target_class
-        or f'|{target_class}|'.find(f'|{viewer_class}|') != -1
+        or f',{target_class},'.find(f',{viewer_class},') != -1
     )
     return class_ok
