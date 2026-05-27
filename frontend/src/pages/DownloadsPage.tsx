@@ -73,8 +73,12 @@ const DownloadsPage: React.FC = () => {
     }
   }, [isStudent])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadFiles() }, [])
+  const loadFilesRef = useRef(loadFiles)
+  useEffect(() => { loadFilesRef.current = loadFiles })
+  useEffect(() => {
+    const timer = setTimeout(() => loadFilesRef.current(), 0)
+    return () => clearTimeout(timer)
+  }, [])
 
   // 上传单个文件到指定子目录
   const uploadSingleFile = async (file: File, subPath: string): Promise<string> => {
