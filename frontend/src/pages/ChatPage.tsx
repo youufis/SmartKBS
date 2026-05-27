@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   Layout, Input, Button, Space, Checkbox, message, Modal,
-  Typography, Dropdown, Tooltip, Tree, Drawer, Spin, Popconfirm, Card,
+  Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card,
 } from 'antd'
 import {
   SendOutlined, StopOutlined, PlusOutlined,
-  ReloadOutlined, EyeOutlined, UploadOutlined,
+  EyeOutlined, UploadOutlined,
   DeleteOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
   CopyOutlined, CameraOutlined,
 } from '@ant-design/icons'
@@ -116,6 +116,7 @@ const ChatPage: React.FC = () => {
   const [taskSelectOpen, setTaskSelectOpen] = useState(false)
   const [pendingTasks, setPendingTasks] = useState<TaskInfo[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<React.ComponentRef<typeof TextArea>>(null)
   const [usage, setUsage] = useState<chatApi.UsageInfo | null>(null)
 
@@ -381,28 +382,53 @@ const ChatPage: React.FC = () => {
 
   // 复制对话内容
   const handleCopy = useCallback(() => {
-    const text = messages.map(m => `${m.role === 'user' ? '👤' : '🤖'} ${m.content}`).join('\n\n---\n\n');
-    navigator.clipboard.writeText(text).then(
-      () => message.success('已复制'),
-      () => message.error('复制失败')
-    );
-  }, [messages]);
+    if (!messages.length) { message.warning('没有可复制的内容'); return }
 
-  const moreMenu = {
-    items: [
-      { key: 'preview', icon: <EyeOutlined />, label: '预览 HTML', disabled: !hasHtmlInResponse },
-      { key: 'copy', icon: <CopyOutlined />, label: '复制对话' },
-    ],
-    onClick: ({ key }: { key: string }) => {
-      if (key === 'preview') extractHtmlPreview();
-      if (key === 'copy') handleCopy();
-    },
-  }
+    // 优先使用 DOM 选取方式复制渲染后的内容（保留完整样式，Word 友好）
+    const container = messagesRef.current
+    if (container && container.children.length > 0 && document.createRange) {
+      try {
+        const range = document.createRange()
+        range.selectNodeContents(container)
+        const sel = window.getSelection()
+        sel?.removeAllRanges()
+        sel?.addRange(range)
+        const ok = document.execCommand('copy')
+        sel?.removeAllRanges()
+        if (ok) { message.success('已复制'); return }
+      } catch { /* 降级到 HTML clipboard */ }
+    }
+
+    // 降级方案：ClipboardItem API（text + html 双格式）
+    const text = messages.map(m => `${m.role === 'user' ? '👤' : '🤖'} ${m.content}`).join('\n\n---\n\n')
+    const html = messages.map(m => {
+      const role = m.role === 'user' ? '👤 用户' : '🤖 助手'
+      const bg = m.role === 'user' ? '#f0f5ff' : '#f6ffed'
+      return `<div style="margin:8px 0;padding:10px 14px;background:${bg};border-radius:6px;border-left:3px solid ${m.role === 'user' ? '#1677ff' : '#52c41a'}">\n        <div style="font-weight:600;font-size:14px;margin-bottom:4px;color:#333">${role}</div>\n        <div style="font-size:14px;line-height:1.7;color:#1a1a1a;white-space:pre-wrap">${m.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>\n      </div>`
+    }).join('\n')
+    if (navigator.clipboard?.write) {
+      navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+          'text/html': new Blob([`<div style="font-family:'Microsoft YaHei',sans-serif">${html}</div>`], { type: 'text/html' }),
+        }),
+      ]).then(() => message.success('已复制'), () => message.error('复制失败'))
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy'); message.success('已复制') } catch { message.error('复制失败') }
+      document.body.removeChild(ta)
+    }
+  }, [messages]);
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
       {/* 消息列表 */}
-      <div style={{
+      <div ref={messagesRef} style={{
         flex: 1, overflow: 'auto', padding: 24,
         background: '#fafafa',
       }}>
@@ -507,9 +533,7 @@ const ChatPage: React.FC = () => {
                 发送
               </Button>
             )}
-            <Dropdown menu={moreMenu} trigger={['click']}>
-              <Button icon={<ReloadOutlined />} />
-            </Dropdown>
+            <Button icon={<CopyOutlined />} onClick={handleCopy} title="复制对话" />
           </Space.Compact>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -557,10 +581,22 @@ const ChatPage: React.FC = () => {
               showLine
               onSelect={handleHistorySelect}
               titleRender={(node: TreeNode) => (
-                <Space size={4}>
+                <Space size={4} style={{ width: '100%' }}>
                   {node.isLeaf ? <FileOutlined /> : <FolderOutlined />}
-                  <span style={{ fontSize: 13 }}>{node.title}</span>
-                  <span onClick={(e) => e.stopPropagation()}>
+                  <span style={{
+                    fontSize: 13,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 220,
+                    display: 'inline-block',
+                    verticalAlign: 'middle',
+                  }} title={node.title as string}>
+                    {node.isLeaf
+                      ? (node.title as string).replace(/^conversation_/, '').replace(/\.md$/, '')
+                      : node.title}
+                  </span>
+                  <span onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
                     <Popconfirm
                       title={`确认删除${node.isLeaf ? '文件' : '整个目录'}？`}
                       onConfirm={() => handleHistoryDelete(node.key)}

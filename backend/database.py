@@ -163,6 +163,25 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 对话历史索引表（替代文件扫描） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                session_id TEXT DEFAULT '',
+                date TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                title TEXT DEFAULT '',
+                message_count INTEGER DEFAULT 0,
+                file_size INTEGER DEFAULT 0,
+                created_at TEXT,
+                UNIQUE(username, date, filename)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_conv_date ON conversations(username, date)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.info("数据库初始化完成")
 
@@ -234,9 +253,55 @@ def get_transaction():
 
 # ── 旧版 JSON → 数据库 数据迁移 ──
 
+def _migrate_conversations(BASE_DIR, conn):
+    """扫描用户目录下的 .md 对话文件，建立 DB 索引"""
+    chat_dirs = [BASE_DIR / "root" / "ChatHistory"]
+    stu_dir = BASE_DIR / "stu"
+    if stu_dir.exists():
+        for user_dir in stu_dir.iterdir():
+            if user_dir.is_dir():
+                chat_dirs.append(user_dir / "ChatHistory")
+    for item in BASE_DIR.iterdir():
+        d = item / "ChatHistory"
+        if item.is_dir() and d.exists() and item.name not in ("root", "stu"):
+            chat_dirs.append(d)
+
+    now_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    for chat_dir in chat_dirs:
+        if not chat_dir.exists():
+            continue
+        parent = chat_dir.parent
+        username = parent.name  # stu/ 下的由外层循环处理
+        for md_file in chat_dir.rglob("*.md"):
+            if "Summary" in md_file.parts:
+                continue
+            rel_path = md_file.relative_to(chat_dir)
+            date_str = rel_path.parts[0] if len(rel_path.parts) > 1 else ""
+            fsize = md_file.stat().st_size
+            try:
+                conn.cursor().execute(
+                    "INSERT OR IGNORE INTO conversations (username, date, filename, file_size, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (username, date_str, str(rel_path).replace("\\", "/"), fsize, now_str),
+                )
+            except Exception:
+                pass
+    conn.commit()
+    cnt = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+    logger.info(f"[迁移] 对话索引: {cnt} 条")
+
+
 def _migrate_from_json():
     """将旧版 JSON 文件数据迁移到数据库（仅首次运行自动执行）"""
     BASE_DIR = Path(__file__).resolve().parent.parent
+
+    # ── 对话历史索引迁移（独立运行，不受 scores 检查影响） ──
+    try:
+        with get_connection() as conn:
+            existing = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+            if existing == 0:
+                _migrate_conversations(BASE_DIR, conn)
+    except Exception as e:
+        logger.warning(f"[迁移] 对话索引失败: {e}")
 
     # 检查是否已迁移（scores 表有数据则跳过）
     with get_connection() as conn:
@@ -330,6 +395,15 @@ def _migrate_from_json():
             logger.info(f"[迁移] 任务数据完成")
         except Exception as e:
             logger.warning(f"[迁移] 任务数据失败: {e}")
+
+    # ── 4. 迁移对话历史索引（扫描现有 .md 文件） ──
+    try:
+        with get_connection() as conn:
+            existing = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+            if existing == 0:
+                _migrate_conversations(BASE_DIR, conn)
+    except Exception as e:
+        logger.warning(f"[迁移] 对话索引失败: {e}")
 
     if migrated_any:
         logger.info("数据库迁移完成：旧版 JSON → SQLite")
