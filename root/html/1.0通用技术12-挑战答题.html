@@ -1755,7 +1755,7 @@ const TEACHER = (pathMatch ? pathMatch[1] : '') || '';
                 const grade = record.class.startsWith('高一') ? '高一' : '高二';
                 
                 // 调用积分系统API
-                const response = await fetch(`${SCORE_API_BASE}/score-api/score`, {
+                const response = await fetch(`${SCORE_API_BASE}/api/scores/score`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

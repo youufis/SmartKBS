@@ -610,10 +610,10 @@ function updateRoundDots(){
     d.title=`第${i+1}组`;ri.appendChild(d);
   }
 }
-function saveRecord(g,c,s,cc,t,pts,ans,title){fetch('/rollcall-api/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',teacher:TEACHER,title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[]})}).catch(()=>{})}
+function saveRecord(g,c,s,cc,t,pts,ans,title){fetch('/api/rollcall/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',teacher:TEACHER,title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[]})}).catch(()=>{})}
 function saveScore(grade,cls,name,points){
-  fetch('/score-api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade,class:cls,name,points})})
-    .then(r=>r.ok?showToast('💰','积分已保存',`+${points}`):showToast('⚠️','积分存储异常')).then(()=>{fetch('/rollcall-api/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.class,student:name,result:'quiz'})}).catch(()=>{});const cr=state.roundResults[state.currentRound];if(cr)saveRecord(state.grade,state.class,name,cr.correctCount||0,2,cr.points||5,cr.answers,'设计的一般过程-未来教室');})
+  fetch('/api/scores/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade,class:cls,name,points})})
+    .then(r=>r.ok?showToast('💰','积分已保存',`+${points}`):showToast('⚠️','积分存储异常')).then(()=>{fetch('/api/rollcall/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.class,student:name,result:'quiz'})}).catch(()=>{});const cr=state.roundResults[state.currentRound];if(cr)saveRecord(state.grade,state.class,name,cr.correctCount||0,2,cr.points||5,cr.answers,'设计的一般过程-未来教室');})
     .catch(()=>{console.log(`[分数] ${grade}|${cls}|${name} +${points}`);showToast('📝','本地模式·分数已记录');});
 }
 
@@ -624,7 +624,7 @@ async function loadClasses(){
   const gRaw=$('gradeSelect').value;const g=gRaw.replace('年级','');state.grade=g;
   const cs=$('classSelect');cs.disabled=true;cs.innerHTML='<option value="">加载中...</option>';
   try{
-    const r=await fetch('/rollcall-api/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);const data=await r.json();const cls=data;
+    const r=await fetch('/api/rollcall/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);const data=await r.json();const cls=data;
     
     cs.innerHTML='<option value="">-- 请选择班级 --</option>';
     cls.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o);});
@@ -635,7 +635,7 @@ $('gradeSelect').addEventListener('change',loadClasses);
 $('classSelect').addEventListener('change',async function(){
   const cls=this.value;state.class=cls;$('btnStart').disabled=!cls;
   if(cls){
-    const resp=await fetch('/rollcall-api/students?grade='+encodeURIComponent(state.grade)+'&class='+encodeURIComponent(cls)+'&teacher='+TEACHER);
+    const resp=await fetch('/api/rollcall/students?grade='+encodeURIComponent(state.grade)+'&class='+encodeURIComponent(cls)+'&teacher='+TEACHER);
     state.students=await resp.json().then(d=>d.map(s=>s.name));
     ;
   }
@@ -656,7 +656,7 @@ function startPick(){
   $('pickClassTag').classList.add('hidden');$('btnPickStart').classList.remove('hidden');$('btnPickConfirm').classList.add('hidden');
   $('pickName').textContent='✨';$('pickName').className='pick-name';$('btnPickStart').disabled=false;$('btnPickStart').textContent='🔄 抽取同学';
 }
-function rp(){const pool=state.students.length>0?state.students:['---'];const pn=$('pickName');pn.className='pick-name rolling';$('pickHint').textContent='抽取中...';$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('btnPickStart').disabled=true;let rc=0,mx=18+Math.floor(Math.random()*10);let iv=setInterval(()=>{pn.textContent=pool[Math.floor(Math.random()*pool.length)];rc++;if(rc>=mx){clearInterval(iv);fetch('/rollcall-api/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.class})}).then(d=>d.json()).then(d=>{if(d.error){showToast('⚠️',d.error);pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false;return}const c=d.student;pn.textContent=c;pn.className='pick-name result';$('pickHint').classList.add('hidden');$('pickClassTag').textContent=state.grade+' · '+state.class;$('pickClassTag').classList.remove('hidden');$('btnPickConfirm').classList.remove('hidden');$('btnRepick').classList.remove('hidden');fireParticles(innerWidth/2,innerHeight/2,'var(--gold)',60);showToast('🎯','已选',c);state.picks[state.currentRound]=c}).catch(()=>{showToast('⚠️','服务异常');pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false})}},60+Math.random()*40)}
+function rp(){const pool=state.students.length>0?state.students:['---'];const pn=$('pickName');pn.className='pick-name rolling';$('pickHint').textContent='抽取中...';$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('btnPickStart').disabled=true;let rc=0,mx=18+Math.floor(Math.random()*10);let iv=setInterval(()=>{pn.textContent=pool[Math.floor(Math.random()*pool.length)];rc++;if(rc>=mx){clearInterval(iv);fetch('/api/rollcall/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:state.grade,class:state.class})}).then(d=>d.json()).then(d=>{if(d.error){showToast('⚠️',d.error);pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false;return}const c=d.student;pn.textContent=c;pn.className='pick-name result';$('pickHint').classList.add('hidden');$('pickClassTag').textContent=state.grade+' · '+state.class;$('pickClassTag').classList.remove('hidden');$('btnPickConfirm').classList.remove('hidden');$('btnRepick').classList.remove('hidden');fireParticles(innerWidth/2,innerHeight/2,'var(--gold)',60);showToast('🎯','已选',c);state.picks[state.currentRound]=c}).catch(()=>{showToast('⚠️','服务异常');pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false})}},60+Math.random()*40)}
 $('btnPickStart').addEventListener('click',function(){this.disabled=true;rp()});
 $('btnRepick').addEventListener('click',rp);
 $('btnPickConfirm').addEventListener('click',function(){hide('scenePick');startQuiz();});

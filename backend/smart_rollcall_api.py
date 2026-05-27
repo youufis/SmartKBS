@@ -466,14 +466,4 @@ async def api_save_record(request: Request):
     return {"success": True}
 
 
-# ── 挂载 ──
-
-def mount_rollcall_api(app):
-    app.get("/rollcall-api/grades")(api_grades)
-    app.get("/rollcall-api/classes")(api_classes)
-    app.get("/rollcall-api/students")(api_students)
-    app.post("/rollcall-api/pick")(api_pick)
-    app.post("/rollcall-api/mark")(api_mark)
-    app.get("/rollcall-api/history")(api_history)
-    app.post("/rollcall-api/reset")(api_reset)
-    app.post("/rollcall-api/save-record")(api_save_record)
+# ── 注意：API 路由已迁移至 backend/api/rollcall_router.py ──
