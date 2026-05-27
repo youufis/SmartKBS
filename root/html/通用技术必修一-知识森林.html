@@ -229,12 +229,12 @@ function ud(){
 }
 
 function sv(g,c,n,p){
-  fetch('/score-api/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,name:n,points:p,teacher:TEACHER})})
+  fetch('/api/scores/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,name:n,points:p,teacher:TEACHER})})
     .then(r=>r.ok?st('💰','保存','+'+p):st('⚠️','异常')).catch(()=>st('📝','本地'))
 }
 
 function saveRecord(g,c,s,cc,t,pts,ans,title){
-  fetch('/rollcall-api/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',teacher:TEACHER,title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[]})}).catch(()=>{})
+  fetch('/api/rollcall/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',teacher:TEACHER,title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[]})}).catch(()=>{})
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -302,7 +302,7 @@ async function lc(){
   const g=$('gradeSelect').value;S.grade=g;
   const cs=$('classSelect');cs.disabled=true;cs.innerHTML='<option value="">...</option>';
   try{
-    const r=await fetch('/rollcall-api/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);
+    const r=await fetch('/api/rollcall/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);
     const cls=await r.json();
     cs.innerHTML='<option value="">— 选择 —</option>';
     cls.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o)});
@@ -314,7 +314,7 @@ $('gradeSelect').addEventListener('change',lc);
 $('classSelect').addEventListener('change',async function(){
   const c=this.value;S.class=c;$('btnStart').disabled=!c;
   if(c){
-    const resp=await fetch('/rollcall-api/students?grade='+encodeURIComponent(S.grade)+'&class='+encodeURIComponent(c)+'&teacher='+TEACHER);const data=await resp.json();S.students=data.map(s=>s.name)
+    const resp=await fetch('/api/rollcall/students?grade='+encodeURIComponent(S.grade)+'&class='+encodeURIComponent(c)+'&teacher='+TEACHER);const data=await resp.json();S.students=data.map(s=>s.name)
   }
 });
 
@@ -361,7 +361,7 @@ function rp(){
     rc++;
     if(rc>=mx){
       clearInterval(iv);
-      fetch('/rollcall-api/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,teacher:TEACHER})})
+      fetch('/api/rollcall/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,teacher:TEACHER})})
         .then(d=>d.json()).then(d=>{
           if(d.error){st('⚠️',d.error);pn.textContent='——';pn.className='pick-t1-name';$('btnPickStart').disabled=false;return}
           const c=d.student;pn.textContent=c;pn.className='pick-t1-name result';
@@ -438,7 +438,7 @@ function sSc(){
   const p=cc===0?25:cc===1?60:100;
   setTimeout(()=>{$('energyBar').style.width=p+'%';$('energyText').textContent=p+'%'},100);
   sv(S.grade,S.class,s,pts);S.total+=pts;
-  fetch('/rollcall-api/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,student:s,result:'quiz',teacher:TEACHER})}).catch(()=>{});
+  fetch('/api/rollcall/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,student:s,result:'quiz',teacher:TEACHER})}).catch(()=>{});
   saveRecord(S.grade,S.class,s,cc,QUESTIONS_PER_ROUND,pts,S.rr[S.cr]?.answers,'通用技术·必修一');
   fp(innerWidth/2,innerHeight/2-100,'var(--t1-green)',25);
   $('btnNextRound').textContent=S.cr<4?'下一组':'完成'

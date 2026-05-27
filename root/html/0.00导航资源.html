@@ -1044,7 +1044,7 @@ function dlGoUp() { if (!_dlCurDir) return; var i=_dlCurDir.lastIndexOf('/'); _d
 async function loadDLList() {
   var container = document.getElementById('dlFileList');
   try {
-    var resp = await fetch('/downloads-api/list?_=' + Date.now());
+    var resp = await fetch('/api/downloads/list?_=' + Date.now());
     if (!resp.ok) throw new Error('API error');
     var data = await resp.json();
     if (!data || !Array.isArray(data.files)) throw new Error('bad data');
