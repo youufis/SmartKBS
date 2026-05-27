@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown } from 'antd'
 import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined } from '@ant-design/icons'
 import * as sharingApi from '../api/sharing'
@@ -15,7 +14,6 @@ interface DownloadFile {
 }
 
 const DownloadsPage: React.FC = () => {
-  const navigate = useNavigate()
   const user = JSON.parse(localStorage.getItem('smartkb_user') || '{}')
   const username: string = user?.username || 'root'
   const [files, setFiles] = useState<DownloadFile[]>([])
@@ -76,20 +74,6 @@ const DownloadsPage: React.FC = () => {
       setLoading(false)
     }
   }, [isStudent])
-    setLoading(true)
-    try {
-      const { data } = await apiClient.get('/downloads-api/list')
-      setFiles(data.files || [])
-      setUsage(data.usage || 0)
-      setQuota(data.quota || 0)
-      setUsageStr(data.usage_str || '')
-      setQuotaStr(data.quota_str || '')
-    } catch {
-      message.error('加载文件列表失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
 
   useEffect(() => { loadFiles() }, [loadFiles])
 
