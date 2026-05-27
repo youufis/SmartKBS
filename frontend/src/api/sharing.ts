@@ -17,9 +17,6 @@ export interface ShareRequest {
   file_path: string;
   file_name: string;
   resource_type: 'html' | 'download';
-  share_scope: 'all' | 'class';
-  target_grade?: string;
-  target_class?: string;
 }
 
 /** 共享一个资源 */
