@@ -164,19 +164,21 @@ async def received_shares(request: Request):
     role = user["role"]
 
     if role == 0:
-        # 管理员：看到所有共享
+        # 管理员：只看到 scope=all 的共享（教师按班级的共享不对管理员可见）
         rows = execute_query(
             """SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
                       s.share_scope, s.target_grade, s.target_class, s.created_at
                FROM shared_resources s
+               WHERE s.share_scope='all'
                ORDER BY s.created_at DESC""",
         )
     elif role == 1:
-        # 教师：看到所有共享（用于管理）
+        # 教师：只看到 scope=all 的共享
         rows = execute_query(
             """SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
                       s.share_scope, s.target_grade, s.target_class, s.created_at
                FROM shared_resources s
+               WHERE s.share_scope='all'
                ORDER BY s.created_at DESC""",
         )
     else:
