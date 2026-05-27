@@ -1,6 +1,6 @@
 """
 共享资源 API 路由
-管理员/教师共享 HTML 资源和下载文件，学生按年级/班级查看
+管理员/教师共享 HTML 资源和下载文件，可按角色、年级、班级灵活设置共享范围
 """
 from datetime import datetime
 
@@ -19,54 +19,66 @@ class ShareRequest(BaseModel):
     file_path: str
     file_name: str
     resource_type: str  # 'html' or 'download'
+    share_scope: str = "all"  # 'all', 'teacher', 'staff', 'class'
+    target_grade: str = ""
+    target_class: str = ""
 
 
 def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
     """构建完整的 /api/files/ 访问路径（相对于 BASE_DIR）"""
     dir_name = "html" if resource_type == "html" else "downloads"
-    # 如果 file_path 已经包含完整前缀（如 root/html/xxx.html），直接返回
     if file_path.startswith(f"{owner}/{dir_name}/") or file_path.startswith(f"stu/{owner}/{dir_name}/"):
         return file_path
-    # 否则拼接完整路径
     return f"{owner}/{dir_name}/{file_path}"
+
+
+_VALID_SCOPES = {"all", "teacher", "staff", "class"}
 
 
 # ── 创建共享 ──
 
 @router.post("/share")
 async def share_resource(request: Request, body: ShareRequest):
-    """共享一个资源或文件（管理员：全员共享；教师：自动共享给自己班级学生）"""
+    """共享一个资源，支持按角色/年级/班级灵活设置共享范围"""
     user = get_current_user(request)
     username = user["username"]
     role = user["role"]
 
-    # 仅管理员和教师可以共享
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅管理员和教师可以共享资源")
 
     if body.resource_type not in ("html", "download"):
         raise HTTPException(status_code=400, detail="resource_type 必须是 html 或 download")
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if body.share_scope not in _VALID_SCOPES:
+        raise HTTPException(status_code=400, detail=f"无效的共享范围: {body.share_scope}")
 
-    if role == 0:
-        # 管理员：共享给所有人
-        share_scope = "all"
-        target_grade = ""
-        target_class = ""
-    else:
-        # 教师：自动从用户信息获取班级和年级
-        share_scope = "class"
-        rows = execute_query(
-            "SELECT grade, class FROM users WHERE username=?",
-            (username,),
-        )
-        if rows:
-            target_grade = rows[0][0] or ""
-            target_class = rows[0][1] or ""
-        else:
-            target_grade = ""
-            target_class = ""
+    # 权限校验
+    if role == 0:  # 管理员：可以使用所有范围
+        pass
+    elif role == 1:  # 教师
+        if body.share_scope == "all":
+            raise HTTPException(status_code=403, detail="教师不能选择「所有人」范围")
+        if body.share_scope == "class":
+            # 教师只能共享给自己的班级
+            rows = execute_query(
+                "SELECT grade, class FROM users WHERE username=?",
+                (username,),
+            )
+            if rows:
+                allowed_grade = rows[0][0] or ""
+                allowed_class = rows[0][1] or ""
+                if body.target_grade and body.target_grade != allowed_grade:
+                    raise HTTPException(status_code=403, detail="教师只能共享给自己所在年级")
+                if body.target_class and body.target_class != allowed_class:
+                    raise HTTPException(status_code=403, detail="教师只能共享给自己所在班级")
+            # 自动填充教师的年级/班级
+            if not body.target_grade and rows:
+                body.target_grade = rows[0][0] or ""
+            if not body.target_class and rows:
+                body.target_class = rows[0][1] or ""
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     try:
         execute_insert_update(
@@ -74,9 +86,9 @@ async def share_resource(request: Request, body: ShareRequest):
                (owner_username, file_path, file_name, resource_type, share_scope, target_grade, target_class, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (username, body.file_path, body.file_name, body.resource_type,
-             share_scope, target_grade, target_class, now, now),
+             body.share_scope, body.target_grade, body.target_class, now, now),
         )
-        logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={share_scope})")
+        logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
         return {"message": "共享成功", "file_path": body.file_path}
     except Exception as e:
         logger.error(f"共享创建失败: {e}")
@@ -95,7 +107,6 @@ async def unshare_resource(id: int = Query(...), request: Request = None):
     username = user["username"]
     role = user["role"]
 
-    # 查询共享记录
     rows = execute_query(
         "SELECT owner_username FROM shared_resources WHERE id=?",
         (id,),
@@ -105,7 +116,6 @@ async def unshare_resource(id: int = Query(...), request: Request = None):
 
     owner = rows[0][0]
 
-    # 仅共享者本人或管理员可以取消
     if username != owner and role != 0:
         raise HTTPException(status_code=403, detail="无权取消此共享")
 
@@ -158,46 +168,143 @@ async def my_shares(request: Request):
 
 @router.get("/received")
 async def received_shares(request: Request):
-    """获取共享给当前用户的资源（按角色和年级/班级过滤）"""
+    """获取共享给当前用户的资源（按角色、年级、班级过滤）"""
     user = get_current_user(request)
     username = user["username"]
     role = user["role"]
 
+    # 构建可见条件：
+    #   scope='all'      → 所有人可见
+    #   scope='teacher'  → 教师(role=1)可见
+    #   scope='staff'    → 管理员(role=0)和教师(role=1)可见
+    #   scope='class'    → 匹配年级/班级的学生可见
+    seen_conditions = ["s.share_scope='all'"]
     if role == 0:
-        # 管理员：只看到 scope=all 的共享（教师按班级的共享不对管理员可见）
-        rows = execute_query(
-            """SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
-                      s.share_scope, s.target_grade, s.target_class, s.created_at
-               FROM shared_resources s
-               WHERE s.share_scope='all'
-               ORDER BY s.created_at DESC""",
-        )
+        seen_conditions.append("s.share_scope='staff'")
     elif role == 1:
-        # 教师：只看到 scope=all 的共享
-        rows = execute_query(
-            """SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
-                      s.share_scope, s.target_grade, s.target_class, s.created_at
-               FROM shared_resources s
-               WHERE s.share_scope='all'
-               ORDER BY s.created_at DESC""",
-        )
+        seen_conditions.append("s.share_scope='teacher'")
+        seen_conditions.append("s.share_scope='staff'")
     else:
-        # 学生：看到管理员共享(scope=all) + 匹配自己年级/班级的教师共享
-        # 教师可能有多个年级/班级（用逗号分隔），需要逐一匹配
+        # 学生：匹配年级/班级
+        seen_conditions.append(
+            """(s.share_scope='class'
+                AND (s.target_grade='' OR s.target_grade=u.grade
+                     OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
+                AND (s.target_class='' OR s.target_class=u.class
+                     OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))"""
+        )
+
+    where_clause = " OR ".join(seen_conditions)
+
+    if role == 2:
         rows = execute_query(
-            """SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
-                      s.share_scope, s.target_grade, s.target_class, s.created_at
-               FROM shared_resources s
-               LEFT JOIN users u ON u.username=?
-               WHERE s.share_scope='all'
-                  OR (s.share_scope='class'
-                      AND (s.target_grade='' OR s.target_grade=u.grade
-                           OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
-                      AND (s.target_class='' OR s.target_class=u.class
-                           OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))
-               ORDER BY s.created_at DESC""",
+            f"""SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
+                       s.share_scope, s.target_grade, s.target_class, s.created_at
+                FROM shared_resources s
+                LEFT JOIN users u ON u.username=?
+                WHERE {where_clause}
+                ORDER BY s.created_at DESC""",
             (username,),
         )
+    else:
+        rows = execute_query(
+            f"""SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
+                       s.share_scope, s.target_grade, s.target_class, s.created_at
+                FROM shared_resources s
+                WHERE {where_clause}
+                ORDER BY s.created_at DESC""",
+        )
+
+    return {
+        "shares": [
+            {
+                "id": r[0],
+                "owner_username": r[1],
+                "file_path": r[2],
+                "file_name": r[3],
+                "resource_type": r[4],
+                "share_scope": r[5],
+                "target_grade": r[6] or "",
+                "target_class": r[7] or "",
+                "created_at": r[8],
+                "url_path": _build_url_path(r[1], r[4], r[2]),
+            }
+            for r in rows
+        ]
+    }
+
+
+# ── 通用：检查文件是否对用户可见（供 serve_static_file 调用） ──
+
+def is_file_shared_with_user(file_rel_path: str, resource_type: str,
+                             owner_username: str, viewer_username: str) -> bool:
+    """检查一个文件是否通过共享对当前用户可见"""
+    if not viewer_username:
+        return False
+
+    rows = execute_query(
+        """SELECT s.share_scope, s.target_grade, s.target_class
+           FROM shared_resources s
+           WHERE s.owner_username=? AND s.file_path=? AND s.resource_type=?""",
+        (owner_username, file_rel_path, resource_type),
+    )
+    if not rows:
+        return False
+
+    share_scope, target_grade, target_class = rows[0]
+
+    # scope='all'：所有人可见
+    if share_scope == 'all':
+        return True
+
+    # scope='staff'：管理员和教师可见
+    if share_scope == 'staff':
+        viewer_rows = execute_query(
+            "SELECT role FROM users WHERE username=?",
+            (viewer_username,),
+        )
+        if viewer_rows and viewer_rows[0][0] in (0, 1):
+            return True
+        return False
+
+    # scope='teacher'：仅教师可见
+    if share_scope == 'teacher':
+        viewer_rows = execute_query(
+            "SELECT role FROM users WHERE username=?",
+            (viewer_username,),
+        )
+        if viewer_rows and viewer_rows[0][0] == 1:
+            return True
+        return False
+
+    # scope='class'：需要年级/班级匹配（支持逗号分隔的多值匹配）
+    viewer_rows = execute_query(
+        "SELECT grade, class, role FROM users WHERE username=?",
+        (viewer_username,),
+    )
+    if not viewer_rows:
+        return False
+
+    viewer_role = viewer_rows[0][2]
+    # 管理员和教师不通过 class 范围看到文件（他们通过 staff/teacher/all 范围）
+    if viewer_role in (0, 1):
+        return False
+
+    viewer_grade = str(viewer_rows[0][0] or "")
+    viewer_class = str(viewer_rows[0][1] or "")
+
+    grade_ok = not target_grade or (
+        viewer_grade == target_grade
+        or f',{target_grade},'.find(f',{viewer_grade},') != -1
+    )
+    if not grade_ok:
+        return False
+
+    class_ok = not target_class or (
+        viewer_class == target_class
+        or f',{target_class},'.find(f',{viewer_class},') != -1
+    )
+    return class_ok
 
     return {
         "shares": [
