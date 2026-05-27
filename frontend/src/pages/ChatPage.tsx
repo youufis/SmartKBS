@@ -460,15 +460,49 @@ const ChatPage: React.FC = () => {
           {imagePreviewHtml && (
             <div dangerouslySetInnerHTML={{ __html: imagePreviewHtml }} style={{ borderBottom: '1px solid #f0f0f0', padding: '4px 0' }} />
           )}
-          <Space size={8} wrap>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.txt,.md,.pdf,.csv,.json,.html,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
-              onChange={handleNativeFileSelect}
-              style={{ display: 'none' }}
+
+          {/* 隐藏的文件上传 input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.txt,.md,.pdf,.csv,.json,.html,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+            onChange={handleNativeFileSelect}
+            style={{ display: 'none' }}
+          />
+
+          <Space.Compact style={{ width: '100%' }}>
+            <VoiceInput
+              onTranscript={handleVoiceTranscript}
+              disabled={isStreaming}
             />
+            <TextArea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="输入问题 (Ctrl+Enter 发送)"
+              autoSize={{ minRows: 1, maxRows: 4 }}
+              disabled={isStreaming}
+              style={{ flex: 1 }}
+            />
+            {isStreaming ? (
+              <Button icon={<StopOutlined />} onClick={stopStreaming} danger>
+                停止
+              </Button>
+            ) : (
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                onClick={handleSend}
+              >
+                发送
+              </Button>
+            )}
+            <Button icon={<CopyOutlined />} onClick={handleCopy} title="复制对话" />
+          </Space.Compact>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <Tooltip title="上传文件">
               <Button icon={<UploadOutlined />} size="small" onClick={() => fileInputRef.current?.click()} />
             </Tooltip>
@@ -503,47 +537,13 @@ const ChatPage: React.FC = () => {
                 预览 HTML
               </Button>
             )}
-          </Space>
-
-          <Space.Compact style={{ width: '100%' }}>
-            <VoiceInput
-              onTranscript={handleVoiceTranscript}
-              disabled={isStreaming}
-            />
-            <TextArea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="输入问题 (Ctrl+Enter 发送)"
-              autoSize={{ minRows: 1, maxRows: 4 }}
-              disabled={isStreaming}
-              style={{ flex: 1 }}
-            />
-            {isStreaming ? (
-              <Button icon={<StopOutlined />} onClick={stopStreaming} danger>
-                停止
-              </Button>
-            ) : (
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={handleSend}
-              >
-                发送
-              </Button>
-            )}
-            <Button icon={<CopyOutlined />} onClick={handleCopy} title="复制对话" />
-          </Space.Compact>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ width: 1, height: 20, background: '#e8e8e8', margin: '0 2px' }} />
             <Button size="small" icon={<PlusOutlined />} onClick={newTopic}>
               新话题
             </Button>
             <Button size="small" icon={<HistoryOutlined />} onClick={handleOpenHistory}>
               历史记录
             </Button>
-            {/* ── 用量指示器（右对齐） ── */}
             <div style={{ flex: 1, minWidth: 0 }} />
             {usage && (
               <div style={{ fontSize: 12, color: '#999', whiteSpace: 'nowrap' }}>
