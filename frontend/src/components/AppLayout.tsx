@@ -43,9 +43,11 @@ const AppLayout: React.FC = () => {
     key: string; icon: React.ReactNode; label: string;
     adminOnly?: boolean; adminOrTeacherOnly?: boolean;
   }[] = isStudent
-    ? // ── 学生端菜单：AI对话 → 课堂积分 → 任务管理 → 在线考试 → 修改密码 → 系统说明 ──
+    ? // ── 学生端菜单 ──
       [
         { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
+        { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
+        { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
         { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
         { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
         { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
@@ -55,14 +57,14 @@ const AppLayout: React.FC = () => {
     : // ── 教师/管理员菜单 ──
       [
         { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-        { key: '/html-files', icon: <FileOutlined />, label: '资源中心', adminOrTeacherOnly: true },
+        { key: '/html-files', icon: <FileOutlined />, label: '资源中心' },
         { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
         { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },
         { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
         { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
         { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
         { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
-        { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心', adminOrTeacherOnly: true },
+        { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心' },
         { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
         { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
       ]
