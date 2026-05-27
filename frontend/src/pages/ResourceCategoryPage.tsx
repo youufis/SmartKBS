@@ -47,8 +47,7 @@ const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ su
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {files.map((f) => {
-            const token = localStorage.getItem('smartkb_token') || ''
-            const fileUrl = `/api/files/${f.url_path || f.name}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+            const fileUrl = `/api/files/${f.url_path || f.name}`
             return (
             <Card key={f.path} size="small" hoverable style={{ width: 280 }}>
               <Card.Meta

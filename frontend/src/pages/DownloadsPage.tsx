@@ -32,8 +32,6 @@ const DownloadsPage: React.FC = () => {
   const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
   const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
   const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
-  const token = localStorage.getItem('smartkb_token') || ''
-
   const loadShares = async () => {
     try {
       const res = await sharingApi.getMyShares()
@@ -199,9 +197,8 @@ const DownloadsPage: React.FC = () => {
   const buildDownloadUrl = (record: DownloadFile) => {
     const dir = record.path.replace('/' + record.name, '')
     const sep = dir ? `${dir}/${record.name}` : record.name
-    const token = localStorage.getItem('smartkb_token') || ''
     const baseUrl = `/api/files/${encodeURIComponent(`${username}/downloads/${sep}`)}`
-    return token ? `${baseUrl}?token=${encodeURIComponent(token)}` : baseUrl
+    return baseUrl
   }
 
   const columns = [
@@ -332,7 +329,7 @@ const DownloadsPage: React.FC = () => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
               {downloadShares.map((s) => {
                 const fullPath = s.url_path || s.file_path
-                const fileUrl = `/api/files/${fullPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+                const fileUrl = `/api/files/${fullPath}`
                 return (
                   <Card key={s.id} size="small" hoverable>
                     <Card.Meta

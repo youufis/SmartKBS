@@ -214,7 +214,7 @@ const UserMgmtPage: React.FC = () => {
 
   // ── 下载模板 ──
   const handleDownloadTemplate = async () => {
-    window.open('/api/users/import/template?token=' + localStorage.getItem('smartkb_token'), '_blank')
+    window.open('/api/users/import/template', '_blank')
   }
 
   const genderRadios = [
