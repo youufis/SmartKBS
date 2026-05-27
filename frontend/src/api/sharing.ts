@@ -7,7 +7,7 @@ export interface ShareItem {
   file_path: string;
   file_name: string;
   resource_type: 'html' | 'download';
-  share_scope: 'all' | 'class';
+  share_scope: 'all' | 'teacher' | 'staff' | 'class';
   target_grade: string;
   target_class: string;
   created_at: string;
@@ -18,6 +18,9 @@ export interface ShareRequest {
   file_path: string;
   file_name: string;
   resource_type: 'html' | 'download';
+  share_scope: 'all' | 'teacher' | 'staff' | 'class';
+  target_grade?: string;
+  target_class?: string;
 }
 
 /** 共享一个资源 */

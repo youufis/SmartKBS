@@ -184,10 +184,10 @@ const ResourceMgmtPage: React.FC = () => {
                 <Card size="small" title="📁 目录结构">
                   <Tree treeData={treeData} showLine defaultExpandAll={false}
                     titleRender={(node: any) => (
-                      <Space size={4}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', overflow: 'hidden' }}>
                         {node.isLeaf ? <FileOutlined /> : <FolderOutlined />}
-                        <span style={{ fontSize: 13 }}>{node.title}</span>
-                        <span onClick={(e) => e.stopPropagation()}>
+                        <span style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{node.title}</span>
+                        <span onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
                           {node.isLeaf && (
                             <Tooltip title={isFileShared(node.key) ? '已共享 - 点击取消共享' : '点击共享'}>
                               <Button type="link" size="small"
@@ -205,7 +205,7 @@ const ResourceMgmtPage: React.FC = () => {
                               onClick={() => handleDelete(node.key)} />
                           </Tooltip>
                         </span>
-                      </Space>
+                      </div>
                     )}
                   />
                 </Card>
