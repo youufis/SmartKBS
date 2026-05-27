@@ -65,7 +65,7 @@ def init_db():
                     file_path TEXT NOT NULL,
                     file_name TEXT NOT NULL,
                     resource_type TEXT NOT NULL CHECK(resource_type IN ('html', 'download')),
-                    share_scope TEXT NOT NULL DEFAULT 'all' CHECK(share_scope IN ('all', 'class')),
+                    share_scope TEXT NOT NULL DEFAULT 'all',
                     target_grade TEXT DEFAULT '',
                     target_class TEXT DEFAULT '',
                     created_at TEXT NOT NULL,
@@ -73,6 +73,30 @@ def init_db():
                     UNIQUE(owner_username, file_path, resource_type)
                 )"""
             )
+            # 迁移旧表：移除 share_scope 的 CHECK 约束以支持新值
+            try:
+                c.execute("DROP TABLE IF EXISTS shared_resources_old")
+                c.execute("ALTER TABLE shared_resources RENAME TO shared_resources_old")
+                c.execute("""CREATE TABLE shared_resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner_username TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    resource_type TEXT NOT NULL CHECK(resource_type IN ('html', 'download')),
+                    share_scope TEXT NOT NULL DEFAULT 'all',
+                    target_grade TEXT DEFAULT '',
+                    target_class TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(owner_username, file_path, resource_type)
+                )""")
+                c.execute("""INSERT INTO shared_resources
+                    (id, owner_username, file_path, file_name, resource_type, share_scope, target_grade, target_class, created_at, updated_at)
+                    SELECT id, owner_username, file_path, file_name, resource_type, share_scope, target_grade, target_class, created_at, updated_at
+                    FROM shared_resources_old""")
+                c.execute("DROP TABLE shared_resources_old")
+            except sqlite3.OperationalError:
+                pass  # 首次创建或已迁移
 
             # ── 课堂积分表（替代 score_system JSON） ──
             c.execute("""CREATE TABLE IF NOT EXISTS scores (
