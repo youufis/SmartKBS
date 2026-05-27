@@ -6,8 +6,13 @@ import {
 } from 'antd'
 import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
+import type { UserItem } from '../types'
 import type { ImportProgressEvent } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
+
+interface ApiError {
+  response?: { data?: { detail?: string } }
+}
 
 const UserMgmtPage: React.FC = () => {
   const user = useAuthStore((s: { user: { username: string; role: string } | null }) => s.user)
@@ -18,79 +23,84 @@ const UserMgmtPage: React.FC = () => {
 
   // ── 注册 ──
   const [regForm] = Form.useForm()
-  const handleRegister = async (values: any) => {
+  const handleRegister = async (values: Record<string, unknown>) => {
+    const v = values as Record<string, string>
     try {
       const msg = await usersApi.registerUser({
-        username: values.username,
-        password: values.password,
-        class_val: values.class_val?.toString() || '',
-        name: values.name || '',
-        gender: values.gender === '男' ? 1 : 0,
-        role: values.role === '管理员' ? 0 : values.role === '教师' ? 1 : 2,
-        grade: values.grade || '',
+        username: v.username,
+        password: v.password,
+        class_val: v.class_val || '',
+        name: v.name || '',
+        gender: v.gender === '男' ? 1 : 0,
+        role: v.role === '管理员' ? 0 : v.role === '教师' ? 1 : 2,
+        grade: v.grade || '',
       })
       message.success(msg)
       regForm.resetFields()
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '注册失败')
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || '注册失败')
     }
   }
 
   // ── 更新信息 ──
   const [updForm] = Form.useForm()
-  const handleUpdate = async (values: any) => {
+  const handleUpdate = async (values: Record<string, unknown>) => {
+    const v = values as Record<string, string>
     try {
       const msg = await usersApi.updateUserInfo(
-        values.username, values.class_val?.toString() || '',
-        values.name || '', values.gender === '男' ? 1 : 0,
-        values.grade || '',
+        v.username, v.class_val || '',
+        v.name || '', v.gender === '男' ? 1 : 0,
+        v.grade || '',
       )
       message.success(msg)
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '更新失败')
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || '更新失败')
     }
   }
 
   // ── 修改密码 ──
   const [pwdForm] = Form.useForm()
-  const handleChangePwd = async (values: any) => {
-    if (!values.username || !values.new_password) {
+  const handleChangePwd = async (values: Record<string, unknown>) => {
+    const v = values as Record<string, string>
+    if (!v.username || !v.new_password) {
       message.warning('用户名和新密码不能为空')
       return
     }
     // 普通用户只能改自己的
-    if (!isAdmin && values.username !== user?.username) {
+    if (!isAdmin && v.username !== user?.username) {
       message.error('权限不足：只能修改自己的密码')
       return
     }
     try {
-      const msg = await usersApi.changePassword(values.username, values.new_password)
+      const msg = await usersApi.changePassword(v.username, v.new_password)
       message.success(msg)
       pwdForm.resetFields()
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '修改密码失败')
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || '修改密码失败')
     }
   }
 
   // ── 删除用户 ──
   const [delForm] = Form.useForm()
-  const handleDelete = async (values: any) => {
+  const handleDelete = async (values: Record<string, unknown>) => {
+    const v = values as Record<string, string>
     if (!isRoot) { message.error('权限不足'); return }
     try {
-      const msg = await usersApi.deleteUser(values.username)
+      const msg = await usersApi.deleteUser(v.username)
       message.success(msg)
       delForm.resetFields()
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '删除失败')
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || '删除失败')
     }
   }
 
   // ── 查询用户（支持用户名/姓名模糊搜索） ──
   const [searchForm] = Form.useForm()
-  const [searchResult, setSearchResult] = useState<any[]>([])
+  const [searchResult, setSearchResult] = useState<UserItem[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
-  const handleSearch = async (values: any) => {
-    const keyword = values.keyword?.trim()
+  const handleSearch = async (values: Record<string, unknown>) => {
+    const v = values as Record<string, string>
+    const keyword = v.keyword?.trim()
     if (!keyword) {
       message.warning('请输入关键词')
       return
@@ -99,8 +109,8 @@ const UserMgmtPage: React.FC = () => {
     try {
       const { users } = await usersApi.getAllUsers(keyword)
       setSearchResult(users)
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '查询失败')
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || '查询失败')
       setSearchResult([])
     } finally {
       setSearchLoading(false)
@@ -108,7 +118,7 @@ const UserMgmtPage: React.FC = () => {
   }
 
   // ── 用户列表 ──
-  const [allUsers, setAllUsers] = useState<any[]>([])
+  const [allUsers, setAllUsers] = useState<UserItem[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
   const handleListUsers = async () => {
     if (!isAdmin) { message.warning('仅管理员可查看'); return }
@@ -131,8 +141,8 @@ const UserMgmtPage: React.FC = () => {
     try {
       const msg = await usersApi.bulkDeleteUsers(bulkPattern)
       message.success(msg)
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '批量删除失败')
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || '批量删除失败')
     }
   }
 
@@ -198,10 +208,10 @@ const UserMgmtPage: React.FC = () => {
           }))
         }
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
       setImportProgress(prev => ({
         ...prev,
-        message: err.message || '导入失败',
+        message: err instanceof Error ? err.message : '导入失败',
         done: true,
       }))
     }
