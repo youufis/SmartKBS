@@ -20,3 +20,9 @@ temp_uploads/
 # ── 数据库 ──
 backend/smartkb.db
 *.db
+
+# ── 运行时数据 ──
+**/ChatHistory/
+**/Summary/
+stu/
+backend/stu/
