@@ -235,7 +235,7 @@ const DownloadsPage: React.FC = () => {
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space direction="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography.Title level={4} style={{ margin: 0 }}>📥 下载中心</Typography.Title>
+          <Typography.Title level={4} style={{ margin: 0 }}>📥 文件中心</Typography.Title>
           <Button icon={<ReloadOutlined />} onClick={loadFiles} loading={loading}>刷新</Button>
         </div>
 
