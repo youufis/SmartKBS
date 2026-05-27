@@ -469,7 +469,7 @@ const ChatPage: React.FC = () => {
             }>
               <Checkbox checked={contextEnhance}
                 onChange={(e) => setContextEnhance(e.target.checked)}>
-                文件摘要增强
+                摘要
               </Checkbox>
             </Tooltip>
             {hasHtmlInResponse && (
