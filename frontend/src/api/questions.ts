@@ -9,7 +9,9 @@ import type {
 } from '../types';
 
 export async function generateQuestions(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
-  const { data } = await apiClient.post('/api/questions/generate', req);
+  const { data } = await apiClient.post('/api/questions/generate', req, {
+    timeout: 180000, // AI 生成较慢，设置 3 分钟超时
+  });
   return data;
 }
 
@@ -53,5 +55,14 @@ export async function deleteQuestion(id: number): Promise<{ message: string }> {
 
 export async function getQuestionTypes(): Promise<{ types: QuestionTypeOption[] }> {
   const { data } = await apiClient.get('/api/questions/types/list');
+  return data;
+}
+
+export async function dedupQuestions(): Promise<{
+  total_deleted: number;
+  groups: { question_text: string; keep_id: number; deleted_ids: number[]; count: number }[];
+  message: string;
+}> {
+  const { data } = await apiClient.post('/api/questions/dedup');
   return data;
 }
