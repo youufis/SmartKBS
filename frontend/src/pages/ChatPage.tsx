@@ -426,7 +426,7 @@ const ChatPage: React.FC = () => {
   }, [messages]);
 
   return (
-    <Layout style={{ height: '100%', background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
       {/* 消息列表 */}
       <div ref={messagesRef} style={{
         flex: 1, overflow: 'auto', padding: 24,
