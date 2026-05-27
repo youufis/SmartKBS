@@ -189,34 +189,29 @@ async def received_shares(request: Request):
     role = user["role"]
 
     # 构建可见条件：
-    #   scope='all'      → 所有人可见
-    #   scope='staff'    → 管理员(role=0)和教师(role=1)可见
-    #   scope='teacher'  → 在 target_users 列表中的用户可见（若同时有 grade/class，也匹配学生）
-    #   scope='class'    → 匹配年级/班级的学生可见
+    #   scope='all'       → 所有人可见
+    #   scope='staff'     → 管理员(role=0)和教师(role=1)可见
+    #   scope='teacher'   → 在 target_users 列表中的用户可见（若同时有 grade/class，也匹配学生）
+    #   scope='class'     → 仅匹配年级/班级的学生可见（管理员/教师不通过此范围看到）
     seen_conditions = ["s.share_scope='all'"]
-    if role == 0:
+    if role in (0, 1):
         seen_conditions.append("s.share_scope='staff'")
-    elif role == 1:
-        seen_conditions.append("s.share_scope='staff'")
-    # scope='teacher' → 检查 target_users（含同时指定了 grade/class 的可见性）
+    # scope='teacher' → target_users 匹配（管理员/教师/被选中的用户可见）
     seen_conditions.append(
         f"(s.share_scope='teacher' AND (s.target_users=''"
         f" OR ',' || s.target_users || ',' LIKE '%,' || '{username}' || ',%'))"
     )
 
     if role == 2:
-        # 学生：匹配年级/班级（含 scope='teacher' 同时指定了年级/班级的情况）
+        # 学生：匹配 scope='class' 或 scope='teacher' 且指定了年级的共享
+        # 注意：target_grade 必须非空，防止教师无年级时误匹配所有学生
         seen_conditions.append(
             """((s.share_scope='class' OR (s.share_scope='teacher' AND s.target_grade != ''))
-                AND (s.target_grade='' OR s.target_grade=u.grade
+                AND s.target_grade != ''
+                AND (s.target_grade=u.grade
                      OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
                 AND (s.target_class='' OR s.target_class=u.class
                      OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))"""
-        )
-    else:
-        seen_conditions.append(
-            """(s.share_scope='class'
-                AND (s.target_grade != '' OR s.target_class != ''))"""
         )
 
     where_clause = " OR ".join(seen_conditions)
@@ -304,11 +299,11 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
             or f',{target_users},'.find(f',{viewer_username},') != -1
         ):
             return True
-        # 如果同时指定了年级/班级，也匹配学生
-        if viewer_role == 2 and (target_grade or target_class):
+        # 如果同时指定了年级/班级，也匹配学生（需要 grade 非空）
+        if viewer_role == 2 and target_grade:
             viewer_grade = str(viewer_rows[0][0] or "")
             viewer_class = str(viewer_rows[0][1] or "")
-            grade_ok = not target_grade or (
+            grade_ok = (
                 viewer_grade == target_grade
                 or f',{target_grade},'.find(f',{viewer_grade},') != -1
             )
@@ -321,88 +316,22 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
             return class_ok
         return False
 
-    # scope='class'：需要年级/班级匹配
+    # scope='class'：需要年级/班级匹配（target_grade 必须非空）
     if viewer_role in (0, 1):
         return False
+    if not target_grade:
+        return False
 
     viewer_grade = str(viewer_rows[0][0] or "")
     viewer_class = str(viewer_rows[0][1] or "")
 
-    grade_ok = not target_grade or (
+    grade_ok = (
         viewer_grade == target_grade
         or f',{target_grade},'.find(f',{viewer_grade},') != -1
     )
     if not grade_ok:
         return False
 
-    class_ok = not target_class or (
-        viewer_class == target_class
-        or f',{target_class},'.find(f',{viewer_class},') != -1
-    )
-    return class_ok
-
-    return {
-        "shares": [
-            {
-                "id": r[0],
-                "owner_username": r[1],
-                "file_path": r[2],
-                "file_name": r[3],
-                "resource_type": r[4],
-                "share_scope": r[5],
-                "target_grade": r[6] or "",
-                "target_class": r[7] or "",
-                "created_at": r[8],
-                "url_path": _build_url_path(r[1], r[4], r[2]),
-            }
-            for r in rows
-        ]
-    }
-
-
-# ── 通用：检查文件是否对用户可见（供 serve_static_file 调用） ──
-
-def is_file_shared_with_user(file_rel_path: str, resource_type: str,
-                             owner_username: str, viewer_username: str) -> bool:
-    """检查一个文件是否通过共享对当前用户可见"""
-    if not viewer_username:
-        return False
-
-    # 查共享表中是否有这条记录，且 viewer 有权限
-    rows = execute_query(
-        """SELECT s.share_scope, s.target_grade, s.target_class
-           FROM shared_resources s
-           WHERE s.owner_username=? AND s.file_path=? AND s.resource_type=?""",
-        (owner_username, file_rel_path, resource_type),
-    )
-    if not rows:
-        return False
-
-    share_scope, target_grade, target_class = rows[0]
-
-    if share_scope == 'all':
-        return True
-
-    # scope='class'：需要年级/班级匹配（支持 | 分隔的多值匹配）
-    viewer_rows = execute_query(
-        "SELECT grade, class FROM users WHERE username=?",
-        (viewer_username,),
-    )
-    if not viewer_rows:
-        return False
-
-    viewer_grade = str(viewer_rows[0][0] or "")
-    viewer_class = str(viewer_rows[0][1] or "")
-
-    # 年级匹配（支持逗号分隔的多值匹配）
-    grade_ok = not target_grade or (
-        viewer_grade == target_grade
-        or f',{target_grade},'.find(f',{viewer_grade},') != -1
-    )
-    if not grade_ok:
-        return False
-
-    # 班级匹配（支持逗号分隔的多值匹配）
     class_ok = not target_class or (
         viewer_class == target_class
         or f',{target_class},'.find(f',{viewer_class},') != -1
