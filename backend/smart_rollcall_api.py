@@ -2,7 +2,7 @@
 智能点名 · 公平版 — 后端 API
 提供：年级/班级列表、学生数据、公平点名算法、历史记录（服务端持久化）
 积分存储与 score_system.py 保持一致（按教师目录存储）
-学生数据全部从数据库 users.db 加载
+学生数据全部从数据库 smartkb.db 加载
 """
 import json, os, random, time
 from fastapi import Request
@@ -11,6 +11,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "root", "html")
 
 # 与 score_system.py 共享积分存储逻辑
+from backend.database import get_connection, execute_query
 from backend.score_system import (
     _load_teacher_scores,
     _save_teacher_scores,
@@ -42,73 +43,46 @@ def _get_rollcall_teacher(request: Request, body: dict = None) -> str:
 
 
 def _rollcall_dir(teacher: str) -> str:
-    """获取教师的点名数据目录"""
+    """获取教师的点名数据目录（仅兼容旧代码引用，数据已迁移至数据库）"""
     if teacher == "root":
         d = os.path.join(BASE_DIR, "root", "html", "rollcall_data")
     else:
         d = os.path.join(BASE_DIR, teacher, "html", "rollcall_data")
-    os.makedirs(d, exist_ok=True)
     return d
 
 # ── 工具函数 ──
 
 def _load_students(grade="高一"):
     """从数据库加载学生名单，按年级和班级筛选"""
-    import sqlite3
-    db_path = os.path.join(BASE_DIR, "backend", "users.db")
     students = []
     try:
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-        c.execute("SELECT name, class, gender FROM users WHERE role=2 AND grade=? AND name IS NOT NULL AND name!=''",
-                   (grade,))
-        seen, class_map = set(), {}
-        for name, cls_num, gval in c.fetchall():
-            if name in seen:
-                continue
-            seen.add(name)
-            cls_str = str(cls_num or "")
-            cls_key = f"{grade}{cls_str}班" if cls_str else f"{grade}班"
-            class_map.setdefault(cls_key, []).append({
-                "class": cls_key, "name": name,
-                "gender": "男" if gval in (1, "1", "男") else "女" if gval in (2, "0", "女", 0) else "",
-                "language": "", "subjects": "", "major": "",
-            })
-        conn.close()
-        for cls_name in sorted(class_map.keys()):
-            students.extend(class_map[cls_name])
-        if students:
-            return students
+        with get_connection() as conn:
+            c = conn.cursor()
+            c.execute(
+                "SELECT name, class, gender FROM users WHERE role=2 AND grade=? AND name IS NOT NULL AND name!=''",
+                (grade,),
+            )
+            seen, class_map = set(), {}
+            for name, cls_num, gval in c.fetchall():
+                if name in seen:
+                    continue
+                seen.add(name)
+                cls_str = str(cls_num or "")
+                cls_key = f"{grade}{cls_str}班" if cls_str else f"{grade}班"
+                class_map.setdefault(cls_key, []).append({
+                    "class": cls_key, "name": name,
+                    "gender": "男" if gval in (1, "1", "男") else "女" if gval in (2, "0", "女", 0) else "",
+                    "language": "", "subjects": "", "major": "",
+                })
+            for cls_name in sorted(class_map.keys()):
+                students.extend(class_map[cls_name])
     except Exception:
         pass
-    return []
+    return students
 
 def _load_scores(teacher="root"):
-    """使用 score_system 的统一积分存储，自动迁移旧数据"""
-    scores = _load_teacher_scores(teacher)
-    if scores:
-        return scores
-
-    # 迁移旧版 scores.json（单文件，key 格式 {grade}|{cls}|{name}）
-    old_path = os.path.join(DATA_DIR, "score_system", "scores.json")
-    if os.path.exists(old_path):
-        try:
-            with open(old_path, "r", encoding="utf-8") as f:
-                old_scores = json.load(f)
-            if old_scores:
-                new_scores = {}
-                for key, val in old_scores.items():
-                    parts = key.split("|")
-                    if len(parts) == 3:
-                        new_key = _teacher_score_key(teacher, parts[0], parts[1], parts[2])
-                        new_scores[new_key] = val
-                    else:
-                        new_scores[key] = val
-                _save_teacher_scores(new_scores, teacher)
-                return new_scores
-        except Exception:
-            pass
-    return {}
+    """从数据库加载积分数据（委托 score_system）"""
+    return _load_teacher_scores(teacher)
 
 def _save_scores(scores, teacher="root"):
     _save_teacher_scores(scores, teacher)
@@ -116,34 +90,81 @@ def _save_scores(scores, teacher="root"):
 def _score_key(teacher, grade, cls, name):
     return _teacher_score_key(teacher, grade, cls, name)
 
-def _history_file(teacher, grade, cls):
-    safe = f"{grade}_{cls}".replace(" ", "_")
-    return os.path.join(_rollcall_dir(teacher), f"{safe}.json")
-
 def _load_history(teacher, grade, cls):
-    path = _history_file(teacher, grade, cls)
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"weights": {}, "history": [], "updated": ""}
+    """从数据库加载点名状态"""
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT student_name, weight FROM rollcall_weights WHERE teacher_username=? AND grade=? AND class_name=?",
+            (teacher, grade, cls),
+        )
+        weights = {row[0]: row[1] for row in c.fetchall()}
+        c.execute(
+            "SELECT last_time, picked_in_round FROM rollcall_meta WHERE teacher_username=? AND grade=? AND class_name=?",
+            (teacher, grade, cls),
+        )
+        meta = c.fetchone()
+        last_time = meta[0] if meta else None
+        picked_in_round = json.loads(meta[1]) if meta and meta[1] else []
+        c.execute(
+            "SELECT student_name, created_at, result, points, teacher_username FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=? ORDER BY id",
+            (teacher, grade, cls),
+        )
+        history = [
+            {"student": row[0], "time": row[1], "result": row[2], "points": row[3], "teacher": row[4]}
+            for row in c.fetchall()
+        ]
+    return {
+        "weights": weights,
+        "history": history,
+        "picked_in_round": picked_in_round,
+        "last_time": last_time,
+        "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
 
 def _save_history(teacher, grade, cls, data):
-    data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    with open(_history_file(teacher, grade, cls), "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """保存点名状态到数据库"""
+    with get_connection() as conn:
+        c = conn.cursor()
+        # 保存权重（全量替换）
+        c.execute(
+            "DELETE FROM rollcall_weights WHERE teacher_username=? AND grade=? AND class_name=?",
+            (teacher, grade, cls),
+        )
+        for sname, weight in data.get("weights", {}).items():
+            c.execute(
+                "INSERT INTO rollcall_weights (teacher_username, grade, class_name, student_name, weight) VALUES (?, ?, ?, ?, ?)",
+                (teacher, grade, cls, sname, weight),
+            )
+        # 保存元数据（轮次状态）
+        picked = json.dumps(data.get("picked_in_round", []), ensure_ascii=False)
+        c.execute(
+            "INSERT OR REPLACE INTO rollcall_meta (teacher_username, grade, class_name, last_time, picked_in_round, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            (teacher, grade, cls, data.get("last_time"), picked),
+        )
+        # 保存历史记录（全量替换）
+        c.execute(
+            "DELETE FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=?",
+            (teacher, grade, cls),
+        )
+        for entry in data.get("history", []):
+            c.execute(
+                "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name, result, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (teacher, grade, cls, entry.get("student", ""), entry.get("result", ""), entry.get("points", 0), entry.get("time", "")),
+            )
+        conn.commit()
+        data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
 # ── API: 年级列表 ──
 
 async def api_grades(request: Request):
     """从数据库获取有学生的年级列表"""
-    import sqlite3
     try:
-        conn = sqlite3.connect(os.path.join(BASE_DIR, "backend", "users.db"))
-        c = conn.cursor()
-        c.execute("SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade")
-        grades = [row[0] for row in c.fetchall()]
-        conn.close()
-        return grades
+        rows = execute_query(
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+        )
+        return [row[0] for row in rows]
     except Exception:
         return ["高一", "高二"]
 
@@ -356,31 +377,19 @@ async def api_reset(request: Request):
 def _save_to_student_chat(student_name, cls, content):
     """将课堂记录写入学生个人的 ChatHistory 目录"""
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(base_dir, "users.db")
     username = None
-    if os.path.exists(db_path):
-        import sqlite3
-        try:
-            conn = sqlite3.connect(db_path)
-            c = conn.cursor()
-            # 只用姓名查找（班级可能不一致）
-            c.execute("SELECT username FROM users WHERE name=?", (student_name,))
-            results = c.fetchall()
-            conn.close()
-            if results:
-                username = results[0][0]
-        except Exception:
-            pass
+    try:
+        rows = execute_query("SELECT username FROM users WHERE name=?", (student_name,))
+        if rows:
+            username = rows[0][0]
+    except Exception:
+        pass
     if not username:
         return None
     # 根据用户角色决定工作目录：学生(普通用户)在 stu/ 下，教师和管理员在根目录
     try:
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-        c.execute("SELECT role FROM users WHERE username=?", (username,))
-        role_row = c.fetchone()
-        conn.close()
-        if role_row and role_row[0] == 2:  # 普通用户（学生）
+        role_rows = execute_query("SELECT role FROM users WHERE username=?", (username,))
+        if role_rows and role_rows[0][0] == 2:  # 普通用户（学生）
             user_dir = os.path.join(base_dir, "stu", username)
         else:
             user_dir = os.path.join(base_dir, username)

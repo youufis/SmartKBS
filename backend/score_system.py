@@ -1,7 +1,7 @@
 """
 课堂积分激励系统 - 多教师版
 每个教师管理自己的积分，积分文件保存在教师自己的目录中
-学生数据全部从数据库 users.db 加载
+学生数据全部从数据库 smartkb.db 加载
 """
 import json, os
 import jwt as pyjwt
@@ -11,55 +11,31 @@ from backend.database import get_connection, execute_query
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _get_db_path():
-    return os.path.join(BASE_DIR, "backend", "users.db")
-
-
 # ── 教师积分文件读写（保存在教师自己目录中）──
 
-def _teacher_score_file(username):
-    """获取教师的积分文件路径（保存在用户目录的 html/score_system/ 下）"""
-    if username == "root":
-        return os.path.join(BASE_DIR, "root", "html", "score_system", "score.json")
-    return os.path.join(BASE_DIR, username, "html", "score_system", "score.json")
-
-
 def _load_teacher_scores(teacher):
-    """加载教师的积分数据，自动从旧位置迁移"""
-    path = _teacher_score_file(teacher)
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-
-    # 兼容旧位置1：root/html/score_system/scores_{teacher}.json
-    old_path1 = os.path.join(BASE_DIR, "root", "html", "score_system", f"scores_{teacher}.json")
-    # 兼容旧位置2：{username}/score.json（之前迁移到的根目录位置）
-    old_path2 = os.path.join(BASE_DIR, "root", "score.json") if teacher == "root" else os.path.join(BASE_DIR, teacher, "score.json")
-
-    for old_path in (old_path1, old_path2):
-        if os.path.exists(old_path):
-            try:
-                with open(old_path, "r", encoding="utf-8") as f:
-                    scores = json.load(f)
-                # 迁移到新位置
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(scores, f, ensure_ascii=False, indent=2)
-                return scores
-            except Exception:
-                pass
-
-    return {}
+    """从数据库加载教师的积分数据"""
+    rows = execute_query(
+        "SELECT grade, class_name, student_name, score FROM scores WHERE teacher_username=?",
+        (teacher,),
+    )
+    return {_teacher_score_key(teacher, row[0], row[1], row[2]): row[3] for row in rows}
 
 
-def _save_teacher_scores(scores, teacher):
-    path = _teacher_score_file(teacher)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(scores, f, ensure_ascii=False, indent=2)
+def _save_teacher_scores(scores_data, teacher):
+    """保存教师的积分数据到数据库（全量替换）"""
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM scores WHERE teacher_username=?", (teacher,))
+        for key, score in scores_data.items():
+            parts = key.split("|")
+            if len(parts) == 4:
+                _, grade, cls, name = parts
+                c.execute(
+                    "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                    (teacher, grade, cls, name, score),
+                )
+        conn.commit()
 
 
 def _teacher_score_key(teacher, grade, cls, name):
