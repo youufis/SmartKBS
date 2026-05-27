@@ -4,6 +4,7 @@ SmartKB 后端入口
 """
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # 确保项目根目录在 sys.path 中
@@ -19,12 +20,27 @@ from backend.question_db import init_question_db
 from backend.logger import logger
 from backend.middleware import register_middleware
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理（替代已弃用的 on_event）"""
+    # ── 启动 ──
+    os.environ.setdefault("MPLCONFIGDIR", "D:/SmartKBS/matplotlib")
+    init_db()
+    init_question_db()
+    logger.info("SmartKB 后端启动完成")
+    yield
+    # ── 关闭 ──
+    logger.info("SmartKB 后端关闭")
+
+
 # 创建 FastAPI 应用
 app = FastAPI(
     title="SmartKB - 教育智能体 API",
     description="高中信息技术与通用技术课程 AI 智能问答与教学管理平台",
     version="1.1.0",
     docs_url="/docs",
+    lifespan=lifespan,
 )
 
 # CORS 配置（开发环境允许前端 dev server 跨域）
@@ -98,23 +114,6 @@ if _frontend_dist.exists() and _frontend_dist.is_dir():
     logger.info(f"前端静态文件服务已挂载: {_frontend_dist}")
 else:
     logger.warning(f"前端构建目录不存在: {_frontend_dist}，请先执行 npm run build")
-
-
-@app.on_event("startup")
-async def startup():
-    """应用启动时的初始化"""
-    # 设置 Matplotlib 配置目录
-    os.environ.setdefault("MPLCONFIGDIR", "D:/SmartKBS/matplotlib")
-
-    # 初始化数据库
-    init_db()
-    init_question_db()
-    logger.info("SmartKB 后端启动完成")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    logger.info("SmartKB 后端关闭")
 
 
 # ── 启动入口（直接运行 python backend/main.py） ──
