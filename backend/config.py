@@ -16,7 +16,6 @@ STU_DIR = "stu"
 SUMMARY_DIR_NAME = "Summary"
 TASK_DIR_NAME = "Task"
 ICON_PATH = "icon/logo.png"
-FAVICON_PATH = "favicon.ico"
 
 # ── 服务器配置 ──
 SERVER_HOST = "0.0.0.0"
