@@ -31,9 +31,9 @@ function App() {
       <Route path="/exam-take/:examId" element={isLoggedIn && user?.role === 'student' ? <ExamTakePage /> : <Navigate to={isLoggedIn ? '/chat' : '/login'} />} />
       <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
         <Route path="chat" element={<ChatPage />} />
-        <Route path="html-files" element={user?.role === 'admin' || user?.role === 'teacher' ? <HtmlFilesPage /> : <Navigate to="/chat" />} />
+        <Route path="html-files" element={<HtmlFilesPage />} />
         <Route path="resource-mgmt" element={user?.role === 'admin' || user?.role === 'teacher' ? <ResourceMgmtPage /> : <Navigate to="/chat" />} />
-        <Route path="downloads" element={user?.role === 'admin' || user?.role === 'teacher' ? <DownloadsPage /> : <Navigate to="/chat" />} />
+        <Route path="downloads" element={<DownloadsPage />} />
         <Route path="user-mgmt" element={<UserMgmtPage />} />
         <Route path="tasks" element={<TaskPage />} />
         <Route path="system-config" element={user?.role === 'admin' ? <SystemConfigPage /> : <Navigate to="/chat" />} />
