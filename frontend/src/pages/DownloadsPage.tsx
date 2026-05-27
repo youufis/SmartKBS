@@ -73,7 +73,8 @@ const DownloadsPage: React.FC = () => {
     }
   }, [isStudent])
 
-  useEffect(() => { loadFiles() }, [loadFiles])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadFiles() }, [])
 
   // 上传单个文件到指定子目录
   const uploadSingleFile = async (file: File, subPath: string): Promise<string> => {
@@ -95,8 +96,8 @@ const DownloadsPage: React.FC = () => {
         return data.errors[0]
       }
       return data.success ? '' : '上传失败'
-    } catch (err: any) {
-      return err.message || '网络错误'
+    } catch (err: unknown) {
+      return err instanceof Error ? err.message : '网络错误'
     }
   }
 
@@ -146,7 +147,7 @@ const DownloadsPage: React.FC = () => {
       const file = fileList[i]
       // 获取相对于选定目录的路径
       // webkitRelativePath 格式: "subdir/filename"
-      const relPath = (file as any).webkitRelativePath || file.name
+      const relPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
       const dirParts = relPath.split('/')
       // 去掉文件名，只保留目录部分
       dirParts.pop()
@@ -238,7 +239,7 @@ const DownloadsPage: React.FC = () => {
       title: '操作',
       key: 'actions',
       width: 150,
-      render: (_: any, record: DownloadFile) =>
+      render: (_: unknown, record: DownloadFile) =>
         record.is_dir ? null : (
           <Space>
             <Tooltip title="下载">
@@ -282,7 +283,7 @@ const DownloadsPage: React.FC = () => {
                 </Typography.Text>
                 <input ref={fileInputRef} type="file" multiple onChange={handleUploadFiles} style={{ display: 'none' }} />
                 <input ref={dirInputRef} type="file" multiple
-                  {...({ webkitdirectory: '', directory: '' } as any)}
+                  {...({ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
                   onChange={handleUploadDir} style={{ display: 'none' }} />
                 <Dropdown.Button
                   type="primary"
