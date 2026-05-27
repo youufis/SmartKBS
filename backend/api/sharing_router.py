@@ -191,22 +191,23 @@ async def received_shares(request: Request):
     # 构建可见条件：
     #   scope='all'      → 所有人可见
     #   scope='staff'    → 管理员(role=0)和教师(role=1)可见
-    #   scope='teacher'  → 在 target_users 列表中的用户可见
+    #   scope='teacher'  → 在 target_users 列表中的用户可见（若同时有 grade/class，也匹配学生）
     #   scope='class'    → 匹配年级/班级的学生可见
     seen_conditions = ["s.share_scope='all'"]
     if role == 0:
         seen_conditions.append("s.share_scope='staff'")
     elif role == 1:
         seen_conditions.append("s.share_scope='staff'")
-    # scope='teacher' → 检查当前用户是否在 target_users 中
+    # scope='teacher' → 检查 target_users（含同时指定了 grade/class 的可见性）
     seen_conditions.append(
         f"(s.share_scope='teacher' AND (s.target_users=''"
         f" OR ',' || s.target_users || ',' LIKE '%,' || '{username}' || ',%'))"
     )
 
     if role == 2:
+        # 学生：匹配年级/班级（含 scope='teacher' 同时指定了年级/班级的情况）
         seen_conditions.append(
-            """(s.share_scope='class'
+            """((s.share_scope='class' OR (s.share_scope='teacher' AND s.target_grade != ''))
                 AND (s.target_grade='' OR s.target_grade=u.grade
                      OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
                 AND (s.target_class='' OR s.target_class=u.class
@@ -295,12 +296,30 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
     if share_scope == 'staff':
         return viewer_role in (0, 1)
 
-    # scope='teacher'：检查是否在 target_users 列表中
+    # scope='teacher'：检查是否在 target_users 列表中，或者匹配年级/班级（组合共享）
     if share_scope == 'teacher':
-        return target_users and (
+        # 检查是否在 target_users 中
+        if target_users and (
             viewer_username == target_users
             or f',{target_users},'.find(f',{viewer_username},') != -1
-        )
+        ):
+            return True
+        # 如果同时指定了年级/班级，也匹配学生
+        if viewer_role == 2 and (target_grade or target_class):
+            viewer_grade = str(viewer_rows[0][0] or "")
+            viewer_class = str(viewer_rows[0][1] or "")
+            grade_ok = not target_grade or (
+                viewer_grade == target_grade
+                or f',{target_grade},'.find(f',{viewer_grade},') != -1
+            )
+            if not grade_ok:
+                return False
+            class_ok = not target_class or (
+                viewer_class == target_class
+                or f',{target_class},'.find(f',{viewer_class},') != -1
+            )
+            return class_ok
+        return False
 
     # scope='class'：需要年级/班级匹配
     if viewer_role in (0, 1):
