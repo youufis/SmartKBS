@@ -11,14 +11,49 @@ from fastapi.responses import JSONResponse
 
 from backend.api.dependencies import get_current_user
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
+from backend.database import execute_query, execute_insert_update
 from backend.config import DEFAULT_LOGGED_IN_NAME, ROOT_DIR
 from backend.logger import logger
 
 router = APIRouter()
 
 
+def _db_tree_to_response(username: str) -> list:
+    """从 conversations 表构建目录树"""
+    rows = execute_query(
+        """SELECT date, filename, title, message_count, file_size
+           FROM conversations WHERE username=? ORDER BY date DESC, filename""",
+        (username,),
+    )
+    if not rows:
+        return []
+
+    # 按日期分组
+    date_map: dict[str, list] = {}
+    for row in rows:
+        date_str = row[0]
+        if date_str not in date_map:
+            date_map[date_str] = []
+        date_map[date_str].append({
+            "title": row[1].replace("\\", "/").split("/")[-1],
+            "key": row[1].replace("\\", "/"),
+            "isLeaf": True,
+            "size": row[4] or 0,
+        })
+
+    tree = []
+    for date_str in sorted(date_map.keys(), reverse=True):
+        tree.append({
+            "title": date_str,
+            "key": date_str,
+            "isLeaf": False,
+            "children": date_map[date_str],
+        })
+    return tree
+
+
 def _scan_tree(dirpath: str, base_rel: str = "") -> list:
-    """递归扫描目录，返回目录树结构"""
+    """递归扫描目录（DB 无数据时的回退方案）"""
     entries = []
     try:
         for name in sorted(os.listdir(dirpath), key=str.lower):
@@ -46,14 +81,19 @@ def _scan_tree(dirpath: str, base_rel: str = "") -> list:
 
 @router.get("/tree")
 async def get_history_tree(request: Request):
-    """获取当前用户的历史记录目录树"""
+    """获取当前用户的历史记录目录树（优先从 DB 索引）"""
     user = get_current_user(request)
     username = user["username"]
-    chat_dir = get_account_chat_history_dir(username)
 
+    # 优先从 DB 查询
+    tree = _db_tree_to_response(username)
+    if tree:
+        return {"tree": tree}
+
+    # 回退：扫描文件系统
+    chat_dir = get_account_chat_history_dir(username)
     if not os.path.exists(chat_dir):
         return {"tree": []}
-
     tree = _scan_tree(chat_dir)
     return {"tree": tree, "root": chat_dir}
 
@@ -127,11 +167,13 @@ async def delete_history_file(path: str = Query(...), request: Request = None):
     try:
         if os.path.isfile(target_path):
             os.remove(target_path)
-            # 验证删除
             still_exists = os.path.exists(target_path)
             logger.info(f"os.remove 结果: file='{target_path}' still_exists={still_exists}")
             if still_exists:
                 raise Exception(f"文件删除后仍然存在: {target_path}")
+            # 删除 DB 索引
+            rel = os.path.relpath(target_path, chat_dir).replace("\\", "/")
+            execute_insert_update("DELETE FROM conversations WHERE username=? AND filename=?", (username, rel))
             msg = f"文件 {os.path.basename(target_path)} 已删除"
         elif os.path.isdir(target_path):
             shutil.rmtree(target_path)
@@ -139,6 +181,9 @@ async def delete_history_file(path: str = Query(...), request: Request = None):
             logger.info(f"shutil.rmtree 结果: dir='{target_path}' still_exists={still_exists}")
             if still_exists:
                 raise Exception(f"目录删除后仍然存在: {target_path}")
+            # 删除 DB 索引（匹配该日期目录下所有文件）
+            rel_prefix = os.path.relpath(target_path, chat_dir).replace("\\", "/")
+            execute_insert_update("DELETE FROM conversations WHERE username=? AND filename LIKE ?", (username, f"{rel_prefix}%"))
             msg = f"目录 {os.path.basename(target_path)} 已删除"
         else:
             raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
@@ -154,7 +199,7 @@ async def delete_history_file(path: str = Query(...), request: Request = None):
 
 @router.post("/save")
 async def save_conversation(request: Request):
-    """保存对话记录到文件"""
+    """保存对话记录到文件 + 写入索引"""
     body = await request.json()
     content = body.get("content", "")
     session_id = body.get("session_id")
@@ -165,7 +210,6 @@ async def save_conversation(request: Request):
     chat_dir = get_account_chat_history_dir(username)
     os.makedirs(chat_dir, exist_ok=True)
 
-    # 按日期目录保存
     from datetime import datetime
     date_str = datetime.now().strftime("%Y-%m-%d")
     date_dir = os.path.join(chat_dir, date_str)
@@ -183,6 +227,17 @@ async def save_conversation(request: Request):
             if not file_exists:
                 f.write(f"创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n")
             f.write(f"{content}\n\n---\n\n")
+
+        # 更新 DB 索引
+        rel_path = f"{date_str}/{filename}"
+        fsize = os.path.getsize(file_path)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        execute_insert_update(
+            """INSERT OR REPLACE INTO conversations
+               (username, session_id, date, filename, file_size, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (username, session_id or "", date_str, rel_path, fsize, now),
+        )
 
         return {"message": "对话已保存", "path": file_path}
     except Exception as e:
