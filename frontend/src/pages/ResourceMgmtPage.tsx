@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs } from 'antd'
-import { UploadOutlined, DeleteOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, ShareAltOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
+import * as sharingApi from '../api/sharing'
 import apiClient from '../api/client'
 import type { TreeNode } from '../types'
 import { useAuthStore } from '../stores/authStore'
+import ShareDialog from '../components/ShareDialog'
 
 const ResourceMgmtPage: React.FC = () => {
   const user = useAuthStore((s: { user: { role: string } | null }) => s.user)
@@ -91,6 +93,38 @@ const ResourceMgmtPage: React.FC = () => {
   const [renameOld, setRenameOld] = useState('')
   const [renameNew, setRenameNew] = useState('')
 
+  // ── 共享 ──
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [shareFile, setShareFile] = useState<{ path: string; name: string }>({ path: '', name: '' })
+  const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
+  const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
+
+  const loadShares = async () => {
+    try {
+      const res = await sharingApi.getMyShares()
+      setMyShares(res.shares)
+    } catch { /* ignore */ }
+  }
+
+  const isFileShared = (nodeKey: string) => {
+    return myShares.some(s => s.file_path === nodeKey)
+  }
+
+  const openShare = (nodeKey: string, nodeTitle: string) => {
+    setShareFile({ path: nodeKey, name: nodeTitle })
+    const existing = myShares.find(s => s.file_path === nodeKey) || null
+    setShareExisting(existing)
+    setShareDialogOpen(true)
+  }
+
+  // 在 loadTree 之后也加载共享列表
+  const loadTreeAndShares = async () => {
+    await loadTree()
+    await loadShares()
+  }
+
+  useEffect(() => { loadTreeAndShares() }, [])
+
   const handleRename = async () => {
     if (!renameNew.trim()) { message.warning('名称不能为空'); return }
     try {
@@ -154,6 +188,14 @@ const ResourceMgmtPage: React.FC = () => {
                         {node.isLeaf ? <FileOutlined /> : <FolderOutlined />}
                         <span style={{ fontSize: 13 }}>{node.title}</span>
                         <span onClick={(e) => e.stopPropagation()}>
+                          {node.isLeaf && (
+                            <Tooltip title={isFileShared(node.key) ? '已共享 - 点击修改' : '点击共享'}>
+                              <Button type="link" size="small"
+                                icon={<ShareAltOutlined />}
+                                style={{ color: isFileShared(node.key) ? '#1677ff' : '#999' }}
+                                onClick={() => openShare(node.key, node.title)} />
+                            </Tooltip>
+                          )}
                           <Tooltip title="重命名">
                             <Button type="link" size="small" icon={<EditOutlined />}
                               onClick={() => openRename(node.key, node.title)} />
@@ -183,6 +225,17 @@ const ResourceMgmtPage: React.FC = () => {
             onPressEnter={handleRename} placeholder="输入新名称" />
         </Space>
       </Modal>
+
+      {/* 共享弹窗 */}
+      <ShareDialog
+        open={shareDialogOpen}
+        onClose={() => setShareDialogOpen(false)}
+        filePath={shareFile.path}
+        fileName={shareFile.name}
+        resourceType="html"
+        existingShare={shareExisting}
+        onSuccess={() => { loadShares(); loadTree(); }}
+      />
 
       <style>{`
         .guide-markdown-content h1 { font-size: 1.6em; margin-top: 1.2em; margin-bottom: 0.5em; padding-bottom: 0.3em; border-bottom: 1px solid #eee; }

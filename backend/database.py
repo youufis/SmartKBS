@@ -54,6 +54,23 @@ def init_db():
                 )"""
             )
 
+            # ── 共享资源表 ──
+            c.execute(
+                """CREATE TABLE IF NOT EXISTS shared_resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    owner_username TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    resource_type TEXT NOT NULL CHECK(resource_type IN ('html', 'download')),
+                    share_scope TEXT NOT NULL DEFAULT 'all' CHECK(share_scope IN ('all', 'class')),
+                    target_grade TEXT DEFAULT '',
+                    target_class TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(owner_username, file_path, resource_type)
+                )"""
+            )
+
             conn.commit()
             logger.info("数据库初始化完成")
     except Exception as e:
