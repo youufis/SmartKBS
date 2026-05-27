@@ -327,80 +327,8 @@ async def api_student_delete(request: Request):
     return {"success": True}
 
 
-# ── 挂载路由 ──
-
-def mount_score_api(app):
-    app.get("/score-api/classes")(api_classes)
-    app.get("/score-api/my-grades")(api_my_grades)
-    app.get("/score-api/teacher-info")(api_teacher_info)
-    app.get("/score-api/students")(api_students)
-    app.get("/score-api/ranking")(api_ranking)
-    app.get("/score-api/stats")(api_stats)
-    app.post("/score-api/score")(api_score_post)
-    app.post("/score-api/reset")(api_reset_post)
-
-    async def ping(request: Request):
-        routes = sorted(set(r.path for r in app.routes if hasattr(r, 'path') and 'score' in r.path))
-        return {"status": "ok", "score_routes": routes}
-    app.get("/score-api/ping")(ping)
-    app.post("/score-api/student")(api_student_save)
-    app.delete("/score-api/student")(api_student_delete)
-
-    async def api_my_score(request: Request):
-        name = request.query_params.get("name", "").strip()
-        if not name:
-            return {"error": "缺少 name 参数"}
-
-        # 收集所有教师/管理员
-        teachers_list = ["root"]
-        try:
-            rows = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
-            teachers_list = ["root"] + [row[0] for row in rows if row[0] != "root"]
-        except Exception:
-            pass
-
-        total_score = 0
-        found_grade = ""
-        found_class = ""
-        found_teachers = []
-        teacher_scores = {}  # teacher -> score
-
-        for t in teachers_list:
-            scores = _load_teacher_scores(t)
-            for key, val in scores.items():
-                parts = key.split("|")
-                if len(parts) == 4 and parts[-1] == name:
-                    total_score += val
-                    if not found_grade:
-                        found_grade = parts[1]
-                        found_class = parts[2]
-                    if t not in found_teachers:
-                        found_teachers.append(t)
-                    teacher_scores[t] = teacher_scores.get(t, 0) + val
-
-        if total_score > 0:
-            return {
-                "name": name,
-                "class": found_class,
-                "grade": found_grade,
-                "score": total_score,
-                "teacher": "、".join(found_teachers),
-                "teacher_scores": teacher_scores,
-            }
-        return {"name": name, "score": None, "message": "未找到该学生的积分记录"}
-
-    app.get("/score-api/my-score")(api_my_score)
-
-    async def api_teachers(request: Request):
-        teachers = ["root"]
-        try:
-            rows = execute_query("SELECT username FROM users WHERE role IN (0, 1) ORDER BY username")
-            teachers = ["root"] + [row[0] for row in rows if row[0] != "root"]
-        except Exception:
-            pass
-        return sorted(set(teachers))
-
-    app.get("/score-api/teachers")(api_teachers)
+# ── 注意：API 路由已迁移至 backend/api/score_router.py ──
+# 本文件保留所有工具函数和 API 处理函数，供新路由模块和 smart_rollcall_api.py 导入
 
 
 def read_score_html():

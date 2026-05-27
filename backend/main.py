@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SmartKB - 教育智能体 API",
     description="高中信息技术与通用技术课程 AI 智能问答与教学管理平台",
-    version="1.1.0",
+    version="1.2.0",
     docs_url="/docs",
     lifespan=lifespan,
 )
@@ -55,17 +55,19 @@ app.add_middleware(
 # 注册认证中间件
 register_middleware(app)
 
-# ── 挂载现有 API 模块 ──
-from backend.score_system import mount_score_api
-from backend.smart_rollcall_api import mount_rollcall_api
-from backend.downloads_api import mount_downloads_api
+# ── 挂载 API 路由（按功能模块分组）──
 
-mount_score_api(app)
-mount_rollcall_api(app)
-mount_downloads_api(app)
-logger.info("现有 API 模块已挂载: score / rollcall / downloads")
+# 重构后的遗留模块路由
+from backend.api.score_router import router as score_router
+from backend.api.rollcall_router import router as rollcall_router
+from backend.api.downloads_router import router as downloads_router
 
-# ── 挂载新 API 路由 ──
+app.include_router(score_router, prefix="/api/scores", tags=["课堂积分"])
+app.include_router(rollcall_router, prefix="/api/rollcall", tags=["智能点名"])
+app.include_router(downloads_router, prefix="/api/downloads", tags=["文件下载"])
+logger.info("遗留模块已重构挂载: score / rollcall / downloads")
+
+# ── 新架构 API 路由 ──
 from backend.api.auth_router import router as auth_router
 from backend.api.users_router import router as users_router
 from backend.api.chat_router import router as chat_router
