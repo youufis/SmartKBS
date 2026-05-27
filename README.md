@@ -2,7 +2,7 @@
 
 > 面向高中信息技术与通用技术课程的 AI 智能问答与教学管理平台
 
-![版本](https://img.shields.io/badge/版本-1.1.0-blue)
+![版本](https://img.shields.io/badge/版本-1.3.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -63,7 +63,12 @@ AI 智能试题库系统，支持一键生成（按科目/题型/知识点/难�
 
 ### 🏆 课堂积分
 
-课堂积分激励系统，支持教师独立管理积分、排行榜、学生管理，多教师数据隔离。
+课堂积分激励系统，支持教师独立管理积分、排行榜、学生管理，多教师数据隔离，数据持久化至数据库。
+
+### 🎯 点名管理
+
+智能点名系统，支持公平加权随机抽取、权重自然衰减、轮次管理、历史记录追踪。
+管理员可查看所有班级点名数据，教师仅查看自己班级。
 
 ---
 
@@ -120,12 +125,16 @@ SmartKBS/
 │   ├── database.py       # 数据库
 │   ├── auth.py           # 认证
 │   ├── middleware.py      # 中间件
+│   ├── database.py        # 数据库连接管理
 │   ├── api/              # API 路由
 │   │   ├── auth_router.py
 │   │   ├── chat_router.py
 │   │   ├── question_router.py
 │   │   ├── exam_router.py
 │   │   ├── users_router.py
+│   │   ├── score_router.py      # 课堂积分
+│   │   ├── rollcall_router.py   # 智能点名
+│   │   ├── downloads_router.py  # 文件下载
 │   │   └── ...
 │   └── ...
 ├── frontend/             # React + Vite 前端
@@ -155,12 +164,11 @@ SmartKBS/
 
 | 数据类型 | 存储位置 |
 | --------- | --------- |
-| 用户账号 | `backend/users.db`（SQLite） |
+| 用户账号/积分/点名/任务 | `backend/smartkb.db`（SQLite 统一数据库） |
+| 试题库与考试 | `backend/questions.db`（SQLite） |
 | 对话历史 | `<用户目录>/ChatHistory/` |
 | 教学资源 | `<用户目录>/html/` |
-| 试题库与考试 | `backend/questions.db`（SQLite） |
 | 系统配置 | `backend/system_config.json` |
-| 课堂积分 | `<用户目录>/html/score_system/score.json` |
 
 ---
 
@@ -179,6 +187,7 @@ SmartKBS/
 | 用户管理 | 仅改密 | ✅ | ✅ |
 | 系统配置 | - | - | ✅ |
 | 课堂积分 | ✅ 查看 | ✅ 管理 | ✅ 管理 |
+| 点名管理 | - | ✅ 自己班级 | ✅ 所有班级 |
 
 ---
 
