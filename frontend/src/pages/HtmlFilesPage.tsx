@@ -59,7 +59,7 @@ const HtmlFilesPage: React.FC = () => {
   const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false) => (
     <Card key={urlPath} size="small" hoverable style={{ fontSize: 14 }}
       actions={showShareBtn ? [
-        <Tooltip key="share" title={isFileShared(urlPath) ? '已共享 - 点击修改' : '点击共享'}>
+        <Tooltip key="share" title={isFileShared(urlPath) ? '已共享 - 点击取消共享' : '点击共享'}>
           <ShareAltOutlined
             style={{ color: isFileShared(urlPath) ? '#1677ff' : '#999' }}
             onClick={() => openShare(urlPath, name)}
