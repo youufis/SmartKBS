@@ -16,3 +16,7 @@ frontend/dist/
 # ── 运行时 ──
 LogFiles/
 temp_uploads/
+
+# ── 数据库 ──
+backend/smartkb.db
+*.db

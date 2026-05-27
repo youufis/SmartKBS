@@ -1,6 +1,6 @@
 """
 试题库数据库连接管理
-独立于 users.db，使用单独的 questions.db 文件
+独立于 smartkb.db，使用单独的 questions.db 文件
 """
 import sqlite3
 from contextlib import contextmanager

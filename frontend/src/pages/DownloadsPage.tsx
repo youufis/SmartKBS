@@ -60,7 +60,7 @@ const DownloadsPage: React.FC = () => {
     setLoading(true)
     try {
       if (!isStudent) {
-        const { data } = await apiClient.get('/downloads-api/list')
+        const { data } = await apiClient.get('/api/downloads/list')
         setFiles(data.files || [])
         setUsage(data.usage || 0)
         setQuota(data.quota || 0)
@@ -84,7 +84,7 @@ const DownloadsPage: React.FC = () => {
     formData.append('path0', subPath)
     try {
       const token = localStorage.getItem('smartkb_token')
-      const resp = await fetch('/downloads-api/upload', {
+      const resp = await fetch('/api/downloads/upload', {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
@@ -181,7 +181,7 @@ const DownloadsPage: React.FC = () => {
       content: `确定删除「${filename}」？`,
       onOk: async () => {
         try {
-          const { data } = await apiClient.post('/downloads-api/delete', { filename })
+          const { data } = await apiClient.post('/api/downloads/delete', { filename })
           if (data.success) {
             message.success('已删除')
             loadFiles()
