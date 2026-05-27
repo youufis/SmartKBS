@@ -57,25 +57,26 @@ const HtmlFilesPage: React.FC = () => {
   }
 
   const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false) => (
-    <Card key={urlPath} size="small" hoverable style={{ fontSize: 14 }}
-      actions={showShareBtn ? [
-        <Tooltip key="share" title={isFileShared(urlPath) ? '已共享 - 点击取消共享' : '点击共享'}>
-          <ShareAltOutlined
-            style={{ color: isFileShared(urlPath) ? '#1677ff' : '#999' }}
-            onClick={() => openShare(urlPath, name)}
-          />
-        </Tooltip>,
-      ] : undefined}
-    >
+    <Card key={urlPath} size="small" hoverable style={{ fontSize: 14 }}>
       <Card.Meta
         avatar={<FileOutlined style={{ fontSize: 16, color: isShared ? '#1677ff' : undefined }} />}
         title={
-          <a href={`/api/files/${urlPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`}
-            target="_blank" rel="noreferrer"
-            title={name}
-            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', fontSize: 14 }}>
-            {name}
-          </a>
+          <Space size={4} style={{ width: '100%' }}>
+            <a href={`/api/files/${urlPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`}
+              target="_blank" rel="noreferrer"
+              title={name}
+              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontSize: 14 }}>
+              {name}
+            </a>
+            {showShareBtn && (
+              <Tooltip title={isFileShared(urlPath) ? '已共享 - 点击取消共享' : '点击共享'}>
+                <ShareAltOutlined
+                  style={{ color: isFileShared(urlPath) ? '#1677ff' : '#999', cursor: 'pointer', fontSize: 14 }}
+                  onClick={(e) => { e.preventDefault(); openShare(urlPath, name); }}
+                />
+              </Tooltip>
+            )}
+          </Space>
         }
         description={isShared && owner ? <Tag color="blue" style={{ fontSize: 11 }}>来自 {owner}</Tag> : undefined}
       />
