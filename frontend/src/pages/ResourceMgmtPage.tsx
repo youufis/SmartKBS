@@ -189,7 +189,7 @@ const ResourceMgmtPage: React.FC = () => {
                         <span style={{ fontSize: 13 }}>{node.title}</span>
                         <span onClick={(e) => e.stopPropagation()}>
                           {node.isLeaf && (
-                            <Tooltip title={isFileShared(node.key) ? '已共享 - 点击修改' : '点击共享'}>
+                            <Tooltip title={isFileShared(node.key) ? '已共享 - 点击取消共享' : '点击共享'}>
                               <Button type="link" size="small"
                                 icon={<ShareAltOutlined />}
                                 style={{ color: isFileShared(node.key) ? '#1677ff' : '#999' }}

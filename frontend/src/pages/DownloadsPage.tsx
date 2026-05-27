@@ -249,7 +249,7 @@ const DownloadsPage: React.FC = () => {
                 href={buildDownloadUrl(record)}
                 target="_blank" />
             </Tooltip>
-            <Tooltip title={isFileShared(record.path) ? '已共享 - 点击修改' : '点击共享'}>
+            <Tooltip title={isFileShared(record.path) ? '已共享 - 点击取消共享' : '点击共享'}>
               <Button type="link" size="small"
                 icon={<ShareAltOutlined />}
                 style={{ color: isFileShared(record.path) ? '#1677ff' : '#999' }}
