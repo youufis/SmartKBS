@@ -327,10 +327,10 @@ const DownloadsPage: React.FC = () => {
         )}
 
         {/* 共享文件列表 */}
-        {receivedShares.length > 0 && (
-          <Card size="small" title={<><ShareAltOutlined style={{ color: '#1677ff' }} /> 共享文件 ({receivedShares.length})</>}>
+        {(() => { const downloadShares = receivedShares.filter(s => s.resource_type === 'download'); return downloadShares.length > 0 ? (
+          <Card size="small" title={<><ShareAltOutlined style={{ color: '#1677ff' }} /> 共享文件 ({downloadShares.length})</>}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-              {receivedShares.filter(s => s.resource_type === 'download').map((s) => {
+              {downloadShares.map((s) => {
                 const fullPath = s.url_path || s.file_path
                 const fileUrl = `/api/files/${fullPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`
                 return (
@@ -350,7 +350,7 @@ const DownloadsPage: React.FC = () => {
               })}
             </div>
           </Card>
-        )}
+        ) : null; })()}
         {!isStudent && receivedShares.filter(s => s.resource_type === 'download').length === 0 && (
           <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>暂无共享文件</Typography.Text>
         )}
