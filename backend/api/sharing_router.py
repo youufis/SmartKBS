@@ -196,21 +196,28 @@ async def received_shares(request: Request):
     seen_conditions = ["s.share_scope='all'"]
     if role in (0, 1):
         seen_conditions.append("s.share_scope='staff'")
-    # scope='teacher' → target_users 匹配（管理员/教师/被选中的用户可见）
+    # scope='teacher' → target_users 精确匹配（仅被选中的用户可见，不含空匹配）
     seen_conditions.append(
-        f"(s.share_scope='teacher' AND (s.target_users=''"
-        f" OR ',' || s.target_users || ',' LIKE '%,' || '{username}' || ',%'))"
+        f"(s.share_scope='teacher' AND s.target_users!=''"
+        f" AND ',' || s.target_users || ',' LIKE '%,' || '{username}' || ',%')"
     )
 
     if role == 2:
-        # 学生：匹配 scope='class' 或 scope='teacher' 且指定了年级的共享
-        # 注意：target_grade 必须非空，防止教师无年级时误匹配所有学生
+        # 学生：匹配 scope='class'（target_grade 必填，target_class 可选）
+        # 或 scope='teacher' 含班级的组合共享（target_grade 和 target_class 都必须非空）
         seen_conditions.append(
-            """((s.share_scope='class' OR (s.share_scope='teacher' AND s.target_grade != ''))
+            """(s.share_scope='class'
                 AND s.target_grade != ''
                 AND (s.target_grade=u.grade
                      OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
                 AND (s.target_class='' OR s.target_class=u.class
+                     OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))"""
+        )
+        seen_conditions.append(
+            """(s.share_scope='teacher' AND s.target_grade != '' AND s.target_class != ''
+                AND (s.target_grade=u.grade
+                     OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
+                AND (s.target_class=u.class
                      OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))"""
         )
 
@@ -299,8 +306,8 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
             or f',{target_users},'.find(f',{viewer_username},') != -1
         ):
             return True
-        # 如果同时指定了年级/班级，也匹配学生（需要 grade 非空）
-        if viewer_role == 2 and target_grade:
+        # 如果同时指定了年级/班级，也匹配学生（需要 grade 和 class 都非空）
+        if viewer_role == 2 and target_grade and target_class:
             viewer_grade = str(viewer_rows[0][0] or "")
             viewer_class = str(viewer_rows[0][1] or "")
             grade_ok = (
