@@ -186,13 +186,8 @@ const AppLayout: React.FC = () => {
           />
         </Sider>
 
-        <Content style={{
-          padding: 24, background: '#f5f5f5',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        }}>
-          <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-            <Outlet />
-          </div>
+        <Content style={{ padding: 24, background: '#f5f5f5', overflow: 'auto' }}>
+          <Outlet />
           <div style={{ textAlign: 'center', padding: '16px 0 0', color: '#bbb', fontSize: 12 }}>
             Copyright © 2025 By UNET All rights reserved.
           </div>
