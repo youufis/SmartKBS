@@ -19,16 +19,13 @@ class ShareRequest(BaseModel):
     file_path: str
     file_name: str
     resource_type: str  # 'html' or 'download'
-    share_scope: str = "all"  # 'all' or 'class'
-    target_grade: str = ""
-    target_class: str = ""
 
 
 # ── 创建共享 ──
 
 @router.post("/share")
 async def share_resource(request: Request, body: ShareRequest):
-    """共享一个资源或文件"""
+    """共享一个资源或文件（管理员：全员共享；教师：自动共享给自己班级学生）"""
     user = get_current_user(request)
     username = user["username"]
     role = user["role"]
@@ -40,10 +37,26 @@ async def share_resource(request: Request, body: ShareRequest):
     if body.resource_type not in ("html", "download"):
         raise HTTPException(status_code=400, detail="resource_type 必须是 html 或 download")
 
-    if body.share_scope not in ("all", "class"):
-        raise HTTPException(status_code=400, detail="share_scope 必须是 all 或 class")
-
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if role == 0:
+        # 管理员：共享给所有人
+        share_scope = "all"
+        target_grade = ""
+        target_class = ""
+    else:
+        # 教师：自动从用户信息获取班级和年级
+        share_scope = "class"
+        rows = execute_query(
+            "SELECT grade, class FROM users WHERE username=?",
+            (username,),
+        )
+        if rows:
+            target_grade = rows[0][0] or ""
+            target_class = rows[0][1] or ""
+        else:
+            target_grade = ""
+            target_class = ""
 
     try:
         execute_insert_update(
@@ -51,9 +64,9 @@ async def share_resource(request: Request, body: ShareRequest):
                (owner_username, file_path, file_name, resource_type, share_scope, target_grade, target_class, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (username, body.file_path, body.file_name, body.resource_type,
-             body.share_scope, body.target_grade, body.target_class, now, now),
+             share_scope, target_grade, target_class, now, now),
         )
-        logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
+        logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={share_scope})")
         return {"message": "共享成功", "file_path": body.file_path}
     except Exception as e:
         logger.error(f"共享创建失败: {e}")
@@ -157,14 +170,18 @@ async def received_shares(request: Request):
         )
     else:
         # 学生：看到管理员共享(scope=all) + 匹配自己年级/班级的教师共享
+        # 教师可能有多个年级/班级（用 | 分隔），需要逐一匹配
         rows = execute_query(
             """SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
                       s.share_scope, s.target_grade, s.target_class, s.created_at
                FROM shared_resources s
                LEFT JOIN users u ON u.username=?
-               WHERE (s.share_scope='all' AND s.owner_username='root')
-                  OR (s.share_scope='class' AND s.target_grade=u.grade
-                      AND (s.target_class='' OR s.target_class=u.class))
+               WHERE s.share_scope='all'
+                  OR (s.share_scope='class'
+                      AND (s.target_grade='' OR s.target_grade=u.grade
+                           OR ',' || s.target_grade || ',' LIKE '%,' || u.grade || ',%')
+                      AND (s.target_class='' OR s.target_class=u.class
+                           OR ',' || s.target_class || ',' LIKE '%,' || u.class || ',%'))
                ORDER BY s.created_at DESC""",
             (username,),
         )
@@ -210,7 +227,7 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
     if share_scope == 'all':
         return True
 
-    # scope='class'：需要年级/班级匹配
+    # scope='class'：需要年级/班级匹配（支持 | 分隔的多值匹配）
     viewer_rows = execute_query(
         "SELECT grade, class FROM users WHERE username=?",
         (viewer_username,),
@@ -219,8 +236,18 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
         return False
 
     viewer_grade, viewer_class = viewer_rows[0]
-    if viewer_grade == target_grade:
-        if not target_class or viewer_class == target_class:
-            return True
 
-    return False
+    # 年级匹配（支持 | 分隔）
+    grade_ok = not target_grade or (
+        viewer_grade == target_grade
+        or f'|{target_grade}|'.find(f'|{viewer_grade}|') != -1
+    )
+    if not grade_ok:
+        return False
+
+    # 班级匹配（支持 | 分隔）
+    class_ok = not target_class or (
+        viewer_class == target_class
+        or f'|{target_class}|'.find(f'|{viewer_class}|') != -1
+    )
+    return class_ok
