@@ -21,6 +21,16 @@ class ShareRequest(BaseModel):
     resource_type: str  # 'html' or 'download'
 
 
+def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
+    """构建完整的 /api/files/ 访问路径（相对于 BASE_DIR）"""
+    dir_name = "html" if resource_type == "html" else "downloads"
+    # 如果 file_path 已经包含完整前缀（如 root/html/xxx.html），直接返回
+    if file_path.startswith(f"{owner}/{dir_name}/") or file_path.startswith(f"stu/{owner}/{dir_name}/"):
+        return file_path
+    # 否则拼接完整路径
+    return f"{owner}/{dir_name}/{file_path}"
+
+
 # ── 创建共享 ──
 
 @router.post("/share")
@@ -137,6 +147,7 @@ async def my_shares(request: Request):
                 "target_grade": r[5] or "",
                 "target_class": r[6] or "",
                 "created_at": r[7],
+                "url_path": _build_url_path(username, r[3], r[1]),
             }
             for r in rows
         ]
@@ -198,6 +209,7 @@ async def received_shares(request: Request):
                 "target_grade": r[6] or "",
                 "target_class": r[7] or "",
                 "created_at": r[8],
+                "url_path": _build_url_path(r[1], r[4], r[2]),
             }
             for r in rows
         ]

@@ -331,7 +331,8 @@ const DownloadsPage: React.FC = () => {
           <Card size="small" title={<><ShareAltOutlined style={{ color: '#1677ff' }} /> 共享文件 ({receivedShares.length})</>}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
               {receivedShares.filter(s => s.resource_type === 'download').map((s) => {
-                const fileUrl = `/api/files/${s.file_path}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+                const fullPath = s.url_path || s.file_path
+                const fileUrl = `/api/files/${fullPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`
                 return (
                   <Card key={s.id} size="small" hoverable>
                     <Card.Meta

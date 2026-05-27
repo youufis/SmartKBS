@@ -11,6 +11,7 @@ export interface ShareItem {
   target_grade: string;
   target_class: string;
   created_at: string;
+  url_path?: string;
 }
 
 export interface ShareRequest {
