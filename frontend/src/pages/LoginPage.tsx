@@ -33,7 +33,7 @@ const LoginPage: React.FC = () => {
     try {
       await login(values.username, values.password)
       message.success('登录成功')
-      navigate('/chat')
+      navigate('/dashboard')
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err.message || '登录失败'
       message.error(detail)

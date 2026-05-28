@@ -9,6 +9,7 @@ import {
   PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -1084,7 +1085,15 @@ const ExamPage: React.FC = () => {
         open={resultModal}
         onCancel={() => setResultModal(false)}
         width={900}
-        footer={[<Button key="close" onClick={() => setResultModal(false)}>关闭</Button>]}>
+        footer={[
+          <Button key="export" type="primary" icon={<DownloadOutlined />}
+            disabled={!resultExam?.id}
+            onClick={() => {
+              const token = localStorage.getItem('smartkb_token')
+              window.open(`/api/export/exam/${resultExam?.id}?token=${token}`, '_blank')
+            }}>导出报告</Button>,
+          <Button key="close" onClick={() => setResultModal(false)}>关闭</Button>,
+        ]}>
         <Spin spinning={resultLoading}>
           {resultData && (
             <>

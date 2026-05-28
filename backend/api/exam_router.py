@@ -455,6 +455,22 @@ async def publish_exam(exam_id: int, request: Request):
     )
 
     logger.info(f"用户 {username} 发布考试: {exam['title']} (id={exam_id})")
+
+    # ── 发送通知给所有学生 ──
+    try:
+        from backend.api.notification_router import _notify_users
+        from backend.database import execute_query as db_query
+        all_students = db_query("SELECT username FROM users WHERE role = 2")
+        student_usernames = [r[0] for r in all_students]
+        _notify_users(
+            student_usernames, "exam",
+            f"新考试「{exam['title']}」已发布",
+            f"时长 {exam['duration']} 分钟，满分 {exam['total_score']} 分",
+            "/exam",
+        )
+    except Exception as notify_err:
+        logger.warning(f"发送考试通知失败: {notify_err}")
+
     return {"message": "考试已发布"}
 
 
@@ -959,6 +975,19 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         raise HTTPException(status_code=400, detail="该考试已提交，请勿重复提交")
 
     logger.info(f"学生 {username} 提交考试 {exam_id}，得分 {earned_score}/{total_score}")
+
+    # ── 发送考试结果通知 ──
+    try:
+        from backend.api.notification_router import _create_notification
+        passed_str = "通过" if earned_score >= exam["pass_score"] else "未通过"
+        _create_notification(
+            username, "exam",
+            f"考试「{exam['title']}」成绩已出",
+            f"得分 {earned_score}/{total_score}（{passed_str}）",
+            "/exam",
+        )
+    except Exception as notify_err:
+        logger.warning(f"发送考试结果通知失败: {notify_err}")
 
     result = {
         "message": "提交成功",
