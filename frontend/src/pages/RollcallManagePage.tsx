@@ -6,6 +6,7 @@ import {
 import {
   ReloadOutlined, DeleteOutlined, HistoryOutlined,
   TeamOutlined, BarChartOutlined, EyeOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 
@@ -152,9 +153,17 @@ const RollcallManagePage: React.FC = () => {
             <HistoryOutlined style={{ fontSize: 24, color: '#1677ff' }} />
             <Title level={4} style={{ margin: 0 }}>点名数据管理</Title>
           </Space>
-          <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={loading}>
-            刷新
-          </Button>
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={loading}>
+              刷新
+            </Button>
+            <Button icon={<DownloadOutlined />} onClick={() => {
+              const token = localStorage.getItem('smartkb_token')
+              window.open(`/api/export/rollcall?token=${token}`, '_blank')
+            }}>
+              导出记录
+            </Button>
+          </Space>
         </div>
 
         {sessions.length === 0 && !loading ? (

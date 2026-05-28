@@ -8,6 +8,7 @@ import {
   PlusOutlined, MinusOutlined, TrophyOutlined,
   ReloadOutlined, BarChartOutlined, TeamOutlined,
   UserAddOutlined, DeleteOutlined, EditOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -401,6 +402,13 @@ const ScorePage: React.FC = () => {
               />
               <Tooltip title="刷新">
                 <Button icon={<ReloadOutlined />} onClick={() => { loadStudents(); loadStats() }} />
+              </Tooltip>
+              <Tooltip title="导出 Excel">
+                <Button icon={<DownloadOutlined />} onClick={() => {
+                  const token = localStorage.getItem('smartkb_token')
+                  const url = `/api/export/scores?teacher=${currentTeacher}&grade=${grade}&cls=${cls}`
+                  window.open(`${url}&token=${token}`, '_blank')
+                }} disabled={!cls} />
               </Tooltip>
             </Space>
           </Col>
