@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Layout, Menu, Dropdown, Avatar, Space, Typography } from 'antd'
 import {
+  HomeOutlined,
   MessageOutlined,
   TrophyOutlined,
   InfoCircleOutlined,
@@ -17,10 +18,14 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   FileAddOutlined,
+  BellOutlined,
+  BarChartOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import apiClient from '../api/client'
+import NotificationBell from './NotificationBell'
 
 const { Header, Sider, Content } = Layout
 
@@ -46,39 +51,39 @@ const AppLayout: React.FC = () => {
   }[] = isStudent
     ? // ── 学生端菜单 ──
       [
+        { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
         { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
         { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
         { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
         { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
+        { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
         { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
         { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
+        { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
         { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
+        { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
         { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
       ]
     : // ── 教师/管理员菜单 ──
       [
+        { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
         { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
         { key: '/html-files', icon: <FileOutlined />, label: '资源中心' },
         { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
         { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },
         { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
+        { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
         { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
         { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
         { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
+        { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
+        { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
         { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
         { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心' },
         { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
+        { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
         { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
       ]
-
-  // 自动展开当前路由所在的子菜单
-  const currentPath = location.pathname
-  const parentKey = '/' + currentPath.split('/')[1]
-  const [openKeys, setOpenKeys] = React.useState<string[]>([parentKey])
-
-  React.useEffect(() => {
-    setOpenKeys([parentKey])
-  }, [parentKey])
 
   React.useEffect(() => {
     fetchOnlineCount()
@@ -132,12 +137,15 @@ const AppLayout: React.FC = () => {
           </Typography.Text>
         </Space>
 
-        <Dropdown menu={userMenu} placement="bottomRight">
-          <Space style={{ cursor: 'pointer' }}>
-            <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
-            <span>{user?.name || user?.username}</span>
-          </Space>
-        </Dropdown>
+        <Space size={20}>
+          <NotificationBell />
+          <Dropdown menu={userMenu} placement="bottomRight">
+            <Space style={{ cursor: 'pointer' }}>
+              <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
+              <span>{user?.name || user?.username}</span>
+            </Space>
+          </Dropdown>
+        </Space>
       </Header>
 
       <Layout>
@@ -179,8 +187,6 @@ const AppLayout: React.FC = () => {
               if (item.adminOrTeacherOnly) return user?.role === 'admin' || user?.role === 'teacher'
               return true
             })}
-            openKeys={collapsed ? [] : openKeys}
-            onOpenChange={collapsed ? () => {} : setOpenKeys}
             onClick={({ key }) => navigate(key)}
             style={{ height: '100%', borderRight: 0 }}
           />
