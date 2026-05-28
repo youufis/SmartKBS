@@ -56,6 +56,7 @@ const AppLayout: React.FC = () => {
         { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
         { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
         { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
+        { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
         { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
         { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
         { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
@@ -76,21 +77,13 @@ const AppLayout: React.FC = () => {
         { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
         { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
         { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
+        { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
         { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
         { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心' },
         { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
         { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
         { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
       ]
-
-  // 自动展开当前路由所在的子菜单
-  const currentPath = location.pathname
-  const parentKey = '/' + currentPath.split('/')[1]
-  const [openKeys, setOpenKeys] = React.useState<string[]>([parentKey])
-
-  React.useEffect(() => {
-    setOpenKeys([parentKey])
-  }, [parentKey])
 
   React.useEffect(() => {
     fetchOnlineCount()
@@ -194,8 +187,6 @@ const AppLayout: React.FC = () => {
               if (item.adminOrTeacherOnly) return user?.role === 'admin' || user?.role === 'teacher'
               return true
             })}
-            openKeys={collapsed ? [] : openKeys}
-            onOpenChange={collapsed ? () => {} : setOpenKeys}
             onClick={({ key }) => navigate(key)}
             style={{ height: '100%', borderRight: 0 }}
           />

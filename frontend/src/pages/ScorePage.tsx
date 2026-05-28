@@ -8,10 +8,11 @@ import {
   PlusOutlined, MinusOutlined, TrophyOutlined,
   ReloadOutlined, BarChartOutlined, TeamOutlined,
   UserAddOutlined, DeleteOutlined, EditOutlined,
-  DownloadOutlined,
+  DownloadOutlined, UserOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useNavigate } from 'react-router-dom'
 
 const { Text } = Typography
 
@@ -34,6 +35,7 @@ interface Stats {
 }
 
 const ScorePage: React.FC = () => {
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -326,6 +328,23 @@ const ScorePage: React.FC = () => {
             />
           </Tooltip>
         </Popconfirm>
+      )}
+      {isAdminOrTeacher && (
+        <Tooltip title="查看成长档案">
+          <Button size="small" type="link"
+            icon={<UserOutlined />}
+            onClick={async () => {
+              try {
+                const { data } = await apiClient.get('/api/users', { params: { keyword: student.name } })
+                const found = data.users?.find((u: any) => u.name === student.name && u.role === '普通用户')
+                if (found) navigate(`/portfolio/${found.username}`)
+                else message.warning('未找到对应用户')
+              } catch { message.warning('查询失败') }
+            }}
+          >
+            档案
+          </Button>
+        </Tooltip>
       )}
     </Space>
   )
