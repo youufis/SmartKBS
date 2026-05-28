@@ -139,6 +139,19 @@ async def dashboard_summary(request: Request):
                 "end_time": ex['end_time'],
             })
 
+        # ── 课堂互动数据 ──
+        active_quiz_count = _db_count(
+            "SELECT COUNT(*) FROM interaction_quizzes WHERE status = 'active'",
+        )
+        my_quiz_answers = _db_count(
+            "SELECT COUNT(*) FROM interaction_quiz_answers WHERE student_username = ?",
+            (username,),
+        )
+        poll_vote_count = _db_count(
+            "SELECT COUNT(DISTINCT poll_id) FROM interaction_poll_votes WHERE student_username = ?",
+            (username,),
+        )
+
         result.update({
             "pending_exam_count": pending_count,
             "completed_exam_count": completed_count,
@@ -149,6 +162,10 @@ async def dashboard_summary(request: Request):
             "recent_chat_count": recent_chat_count,
             "exam_results": exam_results,
             "pending_exams": pending_exams_list,
+            # 课堂互动
+            "active_quiz_count": active_quiz_count,
+            "my_quiz_answers": my_quiz_answers,
+            "student_poll_vote_count": poll_vote_count,
         })
 
     else:  # ── 教师/管理员 ──
@@ -226,6 +243,34 @@ async def dashboard_summary(request: Request):
             (today_str,),
         )
 
+        # ── 课堂互动数据 ──
+        if role == 0:
+            quiz_count = _db_count("SELECT COUNT(*) FROM interaction_quizzes")
+            active_quiz_count = _db_count("SELECT COUNT(*) FROM interaction_quizzes WHERE status = 'active'")
+            poll_count = _db_count("SELECT COUNT(*) FROM interaction_polls WHERE status = 'active'")
+            quiz_answer_count = _db_count("SELECT COUNT(*) FROM interaction_quiz_answers")
+            poll_vote_count = _db_count("SELECT COUNT(*) FROM interaction_poll_votes")
+        else:
+            quiz_count = _db_count(
+                "SELECT COUNT(*) FROM interaction_quizzes WHERE creator_username = ?", (username,),
+            )
+            active_quiz_count = _db_count(
+                "SELECT COUNT(*) FROM interaction_quizzes WHERE creator_username = ? AND status = 'active'", (username,),
+            )
+            poll_count = _db_count(
+                "SELECT COUNT(*) FROM interaction_polls WHERE creator_username = ? AND status = 'active'", (username,),
+            )
+            quiz_answer_count = _db_count(
+                """SELECT COUNT(*) FROM interaction_quiz_answers a
+                   JOIN interaction_quizzes q ON a.quiz_id = q.id
+                   WHERE q.creator_username = ?""", (username,),
+            )
+            poll_vote_count = _db_count(
+                """SELECT COUNT(*) FROM interaction_poll_votes v
+                   JOIN interaction_polls p ON v.poll_id = p.id
+                   WHERE p.creator_username = ?""", (username,),
+            )
+
         result.update({
             "exam_stats": {
                 "total": exam_total,
@@ -239,6 +284,12 @@ async def dashboard_summary(request: Request):
             "total_teachers": total_teachers,
             "rollcall_this_week": total_rollcalls,
             "today_chat_count": today_chat_count,
+            # 课堂互动
+            "teacher_quiz_count": quiz_count,
+            "teacher_active_quiz_count": active_quiz_count,
+            "teacher_poll_count": poll_count,
+            "teacher_quiz_answer_count": quiz_answer_count,
+            "teacher_poll_vote_count": poll_vote_count,
         })
 
         if role == 1:
@@ -293,6 +344,41 @@ async def recent_activity(request: Request):
                 "type": "score",
                 "title": f"课堂积分变动",
                 "detail": f"{'获得' if act[1] > 0 else '扣除'} {abs(act[1])} 分",
+            })
+
+        # 最近的随堂测验结果
+        quiz_activities = execute_query(
+            """SELECT a.submitted_at, q.title, a.score
+               FROM interaction_quiz_answers a
+               JOIN interaction_quizzes q ON a.quiz_id = q.id
+               WHERE a.student_username = ?
+               ORDER BY a.submitted_at DESC LIMIT 5""",
+            (username,),
+        )
+        for act in quiz_activities:
+            activities.append({
+                "time": act[0],
+                "type": "quiz",
+                "title": f"完成了随堂测验「{act[1]}」",
+                "detail": f"得分 {act[2]} 分",
+            })
+
+        # 最近的投票参与
+        vote_activities = execute_query(
+            """SELECT v.created_at, p.question
+               FROM interaction_poll_votes v
+               JOIN interaction_polls p ON v.poll_id = p.id
+               WHERE v.student_username = ?
+               GROUP BY v.poll_id
+               ORDER BY v.created_at DESC LIMIT 5""",
+            (username,),
+        )
+        for act in vote_activities:
+            activities.append({
+                "time": act[0],
+                "type": "poll",
+                "title": f"参与了投票「{act[1]}」",
+                "detail": "",
             })
 
     else:  # 教师/管理员
@@ -364,6 +450,58 @@ async def recent_activity(request: Request):
                 "type": "rollcall",
                 "title": f"点名 {act[1]}",
                 "detail": f"{act[3]} - {result_label}",
+            })
+
+        # 最近的随堂测验提交
+        if role == 0:
+            quiz_acts = execute_query(
+                """SELECT a.submitted_at, q.title, a.student_username
+                   FROM interaction_quiz_answers a
+                   JOIN interaction_quizzes q ON a.quiz_id = q.id
+                   ORDER BY a.submitted_at DESC LIMIT 5""",
+            )
+        else:
+            quiz_acts = execute_query(
+                """SELECT a.submitted_at, q.title, a.student_username
+                   FROM interaction_quiz_answers a
+                   JOIN interaction_quizzes q ON a.quiz_id = q.id
+                   WHERE q.creator_username = ?
+                   ORDER BY a.submitted_at DESC LIMIT 5""",
+                (username,),
+            )
+        for act in quiz_acts:
+            activities.append({
+                "time": act[0],
+                "type": "quiz",
+                "title": f"学生 {act[2]} 完成了测验「{act[1]}」",
+                "detail": "",
+            })
+
+        # 最近的投票活动
+        if role == 0:
+            poll_acts = execute_query(
+                """SELECT v.created_at, p.question
+                   FROM interaction_poll_votes v
+                   JOIN interaction_polls p ON v.poll_id = p.id
+                   GROUP BY v.poll_id
+                   ORDER BY v.created_at DESC LIMIT 5""",
+            )
+        else:
+            poll_acts = execute_query(
+                """SELECT v.created_at, p.question
+                   FROM interaction_poll_votes v
+                   JOIN interaction_polls p ON v.poll_id = p.id
+                   WHERE p.creator_username = ?
+                   GROUP BY v.poll_id
+                   ORDER BY v.created_at DESC LIMIT 5""",
+                (username,),
+            )
+        for act in poll_acts:
+            activities.append({
+                "time": act[0],
+                "type": "poll",
+                "title": "有学生参与了投票",
+                "detail": f"「{act[1]}」",
             })
 
     # 按时间排序

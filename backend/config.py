@@ -26,7 +26,7 @@ QWEN_OPENAI_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 APPID = "6fcb54e8f16f4e3b94e4b9fd4eab1125"
 MODEL_LONG_NAME = "qwen-long"
 MODEL_VL_NAME = "qwen3-vl-flash"
-MODEL_NAME = "deepseek-v4-flash"
+MODEL_NAME = "qwen-max"
 
 # ── API Key（优先从环境变量获取） ──
 dashscope_api_key = os.environ.get("DASHSCOPE_API_KEY", "")
