@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SmartKB - 教育智能体 API",
     description="高中信息技术与通用技术课程 AI 智能问答与教学管理平台",
-    version="1.3.0",
+    version="1.5.0",
     docs_url="/docs",
     lifespan=lifespan,
 )
@@ -65,8 +65,6 @@ from backend.api.downloads_router import router as downloads_router
 app.include_router(score_router, prefix="/api/scores", tags=["课堂积分"])
 app.include_router(rollcall_router, prefix="/api/rollcall", tags=["智能点名"])
 app.include_router(downloads_router, prefix="/api/downloads", tags=["文件下载"])
-logger.info("遗留模块已重构挂载: score / rollcall / downloads")
-
 # ── 新架构 API 路由 ──
 from backend.api.auth_router import router as auth_router
 from backend.api.users_router import router as users_router
@@ -80,6 +78,12 @@ from backend.api.config_router import router as config_router
 from backend.api.question_router import router as question_router
 from backend.api.exam_router import router as exam_router
 from backend.api.sharing_router import router as sharing_router
+from backend.api.dashboard_router import router as dashboard_router
+from backend.api.notification_router import router as notification_router
+from backend.api.export_router import router as export_router
+from backend.api.portfolio_router import router as portfolio_router
+from backend.api.analytics_router import router as analytics_router
+from backend.api.interaction_router import router as interaction_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
@@ -93,6 +97,12 @@ app.include_router(config_router, prefix="/api/config", tags=["系统配置"])
 app.include_router(question_router, prefix="/api/questions", tags=["试题库"])
 app.include_router(exam_router, prefix="/api/exams", tags=["考试发布"])
 app.include_router(sharing_router, prefix="/api/sharing", tags=["资源共享"])
+app.include_router(dashboard_router, prefix="/api/dashboard", tags=["仪表盘"])
+app.include_router(notification_router, prefix="/api/notifications", tags=["通知公告"])
+app.include_router(export_router, prefix="/api/export", tags=["数据导出"])
+app.include_router(portfolio_router, prefix="/api/portfolio", tags=["成长档案"])
+app.include_router(analytics_router, prefix="/api/analytics", tags=["学情分析"])
+app.include_router(interaction_router, prefix="/api/interaction", tags=["课堂互动"])
 
 
 @app.get("/api/health")

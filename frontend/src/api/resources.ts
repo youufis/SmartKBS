@@ -29,6 +29,8 @@ export async function deleteResource(path: string): Promise<string> {
   return data.message;
 }
 
+
+
 export async function renameResource(path: string, new_name: string): Promise<string> {
   const { data } = await apiClient.put('/api/resources/rename', { path, new_name });
   return data.message;
