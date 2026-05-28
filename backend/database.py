@@ -293,7 +293,7 @@ def init_db():
                 student_username TEXT NOT NULL,
                 selected_option INTEGER NOT NULL,
                 created_at TEXT NOT NULL,
-                UNIQUE(poll_id, student_username)
+                UNIQUE(poll_id, student_username, selected_option)
             )""")
 
             # ── 课堂互动：学生提问表 ──
@@ -307,6 +307,38 @@ def init_db():
                 created_at TEXT NOT NULL,
                 answered_at TEXT
             )""")
+
+            # ── 迁移：interaction_polls 添加 poll_type 列 ──
+            try:
+                c.execute("ALTER TABLE interaction_polls ADD COLUMN poll_type TEXT DEFAULT 'single'")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 迁移：interaction_poll_votes 唯一约束改为 (poll_id, student_username, selected_option) ──
+            # 支持多选投票：同一学生可对同一投票选择多个不同选项
+            try:
+                c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='interaction_poll_votes'")
+                row = c.fetchone()
+                if row and row[0]:
+                    # 旧约束: UNIQUE(poll_id, student_username)
+                    # 新约束: UNIQUE(poll_id, student_username, selected_option)
+                    if "UNIQUE(poll_id, student_username)" in row[0] and "selected_option" not in row[0]:
+                        c.execute("ALTER TABLE interaction_poll_votes RENAME TO interaction_poll_votes_old")
+                        c.execute("""CREATE TABLE interaction_poll_votes (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            poll_id INTEGER NOT NULL,
+                            student_username TEXT NOT NULL,
+                            selected_option INTEGER NOT NULL,
+                            created_at TEXT NOT NULL,
+                            UNIQUE(poll_id, student_username, selected_option)
+                        )""")
+                        c.execute("""INSERT INTO interaction_poll_votes
+                            (id, poll_id, student_username, selected_option, created_at)
+                            SELECT id, poll_id, student_username, selected_option, created_at
+                            FROM interaction_poll_votes_old""")
+                        c.execute("DROP TABLE interaction_poll_votes_old")
+            except sqlite3.OperationalError:
+                pass
 
             conn.commit()
             logger.info("数据库初始化完成")
@@ -375,6 +407,18 @@ def get_transaction():
         raise
     finally:
         conn.close()
+
+
+def execute_batch(operations: list[tuple[str, tuple]]):
+    """
+    批量执行多个写操作，共用同一个事务
+    operations: [(sql1, params1), (sql2, params2), ...]
+    """
+    with get_connection() as conn:
+        c = conn.cursor()
+        for sql, params in operations:
+            c.execute(sql, params)
+        conn.commit()
 
 
 # ── 旧版 JSON → 数据库 数据迁移 ──

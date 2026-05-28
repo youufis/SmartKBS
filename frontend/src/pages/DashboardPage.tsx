@@ -50,6 +50,10 @@ interface DashboardSummary {
     start_time: string | null
     end_time: string | null
   }>
+  // 学生 - 课堂互动
+  active_quiz_count?: number
+  my_quiz_answers?: number
+  student_poll_vote_count?: number
   // 教师/管理员
   exam_stats?: {
     total: number
@@ -65,11 +69,17 @@ interface DashboardSummary {
   today_chat_count?: number
   teacher_grades?: string
   teacher_classes?: string
+  // 教师/管理员 - 课堂互动
+  teacher_quiz_count?: number
+  teacher_active_quiz_count?: number
+  teacher_poll_count?: number
+  teacher_quiz_answer_count?: number
+  teacher_poll_vote_count?: number
 }
 
 interface Activity {
   time: string
-  type: 'exam' | 'score' | 'task' | 'rollcall'
+  type: 'exam' | 'score' | 'task' | 'rollcall' | 'quiz' | 'poll'
   title: string
   detail: string
 }
@@ -79,6 +89,8 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   score: { color: '#52c41a', icon: <TrophyOutlined /> },
   task: { color: '#faad14', icon: <CheckCircleOutlined /> },
   rollcall: { color: '#722ed1', icon: <AuditOutlined /> },
+  quiz: { color: '#ff4d4f', icon: <ThunderboltOutlined /> },
+  poll: { color: '#722ed1', icon: <BarChartOutlined /> },
 }
 
 const DashboardPage: React.FC = () => {
@@ -239,6 +251,28 @@ const DashboardPage: React.FC = () => {
               />
             </Card>
           </Col>
+          <Col xs={12} sm={6}>
+            <Card hoverable onClick={() => navigate('/interaction')}>
+              <Statistic
+                title="待答测验"
+                value={summary.active_quiz_count ?? 0}
+                prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
+                suffix="个"
+                valueStyle={{ color: '#ff4d4f' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Card hoverable onClick={() => navigate('/interaction')}>
+              <Statistic
+                title="已参与投票"
+                value={summary.student_poll_vote_count ?? 0}
+                prefix={<BarChartOutlined style={{ color: '#722ed1' }} />}
+                suffix="次"
+                valueStyle={{ color: '#722ed1' }}
+              />
+            </Card>
+          </Col>
         </Row>
       ) : (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
@@ -317,6 +351,37 @@ const DashboardPage: React.FC = () => {
               </Card>
             </Col>
           )}
+          {/* ── 课堂互动卡片（教师/管理员） ── */}
+          <Col xs={12} sm={6}>
+            <Card hoverable onClick={() => navigate('/interaction')}>
+              <Statistic
+                title="随堂测验"
+                value={summary.teacher_quiz_count ?? 0}
+                prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
+                suffix={
+                  <Text type="secondary" style={{ fontSize: 14 }}>
+                    进行中 {summary.teacher_active_quiz_count ?? 0}
+                  </Text>
+                }
+                valueStyle={{ color: '#ff4d4f', fontSize: 28 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Card hoverable onClick={() => navigate('/interaction')}>
+              <Statistic
+                title="活跃投票"
+                value={summary.teacher_poll_count ?? 0}
+                prefix={<BarChartOutlined style={{ color: '#722ed1' }} />}
+                suffix={
+                  <Text type="secondary" style={{ fontSize: 14 }}>
+                    回应 {summary.teacher_quiz_answer_count ?? 0} 人
+                  </Text>
+                }
+                valueStyle={{ color: '#722ed1', fontSize: 28 }}
+              />
+            </Card>
+          </Col>
         </Row>
       )}
 
