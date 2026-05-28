@@ -213,6 +213,101 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 通知消息表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recipient_username TEXT NOT NULL,
+                type TEXT NOT NULL DEFAULT 'info',
+                title TEXT NOT NULL,
+                content TEXT DEFAULT '',
+                related_link TEXT DEFAULT '',
+                is_read INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_notif_recipient ON notifications(recipient_username, is_read)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_notif_time ON notifications(recipient_username, created_at)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 公告表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS announcements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                creator_username TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                target_role TEXT DEFAULT 'all',
+                target_grade TEXT DEFAULT '',
+                target_class TEXT DEFAULT '',
+                priority TEXT DEFAULT 'normal',
+                is_pinned INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ann_target ON announcements(target_role, target_grade, target_class)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 课堂互动：随堂测验表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_quizzes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                creator_username TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                questions TEXT NOT NULL,      -- JSON 数组
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_iq_creator ON interaction_quizzes(creator_username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 课堂互动：随堂测验答案表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_quiz_answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quiz_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                answers TEXT NOT NULL,        -- JSON
+                score REAL DEFAULT 0,
+                submitted_at TEXT NOT NULL,
+                UNIQUE(quiz_id, student_username)
+            )""")
+
+            # ── 课堂互动：快速投票表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_polls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                creator_username TEXT NOT NULL,
+                question TEXT NOT NULL,
+                options TEXT NOT NULL,         -- JSON 数组
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL
+            )""")
+
+            # ── 课堂互动：投票记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_poll_votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                poll_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                selected_option INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(poll_id, student_username)
+            )""")
+
+            # ── 课堂互动：学生提问表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                content TEXT NOT NULL,
+                is_anonymous INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                answer TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                answered_at TEXT
+            )""")
+
             conn.commit()
             logger.info("数据库初始化完成")
 
