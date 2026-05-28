@@ -161,8 +161,6 @@ def ensure_teacher_html_files(username: str):
     source_dir = _resolve_abs(os.path.join(ROOT_DIR, "html"))
     required_files = [
         "0.00智能随机点名.html",
-        "高二年级学生名单.json",
-        "高一年级学生名单.json",
     ]
     for filename in required_files:
         target_path = os.path.join(html_dir, filename)
@@ -212,14 +210,14 @@ def get_limit_config() -> tuple[bool, int]:
     return False, 50
 
 
-def check_user_daily_requests(username: str, role: int) -> tuple[bool, int]:
+def check_user_daily_requests(username: str, role: int) -> tuple[bool, int | float]:
     """检查用户当日请求是否超限（仅对学生和教师生效，管理员不受限）
 
     使用 daily_usage 表计数。
     配置从 system_config.json 运行时读取，修改即时生效。
 
     Returns:
-        (allowed: bool, remaining: int)
+        (allowed: bool, remaining: int | float)
     """
     # 管理员不受限
     if role == 0:
