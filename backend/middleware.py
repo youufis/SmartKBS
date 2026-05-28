@@ -29,7 +29,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         public_paths = [
             "/api/auth/login",
             "/api/auth/logout",
-            "/api/files/",
             "/api/resources/nav",
             "/api/scores/",
             "/api/rollcall/",
