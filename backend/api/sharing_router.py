@@ -102,6 +102,58 @@ async def share_resource(request: Request, body: ShareRequest):
              body.share_scope, target_users_csv, target_grades_csv, target_classes_csv, now, now),
         )
         logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
+
+        # ── 发送通知给目标用户 ──
+        try:
+            from backend.api.notification_router import _notify_users, _create_notification
+            resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
+
+            if body.share_scope == "all":
+                # 通知所有学生
+                all_students = execute_query(
+                    "SELECT username FROM users WHERE role = 2"
+                )
+                student_usernames = [r[0] for r in all_students]
+                _notify_users(
+                    student_usernames, "share",
+                    f"新的{resource_label}已分享",
+                    f"{username} 分享了「{body.file_name}」，请前往资源中心查看",
+                    "/html-files" if body.resource_type == "html" else "/downloads",
+                )
+            elif body.share_scope == "teacher" and body.target_users:
+                _notify_users(
+                    body.target_users, "share",
+                    f"新的{resource_label}已分享",
+                    f"{username} 分享了「{body.file_name}」给您",
+                    "/html-files" if body.resource_type == "html" else "/downloads",
+                )
+            elif body.share_scope == "class":
+                # 通知指定年级/班级的学生
+                conditions = ["role = 2"]
+                params = []
+                if body.target_grades:
+                    placeholders = ",".join(["?"] * len(body.target_grades))
+                    conditions.append(f"grade IN ({placeholders})")
+                    params.extend(body.target_grades)
+                if body.target_classes:
+                    placeholders = ",".join(["?"] * len(body.target_classes))
+                    conditions.append(f"class IN ({placeholders})")
+                    params.extend(body.target_classes)
+                if conditions:
+                    target_students = execute_query(
+                        f"SELECT username FROM users WHERE {' AND '.join(conditions)}",
+                        tuple(params),
+                    )
+                    student_usernames = [r[0] for r in target_students]
+                    _notify_users(
+                        student_usernames, "share",
+                        f"新的{resource_label}已分享",
+                        f"「{body.file_name}」可供您所在班级使用",
+                        "/html-files" if body.resource_type == "html" else "/downloads",
+                    )
+        except Exception as notify_err:
+            logger.warning(f"发送共享通知失败（不影响共享操作）: {notify_err}")
+
         return {"message": "共享成功", "file_path": body.file_path}
     except Exception as e:
         logger.error(f"共享创建失败: {e}")

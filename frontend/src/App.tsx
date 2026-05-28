@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
 import AppLayout from './components/AppLayout'
+import DashboardPage from './pages/DashboardPage'
 import ChatPage from './pages/ChatPage'
 import HtmlFilesPage from './pages/HtmlFilesPage'
 import ResourceMgmtPage from './pages/ResourceMgmtPage'
@@ -16,6 +17,11 @@ import AboutPage from './pages/AboutPage'
 import QuestionBankPage from './pages/QuestionBankPage'
 import ExamPage from './pages/ExamPage'
 import ExamTakePage from './pages/ExamTakePage'
+import NotificationsPage from './pages/NotificationsPage'
+import AnnouncementsPage from './pages/AnnouncementsPage'
+import PortfolioPage from './pages/PortfolioPage'
+import AnalyticsPage from './pages/AnalyticsPage'
+import InteractionPage from './pages/InteractionPage'
 
 function App() {
   const restoreSession = useAuthStore((s: { restoreSession: () => void }) => s.restoreSession)
@@ -28,9 +34,11 @@ function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={isLoggedIn ? <Navigate to="/chat" /> : <LoginPage />} />
+      <Route path="/login" element={isLoggedIn ? <Navigate to="/dashboard" /> : <LoginPage />} />
       <Route path="/exam-take/:examId" element={isLoggedIn && user?.role === 'student' ? <ExamTakePage /> : <Navigate to={isLoggedIn ? '/chat' : '/login'} />} />
       <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
+        <Route index element={<DashboardPage />} />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="chat" element={<ChatPage />} />
         <Route path="html-files" element={<HtmlFilesPage />} />
         <Route path="resource-mgmt" element={user?.role === 'admin' || user?.role === 'teacher' ? <ResourceMgmtPage /> : <Navigate to="/chat" />} />
@@ -42,8 +50,13 @@ function App() {
         <Route path="exam" element={<ExamPage />} />
         <Route path="score" element={<ScorePage />} />
         <Route path="rollcall" element={<RollcallManagePage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
+        <Route path="announcements" element={<AnnouncementsPage />} />
+        <Route path="portfolio" element={<PortfolioPage />} />
+        <Route path="portfolio/:username" element={<PortfolioPage />} />
+        <Route path="analytics" element={<AnalyticsPage />} />
+        <Route path="interaction" element={<InteractionPage />} />
         <Route path="about" element={<AboutPage />} />
-        <Route index element={<Navigate to="/chat" />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" />} />
     </Routes>
