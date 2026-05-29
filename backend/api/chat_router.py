@@ -59,7 +59,6 @@ def get_api_keys(username: str) -> Tuple[str, str]:
     1. 系统环境变量 DASHSCOPE_API_KEY（最安全，适合生产部署）
     2. system_config.json 中的 dashscope_api_key（管理员在页面配置）
     """
-    import time
     now = time.time()
     cached = _API_KEY_CACHE.get(username)
     if cached and (now - cached[0]) < _API_KEY_CACHE_TTL:
@@ -81,6 +80,11 @@ def get_api_keys(username: str) -> Tuple[str, str]:
 
     _API_KEY_CACHE[username] = (now, key)
     return key, ""
+
+
+def clear_api_key_cache():
+    """清除 API Key 缓存（管理员更新配置后调用，使新 key 即时生效）"""
+    _API_KEY_CACHE.clear()
 
 
 # ── DashScope 文件上传 ──
