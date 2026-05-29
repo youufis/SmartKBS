@@ -75,6 +75,8 @@ interface DashboardSummary {
   teacher_poll_count?: number
   teacher_quiz_answer_count?: number
   teacher_poll_vote_count?: number
+  // AI 用量
+  token_today?: number
 }
 
 interface Activity {
@@ -335,6 +337,17 @@ const DashboardPage: React.FC = () => {
                 prefix={<AuditOutlined style={{ color: '#fa8c16' }} />}
                 suffix="次"
                 valueStyle={{ color: '#fa8c16', fontSize: 28 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Card hoverable onClick={() => navigate('/token-usage')}>
+              <Statistic
+                title="AI 用量（今日）"
+                value={summary.token_today ?? 0}
+                prefix={<BarChartOutlined style={{ color: '#1677ff' }} />}
+                suffix="tokens"
+                valueStyle={{ color: '#1677ff', fontSize: 28 }}
               />
             </Card>
           </Col>

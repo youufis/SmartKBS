@@ -53,6 +53,12 @@ async def dashboard_summary(request: Request):
         "user_name": user.get("name", username),
     }
 
+    # ── AI Token 用量（今日） ──
+    token_today = _db_count(
+        "SELECT COALESCE(SUM(total_tokens), 0) FROM ai_token_usage WHERE created_at >= ? AND created_at <= ?",
+        (today_str, today_str + " 23:59:59"),
+    )
+
     if role == 2:  # ── 学生 ──
         pending_count = _q_count(
             """SELECT COUNT(*) FROM exams
@@ -204,6 +210,7 @@ async def dashboard_summary(request: Request):
             "active_quiz_count": active_quiz_count,
             "my_quiz_answers": my_quiz_answers,
             "student_poll_vote_count": poll_vote_count,
+            "token_today": token_today,
         })
 
     else:  # ── 教师/管理员 ──
@@ -309,6 +316,8 @@ async def dashboard_summary(request: Request):
                    WHERE p.creator_username = ?""", (username,),
             )
 
+        # ── AI Token 用量（今日） ──
+
         result.update({
             "exam_stats": {
                 "total": exam_total,
@@ -328,6 +337,7 @@ async def dashboard_summary(request: Request):
             "teacher_poll_count": poll_count,
             "teacher_quiz_answer_count": quiz_answer_count,
             "teacher_poll_vote_count": poll_vote_count,
+            "token_today": token_today,
         })
 
         if role == 1:
