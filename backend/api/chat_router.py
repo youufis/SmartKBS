@@ -23,6 +23,7 @@ from backend.api.dependencies import get_current_user
 from backend.auth import get_user_role
 from backend.utils import (
     encode_image_to_base64,
+    get_image_mime_type,
     is_image_file,
     is_document_file,
     check_file_size,
@@ -208,7 +209,7 @@ class FileSummaryCache:
                         "messages": [{
                             "role": "user",
                             "content": [
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
+                                {"type": "image_url", "image_url": {"url": f"data:{get_image_mime_type(file_path)};base64,{encoded}"}},
                                 {"type": "text", "text": prompt},
                             ]
                         }],
@@ -487,7 +488,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             "messages": [{
                 "role": "user",
                 "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+                    {"type": "image_url", "image_url": {"url": f"data:{get_image_mime_type(file_path)};base64,{encoded_image}"}},
                     {"type": "text", "text": prompt},
                 ]
             }],
