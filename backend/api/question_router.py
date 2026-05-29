@@ -193,6 +193,7 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 def _call_dashscope_agent(prompt: str, api_key: str) -> str:
     """调用 DashScope 智能体（非流式），返回完整响应文本"""
     from dashscope import Application as DashScopeApp
+    from backend.token_usage import record_token_usage
 
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
@@ -204,6 +205,18 @@ def _call_dashscope_agent(prompt: str, api_key: str) -> str:
     }
 
     response = DashScopeApp.call(**call_params)
+
+    # 记录 token 用量
+    try:
+        usage = getattr(response, "usage", None)
+        if usage:
+            record_token_usage("system", 0, "deepseek-v4-flash",
+                getattr(usage, "input_tokens", 0) or 0,
+                getattr(usage, "output_tokens", 0) or 0,
+                "quiz", "")
+    except Exception:
+        pass
+
     output = getattr(response, "output", None)
     if output:
         text = getattr(output, "text", None)

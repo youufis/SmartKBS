@@ -346,6 +346,26 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── AI Token 用量统计表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS ai_token_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                user_role INTEGER DEFAULT 2,
+                model TEXT NOT NULL,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                source TEXT DEFAULT 'chat',
+                conversation_id TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_atu_time ON ai_token_usage(created_at)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_atu_user ON ai_token_usage(username, created_at)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_atu_model ON ai_token_usage(model)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.info("数据库初始化完成")
 
