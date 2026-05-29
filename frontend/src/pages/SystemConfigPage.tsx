@@ -17,7 +17,7 @@ const { Title, Text } = Typography
 const GLOBAL_CONFIG_FIELDS = [
   // 品牌信息
   { key: 'AGENT_NAME', label: '智能体名称', type: 'text', group: 'brand',
-    desc: '显示在登录页面的智能体名称，例如"高中信通版"、"高中数学版"等' },
+    desc: '显示在登录页面的平台名称。如"智慧教学平台-高中信通版"、"智慧教学平台-高中数学版"等' },
   { key: 'ORG_NAME', label: '单位名称', type: 'text', group: 'brand', required: false,
     desc: '显示在登录页面和界面顶部的单位/学校名称，为空则不显示' },
   // API 密钥
