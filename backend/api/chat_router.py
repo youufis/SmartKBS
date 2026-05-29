@@ -490,6 +490,8 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     """图像理解流式（同步）"""
     import requests as sync_requests
     try:
+        if is_image_file(file_path):
+            logger.info(f"开始处理图片: {file_path}")
         encoded_image = encode_image_to_base64(file_path)
         payload = {
             "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-flash"),
@@ -510,6 +512,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             timeout=120,
         )
         if resp.status_code != 200:
+            logger.warning(f"图像API返回非200状态: {resp.status_code} - {resp.text[:300]}")
             yield {"text": "图像处理失败"}
             return
 
