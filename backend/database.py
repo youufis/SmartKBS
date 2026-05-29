@@ -4,12 +4,12 @@
 提供上下文管理器，自动管理连接生命周期
 """
 import json
-import os
 import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from backend.config import ROOT_DIR, STU_DIR
 from backend.logger import logger
 
 # 数据库文件路径（backend 目录下）
@@ -34,6 +34,12 @@ def init_db():
             # 兼容旧表：添加 grade 列（如果不存在）
             try:
                 c.execute("ALTER TABLE users ADD COLUMN grade TEXT")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
+
+            # 兼容旧表：添加 token_version 列（单点登录用）
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass  # 列已存在
 
@@ -425,15 +431,15 @@ def execute_batch(operations: list[tuple[str, tuple]]):
 
 def _migrate_conversations(BASE_DIR, conn):
     """扫描用户目录下的 .md 对话文件，建立 DB 索引"""
-    chat_dirs = [BASE_DIR / "root" / "ChatHistory"]
-    stu_dir = BASE_DIR / "stu"
+    chat_dirs = [BASE_DIR / ROOT_DIR / "ChatHistory"]
+    stu_dir = BASE_DIR / STU_DIR
     if stu_dir.exists():
         for user_dir in stu_dir.iterdir():
             if user_dir.is_dir():
                 chat_dirs.append(user_dir / "ChatHistory")
     for item in BASE_DIR.iterdir():
         d = item / "ChatHistory"
-        if item.is_dir() and d.exists() and item.name not in ("root", "stu"):
+        if item.is_dir() and d.exists() and item.name not in (ROOT_DIR, STU_DIR):
             chat_dirs.append(d)
 
     now_str = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -481,7 +487,7 @@ def _migrate_from_json():
     migrated_any = False
 
     # ── 1. 迁移积分数据（root/html/score_system/score.json） ──
-    score_path = BASE_DIR / "root" / "html" / "score_system" / "score.json"
+    score_path = BASE_DIR / ROOT_DIR / "html" / "score_system" / "score.json"
     if score_path.exists():
         try:
             with open(score_path, "r", encoding="utf-8") as f:
@@ -502,7 +508,7 @@ def _migrate_from_json():
             logger.warning(f"[迁移] 积分数据失败: {e}")
 
     # ── 2. 迁移点名数据（root/html/rollcall_data/*.json） ──
-    rc_dir = BASE_DIR / "root" / "html" / "rollcall_data"
+    rc_dir = BASE_DIR / ROOT_DIR / "html" / "rollcall_data"
     if rc_dir.exists():
         try:
             with get_connection() as conn:
@@ -513,7 +519,7 @@ def _migrate_from_json():
                     grade, cls = parts
                     with open(fpath, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    teacher = "root"
+                    teacher = ROOT_DIR
                     c = conn.cursor()
                     for sname, weight in data.get("weights", {}).items():
                         c.execute(
@@ -537,7 +543,7 @@ def _migrate_from_json():
             logger.warning(f"[迁移] 点名数据失败: {e}")
 
     # ── 3. 迁移任务数据（root/ChatHistory/Task/*/active_tasks.json） ──
-    task_base = BASE_DIR / "root" / "ChatHistory" / "Task"
+    task_base = BASE_DIR / ROOT_DIR / "ChatHistory" / "Task"
     if task_base.exists():
         try:
             with get_connection() as conn:

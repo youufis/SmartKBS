@@ -83,10 +83,10 @@ def _call_ai(prompt: str) -> str:
         return "⚠️ AI 功能不可用：请配置 DashScope API Key"
 
     from dashscope import Application as DashScopeApp
-    from backend.config import APPID
+    from backend.api.config_router import get_config_value
     os.environ["DASHSCOPE_API_KEY"] = api_key
     try:
-        response = DashScopeApp.call(app_id=APPID, prompt=prompt, stream=False)
+        response = DashScopeApp.call(app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"), prompt=prompt, stream=False)
         if hasattr(response, "output") and hasattr(response.output, "text"):
             return response.output.text
         return "AI 未返回有效结果"
@@ -427,9 +427,11 @@ async def list_quizzes(
     params: list = []
 
     if role == 2:
-        # 学生：只看自己班级教师的测验
+        # 学生：只看自己班级教师的测验，排除已答过的
         grade, cls = _get_user_grade_class(username)
         conditions.append("q.status = 'active'")
+        conditions.append("q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)")
+        params.append(username)
         if grade:
             conditions.append("u.grade = ?")
             params.append(grade)
@@ -516,12 +518,12 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         if cls:
             cls_param = f",{cls},"
             teacher_ok = execute_query(
-                "SELECT id FROM users WHERE username = ? AND role IN (0, 1) AND grade = ? AND INSTR(',' || class || ',', ?) > 0",
+                "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ? AND INSTR(',' || class || ',', ?) > 0",
                 (creator, grade, cls_param),
             )
         else:
             teacher_ok = execute_query(
-                "SELECT id FROM users WHERE username = ? AND role IN (0, 1) AND grade = ?",
+                "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ?",
                 (creator, grade),
             )
         if not teacher_ok:
@@ -767,12 +769,12 @@ async def submit_vote(
         if cls:
             cls_param = f",{cls},"
             teacher_ok = execute_query(
-                "SELECT id FROM users WHERE username = ? AND role IN (0, 1) AND grade = ? AND INSTR(',' || class || ',', ?) > 0",
+                "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ? AND INSTR(',' || class || ',', ?) > 0",
                 (creator, grade, cls_param),
             )
         else:
             teacher_ok = execute_query(
-                "SELECT id FROM users WHERE username = ? AND role IN (0, 1) AND grade = ?",
+                "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ?",
                 (creator, grade),
             )
         if not teacher_ok:

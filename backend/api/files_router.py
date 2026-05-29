@@ -12,7 +12,9 @@ from fastapi.responses import FileResponse
 
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
-from backend.config import IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BASE_DIR
+from backend.config import BASE_DIR
+from backend.api.config_router import get_config_value
+from backend.config import ROOT_DIR, STU_DIR
 from backend.api.sharing_router import is_file_shared_with_user
 from backend.logger import logger
 
@@ -21,7 +23,11 @@ router = APIRouter()
 TEMP_UPLOAD_DIR = BASE_DIR / "temp_uploads"
 TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_EXTENSIONS = set(IMAGE_EXTENSIONS + DOCUMENT_EXTENSIONS)
+def _get_allowed_extensions() -> set:
+    """获取允许的文件扩展名集合（运行时读取，支持热更新）"""
+    img = get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'])
+    doc = get_config_value("DOCUMENT_EXTENSIONS", ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm'])
+    return set(img + doc)
 
 # ── 自动清理旧临时文件（每 24 小时检查一次，删除超过 24 小时的） ──
 _last_temp_cleanup: float = 0
@@ -63,7 +69,7 @@ async def upload_temp_file(request: Request, file: UploadFile = File(...)):
     username = user["username"]
     filename = file.filename or "unknown"
     _, ext = os.path.splitext(filename.lower())
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext not in _get_allowed_extensions():
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
     unique_name = f"{uuid.uuid4().hex}{ext}"
     user_dir = TEMP_UPLOAD_DIR / username
@@ -72,7 +78,7 @@ async def upload_temp_file(request: Request, file: UploadFile = File(...)):
     try:
         content = await file.read()
         max_size = 10 * 1024 * 1024
-        if ext in IMAGE_EXTENSIONS:
+        if ext in get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']):
             max_size = 5 * 1024 * 1024
         if len(content) > max_size:
             raise HTTPException(status_code=400, detail="文件超过大小限制")
@@ -116,9 +122,9 @@ def _parse_file_owner_and_type(rel_path: str):
     """从相对路径解析文件的所有者和资源类型"""
     parts = rel_path.split("/")
     if len(parts) >= 3:
-        if parts[0] == "stu":
+        if parts[0] == STU_DIR:
             return parts[1], parts[2]  # stu/s110005/html/... → (s110005, html)
-        elif parts[0] == "root":
+        elif parts[0] == ROOT_DIR:
             return parts[0], parts[1]  # root/html/... → (root, html)
         else:
             return parts[0], parts[1]  # youufis/html/... → (youufis, html)
@@ -176,7 +182,7 @@ async def serve_static_file(path: str, request: Request):
     
     # 教师：可访问 root/（共享）和自己名下的资源
     elif role == 1:
-        if path_parts[0] == "root":
+        if path_parts[0] == ROOT_DIR:
             allowed = True
         elif path_parts[0] == "backend" and len(path_parts) > 1 and path_parts[1] == "data":
             allowed = True
@@ -185,7 +191,7 @@ async def serve_static_file(path: str, request: Request):
     
     # 学生：仅可访问 stu/自己学号/ 下的资源
     elif role == 2:
-        if len(path_parts) >= 3 and path_parts[0] == "stu" and path_parts[1] == username:
+        if len(path_parts) >= 3 and path_parts[0] == STU_DIR and path_parts[1] == username:
             allowed = True
     
     # ── 共享覆盖检查：如果普通检查未通过，检查是否为共享资源 ──

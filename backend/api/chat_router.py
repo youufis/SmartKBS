@@ -1,13 +1,12 @@
 """
 AI 对话 API 路由 — SSE 流式对话
-移植自 AgentSmartKBXS.py 的聊天核心逻辑
 """
 import asyncio
 import json
 import os
 import time
 import re
-from typing import Optional, Any
+from typing import Optional, Any, Tuple, Dict
 
 import httpx
 from dashscope import Application as DashScopeApp
@@ -17,15 +16,9 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 from backend.config import (
-    APPID,
-    QWEN_OPENAI_API_BASE,
-    MODEL_LONG_NAME,
-    MODEL_VL_NAME,
-    MODEL_NAME,
     DEFAULT_LOGGED_IN_NAME,
-    IMAGE_EXTENSIONS,
-    DOCUMENT_EXTENSIONS,
 )
+from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import get_user_role
 from backend.utils import (
@@ -59,7 +52,7 @@ _API_KEY_CACHE: dict[str, tuple[float, str]] = {}  # username -> (timestamp, key
 _API_KEY_CACHE_TTL = 60  # 缓存 60 秒
 
 
-def get_api_keys(username: str) -> tuple:
+def get_api_keys(username: str) -> Tuple[str, str]:
     """获取 API Key，带 60 秒缓存
 
     优先级：
@@ -98,7 +91,7 @@ async def upload_file_to_dashscope(file_path: str, api_key: str) -> str:
         with open(file_path, "rb") as f:
             files = {"file": f, "purpose": (None, "file-extract")}
             resp = await client.post(
-                f"{QWEN_OPENAI_API_BASE}/files",
+                f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/files',
                 headers={"Authorization": f"Bearer {api_key}"},
                 files=files,
             )
@@ -112,7 +105,7 @@ async def upload_file_to_dashscope(file_path: str, api_key: str) -> str:
 class FileSummaryCache:
     """文件摘要缓存，带过期清理（最多保留 maxsize 条，超过 30 天自动清理）"""
     def __init__(self, maxsize: int = 100, max_age_days: int = 30):
-        self._cache: dict = {}
+        self._cache: Dict[str, Dict[str, Any]] = {}
         self._maxsize = maxsize
         self._max_age = max_age_days * 86400  # 秒
         self._last_cleanup: float = 0
@@ -172,10 +165,10 @@ class FileSummaryCache:
                 return ""
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{QWEN_OPENAI_API_BASE}/chat/completions",
+                    f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": MODEL_LONG_NAME,
+                        "model": get_config_value("MODEL_LONG_NAME", "qwen-long"),
                         "messages": [
                             {"role": "system", "content": "You are a helpful assistant."},
                             {"role": "system", "content": f"fileid://{file_id}"},
@@ -196,10 +189,10 @@ class FileSummaryCache:
             encoded = encode_image_to_base64(file_path)
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{QWEN_OPENAI_API_BASE}/chat/completions",
+                    f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": MODEL_VL_NAME,
+                        "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-flash"),
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -323,11 +316,13 @@ def _chat_event_generator(
                 combined += header
                 yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
             if is_image_file(fp):
+                content = ""
                 for chunk in _agent_chat_image_stream(fp, enhanced_prompt, dashscope_api_key):
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
                 combined += content
             elif is_document_file(fp):
+                content = ""
                 for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
@@ -348,7 +343,7 @@ def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str):
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
     call_params = {
-        "app_id": APPID,
+        "app_id": get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
         "prompt": prompt,
         "stream": True,
         "incremental_output": True,
@@ -383,7 +378,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
         # 使用同步 requests 上传文件
         with open(file_path, "rb") as f:
             file_resp = sync_requests.post(
-                f"{QWEN_OPENAI_API_BASE}/files",
+                f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/files',
                 headers={"Authorization": f"Bearer {api_key}"},
                 files={"file": f, "purpose": (None, "file-extract")},
             )
@@ -393,7 +388,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
         file_id = file_resp.json().get("id", "")
 
         payload = {
-            "model": MODEL_LONG_NAME,
+            "model": get_config_value("MODEL_LONG_NAME", "qwen-long"),
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "system", "content": f"fileid://{file_id}"},
@@ -403,7 +398,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
         }
 
         resp = sync_requests.post(
-            f"{QWEN_OPENAI_API_BASE}/chat/completions",
+            f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
@@ -443,7 +438,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     try:
         encoded_image = encode_image_to_base64(file_path)
         payload = {
-            "model": MODEL_VL_NAME,
+            "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-flash"),
             "messages": [{
                 "role": "user",
                 "content": [
@@ -454,7 +449,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             "stream": True,
         }
         resp = sync_requests.post(
-            f"{QWEN_OPENAI_API_BASE}/chat/completions",
+            f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,

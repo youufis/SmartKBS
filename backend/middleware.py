@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from backend.auth import decode_jwt_token, update_active_token
+from backend.auth import decode_jwt_token, update_active_token, verify_token_version
 
 
 def extract_token(request: Request) -> Optional[str]:
@@ -63,9 +63,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if token:
             payload = decode_jwt_token(token)
             if payload:
-                # 注入用户信息
-                request.state.user = payload
-                update_active_token(token)
+                # 校验 token 版本号（防止多设备同时登录）
+                if not verify_token_version(payload):
+                    request.state.user = None
+                    if not is_public:
+                        return JSONResponse(
+                            status_code=401,
+                            content={"detail": "登录已过期：该账号已在其他地方登录"},
+                        )
+                else:
+                    # 注入用户信息
+                    request.state.user = payload
+                    update_active_token(token)
             else:
                 # token 无效
                 if not is_public:

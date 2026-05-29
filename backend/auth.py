@@ -1,7 +1,6 @@
 """
 认证工具函数
 JWT 生成/验证 + 密码哈希 + 角色判断
-移植自 AgentSmartKBXS.py
 """
 import time
 from datetime import datetime, timedelta, timezone
@@ -13,10 +12,9 @@ import jwt
 from backend.config import (
     JWT_SECRET_KEY,
     JWT_ALGORITHM,
-    JWT_EXPIRATION_HOURS,
-    ONLINE_USER_TIMEOUT_SECONDS,
 )
-from backend.database import execute_query, execute_insert_update
+from backend.api.config_router import get_config_value
+from backend.database import execute_query, execute_insert_update, get_connection
 
 # ── 在线用户管理（替代全局变量 active_users）──
 _active_tokens: dict[str, float] = {}  # token -> last_active_time
@@ -36,7 +34,7 @@ def get_online_count() -> int:
     """获取在线用户数（按用户名去重），自动清理过期 token"""
     now = time.time()
     expired = [t for t in _active_tokens
-               if now - _active_tokens[t] > ONLINE_USER_TIMEOUT_SECONDS]
+               if now - _active_tokens[t] > get_config_value("ONLINE_USER_TIMEOUT_SECONDS", 1800)]
     for t in expired:
         del _active_tokens[t]
     # 解码 token 统计唯一用户名
@@ -62,12 +60,31 @@ def check_password(password: str, hashed: bytes) -> bool:
 
 # ── JWT ──
 
+def get_token_version(username: str) -> int:
+    """获取用户当前的 token 版本号"""
+    rows = execute_query("SELECT token_version FROM users WHERE username=?", (username,))
+    return rows[0][0] if rows else 0
+
+
+def increment_token_version(username: str) -> int:
+    """递增 token 版本号（使旧 token 失效），返回新版本号"""
+    with get_connection() as conn:
+        conn.cursor().execute(
+            "UPDATE users SET token_version = token_version + 1 WHERE username=?",
+            (username,),
+        )
+        conn.commit()
+    return get_token_version(username)
+
+
 def create_jwt_token(username: str, role: int) -> str:
-    """创建 JWT token"""
+    """创建 JWT token（携带 token_version，用于单点登录校验）"""
+    version = get_token_version(username)
     payload = {
         "username": username,
         "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS),
+        "token_version": version,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=get_config_value("JWT_EXPIRATION_HOURS", 24)),
         "iat": datetime.now(timezone.utc),
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
@@ -82,6 +99,14 @@ def decode_jwt_token(token: str) -> dict[str, Any] | None:
         return None
     except jwt.InvalidTokenError:
         return None
+
+
+def verify_token_version(payload: dict[str, Any]) -> bool:
+    """验证 token 版本号是否与数据库一致（防止多设备登录）"""
+    username = payload.get("username", "")
+    token_version = payload.get("token_version", 0)
+    db_version = get_token_version(username)
+    return token_version == db_version
 
 
 # ── 角色判断 ──

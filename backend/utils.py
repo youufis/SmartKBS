@@ -15,10 +15,6 @@ from backend.config import (
     ROOT_DIR,
     STU_DIR,
     CHAT_HISTORY_DIR,
-    IMAGE_EXTENSIONS,
-    DOCUMENT_EXTENSIONS,
-    MAX_DOC_SIZE_MB,
-    MAX_IMAGE_SIZE_MB,
     DEFAULT_LOGGED_IN_NAME,
 )
 from backend.database import execute_query
@@ -71,13 +67,15 @@ def get_account_html_dir(logged_in_name: Optional[str]) -> str:
 # ── 文件类型检测 ──
 
 def is_image_file(file_path: str) -> bool:
+    from backend.api.config_router import get_config_value
     _, ext = os.path.splitext(file_path.lower())
-    return ext in IMAGE_EXTENSIONS
+    return ext in get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'])
 
 
 def is_document_file(file_path: str) -> bool:
+    from backend.api.config_router import get_config_value
     _, ext = os.path.splitext(file_path.lower())
-    return ext in DOCUMENT_EXTENSIONS
+    return ext in get_config_value("DOCUMENT_EXTENSIONS", ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm'])
 
 
 def check_file_size(file_path: str, max_size_mb: int = 10) -> bool:
@@ -196,18 +194,10 @@ def get_user_daily_usage(username: str) -> int:
 
 def get_limit_config() -> tuple[bool, int]:
     """运行时读取限流配置（每次调用时读取，修改即时生效）"""
-    try:
-        path = Path(__file__).resolve().parent / "system_config.json"
-        if path.exists():
-            import json as _json
-            cfg = _json.loads(path.read_text(encoding="utf-8"))
-            enabled = cfg.get("ENABLE_REQUEST_LIMIT", False)
-            limit = cfg.get("MAX_ALLOWED_REQUESTS", 50)
-            return bool(enabled), int(limit)
-    except Exception:
-        pass
-    # 回退到 config.py 的默认值
-    return False, 50
+    from backend.api.config_router import get_config_value
+    enabled = get_config_value("ENABLE_REQUEST_LIMIT", False)
+    limit = get_config_value("MAX_ALLOWED_REQUESTS", 50)
+    return bool(enabled), int(limit)
 
 
 def check_user_daily_requests(username: str, role: int) -> tuple[bool, int | float]:

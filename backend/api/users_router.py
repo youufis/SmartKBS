@@ -1,7 +1,6 @@
 """
 用户管理 API 路由
 注册 / 更新 / 改密 / 删除 / 查询 / 导入 / 批量删除
-移植自 AgentSmartKBXS.py
 """
 import asyncio
 import csv

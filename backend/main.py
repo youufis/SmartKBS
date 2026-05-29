@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from backend.config import SERVER_HOST, SERVER_PORT, FRONTEND_DIST_DIR
+from backend.config import SERVER_HOST, SERVER_PORT, FRONTEND_DIST_DIR, BASE_DIR
 from backend.database import init_db
 from backend.question_db import init_question_db
 from backend.logger import logger
@@ -25,7 +25,7 @@ from backend.middleware import register_middleware
 async def lifespan(app: FastAPI):
     """应用生命周期管理（替代已弃用的 on_event）"""
     # ── 启动 ──
-    os.environ.setdefault("MPLCONFIGDIR", "D:/SmartKBS/matplotlib")
+    os.environ.setdefault("MPLCONFIGDIR", str(BASE_DIR / "matplotlib"))
     init_db()
     init_question_db()
     logger.info("SmartKB 后端启动完成")
