@@ -11,7 +11,7 @@ const LoginPage: React.FC = () => {
   const login = useAuthStore((s: { login: (u: string, p: string) => Promise<void> }) => s.login)
   const [loading, setLoading] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
-  const [agentName, setAgentName] = useState('高中信通版')
+  const [agentName, setAgentName] = useState('智慧教学平台-高中信通版')
   const [orgName, setOrgName] = useState('')
 
   // 获取公开配置（品牌信息）
@@ -67,7 +67,7 @@ const LoginPage: React.FC = () => {
             <Typography.Title level={3} style={{ margin: 0, color: '#1677ff' }}>
               🤖 SmartKB
             </Typography.Title>
-            <Typography.Text type="secondary">教育智能体·{agentName}</Typography.Text>
+            <Typography.Text type="secondary">{agentName}</Typography.Text>
             <div style={{ marginTop: 8, fontSize: 13, color: onlineCount > 0 ? '#52c41a' : '#999' }}>
               🟢 在线人数: {onlineCount}
             </div>

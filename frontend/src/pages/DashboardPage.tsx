@@ -177,7 +177,7 @@ const DashboardPage: React.FC = () => {
           <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 15, marginTop: 8, display: 'block' }}>
             {isStudent
               ? '欢迎回来，继续你的学习之旅吧！'
-              : '欢迎使用 SmartKB 教学管理平台'}
+              : '欢迎使用 SmartKBS 智慧教学平台'}
           </Text>
         </div>
       </Card>
