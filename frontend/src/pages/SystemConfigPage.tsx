@@ -25,7 +25,7 @@ const GLOBAL_CONFIG_FIELDS = [
     desc: '全局兜底密钥，用户未配置时使用。如已设置环境变量 DASHSCOPE_API_KEY 则优先使用，此处可不填' },
   // 模型与应用配置
   { key: 'APPID', label: 'APPID', type: 'text', group: 'model',
-    desc: 'DashScope 应用 ID' },
+    desc: '在阿里云百炼平台（https://bailian.console.aliyun.com）上创建的智能体应用 ID。创建路径：百炼 → 应用中心 → 我的应用 → 创建智能体应用 → 复制 APPID' },
   { key: 'QWEN_OPENAI_API_BASE', label: 'API 基础地址', type: 'text', group: 'model' },
   { key: 'MODEL_LONG_NAME', label: '长文本模型', type: 'text', group: 'model' },
   { key: 'MODEL_VL_NAME', label: '视觉模型', type: 'text', group: 'model' },
