@@ -91,6 +91,20 @@ def encode_image_to_base64(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
+def get_image_mime_type(file_path: str) -> str:
+    """根据文件扩展名返回对应的图片 MIME 类型"""
+    ext = os.path.splitext(file_path.lower())[1]
+    mime_map = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.bmp': 'image/bmp',
+        '.tiff': 'image/tiff', '.tif': 'image/tiff',
+        '.webp': 'image/webp',
+    }
+    return mime_map.get(ext, 'image/jpeg')
+
+
 def calculate_file_hash(file_path: str) -> str:
     """计算文件 MD5 哈希"""
     hash_md5 = hashlib.md5()
