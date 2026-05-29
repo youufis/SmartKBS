@@ -109,6 +109,15 @@ async def update_config(req: ConfigUpdate, request: Request):
             current[key] = value
     save_config(current)
     logger.info(f"管理员 {user['username']} 更新了系统配置 ({len(req.config)} 项)")
+
+    # 更新 API Key 后清除聊天模块的缓存，使新 key 即时生效
+    if any(k in ('dashscope_api_key', 'deepseek_api_key') for k in req.config):
+        try:
+            from backend.api.chat_router import clear_api_key_cache
+            clear_api_key_cache()
+        except Exception:
+            pass
+
     return {"status": "ok", "config": current}
 
 
