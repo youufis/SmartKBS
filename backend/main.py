@@ -36,8 +36,8 @@ async def lifespan(app: FastAPI):
 
 # 创建 FastAPI 应用
 app = FastAPI(
-    title="SmartKB - 教育智能体 API",
-    description="高中信息技术与通用技术课程 AI 智能问答与教学管理平台",
+    title="SmartKBS - 智慧教学平台 API",
+    description="高中信息技术与通用技术课程 AI 智慧教学管理平台",
     version="2.0.0",
     docs_url="/docs",
     lifespan=lifespan,
