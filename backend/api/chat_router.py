@@ -334,6 +334,10 @@ def _chat_event_generator(
                 for chunk in _agent_chat_image_stream(fp, enhanced_prompt, dashscope_api_key):
                     if 'usage' in chunk:
                         usage = chunk['usage']
+                        # usage 所在 chunk 也携带了完整文本，需要发送到前端
+                        if chunk.get('text'):
+                            content = chunk['text']
+                            yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
                         continue
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
@@ -348,6 +352,10 @@ def _chat_event_generator(
                 for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
                     if 'usage' in chunk:
                         usage = chunk['usage']
+                        # usage 所在 chunk 也携带了完整文本
+                        if chunk.get('text'):
+                            content = chunk['text']
+                            yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
                         continue
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
