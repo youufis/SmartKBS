@@ -205,7 +205,7 @@ class FileSummaryCache:
                     f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-flash"),
+                        "model": get_config_value("MODEL_VL_NAME", "qwen-vl-plus"),
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -344,7 +344,7 @@ def _chat_event_generator(
                 combined += content
                 if usage:
                     record_token_usage(username, user_payload.get('role', 2) if user_payload else 2,
-                        usage.get('model', 'qwen3-vl-flash'), usage.get('input_tokens', 0), usage.get('output_tokens', 0),
+                        usage.get('model', 'qwen-vl-plus'), usage.get('input_tokens', 0), usage.get('output_tokens', 0),
                         'chat', session_id or '')
             elif is_document_file(fp):
                 content = ""
@@ -449,7 +449,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
-            timeout=120,
+            timeout=60,
         )
         if resp.status_code != 200:
             yield {"text": "文档处理失败"}
@@ -490,11 +490,12 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     """图像理解流式（同步）"""
     import requests as sync_requests
     try:
-        if is_image_file(file_path):
-            logger.info(f"开始处理图片: {file_path}")
+        logger.info(f"开始处理图片: {file_path}")
         encoded_image = encode_image_to_base64(file_path)
+        model_name = get_config_value("MODEL_VL_NAME", "qwen-vl-plus")
+        logger.info(f"调用视觉模型: {model_name}")
         payload = {
-            "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-flash"),
+            "model": model_name,
             "messages": [{
                 "role": "user",
                 "content": [
@@ -509,7 +510,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
-            timeout=120,
+            timeout=60,
         )
         if resp.status_code != 200:
             logger.warning(f"图像API返回非200状态: {resp.status_code} - {resp.text[:300]}")
@@ -529,7 +530,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
                     data = json.loads(data_str)
                     if "usage" in data:
                         yield {"text": full_text, "usage": {
-                            "model": data["usage"].get("model", "qwen3-vl-flash") if isinstance(data["usage"], dict) else "qwen3-vl-flash",
+                            "model": data["usage"].get("model", "qwen-vl-plus") if isinstance(data["usage"], dict) else "qwen-vl-plus",
                             "input_tokens": data["usage"].get("input_tokens", 0) if isinstance(data["usage"], dict) else 0,
                             "output_tokens": data["usage"].get("output_tokens", 0) if isinstance(data["usage"], dict) else 0,
                         }}
