@@ -260,6 +260,16 @@ async def chat_stream(req: ChatRequest, request: Request):
     username = user["username"] if user else DEFAULT_LOGGED_IN_NAME
     role_val = user.get("role", 2) if user else 2
 
+    # AI 对话权限检查（管理员 role=0 始终可用，教师和学生按配置决定）
+    if role_val != 0:
+        allowed_roles = get_config_value("ENABLE_AI_CHAT_FOR_ROLES", [1, 2])
+        if role_val not in allowed_roles:
+            role_name = "教师" if role_val == 1 else "学生"
+            return StreamingResponse(
+                _error_stream(f"AI 对话功能已对{role_name}关闭，请联系管理员开启"),
+                media_type="text/event-stream"
+            )
+
     # 请求限流（仅对学生和教师生效）
     allowed, remaining = check_user_daily_requests(username, role_val)
     if not allowed:

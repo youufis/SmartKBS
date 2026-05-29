@@ -34,7 +34,18 @@ const AppLayout: React.FC = () => {
   const location = useLocation()
   const { user, onlineCount, logout, fetchOnlineCount } = useAuthStore()
   const [collapsed, setCollapsed] = React.useState(false)
+  const [openKeys, setOpenKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('smartkb_menu_openkeys')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   const [orgName, setOrgName] = useState('')
+
+  // 根据角色构建菜单项（分组分类）
+  const isStudent = user?.role === 'student'
+  const isTeacher = user?.role === 'teacher'
+  const isAdmin = user?.role === 'admin'
 
   // 获取单位名称
   useEffect(() => {
@@ -42,11 +53,6 @@ const AppLayout: React.FC = () => {
       if (data.ORG_NAME) setOrgName(data.ORG_NAME)
     }).catch(() => {})
   }, [])
-
-  // 根据角色构建菜单项（分组分类）
-  const isStudent = user?.role === 'student'
-  const isTeacher = user?.role === 'teacher'
-  const isAdmin = user?.role === 'admin'
 
   // 学生菜单分组
   const studentMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
@@ -111,7 +117,6 @@ const AppLayout: React.FC = () => {
     return groups.map(group => ({
       key: group.key,
       label: group.label,
-      type: 'group' as const,
       children: group.children
         .filter((item: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }) => {
           if (item.adminOnly) return isAdmin
@@ -125,6 +130,22 @@ const AppLayout: React.FC = () => {
         })),
     }))
   }
+
+  // 记住展开状态到 localStorage
+  useEffect(() => {
+    localStorage.setItem('smartkb_menu_openkeys', JSON.stringify(openKeys))
+  }, [openKeys])
+
+  // 当前路径变化时，自动展开所在的分组
+  useEffect(() => {
+    const groups = isStudent ? studentMenuGroups : teacherMenuGroups
+    const parentKey = groups.find(g =>
+      g.children.some(c => c.key === location.pathname)
+    )?.key
+    if (parentKey) {
+      setOpenKeys(prev => prev.includes(parentKey) ? prev : [...prev, parentKey])
+    }
+  }, [location.pathname, isStudent])
 
   React.useEffect(() => {
     fetchOnlineCount()
@@ -225,6 +246,8 @@ const AppLayout: React.FC = () => {
             selectedKeys={[location.pathname]}
             items={buildMenuItems()}
             onClick={({ key }) => navigate(key)}
+            openKeys={collapsed ? [] : openKeys}
+            onOpenChange={setOpenKeys}
             style={{ height: '100%', borderRight: 0 }}
           />
         </Sider>
