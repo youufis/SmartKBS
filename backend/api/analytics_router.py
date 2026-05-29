@@ -36,12 +36,12 @@ def _call_ai(prompt: str) -> str:
         return "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
 
     from dashscope import Application as DashScopeApp
-    from backend.config import APPID
+    from backend.api.config_router import get_config_value
 
     os.environ["DASHSCOPE_API_KEY"] = api_key
     try:
         response = DashScopeApp.call(
-            app_id=APPID,
+            app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
             prompt=prompt,
             stream=False,  # 非流式调用
         )

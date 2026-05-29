@@ -1,7 +1,6 @@
 """
 认证 API 路由
 登录 / 登出 / 当前用户 / 在线人数
-移植自 AgentSmartKBXS.py login() 函数
 """
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -11,11 +10,12 @@ from backend.database import execute_query
 from backend.auth import (
     check_password,
     create_jwt_token,
+    increment_token_version,
     get_user_role,
     remove_active_token,
     get_online_count,
 )
-from backend.config import JWT_EXPIRATION_HOURS
+from backend.api.config_router import get_config_value
 from backend.logger import logger
 
 router = APIRouter()
@@ -63,7 +63,8 @@ async def login(req: LoginRequest):
     if not check_password(password, hashed_password):
         raise HTTPException(status_code=401, detail="密码错误")
 
-    # 生成 JWT token
+    # 生成 JWT token（先递增版本号，使旧 token 失效）
+    increment_token_version(username)
     token = create_jwt_token(username, role_val)
 
     # 格式化用户信息
@@ -98,7 +99,7 @@ async def login(req: LoginRequest):
         value=token,
         httponly=True,      # 防止 XSS 窃取
         samesite="lax",     # 允许同站导航携带
-        max_age=JWT_EXPIRATION_HOURS * 3600,  # 与 JWT 过期时间一致
+        max_age=get_config_value("JWT_EXPIRATION_HOURS", 24) * 3600,  # 与 JWT 过期时间一致
         path="/",
     )
     return response

@@ -20,6 +20,17 @@ def _q_count(sql: str, params: tuple = ()) -> int:
     return rows[0]['COUNT(*)'] if rows else 0
 
 
+def _get_user_grade_class(username: str) -> tuple:
+    """查询用户的年级(grade)和班级(class)"""
+    rows = execute_query(
+        "SELECT grade, class FROM users WHERE username = ?",
+        (username,),
+    )
+    if rows and rows[0]:
+        return rows[0][0] or "", rows[0][1] or ""
+    return "", ""
+
+
 def _db_count(sql: str, params: tuple = ()) -> int:
     """执行 database 的 COUNT 查询并返回数值（返回 tuple，按下标访问）"""
     rows = execute_query(sql, params)
@@ -47,8 +58,12 @@ async def dashboard_summary(request: Request):
             """SELECT COUNT(*) FROM exams
                WHERE status = 'published'
                AND (start_time IS NULL OR start_time <= ?)
-               AND (end_time IS NULL OR end_time >= ?)""",
-            (today_str, today_str),
+               AND (end_time IS NULL OR end_time >= ?)
+               AND id NOT IN (
+                   SELECT exam_id FROM exam_attempts
+                   WHERE student_username = ? AND status IN ('submitted', 'graded')
+               )""",
+            (today_str, today_str, username),
         )
 
         completed_count = _q_count(
@@ -76,6 +91,12 @@ async def dashboard_summary(request: Request):
         active_task_count = _db_count(
             "SELECT COUNT(*) FROM tasks WHERE status = 'active'",
         )
+        if active_task_count > 0:
+            # 与学生相关的活跃任务（按年级/班级匹配教师）才计数
+            from backend.api.tasks_router import _get_all_tasks, _get_user_relevant_tasks
+            all_active = _get_all_tasks()
+            relevant = _get_user_relevant_tasks(username, all_active)
+            active_task_count = len(relevant)
 
         submission_count = _db_count(
             "SELECT COUNT(*) FROM task_submissions WHERE student_username = ?",
@@ -140,9 +161,26 @@ async def dashboard_summary(request: Request):
             })
 
         # ── 课堂互动数据 ──
-        active_quiz_count = _db_count(
-            "SELECT COUNT(*) FROM interaction_quizzes WHERE status = 'active'",
-        )
+        grade, cls = _get_user_grade_class(username)
+        if grade:
+            active_quiz_count = _db_count(
+                """SELECT COUNT(*) FROM interaction_quizzes q
+                   JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
+                   WHERE q.status = 'active' AND u.grade = ?
+                   AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)""",
+                (grade, username),
+            )
+            if cls:
+                cls_param = f",{cls},"
+                active_quiz_count = _db_count(
+                    """SELECT COUNT(*) FROM interaction_quizzes q
+                       JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
+                       WHERE q.status = 'active' AND u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0
+                       AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)""",
+                    (grade, cls_param, username),
+                )
+        else:
+            active_quiz_count = 0
         my_quiz_answers = _db_count(
             "SELECT COUNT(*) FROM interaction_quiz_answers WHERE student_username = ?",
             (username,),

@@ -1,7 +1,6 @@
 """
 对话历史记录 API 路由
 目录树浏览 / 文件读取 / 删除
-移植自 AgentSmartKBXS.py
 """
 import os
 import shutil

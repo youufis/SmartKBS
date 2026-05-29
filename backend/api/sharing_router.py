@@ -12,6 +12,7 @@ from backend.api.dependencies import get_current_user
 from backend.auth import is_admin, is_teacher
 from backend.database import execute_query, execute_insert_update
 from backend.logger import logger
+from backend.config import STU_DIR, ROOT_DIR
 
 router = APIRouter()
 
@@ -34,7 +35,7 @@ def _list_to_csv(items: list[str]) -> str:
 def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
     """构建完整的 /api/files/ 访问路径（相对于 BASE_DIR）"""
     dir_name = "html" if resource_type == "html" else "downloads"
-    if file_path.startswith(f"{owner}/{dir_name}/") or file_path.startswith(f"stu/{owner}/{dir_name}/"):
+    if file_path.startswith(f"{owner}/{dir_name}/") or file_path.startswith(f"{STU_DIR}/{owner}/{dir_name}/"):
         return file_path
     return f"{owner}/{dir_name}/{file_path}"
 
