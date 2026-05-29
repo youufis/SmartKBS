@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
-  Spin, Typography, Divider, Space, Alert, Tag,
+  Spin, Typography, Divider, Space, Alert, Tag, Checkbox,
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
@@ -17,8 +17,8 @@ const { Title, Text } = Typography
 
 const GLOBAL_CONFIG_FIELDS = [
   // 品牌信息
-  { key: 'AGENT_NAME', label: '智能体名称', type: 'text', group: 'brand',
-    desc: '显示在登录页面的平台名称。如"智慧教学平台-高中信通版"、"智慧教学平台-高中数学版"等' },
+  { key: 'AGENT_EDITION', label: '平台版本', type: 'text', group: 'brand',
+    desc: '显示在登录页面 "智慧教学平台-" 之后的版本名称，如 "高中信通版"、"高中数学版"等' },
   { key: 'ORG_NAME', label: '单位名称', type: 'text', group: 'brand', required: false,
     desc: '显示在登录页面和界面顶部的单位/学校名称，为空则不显示' },
   // API 密钥
@@ -31,6 +31,9 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MODEL_LONG_NAME', label: '长文本模型', type: 'text', group: 'model' },
   { key: 'MODEL_VL_NAME', label: '视觉模型', type: 'text', group: 'model' },
   { key: 'MODEL_NAME', label: '默认对话模型', type: 'text', group: 'model' },
+  // AI 对话权限
+  { key: 'ENABLE_AI_CHAT_FOR_ROLES', label: 'AI 对话权限', type: 'roles', group: 'ai',
+    desc: '选择可使用 AI 对话的角色（管理员始终可用）' },
   // 系统限制
   { key: 'MAX_DOC_SIZE_MB', label: '文档大小限制 (MB)', type: 'number', group: 'limit' },
   { key: 'MAX_IMAGE_SIZE_MB', label: '图片大小限制 (MB)', type: 'number', group: 'limit' },
@@ -51,6 +54,7 @@ const GROUP_LABELS: Record<string, string> = {
   brand: '🏷️ 品牌信息',
   api: '🔑 API 密钥',
   model: '🤖 模型与应用配置',
+  ai: '💬 AI 对话设置',
   limit: '⚙️ 系统限制',
   filetype: '📁 文件类型白名单',
 }
@@ -216,14 +220,29 @@ const SystemConfigPage: React.FC = () => {
                 >
                   <Input placeholder="多个扩展名用逗号分隔，如 .jpg,.png" />
                 </Form.Item>
+              ) : field.type === 'roles' ? (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  extra={field.desc}
+                >
+                  <Checkbox.Group>
+                    <Checkbox value={1}>教师</Checkbox>
+                    <Checkbox value={2}>学生</Checkbox>
+                  </Checkbox.Group>
+                </Form.Item>
               ) : (
                 <Form.Item
                   name={field.key}
                   label={field.label}
                   rules={field.required !== false ? [{ required: true, message: `请输入${field.label}` }] : undefined}
-                  extra={field.desc}
+                  extra={field.key === 'AGENT_EDITION' ? '填写版本名称即可，系统会自动拼接为完整名称（如 "智慧教学平台-高中信通版"）' : field.desc}
                 >
-                  <Input />
+                  {field.key === 'AGENT_EDITION' ? (
+                    <Input placeholder="例如：高中信通版" />
+                  ) : (
+                    <Input />
+                  )}
                 </Form.Item>
               )}
             </div>
@@ -322,7 +341,7 @@ const SystemConfigPage: React.FC = () => {
                 initialValues={config}
                 style={{ maxWidth: 900 }}
               >
-                {['brand', 'api', 'model', 'limit', 'filetype'].map(renderGroup)}
+                {['brand', 'api', 'model', 'ai', 'limit', 'filetype'].map(renderGroup)}
 
                 <Divider />
                 <Space>
