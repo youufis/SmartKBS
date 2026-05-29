@@ -55,7 +55,6 @@ const AppLayout: React.FC = () => {
     ]},
     { label: '💡 学习', key: 'learn', children: [
       { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-      { key: '/token-usage', icon: <BarChartOutlined />, label: 'AI 用量' },
       { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
       { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
     ]},
@@ -80,7 +79,6 @@ const AppLayout: React.FC = () => {
     ]},
     { label: '💡 教学', key: 'teach', children: [
       { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-      { key: '/token-usage', icon: <BarChartOutlined />, label: 'AI 用量' },
       { key: '/html-files', icon: <FileOutlined />, label: '资源中心' },
       { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
       { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },

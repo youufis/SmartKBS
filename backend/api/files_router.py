@@ -63,7 +63,7 @@ def _auto_cleanup_temp():
 
 @router.post("/upload-temp")
 async def upload_temp_file(request: Request, file: UploadFile = File(...)):
-    """上传临时文件，返回服务器端路径"""
+    """上传临时文件，返回服务器端路径（相同内容只保存一份）"""
     _auto_cleanup_temp()
     user = get_current_user(request)
     username = user["username"]
@@ -71,10 +71,8 @@ async def upload_temp_file(request: Request, file: UploadFile = File(...)):
     _, ext = os.path.splitext(filename.lower())
     if ext not in _get_allowed_extensions():
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
-    unique_name = f"{uuid.uuid4().hex}{ext}"
     user_dir = TEMP_UPLOAD_DIR / username
     user_dir.mkdir(parents=True, exist_ok=True)
-    save_path = user_dir / unique_name
     try:
         content = await file.read()
         max_size = 10 * 1024 * 1024
@@ -82,9 +80,19 @@ async def upload_temp_file(request: Request, file: UploadFile = File(...)):
             max_size = 5 * 1024 * 1024
         if len(content) > max_size:
             raise HTTPException(status_code=400, detail="文件超过大小限制")
-        with open(save_path, "wb") as f:
-            f.write(content)
-        logger.info(f"临时文件已上传: {save_path}")
+
+        # 计算内容哈希，相同内容的文件只保存一份
+        import hashlib
+        file_hash = hashlib.sha256(content).hexdigest()
+        save_path = user_dir / f"{file_hash}{ext}"
+
+        if not save_path.exists():
+            with open(save_path, "wb") as f:
+                f.write(content)
+            logger.info(f"临时文件已上传: {save_path}")
+        else:
+            logger.info(f"临时文件已存在（重复上传）: {save_path}")
+
         return {"path": str(save_path), "filename": filename, "size": len(content)}
     except HTTPException:
         raise

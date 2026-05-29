@@ -5,8 +5,9 @@ import {
   Spin, Typography, Divider, Space, Alert, Tag,
 } from 'antd'
 import {
-  SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined,
+  SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons'
+import { Modal } from 'antd'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 
@@ -263,6 +264,53 @@ const SystemConfigPage: React.FC = () => {
 
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
           {/* ── 全局配置 Tab ── */}
+          {/* ── 缓存管理 Tab ── */}
+          <Tabs.TabPane
+            tab={<span><ReloadOutlined /> 缓存管理</span>}
+            key="cache"
+          >
+            <Card title="清理临时文件">
+              <Text style={{ display: 'block', marginBottom: 16 }}>
+                临时文件是用户上传的图片和文档在服务器上生成的缓存，
+                包括 AI 对话中上传的文件。清理后不会影响系统运行，
+                但正在进行的对话中引用的文件可能需要重新上传。
+              </Text>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Alert
+                  message="此操作将删除所有用户上传的临时文件，不可恢复！"
+                  type="warning"
+                  showIcon
+                />
+                <Button
+                  danger
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={() => {
+                    Modal.confirm({
+                      title: '确认清理所有临时缓存？',
+                      icon: <ExclamationCircleOutlined />,
+                      content: '所有用户上传的临时文件将被永久删除，此操作不可恢复！',
+                      okText: '确认清理',
+                      okType: 'danger',
+                      cancelText: '取消',
+                      onOk: async () => {
+                        try {
+                          await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
+                          message.success('所有临时缓存已清理')
+                        } catch (e: unknown) {
+                          const err = e as { response?: { data?: { detail?: string } }; message?: string }
+                          message.error('清理失败: ' + (err?.response?.data?.detail || err?.message || '未知错误'))
+                        }
+                      },
+                    })
+                  }}
+                >
+                  清理所有缓存
+                </Button>
+              </Space>
+            </Card>
+          </Tabs.TabPane>
+
           <Tabs.TabPane
             tab={<span><SettingOutlined /> 全局配置</span>}
             key="global"
