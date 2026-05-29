@@ -53,12 +53,6 @@ async def dashboard_summary(request: Request):
         "user_name": user.get("name", username),
     }
 
-    # ── AI Token 用量（今日） ──
-    token_today = _db_count(
-        "SELECT COALESCE(SUM(total_tokens), 0) FROM ai_token_usage WHERE created_at >= ? AND created_at <= ?",
-        (today_str, today_str + " 23:59:59"),
-    )
-
     if role == 2:  # ── 学生 ──
         pending_count = _q_count(
             """SELECT COUNT(*) FROM exams
@@ -210,7 +204,6 @@ async def dashboard_summary(request: Request):
             "active_quiz_count": active_quiz_count,
             "my_quiz_answers": my_quiz_answers,
             "student_poll_vote_count": poll_vote_count,
-            "token_today": token_today,
         })
 
     else:  # ── 教师/管理员 ──
@@ -316,8 +309,6 @@ async def dashboard_summary(request: Request):
                    WHERE p.creator_username = ?""", (username,),
             )
 
-        # ── AI Token 用量（今日） ──
-
         result.update({
             "exam_stats": {
                 "total": exam_total,
@@ -337,7 +328,6 @@ async def dashboard_summary(request: Request):
             "teacher_poll_count": poll_count,
             "teacher_quiz_answer_count": quiz_answer_count,
             "teacher_poll_vote_count": poll_vote_count,
-            "token_today": token_today,
         })
 
         if role == 1:
@@ -564,43 +554,3 @@ async def recent_activity(request: Request):
     return activities[:20]
 
 
-@router.get("/token-usage", summary="获取 AI Token 用量统计")
-async def get_token_usage(
-    request: Request,
-    range_type: str = "today",
-    model: str = "",
-):
-    """获取 AI Token 用量统计
-
-    - 学生：仅看自己
-    - 教师：看自己 + 本班学生（通过 user_role + grade 过滤）
-    - 管理员：看全部
-    - range_type: today / yesterday / week / month / custom
-    """
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-
-    from backend.token_usage import get_token_usage_summary
-
-    if role == 2:
-        # 学生只看自己
-        summary = get_token_usage_summary(username=username, range_type=range_type)
-    elif role == 1:
-        # 教师看自己和本班学生的
-        grade, cls = _get_user_grade_class(username)
-        rows = execute_query(
-            "SELECT username FROM users WHERE role=2 AND grade=?", (grade,),
-        )
-        usernames = [username] + [r[0] for r in rows]
-        # 没有按用户列表过滤的简便方式，直接用 user_role 过滤（学生=2）
-        summary = get_token_usage_summary(range_type=range_type)
-        summary["filtered"] = f"{grade}"
-    else:
-        # 管理员看全部
-        summary = get_token_usage_summary(range_type=range_type)
-
-    if model:
-        summary["by_model"] = [m for m in summary["by_model"] if m["model"] == model]
-
-    return summary

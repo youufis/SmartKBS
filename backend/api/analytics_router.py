@@ -37,7 +37,6 @@ def _call_ai(prompt: str) -> str:
 
     from dashscope import Application as DashScopeApp
     from backend.api.config_router import get_config_value
-    from backend.token_usage import record_token_usage
 
     os.environ["DASHSCOPE_API_KEY"] = api_key
     try:
@@ -46,15 +45,6 @@ def _call_ai(prompt: str) -> str:
             prompt=prompt,
             stream=False,  # 非流式调用
         )
-        try:
-            usage = getattr(response, "usage", None)
-            if usage:
-                record_token_usage("system", 0, "deepseek-v4-flash",
-                    getattr(usage, "input_tokens", 0) or 0,
-                    getattr(usage, "output_tokens", 0) or 0,
-                    "analytics", "")
-        except Exception:
-            pass
         if hasattr(response, "output"):
             output = response.output
             if hasattr(output, "text"):

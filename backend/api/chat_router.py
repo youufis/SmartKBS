@@ -35,7 +35,6 @@ from backend.utils import (
 )
 from backend.logger import logger
 from backend.database import execute_query
-from backend.token_usage import record_token_usage
 
 router = APIRouter()
 
@@ -185,13 +184,6 @@ class FileSummaryCache:
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    # 记录 token 用量
-                    usage = data.get("usage", {})
-                    if usage:
-                        record_token_usage("system", 0, "qwen-long",
-                            usage.get("input_tokens", 0) or 0,
-                            usage.get("output_tokens", 0) or 0,
-                            "summary", "")
                     return data["choices"][0]["message"]["content"]
         except Exception as e:
             logger.warning(f"文件摘要生成失败: {e}")
@@ -205,7 +197,7 @@ class FileSummaryCache:
                     f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": get_config_value("MODEL_VL_NAME", "qwen-vl-plus"),
+                        "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-flash"),
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -330,40 +322,16 @@ def _chat_event_generator(
                 yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
             if is_image_file(fp):
                 content = ""
-                usage = {}
                 for chunk in _agent_chat_image_stream(fp, enhanced_prompt, dashscope_api_key):
-                    if 'usage' in chunk:
-                        usage = chunk['usage']
-                        # usage 所在 chunk 也携带了完整文本，需要发送到前端
-                        if chunk.get('text'):
-                            content = chunk['text']
-                            yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
-                        continue
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
                 combined += content
-                if usage:
-                    record_token_usage(username, user_payload.get('role', 2) if user_payload else 2,
-                        usage.get('model', 'qwen-vl-plus'), usage.get('input_tokens', 0), usage.get('output_tokens', 0),
-                        'chat', session_id or '')
             elif is_document_file(fp):
                 content = ""
-                usage = {}
                 for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
-                    if 'usage' in chunk:
-                        usage = chunk['usage']
-                        # usage 所在 chunk 也携带了完整文本
-                        if chunk.get('text'):
-                            content = chunk['text']
-                            yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
-                        continue
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
                 combined += content
-                if usage:
-                    record_token_usage(username, user_payload.get('role', 2) if user_payload else 2,
-                        usage.get('model', 'qwen-long'), usage.get('input_tokens', 0), usage.get('output_tokens', 0),
-                        'chat', session_id or '')
             else:
                 err = f'不支持的文件类型: {fp}'
                 combined += err
@@ -403,16 +371,6 @@ def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, use
                 if text:
                     full_text += text
                     yield {"text": full_text, "session_id": new_session_id}
-        # 记录 token 用量
-        try:
-            usage = getattr(response, "usage", None)
-            if usage and username:
-                record_token_usage(username, 2, "deepseek-v4-flash",
-                    getattr(usage, "input_tokens", 0) or 0,
-                    getattr(usage, "output_tokens", 0) or 0,
-                    "chat", new_session_id or "")
-        except Exception:
-            pass
     except Exception as e:
         logger.error(f"Agent chat error: {e}")
         yield {"text": "网络连接错误：请检查您的网络连接或稍后重试！", "session_id": session_id}
@@ -449,7 +407,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
-            timeout=60,
+            timeout=120,
         )
         if resp.status_code != 200:
             yield {"text": "文档处理失败"}
@@ -466,13 +424,6 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
                     break
                 try:
                     data = json.loads(data_str)
-                    if "usage" in data:
-                        yield {"text": full_text, "usage": {
-                            "model": data["usage"].get("model", "qwen-long") if isinstance(data["usage"], dict) else "qwen-long",
-                            "input_tokens": data["usage"].get("input_tokens", 0) if isinstance(data["usage"], dict) else 0,
-                            "output_tokens": data["usage"].get("output_tokens", 0) if isinstance(data["usage"], dict) else 0,
-                        }}
-                        continue
                     if "choices" in data and data["choices"]:
                         delta = data["choices"][0].get("delta", {})
                         content = delta.get("content", "")
@@ -492,7 +443,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     try:
         logger.info(f"开始处理图片: {file_path}")
         encoded_image = encode_image_to_base64(file_path)
-        model_name = get_config_value("MODEL_VL_NAME", "qwen-vl-plus")
+        model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-flash")
         logger.info(f"调用视觉模型: {model_name}")
         payload = {
             "model": model_name,
@@ -510,7 +461,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
-            timeout=60,
+            timeout=120,
         )
         if resp.status_code != 200:
             logger.warning(f"图像API返回非200状态: {resp.status_code} - {resp.text[:300]}")
@@ -528,13 +479,6 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
                     break
                 try:
                     data = json.loads(data_str)
-                    if "usage" in data:
-                        yield {"text": full_text, "usage": {
-                            "model": data["usage"].get("model", "qwen-vl-plus") if isinstance(data["usage"], dict) else "qwen-vl-plus",
-                            "input_tokens": data["usage"].get("input_tokens", 0) if isinstance(data["usage"], dict) else 0,
-                            "output_tokens": data["usage"].get("output_tokens", 0) if isinstance(data["usage"], dict) else 0,
-                        }}
-                        continue
                     if "choices" in data and data["choices"]:
                         delta = data["choices"][0].get("delta", {})
                         content = delta.get("content", "")
