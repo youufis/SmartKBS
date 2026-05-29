@@ -30,7 +30,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-flash",
-    "MODEL_NAME": "qwen-max",
+    "MODEL_NAME": "deepseek-v4-flash",
     # 文件大小限制
     "MAX_DOC_SIZE_MB": 10,
     "MAX_IMAGE_SIZE_MB": 5,
@@ -43,6 +43,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "MAX_ALLOWED_REQUESTS": 50,
     # 下载中心
     "TEACHER_DOWNLOAD_QUOTA_GB": 5,
+    # 文件类型白名单
+    "IMAGE_EXTENSIONS": ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'],
+    "DOCUMENT_EXTENSIONS": [
+        '.txt', '.md', '.pdf', '.doc', '.docx',
+        '.xls', '.xlsx', '.ppt', '.pptx', '.csv',
+        '.json', '.html', '.htm',
+    ],
 }
 
 

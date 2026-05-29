@@ -1,7 +1,6 @@
 """
 任务管理 API 路由
 创建/激活/提交/汇总
-移植自 AgentSmartKBXS.py
 """
 import os
 import time

@@ -39,6 +39,11 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MAX_ALLOWED_REQUESTS', label: '每日最大请求数', type: 'number', group: 'limit' },
   { key: 'TEACHER_DOWNLOAD_QUOTA_GB', label: '教师下载配额 (GB)', type: 'number', group: 'limit',
     desc: '每位教师下载中心的最大存储空间' },
+  // 文件类型白名单
+  { key: 'IMAGE_EXTENSIONS', label: '图片文件扩展名', type: 'tags', group: 'filetype',
+    desc: '允许上传的图片格式，多个用逗号分隔，如 .jpg,.jpeg,.png' },
+  { key: 'DOCUMENT_EXTENSIONS', label: '文档文件扩展名', type: 'tags', group: 'filetype',
+    desc: '允许上传的文档格式，多个用逗号分隔，如 .txt,.md,.pdf' },
 ]
 
 const GROUP_LABELS: Record<string, string> = {
@@ -46,6 +51,7 @@ const GROUP_LABELS: Record<string, string> = {
   api: '🔑 API 密钥',
   model: '🤖 模型与应用配置',
   limit: '⚙️ 系统限制',
+  filetype: '📁 文件类型白名单',
 }
 
 const SystemConfigPage: React.FC = () => {
@@ -74,7 +80,14 @@ const SystemConfigPage: React.FC = () => {
     try {
       const { data } = await apiClient.get('/api/config')
       setConfig(data)
-      form.setFieldsValue(data)
+      // 将数组字段转为逗号分隔字符串供 Tags 输入框展示
+      const formValues = { ...data }
+      for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS']) {
+        if (Array.isArray(formValues[key])) {
+          formValues[key] = formValues[key].join(',')
+        }
+      }
+      form.setFieldsValue(formValues)
       // 同时刷新 API Key 状态
       loadApikeyStatus()
     } catch {
@@ -91,6 +104,12 @@ const SystemConfigPage: React.FC = () => {
       setSaving(true)
       // 使用 getFieldsValue 确保所有字段（包括空值）都被提交
       const allValues = form.getFieldsValue()
+      // 将 Tags 输入框的逗号分隔字符串转回数组
+      for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS']) {
+        if (typeof allValues[key] === 'string') {
+          allValues[key] = allValues[key].split(',').map((s: string) => s.trim()).filter(Boolean)
+        }
+      }
       await apiClient.put('/api/config', { config: allValues })
       message.success('系统配置已保存（部分配置需重启服务生效）')
       loadConfig()
@@ -111,7 +130,13 @@ const SystemConfigPage: React.FC = () => {
       try {
         const { data } = await apiClient.get('/api/config')
         setConfig(data)
-        form.setFieldsValue(data)
+        const formValues = { ...data }
+        for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS']) {
+          if (Array.isArray(formValues[key])) {
+            formValues[key] = formValues[key].join(',')
+          }
+        }
+        form.setFieldsValue(formValues)
         loadApikeyStatus()
       } catch {
         message.error('加载系统配置失败')
@@ -180,6 +205,16 @@ const SystemConfigPage: React.FC = () => {
                 >
                   <Input.Password placeholder={apikeyStatus?.configured ? '留空则不覆盖已有值' : '请输入 API Key'} />
                 </Form.Item>
+              ) : field.type === 'tags' ? (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  rules={[{ required: true, message: `请输入${field.label}` }]}
+                  extra={field.desc}
+                  getValueFromEvent={(e) => e.target.value}
+                >
+                  <Input placeholder="多个扩展名用逗号分隔，如 .jpg,.png" />
+                </Form.Item>
               ) : (
                 <Form.Item
                   name={field.key}
@@ -239,7 +274,7 @@ const SystemConfigPage: React.FC = () => {
                 initialValues={config}
                 style={{ maxWidth: 900 }}
               >
-                {['brand', 'api', 'model', 'limit'].map(renderGroup)}
+                {['brand', 'api', 'model', 'limit', 'filetype'].map(renderGroup)}
 
                 <Divider />
                 <Space>

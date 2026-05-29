@@ -43,47 +43,88 @@ const AppLayout: React.FC = () => {
     }).catch(() => {})
   }, [])
 
-  // 根据角色构建菜单项
+  // 根据角色构建菜单项（分组分类）
   const isStudent = user?.role === 'student'
-  const allMenuItems: {
-    key: string; icon: React.ReactNode; label: string;
-    adminOnly?: boolean; adminOrTeacherOnly?: boolean;
-  }[] = isStudent
-    ? // ── 学生端菜单 ──
-      [
-        { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
-        { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-        { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
-        { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
-        { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
-        { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
-        { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
-        { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
-        { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
-        { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
-        { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
-        { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
-      ]
-    : // ── 教师/管理员菜单 ──
-      [
-        { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
-        { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-        { key: '/html-files', icon: <FileOutlined />, label: '资源中心' },
-        { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
-        { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },
-        { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
-        { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
-        { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
-        { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
-        { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
-        { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
-        { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
-        { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
-        { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心' },
-        { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
-        { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
-        { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
-      ]
+  const isTeacher = user?.role === 'teacher'
+  const isAdmin = user?.role === 'admin'
+
+  // 学生菜单分组
+  const studentMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
+    { label: '📊 概览', key: 'overview', children: [
+      { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
+    ]},
+    { label: '💡 学习', key: 'learn', children: [
+      { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
+      { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
+      { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
+    ]},
+    { label: '📚 学业', key: 'study', children: [
+      { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
+      { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
+      { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
+      { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
+      { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
+    ]},
+    { label: '⚙️ 系统', key: 'sys', children: [
+      { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
+      { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
+      { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
+    ]},
+  ]
+
+  // 教师/管理员菜单分组
+  const teacherMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }[] }[] = [
+    { label: '📊 概览', key: 'overview', children: [
+      { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
+    ]},
+    { label: '💡 教学', key: 'teach', children: [
+      { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
+      { key: '/html-files', icon: <FileOutlined />, label: '资源中心' },
+      { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
+      { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },
+      { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
+    ]},
+    { label: '🏫 课堂', key: 'classroom', children: [
+      { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
+      { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
+      { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
+      { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
+      { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
+    ]},
+    { label: '📋 档案', key: 'profile', children: [
+      { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
+    ]},
+    { label: '⚙️ 管理', key: 'admin', children: [
+      { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
+      { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心' },
+      { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
+    ]},
+    { label: '🔧 系统', key: 'system', children: [
+      { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
+      { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
+    ]},
+  ]
+
+  // 根据用户角色过滤菜单项并转为 Ant Design Menu 格式
+  const buildMenuItems = () => {
+    const groups = isStudent ? studentMenuGroups : teacherMenuGroups
+    return groups.map(group => ({
+      key: group.key,
+      label: group.label,
+      type: 'group' as const,
+      children: group.children
+        .filter((item: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }) => {
+          if (item.adminOnly) return isAdmin
+          if (item.adminOrTeacherOnly) return isAdmin || isTeacher
+          return true
+        })
+        .map(item => ({
+          key: item.key,
+          icon: item.icon,
+          label: item.label,
+        })),
+    }))
+  }
 
   React.useEffect(() => {
     fetchOnlineCount()
@@ -182,11 +223,7 @@ const AppLayout: React.FC = () => {
             mode="inline"
             inlineCollapsed={collapsed}
             selectedKeys={[location.pathname]}
-            items={allMenuItems.filter((item) => {
-              if (item.adminOnly) return user?.role === 'admin'
-              if (item.adminOrTeacherOnly) return user?.role === 'admin' || user?.role === 'teacher'
-              return true
-            })}
+            items={buildMenuItems()}
             onClick={({ key }) => navigate(key)}
             style={{ height: '100%', borderRight: 0 }}
           />

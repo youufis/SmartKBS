@@ -11,7 +11,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
-from backend.config import APPID
+from backend.api.config_router import get_config_value
 from backend.question_db import (
     execute_query,
     execute_query_one,
@@ -197,7 +197,7 @@ def _call_dashscope_agent(prompt: str, api_key: str) -> str:
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
     call_params = {
-        "app_id": APPID,
+        "app_id": get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
         "prompt": prompt,
         "stream": False,
         "headers": {"X-DashScope-OssResourceResolve": "enable"},
