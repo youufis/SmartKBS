@@ -20,8 +20,8 @@ CONFIG_FILE = Path(__file__).resolve().parent.parent / "system_config.json"
 
 # ── 默认配置（与 config.py 保持一致） ──
 DEFAULT_CONFIG: dict[str, Any] = {
-    # 品牌信息
-    "AGENT_NAME": "智慧教学平台-高中信通版",
+    # 品牌信息（AGENT_NAME 由 "智慧教学平台-" + AGENT_EDITION 自动拼接，不再单独保存）
+    "AGENT_EDITION": "高中信通版",
     "ORG_NAME": "",
     # API 密钥（全局兜底）
     "dashscope_api_key": "",
@@ -38,6 +38,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "JWT_EXPIRATION_HOURS": 24,
     # 在线用户超时
     "ONLINE_USER_TIMEOUT_SECONDS": 1800,
+    # AI 对话权限（可多选角色：1=教师, 2=学生；管理员始终可用）
+    "ENABLE_AI_CHAT_FOR_ROLES": [1, 2],
     # 请求限制
     "ENABLE_REQUEST_LIMIT": False,
     "MAX_ALLOWED_REQUESTS": 50,
@@ -125,8 +127,10 @@ async def update_config(req: ConfigUpdate, request: Request):
 async def get_public_config():
     """公开配置（无需登录）— 用于登录页面等展示品牌信息"""
     cfg = load_config()
+    edition = cfg.get("AGENT_EDITION", "高中信通版")
+    full_name = f"智慧教学平台-{edition}" if edition else "智慧教学平台"
     return {
-        "AGENT_NAME": cfg.get("AGENT_NAME", "智慧教学平台-高中信通版"),
+        "AGENT_NAME": full_name,
         "ORG_NAME": cfg.get("ORG_NAME", ""),
     }
 
