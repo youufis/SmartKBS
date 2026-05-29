@@ -34,6 +34,7 @@ from backend.utils import (
 )
 from backend.logger import logger
 from backend.database import execute_query
+from backend.token_usage import record_token_usage
 
 router = APIRouter()
 
@@ -183,6 +184,13 @@ class FileSummaryCache:
                 )
                 if resp.status_code == 200:
                     data = resp.json()
+                    # 记录 token 用量
+                    usage = data.get("usage", {})
+                    if usage:
+                        record_token_usage("system", 0, "qwen-long",
+                            usage.get("input_tokens", 0) or 0,
+                            usage.get("output_tokens", 0) or 0,
+                            "summary", "")
                     return data["choices"][0]["message"]["content"]
         except Exception as e:
             logger.warning(f"文件摘要生成失败: {e}")
@@ -306,7 +314,7 @@ def _chat_event_generator(
                 enhanced_prompt = ("\n\n".join(summaries) + "\n\n" + enhanced_prompt).strip()
 
         if not valid_file_paths:
-            for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key):
+            for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key, username):
                 yield f"data: {json.dumps({'type': 'delta', 'content': chunk['text']})}\n\n"
                 session_id = chunk.get("session_id") or session_id
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
@@ -321,16 +329,32 @@ def _chat_event_generator(
                 yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
             if is_image_file(fp):
                 content = ""
+                usage = {}
                 for chunk in _agent_chat_image_stream(fp, enhanced_prompt, dashscope_api_key):
+                    if 'usage' in chunk:
+                        usage = chunk['usage']
+                        continue
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
                 combined += content
+                if usage:
+                    record_token_usage(username, user_payload.get('role', 2) if user_payload else 2,
+                        usage.get('model', 'qwen3-vl-flash'), usage.get('input_tokens', 0), usage.get('output_tokens', 0),
+                        'chat', session_id or '')
             elif is_document_file(fp):
                 content = ""
+                usage = {}
                 for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
+                    if 'usage' in chunk:
+                        usage = chunk['usage']
+                        continue
                     content = chunk['text']
                     yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
                 combined += content
+                if usage:
+                    record_token_usage(username, user_payload.get('role', 2) if user_payload else 2,
+                        usage.get('model', 'qwen-long'), usage.get('input_tokens', 0), usage.get('output_tokens', 0),
+                        'chat', session_id or '')
             else:
                 err = f'不支持的文件类型: {fp}'
                 combined += err
@@ -342,7 +366,7 @@ def _chat_event_generator(
         yield f"data: {json.dumps({'type': 'error', 'content': f'对话生成失败：{str(e)}'})}\n\n"
 
 
-def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str):
+def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = ""):
     """DashScope Agent 流式对话（同步生成器）"""
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
@@ -370,6 +394,16 @@ def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str):
                 if text:
                     full_text += text
                     yield {"text": full_text, "session_id": new_session_id}
+        # 记录 token 用量
+        try:
+            usage = getattr(response, "usage", None)
+            if usage and username:
+                record_token_usage(username, 2, "deepseek-v4-flash",
+                    getattr(usage, "input_tokens", 0) or 0,
+                    getattr(usage, "output_tokens", 0) or 0,
+                    "chat", new_session_id or "")
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"Agent chat error: {e}")
         yield {"text": "网络连接错误：请检查您的网络连接或稍后重试！", "session_id": session_id}
@@ -423,6 +457,13 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
                     break
                 try:
                     data = json.loads(data_str)
+                    if "usage" in data:
+                        yield {"text": full_text, "usage": {
+                            "model": data["usage"].get("model", "qwen-long") if isinstance(data["usage"], dict) else "qwen-long",
+                            "input_tokens": data["usage"].get("input_tokens", 0) if isinstance(data["usage"], dict) else 0,
+                            "output_tokens": data["usage"].get("output_tokens", 0) if isinstance(data["usage"], dict) else 0,
+                        }}
+                        continue
                     if "choices" in data and data["choices"]:
                         delta = data["choices"][0].get("delta", {})
                         content = delta.get("content", "")
@@ -474,6 +515,13 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
                     break
                 try:
                     data = json.loads(data_str)
+                    if "usage" in data:
+                        yield {"text": full_text, "usage": {
+                            "model": data["usage"].get("model", "qwen3-vl-flash") if isinstance(data["usage"], dict) else "qwen3-vl-flash",
+                            "input_tokens": data["usage"].get("input_tokens", 0) if isinstance(data["usage"], dict) else 0,
+                            "output_tokens": data["usage"].get("output_tokens", 0) if isinstance(data["usage"], dict) else 0,
+                        }}
+                        continue
                     if "choices" in data and data["choices"]:
                         delta = data["choices"][0].get("delta", {})
                         content = delta.get("content", "")
