@@ -29,7 +29,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "APPID": "6fcb54e8f16f4e3b94e4b9fd4eab1125",
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "MODEL_LONG_NAME": "qwen-long",
-    "MODEL_VL_NAME": "qwen-vl-plus",
+    "MODEL_VL_NAME": "qwen3-vl-flash",
     "MODEL_NAME": "deepseek-v4-flash",
     # 文件大小限制
     "MAX_DOC_SIZE_MB": 10,

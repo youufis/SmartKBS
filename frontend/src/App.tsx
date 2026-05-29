@@ -22,7 +22,6 @@ import AnnouncementsPage from './pages/AnnouncementsPage'
 import PortfolioPage from './pages/PortfolioPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import InteractionPage from './pages/InteractionPage'
-import TokenUsagePage from './pages/TokenUsagePage'
 
 function App() {
   const restoreSession = useAuthStore((s: { restoreSession: () => void }) => s.restoreSession)
@@ -57,7 +56,6 @@ function App() {
         <Route path="portfolio/:username" element={<PortfolioPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="interaction" element={<InteractionPage />} />
-        <Route path="token-usage" element={<TokenUsagePage />} />
         <Route path="about" element={<AboutPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" />} />

@@ -84,19 +84,9 @@ def _call_ai(prompt: str) -> str:
 
     from dashscope import Application as DashScopeApp
     from backend.api.config_router import get_config_value
-    from backend.token_usage import record_token_usage
     os.environ["DASHSCOPE_API_KEY"] = api_key
     try:
         response = DashScopeApp.call(app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"), prompt=prompt, stream=False)
-        try:
-            usage = getattr(response, "usage", None)
-            if usage:
-                record_token_usage("system", 0, "deepseek-v4-flash",
-                    getattr(usage, "input_tokens", 0) or 0,
-                    getattr(usage, "output_tokens", 0) or 0,
-                    "quiz", "")
-        except Exception:
-            pass
         if hasattr(response, "output") and hasattr(response.output, "text"):
             return response.output.text
         return "AI 未返回有效结果"
