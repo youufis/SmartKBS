@@ -113,9 +113,19 @@ def _save_history(teacher, grade, cls, data):
             (teacher, grade, cls),
         )
         for entry in data.get("history", []):
+            raw_time = entry.get("time", "")
+            # 补全日期：如果只有时间没有日期，结合 last_time 或当前日期
+            if raw_time and len(raw_time) <= 10 and ":" in raw_time:
+                if data.get("last_time"):
+                    base_date = time.strftime("%Y-%m-%d", time.localtime(data["last_time"]))
+                else:
+                    base_date = time.strftime("%Y-%m-%d")
+                full_time = f"{base_date} {raw_time}"
+            else:
+                full_time = raw_time if raw_time else time.strftime("%Y-%m-%d %H:%M:%S")
             c.execute(
                 "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name, result, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (teacher, grade, cls, entry.get("student", ""), entry.get("result", ""), entry.get("points", 0), entry.get("time", "")),
+                (teacher, grade, cls, entry.get("student", ""), entry.get("result", ""), entry.get("points", 0), full_time),
             )
         conn.commit()
         data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")

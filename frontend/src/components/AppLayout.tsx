@@ -69,6 +69,7 @@ const AppLayout: React.FC = () => {
       { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
       { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
+      { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
       { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
     ]},
     { label: '⚙️ 系统', key: 'sys', children: [
@@ -92,6 +93,7 @@ const AppLayout: React.FC = () => {
     ]},
     { label: '🏫 课堂', key: 'classroom', children: [
       { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
+      { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
       { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
