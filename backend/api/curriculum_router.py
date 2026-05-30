@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
-from backend.database import execute_query, execute_insert_update, get_connection
+from backend.database import execute_query_dict as execute_query, execute_insert_update, get_connection
 from backend.question_db import execute_query as q_execute_query
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin, is_teacher
