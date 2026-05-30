@@ -7,11 +7,12 @@ import {
   BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   FileOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
   TeamOutlined, CheckCircleOutlined, ClockCircleOutlined,
-  MenuOutlined, NodeIndexOutlined,
+  MenuOutlined, NodeIndexOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import * as curriculumApi from '../api/curriculum'
 import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
+import AICurriculumGenerator from '../components/AICurriculumGenerator'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 
 const { TextArea } = Input
@@ -96,6 +97,9 @@ const CurriculumPage: React.FC = () => {
   const [binderOpen, setBinderOpen] = useState(false)
   const [binderKpId, setBinderKpId] = useState(0)
   const [binderKpName, setBinderKpName] = useState('')
+
+  // ── AI 生成课程弹窗 ──
+  const [aiGeneratorOpen, setAiGeneratorOpen] = useState(false)
 
   // ── 加载课程树 ──
   const loadTree = useCallback(async () => {
@@ -462,9 +466,14 @@ const CurriculumPage: React.FC = () => {
                   <BookOutlined />
                   <span>课程大纲</span>
                   {isTeacherOrAdmin && (
-                    <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateCourse}>
-                      新建课程
-                    </Button>
+                    <>
+                      <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateCourse}>
+                        新建课程
+                      </Button>
+                      <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
+                        AI 生成
+                      </Button>
+                    </>
                   )}
                   <Button size="small" icon={<ReloadOutlined />} onClick={loadTree} />
                 </Space>
@@ -754,6 +763,16 @@ const CurriculumPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      {/* ── AI 生成课程弹窗 ── */}
+      <AICurriculumGenerator
+        open={aiGeneratorOpen}
+        onClose={() => setAiGeneratorOpen(false)}
+        onSuccess={() => {
+          setAiGeneratorOpen(false)
+          loadTree()
+        }}
+      />
+
       {/* ── 资源绑定弹窗 ── */}
       <ResourceBinder
         kpId={binderKpId}
