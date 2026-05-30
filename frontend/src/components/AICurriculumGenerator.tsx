@@ -23,7 +23,7 @@ const PROGRESS_STAGES = [
   { key: 'parsing', label: '解析生成结果...', duration: 2000 },
 ]
 
-const TIMEOUT_MS = 120_000 // 120 秒超时
+const TIMEOUT_MS = 300_000 // 300 秒超时（5 分钟）
 
 interface Props {
   open: boolean
@@ -423,7 +423,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           </Space>
 
           <Alert
-            message="提示：AI 会根据内容自动提取章、节、知识点结构。生成过程约需 30-60 秒，请耐心等待。"
+            message="提示：AI 会根据内容自动提取章、节、知识点结构。生成过程约需 1-3 分钟，请耐心等待。"
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
@@ -463,7 +463,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
             style={{ padding: '0 16px' }}
           />
           <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 8, fontSize: 12 }}>
-            预计 30-60 秒，请勿关闭弹窗
+            预计 1-3 分钟，请勿关闭弹窗
           </Typography.Text>
         </div>
       )}
