@@ -155,3 +155,19 @@ export async function getClassProgressOverview(params?: {
   const { data } = await apiClient.get('/api/curriculum/progress/overview', { params });
   return data;
 }
+
+/** 拖动排序（批量更新 sort_order，支持跨层级拖动） */
+export interface ReorderItem {
+  type: 'chapter' | 'knowledge_point';
+  id: number;
+  sort_order: number;
+  /** 章节的新父级ID（None=顶层），仅 type='chapter' 时有效 */
+  parent_id?: number | null;
+  /** 知识点的新归属章节ID，仅 type='knowledge_point' 时有效 */
+  chapter_id?: number | null;
+}
+
+export async function reorderNodes(items: ReorderItem[]): Promise<{ message: string; updated: { chapters: number; knowledge_points: number } }> {
+  const { data } = await apiClient.put('/api/curriculum/reorder', { items });
+  return data;
+}
