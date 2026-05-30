@@ -30,6 +30,14 @@ def remove_active_token(token: str):
     _active_tokens.pop(token, None)
 
 
+def remove_active_token_by_username(username: str):
+    """移除该用户的所有活跃 token（用于登出时清除在线状态）"""
+    for token in list(_active_tokens.keys()):
+        payload = decode_jwt_token(token)
+        if payload and payload.get("username") == username:
+            del _active_tokens[token]
+
+
 def get_online_count() -> int:
     """获取在线用户数（按用户名去重），自动清理过期 token"""
     now = time.time()

@@ -13,6 +13,7 @@ from backend.auth import (
     increment_token_version,
     get_user_role,
     remove_active_token,
+    remove_active_token_by_username,
     get_online_count,
 )
 from backend.api.config_router import get_config_value
@@ -63,8 +64,8 @@ async def login(req: LoginRequest):
     if not check_password(password, hashed_password):
         raise HTTPException(status_code=401, detail="密码错误")
 
-    # 生成 JWT token（先递增版本号，使旧 token 失效）
-    increment_token_version(username)
+    # 生成 JWT token（不递增版本号，允许多标签页共存）
+    # 版本号仅在显式登出时递增，以清除所有在线会话
     token = create_jwt_token(username, role_val)
 
     # 格式化用户信息
@@ -106,8 +107,16 @@ async def login(req: LoginRequest):
 
 
 @router.post("/logout")
-async def logout():
-    """登出（清除 cookie）"""
+async def logout(request: Request):
+    """登出（使当前用户的所有 token 失效，清除 cookie）"""
+    user = request.state.user
+    if user:
+        username = user.get("username", "")
+        if username:
+            increment_token_version(username)  # 递增版本号，清除所有在线会话
+            remove_active_token_by_username(username)
+            logger.info(f"用户登出: {username}")
+
     response = JSONResponse(content={"message": "已登出"})
     response.delete_cookie(key="smartkb_token", path="/")
     return response
