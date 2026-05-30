@@ -253,15 +253,24 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 
     # 构造 Prompt
     course_hint = f"课程名称：{req.course_name}" if req.course_name else "请根据内容推断课程名称"
-    prompt = f"""你是一个教学课程设计专家。请根据以下教学内容文本，提取并构建一个完整的课程大纲结构。
+    prompt = f"""你是一位资深的课程教学设计专家。请根据以下教学内容文本，提取并构建一个结构清晰、层次准确的课程大纲。
 
-要求：
+【核心要求】
 - 科目：{req.subject}
 - 年级：{req.grade}
 - {course_hint}
 - 严格按照 JSON 格式输出，不要包含任何其他文本
 
-输出格式：
+【层次结构规则（重要）】
+1. 章（chapter）是一级标题，节（section）是二级标题（放在 chapter 的 children 中）
+2. 每个知识点（knowledge_point）必须放在它最直接所属的父级下：
+   - 如果知识点属于某个具体的节，放在该节的 knowledge_points 中
+   - 如果知识点属于整章的总括内容（不归属任何节），放在章的 knowledge_points 中
+   - 一个节只能放该节特有的知识点，不要把所有知识点都堆到章级别
+3. difficulty 只能是 easy、medium 或 hard
+4. 每个知识点建议学习时间 10-90 分钟
+
+【输出格式】
 ```json
 {{
   "course_name": "课程名称",
@@ -274,12 +283,21 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
       "children": [
         {{
           "name": "节名称",
-          "description": "节描述"
+          "description": "节描述",
+          "knowledge_points": [
+            {{
+              "name": "知识点名称",
+              "description": "知识点描述",
+              "learning_objectives": "学习目标",
+              "difficulty": "easy|medium|hard",
+              "estimated_minutes": 30
+            }}
+          ]
         }}
       ],
       "knowledge_points": [
         {{
-          "name": "知识点名称",
+          "name": "章总括知识点",
           "description": "知识点描述",
           "learning_objectives": "学习目标",
           "difficulty": "easy|medium|hard",
@@ -291,12 +309,10 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 }}
 ```
 
-请注意：
-1. 章（chapter）是一级标题，节（section）是二级标题（放在 children 中）
-2. 知识点（knowledge_points）是具体可学习的最小单元
-3. difficulty 只能是 easy、medium 或 hard
-4. 每个知识点建议学习时间 10-90 分钟
-5. 如果没有明确的节，可以只保留章和知识点
+⚠️ 特别注意：
+- 如果教学内容中有明确的章、节划分，必须严格对应
+- 每个节下的知识点只属于该节，不要重复放到章级别
+- 章级别的 knowledge_points 只放不归属于任何具体节的综述性知识点
 
 教学内容文本：
 ---
@@ -517,18 +533,16 @@ def _save_ai_result(result: dict, subject: str, grade: str, username: str) -> di
             )
             saved["chapters"] += 1
 
-            # 子章节的知识点
+            # 该节下专属的知识点
+            kp_cursor = 0
             for kp_idx, kp in enumerate(sec.get("knowledge_points", [])):
                 _insert_kp(sec_id, kp, kp_idx, now)
                 saved["knowledge_points"] += 1
+                kp_cursor += 1
 
-        # 顶层章节的知识点
+        # 章级别的知识点（属于整章总括，不归属到任何一个节下）
         for kp_idx, kp in enumerate(ch.get("knowledge_points", [])):
-            # 如果有子章节，知识点放在最后一个子章节下
-            if children:
-                _insert_kp(sec_id, kp, kp_idx, now)
-            else:
-                _insert_kp(ch_id, kp, kp_idx, now)
+            _insert_kp(ch_id, kp, kp_idx, now)
             saved["knowledge_points"] += 1
 
     logger.info(f"AI 生成课程已保存: {course_name} (id={course_id}), {saved}")
