@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
-  InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty,
+  InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
-  LoadingOutlined, BookOutlined, FilterOutlined,
+  LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined,
 } from '@ant-design/icons'
 import * as questionsApi from '../api/questions'
 import { useAuthStore } from '../stores/authStore'
@@ -50,6 +50,16 @@ const QuestionBankPage: React.FC = () => {
   const [genProgress, setGenProgress] = useState({ step: 0, text: '', count: 0, total: 0 })
   const [generatedQuestions, setGeneratedQuestions] = useState<QuestionInfo[]>([])
   const [showGeneratePanel, setShowGeneratePanel] = useState(false)
+  const [genTab, setGenTab] = useState('generate')
+
+  // ── 提取试题 ──
+  const [extractSubject, setExtractSubject] = useState('信息技术')
+  const [extractDifficulty, setExtractDifficulty] = useState('medium')
+  const [extractText, setExtractText] = useState('')
+  const [extractFile, setExtractFile] = useState<File | null>(null)
+  const [extracting, setExtracting] = useState(false)
+  const [extractedQuestions, setExtractedQuestions] = useState<QuestionInfo[]>([])
+  const [extractError, setExtractError] = useState<string | null>(null)
 
   // ── 题库列表 ──
   const [questions, setQuestions] = useState<QuestionInfo[]>([])
@@ -128,6 +138,36 @@ const QuestionBankPage: React.FC = () => {
       } else {
         setGenerating(false)
       }
+    }
+  }
+
+  // ── 提取试题 ──
+  const handleExtract = async () => {
+    if (!extractText.trim() && !extractFile) {
+      message.warning('请粘贴文本或上传 Word 文档')
+      return
+    }
+    setExtracting(true)
+    setExtractError(null)
+    setExtractedQuestions([])
+    try {
+      const formData = new FormData()
+      formData.append('subject', extractSubject)
+      formData.append('difficulty', extractDifficulty)
+      if (extractFile) {
+        formData.append('file', extractFile)
+      } else {
+        formData.append('text', extractText)
+      }
+      const res = await questionsApi.extractQuestions(formData)
+      setExtractedQuestions(res.questions)
+      message.success(res.message)
+      loadQuestions()
+      setExtracting(false)
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.detail || err?.message || '提取失败，请重试'
+      setExtractError(errMsg)
+      setExtracting(false)
     }
   }
 
@@ -324,7 +364,7 @@ const QuestionBankPage: React.FC = () => {
               📝 试题管理
             </Typography.Title>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              通过 AI 智能生成试题，统一管理题库
+              通过 AI 智能生成或从文本/Word 文档提取试题，统一管理题库
             </Typography.Text>
           </Col>
           <Col>
@@ -334,7 +374,7 @@ const QuestionBankPage: React.FC = () => {
                 icon={<PlusOutlined />}
                 onClick={() => setShowGeneratePanel(!showGeneratePanel)}
               >
-                {showGeneratePanel ? '收起生成面板' : '生成试题'}
+                {showGeneratePanel ? '收起面板' : '生成/提取试题'}
               </Button>
               <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}>
                 刷新
@@ -346,129 +386,267 @@ const QuestionBankPage: React.FC = () => {
           </Col>
         </Row>
 
-        {/* ── 试题生成面板 ── */}
+        {/* ── 试题生成/提取面板 ── */}
         {showGeneratePanel && (
-          <Card
-            title={<Space><BookOutlined />AI 智能生成试题</Space>}
-            style={{ border: '1px solid #1677ff22', background: '#fafaff' }}
-          >
-            <Form
-              form={generateForm}
-              layout="vertical"
-              initialValues={{
-                subject: '信息技术',
-                question_type: 'single',
-                count: 5,
-                difficulty: 'medium',
-                knowledge_points: '',
-              }}
-              style={{ maxWidth: 800 }}
-            >
-              <Row gutter={16}>
-                <Col span={8}>
-                  <Form.Item label="科目" name="subject" rules={[{ required: true }]}>
-                    <Select>
-                      {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
-                    </Select>
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <Form.Item label="题型" name="question_type" rules={[{ required: true }]}>
-                    <Select>
-                      <Option value="single">单选题</Option>
-                      <Option value="multiple">多选题</Option>
-                      <Option value="true_false">判断题</Option>
-                      <Option value="short">简答题</Option>
-                    </Select>
-                  </Form.Item>
-                </Col>
-                <Col span={4}>
-                  <Form.Item label="数量" name="count" rules={[{ required: true }]}>
-                    <InputNumber min={1} max={100} style={{ width: '100%' }}
-                      onChange={(v) => {
-                        if (v && v > 20) message.warning('超过 20 题生成时间较长，建议减少数量')
-                      }}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={4}>
-                  <Form.Item label="难度" name="difficulty">
-                    <Select>
-                      <Option value="easy">简单</Option>
-                      <Option value="medium">中等</Option>
-                      <Option value="hard">困难</Option>
-                    </Select>
-                  </Form.Item>
-                </Col>
-              </Row>
-              <Form.Item
-                label="知识点"
-                name="knowledge_points"
-                rules={[{ required: true, message: '请输入知识点' }]}
-              >
-                <TextArea
-                  rows={2}
-                  placeholder="输入知识点，如：TCP/IP协议、IP地址分类、子网掩码（多个知识点用逗号分隔）"
-                />
-              </Form.Item>
-              <Form.Item>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <Button
-                    type="primary"
-                    onClick={handleGenerate}
-                    loading={generating}
-                    icon={generating ? <LoadingOutlined /> : <BookOutlined />}
-                    disabled={generating}
-                  >
-                    {generating ? 'AI 生成中...' : '开始生成'}
-                  </Button>
-                  {generating && genProgress.text && (
-                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                      {genProgress.text}
-                    </Typography.Text>
-                  )}
-                  {genError && (
-                    <Typography.Text type="danger" style={{ fontSize: 13 }}>
-                      ❌ {genError}
-                    </Typography.Text>
-                  )}
-                </div>
-              </Form.Item>
-            </Form>
+          <Card style={{ border: '1px solid #1677ff22', background: '#fafaff' }}>
+            <Tabs
+              activeKey={genTab}
+              onChange={setGenTab}
+              items={[
+                {
+                  key: 'generate',
+                  label: <Space><BookOutlined />AI 智能生成</Space>,
+                  children: (
+                    <>
+                      <Form
+                        form={generateForm}
+                        layout="vertical"
+                        initialValues={{
+                          subject: '信息技术',
+                          question_type: 'single',
+                          count: 5,
+                          difficulty: 'medium',
+                          knowledge_points: '',
+                        }}
+                        style={{ maxWidth: 800 }}
+                      >
+                        <Row gutter={16}>
+                          <Col span={8}>
+                            <Form.Item label="科目" name="subject" rules={[{ required: true }]}>
+                              <Select>
+                                {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
+                              </Select>
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item label="题型" name="question_type" rules={[{ required: true }]}>
+                              <Select>
+                                <Option value="single">单选题</Option>
+                                <Option value="multiple">多选题</Option>
+                                <Option value="true_false">判断题</Option>
+                                <Option value="short">简答题</Option>
+                              </Select>
+                            </Form.Item>
+                          </Col>
+                          <Col span={4}>
+                            <Form.Item label="数量" name="count" rules={[{ required: true }]}>
+                              <InputNumber min={1} max={100} style={{ width: '100%' }}
+                                onChange={(v) => {
+                                  if (v && v > 20) message.warning('超过 20 题生成时间较长，建议减少数量')
+                                }}
+                              />
+                            </Form.Item>
+                          </Col>
+                          <Col span={4}>
+                            <Form.Item label="难度" name="difficulty">
+                              <Select>
+                                <Option value="easy">简单</Option>
+                                <Option value="medium">中等</Option>
+                                <Option value="hard">困难</Option>
+                              </Select>
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                        <Form.Item
+                          label="知识点"
+                          name="knowledge_points"
+                          rules={[{ required: true, message: '请输入知识点' }]}
+                        >
+                          <TextArea
+                            rows={2}
+                            placeholder="输入知识点，如：TCP/IP协议、IP地址分类、子网掩码（多个知识点用逗号分隔）"
+                          />
+                        </Form.Item>
+                        <Form.Item>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <Button
+                              type="primary"
+                              onClick={handleGenerate}
+                              loading={generating}
+                              icon={generating ? <LoadingOutlined /> : <BookOutlined />}
+                              disabled={generating}
+                            >
+                              {generating ? 'AI 生成中...' : '开始生成'}
+                            </Button>
+                            {generating && genProgress.text && (
+                              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                                {genProgress.text}
+                              </Typography.Text>
+                            )}
+                            {genError && (
+                              <Typography.Text type="danger" style={{ fontSize: 13 }}>
+                                ❌ {genError}
+                              </Typography.Text>
+                            )}
+                          </div>
+                        </Form.Item>
+                      </Form>
 
-            {/* ── 生成结果预览 ── */}
-            {generatedQuestions.length > 0 && (
-              <>
-                <Divider style={{ fontSize: 14 }}>
-                  ✅ 已生成 {generatedQuestions.length} 道题（已自动保存到题库）
-                </Divider>
-                {generatedQuestions.map((q, idx) => (
-                  <Card
-                    key={q.id}
-                    size="small"
-                    style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
-                    title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
-                  >
-                    <Typography.Text style={{ fontSize: 14, fontWeight: 500 }}>
-                      {q.question_text}
-                    </Typography.Text>
-                    {q.options && Object.entries(q.options).map(([k, v]) => (
-                      <div key={k} style={{ margin: '4px 0 0 16px', fontSize: 13 }}>
-                        <Tag>{k}</Tag> {v as string}
-                      </div>
-                    ))}
-                    <div style={{ marginTop: 8, fontSize: 13 }}>
-                      <Tag color="green">答案：{q.correct_answer}</Tag>
-                      {q.explanation && (
-                        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                          📖 {q.explanation}
-                        </Typography.Text>
+                      {/* ── 生成结果预览 ── */}
+                      {generatedQuestions.length > 0 && (
+                        <>
+                          <Divider style={{ fontSize: 14 }}>
+                            ✅ 已生成 {generatedQuestions.length} 道题（已自动保存到题库）
+                          </Divider>
+                          {generatedQuestions.map((q, idx) => (
+                            <Card
+                              key={q.id}
+                              size="small"
+                              style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
+                              title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
+                            >
+                              <Typography.Text style={{ fontSize: 14, fontWeight: 500 }}>
+                                {q.question_text}
+                              </Typography.Text>
+                              {q.options && Object.entries(q.options).map(([k, v]) => (
+                                <div key={k} style={{ margin: '4px 0 0 16px', fontSize: 13 }}>
+                                  <Tag>{k}</Tag> {v as string}
+                                </div>
+                              ))}
+                              <div style={{ marginTop: 8, fontSize: 13 }}>
+                                <Tag color="green">答案：{q.correct_answer}</Tag>
+                                {q.explanation && (
+                                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                                    📖 {q.explanation}
+                                  </Typography.Text>
+                                )}
+                              </div>
+                            </Card>
+                          ))}
+                        </>
                       )}
-                    </div>
-                  </Card>
-                ))}
-              </>
-            )}
+                    </>
+                  ),
+                },
+                {
+                  key: 'extract',
+                  label: <Space><FileTextOutlined />智能提取</Space>,
+                  children: (
+                    <>
+                      <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+                        从粘贴的文本或 Word 文档中智能提取试题，自动识别题型、选项和答案并入库。
+                      </Typography.Text>
+                      <Row gutter={16}>
+                        <Col span={8}>
+                          <Typography.Text strong style={{ fontSize: 13 }}>科目</Typography.Text>
+                          <Select
+                            value={extractSubject}
+                            onChange={setExtractSubject}
+                            style={{ width: '100%', marginTop: 4 }}
+                          >
+                            {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
+                          </Select>
+                        </Col>
+                        <Col span={8}>
+                          <Typography.Text strong style={{ fontSize: 13 }}>难度</Typography.Text>
+                          <Select
+                            value={extractDifficulty}
+                            onChange={setExtractDifficulty}
+                            style={{ width: '100%', marginTop: 4 }}
+                          >
+                            <Option value="easy">简单</Option>
+                            <Option value="medium">中等</Option>
+                            <Option value="hard">困难</Option>
+                          </Select>
+                        </Col>
+                        <Col span={8}>
+                          <Typography.Text strong style={{ fontSize: 13 }}>上传 Word 文档</Typography.Text>
+                          <div style={{ marginTop: 4 }}>
+                            <Upload
+                              accept=".docx"
+                              maxCount={1}
+                              fileList={extractFile ? [{ uid: '-1', name: extractFile.name, status: 'done' }] : []}
+                              beforeUpload={(file) => {
+                                if (!file.name.toLowerCase().endsWith('.docx')) {
+                                  message.warning('仅支持 .docx 格式')
+                                  return Upload.LIST_IGNORE
+                                }
+                                setExtractFile(file)
+                                return false
+                              }}
+                              onRemove={() => setExtractFile(null)}
+                            >
+                              <Button icon={<UploadOutlined />}>
+                                {extractFile ? '更换文件' : '选择文件'}
+                              </Button>
+                            </Upload>
+                          </div>
+                        </Col>
+                      </Row>
+                      <div style={{ marginTop: 16 }}>
+                        <Typography.Text strong style={{ fontSize: 13 }}>或粘贴文本内容</Typography.Text>
+                        <TextArea
+                          rows={6}
+                          value={extractText}
+                          onChange={(e) => setExtractText(e.target.value)}
+                          placeholder={`在此粘贴试题文本，例如：
+
+1. 世界上最大的海洋是？
+   A. 大西洋  B. 太平洋  C. 印度洋  D. 北冰洋
+   答案：B
+
+2. 计算机的核心部件是？
+   A. 显示器  B. 键盘  C. CPU  D. 内存
+   答案：C`}
+                          style={{ marginTop: 4 }}
+                          disabled={!!extractFile}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+                        <Button
+                          type="primary"
+                          onClick={handleExtract}
+                          loading={extracting}
+                          icon={extracting ? <LoadingOutlined /> : <FileTextOutlined />}
+                          disabled={extracting || (!extractText.trim() && !extractFile)}
+                        >
+                          {extracting ? 'AI 提取中...' : '开始提取'}
+                        </Button>
+                        {extractError && (
+                          <Typography.Text type="danger" style={{ fontSize: 13 }}>
+                            ❌ {extractError}
+                          </Typography.Text>
+                        )}
+                      </div>
+
+                      {/* ── 提取结果预览 ── */}
+                      {extractedQuestions.length > 0 && (
+                        <>
+                          <Divider style={{ fontSize: 14 }}>
+                            ✅ 已提取 {extractedQuestions.length} 道题（已自动保存到题库）
+                          </Divider>
+                          {extractedQuestions.map((q, idx) => (
+                            <Card
+                              key={q.id}
+                              size="small"
+                              style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
+                              title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
+                            >
+                              <Typography.Text style={{ fontSize: 14, fontWeight: 500 }}>
+                                {q.question_text}
+                              </Typography.Text>
+                              {q.options && Object.entries(q.options).map(([k, v]) => (
+                                <div key={k} style={{ margin: '4px 0 0 16px', fontSize: 13 }}>
+                                  <Tag>{k}</Tag> {v as string}
+                                </div>
+                              ))}
+                              <div style={{ marginTop: 8, fontSize: 13 }}>
+                                <Tag color="green">答案：{q.correct_answer}</Tag>
+                                {q.explanation && (
+                                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                                    📖 {q.explanation}
+                                  </Typography.Text>
+                                )}
+                              </div>
+                            </Card>
+                          ))}
+                        </>
+                      )}
+                    </>
+                  ),
+                },
+              ]}
+            />
           </Card>
         )}
 

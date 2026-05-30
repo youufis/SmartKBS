@@ -4,11 +4,12 @@ AI 生成试题 + 题库 CRUD
 """
 import json
 import os
+import io
 import time
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, UploadFile, File, Form
 from pydantic import BaseModel
 
 from backend.api.config_router import get_config_value
@@ -191,31 +192,9 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 
 
 def _call_dashscope_agent(prompt: str, api_key: str) -> str:
-    """调用 DashScope 智能体（非流式），返回完整响应文本"""
-    from dashscope import Application as DashScopeApp
-
-    os.environ["DASHSCOPE_API_KEY"] = api_key
-
-    call_params = {
-        "app_id": get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-        "prompt": prompt,
-        "stream": False,
-        "headers": {"X-DashScope-OssResourceResolve": "enable"},
-    }
-
-    response = DashScopeApp.call(**call_params)
-
-    output = getattr(response, "output", None)
-    if output:
-        text = getattr(output, "text", None)
-        if text:
-            return text
-
-    # 尝试从 response 直接获取文本
-    if hasattr(response, "text"):
-        return response.text
-
-    raise Exception("AI 响应为空，请重试")
+    """调用 AI（非流式）- 支持智能体/直接调大模型双模式"""
+    from backend.api.ai_service import call_ai_sync
+    return call_ai_sync(prompt, api_key)
 
 
 def _parse_ai_response(text: str) -> list:
@@ -479,3 +458,163 @@ async def list_question_types():
             {"key": "short", "label": "简答题"},
         ]
     }
+
+
+# ── 从粘贴文本或 Word 文档提取试题 ──
+
+@router.post("/extract")
+async def extract_questions_from_text(
+    request: Request,
+    subject: str = Form("信息技术"),
+    difficulty: str = Form("medium"),
+    text: str = Form(""),
+    file: UploadFile = File(None),
+):
+    """从粘贴文本或 Word 文档中智能提取试题"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+
+    # 提取文本内容
+    content = ""
+    source_label = "paste"
+    if file and file.filename:
+        if not file.filename.lower().endswith('.docx'):
+            raise HTTPException(status_code=400, detail="仅支持 .docx 格式的 Word 文档")
+        try:
+            file_bytes = await file.read()
+            content = _extract_text_from_docx(file_bytes)
+            source_label = "word"
+        except Exception as e:
+            logger.error(f"解析 Word 文档失败: {e}")
+            raise HTTPException(status_code=400, detail=f"解析 Word 文档失败: {str(e)}")
+    elif text.strip():
+        content = text.strip()
+    else:
+        raise HTTPException(status_code=400, detail="请提供粘贴文本或上传 Word 文档")
+
+    if len(content) < 10:
+        raise HTTPException(status_code=400, detail="文本内容太少，无法提取试题")
+
+    # 截取过长内容
+    if len(content) > 8000:
+        content = content[:8000]
+        logger.info(f"文本内容过长，已截取前 8000 字符")
+
+    # 获取 API Key
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key，请先在系统配置中设置")
+
+    # 构造提取 Prompt
+    prompt = _build_extract_prompt(subject, difficulty, content)
+    logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
+
+    # 调用 AI
+    try:
+        result_text = _call_dashscope_agent(prompt, api_key)
+        logger.info(f"AI 返回原始内容: {result_text[:300]}")
+    except Exception as e:
+        logger.error(f"AI 提取试题失败: {e}")
+        raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
+
+    # 解析 JSON
+    questions = _parse_ai_response(result_text)
+    if not questions:
+        logger.error(f"AI 返回无法解析: {result_text[:500]}")
+        raise HTTPException(status_code=502, detail="AI 返回格式异常，未能提取出试题，请重试")
+
+    # 获取创建者姓名
+    from backend.database import execute_query as user_query
+    user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
+    creator_name = user_row[0][0] if user_row and user_row[0][0] else username
+
+    # 入库
+    saved_questions = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for q_data in questions:
+        q_type = q_data.get("type", "single")
+        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
+        qid = execute_insert(
+            """INSERT INTO question_bank
+               (type, question_text, options, correct_answer, explanation,
+                knowledge_points, subject, difficulty, creator_username, creator_name,
+                source, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+            (
+                q_type,
+                q_data.get("question", ""),
+                options_str,
+                q_data.get("answer", ""),
+                q_data.get("explanation", ""),
+                q_data.get("knowledge_point", ""),
+                subject,
+                q_data.get("difficulty", difficulty),
+                username,
+                creator_name,
+                source_label,
+                now,
+                now,
+            ),
+        )
+        saved_questions.append({
+            "id": qid,
+            "type": q_type,
+            "question_text": q_data.get("question", ""),
+            "options": q_data.get("options", {}),
+            "correct_answer": q_data.get("answer", ""),
+            "explanation": q_data.get("explanation", ""),
+            "knowledge_points": q_data.get("knowledge_point", ""),
+            "difficulty": q_data.get("difficulty", difficulty),
+        })
+
+    logger.info(f"用户 {username} 从{'Word文档' if source_label == 'word' else '粘贴文本'}提取并入库 {len(saved_questions)} 道试题")
+    return {
+        "message": f"成功提取 {len(saved_questions)} 道试题",
+        "questions": saved_questions,
+        "total": len(saved_questions),
+    }
+
+
+def _extract_text_from_docx(file_bytes: bytes) -> str:
+    """从 .docx 文件字节中提取纯文本"""
+    from docx import Document
+    doc = Document(io.BytesIO(file_bytes))
+    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+    return "\n".join(paragraphs)
+
+
+def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
+    """构建 AI 提取试题的 Prompt"""
+    difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
+    return f"""你是一个试题提取助手。下面是一些文本内容，可能包含试题和答案。
+请从文本中识别并提取出所有试题，按照 JSON 格式输出。
+
+科目：{subject}
+难度：{difficulty_desc}
+
+要求：
+1. 仔细阅读文本，找出其中的试题（包括题干、选项、答案）
+2. 如果文本中没有明确的试题，可以根据文本内容中的知识点，自动生成相关试题
+3. 每个试题必须包含：题目、正确答案、题型
+4. 选择题必须有选项（最少4个选项）
+5. 判断题的选项为 {{"对":"对","错":"错"}}
+
+请严格按照 JSON 格式输出，只返回一个 JSON 数组，不要包含其他内容：
+
+[
+  {{
+    "type": "题型标识(single/multiple/true_false/short)",
+    "question": "题目内容",
+    "options": {{"A":"选项A", "B":"选项B", "C":"选项C", "D":"选项D"}},
+    "answer": "正确答案",
+    "explanation": "解析内容",
+    "knowledge_point": "所属知识点",
+    "difficulty": "easy/medium/hard"
+  }}
+]
+
+文本内容：
+{content}"""

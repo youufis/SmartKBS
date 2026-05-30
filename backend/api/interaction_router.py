@@ -69,7 +69,7 @@ class AiGeneratePoll(BaseModel):
 # ── AI 辅助函数 ──
 
 def _call_ai(prompt: str) -> str:
-    """调用 DashScope AI（非流式）"""
+    """调用 AI（非流式）- 支持智能体/直接调大模型双模式"""
     import os
     api_key = os.environ.get("DASHSCOPE_API_KEY", "")
     if not api_key:
@@ -82,14 +82,9 @@ def _call_ai(prompt: str) -> str:
     if not api_key:
         return "⚠️ AI 功能不可用：请配置 DashScope API Key"
 
-    from dashscope import Application as DashScopeApp
-    from backend.api.config_router import get_config_value
-    os.environ["DASHSCOPE_API_KEY"] = api_key
+    from backend.api.ai_service import call_ai_sync
     try:
-        response = DashScopeApp.call(app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"), prompt=prompt, stream=False)
-        if hasattr(response, "output") and hasattr(response.output, "text"):
-            return response.output.text
-        return "AI 未返回有效结果"
+        return call_ai_sync(prompt, api_key)
     except Exception as e:
         return f"AI 调用出错: {str(e)}"
 

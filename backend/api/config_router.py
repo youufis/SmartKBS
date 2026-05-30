@@ -26,7 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # API 密钥（全局兜底）
     "dashscope_api_key": "",
     # 模型与应用配置
-    "APPID": "6fcb54e8f16f4e3b94e4b9fd4eab1125",
+    "APPID": "",  # 留空则直接调用大模型(MODEL_NAME)；填写后调用百炼智能体应用
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-flash",
