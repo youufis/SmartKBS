@@ -1,0 +1,177 @@
+"""
+AI 服务封装：根据是否配置 APPID 自动选择调用模式
+
+- 配置了 APPID → 调用百炼平台智能体应用 (DashScopeApp.call)
+- 未配置 APPID → 直接调用大模型 (OpenAI 兼容接口 /chat/completions)
+"""
+import json
+import os
+from typing import Optional
+
+from backend.logger import logger
+
+
+def get_ai_config():
+    """获取 AI 调用配置"""
+    from backend.api.config_router import get_config_value
+    app_id = get_config_value("APPID", "")
+    if app_id:
+        return {"mode": "agent", "app_id": app_id}
+    return {
+        "mode": "direct",
+        "model": get_config_value("MODEL_NAME", "deepseek-v4-flash"),
+        "api_base": get_config_value("QWEN_OPENAI_API_BASE",
+                                      "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    }
+
+
+# ── 非流式调用（同步，返回完整文本） ──
+
+def call_ai_sync(prompt: str, api_key: str) -> str:
+    """同步调用 AI，返回完整响应文本"""
+    cfg = get_ai_config()
+    os.environ["DASHSCOPE_API_KEY"] = api_key
+
+    if cfg["mode"] == "agent":
+        return _call_agent_sync(prompt, api_key, cfg["app_id"])
+    else:
+        return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"])
+
+
+def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
+    """调用百炼智能体应用（同步）"""
+    from dashscope import Application as DashScopeApp
+    try:
+        response = DashScopeApp.call(
+            app_id=app_id,
+            prompt=prompt,
+            stream=False,
+            headers={"X-DashScope-OssResourceResolve": "enable"},
+        )
+        output = getattr(response, "output", None)
+        if output:
+            text = getattr(output, "text", None)
+            if text:
+                return text
+        if hasattr(response, "text"):
+            return response.text
+        raise Exception("AI 响应为空")
+    except Exception as e:
+        logger.error(f"智能体调用失败 (app_id={app_id}): {e}")
+        raise
+
+
+def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> str:
+    """直接调用大模型（同步，OpenAI 兼容接口）"""
+    import requests as sync_requests
+    try:
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        resp = sync_requests.post(
+            f"{api_base}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=180,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        logger.error(f"大模型调用失败: status={resp.status_code}, {resp.text[:300]}")
+        raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
+    except Exception as e:
+        logger.error(f"大模型调用异常: {e}")
+        raise
+
+
+# ── 流式调用（返回事件生成器） ──
+
+def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None):
+    """流式调用 AI，返回 (text_generator, get_session_id)"""
+    cfg = get_ai_config()
+    os.environ["DASHSCOPE_API_KEY"] = api_key
+
+    if cfg["mode"] == "agent":
+        return _call_agent_stream(prompt, api_key, cfg["app_id"], session_id)
+    else:
+        return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"])
+
+
+def _call_agent_stream(prompt: str, api_key: str, app_id: str,
+                       session_id: Optional[str] = None):
+    """调用百炼智能体应用（流式），返回生成器，yield {"text": str, "session_id": str}"""
+    from dashscope import Application as DashScopeApp
+    call_params = {
+        "app_id": app_id,
+        "prompt": prompt,
+        "stream": True,
+        "incremental_output": True,
+        "headers": {"X-DashScope-OssResourceResolve": "enable"},
+    }
+    if session_id:
+        call_params["session_id"] = session_id
+
+    try:
+        response = DashScopeApp.call(**call_params)
+        new_session_id = session_id
+        full_text = ""
+        for chunk in response:
+            output = getattr(chunk, "output", None)
+            if output:
+                sid = getattr(output, "session_id", None)
+                if sid:
+                    new_session_id = sid
+                text = getattr(output, "text", None)
+                if text:
+                    full_text += text
+                    yield {"text": full_text, "session_id": new_session_id}
+    except Exception as e:
+        logger.error(f"智能体流式调用失败: {e}")
+        yield {"text": f"网络连接错误：{str(e)}", "session_id": session_id}
+
+
+def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
+    """直接调用大模型（流式，OpenAI 兼容接口），yield {"text": str, "session_id": None}"""
+    import requests as sync_requests
+    try:
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": True,
+        }
+        resp = sync_requests.post(
+            f"{api_base}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            stream=True,
+            timeout=180,
+        )
+        if resp.status_code != 200:
+            logger.error(f"大模型流式调用失败: status={resp.status_code}")
+            yield {"text": f"AI 调用失败 (HTTP {resp.status_code})", "session_id": None}
+            return
+
+        full_text = ""
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            decoded = line.decode("utf-8") if isinstance(line, bytes) else line
+            if decoded.startswith("data:"):
+                data_str = decoded[5:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    data = json.loads(data_str)
+                    if "choices" in data and data["choices"]:
+                        delta = data["choices"][0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            full_text += content
+                            yield {"text": full_text, "session_id": None}
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        logger.error(f"大模型流式调用异常: {e}")
+        yield {"text": f"网络连接错误：{str(e)}", "session_id": None}

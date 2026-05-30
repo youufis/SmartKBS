@@ -30,26 +30,14 @@ def _get_dashscope_api_key() -> str:
 
 
 def _call_ai(prompt: str) -> str:
-    """调用 DashScope AI 分析（非流式，返回完整文本）"""
+    """调用 AI 分析（非流式）- 支持智能体/直接调大模型双模式"""
     api_key = _get_dashscope_api_key()
     if not api_key:
         return "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
 
-    from dashscope import Application as DashScopeApp
-    from backend.api.config_router import get_config_value
-
-    os.environ["DASHSCOPE_API_KEY"] = api_key
+    from backend.api.ai_service import call_ai_sync
     try:
-        response = DashScopeApp.call(
-            app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-            prompt=prompt,
-            stream=False,  # 非流式调用
-        )
-        if hasattr(response, "output"):
-            output = response.output
-            if hasattr(output, "text"):
-                return output.text
-        return "AI 分析未返回有效结果"
+        return call_ai_sync(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 学情分析调用失败: {e}")
         return f"AI 分析出错：{str(e)}"
