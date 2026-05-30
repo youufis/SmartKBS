@@ -21,6 +21,7 @@ import {
   BellOutlined,
   BarChartOutlined,
   ThunderboltOutlined,
+  BookOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -35,6 +36,7 @@ const studentMenuGroups: { label: string; key: string; children: { key: string; 
     { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
   ]},
   { label: '💡 学习', key: 'learn', children: [
+    { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
     { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
     { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
     { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
@@ -60,6 +62,7 @@ const teacherMenuGroups: { label: string; key: string; children: { key: string; 
       { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
     ]},
     { label: '💡 教学', key: 'teach', children: [
+      { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
       { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
       { key: '/html-files', icon: <FileOutlined />, label: '资源中心' },
       { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
