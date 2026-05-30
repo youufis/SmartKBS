@@ -208,6 +208,213 @@ def _get_resource_name(resource_type: str, resource_id: int) -> str:
 
 
 # ═══════════════════════════════════════════════════════════
+# AI 辅助生成课程结构
+# ═══════════════════════════════════════════════════════════
+
+class AIGenerateRequest(BaseModel):
+    """AI 生成课程请求"""
+    content: str = ""           # 文本内容
+    subject: str = "信息技术"    # 科目
+    grade: str = "高一"          # 年级
+    course_name: str = ""       # 课程名称（留空由 AI 推断）
+    auto_save: bool = False     # 是否自动保存到数据库
+
+@router.post("/ai-generate", summary="AI 辅助生成课程结构")
+async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
+    """上传教学内容文本，AI 自动提取课程→章节→知识点结构"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    if not req.content.strip():
+        raise HTTPException(status_code=400, detail="请输入教学内容文本")
+
+    # 获取 API Key
+    from backend.utils import get_api_keys
+    keys = get_api_keys(user["username"])
+    if not keys:
+        raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
+
+    api_key = keys.get("DASHSCOPE_API_KEY") or keys.get("api_key") or keys.get("QWEN_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未找到有效的 API Key")
+
+    # 构造 Prompt
+    course_hint = f"课程名称：{req.course_name}" if req.course_name else "请根据内容推断课程名称"
+    prompt = f"""你是一个教学课程设计专家。请根据以下教学内容文本，提取并构建一个完整的课程大纲结构。
+
+要求：
+- 科目：{req.subject}
+- 年级：{req.grade}
+- {course_hint}
+- 严格按照 JSON 格式输出，不要包含任何其他文本
+
+输出格式：
+```json
+{{
+  "course_name": "课程名称",
+  "course_code": "课程代码(英文缩写)",
+  "course_description": "课程简要描述",
+  "chapters": [
+    {{
+      "name": "章名称",
+      "description": "章描述",
+      "children": [
+        {{
+          "name": "节名称",
+          "description": "节描述"
+        }}
+      ],
+      "knowledge_points": [
+        {{
+          "name": "知识点名称",
+          "description": "知识点描述",
+          "learning_objectives": "学习目标",
+          "difficulty": "easy|medium|hard",
+          "estimated_minutes": 30
+        }}
+      ]
+    }}
+  ]
+}}
+```
+
+请注意：
+1. 章（chapter）是一级标题，节（section）是二级标题（放在 children 中）
+2. 知识点（knowledge_points）是具体可学习的最小单元
+3. difficulty 只能是 easy、medium 或 hard
+4. 每个知识点建议学习时间 10-90 分钟
+5. 如果没有明确的节，可以只保留章和知识点
+
+教学内容文本：
+---
+{req.content[:8000]}
+---"""
+
+    try:
+        from backend.api.ai_service import call_ai_sync
+        ai_response = call_ai_sync(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 生成课程失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 调用失败: {str(e)}")
+
+    # 解析 AI 返回的 JSON
+    result = _parse_ai_json(ai_response)
+    if not result:
+        raise HTTPException(status_code=500, detail="AI 返回格式异常，无法解析为课程结构")
+
+    # 自动保存
+    if req.auto_save:
+        saved = _save_ai_result(result, req.subject, req.grade, user["username"])
+        result["saved"] = saved
+
+    return result
+
+
+def _parse_ai_json(text: str) -> dict | None:
+    """从 AI 返回文本中提取 JSON"""
+    # 尝试直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 尝试从 ```json ``` 代码块中提取
+    import re
+    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # 尝试从 { 到 } 提取最外层 JSON
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+def _save_ai_result(result: dict, subject: str, grade: str, username: str) -> dict:
+    """将 AI 生成的结构保存到数据库"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    saved = {"course_id": None, "chapters": 0, "knowledge_points": 0}
+
+    # 1. 创建课程
+    course_name = result.get("course_name", f"{subject}课程")
+    course_code = result.get("course_code", "")
+    course_desc = result.get("course_description", f"AI 自动生成的{subject}课程大纲")
+
+    course_id = execute_insert_update(
+        """INSERT INTO courses (name, code, description, grade, sort_order, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, 0, 'active', ?, ?)""",
+        (course_name, course_code, course_desc, grade, now, now),
+    )
+    saved["course_id"] = course_id
+
+    # 2. 创建章节和知识点
+    chapters = result.get("chapters", [])
+    for ch_idx, ch in enumerate(chapters):
+        ch_id = execute_insert_update(
+            """INSERT INTO chapters (course_id, parent_id, name, description, sort_order, status, created_at, updated_at)
+               VALUES (?, NULL, ?, ?, ?, 'active', ?, ?)""",
+            (course_id, ch.get("name", ""), ch.get("description", ""), ch_idx, now, now),
+        )
+        saved["chapters"] += 1
+
+        # 子章节（节）
+        children = ch.get("children", [])
+        for sec_idx, sec in enumerate(children):
+            sec_id = execute_insert_update(
+                """INSERT INTO chapters (course_id, parent_id, name, description, sort_order, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+                (course_id, ch_id, sec.get("name", ""), sec.get("description", ""), sec_idx, now, now),
+            )
+            saved["chapters"] += 1
+
+            # 子章节的知识点
+            for kp_idx, kp in enumerate(sec.get("knowledge_points", [])):
+                _insert_kp(sec_id, kp, kp_idx, now)
+                saved["knowledge_points"] += 1
+
+        # 顶层章节的知识点
+        for kp_idx, kp in enumerate(ch.get("knowledge_points", [])):
+            # 如果有子章节，知识点放在最后一个子章节下
+            if children:
+                _insert_kp(sec_id, kp, kp_idx, now)
+            else:
+                _insert_kp(ch_id, kp, kp_idx, now)
+            saved["knowledge_points"] += 1
+
+    logger.info(f"AI 生成课程已保存: {course_name} (id={course_id}), {saved}")
+    return saved
+
+
+def _insert_kp(chapter_id: int, kp: dict, sort_order: int, now: str):
+    """插入单个知识点"""
+    execute_insert_update(
+        """INSERT INTO knowledge_points (chapter_id, name, description, learning_objectives, difficulty, estimated_minutes, sort_order, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+        (
+            chapter_id,
+            kp.get("name", ""),
+            kp.get("description", ""),
+            kp.get("learning_objectives", ""),
+            kp.get("difficulty", "medium"),
+            kp.get("estimated_minutes", 30),
+            sort_order,
+            now,
+            now,
+        ),
+    )
+
+
+# ═══════════════════════════════════════════════════════════
 # 完整树查询（核心端点）
 # ═══════════════════════════════════════════════════════════
 
