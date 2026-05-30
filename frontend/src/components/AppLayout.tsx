@@ -29,58 +29,33 @@ import NotificationBell from './NotificationBell'
 
 const { Header, Sider, Content } = Layout
 
-const AppLayout: React.FC = () => {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const { user, onlineCount, logout, fetchOnlineCount } = useAuthStore()
-  const [collapsed, setCollapsed] = React.useState(false)
-  const [openKeys, setOpenKeys] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('smartkb_menu_openkeys')
-      return saved ? JSON.parse(saved) : []
-    } catch { return [] }
-  })
-  const [orgName, setOrgName] = useState('')
+// 学生菜单分组（模块级常量，不依赖组件状态）
+const studentMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
+  { label: '📊 概览', key: 'overview', children: [
+    { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
+  ]},
+  { label: '💡 学习', key: 'learn', children: [
+    { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
+    { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
+    { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
+  ]},
+  { label: '📚 学业', key: 'study', children: [
+    { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
+    { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
+    { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
+    { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
+    { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
+    { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
+  ]},
+  { label: '⚙️ 系统', key: 'sys', children: [
+    { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
+    { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
+    { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
+  ]},
+]
 
-  // 根据角色构建菜单项（分组分类）
-  const isStudent = user?.role === 'student'
-  const isTeacher = user?.role === 'teacher'
-  const isAdmin = user?.role === 'admin'
-
-  // 获取单位名称
-  useEffect(() => {
-    apiClient.get('/api/config/public').then(({ data }) => {
-      if (data.ORG_NAME) setOrgName(data.ORG_NAME)
-    }).catch(() => {})
-  }, [])
-
-  // 学生菜单分组
-  const studentMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
-    { label: '📊 概览', key: 'overview', children: [
-      { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
-    ]},
-    { label: '💡 学习', key: 'learn', children: [
-      { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-      { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
-      { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
-    ]},
-    { label: '📚 学业', key: 'study', children: [
-      { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
-      { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
-      { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
-      { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
-      { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
-      { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
-    ]},
-    { label: '⚙️ 系统', key: 'sys', children: [
-      { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
-      { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
-      { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
-    ]},
-  ]
-
-  // 教师/管理员菜单分组
-  const teacherMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }[] }[] = [
+// 教师/管理员菜单分组（模块级常量，不依赖组件状态）
+const teacherMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }[] }[] = [
     { label: '📊 概览', key: 'overview', children: [
       { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
     ]},
@@ -112,6 +87,31 @@ const AppLayout: React.FC = () => {
       { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
     ]},
   ]
+
+const AppLayout: React.FC = () => {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { user, onlineCount, logout, fetchOnlineCount } = useAuthStore()
+  const [collapsed, setCollapsed] = React.useState(false)
+  const [openKeys, setOpenKeys] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('smartkb_menu_openkeys')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [orgName, setOrgName] = useState('')
+
+  // 根据角色构建菜单项（分组分类）
+  const isStudent = user?.role === 'student'
+  const isTeacher = user?.role === 'teacher'
+  const isAdmin = user?.role === 'admin'
+
+  // 获取单位名称
+  useEffect(() => {
+    apiClient.get('/api/config/public').then(({ data }) => {
+      if (data.ORG_NAME) setOrgName(data.ORG_NAME)
+    }).catch(() => {})
+  }, [])
 
   // 根据用户角色过滤菜单项并转为 Ant Design Menu 格式
   const buildMenuItems = () => {
@@ -145,7 +145,10 @@ const AppLayout: React.FC = () => {
       g.children.some(c => c.key === location.pathname)
     )?.key
     if (parentKey) {
-      setOpenKeys(prev => prev.includes(parentKey) ? prev : [...prev, parentKey])
+      const timer = setTimeout(() => {
+        setOpenKeys(prev => prev.includes(parentKey) ? prev : [...prev, parentKey])
+      }, 0)
+      return () => clearTimeout(timer)
     }
   }, [location.pathname, isStudent])
 
