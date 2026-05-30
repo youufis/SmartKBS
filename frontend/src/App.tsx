@@ -33,12 +33,18 @@ function App() {
   const navigate = useNavigate()
   const restoreSession = useAuthStore((s) => s.restoreSession)
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
+  const sessionRestoring = useAuthStore((s) => s.sessionRestoring)
   const user = useAuthStore((s) => s.user)
   const forceLogout = useAuthStore((s) => s.forceLogout)
 
   useEffect(() => {
     restoreSession()
   }, [restoreSession])
+
+  // 正在验证 session 时，不渲染任何路由，防止登录页闪烁
+  if (sessionRestoring) {
+    return null
+  }
 
   // 监听异地登录踢出事件
   useEffect(() => {
