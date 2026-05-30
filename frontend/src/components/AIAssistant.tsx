@@ -1,10 +1,10 @@
 /**
  * AI 助手浮动按钮
- * 固定在右下角，点击展开对话面板
+ * 可爱风格，可拖动，可隐藏
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { Button, Drawer, Input, Space, Typography, Spin, Empty, message as antMsg } from 'antd'
-import { RobotOutlined, CloseOutlined, SendOutlined } from '@ant-design/icons'
+import { Button, Drawer, Input, Space, Typography, Spin, Empty, message as antMsg, Tooltip } from 'antd'
+import { SendOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { chatStream } from '../api/chat'
@@ -29,14 +29,24 @@ const SYSTEM_PROMPT = `你叫小K，是SmartKBS智慧教学平台的AI助手。�
 
 const AIAssistant: React.FC = () => {
   const [open, setOpen] = useState(false)
+  const [hidden, setHidden] = useState(() => localStorage.getItem('ai_assistant_hidden') === 'true')
   const [messages, setMessages] = useState<ChatMsg[]>([
-    { role: 'assistant', content: '你好！我是小K，SmartKBS 平台的 AI 助手。有什么可以帮你的吗？😊' },
+    { role: 'assistant', content: '你好呀！我是小K ~ 有什么可以帮你的吗？(◕‿◕)♡' },
   ])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [streamText, setStreamText] = useState('')
   const abortRef = useRef<AbortController | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLDivElement>(null)
+
+  // 拖动状态
+  const [pos, setPos] = useState(() => {
+    const saved = localStorage.getItem('ai_assistant_pos')
+    return saved ? JSON.parse(saved) : { x: 24, y: 88 }
+  })
+  const dragging = useRef(false)
+  const dragOffset = useRef({ x: 0, y: 0 })
 
   // 自动滚动到底部
   useEffect(() => {
@@ -48,6 +58,51 @@ const AIAssistant: React.FC = () => {
   // 清理中断
   useEffect(() => {
     return () => abortRef.current?.abort()
+  }, [])
+
+  // 保存隐藏状态
+  useEffect(() => {
+    localStorage.setItem('ai_assistant_hidden', String(hidden))
+  }, [hidden])
+
+  // 保存位置
+  useEffect(() => {
+    localStorage.setItem('ai_assistant_pos', JSON.stringify(pos))
+  }, [pos])
+
+  // 拖动开始
+  const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault()
+    dragging.current = true
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (rect) {
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+      dragOffset.current = { x: clientX - rect.left, y: clientY - rect.top }
+    }
+  }, [])
+
+  // 拖动移动
+  useEffect(() => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      if (!dragging.current) return
+      const clientX = 'touches' in e ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX
+      const clientY = 'touches' in e ? (e as TouchEvent).touches[0].clientY : (e as MouseEvent).clientY
+      const newX = Math.max(0, Math.min(window.innerWidth - 60, clientX - dragOffset.current.x))
+      const newY = Math.max(0, Math.min(window.innerHeight - 60, clientY - dragOffset.current.y))
+      setPos({ x: newX, y: newY })
+    }
+    const handleUp = () => { dragging.current = false }
+    window.addEventListener('mousemove', handleMove)
+    window.addEventListener('mouseup', handleUp)
+    window.addEventListener('touchmove', handleMove, { passive: true })
+    window.addEventListener('touchend', handleUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMove)
+      window.removeEventListener('mouseup', handleUp)
+      window.removeEventListener('touchmove', handleMove)
+      window.removeEventListener('touchend', handleUp)
+    }
   }, [])
 
   const handleSend = useCallback(async () => {
@@ -63,7 +118,6 @@ const AIAssistant: React.FC = () => {
     const controller = new AbortController()
     abortRef.current = controller
 
-    // 构建带上下文的消息历史
     const recentMessages = [...messages.slice(-9), userMsg]
     const contextPrompt = `${SYSTEM_PROMPT}\n\n历史对话：\n${recentMessages
       .map((m) => `${m.role === 'user' ? '用户' : '助手'}: ${m.content}`)
@@ -88,23 +142,101 @@ const AIAssistant: React.FC = () => {
     )
   }, [input, streaming, messages])
 
+  if (hidden) {
+    return (
+      <Tooltip title="显示 AI 助手">
+        <div
+          style={{
+            position: 'fixed', bottom: 20, right: 20, zIndex: 1000,
+            cursor: 'pointer', userSelect: 'none',
+          }}
+          onClick={() => setHidden(false)}
+        >
+          <span style={{ fontSize: 28, filter: 'grayscale(0.5)', opacity: 0.6 }}>
+            🐣
+          </span>
+        </div>
+      </Tooltip>
+    )
+  }
+
   return (
     <>
-      {/* 浮动按钮 */}
-      <div style={{ position: 'fixed', bottom: 88, right: 24, zIndex: 1000 }}>
-        <Button
-          type="primary"
-          shape="circle"
-          size="large"
-          style={{ width: 52, height: 52, boxShadow: '0 4px 14px rgba(22,119,255,0.4)' }}
-          icon={open ? <CloseOutlined /> : <RobotOutlined style={{ fontSize: 22 }} />}
+      {/* 可拖动的可爱浮动按钮 */}
+      <div
+        ref={buttonRef}
+        onMouseDown={handleDragStart}
+        onTouchStart={handleDragStart}
+        style={{
+          position: 'fixed',
+          left: pos.x,
+          bottom: pos.y,
+          zIndex: 1000,
+          cursor: dragging.current ? 'grabbing' : 'grab',
+          userSelect: 'none',
+          touchAction: 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 4,
+        }}
+      >
+        {/* 隐藏按钮 */}
+        <div
+          style={{
+            fontSize: 12, color: '#ccc', cursor: 'pointer',
+            background: '#fff', borderRadius: 8, padding: '0 6px',
+            border: '1px solid #f0f0f0', lineHeight: '18px',
+            userSelect: 'none',
+          }}
+          onClick={(e) => { e.stopPropagation(); setHidden(true) }}
+        >
+          ✕ 隐藏
+        </div>
+
+        {/* 可爱图标 */}
+        <div
           onClick={() => setOpen(!open)}
-        />
+          style={{
+            width: 58, height: 58, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #ff9a9e 0%, #fad0c4 50%, #a18cd1 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 4px 20px rgba(161,140,209,0.4)',
+            transition: 'transform 0.2s',
+            transform: open ? 'scale(0.9)' : 'scale(1)',
+            cursor: 'pointer',
+          }}
+        >
+          <span style={{ fontSize: 32, lineHeight: 1 }}>
+            {open ? '😊' : '🤖'}
+          </span>
+        </div>
+
+        {/* 小标签 */}
+        <div
+          style={{
+            fontSize: 11, color: '#a18cd1', fontWeight: 600,
+            background: '#fff', borderRadius: 8, padding: '0 6px',
+            border: '1px solid #f0f0f0', lineHeight: '18px',
+            whiteSpace: 'nowrap',
+            userSelect: 'none',
+            pointerEvents: 'none',
+          }}
+        >
+          小K助手
+        </div>
       </div>
 
       {/* 对话面板 */}
       <Drawer
-        title={<Space><RobotOutlined style={{ color: '#1677ff' }} />AI 助手 - 小K</Space>}
+        title={
+          <Space>
+            <span style={{ fontSize: 20 }}>🤖</span>
+            <span style={{ fontWeight: 600, background: 'linear-gradient(135deg, #ff9a9e, #a18cd1)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              AI 助手 - 小K
+            </span>
+          </Space>
+        }
         placement="right"
         width={420}
         open={open}
@@ -114,10 +246,8 @@ const AIAssistant: React.FC = () => {
         <div
           ref={listRef}
           style={{
-            flex: 1,
-            overflow: 'auto',
-            padding: '12px 16px',
-            background: '#f9f9f9',
+            flex: 1, overflow: 'auto', padding: '12px 16px',
+            background: '#fafafa',
           }}
         >
           {messages.map((msg, i) => (
@@ -127,19 +257,25 @@ const AIAssistant: React.FC = () => {
                 display: 'flex',
                 justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
                 marginBottom: 12,
+                alignItems: 'flex-end',
+                gap: 6,
               }}
             >
+              {msg.role === 'assistant' && (
+                <span style={{ fontSize: 18, flexShrink: 0 }}>🤖</span>
+              )}
               <div
                 style={{
-                  maxWidth: '80%',
+                  maxWidth: '75%',
                   padding: '8px 14px',
-                  borderRadius: 12,
-                  background: msg.role === 'user' ? '#1677ff' : '#fff',
+                  borderRadius: msg.role === 'user' ? '12px 12px 4px 12px' : '12px 12px 12px 4px',
+                  background: msg.role === 'user' ? 'linear-gradient(135deg, #667eea, #764ba2)' : '#fff',
                   color: msg.role === 'user' ? '#fff' : '#333',
-                  border: msg.role === 'user' ? 'none' : '1px solid #e8e8e8',
+                  border: msg.role === 'user' ? 'none' : '1px solid #f0f0f0',
                   fontSize: 14,
                   lineHeight: 1.6,
                   wordBreak: 'break-word',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
                 }}
               >
                 {msg.role === 'user' ? (
@@ -150,23 +286,29 @@ const AIAssistant: React.FC = () => {
                   </ReactMarkdown>
                 )}
               </div>
+              {msg.role === 'user' && (
+                <span style={{ fontSize: 16, flexShrink: 0 }}>🧑</span>
+              )}
             </div>
           ))}
           {/* 流式输出 */}
           {streaming && streamText && (
-            <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 12, alignItems: 'flex-end', gap: 6 }}>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>🤖</span>
               <div
                 style={{
-                  maxWidth: '80%', padding: '8px 14px', borderRadius: 12,
+                  maxWidth: '75%', padding: '8px 14px',
+                  borderRadius: '12px 12px 12px 4px',
                   background: '#fff', color: '#333',
-                  border: '1px solid #e8e8e8', fontSize: 14, lineHeight: 1.6,
+                  border: '1px solid #f0f0f0', fontSize: 14, lineHeight: 1.6,
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
                 }}
               >
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamText}</ReactMarkdown>
                 <span
                   style={{
                     display: 'inline-block', width: 2, height: '1em',
-                    backgroundColor: '#1677ff', marginLeft: 2,
+                    backgroundColor: '#a18cd1', marginLeft: 2,
                     animation: 'blink 1s step-end infinite',
                   }}
                 />
@@ -174,14 +316,17 @@ const AIAssistant: React.FC = () => {
             </div>
           )}
           {streaming && !streamText && (
-            <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 12 }}>
-              <div style={{ padding: '8px 14px', borderRadius: 12, background: '#fff', border: '1px solid #e8e8e8' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 12, gap: 6 }}>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>🤖</span>
+              <div style={{ padding: '8px 14px', borderRadius: 12, background: '#fff', border: '1px solid #f0f0f0' }}>
                 <Spin size="small" />
               </div>
             </div>
           )}
           {!streaming && messages.length <= 1 && (
-            <Empty description="有什么想问的吗？" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <div style={{ paddingTop: 40 }}>
+              <Empty description="有什么想问的吗？(◕‿◕)" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            </div>
           )}
         </div>
 
@@ -191,7 +336,7 @@ const AIAssistant: React.FC = () => {
             <TextArea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="输入问题..."
+              placeholder="给小K发消息..."
               autoSize={{ minRows: 1, maxRows: 4 }}
               onPressEnter={(e) => {
                 if (!e.shiftKey) {
@@ -208,7 +353,7 @@ const AIAssistant: React.FC = () => {
               onClick={handleSend}
               loading={streaming}
               disabled={!input.trim()}
-              style={{ borderRadius: 6 }}
+              style={{ borderRadius: 6, background: 'linear-gradient(135deg, #667eea, #764ba2)', border: 'none' }}
             />
           </Space.Compact>
           <div style={{ marginTop: 4, textAlign: 'right' }}>
