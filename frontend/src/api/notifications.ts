@@ -21,6 +21,7 @@ export interface NotificationListResponse {
 export interface AnnouncementItem {
   id: number
   creator_username: string
+  creator_name?: string
   title: string
   content: string
   target_role: string
@@ -86,4 +87,8 @@ export async function createAnnouncement(announcement: {
 /** 删除公告 */
 export async function deleteAnnouncement(id: number): Promise<void> {
   await apiClient.delete(`/api/notifications/announcements/${id}`)
+}
+
+export async function updateAnnouncement(id: number, data: Record<string, unknown>): Promise<void> {
+  await apiClient.put(`/api/notifications/announcements/${id}`, data)
 }

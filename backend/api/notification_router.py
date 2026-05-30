@@ -38,6 +38,13 @@ class AnnouncementUpdate(BaseModel):
     priority: str | None = None
     is_pinned: bool | None = None
 
+class AiGenerateAnnouncement(BaseModel):
+    """AI 生成公告请求"""
+    topic: str
+    target_role: str = "all"
+    priority: str = "normal"
+    target_grade: str = ""
+    target_class: str = ""
 
 # ── 辅助函数 ──
 
@@ -172,6 +179,71 @@ async def delete_notification(notification_id: int, request: Request):
 
 # ── 公告 API（管理员/教师）──
 
+@router.post("/announcements/ai-generate", summary="AI 自动生成公告")
+async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request):
+    """AI 根据主题自动生成公告内容"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+
+    role_desc = {"all": "全体用户", "teacher": "教师", "student": "学生"}.get(req.target_role, "全体用户")
+    priority_desc = {"normal": "普通", "important": "重要", "urgent": "紧急", "low": "低"}.get(req.priority, "普通")
+
+    prompt = f"""你是一位学校管理员。请根据以下要求撰写一份系统公告。
+
+主题：{req.topic}
+发布范围：{role_desc}
+优先级：{priority_desc}
+适用年级：{req.target_grade or '不限'}
+适用班级：{req.target_class or '不限'}
+
+请按以下 JSON 格式输出，不要包含其他文字：
+{{
+  "title": "公告标题（简洁醒目）",
+  "content": "公告正文（支持 Markdown 格式，包括背景说明、具体内容和注意事项，200字以内）"
+}}
+"""
+
+    import os, json, re
+
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not api_key:
+        try:
+            from backend.api.config_router import load_config
+            cfg = load_config()
+            api_key = cfg.get("dashscope_api_key", "")
+        except Exception:
+            pass
+    if not api_key:
+        return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
+
+    from dashscope import Application as DashScopeApp
+    from backend.api.config_router import get_config_value
+
+    os.environ["DASHSCOPE_API_KEY"] = api_key
+    try:
+        response = DashScopeApp.call(
+            app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
+            prompt=prompt,
+            stream=False,
+        )
+        if hasattr(response, "output") and hasattr(response.output, "text"):
+            result = response.output.text
+            json_match = re.search(r'\{[\s\S]*\}', result)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                    return {"status": "ok", "data": data, "raw": result}
+                except json.JSONDecodeError:
+                    pass
+            return {"status": "error", "content": result}
+        return {"status": "error", "content": "AI 未返回有效结果"}
+    except Exception as e:
+        logger.warning(f"AI 生成公告失败: {e}")
+        return {"status": "error", "content": f"AI 调用出错: {str(e)}"}
+
+
 @router.post("/announcements", summary="发布公告")
 async def create_announcement(req: AnnouncementCreate, request: Request):
     """创建公告（管理员/教师）"""
@@ -210,53 +282,92 @@ async def list_announcements(
     user_grade = user_info[0][0] if user_info else ""
     user_class = user_info[0][1] if user_info else ""
 
-    # 查询可见公告：target_role 匹配 且 grade/class 匹配
-    rows = execute_query(
-        """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
-                  priority, is_pinned, created_at, updated_at
-           FROM announcements
-           ORDER BY is_pinned DESC, created_at DESC
-           LIMIT ? OFFSET ?""",
-        (page_size, (page - 1) * page_size),
-    )
+    # 根据不同角色，用不同的 SQL 查询可见公告（避免 LIMIT 在过滤前截断）
+    if role == 0:
+        # 管理员：全部可见
+        rows = execute_query(
+            """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
+                      priority, is_pinned, created_at, updated_at
+               FROM announcements
+               ORDER BY is_pinned DESC, created_at DESC
+               LIMIT ? OFFSET ?""",
+            (page_size, (page - 1) * page_size),
+        )
+    elif role == 1:
+        # 教师：自己发布的 + 管理员发布的
+        admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
+        if admin_names:
+            placeholders = ",".join("?" for _ in admin_names)
+            rows = execute_query(
+                f"""SELECT id, creator_username, title, content, target_role, target_grade, target_class,
+                          priority, is_pinned, created_at, updated_at
+                   FROM announcements
+                   WHERE creator_username=? OR creator_username IN ({placeholders})
+                   ORDER BY is_pinned DESC, created_at DESC
+                   LIMIT ? OFFSET ?""",
+                (user["username"], *admin_names, page_size, (page - 1) * page_size),
+            )
+        else:
+            rows = execute_query(
+                """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
+                          priority, is_pinned, created_at, updated_at
+                   FROM announcements WHERE creator_username=?
+                   ORDER BY is_pinned DESC, created_at DESC
+                   LIMIT ? OFFSET ?""",
+                (user["username"], page_size, (page - 1) * page_size),
+            )
+    else:
+        # 学生：管理员公告 + 匹配班级的教师公告
+        # 先查出所有管理员用户名
+        admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
+        admin_placeholders = ",".join("?" for _ in admin_names) if admin_names else "''"
+
+        # 查匹配班级的教师：跟学生同年级/同班的教师
+        teacher_rows = execute_query(
+            """SELECT username FROM users WHERE role=1
+               AND (grade='' OR grade IS NULL OR INSTR(grade, ?)>0 OR INSTR(?, grade)>0)
+               AND (class='' OR class IS NULL OR INSTR(class, ?)>0 OR INSTR(?, class)>0)""",
+            (user_grade, user_grade, user_class, user_class),
+        )
+        teacher_names = [r[0] for r in teacher_rows]
+
+        all_creator_names = admin_names + teacher_names
+        if all_creator_names:
+            placeholders = ",".join("?" for _ in all_creator_names)
+            rows = execute_query(
+                f"""SELECT id, creator_username, title, content, target_role, target_grade, target_class,
+                          priority, is_pinned, created_at, updated_at
+                   FROM announcements
+                   WHERE creator_username IN ({placeholders})
+                   ORDER BY is_pinned DESC, created_at DESC
+                   LIMIT ? OFFSET ?""",
+                (*all_creator_names, page_size, (page - 1) * page_size),
+            )
+        else:
+            rows = []
 
     announcements = []
     for r in rows:
-        target_role = r[4]
-        target_grade = r[5] or ""
-        target_class = r[6] or ""
+        # 查询创建者姓名
+        creator_name_row = execute_query(
+            "SELECT name FROM users WHERE username = ?", (r[1],)
+        )
+        creator_name = creator_name_row[0][0] if creator_name_row else r[1]
 
-        # 可见性过滤
-        visible = False
-        role_map = {0: "admin", 1: "teacher", 2: "student"}
-        user_role_str = role_map.get(role, "student")
-
-        if target_role == "all":
-            visible = True
-        elif target_role == user_role_str:
-            visible = True
-        elif target_role == "teacher" and role == 0:
-            visible = True  # 管理员可以看到教师公告
-
-        if visible and target_grade and target_grade != user_grade:
-            visible = False
-        if visible and target_class and target_class != user_class:
-            visible = False
-
-        if visible:
-            announcements.append({
-                "id": r[0],
-                "creator_username": r[1],
-                "title": r[2],
-                "content": r[3],
-                "target_role": target_role,
-                "target_grade": target_grade,
-                "target_class": target_class,
-                "priority": r[7],
-                "is_pinned": bool(r[8]),
-                "created_at": r[9],
-                "updated_at": r[10],
-            })
+        announcements.append({
+            "id": r[0],
+            "creator_username": r[1],
+            "creator_name": creator_name,
+            "title": r[2],
+            "content": r[3],
+            "target_role": r[4],
+            "target_grade": r[5] or "",
+            "target_class": r[6] or "",
+            "priority": r[7],
+            "is_pinned": bool(r[8]),
+            "created_at": r[9],
+            "updated_at": r[10],
+        })
 
     return {
         "announcements": announcements,

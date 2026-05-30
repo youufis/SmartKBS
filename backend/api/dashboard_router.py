@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
+from backend.auth import get_online_count
 from backend.logger import logger
 
 router = APIRouter()
@@ -190,6 +191,29 @@ async def dashboard_summary(request: Request):
             (username,),
         )
 
+        # ── 分组讨论数据 ──
+        active_discussion_count = _db_count(
+            """SELECT COUNT(*) FROM discussions
+               WHERE status='active'
+               AND (creator_username IN (SELECT username FROM users WHERE role=0)
+                    OR creator_username IN (
+                        SELECT username FROM users WHERE role=1
+                        AND (grade='' OR grade IS NULL OR INSTR(grade, ?)>0 OR INSTR(?, grade)>0)
+                        AND (class='' OR class IS NULL OR INSTR(class, ?)>0 OR INSTR(?, class)>0)
+                    ))""",
+            (grade, grade, cls, cls) if grade else (),
+        ) if grade else _db_count(
+            """SELECT COUNT(*) FROM discussions
+               WHERE status='active' AND creator_username IN (SELECT username FROM users WHERE role=0)""",
+        )
+
+        my_discussion_count = _db_count(
+            """SELECT COUNT(*) FROM discussion_members dm
+               JOIN discussion_groups dg ON dm.group_id = dg.id
+               WHERE dm.username = ?""",
+            (username,),
+        )
+
         result.update({
             "pending_exam_count": pending_count,
             "completed_exam_count": completed_count,
@@ -204,6 +228,9 @@ async def dashboard_summary(request: Request):
             "active_quiz_count": active_quiz_count,
             "my_quiz_answers": my_quiz_answers,
             "student_poll_vote_count": poll_vote_count,
+            # 分组讨论
+            "active_discussion_count": active_discussion_count,
+            "my_discussion_count": my_discussion_count,
         })
 
     else:  # ── 教师/管理员 ──
@@ -250,7 +277,23 @@ async def dashboard_summary(request: Request):
                 (username,),
             )
 
-        total_students = _db_count("SELECT COUNT(*) FROM users WHERE role = 2")
+        if role == 1:
+            # 教师：只统计自己班级的学生数
+            t_grade = execute_query(
+                "SELECT grade, class FROM users WHERE username = ?", (username,)
+            )
+            if t_grade and t_grade[0][0]:
+                tg, tc = t_grade[0][0] or "", t_grade[0][1] or ""
+                total_students = _db_count(
+                    """SELECT COUNT(*) FROM users WHERE role=2
+                       AND (grade=? OR INSTR(?, grade)>0 OR INSTR(grade, ?)>0)
+                       AND (class=? OR INSTR(?, class)>0 OR INSTR(class, ?)>0)""",
+                    (tg, tg, tg, tc, tc, tc),
+                )
+            else:
+                total_students = 0
+        else:
+            total_students = _db_count("SELECT COUNT(*) FROM users WHERE role = 2")
 
         if role == 0:
             total_teachers = _db_count("SELECT COUNT(*) FROM users WHERE role = 1")
@@ -309,6 +352,28 @@ async def dashboard_summary(request: Request):
                    WHERE p.creator_username = ?""", (username,),
             )
 
+        # ── 分组讨论数据 ──
+        if role == 0:
+            discussion_total = _db_count("SELECT COUNT(*) FROM discussions")
+            discussion_active = _db_count("SELECT COUNT(*) FROM discussions WHERE status='active'")
+            discussion_member_count = _db_count("SELECT COUNT(*) FROM discussion_members")
+        else:
+            discussion_total = _db_count(
+                """SELECT COUNT(*) FROM discussions WHERE creator_username=? OR creator_username IN (SELECT username FROM users WHERE role=0)""",
+                (username,),
+            )
+            discussion_active = _db_count(
+                """SELECT COUNT(*) FROM discussions WHERE status='active' AND (creator_username=? OR creator_username IN (SELECT username FROM users WHERE role=0))""",
+                (username,),
+            )
+            discussion_member_count = _db_count(
+                """SELECT COUNT(*) FROM discussion_members dm
+                   JOIN discussion_groups dg ON dm.group_id = dg.id
+                   JOIN discussions d ON dg.discussion_id = d.id
+                   WHERE d.creator_username=? OR d.creator_username IN (SELECT username FROM users WHERE role=0)""",
+                (username,),
+            )
+
         result.update({
             "exam_stats": {
                 "total": exam_total,
@@ -328,7 +393,35 @@ async def dashboard_summary(request: Request):
             "teacher_poll_count": poll_count,
             "teacher_quiz_answer_count": quiz_answer_count,
             "teacher_poll_vote_count": poll_vote_count,
+            # 分组讨论
+            "discussion_total": discussion_total,
+            "discussion_active": discussion_active,
+            "discussion_member_count": discussion_member_count,
+            "online_count": get_online_count(),
         })
+
+        # 最近几场考试
+        if role == 0:
+            recent_exams = q_execute_query(
+                """SELECT id, title, status, created_at, creator_username, creator_name
+                   FROM exams ORDER BY created_at DESC LIMIT 3"""
+            )
+        else:
+            # 教师：只看自己创建的考试
+            recent_exams = q_execute_query(
+                """SELECT id, title, status, created_at, creator_username, creator_name
+                   FROM exams WHERE creator_username=?
+                   ORDER BY created_at DESC LIMIT 3""",
+                (username,),
+            )
+        result["recent_exams"] = [
+            {
+                "id": r["id"], "title": r["title"], "status": r["status"],
+                "created_at": r["created_at"], "creator_username": r["creator_username"],
+                "creator_name": r.get("creator_name", ""),
+            }
+            for r in recent_exams
+        ]
 
         if role == 1:
             rows = execute_query(
@@ -350,6 +443,7 @@ async def recent_activity(request: Request):
     role = user.get("role", 2)
 
     activities = []
+    now = datetime.now()
 
     if role == 2:  # 学生
         # 最近的考试结果 (question_db 返回 dict)
@@ -416,6 +510,44 @@ async def recent_activity(request: Request):
                 "time": act[0],
                 "type": "poll",
                 "title": f"参与了投票「{act[1]}」",
+                "detail": "",
+            })
+
+        # 最近的讨论消息（仅最近30天）
+        week_ago_ts = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+        disc_activities = execute_query(
+            """SELECT m.created_at, d.title, m.content, dg.group_index, dg.name
+               FROM discussion_messages m
+               JOIN discussion_groups dg ON m.group_id = dg.id
+               JOIN discussions d ON dg.discussion_id = d.id
+               JOIN discussion_members dm ON dm.group_id = dg.id AND dm.username = ?
+               WHERE m.username = ? AND m.created_at >= ?
+               ORDER BY m.created_at DESC LIMIT 5""",
+            (username, username, week_ago_ts),
+        )
+        for act in disc_activities:
+            activities.append({
+                "time": act[0],
+                "type": "discussion",
+                "title": f"在讨论「{act[1]}」中发言",
+                "detail": f"{act[2][:50]}{'...' if len(act[2]) > 50 else ''}",
+            })
+
+        # 最近加入的讨论
+        join_activities = execute_query(
+            """SELECT dm.joined_at, d.title
+               FROM discussion_members dm
+               JOIN discussion_groups dg ON dm.group_id = dg.id
+               JOIN discussions d ON dg.discussion_id = d.id
+               WHERE dm.username = ? AND dm.joined_at >= ?
+               ORDER BY dm.joined_at DESC LIMIT 5""",
+            (username, week_ago_ts),
+        )
+        for act in join_activities:
+            activities.append({
+                "time": act[0],
+                "type": "discussion",
+                "title": f"加入了讨论「{act[1]}」",
                 "detail": "",
             })
 
@@ -542,14 +674,76 @@ async def recent_activity(request: Request):
                 "detail": f"「{act[1]}」",
             })
 
-    # 按时间排序
-    # 修复时间格式：如果只有时间没有日期，补上今天
-    now = datetime.now()
-    for act_obj in activities:
-        t = act_obj.get("time") or ""
-        if len(t) <= 10 and ":" in t:
-            act_obj["time"] = now.strftime("%Y-%m-%d") + " " + t
+        # 最近的讨论活动（仅最近30天，避免全表扫描）
+        week_ago_ts = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+        if role == 0:
+            disc_acts = execute_query(
+                """SELECT m.created_at, d.title, dg.group_index, m.username
+                   FROM discussion_messages m
+                   JOIN discussion_groups dg ON m.group_id = dg.id
+                   JOIN discussions d ON dg.discussion_id = d.id
+                   WHERE m.created_at >= ? AND m.msg_type IN ('text', 'ai_suggest')
+                   ORDER BY m.created_at DESC LIMIT 5""",
+                (week_ago_ts,),
+            )
+        else:
+            disc_acts = execute_query(
+                """SELECT m.created_at, d.title, dg.group_index, m.username
+                   FROM discussion_messages m
+                   JOIN discussion_groups dg ON m.group_id = dg.id
+                   JOIN discussions d ON dg.discussion_id = d.id
+                   WHERE m.created_at >= ?
+                   AND (d.creator_username = ? OR d.creator_username IN (SELECT username FROM users WHERE role=0))
+                   AND m.msg_type IN ('text', 'ai_suggest')
+                   ORDER BY m.created_at DESC LIMIT 5""",
+                (week_ago_ts, username),
+            )
+        seen_disc = set()
+        for act in disc_acts:
+            key = f"{act[0]}_{act[1]}"
+            if key in seen_disc:
+                continue
+            seen_disc.add(key)
+            sender = act[3] or "AI助教"
+            activities.append({
+                "time": act[0],
+                "type": "discussion",
+                "title": f"讨论「{act[1]}」{act[2] and f'第{act[2]}组' or ''}有新消息",
+                "detail": f"来自 {sender}",
+            })
 
+        # 讨论创建/结束活动
+        if role == 0:
+            disc_events = execute_query(
+                """SELECT created_at, title, 'created' as event_type FROM discussions WHERE created_at >= ?
+                   UNION ALL
+                   SELECT updated_at, title, 'ended' FROM discussions WHERE status='ended' AND updated_at >= ?
+                   ORDER BY created_at DESC LIMIT 5""",
+                (week_ago_ts, week_ago_ts),
+            )
+        else:
+            disc_events = execute_query(
+                """SELECT created_at, title, 'created' as event_type FROM discussions WHERE creator_username=? AND created_at >= ?
+                   UNION ALL
+                   SELECT updated_at, title, 'ended' FROM discussions WHERE creator_username=? AND status='ended' AND updated_at >= ?
+                   ORDER BY created_at DESC LIMIT 5""",
+                (username, week_ago_ts, username, week_ago_ts),
+            )
+        for act in disc_events:
+            label = "创建了" if act[2] == "created" else "结束了"
+            activities.append({
+                "time": act[0],
+                "type": "discussion",
+                "title": f"{label}讨论「{act[1]}」",
+                "detail": "",
+            })
+
+    # 按时间排序
+    # 修复时间格式：如果只有时间没有日期，跳过（无法确定真实日期）
+    activities = [
+        a for a in activities
+        if not (len(a.get("time") or "") <= 10 and ":" in (a.get("time") or ""))
+    ]
     activities.sort(key=lambda x: x["time"] or "", reverse=True)
     return activities[:20]
 

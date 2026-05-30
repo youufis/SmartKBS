@@ -346,6 +346,87 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 分组讨论表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS discussions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                creator_username TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                subject TEXT DEFAULT '',
+                group_mode TEXT DEFAULT 'auto',
+                group_count INTEGER DEFAULT 0,
+                members_per_group INTEGER DEFAULT 0,
+                ai_role TEXT DEFAULT 'guide',
+                duration_minutes INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                grade TEXT DEFAULT '',
+                classes TEXT DEFAULT '',
+                require_summary INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_disc_creator ON discussions(creator_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_disc_status ON discussions(status)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 讨论小组表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS discussion_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discussion_id INTEGER NOT NULL REFERENCES discussions(id),
+                group_index INTEGER NOT NULL,
+                name TEXT DEFAULT ''
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dg_disc ON discussion_groups(discussion_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 讨论组成员表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS discussion_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL REFERENCES discussion_groups(id),
+                username TEXT NOT NULL,
+                role TEXT DEFAULT 'member',
+                joined_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dm_group ON discussion_members(group_id)")
+                c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_dm_user_disc ON discussion_members(group_id, username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 讨论消息表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS discussion_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL REFERENCES discussion_groups(id),
+                username TEXT,
+                content TEXT NOT NULL,
+                msg_type TEXT DEFAULT 'text',
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dmsg_group ON discussion_messages(group_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dmsg_time ON discussion_messages(created_at)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dmsg_type ON discussion_messages(msg_type)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dm_username ON discussion_members(username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 讨论报告表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS discussion_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                discussion_id INTEGER NOT NULL REFERENCES discussions(id),
+                group_id INTEGER,
+                report_content TEXT NOT NULL,
+                generated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dr_disc ON discussion_reports(discussion_id)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.info("数据库初始化完成")
 
