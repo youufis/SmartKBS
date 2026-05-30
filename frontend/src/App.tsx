@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { message } from 'antd'
 import { useAuthStore } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
 import AppLayout from './components/AppLayout'
@@ -27,13 +28,27 @@ import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 
 function App() {
-  const restoreSession = useAuthStore((s: { restoreSession: () => void }) => s.restoreSession)
-  const isLoggedIn = useAuthStore((s: { isLoggedIn: boolean }) => s.isLoggedIn)
+  const navigate = useNavigate()
+  const restoreSession = useAuthStore((s) => s.restoreSession)
+  const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
   const user = useAuthStore((s) => s.user)
+  const forceLogout = useAuthStore((s) => s.forceLogout)
 
   useEffect(() => {
     restoreSession()
   }, [restoreSession])
+
+  // 监听异地登录踢出事件
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const customEvent = e as CustomEvent
+      forceLogout(customEvent.detail)
+      message.warning(customEvent.detail)
+      navigate('/login', { replace: true })
+    }
+    window.addEventListener('auth:kickout', handler)
+    return () => window.removeEventListener('auth:kickout', handler)
+  }, [navigate, forceLogout])
 
   return (
     <Routes>
