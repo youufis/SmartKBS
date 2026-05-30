@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Layout, Card, Table, Select, Button, message, Tag, Space, Typography,
-  Row, Col, Spin, Statistic, Tooltip,
+  Row, Col, Statistic, Tooltip,
 } from 'antd'
 import {
   ReloadOutlined, TeamOutlined, BookOutlined, CheckCircleOutlined,
@@ -12,12 +12,6 @@ import { getAllUsers } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
 
 const { Option } = Select
-
-const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
-  completed: { label: '已完成', color: '#52c41a', bg: '#f6ffed' },
-  in_progress: { label: '学习中', color: '#faad14', bg: '#fffbe6' },
-  not_started: { label: '未开始', color: '#d9d9d9', bg: '#fafafa' },
-}
 
 const CurriculumProgressPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
@@ -109,19 +103,22 @@ const CurriculumProgressPage: React.FC = () => {
 
   useEffect(() => {
     if (isTeacherOrAdmin) {
-      loadData()
+      const fn = async () => { await loadData() }
+      fn()
     }
-  }, [courseId, grade, className, isTeacherOrAdmin, loadData])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId, grade, className, isTeacherOrAdmin])
 
   // ── 展开行渲染：知识点明细 ──
-  const renderExpandedRow = (record: any) => {
+  const renderExpandedRow = (record: Record<string, unknown>) => {
     if (!record.courses || record.courses.length === 0) {
       return <Typography.Text type="secondary">暂无可选课程</Typography.Text>
     }
 
     // 找当前选中课程的详情
-    const courseDetail = record.courses.find((c: any) => c.course_id === courseId) || record.courses[0]
-    const details = courseDetail.details || []
+    const courses = (record.courses as any[]) || []
+    const courseDetail = courses.find((c: any) => c.course_id === courseId) || courses[0]
+    const details = (courseDetail?.details as any[]) || []
 
     return (
       <div style={{ padding: '8px 0' }}>
@@ -157,7 +154,7 @@ const CurriculumProgressPage: React.FC = () => {
       key: 'name',
       width: 100,
       fixed: 'left' as const,
-      render: (name: string, record: any) => (
+      render: (name: string) => (
         <Space>
           <TeamOutlined />
           <Typography.Text strong>{name}</Typography.Text>
@@ -348,7 +345,7 @@ const CurriculumProgressPage: React.FC = () => {
           expandable={{
             expandedRowRender: renderExpandedRow,
             expandedRowKeys,
-            onExpandedRowKeysChange: (keys) => setExpandedRowKeys(keys),
+            onExpandedRowsChange: (keys: readonly React.Key[]) => setExpandedRowKeys([...keys]),
             rowExpandable: () => true,
           }}
           scroll={{ x: 600 }}
