@@ -427,6 +427,87 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 课程大纲模块（v2.3）
+            # ═══════════════════════════════════════════════
+
+            # ── 课程表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS courses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                code TEXT DEFAULT '',
+                description TEXT DEFAULT '',
+                grade TEXT DEFAULT '',
+                cover_image TEXT DEFAULT '',
+                sort_order INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+
+            # ── 章/节表（自引用 parent_id，支持无限嵌套） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS chapters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                course_id INTEGER NOT NULL REFERENCES courses(id),
+                parent_id INTEGER DEFAULT NULL REFERENCES chapters(id),
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                sort_order INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+
+            # ── 知识点表（叶子节点） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS knowledge_points (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chapter_id INTEGER NOT NULL REFERENCES chapters(id),
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                learning_objectives TEXT DEFAULT '',
+                difficulty TEXT DEFAULT 'medium',
+                estimated_minutes INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+
+            # ── 课程资源绑定表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS curriculum_bindings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                knowledge_point_id INTEGER NOT NULL REFERENCES knowledge_points(id),
+                resource_type TEXT NOT NULL,
+                resource_id INTEGER NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(knowledge_point_id, resource_type, resource_id)
+            )""")
+
+            # ── 学生学习进度表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS learning_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL REFERENCES users(username),
+                knowledge_point_id INTEGER NOT NULL REFERENCES knowledge_points(id),
+                status TEXT DEFAULT 'not_started',
+                score REAL DEFAULT 0,
+                completed_at TEXT DEFAULT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(student_username, knowledge_point_id)
+            )""")
+
+            # ── 课程大纲索引 ──
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_chapters_course ON chapters(course_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_chapters_parent ON chapters(parent_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_kp_chapter ON knowledge_points(chapter_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cb_kp ON curriculum_bindings(knowledge_point_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cb_type ON curriculum_bindings(resource_type, resource_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_lp_student ON learning_progress(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_lp_kp ON learning_progress(knowledge_point_id)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.info("数据库初始化完成")
 
