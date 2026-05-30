@@ -27,6 +27,7 @@ import DiscussionPage from './pages/DiscussionPage'
 import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 import CurriculumPage from './pages/CurriculumPage'
+import CurriculumProgressPage from './pages/CurriculumProgressPage'
 
 function App() {
   const navigate = useNavigate()
@@ -79,6 +80,7 @@ function App() {
         <Route path="discussion-room/:groupId" element={<DiscussionRoomPage />} />
         <Route path="discussion-monitor/:discId" element={<DiscussionMonitorPage />} />
         <Route path="curriculum" element={<CurriculumPage />} />
+        <Route path="curriculum/progress" element={user?.role === 'admin' || user?.role === 'teacher' ? <CurriculumProgressPage /> : <Navigate to="/curriculum" />} />
         <Route path="about" element={<AboutPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" />} />
