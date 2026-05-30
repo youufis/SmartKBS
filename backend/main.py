@@ -85,6 +85,7 @@ from backend.api.portfolio_router import router as portfolio_router
 from backend.api.analytics_router import router as analytics_router
 from backend.api.interaction_router import router as interaction_router
 from backend.api.discussion_router import router as discussion_router
+from backend.api.curriculum_router import router as curriculum_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
@@ -105,6 +106,7 @@ app.include_router(portfolio_router, prefix="/api/portfolio", tags=["成长档�
 app.include_router(analytics_router, prefix="/api/analytics", tags=["学情分析"])
 app.include_router(interaction_router, prefix="/api/interaction", tags=["课堂互动"])
 app.include_router(discussion_router, prefix="/api/interaction", tags=["分组讨论"])
+app.include_router(curriculum_router, prefix="/api/curriculum", tags=["课程大纲"])
 
 
 @app.get("/api/health")
