@@ -12,6 +12,7 @@ interface AuthStore {
 
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  forceLogout: (msg?: string) => void;
   restoreSession: () => void;
   fetchOnlineCount: () => Promise<void>;
 }
@@ -33,6 +34,14 @@ export const useAuthStore = create<AuthStore>()((set) => ({
       user: res.user,
       isLoggedIn: true,
     });
+  },
+
+  forceLogout: (msg?: string) => {
+    useChatStore.getState().newTopic();
+    localStorage.removeItem('smartkb_token');
+    localStorage.removeItem('smartkb_user');
+    if (msg) localStorage.setItem('smartkb_kickout_msg', msg);
+    set({ token: null, user: null, isLoggedIn: false });
   },
 
   logout: async () => {
