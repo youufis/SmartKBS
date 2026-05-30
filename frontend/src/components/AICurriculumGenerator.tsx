@@ -245,44 +245,53 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       {/* ── 步骤 0：输入 ── */}
       {step === 0 && (
         <Form form={form} layout="vertical" initialValues={{ subject: '信息技术', grade: '高一' }}>
-          <Tabs activeKey={inputMode} onChange={(k) => setInputMode(k as 'text' | 'file')}>
-            <Tabs.TabPane tab={<span><FileTextOutlined /> 粘贴文本</span>} key="text">
-              <Form.Item name="content" label="教学内容文本" rules={[{ required: true, message: '请输入教学内容' }]}>
-                <TextArea
-                  rows={12}
-                  placeholder={`请粘贴教材原文、教学大纲、课程目录等内容...`}
-                />
-              </Form.Item>
-            </Tabs.TabPane>
-            <Tabs.TabPane tab={<span><UploadOutlined /> 上传文件</span>} key="file">
-              <Form.Item label="上传文档（txt/md/pdf/docx）" required>
-                <Dragger
-                  accept=".txt,.md,.pdf,.docx"
-                  maxCount={1}
-                  beforeUpload={(file) => {
-                    const valid = ['.txt', '.md', '.pdf', '.docx'].some(ext =>
-                      file.name.toLowerCase().endsWith(ext)
-                    )
-                    if (!valid) {
-                      message.error('仅支持 txt/md/pdf/docx 格式')
-                      return Upload.LIST_IGNORE
-                    }
-                    if (file.size > 20 * 1024 * 1024) {
-                      message.error('文件大小不能超过 20MB')
-                      return Upload.LIST_IGNORE
-                    }
-                    setUploadFile(file)
-                    return false
-                  }}
-                  onRemove={() => setUploadFile(null)}
-                >
-                  <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-                  <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-                  <p className="ant-upload-hint">支持 txt、md、pdf、docx 格式，最大 20MB</p>
-                </Dragger>
-              </Form.Item>
-            </Tabs.TabPane>
-          </Tabs>
+          <Tabs
+            activeKey={inputMode}
+            onChange={(k) => setInputMode(k as 'text' | 'file')}
+            items={[
+              {
+                key: 'text',
+                label: <span><FileTextOutlined /> 粘贴文本</span>,
+                children: (
+                  <Form.Item name="content" label="教学内容文本" rules={[{ required: true, message: '请输入教学内容' }]}>
+                    <TextArea rows={12} placeholder="请粘贴教材原文、教学大纲、课程目录等内容..." />
+                  </Form.Item>
+                ),
+              },
+              {
+                key: 'file',
+                label: <span><UploadOutlined /> 上传文件</span>,
+                children: (
+                  <Form.Item label="上传文档（txt/md/pdf/docx）" required>
+                    <Dragger
+                      accept=".txt,.md,.pdf,.docx"
+                      maxCount={1}
+                      beforeUpload={(file) => {
+                        const valid = ['.txt', '.md', '.pdf', '.docx'].some(ext =>
+                          file.name.toLowerCase().endsWith(ext)
+                        )
+                        if (!valid) {
+                          message.error('仅支持 txt/md/pdf/docx 格式')
+                          return Upload.LIST_IGNORE
+                        }
+                        if (file.size > 20 * 1024 * 1024) {
+                          message.error('文件大小不能超过 20MB')
+                          return Upload.LIST_IGNORE
+                        }
+                        setUploadFile(file)
+                        return false
+                      }}
+                      onRemove={() => setUploadFile(null)}
+                    >
+                      <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                      <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
+                      <p className="ant-upload-hint">支持 txt、md、pdf、docx 格式，最大 20MB</p>
+                    </Dragger>
+                  </Form.Item>
+                ),
+              },
+            ]}
+          />
 
           <Space style={{ width: '100%' }} align="start" wrap>
             <Form.Item name="subject" label="科目" style={{ width: 160 }}>
