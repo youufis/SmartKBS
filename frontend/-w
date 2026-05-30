@@ -1,1 +1,0 @@
-{"detail":"Method Not Allowed"}
