@@ -64,15 +64,17 @@ export const useAuthStore = create<AuthStore>()((set) => ({
     const token = localStorage.getItem('smartkb_token');
     const userStr = localStorage.getItem('smartkb_user');
     if (token && userStr) {
-      // 向服务器验证 token 是否仍然有效
-      const user = await authApi.getMe().catch(() => null);
-      if (user) {
-        // 用服务器返回的最新用户信息更新本地缓存
-        localStorage.setItem('smartkb_user', JSON.stringify(user));
-        set({ token, user, isLoggedIn: true, sessionRestoring: false });
-        return;
+      try {
+        // 用短超时快速验证 token（3秒，避免后端不可达时卡死）
+        const user = await authApi.getMeWithTimeout(3000);
+        if (user) {
+          localStorage.setItem('smartkb_user', JSON.stringify(user));
+          set({ token, user, isLoggedIn: true, sessionRestoring: false });
+          return;
+        }
+      } catch {
+        // token 无效或后端不可达，忽略
       }
-      // token 无效或过期，清除本地缓存
     }
     localStorage.removeItem('smartkb_token');
     localStorage.removeItem('smartkb_user');
