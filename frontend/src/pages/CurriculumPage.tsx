@@ -448,9 +448,14 @@ const CurriculumPage: React.FC = () => {
         <Card>
           <Empty description="暂无课程">
             {isTeacherOrAdmin && (
-              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
-                创建第一个课程
-              </Button>
+              <Space>
+                <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
+                  创建课程
+                </Button>
+                <Button icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
+                  AI 生成课程
+                </Button>
+              </Space>
             )}
           </Empty>
         </Card>
