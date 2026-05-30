@@ -253,7 +253,7 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 
     # 构造 Prompt
     course_hint = f"课程名称：{req.course_name}" if req.course_name else "请根据内容推断课程名称"
-    prompt = f"""你是一位资深的课程教学设计专家。请根据以下教学内容文本，提取并构建一个结构清晰、层次准确的课程大纲。
+    prompt = f"""你是一位资深的课程教学设计专家。请根据以下教学内容文本，提取并构建课程大纲。
 
 【核心要求】
 - 科目：{req.subject}
@@ -261,16 +261,16 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 - {course_hint}
 - 严格按照 JSON 格式输出，不要包含任何其他文本
 
-【层次结构规则（重要）】
-1. 章（chapter）是一级标题，节（section）是二级标题（放在 chapter 的 children 中）
-2. 每个知识点（knowledge_point）必须放在它最直接所属的父级下：
-   - 如果知识点属于某个具体的节，放在该节的 knowledge_points 中
-   - 如果知识点属于整章的总括内容（不归属任何节），放在章的 knowledge_points 中
-   - 一个节只能放该节特有的知识点，不要把所有知识点都堆到章级别
-3. difficulty 只能是 easy、medium 或 hard
+【层次结构规则（最重要）】
+优先使用扁平结构：每个主题作为"章(chapter)"，知识点(knowledge_point)直接挂在章下。
+只有原始文本明确存在"章→节"的层级划分时，才使用 children 嵌套。
+
+1. 章(chapter)是一级标题，children是二级标题（只有原文明确分节时才使用）
+2. 每个知识点必须放在它最直接所属的章或节下，不要混淆层级
+3. difficulty: easy | medium | hard
 4. 每个知识点建议学习时间 10-90 分钟
 
-【输出格式】
+【✅ 推荐的扁平输出格式（首选）】
 ```json
 {{
   "course_name": "课程名称",
@@ -278,29 +278,27 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
   "course_description": "课程简要描述",
   "chapters": [
     {{
-      "name": "章名称",
-      "description": "章描述",
-      "children": [
-        {{
-          "name": "节名称",
-          "description": "节描述",
-          "knowledge_points": [
-            {{
-              "name": "知识点名称",
-              "description": "知识点描述",
-              "learning_objectives": "学习目标",
-              "difficulty": "easy|medium|hard",
-              "estimated_minutes": 30
-            }}
-          ]
-        }}
-      ],
+      "name": "主题一名称",
+      "description": "主题描述",
       "knowledge_points": [
         {{
-          "name": "章总括知识点",
+          "name": "知识点名称",
           "description": "知识点描述",
           "learning_objectives": "学习目标",
-          "difficulty": "easy|medium|hard",
+          "difficulty": "medium",
+          "estimated_minutes": 25
+        }}
+      ]
+    }},
+    {{
+      "name": "主题二名称",
+      "description": "主题描述",
+      "knowledge_points": [
+        {{
+          "name": "知识点名称",
+          "description": "知识点描述",
+          "learning_objectives": "学习目标",
+          "difficulty": "hard",
           "estimated_minutes": 30
         }}
       ]
@@ -309,10 +307,44 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 }}
 ```
 
-⚠️ 特别注意：
-- 如果教学内容中有明确的章、节划分，必须严格对应
-- 每个节下的知识点只属于该节，不要重复放到章级别
-- 章级别的 knowledge_points 只放不归属于任何具体节的综述性知识点
+【示例】
+输入文本：
+"人工智能概述与发展\n人工智能的定义与特征\n人工智能发展现状\n人工智能发展历程"
+
+输出应为：
+{{
+  "course_name": "人工智能",
+  "course_code": "AI",
+  "course_description": "人工智能基础课程",
+  "chapters": [
+    {{
+      "name": "人工智能概述与发展",
+      "description": "介绍人工智能的基本概念和发展背景",
+      "knowledge_points": [
+        {{
+          "name": "人工智能的定义与特征",
+          "description": "AI的定义及核心特征",
+          "learning_objectives": "掌握AI的定义与基本特征",
+          "difficulty": "easy",
+          "estimated_minutes": 15
+        }}
+      ]
+    }},
+    {{
+      "name": "人工智能发展现状",
+      "description": "AI技术的发展历程和现状",
+      "knowledge_points": [
+        {{
+          "name": "人工智能发展历程",
+          "description": "AI从起源到当前的发展过程",
+          "learning_objectives": "了解AI发展的关键里程碑",
+          "difficulty": "easy",
+          "estimated_minutes": 20
+        }}
+      ]
+    }}
+  ]
+}}
 
 教学内容文本：
 ---
@@ -403,38 +435,23 @@ async def ai_generate_from_file(request: Request):
 
     # 构造 Prompt
     course_hint = f"课程名称：{course_name}" if course_name else "请根据内容推断课程名称"
-    prompt = f"""你是一个教学课程设计专家。请根据以下从文件「{filename}」中提取的教学内容文本，提取并构建一个完整的课程大纲结构。
+    prompt = f"""你是一位资深的课程教学设计专家。请根据以下从文件「{filename}」中提取的教学内容文本，提取并构建课程大纲。
 
-要求：
-- 科目：{subject}
-- 年级：{grade}
-- {course_hint}
-- 严格按照 JSON 格式输出，不要包含任何其他文本
+规则：
+- 科目：{subject}，年级：{grade}，{course_hint}
+- 优先使用扁平结构：每个主题作为"章(chapter)"，知识点直接挂在章下
+- 只有原文明确分节时才使用 children 嵌套
+- 严格按照 JSON 格式输出，不包含其他文本
 
-输出格式：
+【✅ 推荐扁平格式】
 ```json
 {{
   "course_name": "课程名称",
-  "course_code": "课程代码(英文缩写)",
-  "course_description": "课程简要描述",
   "chapters": [
     {{
-      "name": "章名称",
-      "description": "章描述",
-      "children": [
-        {{
-          "name": "节名称",
-          "description": "节描述"
-        }}
-      ],
+      "name": "主题一",
       "knowledge_points": [
-        {{
-          "name": "知识点名称",
-          "description": "知识点描述",
-          "learning_objectives": "学习目标",
-          "difficulty": "easy|medium|hard",
-          "estimated_minutes": 30
-        }}
+        {{"name": "知识点","difficulty": "easy","estimated_minutes": 15}}
       ]
     }}
   ]
