@@ -354,35 +354,14 @@ def _chat_event_generator(
 
 
 def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = ""):
-    """DashScope Agent 流式对话（同步生成器）"""
-    os.environ["DASHSCOPE_API_KEY"] = api_key
-
-    call_params = {
-        "app_id": get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-        "prompt": prompt,
-        "stream": True,
-        "incremental_output": True,
-        "headers": {"X-DashScope-OssResourceResolve": "enable"},
-    }
-    if session_id:
-        call_params["session_id"] = session_id
+    """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式"""
+    from backend.api.ai_service import call_ai_stream
 
     try:
-        response = DashScopeApp.call(**call_params)
-        new_session_id = session_id
-        full_text = ""
-        for chunk in response:
-            output = getattr(chunk, "output", None)
-            if output:
-                sid = getattr(output, "session_id", None)
-                if sid:
-                    new_session_id = sid
-                text = getattr(output, "text", None)
-                if text:
-                    full_text += text
-                    yield {"text": full_text, "session_id": new_session_id}
+        for chunk in call_ai_stream(prompt, api_key, session_id):
+            yield chunk
     except Exception as e:
-        logger.error(f"Agent chat error: {e}")
+        logger.error(f"AI chat error: {e}")
         yield {"text": "网络连接错误：请检查您的网络连接或稍后重试！", "session_id": session_id}
 
 

@@ -3,7 +3,7 @@
 > 面向高中信息技术与通用技术课程的 AI 智慧教学管理平台
 > 集成流式 AI 对话、资源管理、试题库、在线考试、任务管理、课堂积分、智能点名、学情分析等功能。基于 FastAPI + React 构建。
 
-![版本](https://img.shields.io/badge/版本-2.1.0-blue)
+![版本](https://img.shields.io/badge/版本-2.2.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -105,10 +105,12 @@
 ### �📝 试题管理
 
 AI 智能试题库系统，支持一键生成（按科目/题型/知识点/难度）与手动管理（编辑/删除/筛选），题型涵盖单选、多选、判断、简答。
+支持从**粘贴文本或 Word 文档**中智能提取试题，自动识别题型、选项和答案并入库。
 
 ### 📝 考试发布
 
 完整在线考试系统，支持创建配置、智能/手动组卷、自动批改（客观题）、成绩查看与解析。
+考试全流程通知覆盖：发布通知、取消通知、修改提醒、提前结束提醒、教师收卷提醒。
 
 ### ✅ 任务管理
 
@@ -199,6 +201,7 @@ SmartKBS/
 │   │   ├── exam_router.py
 │   │   ├── users_router.py
 │   │   ├── score_router.py        # 课堂积分
+│   │   ├── ai_service.py          # AI 统一调用服务
 │   │   ├── rollcall_router.py     # 智能点名
 │   │   ├── downloads_router.py    # 文件下载
 │   │   ├── dashboard_router.py    # 首页仪表盘

@@ -66,3 +66,11 @@ export async function dedupQuestions(): Promise<{
   const { data } = await apiClient.post('/api/questions/dedup');
   return data;
 }
+
+export async function extractQuestions(formData: FormData): Promise<QuestionGenerateResponse> {
+  const { data } = await apiClient.post('/api/questions/extract', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 180000,
+  });
+  return data;
+}

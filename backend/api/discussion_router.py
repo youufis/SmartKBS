@@ -159,18 +159,11 @@ AI 助教角色：{ai_role_desc}
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 DashScope API Key"}
 
-    from dashscope import Application as DashScopeApp
-    from backend.api.config_router import get_config_value
+    from backend.api.ai_service import call_ai_sync
 
-    os.environ["DASHSCOPE_API_KEY"] = api_key
     try:
-        response = DashScopeApp.call(
-            app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-            prompt=prompt,
-            stream=False,
-        )
-        if hasattr(response, "output") and hasattr(response.output, "text"):
-            result = response.output.text
+        result = call_ai_sync(prompt, api_key)
+        if result:
             json_match = re.search(r'\{[\s\S]*\}', result)
             if json_match:
                 try:
@@ -537,14 +530,9 @@ async def _auto_generate_report(disc_id: int):
 简要分析："""
 
                 try:
-                    from dashscope import Application as DashScopeApp
-                    os.environ["DASHSCOPE_API_KEY"] = api_key
-                    response = DashScopeApp.call(
-                        app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-                        prompt=prompt, stream=False,
-                    )
-                    if hasattr(response, "output") and hasattr(response.output, "text"):
-                        summary = response.output.text
+                    from backend.api.ai_service import call_ai_sync
+                    summary = call_ai_sync(prompt, api_key)
+                    if summary:
                         overall_parts.append(f"\n**AI 分析**：{summary}")
 
                         # 保存小组报告
@@ -903,18 +891,11 @@ async def ai_suggest(group_id: int, request: Request):
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
-    from dashscope import Application as DashScopeApp
-    from backend.api.config_router import get_config_value
+    from backend.api.ai_service import call_ai_sync
 
-    os.environ["DASHSCOPE_API_KEY"] = api_key
     try:
-        response = DashScopeApp.call(
-            app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-            prompt=prompt,
-            stream=False,
-        )
-        if hasattr(response, "output") and hasattr(response.output, "text"):
-            content = response.output.text
+        content = call_ai_sync(prompt, api_key)
+        if content:
             # 将 AI 回复作为消息存入
             execute_insert_update(
                 "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, NULL, ?, 'ai_suggest', ?)",

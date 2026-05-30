@@ -3,6 +3,7 @@
 管理员/教师共享 HTML 资源和下载文件，可按角色、年级、班级灵活设置共享范围
 支持多选教师、多选年级、多选班级
 """
+import asyncio
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -104,56 +105,53 @@ async def share_resource(request: Request, body: ShareRequest):
         )
         logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
 
-        # ── 发送通知给目标用户 ──
-        try:
-            from backend.api.notification_router import _notify_users, _create_notification
-            resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
+        # ── 异步发送通知（不阻塞共享操作） ──
+        async def _send_notifications():
+            try:
+                from backend.api.notification_router import _notify_users, _create_notification
+                resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
 
-            if body.share_scope == "all":
-                # 通知所有学生
-                all_students = execute_query(
-                    "SELECT username FROM users WHERE role = 2"
-                )
-                student_usernames = [r[0] for r in all_students]
-                _notify_users(
-                    student_usernames, "share",
-                    f"新的{resource_label}已分享",
-                    f"{username} 分享了「{body.file_name}」，请前往资源中心查看",
-                    "/html-files" if body.resource_type == "html" else "/downloads",
-                )
-            elif body.share_scope == "teacher" and body.target_users:
-                _notify_users(
-                    body.target_users, "share",
-                    f"新的{resource_label}已分享",
-                    f"{username} 分享了「{body.file_name}」给您",
-                    "/html-files" if body.resource_type == "html" else "/downloads",
-                )
-            elif body.share_scope == "class":
-                # 通知指定年级/班级的学生
-                conditions = ["role = 2"]
-                params = []
-                if body.target_grades:
-                    placeholders = ",".join(["?"] * len(body.target_grades))
-                    conditions.append(f"grade IN ({placeholders})")
-                    params.extend(body.target_grades)
-                if body.target_classes:
-                    placeholders = ",".join(["?"] * len(body.target_classes))
-                    conditions.append(f"class IN ({placeholders})")
-                    params.extend(body.target_classes)
-                if conditions:
-                    target_students = execute_query(
-                        f"SELECT username FROM users WHERE {' AND '.join(conditions)}",
-                        tuple(params),
-                    )
-                    student_usernames = [r[0] for r in target_students]
-                    _notify_users(
-                        student_usernames, "share",
+                if body.share_scope == "all":
+                    all_users = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
+                    all_usernames = [r[0] for r in all_users]
+                    _notify_users(all_usernames, "share",
                         f"新的{resource_label}已分享",
-                        f"「{body.file_name}」可供您所在班级使用",
-                        "/html-files" if body.resource_type == "html" else "/downloads",
-                    )
-        except Exception as notify_err:
-            logger.warning(f"发送共享通知失败（不影响共享操作）: {notify_err}")
+                        f"{username} 分享了「{body.file_name}」，请前往资源中心查看",
+                        "/html-files" if body.resource_type == "html" else "/downloads")
+                elif body.share_scope == "staff":
+                    staff_users = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
+                    staff_usernames = [r[0] for r in staff_users]
+                    _notify_users(staff_usernames, "share",
+                        f"新的{resource_label}已分享",
+                        f"{username} 分享了「{body.file_name}」（教师共享）",
+                        "/html-files" if body.resource_type == "html" else "/downloads")
+                elif body.share_scope == "teacher" and body.target_users:
+                    _notify_users(body.target_users, "share",
+                        f"新的{resource_label}已分享",
+                        f"{username} 分享了「{body.file_name}」给您",
+                        "/html-files" if body.resource_type == "html" else "/downloads")
+                elif body.share_scope == "class":
+                    conditions, params = ["role = 2"], []
+                    if body.target_grades:
+                        placeholders = ",".join(["?"] * len(body.target_grades))
+                        conditions.append(f"grade IN ({placeholders})")
+                        params.extend(body.target_grades)
+                    if body.target_classes:
+                        placeholders = ",".join(["?"] * len(body.target_classes))
+                        conditions.append(f"class IN ({placeholders})")
+                        params.extend(body.target_classes)
+                    if conditions:
+                        target_students = execute_query(
+                            f"SELECT username FROM users WHERE {' AND '.join(conditions)}", tuple(params))
+                        student_usernames = [r[0] for r in target_students]
+                        _notify_users(student_usernames, "share",
+                            f"新的{resource_label}已分享",
+                            f"「{body.file_name}」可供您所在班级使用",
+                            "/html-files" if body.resource_type == "html" else "/downloads")
+            except Exception as notify_err:
+                logger.warning(f"发送共享通知失败: {notify_err}")
+
+        asyncio.create_task(_send_notifications())
 
         return {"message": "共享成功", "file_path": body.file_path}
     except Exception as e:
@@ -165,7 +163,7 @@ async def share_resource(request: Request, body: ShareRequest):
 
 @router.delete("/share")
 async def unshare_resource(id: int = Query(...), request: Request = None):
-    """取消共享"""
+    """取消共享（含通知）"""
     if request is None:
         raise HTTPException(status_code=401, detail="未登录")
 
@@ -173,14 +171,18 @@ async def unshare_resource(id: int = Query(...), request: Request = None):
     username = user["username"]
     role = user["role"]
 
+    # 在删除前查出完整的共享信息（用于后续通知）
     rows = execute_query(
-        "SELECT owner_username FROM shared_resources WHERE id=?",
+        """SELECT owner_username, file_path, file_name, resource_type,
+                  share_scope, target_users, target_grade, target_class
+           FROM shared_resources WHERE id=?""",
         (id,),
     )
     if not rows:
         raise HTTPException(status_code=404, detail="共享记录不存在")
 
-    owner = rows[0][0]
+    (owner, file_path, file_name, resource_type,
+     share_scope, target_users_csv, target_grade_csv, target_class_csv) = rows[0]
 
     if username != owner and role != 0:
         raise HTTPException(status_code=403, detail="无权取消此共享")
@@ -191,10 +193,78 @@ async def unshare_resource(id: int = Query(...), request: Request = None):
             (id,),
         )
         logger.info(f"共享已取消: id={id}, by={username}")
+
+        # ── 异步发送取消通知（不阻塞取消操作） ──
+        asyncio.create_task(_notify_unshare(
+            owner=owner,
+            file_name=file_name,
+            resource_type=resource_type,
+            share_scope=share_scope,
+            target_users_csv=target_users_csv,
+            target_grade_csv=target_grade_csv,
+            target_class_csv=target_class_csv,
+        ))
+
         return {"message": "共享已取消"}
     except Exception as e:
         logger.error(f"取消共享失败: {e}")
         raise HTTPException(status_code=500, detail=f"取消共享失败: {str(e)}")
+
+
+async def _notify_unshare(owner: str, file_name: str, resource_type: str,
+                          share_scope: str, target_users_csv: str,
+                          target_grade_csv: str, target_class_csv: str):
+    """异步发送取消共享通知"""
+    try:
+        from backend.api.notification_router import _notify_users
+        resource_label = "HTML 资源" if resource_type == "html" else "下载文件"
+        link = "/html-files" if resource_type == "html" else "/downloads"
+
+        target_users = [u for u in target_users_csv.split(",") if u] if target_users_csv else []
+        target_grades = [g for g in target_grade_csv.split(",") if g] if target_grade_csv else []
+        target_classes = [c for c in target_class_csv.split(",") if c] if target_class_csv else []
+
+        if share_scope == "all":
+            all_users = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
+            usernames = [r[0] for r in all_users]
+            _notify_users(usernames, "share",
+                f"{resource_label}共享已取消",
+                f"{owner} 已取消对「{file_name}」的共享",
+                link)
+        elif share_scope == "staff":
+            staff_users = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
+            usernames = [r[0] for r in staff_users]
+            _notify_users(usernames, "share",
+                f"{resource_label}共享已取消",
+                f"{owner} 已取消对「{file_name}」的共享（教师共享）",
+                link)
+        elif share_scope == "teacher" and target_users:
+            _notify_users(target_users, "share",
+                f"{resource_label}共享已取消",
+                f"{owner} 已取消对「{file_name}」的共享",
+                link)
+        elif share_scope == "class":
+            conditions, params = ["role = 2"], []
+            if target_grades:
+                placeholders = ",".join(["?"] * len(target_grades))
+                conditions.append(f"grade IN ({placeholders})")
+                params.extend(target_grades)
+            if target_classes:
+                placeholders = ",".join(["?"] * len(target_classes))
+                conditions.append(f"class IN ({placeholders})")
+                params.extend(target_classes)
+            if conditions:
+                target_students = execute_query(
+                    f"SELECT username FROM users WHERE {' AND '.join(conditions)}", tuple(params))
+                student_usernames = [r[0] for r in target_students]
+                _notify_users(student_usernames, "share",
+                    f"{resource_label}共享已取消",
+                    f"「{file_name}」已不再对您所在班级共享",
+                    link)
+
+        logger.info(f"取消共享通知已发送: {owner} -> {file_name} (scope={share_scope})")
+    except Exception as e:
+        logger.warning(f"发送取消共享通知失败: {e}")
 
 
 # ── 我创建的共享 ──

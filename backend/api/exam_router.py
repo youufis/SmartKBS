@@ -399,6 +399,24 @@ async def update_exam(exam_id: int, req: ExamUpdate, request: Request):
         tuple(params),
     )
 
+    # ── 如果考试已发布且有重要字段变更，通知学生 ──
+    if exam["status"] == "published":
+        key_notify_fields = {"title", "duration", "total_score", "pass_score", "start_time", "end_time"}
+        changed = [f for f in key_notify_fields if getattr(req, f, None) is not None]
+        if changed:
+            try:
+                from backend.api.notification_router import _notify_users
+                all_students = user_query("SELECT username FROM users WHERE role = 2")
+                student_usernames = [r[0] for r in all_students]
+                _notify_users(
+                    student_usernames, "exam",
+                    f"考试「{exam['title']}」信息已更新",
+                    f"涉及字段：{'、'.join(changed)}，请重新查看考试详情",
+                    "/exam",
+                )
+            except Exception as notify_err:
+                logger.warning(f"发送考试更新通知失败: {notify_err}")
+
     return {"message": "更新成功"}
 
 
@@ -415,6 +433,25 @@ async def delete_exam(exam_id: int, request: Request):
 
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权删除此考试")
+
+    # ── 发送考试取消通知（在删除前查出受影响的学生） ──
+    if exam["status"] == "published":
+        try:
+            from backend.api.notification_router import _notify_users
+            affected = execute_query(
+                """SELECT DISTINCT student_username FROM exam_attempts
+                   WHERE exam_id = ?""",
+                (exam_id,),
+            )
+            if affected:
+                _notify_users(
+                    [r["student_username"] for r in affected], "exam",
+                    f"考试「{exam['title']}」已取消",
+                    f"教师已删除该考试",
+                    "/exam",
+                )
+        except Exception as notify_err:
+            logger.warning(f"发送考试取消通知失败: {notify_err}")
 
     # 删除关联数据
     execute_update("DELETE FROM exam_questions WHERE exam_id = ?", (exam_id,))
@@ -492,6 +529,24 @@ async def end_exam(exam_id: int, request: Request):
         "UPDATE exams SET status = 'ended', updated_at = ? WHERE id = ?",
         (now, exam_id),
     )
+
+    # ── 通知正在答题的学生 ──
+    try:
+        from backend.api.notification_router import _notify_users
+        in_progress = execute_query(
+            """SELECT student_username FROM exam_attempts
+               WHERE exam_id = ? AND status = 'in_progress'""",
+            (exam_id,),
+        )
+        if in_progress:
+            _notify_users(
+                [r["student_username"] for r in in_progress], "exam",
+                f"考试「{exam['title']}」已提前结束",
+                f"教师已结束考试，请查看成绩",
+                "/exam",
+            )
+    except Exception as notify_err:
+        logger.warning(f"发送考试结束通知失败: {notify_err}")
 
     return {"message": "考试已结束"}
 
@@ -976,7 +1031,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     logger.info(f"学生 {username} 提交考试 {exam_id}，得分 {earned_score}/{total_score}")
 
-    # ── 发送考试结果通知 ──
+    # ── 发送考试结果通知（给学生） ──
     try:
         from backend.api.notification_router import _create_notification
         passed_str = "通过" if earned_score >= exam["pass_score"] else "未通过"
@@ -988,6 +1043,22 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         )
     except Exception as notify_err:
         logger.warning(f"发送考试结果通知失败: {notify_err}")
+
+    # ── 通知考试创建者（教师/管理员）有学生提交 ──
+    try:
+        from backend.api.notification_router import _create_notification
+        teacher_username = exam["creator_username"]
+        if teacher_username != username:
+            name_rows = user_query("SELECT name FROM users WHERE username=?", (username,))
+            student_display = name_rows[0][0] if name_rows and name_rows[0][0] else username
+            _create_notification(
+                teacher_username, "exam",
+                f"学生提交答卷: {student_display}",
+                f"已提交考试「{exam['title']}」，得分 {earned_score}/{total_score}",
+                f"/exam/{exam_id}/results",
+            )
+    except Exception as notify_err:
+        logger.warning(f"发送教师通知失败: {notify_err}")
 
     result = {
         "message": "提交成功",
