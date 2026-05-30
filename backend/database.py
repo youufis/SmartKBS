@@ -543,11 +543,21 @@ def get_connection():
 
 
 def execute_query(sql: str, params: tuple = ()):
-    """执行查询并返回所有结果"""
+    """执行查询并返回所有结果（返回元组列表）"""
     with get_connection() as conn:
         c = conn.cursor()
         c.execute(sql, params)
         return c.fetchall()
+
+
+def execute_query_dict(sql: str, params: tuple = ()):
+    """执行查询并返回所有结果（返回字典列表，支持按列名访问）"""
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute(sql, params)
+        rows = c.fetchall()
+        return [dict(row) for row in rows]
 
 
 def execute_insert_update(sql: str, params: tuple = ()):
