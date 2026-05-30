@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Layout, Card, Tree, Tabs, Button, message, Modal, Form, Input, Select,
-  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Statistic, Spin, Empty, Progress,
+  Layout, Card, Tree, Tabs, Button, message, Modal, Form, Input, Select, InputNumber,
+  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
 } from 'antd'
 import {
   BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
@@ -12,7 +12,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import * as curriculumApi from '../api/curriculum'
 import { useAuthStore } from '../stores/authStore'
-import type { Course, ChapterTreeNode, KnowledgePoint } from '../types'
+import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -61,8 +61,6 @@ const RESOURCE_LABELS: Record<string, string> = {
   task: '任务',
 }
 
-const subjectOptions = ['信息技术', '通用技术']
-
 const CurriculumPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
@@ -83,10 +81,8 @@ const CurriculumPage: React.FC = () => {
   // ── 章节/知识点管理 ──
   const [chapterModal, setChapterModal] = useState(false)
   const [kpModal, setKpModal] = useState(false)
-  const [editingChapter, setEditingChapter] = useState<any>(null)
-  const [editingKp, setEditingKp] = useState<any>(null)
-  const [parentCourseId, setParentCourseId] = useState<number>(0)
-  const [parentChapterId, setParentChapterId] = useState<number | null>(null)
+  const [editingChapter, setEditingChapter] = useState<ChapterTreeNode | null>(null)
+  const [editingKp, setEditingKp] = useState<KnowledgePoint | null>(null)
   const [chapterForm] = Form.useForm()
   const [kpForm] = Form.useForm()
   const [savingChapter, setSavingChapter] = useState(false)
@@ -94,7 +90,7 @@ const CurriculumPage: React.FC = () => {
 
   // ── 知识点详情（右侧面板） ──
   const [selectedKp, setSelectedKp] = useState<KnowledgePoint | null>(null)
-  const [kpResources, setKpResources] = useState<any[]>([])
+  const [kpResources, setKpResources] = useState<CurriculumResource[]>([])
   const [kpLoading, setKpLoading] = useState(false)
 
   // ── 加载课程树 ──
@@ -106,32 +102,40 @@ const CurriculumPage: React.FC = () => {
       if (data.length > 0 && !activeCourseId) {
         setActiveCourseId(data[0].id)
       }
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载课程大纲失败')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '加载课程大纲失败')
     } finally {
       setLoading(false)
     }
   }, [activeCourseId])
 
   useEffect(() => {
-    loadTree()
+    const fetchData = async () => {
+      await loadTree()
+    }
+    fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── 树节点选择 ──
-  const handleTreeSelect = async (selectedKeys: React.Key[], info: any) => {
-    const node = info.node
-    if (node.isKp) {
+  const handleTreeSelect = (_selectedKeys: React.Key[], info: Record<string, unknown>) => {
+    const node = info.node as Record<string, unknown> | undefined
+    if (node?.isKp) {
+      const kpData = node.data as KnowledgePoint
       // 加载知识点详情
       setKpLoading(true)
-      setSelectedKp(node.data)
-      try {
-        const res = await curriculumApi.getKpResources(node.data.id)
-        setKpResources(res.resources)
-      } catch {
-        setKpResources([])
-      } finally {
-        setKpLoading(false)
-      }
+      setSelectedKp(kpData)
+      ;(async () => {
+        try {
+          const res = await curriculumApi.getKpResources(kpData.id)
+          setKpResources(res.resources)
+        } catch {
+          setKpResources([])
+        } finally {
+          setKpLoading(false)
+        }
+      })()
     }
   }
 
@@ -161,9 +165,10 @@ const CurriculumPage: React.FC = () => {
       }
       setCourseModal(false)
       loadTree()
-    } catch (err: any) {
-      if (err?.response?.data?.detail) {
-        message.error(err.response.data.detail)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      if (detail) {
+        message.error(detail)
       }
     } finally {
       setSavingCourse(false)
@@ -175,25 +180,22 @@ const CurriculumPage: React.FC = () => {
       await curriculumApi.deleteCourse(courseId)
       message.success('课程已删除')
       loadTree()
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '删除失败')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '删除失败')
     }
   }
 
   // ── 章节 CRUD ──
   const handleCreateChapter = (courseId: number, parentId?: number | null) => {
     setEditingChapter(null)
-    setParentCourseId(courseId)
-    setParentChapterId(parentId ?? null)
     chapterForm.resetFields()
     chapterForm.setFieldsValue({ course_id: courseId, parent_id: parentId ?? null })
     setChapterModal(true)
   }
 
-  const handleEditChapter = (chapter: any) => {
+  const handleEditChapter = (chapter: ChapterTreeNode) => {
     setEditingChapter(chapter)
-    setParentCourseId(chapter.course_id)
-    setParentChapterId(chapter.parent_id)
     chapterForm.setFieldsValue(chapter)
     setChapterModal(true)
   }
@@ -211,9 +213,10 @@ const CurriculumPage: React.FC = () => {
       }
       setChapterModal(false)
       loadTree()
-    } catch (err: any) {
-      if (err?.response?.data?.detail) {
-        message.error(err.response.data.detail)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      if (detail) {
+        message.error(detail)
       }
     } finally {
       setSavingChapter(false)
@@ -225,8 +228,9 @@ const CurriculumPage: React.FC = () => {
       await curriculumApi.deleteChapter(chapterId)
       message.success('章节已删除')
       loadTree()
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '删除失败')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '删除失败')
     }
   }
 
@@ -238,7 +242,7 @@ const CurriculumPage: React.FC = () => {
     setKpModal(true)
   }
 
-  const handleEditKp = (kp: any) => {
+  const handleEditKp = (kp: KnowledgePoint) => {
     setEditingKp(kp)
     kpForm.setFieldsValue(kp)
     setKpModal(true)
@@ -257,9 +261,10 @@ const CurriculumPage: React.FC = () => {
       }
       setKpModal(false)
       loadTree()
-    } catch (err: any) {
-      if (err?.response?.data?.detail) {
-        message.error(err.response.data.detail)
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      if (detail) {
+        message.error(detail)
       }
     } finally {
       setSavingKp(false)
@@ -275,8 +280,9 @@ const CurriculumPage: React.FC = () => {
         setSelectedKp(null)
         setKpResources([])
       }
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '删除失败')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '删除失败')
     }
   }
 
@@ -291,8 +297,9 @@ const CurriculumPage: React.FC = () => {
         const kp = await curriculumApi.getKnowledgePoint(kpId)
         setSelectedKp(kp)
       }
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '更新失败')
+    } catch (err: unknown) {
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || '更新失败')
     }
   }
 
@@ -302,15 +309,15 @@ const CurriculumPage: React.FC = () => {
     return chapters.map((ch) => buildChapterNode(ch))
   }
 
-  const buildChapterNode = (ch: ChapterTreeNode): any => {
+  const buildChapterNode = (ch: ChapterTreeNode): Record<string, unknown> => {
     const isLeaf = !ch.children?.length && !ch.knowledge_points?.length
-    const node: any = {
+    const node: Record<string, unknown> = {
       title: renderChapterTitle(ch),
       key: `ch_${ch.id}`,
       isLeaf,
       data: ch,
     }
-    const children: any[] = []
+    const children: Record<string, unknown>[] = []
 
     // 子章节
     if (ch.children?.length) {
@@ -484,7 +491,7 @@ const CurriculumPage: React.FC = () => {
                         <Progress
                           percent={Math.round(course.progress.completed / course.progress.total * 100)}
                           size="small"
-                          format={() => `${course.progress.completed}/${course.progress.total}`}
+                          format={() => course.progress ? `${course.progress.completed}/${course.progress.total}` : ''}
                           style={{ marginBottom: 12 }}
                         />
                       )}
@@ -681,7 +688,6 @@ const CurriculumPage: React.FC = () => {
             <Select
               allowClear
               placeholder="留空为顶层章"
-              onChange={(val) => setParentChapterId(val ?? null)}
             >
               {activeCourse?.chapters?.map((ch) => (
                 <Option key={ch.id} value={ch.id}>{ch.name}</Option>
