@@ -139,8 +139,9 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
 
   // ── 管理员选项 ──
   const adminScopeOptions = [
-    { value: 'all', label: <><GlobalOutlined /> 所有人</>, desc: '所有用户可见' },
-    { value: 'teacher', label: <><TeamOutlined /> 指定教师</>, desc: '仅对选中的教师用户可见' },
+    { value: 'all', label: <><GlobalOutlined /> 所有人</>, desc: '所有用户可见（含教师和学生）' },
+    { value: 'staff', label: <><TeamOutlined /> 全体教师</>, desc: '仅对教师和管理员可见' },
+    { value: 'teacher', label: <><UserOutlined /> 指定教师</>, desc: '仅对选中的教师用户可见' },
     { value: 'class', label: <><BookOutlined /> 指定年级/班级</>, desc: '对选中的年级或班级的学生可见' },
   ]
 

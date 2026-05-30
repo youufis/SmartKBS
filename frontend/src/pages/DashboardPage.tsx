@@ -77,6 +77,9 @@ interface DashboardSummary {
   // 学生 - 分组讨论
   active_discussion_count?: number
   my_discussion_count?: number
+  // 共享资源
+  shared_files_count?: number
+  shared_resources_count?: number
   // 教师/管理员 - 分组讨论
   discussion_total?: number
   discussion_active?: number
