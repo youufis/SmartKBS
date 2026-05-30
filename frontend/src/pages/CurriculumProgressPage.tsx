@@ -111,12 +111,13 @@ const CurriculumProgressPage: React.FC = () => {
 
   // ── 展开行渲染：知识点明细 ──
   const renderExpandedRow = (record: Record<string, unknown>) => {
-    if (!record.courses || record.courses.length === 0) {
+    const stuCourses = (record.courses as Record<string, unknown>[] | undefined) || []
+    if (stuCourses.length === 0) {
       return <Typography.Text type="secondary">暂无可选课程</Typography.Text>
     }
 
     // 找当前选中课程的详情
-    const courses = (record.courses as any[]) || []
+    const courses = stuCourses
     const courseDetail = courses.find((c: any) => c.course_id === courseId) || courses[0]
     const details = (courseDetail?.details as any[]) || []
 
