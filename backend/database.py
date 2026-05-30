@@ -498,6 +498,7 @@ def init_db():
 
             # ── 课程大纲索引 ──
             try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_courses_status ON courses(status)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_chapters_course ON chapters(course_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_chapters_parent ON chapters(parent_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_kp_chapter ON knowledge_points(chapter_id)")

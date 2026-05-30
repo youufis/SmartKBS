@@ -99,34 +99,48 @@ def _now() -> str:
 
 
 def _build_course_tree(course_id: int) -> list[dict]:
-    """构建课程的完整章节-知识点树"""
-    # 查询所有顶层章节（parent_id IS NULL）
-    top_chapters = execute_query(
-        "SELECT * FROM chapters WHERE course_id=? AND parent_id IS NULL AND status='active' ORDER BY sort_order, id",
+    """构建课程的完整章节-知识点树（批量查询优化版）
+
+    优化说明：将 N+1 次递归查询合并为 2 次批量查询，
+    在内存中用字典组装树结构，大幅减少 SQL 查询次数。
+    """
+    # 1) 一次性查询该课程所有章节
+    all_chapters = execute_query(
+        """SELECT * FROM chapters
+           WHERE course_id=? AND status='active'
+           ORDER BY sort_order, id""",
         (course_id,),
     )
-    result = []
-    for ch in top_chapters:
-        result.append(_build_chapter_node(ch))
-    return result
-
-
-def _build_chapter_node(ch: dict) -> dict:
-    """递归构建章节节点（含子章节和知识点）"""
-    node = dict(ch)
-    # 子章节
-    children = execute_query(
-        "SELECT * FROM chapters WHERE parent_id=? AND status='active' ORDER BY sort_order, id",
-        (ch["id"],),
+    # 2) 一次性查询该课程所有知识点
+    all_kps = execute_query(
+        """SELECT kp.* FROM knowledge_points kp
+           JOIN chapters ch ON ch.id = kp.chapter_id
+           WHERE ch.course_id=? AND kp.status='active'
+           ORDER BY kp.sort_order, kp.id""",
+        (course_id,),
     )
-    node["children"] = [_build_chapter_node(c) for c in children]
-    # 知识点
-    kps = execute_query(
-        "SELECT * FROM knowledge_points WHERE chapter_id=? AND status='active' ORDER BY sort_order, id",
-        (ch["id"],),
-    )
-    node["knowledge_points"] = kps
-    return node
+
+    # 3) 构建 parent_id → 章节列表 的映射
+    children_map: dict[int, list[dict]] = {}
+    for ch in all_chapters:
+        pid = ch["parent_id"] or 0  # 顶层用 0 表示
+        children_map.setdefault(pid, []).append(ch)
+
+    # 4) 构建 chapter_id → 知识点列表 的映射
+    kp_map: dict[int, list[dict]] = {}
+    for kp in all_kps:
+        kp_map.setdefault(kp["chapter_id"], []).append(kp)
+
+    # 5) 递归组装树
+    def _build_node(ch: dict) -> dict:
+        node = dict(ch)
+        # 子章节
+        node["children"] = [_build_node(c) for c in children_map.get(ch["id"], [])]
+        # 知识点
+        node["knowledge_points"] = kp_map.get(ch["id"], [])
+        return node
+
+    return [_build_node(ch) for ch in children_map.get(0, [])]
 
 
 def _inject_progress(kps: list[dict], username: str):
