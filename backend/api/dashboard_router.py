@@ -231,6 +231,13 @@ async def dashboard_summary(request: Request):
             # 分组讨论
             "active_discussion_count": active_discussion_count,
             "my_discussion_count": my_discussion_count,
+            # 共享资源
+            "shared_files_count": _db_count(
+                """SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'
+                   OR (share_scope='class' AND (grade=? OR INSTR(?, grade)>0) AND (class=? OR INSTR(?, class)>0))
+                   OR (share_scope='teacher' AND INSTR(target_users, ?)>0)""",
+                (grade, grade, cls, cls, username) if grade else ("", "", "", "", username),
+            ) if grade else _db_count("SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'"),
         })
 
     else:  # ── 教师/管理员 ──
@@ -398,6 +405,12 @@ async def dashboard_summary(request: Request):
             "discussion_active": discussion_active,
             "discussion_member_count": discussion_member_count,
             "online_count": get_online_count(),
+            "shared_resources_count": _db_count(
+                "SELECT COUNT(*) FROM shared_resources"
+            ) if role == 0 else _db_count(
+                "SELECT COUNT(*) FROM shared_resources WHERE owner_username=? OR share_scope='all' OR share_scope='staff' OR (share_scope='teacher' AND INSTR(target_users, ?)>0)",
+                (username, username),
+            ),
         })
 
         # 最近几场考试
