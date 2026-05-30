@@ -20,6 +20,12 @@ const LoginPage: React.FC = () => {
       if (data.AGENT_NAME) setAgentName(data.AGENT_NAME)
       if (data.ORG_NAME) setOrgName(data.ORG_NAME)
     }).catch(() => {})
+    // 检查是否有异地登录被踢出的提示
+    const kickoutMsg = localStorage.getItem('smartkb_kickout_msg')
+    if (kickoutMsg) {
+      message.warning(kickoutMsg)
+      localStorage.removeItem('smartkb_kickout_msg')
+    }
   }, [])
 
   useEffect(() => {
