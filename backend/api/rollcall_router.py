@@ -57,6 +57,43 @@ def _score_key(teacher, grade, cls, name):
     return teacher_score_key(teacher, grade, cls, name)
 
 
+def _is_teacher_allowed(username: str, grade: str, cls: str) -> bool:
+    """检查教师是否有权限访问该年级/班级"""
+    if not grade and not cls:
+        return True
+    rows = execute_query(
+        "SELECT grade, class FROM users WHERE username=?", (username,)
+    )
+    if not rows:
+        return False
+    t_grade = (rows[0][0] or "").strip()
+    t_class = str(rows[0][1] or "").strip()
+
+    # 检查年级
+    if grade:
+        allowed_grades = [g.strip() for g in t_grade.split("|") if g.strip()]
+        if grade not in allowed_grades:
+            return False
+
+    # 检查班级（如果有指定）
+    if cls and t_class:
+        # 从班级名中提取数字部分，如 "高一10班" -> "10"
+        import re
+        cls_match = re.search(r'\d+', cls)
+        cls_num = cls_match.group() if cls_match else cls
+        grade_parts = [g.strip() for g in t_grade.split("|") if g.strip()]
+        class_parts = [c.strip() for c in t_class.split("|")] if t_class else []
+        for i, g in enumerate(grade_parts):
+            if g == grade:
+                if i < len(class_parts) and class_parts[i]:
+                    allowed_nums = [c.strip() for c in class_parts[i].split(",") if c.strip()]
+                    if cls_num in allowed_nums:
+                        return True
+                    return False
+                break
+    return True
+
+
 def _load_history(teacher, grade, cls):
     """从数据库加载点名状态"""
     with get_connection() as conn:
@@ -260,9 +297,19 @@ async def api_classes(request: Request):
 
 
 async def api_students(request: Request):
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
     teacher = _get_rollcall_teacher(request)
     grade = request.query_params.get("grade", "")
     cls = request.query_params.get("class", "")
+
+    # 教师只能查看自己任教班级的学生
+    if role != 0:
+        if not _is_teacher_allowed(username, grade, cls):
+            return []
+
     students = _load_students(grade)
     if cls:
         students = [s for s in students if s.get("class") == cls]
@@ -285,6 +332,11 @@ async def api_pick(request: Request):
     teacher = body.get("teacher") or _get_rollcall_teacher(request, body)
     if not grade or not cls:
         return {"error": "缺少年级/班级"}
+
+    # 教师只能操作自己班级的点名
+    user = get_current_user(request)
+    if user.get("role") != 0 and not _is_teacher_allowed(user["username"], grade, cls):
+        return {"error": "无权操作该班级"}
 
     state = _load_history(teacher, grade, cls)
     students = _load_students(grade)
