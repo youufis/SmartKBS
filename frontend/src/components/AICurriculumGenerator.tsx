@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   Modal, Form, Input, Select, Button, message, Steps, Tree, Space, Tag,
-  Typography, Spin, Alert, Divider, Checkbox,
+  Typography, Spin, Alert, Divider,
 } from 'antd'
 import {
   RobotOutlined, UploadOutlined, FileTextOutlined, CheckCircleOutlined,
