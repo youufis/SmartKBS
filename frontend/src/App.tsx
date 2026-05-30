@@ -22,6 +22,9 @@ import AnnouncementsPage from './pages/AnnouncementsPage'
 import PortfolioPage from './pages/PortfolioPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import InteractionPage from './pages/InteractionPage'
+import DiscussionPage from './pages/DiscussionPage'
+import DiscussionRoomPage from './pages/DiscussionRoomPage'
+import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 
 function App() {
   const restoreSession = useAuthStore((s: { restoreSession: () => void }) => s.restoreSession)
@@ -56,6 +59,9 @@ function App() {
         <Route path="portfolio/:username" element={<PortfolioPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="interaction" element={<InteractionPage />} />
+        <Route path="discussion" element={<DiscussionPage />} />
+        <Route path="discussion-room/:groupId" element={<DiscussionRoomPage />} />
+        <Route path="discussion-monitor/:discId" element={<DiscussionMonitorPage />} />
         <Route path="about" element={<AboutPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" />} />

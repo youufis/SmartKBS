@@ -7,17 +7,16 @@ import {
 import {
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
   MessageOutlined, TeamOutlined, BookOutlined,
-  RiseOutlined, ClockCircleOutlined, ThunderboltOutlined,
+  ClockCircleOutlined, ThunderboltOutlined,
   AuditOutlined, BarChartOutlined, ReloadOutlined,
-  RightOutlined, ExperimentOutlined,
-  DatabaseOutlined, FolderOutlined, BellOutlined,
+  RightOutlined, ExperimentOutlined, BellOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
 
-const { Title, Text, Paragraph } = Typography
+const { Text, Paragraph } = Typography
 
 interface DashboardSummary {
   role: 'admin' | 'teacher' | 'student'
@@ -75,6 +74,16 @@ interface DashboardSummary {
   teacher_poll_count?: number
   teacher_quiz_answer_count?: number
   teacher_poll_vote_count?: number
+  // 学生 - 分组讨论
+  active_discussion_count?: number
+  my_discussion_count?: number
+  // 教师/管理员 - 分组讨论
+  discussion_total?: number
+  discussion_active?: number
+  discussion_member_count?: number
+  // 管理员专有
+  online_count?: number
+  recent_exams?: Array<{ id: number; title: string; status: string; created_at: string; creator_username?: string; creator_name?: string }>
 }
 
 interface Activity {
@@ -91,6 +100,7 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   rollcall: { color: '#722ed1', icon: <AuditOutlined /> },
   quiz: { color: '#ff4d4f', icon: <ThunderboltOutlined /> },
   poll: { color: '#722ed1', icon: <BarChartOutlined /> },
+  discussion: { color: '#1677ff', icon: <TeamOutlined /> },
 }
 
 const DashboardPage: React.FC = () => {
@@ -106,17 +116,6 @@ const DashboardPage: React.FC = () => {
   const isTeacher = user?.role === 'teacher'
   const isAdmin = user?.role === 'admin'
 
-  const fetchData = async () => {
-    setLoading(true)
-    try {
-      const { data } = await apiClient.get('/api/dashboard/summary')
-      setSummary(data)
-    } catch {
-      // ignore
-    }
-    setLoading(false)
-  }
-
   const fetchActivities = async () => {
     setActivityLoading(true)
     try {
@@ -128,19 +127,27 @@ const DashboardPage: React.FC = () => {
     setActivityLoading(false)
   }
 
-  const fetchAnnouncements = async () => {
-    try {
-      const data = await notificationsApi.getAnnouncements(1, 5)
-      setAnnouncements(data.announcements || [])
-    } catch {
-      // ignore
-    }
-  }
-
   useEffect(() => {
-    fetchData()
-    fetchActivities()
-    fetchAnnouncements()
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [sumRes, actRes] = await Promise.all([
+          apiClient.get('/api/dashboard/summary'),
+          apiClient.get('/api/dashboard/recent-activity').catch(() => ({ data: [] })),
+        ])
+        if (cancelled) return
+        setSummary(sumRes.data)
+        setActivities(Array.isArray(actRes.data) ? actRes.data : [])
+      } catch { /* ignore */ }
+      if (!cancelled) {
+        setLoading(false)
+        setActivityLoading(false)
+      }
+    })()
+    notificationsApi.getAnnouncements(1, 5).then((data) => {
+      if (!cancelled) setAnnouncements(data.announcements || [])
+    }).catch(() => {})
+    return () => { cancelled = true }
   }, [])
 
   if (loading) {
@@ -163,223 +170,173 @@ const DashboardPage: React.FC = () => {
     <div>
       {/* ─── 欢迎横幅 ─── */}
       <Card
+        size="small"
         style={{
-          marginBottom: 24,
+          marginBottom: 20,
           background: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
-          borderRadius: 12,
+          borderRadius: 8,
           border: 'none',
         }}
+        bodyStyle={{ padding: '10px 20px' }}
       >
-        <div style={{ color: '#fff' }}>
-          <Title level={3} style={{ color: '#fff', margin: 0 }}>
+        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap' }}>
             {timeOfDay}好，{summary.user_name}{roleLabel}！👋
-          </Title>
-          <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 15, marginTop: 8, display: 'block' }}>
-            {isStudent
-              ? '欢迎回来，继续你的学习之旅吧！'
-              : '欢迎使用 SmartKBS 智慧教学平台'}
-          </Text>
+          </span>
+          <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, whiteSpace: 'nowrap' }}>
+            {isStudent ? '继续你的学习之旅吧' : '欢迎使用 SmartKBS 智慧教学平台'}
+          </span>
+          {isTeacher && summary.teacher_grades && (
+            <span style={{ marginLeft: 'auto', fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
+              <TeamOutlined /> {summary.teacher_grades} · {summary.teacher_classes}班
+            </span>
+          )}
         </div>
       </Card>
 
-      {/* ─── 统计卡片 ─── */}
+      {/* ─── 统计卡片（精简为每行 5 个） ─── */}
       {isStudent ? (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/exam')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/exam')} size="small">
               <Statistic
-                title="待完成考试"
-                value={summary.pending_exam_count ?? 0}
+                title="考试"
+                value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
                 prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
-                suffix="场"
-                valueStyle={{ color: '#1677ff' }}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考</Text>}
+                valueStyle={{ color: '#1677ff', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/exam')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/score')} size="small">
               <Statistic
-                title="已完成考试"
-                value={summary.completed_exam_count ?? 0}
-                prefix={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
-                suffix="场"
-                valueStyle={{ color: '#52c41a' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/score')}>
-              <Statistic
-                title="累计积分"
+                title="积分"
                 value={summary.total_score ?? 0}
                 prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-                suffix="分"
-                valueStyle={{ color: '#faad14' }}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名 {summary.rank ?? '-'}</Text>}
+                valueStyle={{ color: '#faad14', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/tasks')} size="small">
               <Statistic
-                title="积分排名"
-                value={summary.rank ?? '-'}
-                prefix={<RiseOutlined style={{ color: '#722ed1' }} />}
-                suffix={summary.rank ? '/ 全班' : ''}
-                valueStyle={{ color: '#722ed1' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/tasks')}>
-              <Statistic
-                title="活跃任务"
+                title="任务"
                 value={summary.active_task_count ?? 0}
                 prefix={<BookOutlined style={{ color: '#fa8c16' }} />}
-                suffix="个"
-                valueStyle={{ color: '#fa8c16' }}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>个活跃</Text>}
+                valueStyle={{ color: '#fa8c16', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/interaction')} size="small">
               <Statistic
-                title="本周对话"
-                value={summary.recent_chat_count ?? 0}
-                prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
-                suffix="次"
-                valueStyle={{ color: '#13c2c2' }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/interaction')}>
-              <Statistic
-                title="待答测验"
+                title="互动"
                 value={summary.active_quiz_count ?? 0}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix="个"
-                valueStyle={{ color: '#ff4d4f' }}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>待答 · {summary.student_poll_vote_count ?? 0}票</Text>}
+                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/interaction')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/discussion')} size="small">
               <Statistic
-                title="已参与投票"
-                value={summary.student_poll_vote_count ?? 0}
-                prefix={<BarChartOutlined style={{ color: '#722ed1' }} />}
-                suffix="次"
-                valueStyle={{ color: '#722ed1' }}
+                title="讨论"
+                value={summary.my_discussion_count ?? 0}
+                prefix={<TeamOutlined style={{ color: '#1677ff' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>/ {summary.active_discussion_count ?? 0} 进行中</Text>}
+                valueStyle={{ color: '#1677ff', fontSize: 22 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={4}>
+            <Card size="small">
+              <Statistic
+                title="对话"
+                value={summary.recent_chat_count ?? 0}
+                prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>次/本周</Text>}
+                valueStyle={{ color: '#13c2c2', fontSize: 22 }}
               />
             </Card>
           </Col>
         </Row>
       ) : (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/exam')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/exam')} size="small">
               <Statistic
-                title="考试总数"
+                title="考试"
                 value={summary.exam_stats?.total ?? 0}
                 prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
                 suffix={
-                  <Space size={4} style={{ fontSize: 14 }}>
-                    <Tag color="default">草稿 {summary.exam_stats?.draft ?? 0}</Tag>
-                    <Tag color="green">发布 {summary.exam_stats?.published ?? 0}</Tag>
-                    <Tag color="red">结束 {summary.exam_stats?.ended ?? 0}</Tag>
-                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    草稿{summary.exam_stats?.draft ?? 0} · 发布{summary.exam_stats?.published ?? 0} · 结束{summary.exam_stats?.ended ?? 0}
+                  </Text>
                 }
-                valueStyle={{ color: '#1677ff', fontSize: 28 }}
+                valueStyle={{ color: '#1677ff', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/tasks')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/tasks')} size="small">
               <Statistic
-                title="任务提交"
+                title="任务"
                 value={summary.total_submissions ?? 0}
                 prefix={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
-                suffix={
-                  <Space size={4}>
-                    <Text type="secondary" style={{ fontSize: 14 }}>
-                      活跃 {summary.active_task_count ?? 0}
-                    </Text>
-                  </Space>
-                }
-                valueStyle={{ color: '#52c41a', fontSize: 28 }}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>提交 · {summary.active_task_count ?? 0}活跃</Text>}
+                valueStyle={{ color: '#52c41a', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate(isAdmin ? '/user-mgmt' : '/score')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate(isAdmin ? '/user-mgmt' : '/score')} size="small">
               <Statistic
-                title="学生总数"
+                title="师生"
                 value={summary.total_students ?? 0}
                 prefix={<TeamOutlined style={{ color: '#722ed1' }} />}
                 suffix={
-                  isAdmin ? (
-                    <Text type="secondary" style={{ fontSize: 14 }}>
-                      教师 {summary.total_teachers ?? 0}
-                    </Text>
-                  ) : null
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {isAdmin ? `教师 ${summary.total_teachers ?? 0}` : '名学生'}
+                  </Text>
                 }
-                valueStyle={{ color: '#722ed1', fontSize: 28 }}
+                valueStyle={{ color: '#722ed1', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/rollcall')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/rollcall')} size="small">
               <Statistic
-                title="本周点名"
+                title="点名"
                 value={summary.rollcall_this_week ?? 0}
                 prefix={<AuditOutlined style={{ color: '#fa8c16' }} />}
-                suffix="次"
-                valueStyle={{ color: '#fa8c16', fontSize: 28 }}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>次/本周</Text>}
+                valueStyle={{ color: '#fa8c16', fontSize: 22 }}
               />
             </Card>
           </Col>
-
-          {isAdmin && (
-            <Col xs={12} sm={6}>
-              <Card>
-                <Statistic
-                  title="今日对话"
-                  value={summary.today_chat_count ?? 0}
-                  prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
-                  suffix="次"
-                  valueStyle={{ color: '#13c2c2', fontSize: 28 }}
-                />
-              </Card>
-            </Col>
-          )}
-          {/* ── 课堂互动卡片（教师/管理员） ── */}
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/interaction')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/interaction')} size="small">
               <Statistic
-                title="随堂测验"
+                title="互动"
                 value={summary.teacher_quiz_count ?? 0}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={
-                  <Text type="secondary" style={{ fontSize: 14 }}>
-                    进行中 {summary.teacher_active_quiz_count ?? 0}
-                  </Text>
-                }
-                valueStyle={{ color: '#ff4d4f', fontSize: 28 }}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验 · {summary.teacher_poll_count ?? 0}投票</Text>}
+                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6}>
-            <Card hoverable onClick={() => navigate('/interaction')}>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/discussion')} size="small">
               <Statistic
-                title="活跃投票"
-                value={summary.teacher_poll_count ?? 0}
-                prefix={<BarChartOutlined style={{ color: '#722ed1' }} />}
-                suffix={
-                  <Text type="secondary" style={{ fontSize: 14 }}>
-                    回应 {summary.teacher_quiz_answer_count ?? 0} 人
-                  </Text>
-                }
-                valueStyle={{ color: '#722ed1', fontSize: 28 }}
+                title="讨论"
+                value={summary.discussion_active ?? 0}
+                prefix={<TeamOutlined style={{ color: '#1677ff' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>进行中 · 共{summary.discussion_total ?? 0}</Text>}
+                valueStyle={{ color: '#1677ff', fontSize: 22 }}
               />
             </Card>
           </Col>
@@ -430,14 +387,66 @@ const DashboardPage: React.FC = () => {
             </Card>
           )}
 
-          {/* 教师：任教信息 */}
-          {isTeacher && summary.teacher_grades && (
-            <Card title={<Space><TeamOutlined />任教信息</Space>} style={{ marginBottom: 16 }}>
-              <Space direction="vertical">
-                <Text>任教年级：<Tag color="blue">{summary.teacher_grades}</Tag></Text>
-                <Text>任教班级：<Tag color="green">{summary.teacher_classes}</Tag></Text>
-              </Space>
-            </Card>
+          {/* ── 教师：在线状态 + 最近考试 ── */}
+          {isTeacher && (
+            <>
+              <Card size="small" style={{ marginBottom: 16 }}>
+                <Space>
+                  <Statistic
+                    title="今日对话"
+                    value={summary.today_chat_count ?? 0}
+                    prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
+                    valueStyle={{ color: '#13c2c2', fontSize: 20 }}
+                  />
+                  <Statistic
+                    title="本周点名"
+                    value={summary.rollcall_this_week ?? 0}
+                    prefix={<AuditOutlined style={{ color: '#fa8c16' }} />}
+                    valueStyle={{ color: '#fa8c16', fontSize: 20 }}
+                  />
+                </Space>
+              </Card>
+              {summary.recent_exams && summary.recent_exams.length > 0 && (
+                <Card
+                  title={<Space><FileAddOutlined style={{ color: '#1677ff' }} />最近创建的考试</Space>}
+                  size="small"
+                  style={{ marginBottom: 16 }}
+                  extra={
+                    <Button type="link" size="small" onClick={() => navigate('/exam')}>
+                      管理 <RightOutlined />
+                    </Button>
+                  }
+                >
+                  <List
+                    size="small"
+                    dataSource={summary.recent_exams}
+                    renderItem={(exam) => {
+                      const statusMap: Record<string, { label: string; color: string }> = {
+                        draft: { label: '草稿', color: 'default' },
+                        published: { label: '已发布', color: 'green' },
+                        ended: { label: '已结束', color: 'red' },
+                      }
+                      const s = statusMap[exam.status] || { label: exam.status, color: 'default' }
+                      return (
+                        <List.Item>
+                          <List.Item.Meta
+                            title={<Text style={{ fontSize: 13 }}>{exam.title}</Text>}
+                            description={
+                              <Space size={8}>
+                                <Tag color={s.color} style={{ fontSize: 11 }}>{s.label}</Tag>
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  {exam.created_at?.slice(0, 10)}
+                                </Text>
+                              </Space>
+                            }
+                          />
+                        </List.Item>
+                      )
+                    }}
+                  />
+                </Card>
+              )}
+            </>
           )}
 
           {/* 学生：近期考试成绩 */}
@@ -480,35 +489,69 @@ const DashboardPage: React.FC = () => {
             </Card>
           )}
 
-          {/* 教师/管理员：考试概览小表格 */}
-          {!isStudent && (
-            <Card
-              title={<Space><FileAddOutlined style={{ color: '#1677ff' }} />考试概览</Space>}
-              style={{ marginBottom: 16 }}
-              extra={
-                <Button type="link" onClick={() => navigate('/exam')}>
-                  管理考试 <RightOutlined />
-                </Button>
-              }
-            >
-              <Row gutter={[16, 16]}>
-                {[
-                  { label: '草稿', value: summary.exam_stats?.draft ?? 0, color: '#999' },
-                  { label: '已发布', value: summary.exam_stats?.published ?? 0, color: '#52c41a' },
-                  { label: '已结束', value: summary.exam_stats?.ended ?? 0, color: '#ff4d4f' },
-                  { label: '总计', value: summary.exam_stats?.total ?? 0, color: '#1677ff' },
-                ].map((item) => (
-                  <Col span={6} key={item.label}>
-                    <Card size="small" style={{ textAlign: 'center' }}>
-                      <Text type="secondary">{item.label}</Text>
-                      <div style={{ fontSize: 28, fontWeight: 600, color: item.color }}>
-                        {item.value}
-                      </div>
-                    </Card>
-                  </Col>
-                ))}
-              </Row>
-            </Card>
+          {/* ── 管理员：在线状态 + 最近考试 ── */}
+          {isAdmin && (
+            <>
+              <Card size="small" style={{ marginBottom: 16 }}>
+                <Space>
+                  <Statistic
+                    title="当前在线"
+                    value={summary.online_count ?? 0}
+                    prefix={<TeamOutlined style={{ color: '#52c41a' }} />}
+                    valueStyle={{ color: '#52c41a', fontSize: 20 }}
+                  />
+                  <Statistic
+                    title="今日对话"
+                    value={summary.today_chat_count ?? 0}
+                    prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
+                    valueStyle={{ color: '#13c2c2', fontSize: 20 }}
+                  />
+                </Space>
+              </Card>
+              {summary.recent_exams && summary.recent_exams.length > 0 && (
+                <Card
+                  title={<Space><FileAddOutlined style={{ color: '#1677ff' }} />最近创建的考试</Space>}
+                  size="small"
+                  style={{ marginBottom: 16 }}
+                  extra={
+                    <Button type="link" size="small" onClick={() => navigate('/exam')}>
+                      管理 <RightOutlined />
+                    </Button>
+                  }
+                >
+                  <List
+                    size="small"
+                    dataSource={summary.recent_exams}
+                    renderItem={(exam) => {
+                      const statusMap: Record<string, { label: string; color: string }> = {
+                        draft: { label: '草稿', color: 'default' },
+                        published: { label: '已发布', color: 'green' },
+                        ended: { label: '已结束', color: 'red' },
+                      }
+                      const s = statusMap[exam.status] || { label: exam.status, color: 'default' }
+                      return (
+                        <List.Item>
+                          <List.Item.Meta
+                            title={<Text style={{ fontSize: 13 }}>{exam.title}</Text>}
+                            description={
+                              <Space size={8}>
+                                <Tag color={s.color} style={{ fontSize: 11 }}>{s.label}</Tag>
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  {exam.creator_name || exam.creator_username || ''}
+                                </Text>
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  {exam.created_at?.slice(0, 10)}
+                                </Text>
+                              </Space>
+                            }
+                          />
+                        </List.Item>
+                      )
+                    }}
+                  />
+                </Card>
+              )}
+            </>
           )}
 
           {/* 系统公告 */}
@@ -554,25 +597,21 @@ const DashboardPage: React.FC = () => {
             </Card>
           )}
 
-          {/* 快速入口 */}
-          <Card title={<Space><ThunderboltOutlined style={{ color: '#faad14' }} />快速入口</Space>}>
-            <Row gutter={[12, 12]}>
+          {/* 快捷导航 */}
+          <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#faad14' }} />快捷导航</Space>}>
+            <Row gutter={[8, 8]}>
               {isStudent ? (
                 <>
-                  <Col span={8}><Button block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>AI 对话</Button></Col>
-                  <Col span={8}><Button block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>在线考试</Button></Col>
-                  <Col span={8}><Button block icon={<TrophyOutlined />} onClick={() => navigate('/score')}>查看积分</Button></Col>
+                  <Col span={8}><Button size="small" block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>AI 对话</Button></Col>
+                  <Col span={8}><Button size="small" block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>在线考试</Button></Col>
+                  <Col span={8}><Button size="small" block icon={<TeamOutlined />} onClick={() => navigate('/discussion')}>分组讨论</Button></Col>
                 </>
               ) : (
                 <>
-                  <Col span={8}><Button block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>AI 对话</Button></Col>
-                  <Col span={8}><Button block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>考试发布</Button></Col>
-                  <Col span={8}><Button block icon={<AuditOutlined />} onClick={() => navigate('/rollcall')}>智能点名</Button></Col>
-                  {isAdmin && (
-                    <Col span={8}><Button block icon={<TeamOutlined />} onClick={() => navigate('/user-mgmt')}>用户管理</Button></Col>
-                  )}
-                  <Col span={8}><Button block icon={<DatabaseOutlined />} onClick={() => navigate('/question-bank')}>试题管理</Button></Col>
-                  <Col span={8}><Button block icon={<FolderOutlined />} onClick={() => navigate('/resource-mgmt')}>资源管理</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>AI 对话</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>考试发布</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<AuditOutlined />} onClick={() => navigate('/rollcall')}>智能点名</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<TeamOutlined />} onClick={() => navigate('/discussion')}>分组讨论</Button></Col>
                 </>
               )}
             </Row>
