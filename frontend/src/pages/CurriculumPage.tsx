@@ -9,9 +9,9 @@ import {
   TeamOutlined, CheckCircleOutlined, ClockCircleOutlined,
   MenuOutlined, NodeIndexOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
 import * as curriculumApi from '../api/curriculum'
 import { useAuthStore } from '../stores/authStore'
+import ResourceBinder from '../components/ResourceBinder'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 
 const { TextArea } = Input
@@ -63,7 +63,6 @@ const RESOURCE_LABELS: Record<string, string> = {
 
 const CurriculumPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
-  const navigate = useNavigate()
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
 
@@ -92,6 +91,11 @@ const CurriculumPage: React.FC = () => {
   const [selectedKp, setSelectedKp] = useState<KnowledgePoint | null>(null)
   const [kpResources, setKpResources] = useState<CurriculumResource[]>([])
   const [kpLoading, setKpLoading] = useState(false)
+
+  // ── 资源绑定弹窗 ──
+  const [binderOpen, setBinderOpen] = useState(false)
+  const [binderKpId, setBinderKpId] = useState(0)
+  const [binderKpName, setBinderKpName] = useState('')
 
   // ── 加载课程树 ──
   const loadTree = useCallback(async () => {
@@ -620,7 +624,11 @@ const CurriculumPage: React.FC = () => {
                     block
                     icon={<PlusOutlined />}
                     style={{ marginTop: 12 }}
-                    onClick={() => navigate(`/curriculum/knowledge-point/${selectedKp.id}`)}
+                    onClick={() => {
+                      setBinderKpId(selectedKp.id)
+                      setBinderKpName(selectedKp.name)
+                      setBinderOpen(true)
+                    }}
                   >
                     管理绑定资源
                   </Button>
@@ -746,6 +754,22 @@ const CurriculumPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+      {/* ── 资源绑定弹窗 ── */}
+      <ResourceBinder
+        kpId={binderKpId}
+        kpName={binderKpName}
+        open={binderOpen}
+        onClose={() => setBinderOpen(false)}
+        onRefresh={() => {
+          // 刷新课程树和当前知识点的资源列表
+          loadTree()
+          if (selectedKp) {
+            curriculumApi.getKpResources(selectedKp.id).then((res) => {
+              setKpResources(res.resources)
+            }).catch(() => {})
+          }
+        }}
+      />
     </Layout>
   )
 }
