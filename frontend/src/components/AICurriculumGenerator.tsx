@@ -4,7 +4,7 @@ import {
   Typography, Spin, Alert, Divider,
 } from 'antd'
 import {
-  RobotOutlined, UploadOutlined, FileTextOutlined, CheckCircleOutlined,
+  RobotOutlined, FileTextOutlined, CheckCircleOutlined,
   BookOutlined, NodeIndexOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
