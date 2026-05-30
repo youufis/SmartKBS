@@ -2,6 +2,7 @@
 考试发布 API 路由
 创建/发布/答题/批改/查分
 """
+import asyncio
 import json
 from datetime import datetime
 
@@ -399,23 +400,25 @@ async def update_exam(exam_id: int, req: ExamUpdate, request: Request):
         tuple(params),
     )
 
-    # ── 如果考试已发布且有重要字段变更，通知学生 ──
+    # ── 如果考试已发布且有重要字段变更，异步通知学生（不阻塞更新操作） ──
     if exam["status"] == "published":
         key_notify_fields = {"title", "duration", "total_score", "pass_score", "start_time", "end_time"}
         changed = [f for f in key_notify_fields if getattr(req, f, None) is not None]
         if changed:
-            try:
-                from backend.api.notification_router import _notify_users
-                all_students = user_query("SELECT username FROM users WHERE role = 2")
-                student_usernames = [r[0] for r in all_students]
-                _notify_users(
-                    student_usernames, "exam",
-                    f"考试「{exam['title']}」信息已更新",
-                    f"涉及字段：{'、'.join(changed)}，请重新查看考试详情",
-                    "/exam",
-                )
-            except Exception as notify_err:
-                logger.warning(f"发送考试更新通知失败: {notify_err}")
+            async def _notify_update():
+                try:
+                    from backend.api.notification_router import _notify_users
+                    all_students = user_query("SELECT username FROM users WHERE role = 2")
+                    student_usernames = [r[0] for r in all_students]
+                    _notify_users(
+                        student_usernames, "exam",
+                        f"考试「{exam['title']}」信息已更新",
+                        f"涉及字段：{'、'.join(changed)}，请重新查看考试详情",
+                        "/exam",
+                    )
+                except Exception as notify_err:
+                    logger.warning(f"发送考试更新通知失败: {notify_err}")
+            asyncio.create_task(_notify_update())
 
     return {"message": "更新成功"}
 
@@ -434,24 +437,26 @@ async def delete_exam(exam_id: int, request: Request):
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权删除此考试")
 
-    # ── 发送考试取消通知（在删除前查出受影响的学生） ──
+    # ── 异步发送考试取消通知（在删除前查出受影响的学生，不阻塞删除操作） ──
     if exam["status"] == "published":
-        try:
-            from backend.api.notification_router import _notify_users
-            affected = execute_query(
-                """SELECT DISTINCT student_username FROM exam_attempts
-                   WHERE exam_id = ?""",
-                (exam_id,),
-            )
-            if affected:
-                _notify_users(
-                    [r["student_username"] for r in affected], "exam",
-                    f"考试「{exam['title']}」已取消",
-                    f"教师已删除该考试",
-                    "/exam",
+        async def _notify_delete():
+            try:
+                from backend.api.notification_router import _notify_users
+                affected = execute_query(
+                    """SELECT DISTINCT student_username FROM exam_attempts
+                       WHERE exam_id = ?""",
+                    (exam_id,),
                 )
-        except Exception as notify_err:
-            logger.warning(f"发送考试取消通知失败: {notify_err}")
+                if affected:
+                    _notify_users(
+                        [r["student_username"] for r in affected], "exam",
+                        f"考试「{exam['title']}」已取消",
+                        f"教师已删除该考试",
+                        "/exam",
+                    )
+            except Exception as notify_err:
+                logger.warning(f"发送考试取消通知失败: {notify_err}")
+        asyncio.create_task(_notify_delete())
 
     # 删除关联数据
     execute_update("DELETE FROM exam_questions WHERE exam_id = ?", (exam_id,))
@@ -493,20 +498,22 @@ async def publish_exam(exam_id: int, request: Request):
 
     logger.info(f"用户 {username} 发布考试: {exam['title']} (id={exam_id})")
 
-    # ── 发送通知给所有学生 ──
-    try:
-        from backend.api.notification_router import _notify_users
-        from backend.database import execute_query as db_query
-        all_students = db_query("SELECT username FROM users WHERE role = 2")
-        student_usernames = [r[0] for r in all_students]
-        _notify_users(
-            student_usernames, "exam",
-            f"新考试「{exam['title']}」已发布",
-            f"时长 {exam['duration']} 分钟，满分 {exam['total_score']} 分",
-            "/exam",
-        )
-    except Exception as notify_err:
-        logger.warning(f"发送考试通知失败: {notify_err}")
+    # ── 异步发送通知给所有学生（不阻塞发布操作） ──
+    async def _notify_publish():
+        try:
+            from backend.api.notification_router import _notify_users
+            from backend.database import execute_query as db_query
+            all_students = db_query("SELECT username FROM users WHERE role = 2")
+            student_usernames = [r[0] for r in all_students]
+            _notify_users(
+                student_usernames, "exam",
+                f"新考试「{exam['title']}」已发布",
+                f"时长 {exam['duration']} 分钟，满分 {exam['total_score']} 分",
+                "/exam",
+            )
+        except Exception as notify_err:
+            logger.warning(f"发送考试通知失败: {notify_err}")
+    asyncio.create_task(_notify_publish())
 
     return {"message": "考试已发布"}
 
@@ -530,23 +537,25 @@ async def end_exam(exam_id: int, request: Request):
         (now, exam_id),
     )
 
-    # ── 通知正在答题的学生 ──
-    try:
-        from backend.api.notification_router import _notify_users
-        in_progress = execute_query(
-            """SELECT student_username FROM exam_attempts
-               WHERE exam_id = ? AND status = 'in_progress'""",
-            (exam_id,),
-        )
-        if in_progress:
-            _notify_users(
-                [r["student_username"] for r in in_progress], "exam",
-                f"考试「{exam['title']}」已提前结束",
-                f"教师已结束考试，请查看成绩",
-                "/exam",
+    # ── 异步通知正在答题的学生（不阻塞结束操作） ──
+    async def _notify_end():
+        try:
+            from backend.api.notification_router import _notify_users
+            in_progress = execute_query(
+                """SELECT student_username FROM exam_attempts
+                   WHERE exam_id = ? AND status = 'in_progress'""",
+                (exam_id,),
             )
-    except Exception as notify_err:
-        logger.warning(f"发送考试结束通知失败: {notify_err}")
+            if in_progress:
+                _notify_users(
+                    [r["student_username"] for r in in_progress], "exam",
+                    f"考试「{exam['title']}」已提前结束",
+                    f"教师已结束考试，请查看成绩",
+                    "/exam",
+                )
+        except Exception as notify_err:
+            logger.warning(f"发送考试结束通知失败: {notify_err}")
+    asyncio.create_task(_notify_end())
 
     return {"message": "考试已结束"}
 
