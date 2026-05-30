@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin, is_teacher
-from backend.database import execute_query, execute_insert_update
+from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.logger import logger
 from backend.config import STU_DIR, ROOT_DIR
 
@@ -105,53 +105,58 @@ async def share_resource(request: Request, body: ShareRequest):
         )
         logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
 
-        # ── 异步发送通知（不阻塞共享操作） ──
-        async def _send_notifications():
+        # ── 后台批量发送通知（不阻塞共享操作） ──
+        def _send_notifications_sync():
+            """同步执行通知发送，在后台线程中运行"""
             try:
-                from backend.api.notification_router import _notify_users, _create_notification
                 resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+                # 确定收件人列表
+                recipients: list[str] = []
+                link = "/html-files" if body.resource_type == "html" else "/downloads"
+                title = f"新的{resource_label}已分享"
                 if body.share_scope == "all":
-                    all_users = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
-                    all_usernames = [r[0] for r in all_users]
-                    _notify_users(all_usernames, "share",
-                        f"新的{resource_label}已分享",
-                        f"{username} 分享了「{body.file_name}」，请前往资源中心查看",
-                        "/html-files" if body.resource_type == "html" else "/downloads")
+                    rows = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
+                    recipients = [r[0] for r in rows]
+                    content = f"{username} 分享了「{body.file_name}」"
                 elif body.share_scope == "staff":
-                    staff_users = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
-                    staff_usernames = [r[0] for r in staff_users]
-                    _notify_users(staff_usernames, "share",
-                        f"新的{resource_label}已分享",
-                        f"{username} 分享了「{body.file_name}」（教师共享）",
-                        "/html-files" if body.resource_type == "html" else "/downloads")
+                    rows = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
+                    recipients = [r[0] for r in rows]
+                    content = f"{username} 分享了「{body.file_name}」（教师共享）"
                 elif body.share_scope == "teacher" and body.target_users:
-                    _notify_users(body.target_users, "share",
-                        f"新的{resource_label}已分享",
-                        f"{username} 分享了「{body.file_name}」给您",
-                        "/html-files" if body.resource_type == "html" else "/downloads")
+                    recipients = body.target_users
+                    content = f"{username} 分享了「{body.file_name}」给您"
                 elif body.share_scope == "class":
-                    conditions, params = ["role = 2"], []
+                    conds, params = ["role = 2"], []
                     if body.target_grades:
-                        placeholders = ",".join(["?"] * len(body.target_grades))
-                        conditions.append(f"grade IN ({placeholders})")
+                        ph = ",".join(["?"] * len(body.target_grades))
+                        conds.append(f"grade IN ({ph})")
                         params.extend(body.target_grades)
                     if body.target_classes:
-                        placeholders = ",".join(["?"] * len(body.target_classes))
-                        conditions.append(f"class IN ({placeholders})")
+                        ph = ",".join(["?"] * len(body.target_classes))
+                        conds.append(f"class IN ({ph})")
                         params.extend(body.target_classes)
-                    if conditions:
-                        target_students = execute_query(
-                            f"SELECT username FROM users WHERE {' AND '.join(conditions)}", tuple(params))
-                        student_usernames = [r[0] for r in target_students]
-                        _notify_users(student_usernames, "share",
-                            f"新的{resource_label}已分享",
-                            f"「{body.file_name}」可供您所在班级使用",
-                            "/html-files" if body.resource_type == "html" else "/downloads")
+                    if conds:
+                        rows = execute_query(
+                            f"SELECT username FROM users WHERE {' AND '.join(conds)}", tuple(params))
+                        recipients = [r[0] for r in rows]
+                    content = f"「{body.file_name}」可供您所在班级使用"
+
+                # 批量插入通知（单条 SQL 替代逐条循环）
+                if recipients:
+                    sql = """INSERT INTO notifications
+                             (recipient_username, type, title, content, related_link, is_read, created_at)
+                             VALUES (?, 'share', ?, ?, ?, 0, ?)"""
+                    ops = [(sql, (r, title, content, link, now)) for r in recipients]
+                    execute_batch(ops)
+                    logger.info(f"已发送 {len(recipients)} 条共享通知")
             except Exception as notify_err:
                 logger.warning(f"发送共享通知失败: {notify_err}")
 
-        asyncio.create_task(_send_notifications())
+        # 在线程池中运行，不阻塞事件循环
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _send_notifications_sync)
 
         return {"message": "共享成功", "file_path": body.file_path}
     except Exception as e:
@@ -194,16 +199,12 @@ async def unshare_resource(id: int = Query(...), request: Request = None):
         )
         logger.info(f"共享已取消: id={id}, by={username}")
 
-        # ── 异步发送取消通知（不阻塞取消操作） ──
-        asyncio.create_task(_notify_unshare(
-            owner=owner,
-            file_name=file_name,
-            resource_type=resource_type,
-            share_scope=share_scope,
-            target_users_csv=target_users_csv,
-            target_grade_csv=target_grade_csv,
-            target_class_csv=target_class_csv,
-        ))
+        # ── 后台发送取消通知（不阻塞取消操作） ──
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(None, _notify_unshare_sync,
+            owner, file_name, resource_type,
+            share_scope, target_users_csv,
+            target_grade_csv, target_class_csv)
 
         return {"message": "共享已取消"}
     except Exception as e:
@@ -211,58 +212,55 @@ async def unshare_resource(id: int = Query(...), request: Request = None):
         raise HTTPException(status_code=500, detail=f"取消共享失败: {str(e)}")
 
 
-async def _notify_unshare(owner: str, file_name: str, resource_type: str,
+def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
                           share_scope: str, target_users_csv: str,
                           target_grade_csv: str, target_class_csv: str):
-    """异步发送取消共享通知"""
+    """同步发送取消共享通知，在后台线程中运行"""
     try:
-        from backend.api.notification_router import _notify_users
         resource_label = "HTML 资源" if resource_type == "html" else "下载文件"
         link = "/html-files" if resource_type == "html" else "/downloads"
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         target_users = [u for u in target_users_csv.split(",") if u] if target_users_csv else []
         target_grades = [g for g in target_grade_csv.split(",") if g] if target_grade_csv else []
         target_classes = [c for c in target_class_csv.split(",") if c] if target_class_csv else []
 
+        recipients: list[str] = []
+        title = f"{resource_label}共享已取消"
         if share_scope == "all":
-            all_users = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
-            usernames = [r[0] for r in all_users]
-            _notify_users(usernames, "share",
-                f"{resource_label}共享已取消",
-                f"{owner} 已取消对「{file_name}」的共享",
-                link)
+            rows = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
+            recipients = [r[0] for r in rows]
+            content = f"{owner} 已取消对「{file_name}」的共享"
         elif share_scope == "staff":
-            staff_users = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
-            usernames = [r[0] for r in staff_users]
-            _notify_users(usernames, "share",
-                f"{resource_label}共享已取消",
-                f"{owner} 已取消对「{file_name}」的共享（教师共享）",
-                link)
+            rows = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
+            recipients = [r[0] for r in rows]
+            content = f"{owner} 已取消对「{file_name}」的共享（教师共享）"
         elif share_scope == "teacher" and target_users:
-            _notify_users(target_users, "share",
-                f"{resource_label}共享已取消",
-                f"{owner} 已取消对「{file_name}」的共享",
-                link)
+            recipients = target_users
+            content = f"{owner} 已取消对「{file_name}」的共享"
         elif share_scope == "class":
-            conditions, params = ["role = 2"], []
+            conds, params = ["role = 2"], []
             if target_grades:
-                placeholders = ",".join(["?"] * len(target_grades))
-                conditions.append(f"grade IN ({placeholders})")
+                ph = ",".join(["?"] * len(target_grades))
+                conds.append(f"grade IN ({ph})")
                 params.extend(target_grades)
             if target_classes:
-                placeholders = ",".join(["?"] * len(target_classes))
-                conditions.append(f"class IN ({placeholders})")
+                ph = ",".join(["?"] * len(target_classes))
+                conds.append(f"class IN ({ph})")
                 params.extend(target_classes)
-            if conditions:
-                target_students = execute_query(
-                    f"SELECT username FROM users WHERE {' AND '.join(conditions)}", tuple(params))
-                student_usernames = [r[0] for r in target_students]
-                _notify_users(student_usernames, "share",
-                    f"{resource_label}共享已取消",
-                    f"「{file_name}」已不再对您所在班级共享",
-                    link)
+            if conds:
+                rows = execute_query(
+                    f"SELECT username FROM users WHERE {' AND '.join(conds)}", tuple(params))
+                recipients = [r[0] for r in rows]
+            content = f"「{file_name}」已不再对您所在班级共享"
 
-        logger.info(f"取消共享通知已发送: {owner} -> {file_name} (scope={share_scope})")
+        if recipients:
+            sql = """INSERT INTO notifications
+                     (recipient_username, type, title, content, related_link, is_read, created_at)
+                     VALUES (?, 'share', ?, ?, ?, 0, ?)"""
+            ops = [(sql, (r, title, content, link, now)) for r in recipients]
+            execute_batch(ops)
+            logger.info(f"已发送 {len(recipients)} 条取消共享通知")
     except Exception as e:
         logger.warning(f"发送取消共享通知失败: {e}")
 
