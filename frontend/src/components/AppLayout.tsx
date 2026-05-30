@@ -75,6 +75,7 @@ const teacherMenuGroups: { label: string; key: string; children: { key: string; 
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
       { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
+      { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '学情进度' },
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
     ]},
     { label: '📋 档案', key: 'profile', children: [
