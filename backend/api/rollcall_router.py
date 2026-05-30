@@ -192,20 +192,71 @@ def _save_to_student_chat(student_name, cls, content):
 # ── API 处理器 ──
 
 async def api_grades(request: Request):
-    """从数据库获取有学生的年级列表"""
-    try:
-        rows = execute_query(
-            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+    """获取年级列表 - 管理员看到全部，教师只看到自己的年级"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 0:
+        # 管理员：全部年级
+        try:
+            rows = execute_query(
+                "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+            )
+            return [row[0] for row in rows]
+        except Exception:
+            return ["高一", "高二"]
+    else:
+        # 教师：只返回自己任教的年级
+        t_rows = execute_query(
+            "SELECT grade FROM users WHERE username=?", (username,)
         )
-        return [row[0] for row in rows]
-    except Exception:
-        return ["高一", "高二"]
+        if not t_rows or not t_rows[0][0]:
+            return []
+        grade_str = t_rows[0][0]
+        # grade 可能是 "高一|高二" 格式
+        return [g.strip() for g in grade_str.split("|") if g.strip()]
 
 
 async def api_classes(request: Request):
+    """获取班级列表 - 管理员看到全部，教师只看到自己的班级"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
     grade = request.query_params.get("grade", "")
-    students = _load_students(grade)
-    return sorted(set(s.get("class", "") for s in students if s.get("class")))
+    if not grade:
+        return []
+
+    if role == 0:
+        # 管理员：该年级全部班级
+        students = _load_students(grade)
+        return sorted(set(s.get("class", "") for s in students if s.get("class")))
+    else:
+        # 教师：只返回自己在该年级任教的班级
+        t_rows = execute_query(
+            "SELECT grade, class FROM users WHERE username=?", (username,)
+        )
+        if not t_rows:
+            return []
+        t_grade = (t_rows[0][0] or "").strip()
+        t_class = str(t_rows[0][1] or "").strip()
+        if not t_grade:
+            # 没有设置年级，返回全部
+            students = _load_students(grade)
+            return sorted(set(s.get("class", "") for s in students if s.get("class")))
+        # 解析教师的年级/班级映射
+        grade_parts = [g.strip() for g in t_grade.split("|")]
+        class_parts = [c.strip() for c in t_class.split("|")] if t_class else []
+        for i, g in enumerate(grade_parts):
+            if g == grade:
+                if i < len(class_parts) and class_parts[i]:
+                    allowed = [c.strip() for c in class_parts[i].split(",") if c.strip()]
+                    return [f"{grade}{c}班" for c in allowed]
+                break
+        # 没有匹配到具体班级限制，返回全部
+        students = _load_students(grade)
+        return sorted(set(s.get("class", "") for s in students if s.get("class")))
 
 
 async def api_students(request: Request):
