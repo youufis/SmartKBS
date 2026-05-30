@@ -15,6 +15,7 @@ from backend.question_db import execute_query as q_execute_query
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin, is_teacher
 from backend.logger import logger
+from backend.api.chat_router import get_api_keys
 
 router = APIRouter()
 
@@ -229,15 +230,10 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
     if not req.content.strip():
         raise HTTPException(status_code=400, detail="请输入教学内容文本")
 
-    # 获取 API Key
-    from backend.utils import get_api_keys
-    keys = get_api_keys(user["username"])
-    if not keys:
-        raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
-
-    api_key = keys.get("DASHSCOPE_API_KEY") or keys.get("api_key") or keys.get("QWEN_API_KEY")
+    # 获取 API Key（复用 chat_router 的缓存逻辑）
+    api_key, _ = get_api_keys(user["username"])
     if not api_key:
-        raise HTTPException(status_code=400, detail="未找到有效的 API Key")
+        raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
 
     # 构造 Prompt
     course_hint = f"课程名称：{req.course_name}" if req.course_name else "请根据内容推断课程名称"
@@ -308,6 +304,134 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
         saved = _save_ai_result(result, req.subject, req.grade, user["username"])
         result["saved"] = saved
 
+    return result
+
+
+@router.post("/ai-generate-from-file", summary="上传文档 AI 生成课程结构")
+async def ai_generate_from_file(request: Request):
+    """上传文档文件（txt/md/pdf/docx），AI 自动提取课程→章节→知识点结构"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    # 获取 API Key
+    api_key, _ = get_api_keys(user["username"])
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
+
+    # 解析 multipart 表单
+    form = await request.form()
+    file = form.get("file")
+    subject = form.get("subject", "信息技术")
+    grade = form.get("grade", "高一")
+    course_name = form.get("course_name", "")
+    auto_save = form.get("auto_save", "false") == "true"
+
+    if not file or not hasattr(file, "filename") or not file.filename:
+        raise HTTPException(status_code=400, detail="请上传文件")
+
+    # 读取文件内容
+    content_bytes = await file.read()
+    filename = file.filename.lower()
+
+    # 提取文本（按扩展名处理）
+    text_content = ""
+    if filename.endswith(".txt") or filename.endswith(".md"):
+        text_content = content_bytes.decode("utf-8", errors="replace")
+    elif filename.endswith(".pdf"):
+        try:
+            import io
+            import PyPDF2
+            reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
+            text_content = "\n".join(page.extract_text() for page in reader.pages)
+        except ImportError:
+            # 无 PyPDF2 时尝试 pdfminer
+            try:
+                import io
+                from pdfminer.high_level import extract_text as pdf_extract
+                text_content = pdf_extract(io.BytesIO(content_bytes))
+            except ImportError:
+                raise HTTPException(status_code=400, detail="缺少 PDF 解析库，请安装 PyPDF2")
+    elif filename.endswith(".docx"):
+        try:
+            import io
+            from docx import Document
+            doc = Document(io.BytesIO(content_bytes))
+            text_content = "\n".join(p.text for p in doc.paragraphs)
+        except ImportError:
+            raise HTTPException(status_code=400, detail="缺少 DOCX 解析库，请安装 python-docx")
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: {filename}，支持 txt/md/pdf/docx")
+
+    if not text_content.strip():
+        raise HTTPException(status_code=400, detail="文件内容为空或无法提取文本")
+
+    if len(text_content) > 20000:
+        text_content = text_content[:20000] + "\n\n[内容已截断，仅处理前 20000 字符]"
+
+    # 构造 Prompt
+    course_hint = f"课程名称：{course_name}" if course_name else "请根据内容推断课程名称"
+    prompt = f"""你是一个教学课程设计专家。请根据以下从文件「{filename}」中提取的教学内容文本，提取并构建一个完整的课程大纲结构。
+
+要求：
+- 科目：{subject}
+- 年级：{grade}
+- {course_hint}
+- 严格按照 JSON 格式输出，不要包含任何其他文本
+
+输出格式：
+```json
+{{
+  "course_name": "课程名称",
+  "course_code": "课程代码(英文缩写)",
+  "course_description": "课程简要描述",
+  "chapters": [
+    {{
+      "name": "章名称",
+      "description": "章描述",
+      "children": [
+        {{
+          "name": "节名称",
+          "description": "节描述"
+        }}
+      ],
+      "knowledge_points": [
+        {{
+          "name": "知识点名称",
+          "description": "知识点描述",
+          "learning_objectives": "学习目标",
+          "difficulty": "easy|medium|hard",
+          "estimated_minutes": 30
+        }}
+      ]
+    }}
+  ]
+}}
+```
+
+教学内容文本（来自 {filename}）：
+---
+{text_content}
+---"""
+
+    try:
+        from backend.api.ai_service import call_ai_sync
+        ai_response = call_ai_sync(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 文件生成课程失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 调用失败: {str(e)}")
+
+    # 解析 AI 返回的 JSON
+    result = _parse_ai_json(ai_response)
+    if not result:
+        raise HTTPException(status_code=500, detail="AI 返回格式异常，无法解析为课程结构")
+
+    # 自动保存
+    if auto_save:
+        saved = _save_ai_result(result, subject, grade, user["username"])
+        result["saved"] = saved
+
+    result["source_file"] = filename
     return result
 
 
