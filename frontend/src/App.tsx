@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { message } from 'antd'
+import { Spin, message } from 'antd'
 import { useAuthStore } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
 import AppLayout from './components/AppLayout'
@@ -41,11 +41,6 @@ function App() {
     restoreSession()
   }, [restoreSession])
 
-  // 正在验证 session 时，不渲染任何路由，防止登录页闪烁
-  if (sessionRestoring) {
-    return null
-  }
-
   // 监听异地登录踢出事件
   useEffect(() => {
     const handler = (e: Event) => {
@@ -59,38 +54,46 @@ function App() {
   }, [navigate, forceLogout])
 
   return (
-    <Routes>
-      <Route path="/login" element={isLoggedIn ? <Navigate to="/dashboard" /> : <LoginPage />} />
-      <Route path="/exam-take/:examId" element={isLoggedIn && user?.role === 'student' ? <ExamTakePage /> : <Navigate to={isLoggedIn ? '/chat' : '/login'} />} />
-      <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
-        <Route index element={<DashboardPage />} />
-        <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="chat" element={<ChatPage />} />
-        <Route path="html-files" element={<HtmlFilesPage />} />
-        <Route path="resource-mgmt" element={user?.role === 'admin' || user?.role === 'teacher' ? <ResourceMgmtPage /> : <Navigate to="/chat" />} />
-        <Route path="downloads" element={<DownloadsPage />} />
-        <Route path="user-mgmt" element={<UserMgmtPage />} />
-        <Route path="tasks" element={<TaskPage />} />
-        <Route path="system-config" element={user?.role === 'admin' ? <SystemConfigPage /> : <Navigate to="/chat" />} />
-        <Route path="question-bank" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankPage /> : <Navigate to="/chat" />} />
-        <Route path="exam" element={<ExamPage />} />
-        <Route path="score" element={<ScorePage />} />
-        <Route path="rollcall" element={<RollcallManagePage />} />
-        <Route path="notifications" element={<NotificationsPage />} />
-        <Route path="announcements" element={<AnnouncementsPage />} />
-        <Route path="portfolio" element={<PortfolioPage />} />
-        <Route path="portfolio/:username" element={<PortfolioPage />} />
-        <Route path="analytics" element={<AnalyticsPage />} />
-        <Route path="interaction" element={<InteractionPage />} />
-        <Route path="discussion" element={<DiscussionPage />} />
-        <Route path="discussion-room/:groupId" element={<DiscussionRoomPage />} />
-        <Route path="discussion-monitor/:discId" element={<DiscussionMonitorPage />} />
-        <Route path="curriculum" element={<CurriculumPage />} />
-        <Route path="curriculum/progress" element={user?.role === 'admin' || user?.role === 'teacher' ? <CurriculumProgressPage /> : <Navigate to="/curriculum" />} />
-        <Route path="about" element={<AboutPage />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/login" />} />
-    </Routes>
+    <>
+      {sessionRestoring ? (
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+          <Spin size="large" tip="加载中..." />
+        </div>
+      ) : (
+        <Routes>
+          <Route path="/login" element={isLoggedIn ? <Navigate to="/dashboard" /> : <LoginPage />} />
+          <Route path="/exam-take/:examId" element={isLoggedIn && user?.role === 'student' ? <ExamTakePage /> : <Navigate to={isLoggedIn ? '/chat' : '/login'} />} />
+          <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="html-files" element={<HtmlFilesPage />} />
+            <Route path="resource-mgmt" element={user?.role === 'admin' || user?.role === 'teacher' ? <ResourceMgmtPage /> : <Navigate to="/chat" />} />
+            <Route path="downloads" element={<DownloadsPage />} />
+            <Route path="user-mgmt" element={<UserMgmtPage />} />
+            <Route path="tasks" element={<TaskPage />} />
+            <Route path="system-config" element={user?.role === 'admin' ? <SystemConfigPage /> : <Navigate to="/chat" />} />
+            <Route path="question-bank" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankPage /> : <Navigate to="/chat" />} />
+            <Route path="exam" element={<ExamPage />} />
+            <Route path="score" element={<ScorePage />} />
+            <Route path="rollcall" element={<RollcallManagePage />} />
+            <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="announcements" element={<AnnouncementsPage />} />
+            <Route path="portfolio" element={<PortfolioPage />} />
+            <Route path="portfolio/:username" element={<PortfolioPage />} />
+            <Route path="analytics" element={<AnalyticsPage />} />
+            <Route path="interaction" element={<InteractionPage />} />
+            <Route path="discussion" element={<DiscussionPage />} />
+            <Route path="discussion-room/:groupId" element={<DiscussionRoomPage />} />
+            <Route path="discussion-monitor/:discId" element={<DiscussionMonitorPage />} />
+            <Route path="curriculum" element={<CurriculumPage />} />
+            <Route path="curriculum/progress" element={user?.role === 'admin' || user?.role === 'teacher' ? <CurriculumProgressPage /> : <Navigate to="/curriculum" />} />
+            <Route path="about" element={<AboutPage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+      )}
+    </>
   )
 }
 
