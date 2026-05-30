@@ -8,6 +8,7 @@ import {
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
   AuditOutlined, InfoCircleOutlined,
 } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import * as notificationsApi from '../api/notifications'
 import type { NotificationItem } from '../api/notifications'
 
@@ -23,6 +24,7 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode; label:
 }
 
 const NotificationsPage: React.FC = () => {
+  const navigate = useNavigate()
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(false)
   const [total, setTotal] = useState(0)
@@ -143,7 +145,8 @@ const NotificationsPage: React.FC = () => {
                           {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
                         </Text>
                         {item.related_link && (
-                          <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }}>
+                          <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }}
+                            onClick={() => navigate(item.related_link)}>
                             查看详情
                           </Button>
                         )}

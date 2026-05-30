@@ -234,7 +234,7 @@ async def dashboard_summary(request: Request):
             # 共享资源
             "shared_files_count": _db_count(
                 """SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'
-                   OR (share_scope='class' AND (grade=? OR INSTR(?, grade)>0) AND (class=? OR INSTR(?, class)>0))
+                   OR (share_scope='class' AND (target_grade=? OR INSTR(target_grade, ?)>0) AND (target_class=? OR INSTR(target_class, ?)>0))
                    OR (share_scope='teacher' AND INSTR(target_users, ?)>0)""",
                 (grade, grade, cls, cls, username) if grade else ("", "", "", "", username),
             ) if grade else _db_count("SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'"),

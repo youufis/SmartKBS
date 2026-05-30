@@ -123,6 +123,12 @@ const NotificationBell: React.FC = () => {
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = item.is_read ? 'transparent' : '#f6f8ff'
                   }}
+                  onClick={() => {
+                    if (item.related_link) {
+                      navigate(item.related_link)
+                      setOpen(false)
+                    }
+                  }}
                   actions={
                     item.is_read
                       ? [<Button type="text" size="small" icon={<DeleteOutlined />} onClick={() => handleDelete(item.id)} />]
