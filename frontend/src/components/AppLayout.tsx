@@ -257,7 +257,7 @@ const AppLayout: React.FC = () => {
         <Content style={{ padding: 24, background: '#f5f5f5', overflow: 'auto' }}>
           <Outlet />
           <div style={{ textAlign: 'center', padding: '16px 0 0', color: '#bbb', fontSize: 12 }}>
-            Copyright © 2025 By UNET All rights reserved.
+            Copyright © 2026 By UNET All rights reserved.
           </div>
         </Content>
       </Layout>
