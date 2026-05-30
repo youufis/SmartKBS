@@ -270,6 +270,7 @@ export interface CurriculumResource {
   resource_type: string;
   resource_id: number;
   resource_name: string;
+  resource_url: string;
   sort_order: number;
   created_at: string;
 }

@@ -150,23 +150,18 @@ def _inject_progress(kps: list[dict], username: str):
             kp["progress_score"] = 0
 
 
-def _get_resource_name(resource_type: str, resource_id: int) -> str:
-    """根据资源类型和 ID 获取资源名称"""
+def _get_resource_info(resource_type: str, resource_id: int) -> dict:
+    """根据资源类型和 ID 获取资源名称和访问路径"""
+    result = {"name": "", "url": ""}
     try:
-        if resource_type == "html":
+        if resource_type in ("html", "download"):
             rows = execute_query(
-                "SELECT file_name FROM shared_resources WHERE id=? AND resource_type='html'",
-                (resource_id,),
+                "SELECT file_name, file_path FROM shared_resources WHERE id=? AND resource_type=?",
+                (resource_id, resource_type),
             )
             if rows:
-                return rows[0]["file_name"]
-        elif resource_type == "download":
-            rows = execute_query(
-                "SELECT file_name FROM shared_resources WHERE id=? AND resource_type='download'",
-                (resource_id,),
-            )
-            if rows:
-                return rows[0]["file_name"]
+                result["name"] = rows[0]["file_name"]
+                result["url"] = "/api/files/" + rows[0]["file_path"].lstrip("/")
         elif resource_type == "question":
             rows = q_execute_query(
                 "SELECT question_text FROM question_bank WHERE id=? AND status='active'",
@@ -174,38 +169,45 @@ def _get_resource_name(resource_type: str, resource_id: int) -> str:
             )
             if rows:
                 text = rows[0]["question_text"]
-                return text[:60] + ("..." if len(text) > 60 else "")
+                result["name"] = text[:60] + ("..." if len(text) > 60 else "")
+                result["url"] = f"/questions?highlight={resource_id}"
         elif resource_type == "exam":
             rows = q_execute_query(
                 "SELECT title FROM exams WHERE id=?",
                 (resource_id,),
             )
             if rows:
-                return rows[0]["title"]
+                result["name"] = rows[0]["title"]
+                result["url"] = f"/exam?highlight={resource_id}"
         elif resource_type == "discussion":
             rows = execute_query(
                 "SELECT title FROM discussions WHERE id=?",
                 (resource_id,),
             )
             if rows:
-                return rows[0]["title"]
+                result["name"] = rows[0]["title"]
+                result["url"] = f"/discussion?highlight={resource_id}"
         elif resource_type == "interaction_quiz":
             rows = execute_query(
                 "SELECT title FROM interaction_quizzes WHERE id=?",
                 (resource_id,),
             )
             if rows:
-                return rows[0]["title"]
+                result["name"] = rows[0]["title"]
+                result["url"] = f"/interaction?highlight={resource_id}"
         elif resource_type == "task":
             rows = execute_query(
                 "SELECT name FROM tasks WHERE id=?",
                 (str(resource_id),),
             )
             if rows:
-                return rows[0]["name"]
+                result["name"] = rows[0]["name"]
+                result["url"] = f"/tasks?highlight={resource_id}"
     except Exception:
         pass
-    return f"[{resource_type}:{resource_id}]"
+    if not result["name"]:
+        result["name"] = f"[{resource_type}:{resource_id}]"
+    return result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -867,11 +869,13 @@ async def get_knowledge_point(kp_id: int, request: Request):
     )
     resources = []
     for b in bindings:
+        info = _get_resource_info(b["resource_type"], b["resource_id"])
         resources.append({
             "binding_id": b["id"],
             "resource_type": b["resource_type"],
             "resource_id": b["resource_id"],
-            "resource_name": _get_resource_name(b["resource_type"], b["resource_id"]),
+            "resource_name": info["name"],
+            "resource_url": info["url"],
             "sort_order": b["sort_order"],
             "created_at": b["created_at"],
         })
@@ -987,12 +991,14 @@ async def get_kp_resources(kp_id: int, request: Request):
     )
     resources = []
     for b in bindings:
+        info = _get_resource_info(b["resource_type"], b["resource_id"])
         resources.append({
             "binding_id": b["id"],
             "knowledge_point_id": b["knowledge_point_id"],
             "resource_type": b["resource_type"],
             "resource_id": b["resource_id"],
-            "resource_name": _get_resource_name(b["resource_type"], b["resource_id"]),
+            "resource_name": info["name"],
+            "resource_url": info["url"],
             "sort_order": b["sort_order"],
             "created_at": b["created_at"],
         })
@@ -1143,6 +1149,67 @@ async def get_available_resources(
         results = [r for r in results if r["id"] not in bound_ids]
 
     return {"resources": results, "total": len(results)}
+
+
+# ═══════════════════════════════════════════════════════════
+# 节点排序（拖动）
+# ═══════════════════════════════════════════════════════════
+
+class ReorderItem(BaseModel):
+    """排序项"""
+    type: str  # "chapter" | "knowledge_point"
+    id: int
+    sort_order: int
+    parent_id: int | None = None   # 章节新父级ID（None=顶层）
+    chapter_id: int | None = None  # 知识点新所属章节ID
+
+class ReorderRequest(BaseModel):
+    """拖动排序请求"""
+    items: list[ReorderItem]
+
+@router.put("/reorder", summary="拖动排序章节/知识点")
+async def reorder_nodes(req: ReorderRequest, request: Request):
+    """拖动树节点后批量更新 sort_order（教师/管理员）
+    支持同级排序和跨层级拖动（改变 parent_id / chapter_id）
+    """
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    if not req.items:
+        raise HTTPException(status_code=400, detail="排序列表为空")
+
+    now = _now()
+    updated = {"chapters": 0, "knowledge_points": 0}
+
+    for item in req.items:
+        if item.type == "chapter":
+            if item.parent_id is not None:
+                execute_insert_update(
+                    "UPDATE chapters SET sort_order=?, parent_id=?, updated_at=? WHERE id=?",
+                    (item.sort_order, item.parent_id if item.parent_id > 0 else None, now, item.id),
+                )
+            else:
+                execute_insert_update(
+                    "UPDATE chapters SET sort_order=?, updated_at=? WHERE id=?",
+                    (item.sort_order, now, item.id),
+                )
+            updated["chapters"] += 1
+        elif item.type == "knowledge_point":
+            if item.chapter_id is not None:
+                execute_insert_update(
+                    "UPDATE knowledge_points SET sort_order=?, chapter_id=?, updated_at=? WHERE id=?",
+                    (item.sort_order, item.chapter_id, now, item.id),
+                )
+            else:
+                execute_insert_update(
+                    "UPDATE knowledge_points SET sort_order=?, updated_at=? WHERE id=?",
+                    (item.sort_order, now, item.id),
+                )
+            updated["knowledge_points"] += 1
+
+    logger.info(f"用户 {user['username']} 拖动排序: {updated}")
+    return {"message": "排序已更新", "updated": updated}
 
 
 # ═══════════════════════════════════════════════════════════

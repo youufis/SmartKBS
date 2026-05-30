@@ -7,7 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
-from backend.database import execute_query, execute_insert_update
+from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.logger import logger
@@ -62,9 +62,18 @@ def _create_notification(recipient: str, type_: str, title: str, content: str = 
 
 
 def _notify_users(usernames: list[str], type_: str, title: str, content: str = "", related_link: str = ""):
-    """批量通知多个用户"""
-    for username in usernames:
-        _create_notification(username, type_, title, content, related_link)
+    """批量通知多个用户（使用批量插入优化性能）"""
+    if not usernames:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sql = """INSERT INTO notifications
+             (recipient_username, type, title, content, related_link, is_read, created_at)
+             VALUES (?, ?, ?, ?, ?, 0, ?)"""
+    try:
+        ops = [(sql, (r, type_, title, content, related_link, now)) for r in usernames]
+        execute_batch(ops)
+    except Exception as e:
+        logger.error(f"批量创建通知失败: {e}")
 
 
 # ── 通知 API ──

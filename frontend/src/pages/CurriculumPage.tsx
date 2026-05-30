@@ -3,6 +3,7 @@ import {
   Layout, Card, Tree, Tabs, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
 } from 'antd'
+import type { DataNode } from 'antd/es/tree'
 import {
   BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   FileOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
@@ -239,6 +240,190 @@ const CurriculumPage: React.FC = () => {
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(detail || '删除失败')
+    }
+  }
+
+  // ── 拖动排序（支持同级重排和跨层级拖动）──
+  const handleTreeDrop = async (info: { dragNode: DataNode; node: DataNode; dropPosition: number; dropToGap: boolean }) => {
+    if (!isTeacherOrAdmin) return
+
+    const { dragNode, node, dropPosition, dropToGap } = info
+    const dragKey = dragNode.key as string
+    const dropKey = node.key as string
+    const [dragPrefix, dragIdStr] = dragKey.split('_')
+    const [dropPrefix] = dropKey.split('_')
+    const dragId = parseInt(dragIdStr, 10)
+
+    const course = courses.find((c) => c.id === activeCourseId)
+    if (!course) return
+
+    // ─────────────────────────────────────────────
+    // 辅助：在树中查找某个 key 所在的同级数组
+    // ─────────────────────────────────────────────
+    const findContainerByKey = (items: any[], searchKey: string): { list: any[]; parentChapterId: number | null } | null => {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (`ch_${item.id}` === searchKey) {
+          return { list: items, parentChapterId: null }
+        }
+        if (item.children?.length) {
+          const found = findContainerByKey(item.children, searchKey)
+          if (found) return found
+        }
+        if (item.knowledge_points?.length) {
+          for (const kp of item.knowledge_points) {
+            if (`kp_${kp.id}` === searchKey) {
+              return { list: item.knowledge_points, parentChapterId: item.id }
+            }
+          }
+        }
+      }
+      return null
+    }
+
+    // ─────────────────────────────────────────────
+    // 辅助：在树中查找某个 ID 的章节节点（递归）
+    // ─────────────────────────────────────────────
+    const findChapterById = (items: any[], id: number): any | null => {
+      for (const ch of items) {
+        if (ch.id === id) return ch
+        if (ch.children) {
+          const found = findChapterById(ch.children, id)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    // ─────────────────────────────────────────────
+    // 辅助：构建排序请求并提交
+    // ─────────────────────────────────────────────
+    const submitReorder = async (orderedList: curriculumApi.ReorderItem[]) => {
+      try {
+        await curriculumApi.reorderNodes(orderedList)
+        message.success('排序已更新')
+        loadTree()
+      } catch (err: unknown) {
+        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        message.error(detail || '操作失败')
+        loadTree()
+      }
+    }
+
+    // ─────────────────────────────────────────────
+    // CASE 1: dropToGap = true — 同级间隙拖动（重排）
+    // ─────────────────────────────────────────────
+    if (dropToGap) {
+      if (dragPrefix !== dropPrefix) {
+        message.warning('不能在不同类型节点间拖动排序')
+        return
+      }
+
+      const container = findContainerByKey(course.chapters || [], dragKey)
+      if (!container) return
+      const siblings = container.list
+
+      const fromIdx = siblings.findIndex((s: any) => {
+        const key = dragPrefix === 'ch' ? `ch_${s.id}` : `kp_${s.id}`
+        return key === dragKey
+      })
+      const toIdx = siblings.findIndex((s: any) => {
+        const key = dragPrefix === 'ch' ? `ch_${s.id}` : `kp_${s.id}`
+        return key === dropKey
+      })
+      if (fromIdx === -1 || toIdx === -1) return
+
+      const newIndex = dropPosition === -1 ? toIdx : toIdx + 1
+      const reordered = [...siblings]
+      const [moved] = reordered.splice(fromIdx, 1)
+      const adjusted = fromIdx < newIndex ? newIndex - 1 : newIndex
+      reordered.splice(adjusted, 0, moved)
+
+      const nodeType = dragPrefix === 'ch' ? 'chapter' as const : 'knowledge_point' as const
+      return submitReorder(reordered.map((s: any, i: number) => ({
+        type: nodeType,
+        id: s.id,
+        sort_order: i,
+      })))
+    }
+
+    // ─────────────────────────────────────────────
+    // CASE 2: dropToGap = false — 拖入节点内部（改变层级）
+    // ─────────────────────────────────────────────
+    // 目标必须是章节节点
+    if (dropPrefix !== 'ch') {
+      message.warning('只能拖入章节节点')
+      return
+    }
+
+    const targetChapterId = parseInt(dropKey.split('_')[1], 10)
+    const dragContainer = findContainerByKey(course.chapters || [], dragKey)
+    if (!dragContainer) return
+    const dragSiblings = dragContainer.list
+
+    if (dragPrefix === 'ch') {
+      // ── 章节拖入章节 → 改变 parent_id ──
+      // 循环引用检查
+      const wouldCycle = (parentId: number, searchId: number): boolean => {
+        if (parentId === searchId) return true
+        const parent = findChapterById(course.chapters || [], parentId)
+        if (!parent?.children) return false
+        return parent.children.some((c: any) => c.id === searchId || wouldCycle(c.id, searchId))
+      }
+      if (wouldCycle(targetChapterId, dragId)) {
+        message.warning('不能将章节拖入自身或子章节')
+        return
+      }
+
+      // 从原位置移除
+      const fromIdx = dragSiblings.findIndex((s: any) => `ch_${s.id}` === dragKey)
+      if (fromIdx === -1) return
+      const newSiblings = [...dragSiblings]
+      newSiblings.splice(fromIdx, 1)
+
+      const items: curriculumApi.ReorderItem[] = []
+      // 原同级重排
+      newSiblings.forEach((s: any, i: number) => {
+        items.push({ type: 'chapter', id: s.id, sort_order: i })
+      })
+      // 目标章节的子章节重排（保持原顺序，追加拖入节点）
+      const targetChapter = findChapterById(course.chapters || [], targetChapterId)
+      const targetChildren = targetChapter?.children || []
+      targetChildren.forEach((child: any, i: number) => {
+        items.push({ type: 'chapter', id: child.id, sort_order: i, parent_id: targetChapterId })
+      })
+      items.push({ type: 'chapter', id: dragId, sort_order: targetChildren.length, parent_id: targetChapterId })
+
+      return submitReorder(items)
+    }
+
+    if (dragPrefix === 'kp') {
+      // ── 知识点拖入章节 → 改变 chapter_id ──
+      // 知识点不能拖入自身所在章节（无意义）
+      if (dragContainer.parentChapterId === targetChapterId) {
+        message.info('知识点已在目标章节中')
+        return
+      }
+
+      const fromIdx = dragSiblings.findIndex((s: any) => `kp_${s.id}` === dragKey)
+      if (fromIdx === -1) return
+      const newDragSiblings = [...dragSiblings]
+      newDragSiblings.splice(fromIdx, 1)
+
+      const items: curriculumApi.ReorderItem[] = []
+      // 原同级重排（移除后的）
+      newDragSiblings.forEach((s: any, i: number) => {
+        items.push({ type: 'knowledge_point', id: s.id, sort_order: i })
+      })
+      // 目标章节知识点重排（追加拖入节点到最后）
+      const targetChapter = findChapterById(course.chapters || [], targetChapterId)
+      const targetKps = targetChapter?.knowledge_points || []
+      targetKps.forEach((kp: any, i: number) => {
+        items.push({ type: 'knowledge_point', id: kp.id, sort_order: i, chapter_id: targetChapterId })
+      })
+      items.push({ type: 'knowledge_point', id: dragId, sort_order: targetKps.length, chapter_id: targetChapterId })
+
+      return submitReorder(items)
     }
   }
 
@@ -541,6 +726,8 @@ const CurriculumPage: React.FC = () => {
                         defaultExpandAll
                         showLine={{ showLeafIcon: false }}
                         onSelect={handleTreeSelect}
+                        draggable={isTeacherOrAdmin}
+                        onDrop={handleTreeDrop}
                         style={{ background: 'transparent' }}
                       />
                     </div>
@@ -619,15 +806,31 @@ const CurriculumPage: React.FC = () => {
                   <Typography.Text type="secondary">暂无关联资源</Typography.Text>
                 ) : (
                   <Space direction="vertical" style={{ width: '100%' }}>
-                    {kpResources.map((r) => (
-                      <Card key={r.binding_id} size="small" hoverable>
-                        <Space>
-                          {RESOURCE_ICONS[r.resource_type] || <FileOutlined />}
-                          <Typography.Text>{r.resource_name || `[${r.resource_type}:${r.resource_id}]`}</Typography.Text>
-                          <Tag>{RESOURCE_LABELS[r.resource_type] || r.resource_type}</Tag>
-                        </Space>
-                      </Card>
-                    ))}
+                    {kpResources.map((r) => {
+                      const isFileType = r.resource_type === 'html' || r.resource_type === 'download'
+                      const cardProps = r.resource_url
+                        ? isFileType
+                          ? { onClick: () => window.open(r.resource_url, '_blank') }
+                          : { onClick: () => window.location.href = r.resource_url }
+                        : {}
+                      return (
+                        <Card
+                          key={r.binding_id}
+                          size="small"
+                          hoverable
+                          style={{ cursor: r.resource_url ? 'pointer' : 'default' }}
+                          {...cardProps}
+                        >
+                          <Space>
+                            {RESOURCE_ICONS[r.resource_type] || <FileOutlined />}
+                            <Typography.Text style={{ color: r.resource_url ? '#1677ff' : undefined }}>
+                              {r.resource_name || `[${r.resource_type}:${r.resource_id}]`}
+                            </Typography.Text>
+                            <Tag>{RESOURCE_LABELS[r.resource_type] || r.resource_type}</Tag>
+                          </Space>
+                        </Card>
+                      )
+                    })}
                   </Space>
                 )}
 
