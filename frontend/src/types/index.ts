@@ -218,3 +218,100 @@ export interface ExamResultResponse {
     min_score: number;
   };
 }
+
+// ── 课程大纲类型 ──
+
+export interface Course {
+  id: number;
+  name: string;
+  code: string;
+  description: string;
+  grade: string;
+  cover_image: string;
+  sort_order: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  chapters?: ChapterTreeNode[];
+  progress?: { total: number; completed: number };
+}
+
+export interface ChapterTreeNode {
+  id: number;
+  course_id: number;
+  parent_id: number | null;
+  name: string;
+  description: string;
+  sort_order: number;
+  status: string;
+  children?: ChapterTreeNode[];
+  knowledge_points?: KnowledgePoint[];
+}
+
+export interface KnowledgePoint {
+  id: number;
+  chapter_id: number;
+  name: string;
+  description: string;
+  learning_objectives: string;
+  difficulty: string;
+  estimated_minutes: number;
+  sort_order: number;
+  status: string;
+  progress_status?: 'not_started' | 'in_progress' | 'completed';
+  progress_score?: number;
+  resource_count?: number;
+  resources?: CurriculumResource[];
+}
+
+export interface CurriculumResource {
+  binding_id: number;
+  knowledge_point_id: number;
+  resource_type: string;
+  resource_id: number;
+  resource_name: string;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface CourseCreateRequest {
+  name: string;
+  code?: string;
+  description?: string;
+  grade?: string;
+  cover_image?: string;
+  sort_order?: number;
+}
+
+export interface ChapterCreateRequest {
+  course_id: number;
+  parent_id?: number | null;
+  name: string;
+  description?: string;
+  sort_order?: number;
+}
+
+export interface KnowledgePointCreateRequest {
+  chapter_id: number;
+  name: string;
+  description?: string;
+  learning_objectives?: string;
+  difficulty?: string;
+  estimated_minutes?: number;
+  sort_order?: number;
+}
+
+export interface BindingCreateRequest {
+  knowledge_point_id: number;
+  resource_type: string;
+  resource_id: number;
+  sort_order?: number;
+}
+
+export interface ProgressStats {
+  course_id: number;
+  course_name?: string;
+  total: number;
+  completed: number;
+  rate: number;
+}
