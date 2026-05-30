@@ -261,16 +261,14 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 - {course_hint}
 - 严格按照 JSON 格式输出，不要包含任何其他文本
 
-【层次结构规则（最重要）】
-优先使用扁平结构：每个主题作为"章(chapter)"，知识点(knowledge_point)直接挂在章下。
-只有原始文本明确存在"章→节"的层级划分时，才使用 children 嵌套。
+【层次结构规则】
+1. 章(chapter)是一级标题，children是二级标题（节）
+2. 每个知识点(knowledge_point)必须放在它所属的节(children)中
+3. 章级别不直接挂知识点，知识点统一放在节下面
+4. difficulty: easy | medium | hard
+5. 每个知识点建议学习时间 10-90 分钟
 
-1. 章(chapter)是一级标题，children是二级标题（只有原文明确分节时才使用）
-2. 每个知识点必须放在它最直接所属的章或节下，不要混淆层级
-3. difficulty: easy | medium | hard
-4. 每个知识点建议学习时间 10-90 分钟
-
-【✅ 推荐的扁平输出格式（首选）】
+【必须遵循的输出格式】
 ```json
 {{
   "course_name": "课程名称",
@@ -278,28 +276,21 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
   "course_description": "课程简要描述",
   "chapters": [
     {{
-      "name": "主题一名称",
-      "description": "主题描述",
-      "knowledge_points": [
+      "name": "章名称",
+      "description": "章描述",
+      "children": [
         {{
-          "name": "知识点名称",
-          "description": "知识点描述",
-          "learning_objectives": "学习目标",
-          "difficulty": "medium",
-          "estimated_minutes": 25
-        }}
-      ]
-    }},
-    {{
-      "name": "主题二名称",
-      "description": "主题描述",
-      "knowledge_points": [
-        {{
-          "name": "知识点名称",
-          "description": "知识点描述",
-          "learning_objectives": "学习目标",
-          "difficulty": "hard",
-          "estimated_minutes": 30
+          "name": "节名称",
+          "description": "节描述",
+          "knowledge_points": [
+            {{
+              "name": "知识点名称",
+              "description": "知识点描述",
+              "learning_objectives": "学习目标",
+              "difficulty": "medium",
+              "estimated_minutes": 25
+            }}
+          ]
         }}
       ]
     }}
@@ -309,37 +300,60 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 
 【示例】
 输入文本：
-"人工智能概述与发展\n人工智能的定义与特征\n人工智能发展现状\n人工智能发展历程"
+人工智能概述与发展
+人工智能的定义与特征
+人工智能发展现状
+人工智能发展历程
+人工智能前沿应用领域
+人工智能应用领域案例
+人工智能的未来
+人工智能未来趋势与挑战
 
 输出应为：
 {{
-  "course_name": "人工智能",
-  "course_code": "AI",
-  "course_description": "人工智能基础课程",
+  "course_name": "人工智能基础",
   "chapters": [
     {{
       "name": "人工智能概述与发展",
-      "description": "介绍人工智能的基本概念和发展背景",
-      "knowledge_points": [
+      "children": [
         {{
           "name": "人工智能的定义与特征",
-          "description": "AI的定义及核心特征",
-          "learning_objectives": "掌握AI的定义与基本特征",
-          "difficulty": "easy",
-          "estimated_minutes": 15
+          "knowledge_points": [
+            {{"name": "人工智能的定义与特征", "difficulty": "easy", "estimated_minutes": 15}}
+          ]
         }}
       ]
     }},
     {{
       "name": "人工智能发展现状",
-      "description": "AI技术的发展历程和现状",
-      "knowledge_points": [
+      "children": [
         {{
           "name": "人工智能发展历程",
-          "description": "AI从起源到当前的发展过程",
-          "learning_objectives": "了解AI发展的关键里程碑",
-          "difficulty": "easy",
-          "estimated_minutes": 20
+          "knowledge_points": [
+            {{"name": "人工智能发展历程", "difficulty": "easy", "estimated_minutes": 20}}
+          ]
+        }}
+      ]
+    }},
+    {{
+      "name": "人工智能前沿应用领域",
+      "children": [
+        {{
+          "name": "人工智能应用领域案例",
+          "knowledge_points": [
+            {{"name": "人工智能应用领域案例", "difficulty": "medium", "estimated_minutes": 30}}
+          ]
+        }}
+      ]
+    }},
+    {{
+      "name": "人工智能的未来",
+      "children": [
+        {{
+          "name": "人工智能未来趋势与挑战",
+          "knowledge_points": [
+            {{"name": "人工智能未来趋势与挑战", "difficulty": "medium", "estimated_minutes": 25}}
+          ]
         }}
       ]
     }}
@@ -439,19 +453,25 @@ async def ai_generate_from_file(request: Request):
 
 规则：
 - 科目：{subject}，年级：{grade}，{course_hint}
-- 优先使用扁平结构：每个主题作为"章(chapter)"，知识点直接挂在章下
-- 只有原文明确分节时才使用 children 嵌套
+- 章(chapter)是一级标题，children是二级标题（节）
+- 每个知识点(knowledge_point)必须放在它所属的节(children)中
+- 章级别不直接挂知识点
 - 严格按照 JSON 格式输出，不包含其他文本
 
-【✅ 推荐扁平格式】
+【必须遵循的输出格式】
 ```json
 {{
   "course_name": "课程名称",
   "chapters": [
     {{
-      "name": "主题一",
-      "knowledge_points": [
-        {{"name": "知识点","difficulty": "easy","estimated_minutes": 15}}
+      "name": "章名称",
+      "children": [
+        {{
+          "name": "节名称",
+          "knowledge_points": [
+            {{"name": "知识点","difficulty": "easy","estimated_minutes": 15}}
+          ]
+        }}
       ]
     }}
   ]
