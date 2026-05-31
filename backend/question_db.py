@@ -106,7 +106,7 @@ def init_question_db():
                 pass
 
             conn.commit()
-            logger.info("试题库数据库初始化完成（含考试相关表）")
+            logger.debug("试题库数据库初始化完成")
     except Exception as e:
         logger.error(f"试题库数据库初始化失败: {e}")
         raise
