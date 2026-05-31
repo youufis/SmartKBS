@@ -226,7 +226,7 @@ const TaskPage: React.FC = () => {
       title: '操作', key: 'action', width: 280,
       render: (_: any, record: TaskInfo) => (
         <Space size="small" wrap>
-          {record.status === 'active' && (
+          {isStudent && record.status === 'active' && (
             <Button size="small" type="primary" icon={<SendOutlined />}
               onClick={() => { setSelectedTask(record); setSubmitModal(true) }}
             >提交</Button>
