@@ -3,7 +3,7 @@ import {
   Modal, Select, Input, Button, Table, message, Tag, Space, Typography, Empty,
 } from 'antd'
 import {
-  FileOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
+  FileOutlined, DownloadOutlined, FormOutlined,
   TeamOutlined, CheckCircleOutlined, PlusOutlined, DeleteOutlined, SearchOutlined,
 } from '@ant-design/icons'
 import * as curriculumApi from '../api/curriculum'
@@ -14,7 +14,6 @@ const { Option } = Select
 const RESOURCE_TYPE_OPTIONS = [
   { value: 'html', label: 'HTML 资源', icon: <FileOutlined /> },
   { value: 'download', label: '下载文件', icon: <DownloadOutlined /> },
-  { value: 'question', label: '试题', icon: <QuestionCircleOutlined /> },
   { value: 'exam', label: '考试', icon: <FormOutlined /> },
   { value: 'discussion', label: '讨论', icon: <TeamOutlined /> },
   { value: 'interaction_quiz', label: '随堂测验', icon: <FormOutlined /> },

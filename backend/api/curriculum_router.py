@@ -94,6 +94,44 @@ def _can_manage(user: dict) -> bool:
     return role in (0, 1)
 
 
+def _check_resource_ownership(resource_type: str, resource_id: int, username: str) -> bool:
+    """校验指定资源是否属于该用户"""
+    try:
+        if resource_type in ("html", "download"):
+            row = execute_query_one(
+                "SELECT 1 FROM shared_resources WHERE id=? AND owner_username=?",
+                (resource_id, username),
+            )
+            return row is not None
+        elif resource_type == "exam":
+            row = q_execute_query(
+                "SELECT 1 FROM exams WHERE id=? AND creator_username=?",
+                (resource_id, username),
+            )
+            return len(row) > 0
+        elif resource_type == "discussion":
+            row = execute_query_one(
+                "SELECT 1 FROM discussions WHERE id=? AND creator_username=?",
+                (resource_id, username),
+            )
+            return row is not None
+        elif resource_type == "interaction_quiz":
+            row = execute_query_one(
+                "SELECT 1 FROM interaction_quizzes WHERE id=? AND creator_username=?",
+                (resource_id, username),
+            )
+            return row is not None
+        elif resource_type == "task":
+            row = execute_query_one(
+                "SELECT 1 FROM tasks WHERE id=? AND creator_username=?",
+                (str(resource_id), username),
+            )
+            return row is not None
+    except Exception:
+        pass
+    return False
+
+
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1085,9 +1123,16 @@ async def create_binding(req: BindingCreate, request: Request):
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
 
-    valid_types = {"html", "download", "question", "exam", "discussion", "interaction_quiz", "task"}
+    valid_types = {"html", "download", "exam", "discussion", "interaction_quiz", "task"}
     if req.resource_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"无效的资源类型，可选: {', '.join(sorted(valid_types))}")
+
+    # 校验资源所有权：教师只能绑定自己的资源
+    username = user["username"]
+    ownership_ok = _check_resource_ownership(req.resource_type, req.resource_id, username)
+    if not ownership_ok:
+        logger.warning(f"用户 {username} 尝试绑定非自己的资源 {req.resource_type}:{req.resource_id}")
+        raise HTTPException(status_code=403, detail="只能绑定自己的资源")
 
     # 检查是否已绑定
     existing = execute_query_one(
@@ -1130,10 +1175,11 @@ async def get_available_resources(
     keyword: str = Query("", description="搜索关键词"),
     kp_id: int = Query(None, description="知识点 ID（排除已绑定的）"),
 ):
-    """获取指定类型的可选资源列表（用于绑定界面选择）"""
-    get_current_user(request)
+    """获取指定类型的可选资源列表（用于绑定界面选择，仅返回当前教师自己的资源）"""
+    user = get_current_user(request)
+    username = user["username"]
 
-    valid_types = {"html", "download", "question", "exam", "discussion", "interaction_quiz", "task"}
+    valid_types = {"html", "download", "exam", "discussion", "interaction_quiz", "task"}
     if resource_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"无效的资源类型")
 
@@ -1141,8 +1187,8 @@ async def get_available_resources(
 
     try:
         if resource_type == "html":
-            sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='html' AND share_scope='all'"
-            params = []
+            sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='html' AND owner_username=?"
+            params = [username]
             if keyword:
                 sql += " AND file_name LIKE ?"
                 params.append(f"%{keyword}%")
@@ -1150,28 +1196,17 @@ async def get_available_resources(
             results = execute_query(sql, tuple(params))
 
         elif resource_type == "download":
-            sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='download'"
-            params = []
+            sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='download' AND owner_username=?"
+            params = [username]
             if keyword:
                 sql += " AND file_name LIKE ?"
                 params.append(f"%{keyword}%")
             sql += " ORDER BY id DESC LIMIT 200"
             results = execute_query(sql, tuple(params))
 
-        elif resource_type == "question":
-            sql = "SELECT id, question_text as name FROM question_bank WHERE status='active'"
-            params = []
-            if keyword:
-                sql += " AND question_text LIKE ?"
-                params.append(f"%{keyword}%")
-            sql += " ORDER BY id DESC LIMIT 200"
-            results = q_execute_query(sql, tuple(params))
-            for r in results:
-                r["name"] = r["name"][:80] + ("..." if len(r["name"]) > 80 else "")
-
         elif resource_type == "exam":
-            sql = "SELECT id, title as name FROM exams WHERE status='published'"
-            params = []
+            sql = "SELECT id, title as name FROM exams WHERE status='published' AND creator_username=?"
+            params = [username]
             if keyword:
                 sql += " AND title LIKE ?"
                 params.append(f"%{keyword}%")
@@ -1179,8 +1214,8 @@ async def get_available_resources(
             results = q_execute_query(sql, tuple(params))
 
         elif resource_type == "discussion":
-            sql = "SELECT id, title as name FROM discussions WHERE status='pending' OR status='active'"
-            params = []
+            sql = "SELECT id, title as name FROM discussions WHERE (status='pending' OR status='active') AND creator_username=?"
+            params = [username]
             if keyword:
                 sql += " AND title LIKE ?"
                 params.append(f"%{keyword}%")
@@ -1188,8 +1223,8 @@ async def get_available_resources(
             results = execute_query(sql, tuple(params))
 
         elif resource_type == "interaction_quiz":
-            sql = "SELECT id, title as name FROM interaction_quizzes WHERE status='active'"
-            params = []
+            sql = "SELECT id, title as name FROM interaction_quizzes WHERE status='active' AND creator_username=?"
+            params = [username]
             if keyword:
                 sql += " AND title LIKE ?"
                 params.append(f"%{keyword}%")
@@ -1197,8 +1232,8 @@ async def get_available_resources(
             results = execute_query(sql, tuple(params))
 
         elif resource_type == "task":
-            sql = "SELECT id, name FROM tasks WHERE status='active'"
-            params = []
+            sql = "SELECT id, name FROM tasks WHERE status='active' AND creator_username=?"
+            params = [username]
             if keyword:
                 sql += " AND name LIKE ?"
                 params.append(f"%{keyword}%")
