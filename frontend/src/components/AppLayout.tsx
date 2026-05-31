@@ -53,20 +53,27 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
   ]},
 ]
 
-// 教师/管理员菜单分组（注意：标签中不要使用 emoji，折叠后会显示为 ?）
-const teacherMenuGroups: { icon: React.ReactNode; label: string; key: string; children: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }[] }[] = [
-    { icon: <HomeOutlined />, label: '概览', key: 'overview', children: [
+// 教师/管理员菜单项类型：分组（有子项）或平级条目
+type TeacherMenuItem = {
+  type: 'group';
+  icon: React.ReactNode; label: string; key: string;
+  children: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }[];
+} | {
+  type: 'item';
+  key: string; icon: React.ReactNode; label: string;
+}
+
+const teacherMenuItems: TeacherMenuItem[] = [
+    { type: 'item', key: '/question-exam', icon: <DatabaseOutlined />, label: '考试管理' },
+    { type: 'group', icon: <HomeOutlined />, label: '概览', key: 'overview', children: [
       { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
     ]},
-    { icon: <BookOutlined />, label: '教学', key: 'teach', children: [
+    { type: 'group', icon: <BookOutlined />, label: '教学', key: 'teach', children: [
       { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
       { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
       { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
     ]},
-    { icon: <DatabaseOutlined />, label: '题库与考试', key: 'question_exam', children: [
-      { key: '/question-exam', icon: <DatabaseOutlined />, label: '试题管理' },
-    ]},
-    { icon: <ThunderboltOutlined />, label: '课堂', key: 'classroom', children: [
+    { type: 'group', icon: <ThunderboltOutlined />, label: '课堂', key: 'classroom', children: [
       { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
       { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
@@ -74,12 +81,12 @@ const teacherMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
     ]},
-    { icon: <SettingOutlined />, label: '管理', key: 'admin', children: [
+    { type: 'group', icon: <SettingOutlined />, label: '管理', key: 'admin', children: [
       { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
       { key: '/announcements', icon: <BellOutlined />, label: '公告管理' },
       { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
     ]},
-    { icon: <InfoCircleOutlined />, label: '系统', key: 'system', children: [
+    { type: 'group', icon: <InfoCircleOutlined />, label: '系统', key: 'system', children: [
       { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
     ]},
   ]
@@ -111,23 +118,27 @@ const AppLayout: React.FC = () => {
 
   // 根据用户角色过滤菜单项并转为 Ant Design Menu 格式
   const buildMenuItems = () => {
-    const groups = isStudent ? studentMenuGroups : teacherMenuGroups
-    return groups.map(group => ({
-      key: group.key,
-      label: group.label,
-      children: group.children
-        .filter((item: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }) => {
-          if (item.adminOnly) return isAdmin
-          if (item.adminOrTeacherOnly) return isAdmin || isTeacher
+    const raw: (TeacherMenuItem | typeof studentMenuGroups[number])[] = isStudent ? studentMenuGroups : teacherMenuItems
+    return raw.map((item) => {
+      // 平级条目（TeacherMenuItem type='item'）
+      if ('type' in item && item.type === 'item') {
+        return { key: item.key, icon: item.icon, label: item.label }
+      }
+      // 分组条目
+      const group = item as { key: string; label: string; icon: React.ReactNode; children: Array<Record<string, unknown>> }
+      const children = (group.children as Array<{ key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }>)
+        .filter((child) => {
+          if (child.adminOnly) return isAdmin
+          if (child.adminOrTeacherOnly) return isAdmin || isTeacher
           return true
         })
-        .map(item => ({
-          key: item.key,
-          icon: item.icon,
-          label: item.label,
-        })),
-    icon: group.icon,
-    }))
+        .map((child) => ({
+          key: child.key,
+          icon: child.icon,
+          label: child.label,
+        }))
+      return { key: group.key, label: group.label, icon: group.icon, children }
+    })
   }
 
   // 记住展开状态到 localStorage
@@ -137,15 +148,17 @@ const AppLayout: React.FC = () => {
 
   // 当前路径变化时，自动展开所在的分组
   useEffect(() => {
-    const groups = isStudent ? studentMenuGroups : teacherMenuGroups
-    const parentKey = groups.find(g =>
-      g.children.some(c => c.key === location.pathname)
-    )?.key
-    if (parentKey) {
-      const timer = setTimeout(() => {
-        setOpenKeys(prev => prev.includes(parentKey) ? prev : [...prev, parentKey])
-      }, 0)
-      return () => clearTimeout(timer)
+    const items: (TeacherMenuItem | typeof studentMenuGroups[number])[] = isStudent ? studentMenuGroups : teacherMenuItems
+    for (const item of items) {
+      if ('children' in item && item.children) {
+        const group = item as { key: string; children: { key: string }[] }
+        if (group.children.some(c => c.key === location.pathname)) {
+          const timer = setTimeout(() => {
+            setOpenKeys(prev => prev.includes(group.key) ? prev : [...prev, group.key])
+          }, 0)
+          return () => clearTimeout(timer)
+        }
+      }
     }
   }, [location.pathname, isStudent])
 
