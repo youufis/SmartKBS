@@ -253,131 +253,35 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 
     # 构造 Prompt
     course_hint = f"课程名称：{req.course_name}" if req.course_name else "请根据内容推断课程名称"
-    prompt = f"""你是一位资深的课程教学设计专家。请根据以下教学内容文本，提取并构建课程大纲。
+    prompt = f"""你是教学大纲设计师。将以下教学内容提取为 JSON 大纲。
 
-【核心要求】
-- 科目：{req.subject}
-- 年级：{req.grade}
-- {course_hint}
-- 严格按照 JSON 格式输出，不要包含任何其他文本
+【三条铁律】
+1. 结构: 章(chapter)→节(children)→知识点(knowledge_points)，知识点只放在节下
+2. ⚠️ 知识点名称绝不能与节名相同。节名是大标题，知识点名必须是该节下的**具体学习点**
+3. 每个节至少拆出 2~3 个知识点，不要只放 1 个
 
-【层次结构规则】
-1. 章(chapter)是一级标题，children是二级标题（节）
-2. 每个知识点(knowledge_point)必须放在它所属的节(children)中
-3. 章级别不直接挂知识点，知识点统一放在节下面
-4. difficulty: easy | medium | hard
-5. 每个知识点建议学习时间 10-90 分钟
+【课程列表（第X课）处理】
+- 相邻同主题的课合并为一个章（每章 2~4 节）
+- 节名去掉"第X课"编号
+- 根据课名推断 2~3 个具体知识点
 
-【针对"第X课XXX"列表类输入的特殊处理规则】
-当输入是类似"第1课XXX\n第2课YYY"的课程列表时：
-1. **自动分组**：将多个相邻且主题相关的课合并为一个章（每个章含2~4节课）
-2. **去掉编号**：节名中去掉"第X课"前缀，只保留课题名称
-3. **推导知识点**：即使原文只有课名没有详细内容，也要根据课名**推断**该课应包含的 2~3 个核心知识点
-4. 章名需从下属课的主题中归纳概括得出
+科目：{req.subject}，年级：{req.grade}，{course_hint}
 
-例如输入"第1课Python基础\n第2课数据结构\n第3课算法入门\n第4课面向对象"：
-→ 应合并为"Python编程基础"章，含"Python基础/数据结构/算法入门/面向对象"4个节
-→ 每个节下生成2~3个知识点，如"Python基础"节→"变量与数据类型"/"控制流程"/"函数定义"
-
-【命名规则（重要）】
-- 节(name) = 主题大标题/话题名称（概括性）
-- 知识点(name) = 该主题下的**具体学习点**（与节名不同、更细化）
-- 严禁把知识点名称写成与节名完全相同
-
-【提取知识点的核心方法（最重要）】
-请仔细阅读每个节对应的教学内容文本，从中**分析提炼**出该节涵盖的几个关键学习点：
-
-1. **阅读原文内容**：理解该节讲述了哪些具体知识
-2. **拆分为学习单元**：将内容拆分为 2~5 个相互独立的知识单元
-3. **命名知识点**：每个知识单元提炼为一个简洁精确的知识点名称
-4. 如果原文没有明确列出知识点（只有标题），你也要根据标题**智能推断**该课会讲哪些重点
-
-示例：
-原文节内容为"神经网络是AI的核心技术之一…CNN擅长图像识别…RNN适用于序列数据…"
-→ 应提取出：["卷积神经网络CNN的原理", "循环神经网络RNN的应用", "神经网络基础与结构"]
-而不是复制节名"神经网络"作为知识点名。
-
-【必须遵循的输出格式】
+【输出格式】
 ```json
-{{
-  "course_name": "课程名称",
-  "course_code": "课程代码(英文缩写)",
-  "course_description": "课程简要描述",
-  "chapters": [
-    {{
-      "name": "章名称",
-      "description": "章描述",
-      "children": [
-        {{
-          "name": "节名称（话题标题）",
-          "description": "节描述",
-          "knowledge_points": [
-            {{
-              "name": "具体知识点（与节名不同）",
-              "description": "知识点描述",
-              "learning_objectives": "学习目标",
-              "difficulty": "medium",
-              "estimated_minutes": 25
-            }}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}
+{{"course_name":"...","chapters":[{{"name":"章名","children":[
+  {{"name":"节名","knowledge_points":[
+    {{"name":"具体知识点1","difficulty":"easy|medium|hard","estimated_minutes":20}},
+    {{"name":"具体知识点2","difficulty":"medium","estimated_minutes":30}}
+  ]}}
+]}}]}}
 ```
 
-【✅ 正确示例1：原文有明确知识点】
-输入："人工智能定义\n- 图灵测试\n- 强AI与弱AI\n- AI三大特征"
-输出：
-"children": [{{"name":"人工智能定义","knowledge_points":[
-  {{"name":"图灵测试与智能判定","difficulty":"easy","estimated_minutes":15}},
-  {{"name":"强AI与弱AI的本质区别","difficulty":"easy","estimated_minutes":10}},
-  {{"name":"AI的三大核心特征","difficulty":"medium","estimated_minutes":20}}
-]}}]
+✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法","过拟合与欠拟合"]
+❌ 禁止: 节="机器学习基础" → 知识点=["机器学习基础"]  ← 完全重复！
 
-【✅ 正确示例2a：课程列表输入（只有课名，无详细内容）】
-输入："第1课Python基础\n第2课数据结构\n第3课算法入门\n第4课面向对象编程"
-输出（合并为章、去掉编号、推断知识点）：
-"chapters": [{{
-  "name":"Python编程基础","children":[
-    {{"name":"Python基础","knowledge_points":[
-      {{"name":"变量与数据类型","difficulty":"easy","estimated_minutes":20}},
-      {{"name":"控制流程与函数","difficulty":"easy","estimated_minutes":25}}
-    ]}},
-    {{"name":"数据结构","knowledge_points":[
-      {{"name":"列表、元组与字典","difficulty":"medium","estimated_minutes":30}},
-      {{"name":"栈与队列的应用","difficulty":"medium","estimated_minutes":25}}
-    ]}},
-    {{"name":"算法入门","knowledge_points":[
-      {{"name":"排序与搜索算法","difficulty":"medium","estimated_minutes":35}},
-      {{"name":"算法复杂度分析","difficulty":"hard","estimated_minutes":30}}
-    ]}},
-    {{"name":"面向对象编程","knowledge_points":[
-      {{"name":"类与对象","difficulty":"medium","estimated_minutes":25}},
-      {{"name":"继承与多态","difficulty":"medium","estimated_minutes":25}}
-    ]}}
-  ]
-}}]
-
-【✅ 正确示例2b：原文只有段落内容，无显式知识点】
-输入："人工智能的发展历程可以追溯到20世纪50年代。1956年达特茅斯会议标志着AI的诞生。此后经历了多次起落，直到2012年深度学习崛起，AI进入爆发期。近年来大语言模型如ChatGPT展示了惊人能力。"
-→ 从段落中提取出：
-"children": [{{"name":"人工智能发展历程","knowledge_points":[
-  {{"name":"AI的起源与达特茅斯会议","difficulty":"easy","estimated_minutes":15}},
-  {{"name":"AI发展的三次浪潮","difficulty":"medium","estimated_minutes":25}},
-  {{"name":"深度学习与大语言模型的突破","difficulty":"medium","estimated_minutes":30}}
-]}}]
-
-【❌ 错误示例（禁止）】
-{{"name":"人工智能的定义与特征","knowledge_points":[
-  {{"name":"人工智能的定义与特征",...}}  ← 与节名相同，禁止！
-]}}
-
-教学内容文本：
----
-{req.content[:8000]}
----"""
+教学内容：
+{req.content[:8000]}"""
 
     try:
         from backend.api.ai_service import call_ai_sync
@@ -463,46 +367,25 @@ async def ai_generate_from_file(request: Request):
 
     # 构造 Prompt
     course_hint = f"课程名称：{course_name}" if course_name else "请根据内容推断课程名称"
-    prompt = f"""你是一位资深的课程教学设计专家。请根据以下从文件「{filename}」中提取的教学内容文本，提取并构建课程大纲。
+    prompt = f"""你是教学大纲设计师。将文件「{filename}」中的教学内容提取为 JSON 大纲。
 
-规则：
-- 科目：{subject}，年级：{grade}，{course_hint}
-- 章(chapter)是一级标题，children是二级标题（节）
-- 每个知识点(knowledge_point)必须放在它所属的节(children)中
-- 章级别不直接挂知识点
-- 知识点名称必须与节名不同（知识点是具体学习点，节名是话题标题）
+【三条铁律】
+1. 结构: 章→节→知识点，知识点只放在节下
+2. ⚠️ 知识点名称绝不能与节名相同
+3. 每个节至少拆出 2~3 个知识点
 
-课程列表类输入（如"第1课XXX"）的处理规则：
-- 多个主题相邻的课合并为一个章（每章2~4节）
-- 节名中去掉"第X课"前缀
-- 根据课名推断2~3个核心知识点
+科目：{subject}，年级：{grade}，{course_hint}
 
-严格按照 JSON 格式输出，不包含其他文本。
+✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法"]
+❌ 禁止: 节="机器学习基础" → 知识点=["机器学习基础"]  ← 完全重复！
 
-【必须遵循的输出格式】
-```json
-{{
-  "course_name": "课程名称",
-  "chapters": [
-    {{
-      "name": "章名称",
-      "children": [
-        {{
-          "name": "节名称（话题标题）",
-          "knowledge_points": [
-            {{"name": "具体知识点（与节名不同）","difficulty": "easy","estimated_minutes": 15}}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}
-```
+输出格式：
+{{"course_name":"...","chapters":[{{"name":"章","children":[
+  {{"name":"节","knowledge_points":[{{"name":"知识点","difficulty":"easy","estimated_minutes":20}}]}}
+]}}]}}
 
-教学内容文本（来自 {filename}）：
----
-{text_content}
----"""
+内容：
+{text_content}"""
 
     try:
         from backend.api.ai_service import call_ai_sync
