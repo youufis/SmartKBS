@@ -511,11 +511,17 @@ async def extract_questions_from_text(
                 raw_questions = parsed["questions"]
             else:
                 raw_questions = []
-            # 校验是否为合法试题格式（每项必须有 question 字段）
-            if raw_questions and all(isinstance(q, dict) and q.get("question") for q in raw_questions):
-                questions = raw_questions
-                source_label = "json_import"
-                logger.info(f"JSON 文件直接解析成功，共 {len(questions)} 道试题，跳过 AI 提取")
+            # 智能识别并规范化字段名
+            if raw_questions and all(isinstance(q, dict) for q in raw_questions):
+                normalized = []
+                for q in raw_questions:
+                    nq = _normalize_question_json(q)
+                    if nq.get("question"):
+                        normalized.append(nq)
+                if normalized:
+                    questions = normalized
+                    source_label = "json_import"
+                    logger.info(f"JSON 文件直接解析成功（{len(raw_questions)} 项，归一化后 {len(questions)} 道有效试题），跳过 AI 提取")
         except Exception as e:
             logger.info(f"JSON 直接解析失败，回退到 AI 提取: {e}")
 
@@ -594,12 +600,85 @@ async def extract_questions_from_text(
             "difficulty": q_data.get("difficulty", difficulty),
         })
 
-    source_display = {"docx": "Word文档", "txt": "文本文件", "md": "Markdown文件", "pdf": "PDF文件", "json": "JSON文件", "paste": "粘贴文本"}
+    source_display = {"docx": "Word文档", "txt": "文本文件", "md": "Markdown文件", "pdf": "PDF文件", "json": "JSON文件", "json_import": "JSON文件", "paste": "粘贴文本"}
     logger.info(f"用户 {username} 从{source_display.get(source_label, '文件')}提取并入库 {len(saved_questions)} 道试题")
     return {
         "message": f"成功提取 {len(saved_questions)} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
+    }
+
+
+def _normalize_question_json(q: dict) -> dict:
+    """智能识别并规范化 JSON 试题字段名，兼容多种常见命名格式"""
+    import re
+
+    def _first_of(*keys):
+        for k in keys:
+            v = q.get(k)
+            if v is not None:
+                return v
+        return ""
+
+    # ── 题目文本 ──
+    question = _first_of("question", "title", "stem", "content", "题干", "题目")
+    if isinstance(question, (list, dict)):
+        question = str(question)
+
+    # ── 答案 ──
+    answer = _first_of("answer", "correct_answer", "correctAnswer", "answerKey", "key", "答案", "正确答案")
+
+    # ── 题型 ──
+    raw_type = str(_first_of("type", "question_type", "questionType", "qtype", "题型")).lower()
+    type_map = {
+        "single": "single", "单选": "single", "单选题": "single",
+        "multiple": "multiple", "多选": "multiple", "多选题": "multiple",
+        "true_false": "true_false", "judge": "true_false", "判断": "true_false", "判断题": "true_false",
+        "short": "short", "简答": "short", "简答题": "short", "填空": "short", "fill": "short",
+    }
+    q_type = type_map.get(raw_type, "single")
+
+    # ── 选项 ──
+    options_raw = _first_of("options", "choices", "items", "select", "选项", "选择题选项")
+    options = {}
+    if isinstance(options_raw, dict):
+        options = options_raw
+    elif isinstance(options_raw, (list, tuple)):
+        # 将 ["A项", "B项", "C项", "D项"] 转为 {"A": "A项", "B": "B项", ...}
+        labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        for i, opt in enumerate(options_raw):
+            if i < len(labels):
+                options[labels[i]] = str(opt)
+    # 如果 q 中直接有 A/B/C/D 键，也视为选项
+    for k in ("A", "B", "C", "D", "E", "F"):
+        if k in q and k not in options:
+            options[k] = str(q[k])
+
+    # ── 解析 ──
+    explanation = _first_of("explanation", "analysis", "解析", "详解", "评论", "comment", "solution")
+
+    # ── 知识点 ──
+    kp = _first_of("knowledge_point", "knowledgePoints", "knowledge_point", "tags", "subject", "知识点", "标签")
+    if isinstance(kp, (list, tuple)):
+        kp = ", ".join(str(t) for t in kp)
+
+    # ── 难度 ──
+    diff = str(_first_of("difficulty", "level", "difficulty_level", "difficultyLevel", "难度")).lower()
+    diff_map = {
+        "easy": "easy", "简单": "easy",
+        "medium": "medium", "中等": "medium", "中": "medium", "normal": "medium",
+        "hard": "hard", "困难": "hard", "难": "hard",
+    }
+    difficulty = diff_map.get(diff, "medium")
+
+    return {
+        "type": q_type,
+        "question": question,
+        "options": options,
+        "answer": answer,
+        "explanation": explanation,
+        "knowledge_point": kp,
+        "difficulty": difficulty,
     }
 
 
