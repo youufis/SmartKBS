@@ -265,12 +265,12 @@ const ExamPage: React.FC = () => {
 
   const [qTotal, setQTotal] = useState(0)
 
-  const loadAllQuestions = async (search?: string, page?: number) => {
+  const loadAllQuestions = async (page?: number) => {
     try {
       const res = await questionsApi.listQuestions({
-        page: page ?? qPage,
+        page: page ?? 1,
         page_size: 200,
-        keyword: (search ?? qKeyword) || undefined,
+        keyword: qKeyword || undefined,
         subject: qSubject || undefined,
         type: qType || undefined,
         difficulty: qDifficulty || undefined,
@@ -285,10 +285,10 @@ const ExamPage: React.FC = () => {
 
   useEffect(() => {
     if (questionModal) {
-      loadAllQuestions()
+      loadAllQuestions(1)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionModal, qSubject, qType, qDifficulty])
-  // 注意：不依赖 qPage，翻页通过 onChange 显式调用 loadAllQuestions(page)，避免闭包问题
 
   // ── 计算当前总分 ──
   const currentTotal = Object.values(scoreInputs).reduce((s, v) => s + (Number(v) || 0), 0)
@@ -1071,7 +1071,7 @@ const ExamPage: React.FC = () => {
             <Input.Search placeholder="搜索题目/知识点..." allowClear
               value={qKeyword}
               onChange={(e) => setQKeyword(e.target.value)}
-              onSearch={(val) => { setQKeyword(val); setQPage(1); loadAllQuestions(val || undefined, 1) }}
+              onSearch={(val) => { setQKeyword(val); loadAllQuestions(1) }}
               style={{ width: 220 }} />
             <Button type="primary" icon={<PlusOutlined />}
               disabled={selectedQIds.length === 0}
@@ -1081,7 +1081,9 @@ const ExamPage: React.FC = () => {
             </Button>
           </Space>
           <Table dataSource={allQuestions} rowKey="id" size="small"
-            pagination={{ pageSize: 10, total: qTotal, showSizeChanger: false, showTotal: (t) => `共 ${t} 题`, onChange: (page) => { setQPage(page); loadAllQuestions(undefined, page) } }}
+            pagination={{ current: qPage, pageSize: 10, total: qTotal, showSizeChanger: false, showTotal: (t) => `共 ${t} 题`,
+              onChange: (page) => loadAllQuestions(page)
+            }}
             rowSelection={{
               selectedRowKeys: selectedQIds,
               onChange: (keys) => setSelectedQIds(keys as number[]),
