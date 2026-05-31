@@ -35,7 +35,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
     { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
   ]},
   { icon: <BookOutlined />, label: '学习', key: 'learn', children: [
-    { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
+    { key: '/curriculum', icon: <BookOutlined />, label: '课程导学' },
     { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
     { key: '/shared-center', icon: <FileOutlined />, label: '共享中心' },
   ]},
@@ -67,7 +67,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
     ]},
     { type: 'group', icon: <BookOutlined />, label: '教学', key: 'teach', children: [
-      { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
+      { key: '/curriculum', icon: <BookOutlined />, label: '课程管理' },
       { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
       { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
       { key: '/question-exam', icon: <DatabaseOutlined />, label: '考试管理' },
