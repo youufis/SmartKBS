@@ -80,6 +80,19 @@ async def class_overview(
 
     query_teacher = teacher or username
 
+    # 教师只能查看自己班级的数据
+    if role == 1:
+        teacher_info = execute_query(
+            "SELECT grade, class FROM users WHERE username=?", (username,)
+        )
+        if teacher_info:
+            t_grade = (teacher_info[0][0] or "").strip()
+            t_class = (teacher_info[0][1] or "").strip()
+            allowed_grades = [g.strip() for g in t_grade.split("|") if g.strip()]
+            # 如果教师配置了年级，检查请求的年级是否在允许范围内
+            if allowed_grades and grade not in allowed_grades:
+                raise HTTPException(status_code=403, detail="无权查看其他年级的数据")
+
     # 收集班级数据
     # 班级号格式处理：users.class 存数字(1)，下拉框传"高一1班"
     class_num = _extract_class_num(cls)

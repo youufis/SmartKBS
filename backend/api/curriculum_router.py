@@ -1462,13 +1462,12 @@ async def get_class_progress_overview(
     conditions = ["role=2"]
     params = []
 
-    # 非管理员只查看自己班级的学生（用户明确指定了年级/班级时跳过，以用户选择为准）
-    if role == 1 and not grade and not class_name:
+    # 教师只能查看自己班级的学生
+    if role == 1:
         teacher_info = execute_query_one(
             "SELECT grade, class FROM users WHERE username=?", (username,)
         )
         if teacher_info and teacher_info.get("grade"):
-            # 解析教师年级班级（支持 | 分隔多组、逗号分隔多个班级）
             teacher_grades = [g.strip() for g in teacher_info["grade"].split("|") if g.strip()]
             raw_classes = (teacher_info.get("class") or "").strip()
             grade_conditions = []
@@ -1478,7 +1477,6 @@ async def get_class_progress_overview(
             if grade_conditions:
                 conditions.append(f"({' OR '.join(grade_conditions)})")
             if raw_classes:
-                # class 可能是 "1,2,3" 或 "1|2" 格式
                 class_groups = [c.strip() for c in raw_classes.split("|") if c.strip()]
                 class_conditions = []
                 for cg in class_groups:
@@ -1490,6 +1488,7 @@ async def get_class_progress_overview(
                 if class_conditions:
                     conditions.append(f"({' OR '.join(class_conditions)})")
 
+    # 用户选择的额外筛选条件（对管理员直接应用，对教师则在教师权限基础上进一步缩小范围）
     if grade:
         conditions.append("grade=?")
         params.append(grade)
