@@ -256,31 +256,21 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
     prompt = f"""你是教学大纲设计师。将以下教学内容提取为 JSON 大纲。
 
 【三条铁律】
-1. 结构: 章(chapter)→节(children)→知识点(knowledge_points)，知识点只放在节下
-2. ⚠️ 知识点名称绝不能与节名相同。节名是大标题，知识点名必须是该节下的**具体学习点**
+1. 结构: 章→节→知识点，知识点只放在节下
+2. ⚠️ 知识点名称绝不能与节名相同
 3. 每个节至少拆出 1~2 个知识点
-
-【课程列表（第X课）处理】
-- 相邻同主题的课合并为一个章（每章 2~4 节）
-- 节名去掉"第X课"编号
-- 根据课名推断 2~3 个具体知识点
 
 科目：{req.subject}，年级：{req.grade}，{course_hint}
 
-【输出格式】
-```json
-{{"course_name":"...","chapters":[{{"name":"章名","children":[
-  {{"name":"节名","knowledge_points":[
-    {{"name":"具体知识点1","difficulty":"easy|medium|hard","estimated_minutes":20}},
-    {{"name":"具体知识点2","difficulty":"medium","estimated_minutes":30}}
-  ]}}
-]}}]}}
-```
-
-✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法","过拟合与欠拟合"]
+✅ 正确: 节="机器学习基础" → 知识点=["监督学习算法","模型评估方法"]
 ❌ 禁止: 节="机器学习基础" → 知识点=["机器学习基础"]  ← 完全重复！
 
-教学内容：
+输出格式：
+{{"course_name":"...","chapters":[{{"name":"章","children":[
+  {{"name":"节","knowledge_points":[{{"name":"知识点","difficulty":"easy","estimated_minutes":20}}]}}
+]}}]}}
+
+内容：
 {req.content[:8000]}"""
 
     try:
