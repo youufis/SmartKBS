@@ -148,7 +148,11 @@ const AnalyticsPage: React.FC = () => {
     try {
       const params: Record<string, unknown> = { course_id: courseId }
       if (progressGrade) params.grade = progressGrade
-      if (progressClass) params.class_name = progressClass
+      // class_name 只需班级数字（从 "高一1班" 中提取 "1"）
+      if (progressClass) {
+        const match = progressClass.match(/(\d+)/)
+        params.class_name = match ? match[1] : progressClass
+      }
       const { data } = await apiClient.get('/api/curriculum/progress/overview', { params })
       setProgressStudents(data.students || [])
       if (data.students?.length > 0) setExpandedRowKeys([data.students[0].username])
@@ -219,7 +223,10 @@ const AnalyticsPage: React.FC = () => {
     let url = `/api/export/progress?token=${token}`
     if (courseId) url += `&course_id=${courseId}`
     if (progressGrade) url += `&grade=${progressGrade}`
-    if (progressClass) url += `&class_name=${progressClass}`
+    if (progressClass) {
+      const match = progressClass.match(/(\d+)/)
+      url += `&class_name=${match ? match[1] : progressClass}`
+    }
     window.open(url, '_blank')
   }
 
@@ -402,7 +409,7 @@ const AnalyticsPage: React.FC = () => {
                     <Select
                       value={progressClass} onChange={setProgressClass} style={{ width: 120 }}
                       placeholder="全部班级" allowClear
-                      options={classOptions.map(c => ({ label: `${c}班`, value: c }))} />
+                      options={classOptions.map(c => ({ label: c, value: c }))} />
                     <Button type="primary" icon={<ReloadOutlined />} onClick={loadProgress} loading={progressLoading}>查询</Button>
                     <Button icon={<DownloadOutlined />} onClick={exportProgressExcel}
                       disabled={progressStudents.length === 0}>导出Excel</Button>
