@@ -64,8 +64,7 @@ const teacherMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
       { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
     ]},
     { icon: <DatabaseOutlined />, label: '题库与考试', key: 'question_exam', children: [
-      { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },
-      { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
+      { key: '/question-exam', icon: <DatabaseOutlined />, label: '试题管理' },
     ]},
     { icon: <ThunderboltOutlined />, label: '课堂', key: 'classroom', children: [
       { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },

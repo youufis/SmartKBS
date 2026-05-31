@@ -17,6 +17,7 @@ import RollcallManagePage from './pages/RollcallManagePage'
 import AboutPage from './pages/AboutPage'
 import QuestionBankPage from './pages/QuestionBankPage'
 import ExamPage from './pages/ExamPage'
+import QuestionExamPage from './pages/QuestionExamPage'
 import ExamTakePage from './pages/ExamTakePage'
 import NotificationsPage from './pages/NotificationsPage'
 import AnnouncementsPage from './pages/AnnouncementsPage'
@@ -75,6 +76,7 @@ function App() {
             <Route path="user-mgmt" element={<UserMgmtPage />} />
             <Route path="tasks" element={<TaskPage />} />
             <Route path="system-config" element={user?.role === 'admin' ? <SystemConfigPage /> : <Navigate to="/chat" />} />
+            <Route path="question-exam" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionExamPage /> : <Navigate to="/chat" />} />
             <Route path="question-bank" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankPage /> : <Navigate to="/chat" />} />
             <Route path="exam" element={<ExamPage />} />
             <Route path="score" element={<ScorePage />} />
