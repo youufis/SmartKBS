@@ -562,6 +562,27 @@ def _save_ai_result(result: dict, subject: str, grade: str, username: str) -> di
 
         # 子章节（节）
         children = ch.get("children", [])
+        top_kps = ch.get("knowledge_points", [])
+
+        # 后处理：如果章既有子节又有章级知识点，将章级知识点合并到子节中
+        # 确保知识点不会与节平级（用户期望的结构）
+        if top_kps and children:
+            for kp in top_kps:
+                kp_name = kp.get("name", "")
+                # 查找同名节
+                matched = [s for s in children if s.get("name", "").strip() == kp_name.strip()]
+                if matched:
+                    # 追加到同名节的 knowledge_points 中
+                    matched[0].setdefault("knowledge_points", []).append(kp)
+                else:
+                    # 以知识点名称创建新节，将知识点放入其中
+                    children.append({
+                        "name": kp_name,
+                        "description": kp.get("description", ""),
+                        "knowledge_points": [kp],
+                    })
+            ch["knowledge_points"] = []  # 清空章级知识点，避免重复
+
         for sec_idx, sec in enumerate(children):
             sec_id = execute_insert_update(
                 """INSERT INTO chapters (course_id, parent_id, name, description, sort_order, status, created_at, updated_at)
@@ -571,16 +592,15 @@ def _save_ai_result(result: dict, subject: str, grade: str, username: str) -> di
             saved["chapters"] += 1
 
             # 该节下专属的知识点
-            kp_cursor = 0
             for kp_idx, kp in enumerate(sec.get("knowledge_points", [])):
                 _insert_kp(sec_id, kp, kp_idx, now)
                 saved["knowledge_points"] += 1
-                kp_cursor += 1
 
-        # 章级别的知识点（属于整章总括，不归属到任何一个节下）
-        for kp_idx, kp in enumerate(ch.get("knowledge_points", [])):
-            _insert_kp(ch_id, kp, kp_idx, now)
-            saved["knowledge_points"] += 1
+        # 只有章完全没有子节时，知识点才挂在章下
+        if top_kps and not children:
+            for kp_idx, kp in enumerate(top_kps):
+                _insert_kp(ch_id, kp, kp_idx, now)
+                saved["knowledge_points"] += 1
 
     logger.info(f"AI 生成课程已保存: {course_name} (id={course_id}), {saved}")
     return saved
