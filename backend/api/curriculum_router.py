@@ -258,7 +258,7 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 【三条铁律】
 1. 结构: 章(chapter)→节(children)→知识点(knowledge_points)，知识点只放在节下
 2. ⚠️ 知识点名称绝不能与节名相同。节名是大标题，知识点名必须是该节下的**具体学习点**
-3. 每个节至少拆出 2~3 个知识点，不要只放 1 个
+3. 每个节至少拆出 1~2 个知识点
 
 【课程列表（第X课）处理】
 - 相邻同主题的课合并为一个章（每章 2~4 节）
@@ -372,7 +372,7 @@ async def ai_generate_from_file(request: Request):
 【三条铁律】
 1. 结构: 章→节→知识点，知识点只放在节下
 2. ⚠️ 知识点名称绝不能与节名相同
-3. 每个节至少拆出 2~3 个知识点
+3. 每个节至少拆出 1~2 个知识点
 
 科目：{subject}，年级：{grade}，{course_hint}
 
