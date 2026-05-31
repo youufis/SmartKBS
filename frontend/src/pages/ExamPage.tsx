@@ -259,16 +259,20 @@ const ExamPage: React.FC = () => {
     }
   }
 
+  const [qTotal, setQTotal] = useState(0)
+
   const loadAllQuestions = async (search?: string) => {
     try {
       const res = await questionsApi.listQuestions({
         page: qPage,
-        page_size: 50,
+        page_size: 200,
         keyword: search,
       })
-      setAllQuestions(res.questions)
+      setAllQuestions(res.questions || [])
+      setQTotal(res.total || 0)
     } catch {
       setAllQuestions([])
+      setQTotal(0)
     }
   }
 
@@ -1050,7 +1054,7 @@ const ExamPage: React.FC = () => {
             </Button>
           </Space>
           <Table dataSource={allQuestions} rowKey="id" size="small"
-            pagination={{ simple: true, pageSize: 10 }}
+            pagination={{ simple: true, pageSize: 10, total: qTotal, onChange: (page) => setQPage(page) }}
             rowSelection={{
               selectedRowKeys: selectedQIds,
               onChange: (keys) => setSelectedQIds(keys as number[]),
