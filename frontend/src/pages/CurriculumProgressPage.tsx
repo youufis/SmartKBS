@@ -81,7 +81,10 @@ const CurriculumProgressPage: React.FC = () => {
     try {
       const params: Record<string, unknown> = { course_id: courseId }
       if (grade) params.grade = grade
-      if (className) params.class_name = className
+      if (className) {
+        const match = String(className).match(/(\d+)/)
+        params.class_name = match ? match[1] : className
+      }
       const res = await curriculumApi.getClassProgressOverview(params)
       setStudents(res.students || [])
       // 默认展开第一个学生
@@ -361,7 +364,7 @@ const CurriculumProgressPage: React.FC = () => {
             allowClear
           >
             {classOptions.map((c) => (
-              <Option key={c} value={c}>{c}班</Option>
+              <Option key={c} value={c}>{c}</Option>
             ))}
           </Select>
         </Space>
