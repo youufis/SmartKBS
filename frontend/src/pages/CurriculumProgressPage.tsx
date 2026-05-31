@@ -8,8 +8,8 @@ import {
   ClockCircleOutlined, StopOutlined,
 } from '@ant-design/icons'
 import * as curriculumApi from '../api/curriculum'
-import { getAllUsers } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
+import apiClient from '../api/client'
 
 const { Option } = Select
 
@@ -53,20 +53,27 @@ const CurriculumProgressPage: React.FC = () => {
     })
   }, [])
 
-  // ── 加载班级选项 ──
+  // ── 加载年级/班级选项（教师只能看到自己的年级和班级） ──
   useEffect(() => {
-    getAllUsers().then((res: any) => {
-      const grades = new Set<string>()
-      const classes = new Set<string>()
-      const users = res.users || []
-      users.forEach((u: any) => {
-        if (u.grade) grades.add(u.grade)
-        if (u.class) classes.add(String(u.class))
+    apiClient.get('/api/scores/my-grades', { params: { teacher: user?.username } })
+      .then(({ data }: any) => {
+        const grades = Array.isArray(data) ? data : []
+        setGradeOptions(grades)
       })
-      setGradeOptions(Array.from(grades).sort())
-      setClassOptions(Array.from(classes).sort())
-    }).catch(() => {})
-  }, [])
+      .catch(() => {})
+  }, [user?.username])
+
+  useEffect(() => {
+    if (grade) {
+      apiClient.get('/api/scores/classes', { params: { grade, teacher: user?.username } })
+        .then(({ data }: any) => {
+          setClassOptions(Array.isArray(data) ? data : [])
+        })
+        .catch(() => setClassOptions([]))
+    } else {
+      setClassOptions([])
+    }
+  }, [grade, user?.username])
 
   // ── 加载进度数据 ──
   const loadData = useCallback(async () => {
