@@ -269,7 +269,7 @@ const ExamPage: React.FC = () => {
     try {
       const res = await questionsApi.listQuestions({
         page: page ?? 1,
-        page_size: 200,
+        page_size: 10,
         keyword: qKeyword || undefined,
         subject: qSubject || undefined,
         type: qType || undefined,
