@@ -268,6 +268,11 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 4. difficulty: easy | medium | hard
 5. 每个知识点建议学习时间 10-90 分钟
 
+【命名规则（重要）】
+- 节(name) = 主题大标题/话题名称（概括性）
+- 知识点(name) = 该主题下的**具体学习点**（与节名不同、更细化）
+- 严禁把知识点名称写成与节名完全相同
+
 【必须遵循的输出格式】
 ```json
 {{
@@ -280,11 +285,11 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
       "description": "章描述",
       "children": [
         {{
-          "name": "节名称",
+          "name": "节名称（话题标题）",
           "description": "节描述",
           "knowledge_points": [
             {{
-              "name": "知识点名称",
+              "name": "具体知识点（与节名不同）",
               "description": "知识点描述",
               "learning_objectives": "学习目标",
               "difficulty": "medium",
@@ -298,20 +303,11 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 }}
 ```
 
-【示例】
+【✅ 正确示例】
 输入文本：
-人工智能概述与发展
-人工智能的定义与特征
-人工智能发展现状
-人工智能发展历程
-人工智能前沿应用领域
-人工智能应用领域案例
-人工智能的未来
-人工智能未来趋势与挑战
-
+"人工智能概述与发展\n人工智能的定义与特征：\n- 图灵测试与智能的定义\n- 弱人工智能与强人工智能\n- AI的主要特征：学习、推理、感知"
 输出应为：
 {{
-  "course_name": "人工智能基础",
   "chapters": [
     {{
       "name": "人工智能概述与发展",
@@ -319,42 +315,23 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
         {{
           "name": "人工智能的定义与特征",
           "knowledge_points": [
-            {{"name": "人工智能的定义与特征", "difficulty": "easy", "estimated_minutes": 15}}
+            {{"name": "图灵测试与智能定义", "difficulty": "easy", "estimated_minutes": 15}},
+            {{"name": "弱AI与强AI的区别", "difficulty": "easy", "estimated_minutes": 10}},
+            {{"name": "AI三大核心特征", "difficulty": "medium", "estimated_minutes": 20}}
           ]
         }}
       ]
-    }},
+    }}
+  ]
+}}
+
+【❌ 错误示例（禁止）】
+{{
+  "children": [
     {{
-      "name": "人工智能发展现状",
-      "children": [
-        {{
-          "name": "人工智能发展历程",
-          "knowledge_points": [
-            {{"name": "人工智能发展历程", "difficulty": "easy", "estimated_minutes": 20}}
-          ]
-        }}
-      ]
-    }},
-    {{
-      "name": "人工智能前沿应用领域",
-      "children": [
-        {{
-          "name": "人工智能应用领域案例",
-          "knowledge_points": [
-            {{"name": "人工智能应用领域案例", "difficulty": "medium", "estimated_minutes": 30}}
-          ]
-        }}
-      ]
-    }},
-    {{
-      "name": "人工智能的未来",
-      "children": [
-        {{
-          "name": "人工智能未来趋势与挑战",
-          "knowledge_points": [
-            {{"name": "人工智能未来趋势与挑战", "difficulty": "medium", "estimated_minutes": 25}}
-          ]
-        }}
+      "name": "人工智能的定义与特征",
+      "knowledge_points": [
+        {{"name": "人工智能的定义与特征", ...}}  ← 与节名相同，禁止！
       ]
     }}
   ]
@@ -456,6 +433,7 @@ async def ai_generate_from_file(request: Request):
 - 章(chapter)是一级标题，children是二级标题（节）
 - 每个知识点(knowledge_point)必须放在它所属的节(children)中
 - 章级别不直接挂知识点
+- 知识点名称必须与节名不同（知识点是具体学习点，节名是话题标题）
 - 严格按照 JSON 格式输出，不包含其他文本
 
 【必须遵循的输出格式】
@@ -467,9 +445,9 @@ async def ai_generate_from_file(request: Request):
       "name": "章名称",
       "children": [
         {{
-          "name": "节名称",
+          "name": "节名称（话题标题）",
           "knowledge_points": [
-            {{"name": "知识点","difficulty": "easy","estimated_minutes": 15}}
+            {{"name": "具体知识点（与节名不同）","difficulty": "easy","estimated_minutes": 15}}
           ]
         }}
       ]
