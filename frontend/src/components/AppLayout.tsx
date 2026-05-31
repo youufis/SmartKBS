@@ -64,7 +64,6 @@ type TeacherMenuItem = {
 }
 
 const teacherMenuItems: TeacherMenuItem[] = [
-    { type: 'item', key: '/question-exam', icon: <DatabaseOutlined />, label: '考试管理' },
     { type: 'group', icon: <HomeOutlined />, label: '概览', key: 'overview', children: [
       { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
     ]},
@@ -72,6 +71,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
       { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
       { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
+      { key: '/question-exam', icon: <DatabaseOutlined />, label: '考试管理' },
     ]},
     { type: 'group', icon: <ThunderboltOutlined />, label: '课堂', key: 'classroom', children: [
       { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
