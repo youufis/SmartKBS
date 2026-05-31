@@ -268,6 +268,17 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 4. difficulty: easy | medium | hard
 5. 每个知识点建议学习时间 10-90 分钟
 
+【针对"第X课XXX"列表类输入的特殊处理规则】
+当输入是类似"第1课XXX\n第2课YYY"的课程列表时：
+1. **自动分组**：将多个相邻且主题相关的课合并为一个章（每个章含2~4节课）
+2. **去掉编号**：节名中去掉"第X课"前缀，只保留课题名称
+3. **推导知识点**：即使原文只有课名没有详细内容，也要根据课名**推断**该课应包含的 2~3 个核心知识点
+4. 章名需从下属课的主题中归纳概括得出
+
+例如输入"第1课Python基础\n第2课数据结构\n第3课算法入门\n第4课面向对象"：
+→ 应合并为"Python编程基础"章，含"Python基础/数据结构/算法入门/面向对象"4个节
+→ 每个节下生成2~3个知识点，如"Python基础"节→"变量与数据类型"/"控制流程"/"函数定义"
+
 【命名规则（重要）】
 - 节(name) = 主题大标题/话题名称（概括性）
 - 知识点(name) = 该主题下的**具体学习点**（与节名不同、更细化）
@@ -279,7 +290,7 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 1. **阅读原文内容**：理解该节讲述了哪些具体知识
 2. **拆分为学习单元**：将内容拆分为 2~5 个相互独立的知识单元
 3. **命名知识点**：每个知识单元提炼为一个简洁精确的知识点名称
-4. 如果原文没有明确列出知识点，你也要根据内容**智能推导**出应该学习的重点
+4. 如果原文没有明确列出知识点（只有标题），你也要根据标题**智能推断**该课会讲哪些重点
 
 示例：
 原文节内容为"神经网络是AI的核心技术之一…CNN擅长图像识别…RNN适用于序列数据…"
@@ -325,7 +336,31 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
   {{"name":"AI的三大核心特征","difficulty":"medium","estimated_minutes":20}}
 ]}}]
 
-【✅ 正确示例2：原文只有段落内容，无显式知识点】
+【✅ 正确示例2a：课程列表输入（只有课名，无详细内容）】
+输入："第1课Python基础\n第2课数据结构\n第3课算法入门\n第4课面向对象编程"
+输出（合并为章、去掉编号、推断知识点）：
+"chapters": [{{
+  "name":"Python编程基础","children":[
+    {{"name":"Python基础","knowledge_points":[
+      {{"name":"变量与数据类型","difficulty":"easy","estimated_minutes":20}},
+      {{"name":"控制流程与函数","difficulty":"easy","estimated_minutes":25}}
+    ]}},
+    {{"name":"数据结构","knowledge_points":[
+      {{"name":"列表、元组与字典","difficulty":"medium","estimated_minutes":30}},
+      {{"name":"栈与队列的应用","difficulty":"medium","estimated_minutes":25}}
+    ]}},
+    {{"name":"算法入门","knowledge_points":[
+      {{"name":"排序与搜索算法","difficulty":"medium","estimated_minutes":35}},
+      {{"name":"算法复杂度分析","difficulty":"hard","estimated_minutes":30}}
+    ]}},
+    {{"name":"面向对象编程","knowledge_points":[
+      {{"name":"类与对象","difficulty":"medium","estimated_minutes":25}},
+      {{"name":"继承与多态","difficulty":"medium","estimated_minutes":25}}
+    ]}}
+  ]
+}}]
+
+【✅ 正确示例2b：原文只有段落内容，无显式知识点】
 输入："人工智能的发展历程可以追溯到20世纪50年代。1956年达特茅斯会议标志着AI的诞生。此后经历了多次起落，直到2012年深度学习崛起，AI进入爆发期。近年来大语言模型如ChatGPT展示了惊人能力。"
 → 从段落中提取出：
 "children": [{{"name":"人工智能发展历程","knowledge_points":[
@@ -436,7 +471,13 @@ async def ai_generate_from_file(request: Request):
 - 每个知识点(knowledge_point)必须放在它所属的节(children)中
 - 章级别不直接挂知识点
 - 知识点名称必须与节名不同（知识点是具体学习点，节名是话题标题）
-- 严格按照 JSON 格式输出，不包含其他文本
+
+课程列表类输入（如"第1课XXX"）的处理规则：
+- 多个主题相邻的课合并为一个章（每章2~4节）
+- 节名中去掉"第X课"前缀
+- 根据课名推断2~3个核心知识点
+
+严格按照 JSON 格式输出，不包含其他文本。
 
 【必须遵循的输出格式】
 ```json
