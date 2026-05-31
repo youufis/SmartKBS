@@ -265,10 +265,10 @@ const ExamPage: React.FC = () => {
 
   const [qTotal, setQTotal] = useState(0)
 
-  const loadAllQuestions = async (search?: string) => {
+  const loadAllQuestions = async (search?: string, page?: number) => {
     try {
       const res = await questionsApi.listQuestions({
-        page: qPage,
+        page: page ?? qPage,
         page_size: 200,
         keyword: (search ?? qKeyword) || undefined,
         subject: qSubject || undefined,
@@ -1070,7 +1070,7 @@ const ExamPage: React.FC = () => {
             <Input.Search placeholder="搜索题目/知识点..." allowClear
               value={qKeyword}
               onChange={(e) => setQKeyword(e.target.value)}
-              onSearch={(val) => { setQKeyword(val); setQPage(1); loadAllQuestions(val || undefined) }}
+              onSearch={(val) => { setQKeyword(val); setQPage(1); loadAllQuestions(val || undefined, 1) }}
               style={{ width: 220 }} />
             <Button type="primary" icon={<PlusOutlined />}
               disabled={selectedQIds.length === 0}
@@ -1080,7 +1080,7 @@ const ExamPage: React.FC = () => {
             </Button>
           </Space>
           <Table dataSource={allQuestions} rowKey="id" size="small"
-            pagination={{ simple: true, pageSize: 10, total: qTotal, onChange: (page) => setQPage(page) }}
+            pagination={{ simple: true, pageSize: 10, total: qTotal, onChange: (page) => { setQPage(page); loadAllQuestions(undefined, page) } }}
             rowSelection={{
               selectedRowKeys: selectedQIds,
               onChange: (keys) => setSelectedQIds(keys as number[]),
