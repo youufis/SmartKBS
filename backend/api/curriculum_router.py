@@ -1427,27 +1427,31 @@ async def get_class_progress_overview(
     conditions = ["role=2"]
     params = []
 
-    # 非管理员只查看自己班级的学生
-    if role == 1:
+    # 非管理员只查看自己班级的学生（用户明确指定了年级/班级时跳过，以用户选择为准）
+    if role == 1 and not grade and not class_name:
         teacher_info = execute_query_one(
             "SELECT grade, class FROM users WHERE username=?", (username,)
         )
         if teacher_info and teacher_info.get("grade"):
-            # 解析教师年级班级
-            teacher_grades = [g.strip() for g in teacher_info["grade"].split("|")]
-            teacher_classes = [c.strip() for c in (teacher_info.get("class") or "").split("|")]
+            # 解析教师年级班级（支持 | 分隔多组、逗号分隔多个班级）
+            teacher_grades = [g.strip() for g in teacher_info["grade"].split("|") if g.strip()]
+            raw_classes = (teacher_info.get("class") or "").strip()
             grade_conditions = []
             for g in teacher_grades:
                 grade_conditions.append("grade=?")
                 params.append(g)
             if grade_conditions:
                 conditions.append(f"({' OR '.join(grade_conditions)})")
-            if teacher_classes and any(teacher_classes):
+            if raw_classes:
+                # class 可能是 "1,2,3" 或 "1|2" 格式
+                class_groups = [c.strip() for c in raw_classes.split("|") if c.strip()]
                 class_conditions = []
-                for c in teacher_classes:
-                    if c:
-                        class_conditions.append("class=?")
-                        params.append(c)
+                for cg in class_groups:
+                    for cls_val in cg.split(","):
+                        cls_val = cls_val.strip()
+                        if cls_val:
+                            class_conditions.append("class=?")
+                            params.append(cls_val)
                 if class_conditions:
                     conditions.append(f"({' OR '.join(class_conditions)})")
 

@@ -10,7 +10,6 @@ import {
   TeamOutlined,
   FileOutlined,
   FolderOutlined,
-  DownloadOutlined,
   SettingOutlined,
   CheckCircleOutlined,
   DatabaseOutlined,
@@ -30,64 +29,56 @@ import NotificationBell from './NotificationBell'
 
 const { Header, Sider, Content } = Layout
 
-// 学生菜单分组（模块级常量，不依赖组件状态）
-const studentMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
-  { label: '📊 概览', key: 'overview', children: [
+// 学生菜单分组（注意：标签中不要使用 emoji，折叠后会显示为 ?）
+const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
+  { icon: <HomeOutlined />, label: '概览', key: 'overview', children: [
     { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
   ]},
-  { label: '💡 学习', key: 'learn', children: [
+  { icon: <BookOutlined />, label: '学习', key: 'learn', children: [
     { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
-    { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-    { key: '/html-files', icon: <FileOutlined />, label: '共享资源' },
-    { key: '/downloads', icon: <DownloadOutlined />, label: '共享文件' },
+    { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
+    { key: '/shared-center', icon: <FileOutlined />, label: '共享中心' },
   ]},
-  { label: '📚 学业', key: 'study', children: [
-    { key: '/score', icon: <TrophyOutlined />, label: '课堂积分' },
+  { icon: <FileAddOutlined />, label: '学业', key: 'study', children: [
     { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
     { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
     { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
     { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
     { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
   ]},
-  { label: '⚙️ 系统', key: 'sys', children: [
+  { icon: <SettingOutlined />, label: '系统', key: 'sys', children: [
     { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
     { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
     { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
   ]},
 ]
 
-// 教师/管理员菜单分组（模块级常量，不依赖组件状态）
-const teacherMenuGroups: { label: string; key: string; children: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }[] }[] = [
-    { label: '📊 概览', key: 'overview', children: [
+// 教师/管理员菜单分组（注意：标签中不要使用 emoji，折叠后会显示为 ?）
+const teacherMenuGroups: { icon: React.ReactNode; label: string; key: string; children: { key: string; icon: React.ReactNode; label: string; adminOnly?: boolean; adminOrTeacherOnly?: boolean }[] }[] = [
+    { icon: <HomeOutlined />, label: '概览', key: 'overview', children: [
       { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
     ]},
-    { label: '💡 教学', key: 'teach', children: [
+    { icon: <BookOutlined />, label: '教学', key: 'teach', children: [
       { key: '/curriculum', icon: <BookOutlined />, label: '课程大纲' },
-      { key: '/chat', icon: <MessageOutlined />, label: 'AI 对话' },
-      { key: '/html-files', icon: <FileOutlined />, label: '资源中心' },
-      { key: '/resource-mgmt', icon: <FolderOutlined />, label: '资源管理', adminOrTeacherOnly: true },
+      { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
+      { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
       { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理', adminOrTeacherOnly: true },
       { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
     ]},
-    { label: '🏫 课堂', key: 'classroom', children: [
+    { icon: <ThunderboltOutlined />, label: '课堂', key: 'classroom', children: [
       { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
       { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
       { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
-      { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '学情进度' },
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
     ]},
-    { label: '📋 档案', key: 'profile', children: [
-      { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
-    ]},
-    { label: '⚙️ 管理', key: 'admin', children: [
+    { icon: <SettingOutlined />, label: '管理', key: 'admin', children: [
       { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
-      { key: '/downloads', icon: <DownloadOutlined />, label: '文件中心' },
+      { key: '/announcements', icon: <BellOutlined />, label: '公告管理' },
       { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
     ]},
-    { label: '🔧 系统', key: 'system', children: [
-      { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
+    { icon: <InfoCircleOutlined />, label: '系统', key: 'system', children: [
       { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
     ]},
   ]
@@ -134,6 +125,7 @@ const AppLayout: React.FC = () => {
           icon: item.icon,
           label: item.label,
         })),
+    icon: group.icon,
     }))
   }
 

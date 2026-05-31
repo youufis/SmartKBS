@@ -28,6 +28,7 @@ import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 import CurriculumPage from './pages/CurriculumPage'
 import CurriculumProgressPage from './pages/CurriculumProgressPage'
+import SharedCenterPage from './pages/SharedCenterPage'
 
 function App() {
   const navigate = useNavigate()
@@ -68,6 +69,7 @@ function App() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="html-files" element={<HtmlFilesPage />} />
+            <Route path="shared-center" element={<SharedCenterPage />} />
             <Route path="resource-mgmt" element={user?.role === 'admin' || user?.role === 'teacher' ? <ResourceMgmtPage /> : <Navigate to="/chat" />} />
             <Route path="downloads" element={<DownloadsPage />} />
             <Route path="user-mgmt" element={<UserMgmtPage />} />

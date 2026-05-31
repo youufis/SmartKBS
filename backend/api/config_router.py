@@ -52,6 +52,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         '.xls', '.xlsx', '.ppt', '.pptx', '.csv',
         '.json', '.html', '.htm',
     ],
+    # 消息通知类型（默认只启用考试通知，管理员可在系统配置中调整）
+    "enabled_notification_types": ["exam"],
 }
 
 

@@ -5,12 +5,11 @@ import {
 } from 'antd'
 import {
   RobotOutlined, FileTextOutlined, CheckCircleOutlined,
-  BookOutlined, NodeIndexOutlined, UploadOutlined, InboxOutlined,
+  BookOutlined, NodeIndexOutlined, InboxOutlined,
   CloseCircleOutlined, LoadingOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 
-const { TextArea } = Input
 const { Option } = Select
 const { Dragger } = Upload
 
@@ -25,6 +24,41 @@ const PROGRESS_STAGES = [
 
 const TIMEOUT_MS = 300_000 // 300 秒超时（5 分钟）
 
+// ── 类型定义 ──
+
+interface KnowledgePoint {
+  name: string
+  difficulty?: 'easy' | 'medium' | 'hard'
+  estimated_minutes?: number
+}
+
+interface Section {
+  name: string
+  knowledge_points?: KnowledgePoint[]
+}
+
+interface Chapter {
+  name: string
+  children?: Section[]
+  knowledge_points?: KnowledgePoint[]
+}
+
+interface AiResult {
+  course_name: string
+  course_code?: string
+  course_description?: string
+  source_file?: string
+  chapters: Chapter[]
+  saved?: { chapters: number; knowledge_points: number }
+}
+
+interface TreeNode {
+  title: React.ReactNode
+  key: string
+  children?: TreeNode[]
+  isLeaf?: boolean
+}
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -35,8 +69,8 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const [step, setStep] = useState(0) // 0=输入, 1=生成中, 2=预览, 3=错误
   const [loading, setLoading] = useState(false)
   const [form] = Form.useForm()
-  const [result, setResult] = useState<any>(null)
-  const [treeData, setTreeData] = useState<any[]>([])
+  const [result, setResult] = useState<AiResult | null>(null)
+  const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [saveDone, setSaveDone] = useState(false)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
 
@@ -90,14 +124,15 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   }
 
   // ── 通用错误处理 ──
-  const handleError = (err: any, customMsg?: string) => {
+  const handleError = (err: unknown, customMsg?: string) => {
     stopProgress(false)
     setLoading(false)
     let detail = customMsg || ''
-    if (err?.response?.data?.detail) {
-      detail = err.response.data.detail
-    } else if (err?.message) {
-      detail = err.message
+    const e = err as { response?: { data?: { detail?: string } }; message?: string }
+    if (e?.response?.data?.detail) {
+      detail = e.response.data.detail
+    } else if (e?.message) {
+      detail = e.message
     } else if (typeof err === 'string') {
       detail = err
     }
@@ -107,7 +142,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   }
 
   // ── 调用 API 封装（带超时和取消） ──
-  const callApi = async (url: string, data: any, config?: any) => {
+  const callApi = async (url: string, data: Record<string, unknown> | FormData, config?: Record<string, unknown>) => {
     abortRef.current = new AbortController()
     const timeoutId = setTimeout(() => {
       abortRef.current?.abort()
@@ -117,11 +152,12 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
         signal: abortRef.current.signal,
         timeout: TIMEOUT_MS,
         ...config,
-      })
+      } as Record<string, unknown>)
       return response.data
-    } catch (err: any) {
-      if (err?.code === 'ERR_CANCELED' || err?.name === 'AbortError' || err?.message?.includes('aborted')) {
-        throw new Error('请求超时，AI 响应时间过长，请稍后重试或缩短输入内容')
+    } catch (err: unknown) {
+      const e = err as { code?: string; name?: string; message?: string }
+      if (e?.code === 'ERR_CANCELED' || e?.name === 'AbortError' || e?.message?.includes('aborted')) {
+        throw new Error('请求超时，AI 响应时间过长，请稍后重试或缩短输入内容', { cause: err })
       }
       throw err
     } finally {
@@ -154,7 +190,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       setResult(data)
       setTreeData(buildPreviewTree(data))
       setStep(2)
-    } catch (err: any) {
+    } catch (err: unknown) {
       handleError(err, '文件生成失败')
     } finally {
       setLoading(false)
@@ -182,7 +218,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       setSaveDone(true)
       message.success(`课程「${result.course_name}」已成功创建！共 ${result.saved?.chapters || 0} 章、${result.saved?.knowledge_points || 0} 个知识点`)
       onSuccess?.()
-    } catch (err: any) {
+    } catch (err: unknown) {
       handleError(err, '保存失败')
     } finally {
       setLoading(false)
@@ -190,10 +226,10 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   }
 
   // ── 构建预览树 ──
-  const buildPreviewTree = (data: any): any[] => {
+  const buildPreviewTree = (data: AiResult): TreeNode[] => {
     const chapters = data.chapters || []
-    return chapters.map((ch: any, idx: number) => {
-      const chNode: any = {
+    return chapters.map((ch: Chapter, idx: number) => {
+      const chNode: TreeNode = {
         title: (
           <Space size={4}>
             <BookOutlined />
@@ -204,8 +240,8 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
         children: [],
       }
       const children = ch.children || []
-      children.forEach((sec: any, secIdx: number) => {
-        const secNode: any = {
+      children.forEach((sec: Section, secIdx: number) => {
+        const secNode: TreeNode = {
           title: (
             <Space size={4}>
               <FileTextOutlined />
@@ -213,7 +249,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
             </Space>
           ),
           key: `ch_${idx}_sec_${secIdx}`,
-          children: (sec.knowledge_points || []).map((kp: any, kpIdx: number) => ({
+          children: (sec.knowledge_points || []).map((kp: KnowledgePoint, kpIdx: number) => ({
             title: (
               <Space size={4}>
                 <NodeIndexOutlined style={{ fontSize: 12 }} />
@@ -231,11 +267,11 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           })),
         }
         if (!secNode.children?.length) secNode.isLeaf = true
-        chNode.children.push(secNode)
+        chNode.children!.push(secNode)
       })
       const topKps = ch.knowledge_points || []
-      topKps.forEach((kp: any, kpIdx: number) => {
-        chNode.children.push({
+      topKps.forEach((kp: KnowledgePoint, kpIdx: number) => {
+        chNode.children!.push({
           title: (
             <Space size={4}>
               <NodeIndexOutlined style={{ fontSize: 12 }} />
@@ -289,8 +325,8 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   }
 
   const chapterCount = result?.chapters?.length || 0
-  const kpCount = treeData.reduce((sum: number, ch: any) => {
-    return sum + (ch.children || []).reduce((s2: number, c: any) => {
+  const kpCount = treeData.reduce((sum: number, ch: TreeNode) => {
+    return sum + (ch.children || []).reduce((s2: number, c: TreeNode) => {
       return s2 + (c.children?.length || 0) + (c.isLeaf && c.key?.includes('_kp_') ? 1 : 0)
     }, 0)
   }, 0)

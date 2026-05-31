@@ -506,6 +506,81 @@ async def export_tasks(
     return _excel_response(wb, filename)
 
 
+# ── 5. 导出学情进度 ──
+
+@router.get("/progress", summary="导出学情进度 (Excel)")
+async def export_progress(
+    request: Request,
+    course_id: int = Query(None, description="课程 ID"),
+    grade: str = Query(None, description="年级"),
+    class_name: str = Query(None, description="班级"),
+):
+    """导出学情进度（知识点完成情况）为 Excel"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    from backend.api.curriculum_router import get_class_progress_overview as fetch_progress
+
+    # 复用进度总览接口的数据逻辑
+    raw = await fetch_progress(request, course_id, grade, class_name)
+    students = raw.get("students", [])
+
+    if not students:
+        raise HTTPException(status_code=404, detail="没有找到进度数据")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "学情进度"
+
+    title = "学情进度报告"
+    if grade:
+        title += f" - {grade}"
+    if class_name:
+        title += f" - {class_name}班"
+    ws.merge_cells("A1:H1")
+    ws.cell(1, 1, title).font = TITLE_FONT
+
+    headers = ["姓名", "年级", "班级", "课程", "知识点总数", "已完成", "完成率", "状态"]
+    for i, h in enumerate(headers, 1):
+        ws.cell(3, i, h)
+    _style_header(ws, 3, len(headers))
+
+    row_idx = 4
+    for stu in students:
+        stu_courses = stu.get("courses") or []
+        if not stu_courses:
+            ws.cell(row_idx, 1, stu.get("name", ""))
+            ws.cell(row_idx, 2, stu.get("grade", ""))
+            ws.cell(row_idx, 3, stu.get("class", ""))
+            ws.cell(row_idx, 4, "—")
+            ws.cell(row_idx, 5, 0)
+            ws.cell(row_idx, 6, 0)
+            ws.cell(row_idx, 7, "0%")
+            ws.cell(row_idx, 8, "无课程")
+            row_idx += 1
+        else:
+            for c in stu_courses:
+                ws.cell(row_idx, 1, stu.get("name", ""))
+                ws.cell(row_idx, 2, stu.get("grade", ""))
+                ws.cell(row_idx, 3, stu.get("class", ""))
+                ws.cell(row_idx, 4, c.get("course_name", ""))
+                ws.cell(row_idx, 5, c.get("total_kps", 0))
+                ws.cell(row_idx, 6, c.get("completed_kps", 0))
+                rate = c.get("rate", 0)
+                ws.cell(row_idx, 7, f"{rate}%")
+                status = "✅ 已完成" if rate >= 100 else ("🔄 进行中" if rate > 0 else "⏳ 未开始")
+                ws.cell(row_idx, 8, status)
+                row_idx += 1
+
+    _style_cells(ws, 4, row_idx - 1, len(headers))
+    _auto_width(ws, len(headers))
+
+    filename = f"学情进度_{grade or '全部'}_{class_name or '全部'}.xlsx"
+    return _excel_response(wb, filename)
+
+
 def _safe_sheet_name(name: str) -> str:
     """Excel sheet name max 31 chars, no special chars"""
     safe = "".join(c if c.isalnum() or c in "_ -" else "_" for c in name)

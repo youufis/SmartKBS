@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react'
 import {
   Card, Row, Col, Typography, Spin, Select, Button, Space,
-  Empty, Tabs, Statistic, Table, Tag,
+  Empty, Tabs, Statistic, Table, Tag, Tooltip,
 } from 'antd'
 import {
   RobotOutlined, BarChartOutlined,
-  TeamOutlined, ThunderboltOutlined,
+  TeamOutlined, ThunderboltOutlined, BookOutlined,
+  CheckCircleOutlined, ClockCircleOutlined, StopOutlined, ReloadOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
@@ -58,6 +59,18 @@ const AnalyticsPage: React.FC = () => {
   const [examAnalytics, setExamAnalytics] = useState<ExamAnalytics | null>(null)
   const [examLoading, setExamLoading] = useState(false)
 
+  // 学情进度
+  const [courses, setCourses] = useState<any[]>([])
+  const [courseId, setCourseId] = useState<number | undefined>()
+  const [progressGrade, setProgressGrade] = useState<string | undefined>()
+  const [progressClass, setProgressClass] = useState<string | undefined>()
+  const [progressStudents, setProgressStudents] = useState<any[]>([])
+  const [progressLoading, setProgressLoading] = useState(false)
+  const [progressStats, setProgressStats] = useState({ totalStudents: 0, avgRate: 0 })
+  const [classOptions, setClassOptions] = useState<string[]>([])
+  const [gradeOptions, setGradeOptions] = useState<string[]>([])
+  const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([])
+
   // 加载班级列表
   useEffect(() => {
     if (grade) {
@@ -78,6 +91,56 @@ const AnalyticsPage: React.FC = () => {
       })
       .catch(() => {})
   }, [])
+
+  // 加载学情进度数据
+  useEffect(() => {
+    apiClient.get('/api/curriculum/courses', { params: { status: 'active' } })
+      .then(({ data }) => {
+        const list = data.courses || []
+        setCourses(list)
+        if (list.length > 0) setCourseId(list[0].id)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    apiClient.get('/api/users')
+      .then(({ data }: any) => {
+        const users = data.users || []
+        const grades = new Set<string>()
+        const clsSet = new Set<string>()
+        users.forEach((u: any) => {
+          if (u.grade) grades.add(u.grade)
+          if (u.class) clsSet.add(String(u.class))
+        })
+        setGradeOptions(Array.from(grades).sort())
+        setClassOptions(Array.from(clsSet).sort())
+      })
+      .catch(() => {})
+  }, [])
+
+  // 加载进度
+  const loadProgress = async () => {
+    setProgressLoading(true)
+    try {
+      const params: Record<string, unknown> = { course_id: courseId }
+      if (progressGrade) params.grade = progressGrade
+      if (progressClass) params.class_name = progressClass
+      const { data } = await apiClient.get('/api/curriculum/progress/overview', { params })
+      setProgressStudents(data.students || [])
+      if (data.students?.length > 0) setExpandedRowKeys([data.students[0].username])
+      const total = data.students?.length || 0
+      let totalRate = 0
+      if (total > 0) {
+        for (const stu of data.students) {
+          for (const c of stu.courses || []) totalRate += c.rate
+        }
+        totalRate = totalRate / total
+      }
+      setProgressStats({ totalStudents: total, avgRate: totalRate })
+    } catch { /* ignore */ }
+    setProgressLoading(false)
+  }
 
   // 班级学情分析
   const handleClassAnalysis = async () => {
@@ -108,6 +171,33 @@ const AnalyticsPage: React.FC = () => {
       setReport('❌ 分析失败')
     }
     setExamLoading(false)
+  }
+
+  // ── 导出功能 ──
+  const exportReportAsMarkdown = () => {
+    if (!report) return
+    const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `学情报告_${grade}_${cls}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportExamExcel = () => {
+    if (!selectedExam) return
+    const token = localStorage.getItem('smartkb_token')
+    window.open(`/api/export/exam/${selectedExam}?token=${token}`, '_blank')
+  }
+
+  const exportProgressExcel = () => {
+    const token = localStorage.getItem('smartkb_token')
+    let url = `/api/export/progress?token=${token}`
+    if (courseId) url += `&course_id=${courseId}`
+    if (progressGrade) url += `&grade=${progressGrade}`
+    if (progressClass) url += `&class_name=${progressClass}`
+    window.open(url, '_blank')
   }
 
   const typeLabel: Record<string, string> = {
@@ -181,11 +271,17 @@ const AnalyticsPage: React.FC = () => {
                   )}
 
                   {report && !loading && (
-                    <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
-                      <div className="markdown-report">
-                        <ReactMarkdown>{report}</ReactMarkdown>
-                      </div>
-                    </Card>
+                    <>
+                      <Space style={{ marginBottom: 12, justifyContent: 'space-between', width: '100%' }}>
+                        <span />
+                        <Button icon={<DownloadOutlined />} onClick={exportReportAsMarkdown}>导出报告(.md)</Button>
+                      </Space>
+                      <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
+                        <div className="markdown-report">
+                          <ReactMarkdown>{report}</ReactMarkdown>
+                        </div>
+                      </Card>
+                    </>
                   )}
                 </div>
               ),
@@ -221,7 +317,6 @@ const AnalyticsPage: React.FC = () => {
                         <Col span={4}><Statistic title="及格率" value={examAnalytics.statistics.pass_rate} suffix="%" precision={1} /></Col>
                       </Row>
 
-                      {/* 逐题正确率表格 */}
                       <Table
                         dataSource={examAnalytics.question_accuracy}
                         rowKey="id"
@@ -245,12 +340,117 @@ const AnalyticsPage: React.FC = () => {
                         ]}
                       />
 
+                      <Space style={{ marginBottom: 12, justifyContent: 'space-between', width: '100%' }}>
+                        <span />
+                        <Button icon={<DownloadOutlined />} onClick={exportExamExcel}>导出Excel</Button>
+                      </Space>
                       <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
                         <div className="markdown-report">
                           <ReactMarkdown>{examAnalytics.report}</ReactMarkdown>
                         </div>
                       </Card>
                     </>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'progress',
+              label: <span><BookOutlined /> 学情进度</span>,
+              children: (
+                <div>
+                  <Row gutter={16} style={{ marginBottom: 16 }}>
+                    <Col span={6}><Statistic title="筛选学生数" value={progressStats.totalStudents} prefix={<TeamOutlined />} /></Col>
+                    <Col span={6}>
+                      <Statistic title="平均完成率" value={progressStats.avgRate} suffix="%"
+                        precision={1} valueStyle={{ color: progressStats.avgRate >= 60 ? '#52c41a' : '#faad14' }} />
+                    </Col>
+                  </Row>
+
+                  <Space wrap style={{ marginBottom: 16 }}>
+                    <Select
+                      value={courseId} onChange={setCourseId} style={{ width: 160 }}
+                      placeholder="选择课程" allowClear
+                      options={courses.map((c: any) => ({ label: c.name, value: c.id }))} />
+                    <Select
+                      value={progressGrade} onChange={setProgressGrade} style={{ width: 120 }}
+                      placeholder="全部年级" allowClear
+                      options={gradeOptions.map(g => ({ label: g, value: g }))} />
+                    <Select
+                      value={progressClass} onChange={setProgressClass} style={{ width: 120 }}
+                      placeholder="全部班级" allowClear
+                      options={classOptions.map(c => ({ label: `${c}班`, value: c }))} />
+                    <Button type="primary" icon={<ReloadOutlined />} onClick={loadProgress} loading={progressLoading}>查询</Button>
+                    <Button icon={<DownloadOutlined />} onClick={exportProgressExcel}
+                      disabled={progressStudents.length === 0}>导出Excel</Button>
+                  </Space>
+
+                  <Space style={{ marginBottom: 12 }}>
+                    <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>
+                    <Tag icon={<ClockCircleOutlined />} color="processing">学习中</Tag>
+                    <Tag icon={<StopOutlined />} color="default">未开始</Tag>
+                  </Space>
+
+                  {!progressLoading && progressStudents.length === 0 ? (
+                    <Empty description="请选择筛选条件后点击「查询」按钮加载数据" />
+                  ) : (
+                  <Table
+                    dataSource={progressStudents}
+                    rowKey="username"
+                    loading={progressLoading}
+                    pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 名学生` }}
+                    expandable={{
+                      expandedRowRender: (record: any) => {
+                        const stuCourses = record.courses || []
+                        const detail = stuCourses.find((c: any) => c.course_id === courseId) || stuCourses[0]
+                        const details = detail?.details || []
+                        if (!details.length) return <Text type="secondary">该课程暂无知识点</Text>
+                        return (
+                          <Space wrap>
+                            {details.map((d: any) => (
+                              <Tooltip key={d.kp_id} title={d.kp_name}>
+                                <Tag color={d.status === 'completed' ? 'success' : d.status === 'in_progress' ? 'processing' : 'default'}
+                                  style={{ fontSize: 12, cursor: 'pointer', maxWidth: 160 }}>
+                                  <Text ellipsis style={{ maxWidth: 120, display: 'inline-block' }}>{d.kp_name}</Text>
+                                </Tag>
+                              </Tooltip>
+                            ))}
+                          </Space>
+                        )
+                      },
+                      expandedRowKeys,
+                      onExpandedRowsChange: (keys: readonly React.Key[]) => setExpandedRowKeys([...keys]),
+                      rowExpandable: () => true,
+                    }}
+                    scroll={{ x: 600 }}
+                    size="middle"
+                    columns={[
+                      {
+                        title: '姓名', dataIndex: 'name', key: 'name', width: 100,
+                        render: (name: string) => <Text strong><TeamOutlined /> {name}</Text>,
+                      },
+                      { title: '年级', dataIndex: 'grade', width: 70 },
+                      { title: '班级', dataIndex: 'class', width: 70 },
+                      {
+                        title: '课程完成率', key: 'courses', width: 200,
+                        render: (_: any, record: any) => {
+                          const cd = (record.courses || []).find((c: any) => c.course_id === courseId) || (record.courses || [])[0]
+                          if (!cd) return <Text type="secondary">—</Text>
+                          const { completed_kps, total_kps, rate } = cd
+                          return (
+                            <Tooltip title={`${completed_kps}/${total_kps} (${rate}%)`}>
+                              <Space>
+                                <div style={{ width: 120, height: 20, background: '#f0f0f0', borderRadius: 10, overflow: 'hidden' }}>
+                                  <div style={{ width: `${rate}%`, height: '100%', background: rate >= 80 ? '#52c41a' : rate >= 40 ? '#faad14' : '#ff4d4f', borderRadius: 10, transition: 'width 0.3s' }} />
+                                </div>
+                                <Text style={{ fontSize: 12, minWidth: 40 }}>{rate}%</Text>
+                              </Space>
+                            </Tooltip>
+                          )
+                        },
+                      },
+                    ]}
+                  />
                   )}
                 </div>
               ),
