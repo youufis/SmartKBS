@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Layout, Card, Table, Select, Button, message, Tag, Space, Typography,
-  Row, Col, Statistic, Tooltip,
+  Row, Col, Statistic, Tooltip, Spin,
 } from 'antd'
 import {
   ReloadOutlined, TeamOutlined, BookOutlined, CheckCircleOutlined,
@@ -30,10 +30,15 @@ const CurriculumProgressPage: React.FC = () => {
   // ── 进度数据 ──
   const [students, setStudents] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [initLoading, setInitLoading] = useState(true)
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([])
 
   // ── 统计 ──
   const [stats, setStats] = useState({ totalStudents: 0, avgRate: 0, bestCourse: '', bestRate: 0 })
+
+  // ── 标记首次加载完成 ──
+  const coursesLoaded = useRef(false)
+  const dataLoaded = useRef(false)
 
   // ── 加载课程列表 ──
   useEffect(() => {
@@ -42,7 +47,10 @@ const CurriculumProgressPage: React.FC = () => {
       if (res.courses.length > 0) {
         setCourseId(res.courses[0].id)
       }
-    }).catch(() => {})
+      coursesLoaded.current = true
+    }).catch(() => {
+      coursesLoaded.current = true
+    })
   }, [])
 
   // ── 加载班级选项 ──
@@ -64,11 +72,10 @@ const CurriculumProgressPage: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await curriculumApi.getClassProgressOverview({
-        course_id: courseId,
-        grade,
-        class_name: className,
-      })
+      const params: Record<string, unknown> = { course_id: courseId }
+      if (grade) params.grade = grade
+      if (className) params.class_name = className
+      const res = await curriculumApi.getClassProgressOverview(params)
       setStudents(res.students || [])
       // 默认展开第一个学生
       if (res.students?.length > 0) {
@@ -93,21 +100,36 @@ const CurriculumProgressPage: React.FC = () => {
         totalRate = totalRate / total
       }
       setStats({ totalStudents: total, avgRate: totalRate, bestCourse, bestRate })
+      dataLoaded.current = true
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(detail || '加载学情数据失败')
     } finally {
       setLoading(false)
+      setInitLoading(false)
     }
   }, [courseId, grade, className])
 
+  // ── 课程列表加载完成后触发首次数据加载 ──
   useEffect(() => {
-    if (isTeacherOrAdmin) {
-      const fn = async () => { await loadData() }
-      fn()
+    if (!isTeacherOrAdmin) {
+      setInitLoading(false)
+      return
+    }
+    // 等课程列表加载完成且有了 courseId 后再加载数据
+    if (coursesLoaded.current && !dataLoaded.current) {
+      loadData()
+    }
+  }, [courseId, isTeacherOrAdmin, loadData])
+
+  // ── 筛选条件变化时重新加载 ──
+  useEffect(() => {
+    if (!isTeacherOrAdmin) return
+    if (dataLoaded.current) {
+      loadData()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseId, grade, className, isTeacherOrAdmin])
+  }, [grade, className])
 
   // ── 展开行渲染：知识点明细 ──
   const renderExpandedRow = (record: Record<string, unknown>) => {
@@ -223,6 +245,14 @@ const CurriculumProgressPage: React.FC = () => {
         <Card>
           <Typography.Text type="secondary">权限不足，仅教师和管理员可查看学情进度</Typography.Text>
         </Card>
+      </Layout>
+    )
+  }
+
+  if (initLoading) {
+    return (
+      <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
+        <Card><div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" tip="正在加载数据..." /></div></Card>
       </Layout>
     )
   }

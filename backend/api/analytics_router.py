@@ -101,11 +101,11 @@ async def class_overview(
         (query_teacher, grade, cls),
     )
 
-    # 3. 点名统计（rollcall_history.class_name 存 "高一1班" 格式）
+    # 3. 点名统计（rollcall_history.result 存 correct/incorrect/skip）
     rc_stats = execute_query(
         """SELECT COUNT(*),
-                  SUM(CASE WHEN result='1' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN result='0' THEN 1 ELSE 0 END)
+                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
            FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
         (query_teacher, grade, cls),
     )
@@ -313,7 +313,7 @@ async def exam_analytics(exam_id: int, request: Request):
     exam = exam[0]
 
     attempts = q_execute_query(
-        "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded') ORDER BY score DESC",
+        "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded') AND auto_graded = 1 AND answers IS NOT NULL AND answers != '' ORDER BY score DESC",
         (exam_id,),
     )
 
@@ -347,7 +347,13 @@ async def exam_analytics(exam_id: int, request: Request):
             else:
                 answers = {}
             q_key = str(q['id'])
-            if answers.get(q_key, '') == q['correct_answer']:
+            # 注意: answers 存储的是批改结果对象，如 {student_answer, correct_answer, is_correct}
+            ans_entry = answers.get(q_key, {})
+            if isinstance(ans_entry, dict):
+                if ans_entry.get('is_correct'):
+                    correct += 1
+            elif ans_entry == q['correct_answer']:
+                # 兼容旧格式：直接存答案文本
                 correct += 1
         rate = round(correct / max(total_count, 1) * 100, 1)
         q_accuracy.append({
