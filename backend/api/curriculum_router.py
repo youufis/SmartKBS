@@ -285,6 +285,9 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
     if not result:
         raise HTTPException(status_code=500, detail="AI 返回格式异常，无法解析为课程结构")
 
+    # 后处理：修正 AI 输出的不合格知识点（同名、缺失等）
+    _fix_kp_names(result)
+
     # 自动保存
     if req.auto_save:
         saved = _save_ai_result(result, req.subject, req.grade, user["username"])
@@ -388,6 +391,9 @@ async def ai_generate_from_file(request: Request):
     result = _parse_ai_json(ai_response)
     if not result:
         raise HTTPException(status_code=500, detail="AI 返回格式异常，无法解析为课程结构")
+
+    # 后处理：修正 AI 输出的不合格知识点（同名、缺失等）
+    _fix_kp_names(result)
 
     # 自动保存
     if auto_save:
@@ -517,6 +523,89 @@ def _insert_kp(chapter_id: int, kp: dict, sort_order: int, now: str):
             now,
         ),
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# AI 结果后处理：修正不合格的知识点
+# ═══════════════════════════════════════════════════════════
+
+def _fix_kp_names(result: dict):
+    """修正 AI 返回结果中知识点名称不合格的情况"""
+    for ch in result.get("chapters", []):
+        for sec in ch.get("children", []):
+            kps = sec.get("knowledge_points", [])
+            sec_name = sec.get("name", "").strip()
+
+            # 修正1: 知识点名与节名相同时，自动生成更具体的名称
+            # 修正2: 知识点数量太少时，补充默认知识点
+            new_kps = []
+            for kp in kps:
+                kp_name = kp.get("name", "").strip()
+                if kp_name == sec_name:
+                    # 根据节名自动拆解知识点
+                    generated = _split_section_to_kps(sec_name, kp)
+                    new_kps.extend(generated)
+                else:
+                    new_kps.append(kp)
+
+            # 如果处理后仍然没有知识点，生成默认知识点
+            if not new_kps and sec_name:
+                new_kps.append({
+                    "name": f"{sec_name}概述",
+                    "description": sec.get("description", ""),
+                    "learning_objectives": f"掌握{sec_name}的基本概念",
+                    "difficulty": "medium",
+                    "estimated_minutes": 25,
+                })
+
+            sec["knowledge_points"] = new_kps
+
+
+def _split_section_to_kps(sec_name: str, original_kp: dict) -> list[dict]:
+    """将节名拆解为多个具体的知识点名称"""
+    difficulty = original_kp.get("difficulty", "medium")
+    minutes = original_kp.get("estimated_minutes", 30)
+    desc = original_kp.get("description", "")
+    obj = original_kp.get("learning_objectives", "")
+
+    # 尝试从节名中提取子知识点
+    # 1) 包含"与"的：拆分为左右两部分
+    if "与" in sec_name:
+        parts = sec_name.split("与", 1)
+        return [
+            {
+                "name": parts[0].strip(),
+                "description": desc,
+                "learning_objectives": obj or f"理解{parts[0].strip()}",
+                "difficulty": difficulty,
+                "estimated_minutes": max(minutes // 2, 15),
+            },
+            {
+                "name": parts[1].strip(),
+                "description": desc,
+                "learning_objectives": obj or f"掌握{parts[1].strip()}",
+                "difficulty": difficulty,
+                "estimated_minutes": max(minutes - minutes // 2, 15),
+            },
+        ]
+
+    # 2) 其他：生成"概述/核心概念/应用实践"等通用知识点
+    return [
+        {
+            "name": f"{sec_name}基本概念",
+            "description": desc,
+            "learning_objectives": obj or f"理解{sec_name}的基本概念",
+            "difficulty": "easy",
+            "estimated_minutes": max(minutes // 2, 15),
+        },
+        {
+            "name": f"{sec_name}核心原理",
+            "description": desc,
+            "learning_objectives": obj or f"掌握{sec_name}的核心原理",
+            "difficulty": difficulty,
+            "estimated_minutes": max(minutes - minutes // 2, 15),
+        },
+    ]
 
 
 # ═══════════════════════════════════════════════════════════
