@@ -267,8 +267,9 @@ const ExamPage: React.FC = () => {
 
   const loadAllQuestions = async (page?: number) => {
     try {
+      const targetPage = page ?? 1
       const res = await questionsApi.listQuestions({
-        page: page ?? 1,
+        page: targetPage,
         page_size: 10,
         keyword: qKeyword || undefined,
         subject: qSubject || undefined,
@@ -277,6 +278,7 @@ const ExamPage: React.FC = () => {
       })
       setAllQuestions(res.questions || [])
       setQTotal(res.total || 0)
+      setQPage(targetPage)
     } catch {
       setAllQuestions([])
       setQTotal(0)
