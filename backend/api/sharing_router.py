@@ -173,11 +173,8 @@ async def share_resource(request: Request, body: ShareRequest):
 # ── 取消共享 ──
 
 @router.delete("/share")
-async def unshare_resource(id: int = Query(...), request: Request | None = None):
+async def unshare_resource(request: Request, id: int = Query(...)):
     """取消共享（含通知）"""
-    if request is None:
-        raise HTTPException(status_code=401, detail="未登录")
-
     user = get_current_user(request)
     username = user["username"]
     role = user["role"]
