@@ -500,34 +500,55 @@ async def extract_questions_from_text(
     if len(content) < 10:
         raise HTTPException(status_code=400, detail="文本内容太少，无法提取试题")
 
-    # 截取过长内容
-    MAX_CHARS = 50000
-    if len(content) > MAX_CHARS:
-        logger.info(f"文本内容过长 ({len(content)} 字符)，已截取前 {MAX_CHARS} 字符")
-        content = content[:MAX_CHARS]
+    # ── JSON 文件直接解析（不调用 AI） ──
+    questions = None
+    if source_label == "json":
+        try:
+            parsed = json.loads(file_bytes.decode("utf-8", errors="replace"))
+            if isinstance(parsed, list):
+                raw_questions = parsed
+            elif isinstance(parsed, dict) and "questions" in parsed:
+                raw_questions = parsed["questions"]
+            else:
+                raw_questions = []
+            # 校验是否为合法试题格式（每项必须有 question 字段）
+            if raw_questions and all(isinstance(q, dict) and q.get("question") for q in raw_questions):
+                questions = raw_questions
+                source_label = "json_import"
+                logger.info(f"JSON 文件直接解析成功，共 {len(questions)} 道试题，跳过 AI 提取")
+        except Exception as e:
+            logger.info(f"JSON 直接解析失败，回退到 AI 提取: {e}")
 
-    # 获取 API Key
-    api_key, _ = get_api_keys(username)
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 API Key，请先在系统配置中设置")
+    # ── 非 JSON 或 JSON 回退：走 AI 提取 ──
+    if questions is None:
+        # 截取过长内容（JSON 直接解析不截断）
+        MAX_CHARS = 50000
+        if len(content) > MAX_CHARS:
+            logger.info(f"文本内容过长 ({len(content)} 字符)，已截取前 {MAX_CHARS} 字符")
+            content = content[:MAX_CHARS]
 
-    # 构造提取 Prompt
-    prompt = _build_extract_prompt(subject, difficulty, content)
-    logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
+        # 获取 API Key
+        api_key, _ = get_api_keys(username)
+        if not api_key:
+            raise HTTPException(status_code=400, detail="未配置 API Key，请先在系统配置中设置")
 
-    # 调用 AI
-    try:
-        result_text = _call_dashscope_agent(prompt, api_key)
-        logger.info(f"AI 返回原始内容: {result_text[:300]}")
-    except Exception as e:
-        logger.error(f"AI 提取试题失败: {e}")
-        raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
+        # 构造提取 Prompt
+        prompt = _build_extract_prompt(subject, difficulty, content)
+        logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
 
-    # 解析 JSON
-    questions = _parse_ai_response(result_text)
-    if not questions:
-        logger.error(f"AI 返回无法解析: {result_text[:500]}")
-        raise HTTPException(status_code=502, detail="AI 返回格式异常，未能提取出试题，请重试")
+        # 调用 AI
+        try:
+            result_text = _call_dashscope_agent(prompt, api_key)
+            logger.info(f"AI 返回原始内容: {result_text[:300]}")
+        except Exception as e:
+            logger.error(f"AI 提取试题失败: {e}")
+            raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
+
+        # 解析 JSON
+        questions = _parse_ai_response(result_text)
+        if not questions:
+            logger.error(f"AI 返回无法解析: {result_text[:500]}")
+            raise HTTPException(status_code=502, detail="AI 返回格式异常，未能提取出试题，请重试")
 
     # 获取创建者姓名
     from backend.database import execute_query as user_query
