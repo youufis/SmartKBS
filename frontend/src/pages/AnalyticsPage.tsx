@@ -51,7 +51,7 @@ const AnalyticsPage: React.FC = () => {
   const [grade, setGrade] = useState('高一')
   const [cls, setCls] = useState('')
   const [classes, setClasses] = useState<string[]>([])
-  const [allowedGrades] = useState(['高一', '高二'])
+  const [allowedGrades, setAllowedGrades] = useState<string[]>([])
 
   // 考试列表
   const [exams, setExams] = useState<any[]>([])
@@ -70,6 +70,18 @@ const AnalyticsPage: React.FC = () => {
   const [classOptions, setClassOptions] = useState<string[]>([])
   const [gradeOptions, setGradeOptions] = useState<string[]>([])
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([])
+
+  // 加载教师可见年级（学情分析用）
+  useEffect(() => {
+    apiClient.get('/api/scores/my-grades', { params: { teacher: user?.username } })
+      .then(({ data }) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setAllowedGrades(data)
+          if (!data.includes(grade)) setGrade(data[0])
+        }
+      })
+      .catch(() => {})
+  }, [user?.username])
 
   // 加载班级列表
   useEffect(() => {
@@ -103,23 +115,32 @@ const AnalyticsPage: React.FC = () => {
       .catch(() => {})
   }, [])
 
+  // 加载学情进度下拉选项（教师只能看到自己的年级和班级）
   useEffect(() => {
-    apiClient.get('/api/users')
+    apiClient.get('/api/scores/my-grades', { params: { teacher: user?.username } })
       .then(({ data }: any) => {
-        const users = data.users || []
-        const grades = new Set<string>()
-        const clsSet = new Set<string>()
-        users.forEach((u: any) => {
-          // 只统计学生（普通用户）的年级和班级，排除教师和管理员
-          if (u.role !== '普通用户') return
-          if (u.grade) grades.add(u.grade)
-          if (u.class) clsSet.add(String(u.class))
-        })
-        setGradeOptions(Array.from(grades).sort())
-        setClassOptions(Array.from(clsSet).sort())
+        const grades = Array.isArray(data) ? data : []
+        setGradeOptions(grades)
+        if (grades.length > 0 && !grades.includes(progressGrade)) {
+          setProgressGrade(undefined)
+        }
       })
       .catch(() => {})
-  }, [])
+  }, [user?.username])
+
+  // 当进度年级变化时，加载对应班级
+  useEffect(() => {
+    if (progressGrade) {
+      apiClient.get('/api/scores/classes', { params: { grade: progressGrade, teacher: user?.username } })
+        .then(({ data }: any) => {
+          const clsList = Array.isArray(data) ? data : []
+          setClassOptions(clsList)
+        })
+        .catch(() => setClassOptions([]))
+    } else {
+      setClassOptions([])
+    }
+  }, [progressGrade, user?.username])
 
   // 加载进度
   const loadProgress = async () => {
@@ -151,7 +172,7 @@ const AnalyticsPage: React.FC = () => {
     setReport('')
     try {
       const { data } = await apiClient.get('/api/analytics/class-overview', {
-        params: { grade, cls },
+        params: { grade, cls, teacher: user?.username },
       })
       setReport(data.report || '暂无分析结果')
       setRawData(data.data)
