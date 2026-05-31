@@ -121,6 +121,7 @@ async def share_resource(request: Request, body: ShareRequest):
                 recipients: list[str] = []
                 link = "/html-files" if body.resource_type == "html" else "/downloads"
                 title = f"新的{resource_label}已分享"
+                content = ""
                 if body.share_scope == "all":
                     rows = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
                     recipients = [r[0] for r in rows]
@@ -172,7 +173,7 @@ async def share_resource(request: Request, body: ShareRequest):
 # ── 取消共享 ──
 
 @router.delete("/share")
-async def unshare_resource(id: int = Query(...), request: Request = None):
+async def unshare_resource(id: int = Query(...), request: Request | None = None):
     """取消共享（含通知）"""
     if request is None:
         raise HTTPException(status_code=401, detail="未登录")
@@ -235,6 +236,7 @@ def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
 
         recipients: list[str] = []
         title = f"{resource_label}共享已取消"
+        content = ""
         if share_scope == "all":
             rows = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
             recipients = [r[0] for r in rows]
