@@ -644,7 +644,7 @@ def _normalize_question_json(q: dict) -> dict:
     if isinstance(options_raw, dict):
         options = options_raw
     elif isinstance(options_raw, (list, tuple)):
-        # 将 ["A项", "B项", "C项", "D项"] 转为 {"A": "A项", "B": "B项", ...}
+        # 将 ["选项1", "选项2"] 转为 {"A": "选项1", "B": "选项2", ...}
         labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         for i, opt in enumerate(options_raw):
             if i < len(labels):
@@ -653,6 +653,21 @@ def _normalize_question_json(q: dict) -> dict:
     for k in ("A", "B", "C", "D", "E", "F"):
         if k in q and k not in options:
             options[k] = str(q[k])
+
+    # ── 答案归一化：数字索引 → 字母 ──
+    if answer and options:
+        labels_list = sorted(options.keys())
+        # 单数字：0→A, 1→B ...
+        if isinstance(answer, (int, float)) or (isinstance(answer, str) and answer.strip().isdigit()):
+            idx = int(float(answer)) if isinstance(answer, str) else int(answer)
+            if 0 <= idx < len(labels_list):
+                answer = labels_list[idx]
+        # 逗号分隔的数字索引：如 "0,2" → "A,C"
+        elif isinstance(answer, str) and all(s.strip().isdigit() for s in answer.replace("，", ",").split(",") if s.strip()):
+            indices = [int(s.strip()) for s in answer.replace("，", ",").split(",") if s.strip()]
+            letters = [labels_list[i] for i in indices if 0 <= i < len(labels_list)]
+            if letters:
+                answer = ",".join(letters)
 
     # ── 解析 ──
     explanation = _first_of("explanation", "analysis", "解析", "详解", "评论", "comment", "solution")
