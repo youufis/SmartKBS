@@ -287,7 +287,8 @@ const ExamPage: React.FC = () => {
     if (questionModal) {
       loadAllQuestions()
     }
-  }, [questionModal, qPage, qSubject, qType, qDifficulty])
+  }, [questionModal, qSubject, qType, qDifficulty])
+  // 注意：不依赖 qPage，翻页通过 onChange 显式调用 loadAllQuestions(page)，避免闭包问题
 
   // ── 计算当前总分 ──
   const currentTotal = Object.values(scoreInputs).reduce((s, v) => s + (Number(v) || 0), 0)
@@ -1080,7 +1081,7 @@ const ExamPage: React.FC = () => {
             </Button>
           </Space>
           <Table dataSource={allQuestions} rowKey="id" size="small"
-            pagination={{ simple: true, pageSize: 10, total: qTotal, onChange: (page) => { setQPage(page); loadAllQuestions(undefined, page) } }}
+            pagination={{ pageSize: 10, total: qTotal, showSizeChanger: false, showTotal: (t) => `共 ${t} 题`, onChange: (page) => { setQPage(page); loadAllQuestions(undefined, page) } }}
             rowSelection={{
               selectedRowKeys: selectedQIds,
               onChange: (keys) => setSelectedQIds(keys as number[]),
