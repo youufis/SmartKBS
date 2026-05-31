@@ -110,6 +110,8 @@ const AnalyticsPage: React.FC = () => {
         const grades = new Set<string>()
         const clsSet = new Set<string>()
         users.forEach((u: any) => {
+          // 只统计学生（普通用户）的年级和班级，排除教师和管理员
+          if (u.role !== '普通用户') return
           if (u.grade) grades.add(u.grade)
           if (u.class) clsSet.add(String(u.class))
         })
