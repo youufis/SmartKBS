@@ -64,6 +64,10 @@ const ExamPage: React.FC = () => {
   const [selectedQIds, setSelectedQIds] = useState<number[]>([])
   const [qLoading, setQLoading] = useState(false)
   const [qPage, setQPage] = useState(1)
+  const [qSubject, setQSubject] = useState<string>()
+  const [qType, setQType] = useState<string>()
+  const [qDifficulty, setQDifficulty] = useState<string>()
+  const [qKeyword, setQKeyword] = useState('')
   const [autoSelectForm] = Form.useForm()
   const [autoSelecting, setAutoSelecting] = useState(false)
 
@@ -266,7 +270,10 @@ const ExamPage: React.FC = () => {
       const res = await questionsApi.listQuestions({
         page: qPage,
         page_size: 200,
-        keyword: search,
+        keyword: (search ?? qKeyword) || undefined,
+        subject: qSubject || undefined,
+        type: qType || undefined,
+        difficulty: qDifficulty || undefined,
       })
       setAllQuestions(res.questions || [])
       setQTotal(res.total || 0)
@@ -280,7 +287,7 @@ const ExamPage: React.FC = () => {
     if (questionModal) {
       loadAllQuestions()
     }
-  }, [questionModal, qPage])
+  }, [questionModal, qPage, qSubject, qType, qDifficulty])
 
   // ── 计算当前总分 ──
   const currentTotal = Object.values(scoreInputs).reduce((s, v) => s + (Number(v) || 0), 0)
@@ -1041,11 +1048,30 @@ const ExamPage: React.FC = () => {
           <Typography.Title level={5} style={{ fontSize: 14 }}>
             题库列表（手动选择）
           </Typography.Title>
-          <Space style={{ marginBottom: 8 }}>
-            <Input.Search placeholder="搜索题目..." onSearch={(val) => {
-              setQPage(1)
-              loadAllQuestions(val || undefined)
-            }} style={{ width: 300 }} />
+          <Space wrap style={{ marginBottom: 8 }}>
+            <Select allowClear placeholder="科目" style={{ width: 120 }}
+              value={qSubject} onChange={(v) => { setQSubject(v); setQPage(1) }}>
+              <Option value="信息技术">信息技术</Option>
+              <Option value="通用技术">通用技术</Option>
+            </Select>
+            <Select allowClear placeholder="题型" style={{ width: 110 }}
+              value={qType} onChange={(v) => { setQType(v); setQPage(1) }}>
+              <Option value="single">单选题</Option>
+              <Option value="multiple">多选题</Option>
+              <Option value="true_false">判断题</Option>
+              <Option value="short">简答题</Option>
+            </Select>
+            <Select allowClear placeholder="难度" style={{ width: 100 }}
+              value={qDifficulty} onChange={(v) => { setQDifficulty(v); setQPage(1) }}>
+              <Option value="easy">简单</Option>
+              <Option value="medium">中等</Option>
+              <Option value="hard">困难</Option>
+            </Select>
+            <Input.Search placeholder="搜索题目/知识点..." allowClear
+              value={qKeyword}
+              onChange={(e) => setQKeyword(e.target.value)}
+              onSearch={(val) => { setQKeyword(val); setQPage(1); loadAllQuestions(val || undefined) }}
+              style={{ width: 220 }} />
             <Button type="primary" icon={<PlusOutlined />}
               disabled={selectedQIds.length === 0}
               onClick={handleAddQuestions}>
