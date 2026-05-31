@@ -273,6 +273,19 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 - 知识点(name) = 该主题下的**具体学习点**（与节名不同、更细化）
 - 严禁把知识点名称写成与节名完全相同
 
+【提取知识点的核心方法（最重要）】
+请仔细阅读每个节对应的教学内容文本，从中**分析提炼**出该节涵盖的几个关键学习点：
+
+1. **阅读原文内容**：理解该节讲述了哪些具体知识
+2. **拆分为学习单元**：将内容拆分为 2~5 个相互独立的知识单元
+3. **命名知识点**：每个知识单元提炼为一个简洁精确的知识点名称
+4. 如果原文没有明确列出知识点，你也要根据内容**智能推导**出应该学习的重点
+
+示例：
+原文节内容为"神经网络是AI的核心技术之一…CNN擅长图像识别…RNN适用于序列数据…"
+→ 应提取出：["卷积神经网络CNN的原理", "循环神经网络RNN的应用", "神经网络基础与结构"]
+而不是复制节名"神经网络"作为知识点名。
+
 【必须遵循的输出格式】
 ```json
 {{
@@ -303,39 +316,28 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 }}
 ```
 
-【✅ 正确示例】
-输入文本：
-"人工智能概述与发展\n人工智能的定义与特征：\n- 图灵测试与智能的定义\n- 弱人工智能与强人工智能\n- AI的主要特征：学习、推理、感知"
-输出应为：
-{{
-  "chapters": [
-    {{
-      "name": "人工智能概述与发展",
-      "children": [
-        {{
-          "name": "人工智能的定义与特征",
-          "knowledge_points": [
-            {{"name": "图灵测试与智能定义", "difficulty": "easy", "estimated_minutes": 15}},
-            {{"name": "弱AI与强AI的区别", "difficulty": "easy", "estimated_minutes": 10}},
-            {{"name": "AI三大核心特征", "difficulty": "medium", "estimated_minutes": 20}}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}
+【✅ 正确示例1：原文有明确知识点】
+输入："人工智能定义\n- 图灵测试\n- 强AI与弱AI\n- AI三大特征"
+输出：
+"children": [{{"name":"人工智能定义","knowledge_points":[
+  {{"name":"图灵测试与智能判定","difficulty":"easy","estimated_minutes":15}},
+  {{"name":"强AI与弱AI的本质区别","difficulty":"easy","estimated_minutes":10}},
+  {{"name":"AI的三大核心特征","difficulty":"medium","estimated_minutes":20}}
+]}}]
+
+【✅ 正确示例2：原文只有段落内容，无显式知识点】
+输入："人工智能的发展历程可以追溯到20世纪50年代。1956年达特茅斯会议标志着AI的诞生。此后经历了多次起落，直到2012年深度学习崛起，AI进入爆发期。近年来大语言模型如ChatGPT展示了惊人能力。"
+→ 从段落中提取出：
+"children": [{{"name":"人工智能发展历程","knowledge_points":[
+  {{"name":"AI的起源与达特茅斯会议","difficulty":"easy","estimated_minutes":15}},
+  {{"name":"AI发展的三次浪潮","difficulty":"medium","estimated_minutes":25}},
+  {{"name":"深度学习与大语言模型的突破","difficulty":"medium","estimated_minutes":30}}
+]}}]
 
 【❌ 错误示例（禁止）】
-{{
-  "children": [
-    {{
-      "name": "人工智能的定义与特征",
-      "knowledge_points": [
-        {{"name": "人工智能的定义与特征", ...}}  ← 与节名相同，禁止！
-      ]
-    }}
-  ]
-}}
+{{"name":"人工智能的定义与特征","knowledge_points":[
+  {{"name":"人工智能的定义与特征",...}}  ← 与节名相同，禁止！
+]}}
 
 教学内容文本：
 ---
