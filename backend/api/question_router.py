@@ -481,19 +481,21 @@ async def extract_questions_from_text(
     content = ""
     source_label = "paste"
     if file and file.filename:
-        if not file.filename.lower().endswith('.docx'):
-            raise HTTPException(status_code=400, detail="仅支持 .docx 格式的 Word 文档")
+        ext = os.path.splitext(file.filename.lower())[1]
+        supported = {'.docx', '.txt', '.md', '.pdf'}
+        if ext not in supported:
+            raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}，支持 docx/txt/md/pdf")
         try:
             file_bytes = await file.read()
-            content = _extract_text_from_docx(file_bytes)
-            source_label = "word"
+            content = _extract_text_from_file(file_bytes, ext)
+            source_label = ext.lstrip(".")
         except Exception as e:
-            logger.error(f"解析 Word 文档失败: {e}")
-            raise HTTPException(status_code=400, detail=f"解析 Word 文档失败: {str(e)}")
+            logger.error(f"解析文件失败: {e}")
+            raise HTTPException(status_code=400, detail=f"解析文件失败: {str(e)}")
     elif text.strip():
         content = text.strip()
     else:
-        raise HTTPException(status_code=400, detail="请提供粘贴文本或上传 Word 文档")
+        raise HTTPException(status_code=400, detail="请提供粘贴文本或上传文件（docx/txt/md/pdf）")
 
     if len(content) < 10:
         raise HTTPException(status_code=400, detail="文本内容太少，无法提取试题")
@@ -570,7 +572,8 @@ async def extract_questions_from_text(
             "difficulty": q_data.get("difficulty", difficulty),
         })
 
-    logger.info(f"用户 {username} 从{'Word文档' if source_label == 'word' else '粘贴文本'}提取并入库 {len(saved_questions)} 道试题")
+    source_display = {"docx": "Word文档", "txt": "文本文件", "md": "Markdown文件", "pdf": "PDF文件", "paste": "粘贴文本"}
+    logger.info(f"用户 {username} 从{source_display.get(source_label, '文件')}提取并入库 {len(saved_questions)} 道试题")
     return {
         "message": f"成功提取 {len(saved_questions)} 道试题",
         "questions": saved_questions,
@@ -578,12 +581,26 @@ async def extract_questions_from_text(
     }
 
 
-def _extract_text_from_docx(file_bytes: bytes) -> str:
-    """从 .docx 文件字节中提取纯文本"""
-    from docx import Document
-    doc = Document(io.BytesIO(file_bytes))
-    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    return "\n".join(paragraphs)
+def _extract_text_from_file(file_bytes: bytes, ext: str) -> str:
+    """根据文件扩展名提取纯文本，支持 docx/txt/md/pdf"""
+    if ext == ".docx":
+        from docx import Document
+        doc = Document(io.BytesIO(file_bytes))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        return "\n".join(paragraphs)
+    elif ext == ".pdf":
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            pages = [p.extract_text() for p in reader.pages if p.extract_text()]
+            return "\n".join(pages)
+        except ImportError:
+            import PyPDF2
+            reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            pages = [reader.pages[i].extract_text() or "" for i in range(len(reader.pages))]
+            return "\n".join(p.strip() for p in pages if p.strip())
+    else:  # .txt, .md
+        return file_bytes.decode("utf-8", errors="replace")
 
 
 def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
