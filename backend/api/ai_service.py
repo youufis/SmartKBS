@@ -74,7 +74,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> st
             f"{api_base}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
-            timeout=180,
+            timeout=600,
         )
         if resp.status_code == 200:
             data = resp.json()

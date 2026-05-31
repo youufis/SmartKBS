@@ -501,9 +501,10 @@ async def extract_questions_from_text(
         raise HTTPException(status_code=400, detail="文本内容太少，无法提取试题")
 
     # 截取过长内容
-    if len(content) > 8000:
-        content = content[:8000]
-        logger.info(f"文本内容过长，已截取前 8000 字符")
+    MAX_CHARS = 50000
+    if len(content) > MAX_CHARS:
+        logger.info(f"文本内容过长 ({len(content)} 字符)，已截取前 {MAX_CHARS} 字符")
+        content = content[:MAX_CHARS]
 
     # 获取 API Key
     api_key, _ = get_api_keys(username)
