@@ -144,7 +144,7 @@ const QuestionBankPage: React.FC = () => {
   // ── 提取试题 ──
   const handleExtract = async () => {
     if (!extractText.trim() && !extractFile) {
-      message.warning('请粘贴文本或上传文档（docx/txt/md/pdf）')
+      message.warning('请粘贴文本或上传文档（docx/txt/md/pdf/json）')
       return
     }
     setExtracting(true)
@@ -550,16 +550,16 @@ const QuestionBankPage: React.FC = () => {
                           </Select>
                         </Col>
                         <Col span={8}>
-                          <Typography.Text strong style={{ fontSize: 13 }}>上传文档（支持 docx/txt/md/pdf）</Typography.Text>
+                          <Typography.Text strong style={{ fontSize: 13 }}>上传文档（支持 docx/txt/md/pdf/json）</Typography.Text>
                           <div style={{ marginTop: 4 }}>
                             <Upload
-                              accept=".docx,.txt,.md,.pdf"
+                              accept=".docx,.txt,.md,.pdf,.json"
                               maxCount={1}
                               fileList={extractFile ? [{ uid: '-1', name: extractFile.name, status: 'done' }] : []}
                               beforeUpload={(file) => {
                                 const ext = file.name.toLowerCase().split('.').pop()
-                                if (!['docx', 'txt', 'md', 'pdf'].includes(ext || '')) {
-                                  message.warning('仅支持 docx/txt/md/pdf 格式')
+                                if (!['docx', 'txt', 'md', 'pdf', 'json'].includes(ext || '')) {
+                                  message.warning('仅支持 docx/txt/md/pdf/json 格式')
                                   return Upload.LIST_IGNORE
                                 }
                                 setExtractFile(file)
