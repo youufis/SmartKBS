@@ -102,6 +102,9 @@ const CurriculumPage: React.FC = () => {
   // ── AI 生成课程弹窗 ──
   const [aiGeneratorOpen, setAiGeneratorOpen] = useState(false)
 
+  // ── 教师操作图标显隐 ──
+  const [showActions, setShowActions] = useState(false)
+
   // ── 加载课程树 ──
   const loadTree = useCallback(async () => {
     setLoading(true)
@@ -536,7 +539,7 @@ const CurriculumPage: React.FC = () => {
     <Space size="small">
       <MenuOutlined style={{ fontSize: 12, opacity: 0.5 }} />
       <Typography.Text strong>{ch.name}</Typography.Text>
-      {isTeacherOrAdmin && (
+      {isTeacherOrAdmin && showActions && (
         <Space size="small" style={{ marginLeft: 8 }}>
           <Tooltip title="添加子章节">
             <Button
@@ -593,7 +596,7 @@ const CurriculumPage: React.FC = () => {
           {STATUS_LABELS[kp.progress_status]}
         </Tag>
       )}
-      {isTeacherOrAdmin && (
+      {isTeacherOrAdmin && showActions && (
         <Space size="small" style={{ marginLeft: 4 }}>
           <Tooltip title="编辑知识点">
             <Button
@@ -718,6 +721,16 @@ const CurriculumPage: React.FC = () => {
                           <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(course.id)}>
                             添加章/节
                           </Button>
+                          <Tooltip title={showActions ? '隐藏节点操作按钮' : '显示节点操作按钮'}>
+                            <Button
+                              size="small"
+                              icon={showActions ? <EditOutlined /> : <EditOutlined />}
+                              type={showActions ? 'primary' : 'default'}
+                              onClick={() => setShowActions(!showActions)}
+                            >
+                              {showActions ? '隐藏操作' : '节点操作'}
+                            </Button>
+                          </Tooltip>
                         </Space>
                       )}
                       {/* 课程树 */}
