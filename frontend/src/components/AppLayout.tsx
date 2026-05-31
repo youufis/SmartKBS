@@ -40,7 +40,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
     { key: '/shared-center', icon: <FileOutlined />, label: '共享中心' },
   ]},
   { icon: <FileAddOutlined />, label: '学业', key: 'study', children: [
-    { key: '/student-exam-task', icon: <FileAddOutlined />, label: '考试与作业' },
+    { key: '/student-exam-task', icon: <FileAddOutlined />, label: '考试任务' },
     { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
     { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
     { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
