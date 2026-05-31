@@ -251,6 +251,10 @@ const SystemConfigPage: React.FC = () => {
                   <Checkbox.Group>
                     <Checkbox value="exam">📝 考试通知</Checkbox>
                     <Checkbox value="share">📤 资源共享通知</Checkbox>
+                    <Checkbox value="score">🏆 积分变动通知</Checkbox>
+                    <Checkbox value="task">✅ 任务提交通知</Checkbox>
+                    <Checkbox value="rollcall">📋 点名通知</Checkbox>
+                    <Checkbox value="info">ℹ️ 系统信息通知</Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
               ) : (
@@ -363,7 +367,7 @@ const SystemConfigPage: React.FC = () => {
                 initialValues={config}
                 style={{ maxWidth: 900 }}
               >
-                {['brand', 'api', 'model', 'ai', 'limit', 'filetype'].map(renderGroup)}
+                {['brand', 'api', 'model', 'ai', 'limit', 'notify', 'filetype'].map(renderGroup)}
 
                 <Divider />
                 <Space>

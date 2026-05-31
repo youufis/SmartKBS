@@ -171,9 +171,7 @@ def ensure_teacher_html_files(username: str):
     html_dir = get_account_html_dir(username)
     os.makedirs(html_dir, exist_ok=True)
     source_dir = _resolve_abs(os.path.join(ROOT_DIR, "html"))
-    required_files = [
-        "0.00智能随机点名.html",
-    ]
+    required_files: list[str] = []
     for filename in required_files:
         target_path = os.path.join(html_dir, filename)
         if not os.path.exists(target_path):

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>设计中的人机关系 · 人体工学手册</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Ergonomic / Human Scale Theme
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#f7fafc;
+  --card-bg:#ffffff;
+  --text:#1a202c;
+  --text-dim:#4a5568;
+  --teal:#0d9488;
+  --teal-light:#14b8a6;
+  --teal-bg:rgba(13,148,136,0.06);
+  --red:#e53e3e;
+  --blue:#3182ce;
+  --amber:#d97706;
+  --shadow:0 4px 24px rgba(0,0,0,0.05);
+  --radius:16px;
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.8;
+  font-size:18px;
+}
+
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .anime { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   Progress — Measurement tape
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:5px;
+  z-index:999; background:#e2e8f0;
+}
+.progress-wrap::before {
+  content:'cm  1      2      3      4      5      6      7      8      9     10';
+  position:absolute; top:5px; left:0; right:0;
+  font-family:'Courier New',monospace; font-size:0.45rem;
+  color:#cbd5e1; letter-spacing:2px; text-align:center;
+}
+.progress-bar {
+  height:100%; width:0;
+  background:repeating-linear-gradient(90deg,
+    var(--teal) 0px, var(--teal) 3px,
+    transparent 3px, transparent 8px);
+  animation:progGrow both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:2rem; position:relative; overflow:hidden;
+  background:linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 50%, #f0fdfa 100%);
+}
+
+.hero::after {
+  content:''; position:absolute; inset:0;
+  background-image:
+    linear-gradient(90deg, rgba(13,148,136,0.03) 1px, transparent 1px),
+    linear-gradient(rgba(13,148,136,0.03) 1px, transparent 1px);
+  background-size:60px 60px;
+  pointer-events:none;
+}
+
+/* Human silhouette decoration */
+.hero-fig {
+  position:absolute; right:5%; bottom:15%;
+  font-size:10rem; opacity:0.04; line-height:1;
+  pointer-events:none;
+  user-select:none;
+}
+.hero-fig2 {
+  position:absolute; left:5%; top:10%;
+  font-size:6rem; opacity:0.03; line-height:1;
+  pointer-events:none;
+  user-select:none;
+  transform:rotate(-10deg);
+}
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  background:var(--teal-bg);
+  border:1px solid rgba(13,148,136,0.15);
+  padding:0.5rem 1.2rem; border-radius:100px;
+  font-size:0.9rem; color:var(--teal); font-weight:600;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; transform:translateY(-15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero h1 {
+  font-size:clamp(2.5rem,6vw,4.5rem); font-weight:800;
+  letter-spacing:2px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 span {
+  background:linear-gradient(135deg, var(--teal), var(--teal-light));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+@keyframes titleIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,1.8vw,1.3rem);
+  color:var(--text-dim);
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2.5rem;
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  color:var(--text-dim); font-size:0.9rem;
+  animation:bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(10px); } }
+
+/* ============================================================
+   SECTION
+   ============================================================ */
+.section {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem;
+}
+.section-inner { max-width:1100px; width:100%; }
+
+.section-header {
+  display:flex; align-items:center; gap:16px;
+  margin-bottom:2.5rem;
+  animation:headIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 60%;
+}
+@keyframes headIn { from { opacity:0; transform:translateY(-15px); } to { opacity:1; transform:translateY(0); } }
+
+.section-num {
+  width:48px; height:48px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--teal); border-radius:50%;
+  font-size:1.2rem; font-weight:800; color:#fff;
+  font-family:'Courier New',monospace;
+}
+.section-title {
+  font-size:clamp(1.5rem,3vw,2.4rem); font-weight:700;
+}
+
+/* ===== Card ===== */
+.ergo-card {
+  background:var(--card-bg);
+  border-radius:var(--radius);
+  padding:2rem 2.5rem; margin-bottom:2rem;
+  box-shadow:var(--shadow);
+  animation:cardIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+@keyframes cardIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.ergo-card h3 {
+  font-size:1.3rem; color:var(--teal);
+  margin-bottom:1rem; display:flex; align-items:center; gap:10px;
+}
+.ergo-card p, .ergo-card li {
+  font-size:1rem; color:var(--text); line-height:1.9;
+}
+.ergo-card li { padding:0.3rem 0; }
+.ergo-card strong { color:var(--text); }
+
+/* ===== Body diagram card ===== */
+.body-card {
+  background:var(--card-bg);
+  border-radius:var(--radius); overflow:hidden;
+  box-shadow:var(--shadow);
+  animation:cardIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 45%;
+}
+.body-card-top {
+  background:linear-gradient(135deg, var(--teal), #0f766e);
+  padding:1.2rem 2rem; color:#fff;
+  font-size:1.1rem; font-weight:700;
+}
+.body-card-body { padding:2rem; }
+.body-card-body p { font-size:1rem; color:var(--text); line-height:1.8; }
+.body-card-body li { font-size:1rem; padding:0.3rem 0; }
+
+/* ===== Example ===== */
+.example-box {
+  background:var(--teal-bg);
+  border-left:4px solid var(--teal);
+  border-radius:0 var(--radius) var(--radius) 0;
+  padding:1rem 1.5rem; margin-top:1rem;
+}
+.example-box .label {
+  font-size:0.85rem; font-weight:700; color:var(--teal);
+  margin-bottom:0.3rem;
+}
+.example-box p { font-size:0.95rem; color:var(--text-dim); line-height:1.7; }
+
+/* ===== Goal grid ===== */
+.goal-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+.goal-card {
+  background:var(--card-bg); border-radius:var(--radius);
+  padding:1.8rem; box-shadow:var(--shadow);
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.goal-card .goal-icon { font-size:2.5rem; margin-bottom:0.5rem; }
+.goal-card h4 { font-size:1.2rem; color:var(--teal); margin-bottom:0.5rem; }
+.goal-card p, .goal-card li { font-size:0.95rem; color:var(--text); line-height:1.8; }
+.goal-card .example-box { margin-top:0.8rem; }
+
+/* ===== Pathway ===== */
+.path-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+.path-item {
+  background:var(--card-bg); border-radius:var(--radius);
+  padding:1.8rem; box-shadow:var(--shadow);
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.path-item .pi-num {
+  font-family:'Courier New',monospace; font-size:0.85rem;
+  color:var(--teal); font-weight:700; margin-bottom:0.3rem;
+}
+.path-item h4 { font-size:1.15rem; color:var(--text); margin-bottom:0.6rem; }
+.path-item p { font-size:0.95rem; color:var(--text-dim); line-height:1.8; }
+.path-item strong { color:var(--text); }
+
+/* ============================================================
+   SUMMARY
+   ============================================================ */
+.summary {
+  min-height:60vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem;
+  background:linear-gradient(135deg, #f0fdfa, #ccfbf1);
+}
+.summary h2 {
+  font-size:clamp(1.5rem,3vw,2.5rem); font-weight:700;
+  margin-bottom:1rem; color:var(--teal);
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.summary .quote {
+  font-size:1.15rem; color:var(--text-dim); max-width:600px;
+  animation:cardIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .goal-grid, .path-grid { grid-template-columns:1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  .ergo-card { padding:1.5rem; }
+  body { font-size:16px; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:var(--teal-light); border-radius:3px; opacity:0.3; }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-fig">🧍</div>
+  <div class="hero-fig2">✋</div>
+  <div class="hero-badge">◉ 人体工学 · ERGONOMICS</div>
+  <h1>设计中的<br><span>人机关系</span></h1>
+  <p class="hero-sub">— 一切设计，回归"人"的体验 —</p>
+  <div class="hero-scroll">↓ 向下滚动</div>
+</section>
+
+<!-- ===== SECTION 1: 什么是人机关系 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <h2 class="section-title">什么是人机关系？</h2>
+    </div>
+
+    <div class="ergo-card">
+      <h3>🤝 定义</h3>
+      <p>人在使用物品时，人与物品之间产生的相互关系称为<strong>人机关系</strong>。</p>
+      <ul style="margin-top:1rem;">
+        <li><strong>"人"</strong> — 使用者，包括身体各部位（手、眼、背、腿等）和 <strong>心理层面</strong></li>
+        <li><strong>"机"</strong> — 不仅指机器，还包括：<strong>工具</strong>（筷子、拖把）、<strong>仪器</strong>（体温计）、<strong>设备</strong>（电梯、椅子）、<strong>家具、交通工具</strong>，甚至<strong>环境</strong>（教室照明）</li>
+      </ul>
+      <div class="example-box">
+        <div class="label">💡 举例</div>
+        <p>人乘电梯时存在多种人机关系：手与楼层按钮（操作交互）、身体与箱体空间（安全舒适）、眼睛与指示灯（信息获取）</p>
+      </div>
+    </div>
+
+    <div class="body-card">
+      <div class="body-card-top">🧑 人与物的多重关系</div>
+      <div class="body-card-body">
+        <p>每一件产品都与人的多个部位发生关系：</p>
+        <ul>
+          <li>✋ <strong>手</strong> — 操作、握持、按压</li>
+          <li>👁️ <strong>眼</strong> — 读取信息、观察状态</li>
+          <li>🦵 <strong>腿/背</strong> — 支撑、承重、姿势</li>
+          <li>👂 <strong>耳</strong> — 声音反馈、警示</li>
+          <li>🧠 <strong>心理</strong> — 安全感、愉悦感、归属感</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 2: 四大目标 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <h2 class="section-title">人机关系要实现的目标</h2>
+    </div>
+
+    <div class="goal-grid">
+      <div class="goal-card">
+        <div class="goal-icon">⚡</div>
+        <h4>高效</h4>
+        <p>合理分配人与机的功能，促进协调，提高工作效率。</p>
+        <div class="example-box">
+          <p><strong>铁锹作业试验</strong>：优化重量与形状，减少疲劳，提升搬运效率</p>
+        </div>
+      </div>
+      <div class="goal-card">
+        <div class="goal-icon">💚</div>
+        <h4>健康</h4>
+        <p>长期使用产品不应对人体健康造成不良影响。</p>
+        <div class="example-box">
+          <p><strong>反例</strong>：长期穿高跟靴导致足部变形；劣质台灯光线频闪损伤视力</p>
+        </div>
+      </div>
+      <div class="goal-card">
+        <div class="goal-icon">🛡️</div>
+        <h4>安全</h4>
+        <p>使用过程中不构成生理伤害，提供必要防护。</p>
+        <div class="example-box">
+          <p>电水壶<strong>防干烧装置</strong>、儿童玩具<strong>无尖锐边角</strong></p>
+        </div>
+      </div>
+      <div class="goal-card">
+        <div class="goal-icon">😊</div>
+        <h4>舒适</h4>
+        <p>人体处于自然状态，姿势在正常活动范围内，不易疲劳。</p>
+        <div class="example-box">
+          <p>符合人体曲线的<strong>办公椅</strong>、可调节高度的<strong>课桌</strong></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 3: 实现途径 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <h2 class="section-title">实现合理人机关系的途径</h2>
+    </div>
+
+    <div class="path-grid">
+      <div class="path-item">
+        <div class="pi-num">PATH 01</div>
+        <h4>👥 普通人群与特殊人群</h4>
+        <p>大多数产品按普通人数据设计，但需兼顾特殊群体——<strong>盲人</strong>（盲道、语音提示）、<strong>老人/儿童</strong>（大字体、防滑把手）、<strong>肢障人士</strong>（无障碍通道）。</p>
+      </div>
+      <div class="path-item">
+        <div class="pi-num">PATH 02</div>
+        <h4>🧍 静态的人与动态的人</h4>
+        <p><strong>静态尺寸</strong>：身高、胸围、脚长等构造尺寸；<strong>动态尺寸</strong>：动作范围、体形变化等功能尺寸。汽车座椅既要适合坐姿，又要考虑进出车门、踩踏板。</p>
+      </div>
+      <div class="path-item">
+        <div class="pi-num">PATH 03</div>
+        <h4>🧠 生理需求与心理需求</h4>
+        <p><strong>生理</strong>：尺寸、力度、温度、光照；<strong>心理</strong>：色彩、材质、造型带来的感受。图书馆简洁装修营造安静氛围，暖色灯光增加温馨感。</p>
+      </div>
+      <div class="path-item">
+        <div class="pi-num">PATH 04</div>
+        <h4>📡 注重信息交互</h4>
+        <p>通过<strong>视觉</strong>（屏幕）、<strong>听觉</strong>（蜂鸣）、<strong>触觉</strong>（震动）传递信息。微波炉加热完成"叮"一声，就是有效的信息交互设计。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SUMMARY ===== -->
+<section class="summary">
+  <h2>🧘 核心理念：以人为本</h2>
+  <p class="quote">
+    筷子是手的延伸，望远镜是眼的延伸，自行车是脚的延伸……<br>
+    一切设计都应回归<strong>"人"的体验</strong>，而非单纯追求技术先进性。<br><br>
+    <span style="font-size:0.9rem;color:var(--text-dim);">— 好的设计，让人感受不到"设计"的存在 —</span>
+  </p>
+</section>
+
+</body>
+</html>
