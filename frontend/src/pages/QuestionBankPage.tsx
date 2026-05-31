@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload,
@@ -60,6 +60,8 @@ const QuestionBankPage: React.FC = () => {
   const [extracting, setExtracting] = useState(false)
   const [extractedQuestions, setExtractedQuestions] = useState<QuestionInfo[]>([])
   const [extractError, setExtractError] = useState<string | null>(null)
+  const [extractElapsed, setExtractElapsed] = useState(0)
+  const extractTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── 题库列表 ──
   const [questions, setQuestions] = useState<QuestionInfo[]>([])
@@ -150,6 +152,10 @@ const QuestionBankPage: React.FC = () => {
     setExtracting(true)
     setExtractError(null)
     setExtractedQuestions([])
+    setExtractElapsed(0)
+    extractTimerRef.current = setInterval(() => {
+      setExtractElapsed((prev) => prev + 1)
+    }, 1000)
     try {
       const formData = new FormData()
       formData.append('subject', extractSubject)
@@ -163,10 +169,11 @@ const QuestionBankPage: React.FC = () => {
       setExtractedQuestions(res.questions)
       message.success(res.message)
       loadQuestions()
-      setExtracting(false)
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || err?.message || '提取失败，请重试'
       setExtractError(errMsg)
+    } finally {
+      if (extractTimerRef.current) clearInterval(extractTimerRef.current)
       setExtracting(false)
     }
   }
@@ -524,7 +531,7 @@ const QuestionBankPage: React.FC = () => {
                   children: (
                     <>
                       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-                        从粘贴的文本或 Word 文档中智能提取试题，自动识别题型、选项和答案并入库。
+                        从粘贴文本或上传文档（docx/txt/md/pdf/json）中智能提取试题，自动识别入库。
                       </Typography.Text>
                       <Row gutter={16}>
                         <Col span={8}>
@@ -601,7 +608,7 @@ const QuestionBankPage: React.FC = () => {
                           icon={extracting ? <LoadingOutlined /> : <FileTextOutlined />}
                           disabled={extracting || (!extractText.trim() && !extractFile)}
                         >
-                          {extracting ? 'AI 提取中...' : '开始提取'}
+                          {extracting ? `AI 提取中... ${extractElapsed}s` : '开始提取'}
                         </Button>
                         {extractError && (
                           <Typography.Text type="danger" style={{ fontSize: 13 }}>

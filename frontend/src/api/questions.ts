@@ -10,7 +10,7 @@ import type {
 
 export async function generateQuestions(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
   const { data } = await apiClient.post('/api/questions/generate', req, {
-    timeout: 180000, // AI 生成较慢，设置 3 分钟超时
+    timeout: 600000, // AI 生成较慢，设置 10 分钟超时
   });
   return data;
 }
@@ -70,7 +70,7 @@ export async function dedupQuestions(): Promise<{
 export async function extractQuestions(formData: FormData): Promise<QuestionGenerateResponse> {
   const { data } = await apiClient.post('/api/questions/extract', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 180000,
+    timeout: 600000,
   });
   return data;
 }
