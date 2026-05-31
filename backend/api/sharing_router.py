@@ -13,6 +13,7 @@ from backend.api.dependencies import get_current_user
 from backend.auth import is_admin, is_teacher
 from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.logger import logger
+from backend.api.config_router import get_config_value
 from backend.config import STU_DIR, ROOT_DIR
 
 router = APIRouter()
@@ -109,6 +110,10 @@ async def share_resource(request: Request, body: ShareRequest):
         def _send_notifications_sync():
             """同步执行通知发送，在后台线程中运行"""
             try:
+                # 检查分享通知类型是否启用
+                enabled = set(get_config_value("enabled_notification_types", ["exam"]))
+                if "share" not in enabled:
+                    return
                 resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -217,6 +222,9 @@ def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
                           target_grade_csv: str, target_class_csv: str):
     """同步发送取消共享通知，在后台线程中运行"""
     try:
+        enabled = set(get_config_value("enabled_notification_types", ["exam"]))
+        if "share" not in enabled:
+            return
         resource_label = "HTML 资源" if resource_type == "html" else "下载文件"
         link = "/html-files" if resource_type == "html" else "/downloads"
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
