@@ -30,6 +30,7 @@ import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 import CurriculumPage from './pages/CurriculumPage'
 import CurriculumProgressPage from './pages/CurriculumProgressPage'
 import SharedCenterPage from './pages/SharedCenterPage'
+import StudentExamTaskPage from './pages/StudentExamTaskPage'
 
 function App() {
   const navigate = useNavigate()
@@ -90,6 +91,7 @@ function App() {
             <Route path="discussion" element={<DiscussionPage />} />
             <Route path="discussion-room/:groupId" element={<DiscussionRoomPage />} />
             <Route path="discussion-monitor/:discId" element={<DiscussionMonitorPage />} />
+            <Route path="student-exam-task" element={<StudentExamTaskPage />} />
             <Route path="curriculum" element={<CurriculumPage />} />
             <Route path="curriculum/progress" element={user?.role === 'admin' || user?.role === 'teacher' ? <CurriculumProgressPage /> : <Navigate to="/curriculum" />} />
             <Route path="about" element={<AboutPage />} />
