@@ -38,7 +38,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const [result, setResult] = useState<any>(null)
   const [treeData, setTreeData] = useState<any[]>([])
   const [saveDone, setSaveDone] = useState(false)
-  const [inputMode, setInputMode] = useState<'text' | 'file'>('text')
+  const [inputMode, setInputMode] = useState<'text' | 'file'>('file')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
 
   // ── 动态进度 ──
@@ -367,15 +367,6 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
             onChange={(k) => setInputMode(k as 'text' | 'file')}
             items={[
               {
-                key: 'text',
-                label: <span><FileTextOutlined /> 粘贴文本</span>,
-                children: (
-                  <Form.Item name="content" label="教学内容文本" rules={[{ required: true, message: '请输入教学内容' }]}>
-                    <TextArea rows={12} placeholder="请粘贴教材原文、教学大纲、课程目录等内容..." />
-                  </Form.Item>
-                ),
-              },
-              {
                 key: 'file',
                 label: <span><UploadOutlined /> 上传文件</span>,
                 children: (
@@ -398,6 +389,15 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
                       <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
                       <p className="ant-upload-hint">支持 txt、md、pdf、docx 格式，最大 20MB</p>
                     </Dragger>
+                  </Form.Item>
+                ),
+              },
+              {
+                key: 'text',
+                label: <span><FileTextOutlined /> 粘贴文本</span>,
+                children: (
+                  <Form.Item name="content" label="教学内容文本" rules={[{ required: true, message: '请输入教学内容' }]}>
+                    <TextArea rows={12} placeholder="请粘贴教材原文、教学大纲、课程目录等内容..." />
                   </Form.Item>
                 ),
               },
