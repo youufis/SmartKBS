@@ -20,7 +20,7 @@ const QuestionExamPage: React.FC = () => {
         },
         {
           key: 'exam',
-          label: <span><FileAddOutlined /> 考试发布</span>,
+          label: <span><FileAddOutlined /> 考试</span>,
           children: <ExamPage />,
         },
       ]}
