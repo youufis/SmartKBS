@@ -482,9 +482,9 @@ async def extract_questions_from_text(
     source_label = "paste"
     if file and file.filename:
         ext = os.path.splitext(file.filename.lower())[1]
-        supported = {'.docx', '.txt', '.md', '.pdf'}
+        supported = {'.docx', '.txt', '.md', '.pdf', '.json'}
         if ext not in supported:
-            raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}，支持 docx/txt/md/pdf")
+            raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}，支持 docx/txt/md/pdf/json")
         try:
             file_bytes = await file.read()
             content = _extract_text_from_file(file_bytes, ext)
@@ -495,7 +495,7 @@ async def extract_questions_from_text(
     elif text.strip():
         content = text.strip()
     else:
-        raise HTTPException(status_code=400, detail="请提供粘贴文本或上传文件（docx/txt/md/pdf）")
+        raise HTTPException(status_code=400, detail="请提供粘贴文本或上传文件（docx/txt/md/pdf/json）")
 
     if len(content) < 10:
         raise HTTPException(status_code=400, detail="文本内容太少，无法提取试题")
@@ -572,7 +572,7 @@ async def extract_questions_from_text(
             "difficulty": q_data.get("difficulty", difficulty),
         })
 
-    source_display = {"docx": "Word文档", "txt": "文本文件", "md": "Markdown文件", "pdf": "PDF文件", "paste": "粘贴文本"}
+    source_display = {"docx": "Word文档", "txt": "文本文件", "md": "Markdown文件", "pdf": "PDF文件", "json": "JSON文件", "paste": "粘贴文本"}
     logger.info(f"用户 {username} 从{source_display.get(source_label, '文件')}提取并入库 {len(saved_questions)} 道试题")
     return {
         "message": f"成功提取 {len(saved_questions)} 道试题",
@@ -599,6 +599,15 @@ def _extract_text_from_file(file_bytes: bytes, ext: str) -> str:
             reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
             pages = [reader.pages[i].extract_text() or "" for i in range(len(reader.pages))]
             return "\n".join(p.strip() for p in pages if p.strip())
+    elif ext == ".json":
+        # JSON 文件直接转为文本让 AI 提取
+        raw = file_bytes.decode("utf-8", errors="replace")
+        try:
+            # 尝试美化输出，便于 AI 理解
+            parsed = json.loads(raw)
+            return json.dumps(parsed, ensure_ascii=False, indent=2)
+        except json.JSONDecodeError:
+            return raw
     else:  # .txt, .md
         return file_bytes.decode("utf-8", errors="replace")
 
