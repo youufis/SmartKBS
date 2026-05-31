@@ -357,19 +357,37 @@ const ExamTakePage: React.FC = () => {
         <Progress percent={progressPercent} size="small" style={{ marginBottom: 16 }} />
 
         {/* ── 题号导航 ── */}
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>题目导航：</Text>
+          <Space size={12}>
+            <Text style={{ fontSize: 12 }}><Tag color="#1677ff" style={{ lineHeight: '18px', padding: '0 6px' }}>1</Tag> 当前</Text>
+            <Text style={{ fontSize: 12 }}><Tag color="#52c41a" style={{ lineHeight: '18px', padding: '0 6px' }}>2</Tag> 已答</Text>
+            <Text style={{ fontSize: 12 }}><Tag color="#f0f0f0" style={{ lineHeight: '18px', padding: '0 6px', border: '1px solid #d9d9d9' }}>3</Tag> 未答</Text>
+          </Space>
+        </div>
         <div style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {questions.map((q, idx) => {
             const answered = !!answers[String(q.id)]
             const isCurrent = idx === currentIndex
+            let tagColor: string
+            let borderStyle: React.CSSProperties = {}
+            if (isCurrent) {
+              tagColor = '#1677ff'
+            } else if (answered) {
+              tagColor = '#52c41a'
+            } else {
+              tagColor = '#f0f0f0'
+              borderStyle = { border: '1px solid #d9d9d9', color: '#666' }
+            }
             return (
               <Tag
                 key={q.id}
-                color={isCurrent ? '#1677ff' : answered ? '#52c41a' : '#eee'}
-                style={{ cursor: 'pointer', padding: '2px 8px', fontSize: 13 }}
+                color={tagColor}
+                style={{ cursor: 'pointer', padding: '2px 10px', fontSize: 13, minWidth: 32, textAlign: 'center', ...borderStyle }}
                 onClick={() => setCurrentIndex(idx)}
               >
                 {idx + 1}
-                {answered && <CheckCircleOutlined style={{ marginLeft: 4 }} />}
+                {answered && <CheckCircleOutlined style={{ marginLeft: 2, fontSize: 11 }} />}
               </Tag>
             )
           })}
