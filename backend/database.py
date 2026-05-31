@@ -510,7 +510,7 @@ def init_db():
                 pass
 
             conn.commit()
-            logger.info("数据库初始化完成")
+            logger.debug("数据库初始化完成")
 
             # 迁移旧版 JSON 数据（仅首次运行自动导入）
             _migrate_from_json()
