@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import {
   Modal, Form, Input, Select, Button, message, Steps, Tree, Space, Tag,
-  Typography, Spin, Alert, Divider, Upload, Tabs, Progress,
+  Typography, Spin, Alert, Divider, Upload, Progress,
 } from 'antd'
 import {
   RobotOutlined, FileTextOutlined, CheckCircleOutlined,
@@ -38,7 +38,6 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const [result, setResult] = useState<any>(null)
   const [treeData, setTreeData] = useState<any[]>([])
   const [saveDone, setSaveDone] = useState(false)
-  const [inputMode, setInputMode] = useState<'text' | 'file'>('file')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
 
   // ── 动态进度 ──
@@ -130,33 +129,6 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     }
   }
 
-  // ── 文字输入生成 ──
-  const handleGenerateFromText = async () => {
-    try {
-      const values = await form.validateFields(['content', 'subject', 'grade', 'course_name'])
-      setErrorMsg('')
-      setLoading(true)
-      setStep(1)
-      startProgress()
-      const data = await callApi('/api/curriculum/ai-generate', {
-        content: values.content,
-        subject: values.subject,
-        grade: values.grade,
-        course_name: values.course_name || '',
-        auto_save: false,
-      })
-      stopProgress(true)
-      setResult(data)
-      setTreeData(buildPreviewTree(data))
-      setStep(2)
-    } catch (err: any) {
-      handleError(err, '文字生成失败')
-    } finally {
-      setLoading(false)
-      clearTimers()
-    }
-  }
-
   // ── 文件上传生成 ──
   const handleGenerateFromFile = async () => {
     if (!uploadFile) {
@@ -197,27 +169,16 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     setLoading(true)
     setErrorMsg('')
     try {
-      if (inputMode === 'text') {
-        const data = await callApi('/api/curriculum/ai-generate', {
-          content: values.content,
-          subject: values.subject,
-          grade: values.grade,
-          course_name: values.course_name || '',
-          auto_save: true,
-        })
-        setResult(data)
-      } else {
-        const formData = new FormData()
-        formData.append('file', uploadFile!)
-        formData.append('subject', values.subject || '信息技术')
-        formData.append('grade', values.grade || '高一')
-        formData.append('course_name', values.course_name || '')
-        formData.append('auto_save', 'true')
-        const data = await callApi('/api/curriculum/ai-generate-from-file', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        })
-        setResult(data)
-      }
+      const formData = new FormData()
+      formData.append('file', uploadFile!)
+      formData.append('subject', values.subject || '信息技术')
+      formData.append('grade', values.grade || '高一')
+      formData.append('course_name', values.course_name || '')
+      formData.append('auto_save', 'true')
+      const data = await callApi('/api/curriculum/ai-generate-from-file', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      setResult(data)
       setSaveDone(true)
       message.success(`课程「${result.course_name}」已成功创建！共 ${result.saved?.chapters || 0} 章、${result.saved?.knowledge_points || 0} 个知识点`)
       onSuccess?.()
@@ -362,47 +323,26 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       {/* ── 步骤 0：输入 ── */}
       {step === 0 && (
         <Form form={form} layout="vertical" initialValues={{ subject: '信息技术', grade: '高一' }}>
-          <Tabs
-            activeKey={inputMode}
-            onChange={(k) => setInputMode(k as 'text' | 'file')}
-            items={[
-              {
-                key: 'file',
-                label: <span><UploadOutlined /> 上传文件</span>,
-                children: (
-                  <Form.Item label="上传文档（txt/md/pdf/docx）" required>
-                    <Dragger
-                      accept=".txt,.md,.pdf,.docx"
-                      maxCount={1}
-                      beforeUpload={(file) => {
-                        const valid = ['.txt', '.md', '.pdf', '.docx'].some(ext =>
-                          file.name.toLowerCase().endsWith(ext)
-                        )
-                        if (!valid) { message.error('仅支持 txt/md/pdf/docx 格式'); return Upload.LIST_IGNORE }
-                        if (file.size > 20 * 1024 * 1024) { message.error('文件大小不能超过 20MB'); return Upload.LIST_IGNORE }
-                        setUploadFile(file)
-                        return false
-                      }}
-                      onRemove={() => setUploadFile(null)}
-                    >
-                      <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-                      <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-                      <p className="ant-upload-hint">支持 txt、md、pdf、docx 格式，最大 20MB</p>
-                    </Dragger>
-                  </Form.Item>
-                ),
-              },
-              {
-                key: 'text',
-                label: <span><FileTextOutlined /> 粘贴文本</span>,
-                children: (
-                  <Form.Item name="content" label="教学内容文本" rules={[{ required: true, message: '请输入教学内容' }]}>
-                    <TextArea rows={12} placeholder="请粘贴教材原文、教学大纲、课程目录等内容..." />
-                  </Form.Item>
-                ),
-              },
-            ]}
-          />
+          <Form.Item label="上传文档（txt/md/pdf/docx）" required>
+            <Dragger
+              accept=".txt,.md,.pdf,.docx"
+              maxCount={1}
+              beforeUpload={(file) => {
+                const valid = ['.txt', '.md', '.pdf', '.docx'].some(ext =>
+                  file.name.toLowerCase().endsWith(ext)
+                )
+                if (!valid) { message.error('仅支持 txt/md/pdf/docx 格式'); return Upload.LIST_IGNORE }
+                if (file.size > 20 * 1024 * 1024) { message.error('文件大小不能超过 20MB'); return Upload.LIST_IGNORE }
+                setUploadFile(file)
+                return false
+              }}
+              onRemove={() => setUploadFile(null)}
+            >
+              <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+              <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
+              <p className="ant-upload-hint">支持 txt、md、pdf、docx 格式，最大 20MB</p>
+            </Dragger>
+          </Form.Item>
 
           <Space style={{ width: '100%' }} align="start" wrap>
             <Form.Item name="subject" label="科目" style={{ width: 160 }}>
@@ -432,11 +372,11 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           <Button
             type="primary"
             icon={<RobotOutlined />}
-            onClick={inputMode === 'text' ? handleGenerateFromText : handleGenerateFromFile}
+            onClick={handleGenerateFromFile}
             block
             size="large"
           >
-            {inputMode === 'text' ? '开始生成课程大纲' : `上传并生成${uploadFile ? `（${uploadFile.name}）` : ''}`}
+            {`上传并生成${uploadFile ? `（${uploadFile.name}）` : ''}`}
           </Button>
         </Form>
       )}
@@ -540,7 +480,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           />
           <Space style={{ width: '100%', justifyContent: 'center' }}>
             <Button onClick={handleRetry}>返回修改</Button>
-            <Button type="primary" icon={<RobotOutlined />} onClick={inputMode === 'text' ? handleGenerateFromText : handleGenerateFromFile} loading={loading}>
+            <Button type="primary" icon={<RobotOutlined />} onClick={handleGenerateFromFile} loading={loading}>
               重新生成
             </Button>
           </Space>
