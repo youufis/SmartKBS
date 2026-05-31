@@ -47,6 +47,9 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MAX_ALLOWED_REQUESTS', label: '每日最大请求数', type: 'number', group: 'limit' },
   { key: 'TEACHER_DOWNLOAD_QUOTA_GB', label: '教师下载配额 (GB)', type: 'number', group: 'limit',
     desc: '每位教师下载中心的最大存储空间' },
+  // 消息通知
+  { key: 'enabled_notification_types', label: '启用的通知类型', type: 'notifications', group: 'notify',
+    desc: '关闭的通知类型将不会推送给任何用户' },
   // 文件类型白名单
   { key: 'IMAGE_EXTENSIONS', label: '图片文件扩展名', type: 'tags', group: 'filetype',
     desc: '允许上传的图片格式，多个用逗号分隔，如 .jpg,.jpeg,.png' },
@@ -60,6 +63,7 @@ const GROUP_LABELS: Record<string, string> = {
   model: '🤖 模型与应用配置',
   ai: '💬 AI 对话设置',
   limit: '⚙️ 系统限制',
+  notify: '🔔 消息通知',
   filetype: '📁 文件类型白名单',
 }
 
@@ -144,6 +148,9 @@ const SystemConfigPage: React.FC = () => {
           if (Array.isArray(formValues[key])) {
             formValues[key] = formValues[key].join(',')
           }
+        }
+        if (!formValues['enabled_notification_types']) {
+          formValues['enabled_notification_types'] = ['exam']
         }
         form.setFieldsValue(formValues)
         loadApikeyStatus()
@@ -233,6 +240,17 @@ const SystemConfigPage: React.FC = () => {
                   <Checkbox.Group>
                     <Checkbox value={1}>教师</Checkbox>
                     <Checkbox value={2}>学生</Checkbox>
+                  </Checkbox.Group>
+                </Form.Item>
+              ) : field.type === 'notifications' ? (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  extra={field.desc}
+                >
+                  <Checkbox.Group>
+                    <Checkbox value="exam">📝 考试通知</Checkbox>
+                    <Checkbox value="share">📤 资源共享通知</Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
               ) : (

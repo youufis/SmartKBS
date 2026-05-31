@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
 from backend.database import execute_query, execute_insert_update, execute_batch
+from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.logger import logger
@@ -48,8 +49,24 @@ class AiGenerateAnnouncement(BaseModel):
 
 # ── 辅助函数 ──
 
+# ── 通知类型黑白名单 ──
+
+def _get_enabled_notification_types() -> set[str]:
+    """获取系统当前启用的通知类型，默认只启用考试通知"""
+    types = get_config_value("enabled_notification_types", ["exam"])
+    return set(types)
+
+
+def _is_notification_type_enabled(type_: str) -> bool:
+    """判断某通知类型是否被系统启用"""
+    enabled = _get_enabled_notification_types()
+    return type_ in enabled
+
+
 def _create_notification(recipient: str, type_: str, title: str, content: str = "", related_link: str = ""):
-    """创建一条通知（内部调用）"""
+    """创建一条通知（内部调用，会检查类型是否启用）"""
+    if not _is_notification_type_enabled(type_):
+        return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         execute_insert_update(
@@ -62,8 +79,10 @@ def _create_notification(recipient: str, type_: str, title: str, content: str = 
 
 
 def _notify_users(usernames: list[str], type_: str, title: str, content: str = "", related_link: str = ""):
-    """批量通知多个用户（使用批量插入优化性能）"""
+    """批量通知多个用户（使用批量插入优化性能，会检查类型是否启用）"""
     if not usernames:
+        return
+    if not _is_notification_type_enabled(type_):
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     sql = """INSERT INTO notifications
