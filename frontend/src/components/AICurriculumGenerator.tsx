@@ -336,7 +336,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       title={
         <Space>
           <RobotOutlined style={{ color: '#1677ff' }} />
-          <span>AI 智能生成课程大纲</span>
+          <span>AI 生成课程大纲</span>
         </Space>
       }
       open={open}
