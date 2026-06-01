@@ -1066,6 +1066,12 @@ async def get_reports(disc_id: int, request: Request):
 @router.websocket("/ws/{group_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int):
     """WebSocket 端点，客户端连接后实时接收新消息"""
+    # 从 query 参数中获取 token 验证身份
+    from backend.auth import decode_jwt_token
+    token = websocket.query_params.get("token", "")
+    payload = decode_jwt_token(token) if token else None
+    username = payload.get("username", "anonymous") if payload else "anonymous"
+
     await ws_manager.connect(group_id, websocket)
     try:
         while True:
