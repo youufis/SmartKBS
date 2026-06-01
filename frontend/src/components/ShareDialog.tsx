@@ -153,7 +153,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
 
   return (
     <Modal
-      title={<><ShareAltOutlined style={{ color: '#1677ff' }} /> {isShared ? '管理共享' : '共享资源'}</>}
+      title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> {isShared ? '管理共享' : '共享资源'}</>}
       open={open}
       onCancel={onClose}
       footer={
