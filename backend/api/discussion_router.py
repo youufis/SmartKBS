@@ -897,10 +897,19 @@ async def ai_suggest(group_id: int, request: Request):
         content = call_ai_sync(prompt, api_key)
         if content:
             # 将 AI 回复作为消息存入
+            now_str = _now()
             execute_insert_update(
                 "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, NULL, ?, 'ai_suggest', ?)",
-                (group_id, content, _now()),
+                (group_id, content, now_str),
             )
+            # WebSocket 广播，实时推送给所有小组成员
+            asyncio.create_task(ws_manager.broadcast(group_id, {
+                "type": "new_message",
+                "username": None,
+                "content": content,
+                "msg_type": "ai_suggest",
+                "created_at": now_str,
+            }))
             return {"status": "ok", "content": content}
         return {"status": "error", "content": "AI 未返回有效结果"}
     except Exception as e:
