@@ -542,7 +542,7 @@ const ChatPage: React.FC = () => {
               新话题
             </Button>
             <Button size="small" icon={<HistoryOutlined />} onClick={handleOpenHistory}>
-              历史记录
+              历史对话
             </Button>
             <div style={{ flex: 1, minWidth: 0 }} />
             {usage && (
@@ -568,7 +568,7 @@ const ChatPage: React.FC = () => {
 
       {/* 历史记录侧栏（点击文件加载到对话面板） */}
       <Drawer
-        title="📋 历史对话记录"
+        title="📋 历史记录"
         placement="left"
         width={360}
         open={historyOpen}
@@ -581,7 +581,7 @@ const ChatPage: React.FC = () => {
               showLine
               onSelect={handleHistorySelect}
               titleRender={(node: TreeNode) => (
-                <Space size={4} style={{ width: '100%' }}>
+                <Space size={4} style={{ width: '100%' }} className="history-tree-node">
                   {node.isLeaf ? <FileOutlined /> : <FolderOutlined />}
                   <span style={{
                     fontSize: 13,
@@ -596,7 +596,7 @@ const ChatPage: React.FC = () => {
                       ? (node.title as string).replace(/^conversation_/, '').replace(/\.md$/, '')
                       : node.title}
                   </span>
-                  <span onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
+                  <span onClick={(e) => e.stopPropagation()} className="history-delete-btn" style={{ flexShrink: 0, opacity: 0, transition: 'opacity 0.2s' }}>
                     <Popconfirm
                       title={`确认删除${node.isLeaf ? '文件' : '整个目录'}？`}
                       onConfirm={() => handleHistoryDelete(node.key)}
@@ -699,6 +699,9 @@ const ChatPage: React.FC = () => {
         .markdown-content pre code.language-html {
           border-left: 3px solid #1677ff;
           padding-left: 8px;
+        }
+        .history-tree-node:hover .history-delete-btn {
+          opacity: 1 !important;
         }
       `}</style>
     </Layout>
