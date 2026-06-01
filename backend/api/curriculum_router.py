@@ -158,6 +158,18 @@ def _build_course_tree(course_id: int) -> list[dict]:
         (course_id,),
     )
 
+    # 2.5) 批量查询所有知识点的资源绑定数量
+    kp_ids = [kp["id"] for kp in all_kps]
+    resource_count_map: dict[int, int] = {}
+    if kp_ids:
+        placeholders = ",".join("?" for _ in kp_ids)
+        counts = execute_query(
+            f"SELECT knowledge_point_id, COUNT(*) as cnt FROM curriculum_bindings WHERE knowledge_point_id IN ({placeholders}) GROUP BY knowledge_point_id",
+            tuple(kp_ids),
+        )
+        for row in counts:
+            resource_count_map[row["knowledge_point_id"]] = row["cnt"]
+
     # 3) 构建 parent_id → 章节列表 的映射
     children_map: dict[int, list[dict]] = {}
     for ch in all_chapters:
@@ -175,7 +187,10 @@ def _build_course_tree(course_id: int) -> list[dict]:
         # 子章节
         node["children"] = [_build_node(c) for c in children_map.get(ch["id"], [])]
         # 知识点
-        node["knowledge_points"] = kp_map.get(ch["id"], [])
+        kps = kp_map.get(ch["id"], [])
+        for kp in kps:
+            kp["resource_count"] = resource_count_map.get(kp["id"], 0)
+        node["knowledge_points"] = kps
         return node
 
     return [_build_node(ch) for ch in children_map.get(0, [])]

@@ -586,6 +586,13 @@ const CurriculumPage: React.FC = () => {
       <Tag color={DIFFICULTY_COLORS[kp.difficulty]} style={{ fontSize: 11, lineHeight: '18px' }}>
         {DIFFICULTY_LABELS[kp.difficulty] || kp.difficulty}
       </Tag>
+      {(kp.resource_count ?? 0) > 0 && (
+        <Tooltip title={`${kp.resource_count} 个绑定资源`}>
+          <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px', cursor: 'default' }}>
+            {kp.resource_count}
+          </Tag>
+        </Tooltip>
+      )}
       {kp.estimated_minutes > 0 && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {kp.estimated_minutes}分钟
