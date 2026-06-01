@@ -162,7 +162,16 @@ const DiscussionRoomPage: React.FC = () => {
     try {
       await apiClient.post(`/api/interaction/groups/${groupId}/messages`, { content })
       setInput('')
-      // WebSocket 会自动推送新消息，无需手动拉取
+      // 本地立即追加消息，不依赖 WebSocket 回显（确保发送者即时看到）
+      const newMsg: Message = {
+        id: Date.now(),
+        username: user?.username || '我',
+        content,
+        msg_type: 'text',
+        created_at: new Date().toISOString(),
+      }
+      setMessages(prev => [...prev, newMsg])
+      setTimeout(scrollToBottom, 50)
     } catch {
       message.error('发送失败')
     } finally {
