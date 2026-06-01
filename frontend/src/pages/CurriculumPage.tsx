@@ -116,7 +116,7 @@ const CurriculumPage: React.FC = () => {
       }
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '加载课程大纲失败')
+      message.error(detail || '加载课程数据失败')
     } finally {
       setLoading(false)
     }
@@ -628,7 +628,7 @@ const CurriculumPage: React.FC = () => {
       {/* ── 加载中 ── */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
-          <Spin size="large" tip="加载课程大纲..." />
+          <Spin size="large" tip="加载中..." />
         </div>
       )}
 
@@ -657,7 +657,7 @@ const CurriculumPage: React.FC = () => {
               title={
                 <Space>
                   <BookOutlined />
-                  <span>课程大纲</span>
+                  <span>{isStudent ? '课程导学' : '课程管理'}</span>
                   {isTeacherOrAdmin && (
                     <>
                       <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateCourse}>
