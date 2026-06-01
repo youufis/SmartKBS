@@ -371,7 +371,7 @@ const QuestionBankPage: React.FC = () => {
               📝 试题管理
             </Typography.Title>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              通过 AI 智能生成或从文本/Word 文档提取试题，统一管理题库
+              通过 AI 生成或从文本/Word 文档提取试题，统一管理题库
             </Typography.Text>
           </Col>
           <Col>
@@ -402,7 +402,7 @@ const QuestionBankPage: React.FC = () => {
               items={[
                 {
                   key: 'generate',
-                  label: <Space><BookOutlined />AI 智能生成</Space>,
+                  label: <Space><BookOutlined />AI 生成</Space>,
                   children: (
                     <>
                       <Form
