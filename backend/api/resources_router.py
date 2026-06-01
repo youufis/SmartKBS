@@ -371,3 +371,187 @@ h1{{color:#1677ff;border-bottom:2px solid #1677ff;padding-bottom:10px}}
 {file_links if file_links else '<p style="color:#999;text-align:center;padding:40px">暂无资源文件，请在「资源管理」中上传。</p>'}
 <div class="footer"><p>SmartKB 资源中心</p></div>
 </body></html>"""
+
+
+# ═══════════════════════════════════════════════
+# 资源分组管理 API
+# ═══════════════════════════════════════════════
+
+import time
+from backend.database import execute_query, execute_insert_update, execute_batch, get_connection
+
+
+@router.get("/groups")
+async def list_groups(request: Request):
+    """获取当前用户的所有资源分组及包含的文件"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    groups = execute_query(
+        "SELECT id, group_name, sort_order FROM resource_groups WHERE username=? ORDER BY sort_order, id",
+        (username,),
+    )
+    result = []
+    for gid, gname, sort in groups:
+        items = execute_query(
+            "SELECT file_path FROM resource_group_items WHERE group_id=? ORDER BY sort_order, id",
+            (gid,),
+        )
+        result.append({
+            "id": gid,
+            "group_name": gname,
+            "sort_order": sort,
+            "files": [row[0] for row in items],
+        })
+    return {"groups": result}
+
+
+@router.post("/groups")
+async def create_group(request: Request):
+    """创建新分组"""
+    user = get_current_user(request)
+    username = user["username"]
+    body = await request.json()
+    group_name = body.get("group_name", "").strip()
+    if not group_name:
+        raise HTTPException(status_code=400, detail="分组名称不能为空")
+
+    existing = execute_query(
+        "SELECT id FROM resource_groups WHERE username=? AND group_name=?",
+        (username, group_name),
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail=f"分组 '{group_name}' 已存在")
+
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    gid = execute_insert_update(
+        "INSERT INTO resource_groups (username, group_name, sort_order, created_at) VALUES (?, ?, ?, ?)",
+        (username, group_name, 0, now),
+    )
+    logger.info(f"资源分组创建: {username}/{group_name}")
+    return {"message": f"分组 '{group_name}' 已创建", "id": gid}
+
+
+@router.put("/groups/reorder")
+async def reorder_groups(request: Request):
+    """调整分组排序（传入分组 ID 数组，按数组顺序更新 sort_order）"""
+    user = get_current_user(request)
+    username = user["username"]
+    body = await request.json()
+    group_ids = body.get("group_ids", [])
+    if not group_ids:
+        raise HTTPException(status_code=400, detail="group_ids 不能为空")
+
+    ops = []
+    for idx, gid in enumerate(group_ids):
+        ops.append((
+            "UPDATE resource_groups SET sort_order=? WHERE id=? AND username=?",
+            (idx, gid, username),
+        ))
+    execute_batch(ops)
+    logger.info(f"分组排序已更新: {username}, order={group_ids}")
+    return {"message": "排序已更新"}
+
+
+@router.put("/groups/{group_id}")
+async def rename_group(group_id: int, request: Request):
+    """重命名分组"""
+    user = get_current_user(request)
+    username = user["username"]
+    body = await request.json()
+    new_name = body.get("group_name", "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="分组名称不能为空")
+
+    # 验证分组属于当前用户
+    rows = execute_query(
+        "SELECT id FROM resource_groups WHERE id=? AND username=?",
+        (group_id, username),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="分组不存在")
+
+    execute_insert_update(
+        "UPDATE resource_groups SET group_name=? WHERE id=?",
+        (new_name, group_id),
+    )
+    logger.info(f"资源分组重命名: {username}/{group_id} -> {new_name}")
+    return {"message": f"已重命名为 '{new_name}'"}
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(group_id: int, request: Request):
+    """删除分组（不删除资源文件）"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    rows = execute_query(
+        "SELECT id FROM resource_groups WHERE id=? AND username=?",
+        (group_id, username),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="分组不存在")
+
+    # 删除分组及关联记录
+    execute_batch([
+        ("DELETE FROM resource_group_items WHERE group_id=?", (group_id,)),
+        ("DELETE FROM resource_groups WHERE id=?", (group_id,)),
+    ])
+    logger.info(f"资源分组删除: {username}/{group_id}")
+    return {"message": "分组已删除"}
+
+
+@router.post("/groups/{group_id}/items")
+async def add_to_group(group_id: int, request: Request):
+    """将资源添加到分组"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    rows = execute_query(
+        "SELECT id FROM resource_groups WHERE id=? AND username=?",
+        (group_id, username),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="分组不存在")
+
+    body = await request.json()
+    file_path = body.get("file_path", "").strip()
+    if not file_path:
+        raise HTTPException(status_code=400, detail="file_path 不能为空")
+
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        execute_insert_update(
+            "INSERT OR IGNORE INTO resource_group_items (group_id, file_path, sort_order, created_at) VALUES (?, ?, ?, ?)",
+            (group_id, file_path, 0, now),
+        )
+        logger.info(f"资源加入分组: {username}/group={group_id}, file={file_path}")
+        return {"message": "已添加到分组"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加失败: {str(e)}")
+
+
+@router.delete("/groups/{group_id}/items")
+async def remove_from_group(group_id: int, request: Request):
+    """从分组中移除资源"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    rows = execute_query(
+        "SELECT id FROM resource_groups WHERE id=? AND username=?",
+        (group_id, username),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="分组不存在")
+
+    body = await request.json()
+    file_path = body.get("file_path", "").strip()
+    if not file_path:
+        raise HTTPException(status_code=400, detail="file_path 不能为空")
+
+    execute_insert_update(
+        "DELETE FROM resource_group_items WHERE group_id=? AND file_path=?",
+        (group_id, file_path),
+    )
+    logger.info(f"资源移出分组: {username}/group={group_id}, file={file_path}")
+    return {"message": "已从分组移除"}

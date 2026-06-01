@@ -254,7 +254,7 @@ const DownloadsPage: React.FC = () => {
             <Tooltip title={isFileShared(record.path) ? '已共享 - 点击取消共享' : '点击共享'}>
               <Button type="link" size="small"
                 icon={<ShareAltOutlined />}
-                style={{ color: isFileShared(record.path) ? '#1677ff' : '#999' }}
+                style={{ color: isFileShared(record.path) ? '#ff4d4f' : '#999' }}
                 onClick={() => openShare(record.path, record.name)} />
             </Tooltip>
             <Tooltip title="删除">
@@ -330,7 +330,7 @@ const DownloadsPage: React.FC = () => {
 
         {/* 共享文件列表 */}
         {(() => { const downloadShares = receivedShares.filter(s => s.resource_type === 'download'); return downloadShares.length > 0 ? (
-          <Card size="small" title={<><ShareAltOutlined style={{ color: '#1677ff' }} /> 共享文件 ({downloadShares.length})</>}>
+          <Card size="small" title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> 共享文件 ({downloadShares.length})</>}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
               {downloadShares.map((s) => {
                 const fullPath = s.url_path || s.file_path

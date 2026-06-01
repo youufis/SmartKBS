@@ -112,7 +112,7 @@ app.include_router(curriculum_router, prefix="/api/curriculum", tags=["课程大
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    return {"status": "ok", "version": "2.5.0"}
+    return {"status": "ok", "version": "2.8.0"}
 
 
 # ── 静态文件服务（前端构建产物） ──

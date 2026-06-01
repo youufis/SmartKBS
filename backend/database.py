@@ -509,6 +509,34 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 资源分组模块（v2.7）
+            # ═══════════════════════════════════════════════
+
+            c.execute("""CREATE TABLE IF NOT EXISTS resource_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(username, group_name)
+            )""")
+
+            c.execute("""CREATE TABLE IF NOT EXISTS resource_group_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL REFERENCES resource_groups(id),
+                file_path TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(group_id, file_path)
+            )""")
+
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rg_username ON resource_groups(username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rgi_group ON resource_group_items(group_id)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 
