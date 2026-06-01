@@ -33,13 +33,6 @@ def _get_rollcall_teacher(request: Request, body: dict = None) -> str:
     return "root"
 
 
-def _rollcall_dir(teacher: str) -> str:
-    """获取教师的点名数据目录（兼容旧代码）"""
-    if teacher == ROOT_DIR:
-        return os.path.join(BASE_DIR, ROOT_DIR, "html", "rollcall_data")
-    return os.path.join(BASE_DIR, teacher, "html", "rollcall_data")
-
-
 def _load_students(grade="高一"):
     """从数据库加载学生名单，按年级和班级筛选"""
     return load_students(grade)
