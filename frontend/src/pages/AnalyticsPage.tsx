@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import {
   Card, Row, Col, Typography, Spin, Select, Button, Space,
   Empty, Tabs, Statistic, Table, Tag, Tooltip,
@@ -38,6 +38,49 @@ interface ExamAnalytics {
   report: string
 }
 
+interface ClassOverviewData {
+  total_students: number
+  score_total: number
+  score_avg: number
+  rollcall_correct: number
+  rollcall_total: number
+  active_tasks: number
+  submitted_students: number
+  [key: string]: unknown
+}
+
+interface ExamItem {
+  id: number
+  title: string
+  subject: string
+  [key: string]: unknown
+}
+
+interface CourseItem {
+  id: number
+  name: string
+  [key: string]: unknown
+}
+
+interface ProgressStudent {
+  username: string
+  name: string
+  grade: string
+  class: string
+  courses?: {
+    course_id: number
+    completed_kps: number
+    total_kps: number
+    rate: number
+    details?: {
+      kp_id: number
+      kp_name: string
+      status: string
+    }[]
+  }[]
+  [key: string]: unknown
+}
+
 const AnalyticsPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const isStudent = user?.role === 'student'
@@ -45,7 +88,7 @@ const AnalyticsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('class')
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState('')
-  const [rawData, setRawData] = useState<any>(null)
+  const [rawData, setRawData] = useState<ClassOverviewData | null>(null)
 
   // 班级分析参数
   const [grade, setGrade] = useState('高一')
@@ -54,17 +97,17 @@ const AnalyticsPage: React.FC = () => {
   const [allowedGrades, setAllowedGrades] = useState<string[]>([])
 
   // 考试列表
-  const [exams, setExams] = useState<any[]>([])
+  const [exams, setExams] = useState<ExamItem[]>([])
   const [selectedExam, setSelectedExam] = useState<number | null>(null)
   const [examAnalytics, setExamAnalytics] = useState<ExamAnalytics | null>(null)
   const [examLoading, setExamLoading] = useState(false)
 
   // 学情进度
-  const [courses, setCourses] = useState<any[]>([])
+  const [courses, setCourses] = useState<CourseItem[]>([])
   const [courseId, setCourseId] = useState<number | undefined>()
   const [progressGrade, setProgressGrade] = useState<string | undefined>()
   const [progressClass, setProgressClass] = useState<string | undefined>()
-  const [progressStudents, setProgressStudents] = useState<any[]>([])
+  const [progressStudents, setProgressStudents] = useState<ProgressStudent[]>([])
   const [progressLoading, setProgressLoading] = useState(false)
   const [progressStats, setProgressStats] = useState({ totalStudents: 0, avgRate: 0 })
   const [classOptions, setClassOptions] = useState<string[]>([])
@@ -81,7 +124,7 @@ const AnalyticsPage: React.FC = () => {
         }
       })
       .catch(() => {})
-  }, [user?.username])
+  }, [user?.username, grade])
 
   // 加载班级列表
   useEffect(() => {
@@ -118,26 +161,29 @@ const AnalyticsPage: React.FC = () => {
   // 加载学情进度下拉选项（教师只能看到自己的年级和班级）
   useEffect(() => {
     apiClient.get('/api/scores/my-grades', { params: { teacher: user?.username } })
-      .then(({ data }: any) => {
-        const grades = Array.isArray(data) ? data : []
+      .then(({ data }) => {
+        const grades = Array.isArray(data) ? (data as string[]) : []
         setGradeOptions(grades)
-        if (grades.length > 0 && !grades.includes(progressGrade)) {
+        if (grades.length > 0 && !grades.includes(progressGrade ?? '')) {
           setProgressGrade(undefined)
         }
       })
       .catch(() => {})
-  }, [user?.username])
+  }, [user?.username, progressGrade])
 
   // 当进度年级变化时，加载对应班级
+  const prevProgressGrade = useRef(progressGrade)
   useEffect(() => {
     if (progressGrade) {
+      prevProgressGrade.current = progressGrade
       apiClient.get('/api/scores/classes', { params: { grade: progressGrade, teacher: user?.username } })
-        .then(({ data }: any) => {
-          const clsList = Array.isArray(data) ? data : []
+        .then(({ data }) => {
+          const clsList = Array.isArray(data) ? (data as string[]) : []
           setClassOptions(clsList)
         })
         .catch(() => setClassOptions([]))
-    } else {
+    } else if (prevProgressGrade.current !== undefined) {
+      prevProgressGrade.current = undefined
       setClassOptions([])
     }
   }, [progressGrade, user?.username])
@@ -324,7 +370,7 @@ const AnalyticsPage: React.FC = () => {
                   <Space style={{ marginBottom: 16 }}>
                     <Select value={selectedExam} onChange={setSelectedExam} style={{ width: 300 }}
                       placeholder="选择考试"
-                      options={exams.map((e: any) => ({ label: `${e.title} (${e.subject})`, value: e.id }))} />
+                      options={exams.map((e) => ({ label: `${e.title} (${e.subject})`, value: e.id }))} />
                     <Button type="primary" icon={<RobotOutlined />} onClick={handleExamAnalysis}
                       loading={examLoading} disabled={!selectedExam}>
                       AI 分析
@@ -401,7 +447,7 @@ const AnalyticsPage: React.FC = () => {
                     <Select
                       value={courseId} onChange={setCourseId} style={{ width: 160 }}
                       placeholder="选择课程" allowClear
-                      options={courses.map((c: any) => ({ label: c.name, value: c.id }))} />
+                      options={courses.map((c) => ({ label: c.name, value: c.id }))} />
                     <Select
                       value={progressGrade} onChange={setProgressGrade} style={{ width: 120 }}
                       placeholder="全部年级" allowClear
@@ -430,14 +476,14 @@ const AnalyticsPage: React.FC = () => {
                     loading={progressLoading}
                     pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 名学生` }}
                     expandable={{
-                      expandedRowRender: (record: any) => {
+                      expandedRowRender: (record: ProgressStudent) => {
                         const stuCourses = record.courses || []
-                        const detail = stuCourses.find((c: any) => c.course_id === courseId) || stuCourses[0]
+                        const detail = stuCourses.find((c) => c.course_id === courseId) || stuCourses[0]
                         const details = detail?.details || []
                         if (!details.length) return <Text type="secondary">该课程暂无知识点</Text>
                         return (
                           <Space wrap>
-                            {details.map((d: any) => (
+                            {details.map((d) => (
                               <Tooltip key={d.kp_id} title={d.kp_name}>
                                 <Tag color={d.status === 'completed' ? 'success' : d.status === 'in_progress' ? 'processing' : 'default'}
                                   style={{ fontSize: 12, cursor: 'pointer', maxWidth: 160 }}>
@@ -463,8 +509,8 @@ const AnalyticsPage: React.FC = () => {
                       { title: '班级', dataIndex: 'class', width: 70 },
                       {
                         title: '课程完成率', key: 'courses', width: 200,
-                        render: (_: any, record: any) => {
-                          const cd = (record.courses || []).find((c: any) => c.course_id === courseId) || (record.courses || [])[0]
+                        render: (_: unknown, record: ProgressStudent) => {
+                          const cd = (record.courses || []).find((c) => c.course_id === courseId) || (record.courses || [])[0]
                           if (!cd) return <Text type="secondary">—</Text>
                           const { completed_kps, total_kps, rate } = cd
                           return (
