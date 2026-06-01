@@ -185,6 +185,16 @@ const DiscussionRoomPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-suggest`)
       if (data.status === 'ok' && data.content) {
+        // 直接追加到消息列表（WebSocket 推送可能延迟，先本地显示）
+        const newMsg: Message = {
+          id: Date.now(),
+          username: 'AI助教',
+          content: data.content,
+          msg_type: 'ai_suggest',
+          created_at: new Date().toISOString(),
+        }
+        setMessages(prev => [...prev, newMsg])
+        setTimeout(scrollToBottom, 50)
         message.success('AI 助教已回复')
       } else {
         message.info(data.content || 'AI 暂无建议')
