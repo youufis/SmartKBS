@@ -97,7 +97,8 @@ const DiscussionRoomPage: React.FC = () => {
     if (!groupId) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/interaction/ws/${groupId}`
+    const token = localStorage.getItem('smartkb_token') || ''
+    const wsUrl = `${protocol}//${window.location.host}/api/interaction/ws/${groupId}?token=${encodeURIComponent(token)}`
     let reconnectTimer: ReturnType<typeof setTimeout>
 
     const connectWs = () => {
