@@ -251,7 +251,7 @@ const AnalyticsPage: React.FC = () => {
         <div style={{ color: '#fff' }}>
           <Space>
             <RobotOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>AI 智能学情分析</Title>
+            <Title level={3} style={{ color: '#fff', margin: 0 }}>AI 学情分析</Title>
           </Space>
           <Text style={{ color: 'rgba(255,255,255,0.85)', display: 'block', marginTop: 8 }}>
             基于 DashScope AI，对学习数据进行深度分析，生成专业学情报告

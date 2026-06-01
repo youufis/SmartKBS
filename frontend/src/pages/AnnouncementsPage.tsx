@@ -147,7 +147,7 @@ const AnnouncementsPage: React.FC = () => {
                   发布公告
                 </Button>
                 <Button icon={<BulbOutlined />} onClick={() => { setAiModal(true); aiForm.resetFields(); }}>
-                  AI 生成
+                  AI 起草
                 </Button>
               </>
             )}
@@ -222,7 +222,7 @@ const AnnouncementsPage: React.FC = () => {
 
       {/* ── AI 生成公告弹窗 ── */}
       <Modal
-        title="🤖 AI 生成公告"
+        title="🤖 AI 起草公告"
         open={aiModal}
         onCancel={() => setAiModal(false)}
         onOk={handleAiGenerate}

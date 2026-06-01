@@ -641,7 +641,7 @@ const CurriculumPage: React.FC = () => {
                   创建课程
                 </Button>
                 <Button icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
-                  AI 智能导入
+                  AI 导入
                 </Button>
               </Space>
             )}
@@ -664,7 +664,7 @@ const CurriculumPage: React.FC = () => {
                         新建课程
                       </Button>
                       <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
-                        AI 智能导入
+                        AI 导入
                       </Button>
                     </>
                   )}
