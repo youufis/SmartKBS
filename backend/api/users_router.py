@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from backend.database import execute_query, execute_insert_update, get_transaction
+from backend.database import execute_query, execute_insert_update, execute_batch, get_transaction
 from backend.auth import (
     hash_password,
     is_admin,
@@ -24,7 +25,7 @@ from backend.auth import (
     can_import_users,
 )
 from backend.api.dependencies import get_current_user
-from backend.config import STU_DIR, ROOT_DIR
+from backend.config import STU_DIR, ROOT_DIR, BASE_DIR
 from backend.logger import logger
 
 router = APIRouter()
@@ -82,6 +83,57 @@ def _standardize_role(role_value) -> int:
     if r in ("1", "teacher", "教师"):
         return 1
     return 2
+
+
+# ── 彻底删除用户（数据库 + 文件系统） ──
+
+def _delete_user_completely(username: str):
+    """
+    彻底删除用户的所有相关数据：
+    1. 删除用户文件目录（stu/<username> 或 <username>）
+    2. 删除数据库中所有与该用户相关的记录
+    """
+    # 1. 删除用户文件目录
+    user_dir = os.path.join(BASE_DIR, STU_DIR, username)
+    alt_dir = os.path.join(BASE_DIR, username)
+    for d in [user_dir, alt_dir]:
+        if os.path.isdir(d):
+            try:
+                shutil.rmtree(d)
+                logger.info(f"已删除用户目录: {d}")
+            except Exception as e:
+                logger.warning(f"删除用户目录失败 {d}: {e}")
+
+    # 2. 删除数据库中所有与该用户相关的记录（使用事务）
+    delete_ops = [
+        # 以 username 为直接标识的表
+        ("DELETE FROM daily_usage WHERE username=?", (username,)),
+        ("DELETE FROM conversations WHERE username=?", (username,)),
+        ("DELETE FROM notifications WHERE recipient_username=?", (username,)),
+        ("DELETE FROM discussion_members WHERE username=?", (username,)),
+        ("DELETE FROM discussion_messages WHERE username=?", (username,)),
+        ("DELETE FROM interaction_quiz_answers WHERE student_username=?", (username,)),
+        ("DELETE FROM interaction_poll_votes WHERE student_username=?", (username,)),
+        ("DELETE FROM interaction_questions WHERE student_username=?", (username,)),
+        ("DELETE FROM learning_progress WHERE student_username=?", (username,)),
+        ("DELETE FROM task_submissions WHERE student_username=?", (username,)),
+        # 以 username 为创建者/拥有者的表
+        ("DELETE FROM shared_resources WHERE owner_username=?", (username,)),
+        ("DELETE FROM tasks WHERE creator_username=?", (username,)),
+        ("DELETE FROM announcements WHERE creator_username=?", (username,)),
+        ("DELETE FROM interaction_quizzes WHERE creator_username=?", (username,)),
+        ("DELETE FROM interaction_polls WHERE creator_username=?", (username,)),
+        ("DELETE FROM discussions WHERE creator_username=?", (username,)),
+        # 教师相关数据（积分、点名等）
+        ("DELETE FROM scores WHERE teacher_username=?", (username,)),
+        ("DELETE FROM rollcall_weights WHERE teacher_username=?", (username,)),
+        ("DELETE FROM rollcall_meta WHERE teacher_username=?", (username,)),
+        ("DELETE FROM rollcall_history WHERE teacher_username=?", (username,)),
+        # 最后删除用户本身
+        ("DELETE FROM users WHERE username=?", (username,)),
+    ]
+    execute_batch(delete_ops)
+    logger.info(f"用户 '{username}' 的所有数据库记录已清除")
 
 
 # ── API 端点 ──
@@ -181,22 +233,26 @@ async def change_password(req: ChangePasswordRequest, request: Request):
 
 @router.delete("/{username}")
 async def delete_user(username: str, request: Request):
-    """删除用户（仅管理员）"""
+    """彻底删除用户及其所有相关数据（仅管理员）"""
     current_user = get_current_user(request)
     if not can_manage_users(current_user["username"]):
         raise HTTPException(status_code=403, detail="权限不足：仅管理员可以删除用户")
 
-    if username == "root":
-        raise HTTPException(status_code=400, detail="不能删除管理员账号")
-
-    existing = execute_query("SELECT username FROM users WHERE username=?", (username,))
-    if not existing:
+    # 检查用户是否存在并获取角色
+    rows = execute_query("SELECT username, role FROM users WHERE username=?", (username,))
+    if not rows:
         raise HTTPException(status_code=404, detail=f"用户 '{username}' 不存在")
 
+    user_role = rows[0][1]
+
+    # 禁止删除任何管理员账号（role=0）
+    if user_role == 0:
+        raise HTTPException(status_code=400, detail="不能删除管理员账号")
+
     try:
-        execute_insert_update("DELETE FROM users WHERE username=?", (username,))
-        logger.info(f"用户已删除: {username}")
-        return {"message": f"用户 '{username}' 已删除"}
+        _delete_user_completely(username)
+        logger.info(f"用户已彻底删除: {username}")
+        return {"message": f"用户 '{username}' 已彻底删除"}
     except Exception as e:
         logger.error(f"删除用户失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
@@ -262,7 +318,7 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
 
 @router.post("/bulk-delete")
 async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
-    """批量删除用户（按用户名模式匹配）"""
+    """批量彻底删除用户（按用户名模式匹配，跳过管理员账号）"""
     current_user = get_current_user(request)
     if not can_manage_users(current_user["username"]):
         raise HTTPException(status_code=403, detail="权限不足：仅管理员可以批量删除")
@@ -272,20 +328,18 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
         raise HTTPException(status_code=400, detail="请提供要删除的用户名模式")
 
     try:
-        # 先查出匹配的用户（用于返回列表）
+        # 先查出匹配的非管理员用户（用于返回列表）
         rows = execute_query(
-            "SELECT username FROM users WHERE username LIKE ? AND username != 'root'",
+            "SELECT username FROM users WHERE username LIKE ? AND role != 0",
             (f"%{pattern}%",),
         )
         deleted = [row[0] for row in rows]
         if not deleted:
             return {"message": "没有匹配的用户", "deleted": []}
 
-        # 使用 get_transaction 在单一事务中执行所有删除
-        with get_transaction() as conn:
-            cursor = conn.cursor()
-            for username in deleted:
-                cursor.execute("DELETE FROM users WHERE username=?", (username,))
+        # 逐个彻底删除（每个用户清理数据库记录 + 文件目录）
+        for username in deleted:
+            _delete_user_completely(username)
 
         logger.info(f"批量删除用户: pattern={pattern}, count={len(deleted)}")
         return {"message": f"已删除 {len(deleted)} 个用户", "deleted": deleted}
