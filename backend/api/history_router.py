@@ -158,7 +158,25 @@ async def delete_history_file(path: str = Query(...), request: Request = None):
         raise HTTPException(status_code=403, detail="无权删除该文件")
 
     if not os.path.exists(target_path):
-        raise HTTPException(status_code=404, detail="文件不存在")
+        # 磁盘上可能已经被手动删除，但 DB 中仍保留索引。
+        # 在此情况下不应该直接返回 404，而是尝试从 conversations 表中移除对应的索引。
+        rel = os.path.relpath(target_path, chat_dir).replace("\\", "/")
+        # 防止误删除根目录
+        if rel in (".", ""):
+            raise HTTPException(status_code=400, detail="不能删除根目录")
+
+        try:
+            # 删除与该文件或目录匹配的索引（文件精确匹配或目录前缀匹配）
+            execute_insert_update(
+                "DELETE FROM conversations WHERE username=? AND (filename=? OR filename LIKE ?)",
+                (username, rel, f"{rel}%"),
+            )
+            msg = f"路径在磁盘上不存在，已从索引中移除: {rel}"
+            logger.info(f"历史记录索引已移除: username={username}, rel={rel}")
+            return {"message": msg}
+        except Exception as e:
+            logger.error(f"删除历史记录索引失败: {e}")
+            raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
     # 记录请求的路径和实际解析的路径，帮助排查
     logger.info(f"删除请求: path='{path}' → chat_dir='{chat_dir}' → target='{target_path}'")
