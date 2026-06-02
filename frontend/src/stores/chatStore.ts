@@ -43,6 +43,7 @@ interface ChatStore {
   currentText: string;
   filePaths: string[];
   contextEnhance: boolean;
+  ragEnabled: boolean;
   historyTree: TreeNode[];
   historyLoading: boolean;
   historyContent: string;
@@ -54,6 +55,7 @@ interface ChatStore {
   newTopic: () => void;
   setFilePaths: (paths: string[]) => void;
   setContextEnhance: (v: boolean) => void;
+  setRagEnabled: (v: boolean) => void;
   addSystemMessage: (content: string) => void;
   loadHistoryTree: () => Promise<void>;
   loadHistoryFile: (path: string) => Promise<void>;
@@ -69,6 +71,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   currentText: '',
   filePaths: [],
   contextEnhance: false,
+  ragEnabled: false,
   historyTree: [],
   historyLoading: false,
   historyContent: '',
@@ -160,6 +163,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   setFilePaths: (paths: string[]) => set({ filePaths: paths }),
   setContextEnhance: (v: boolean) => set({ contextEnhance: v }),
+  setRagEnabled: (v: boolean) => set({ ragEnabled: v }),
 
   addSystemMessage: (content: string) => {
     const msg: Message = {
