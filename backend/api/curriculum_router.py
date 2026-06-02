@@ -1584,3 +1584,63 @@ def execute_query_one(sql: str, params: tuple = ()):
     """执行查询并返回单条结果"""
     rows = execute_query(sql, params)
     return rows[0] if rows else None
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.1 新增：AI 备课助手
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/ai-lesson-plan")
+async def ai_lesson_plan(
+    request: Request,
+    knowledge_point_id: int = Query(..., description="知识点 ID"),
+):
+    """AI 备课助手：根据知识点生成完整教案"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用备课助手")
+
+    # 获取知识点信息
+    kp_rows = execute_query(
+        """SELECT kp.id, kp.name, kp.chapter_id, c.name as chapter_name,
+                  co.name as course_name, co.grade
+           FROM knowledge_points kp
+           JOIN chapters c ON c.id = kp.chapter_id
+           JOIN courses co ON co.id = c.course_id
+           WHERE kp.id = ?""",
+        (knowledge_point_id,),
+    )
+    if not kp_rows:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    kp = kp_rows[0]
+
+    from backend.prompts.teaching import LESSON_PLAN_PROMPT
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_sync
+
+    keys = get_api_keys(username)
+    api_key = keys.get("dashscope_key") or keys.get("deepseek_key") or ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
+
+    prompt = LESSON_PLAN_PROMPT.format(
+        course_name=kp["course_name"],
+        chapter_name=kp["chapter_name"],
+        knowledge_point=kp["name"],
+        grade=kp.get("grade", ""),
+    )
+
+    try:
+        lesson_plan = call_ai_sync(prompt, api_key)
+        return {
+            "knowledge_point": kp["name"],
+            "chapter_name": kp["chapter_name"],
+            "course_name": kp["course_name"],
+            "lesson_plan": lesson_plan,
+        }
+    except Exception as e:
+        logger.error(f"AI 备课助手生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")

@@ -1206,3 +1206,226 @@ async def get_exam_results(exam_id: int, request: Request):
             "min_score": min_score,
         },
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.1 新增：AI 知识点讲解 & AI 简答题评分
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/{exam_id}/explain-wrong")
+async def get_wrong_answer_explanation(exam_id: int, request: Request):
+    """AI 讲解错题：根据学生的错误答案生成知识点讲解"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+
+    # 获取该学生的答题记录
+    attempt = execute_query_one(
+        """SELECT * FROM exam_attempts
+           WHERE exam_id = ? AND student_username = ? AND status = 'submitted'
+           ORDER BY submitted_at DESC LIMIT 1""",
+        (exam_id, username),
+    )
+    if not attempt:
+        raise HTTPException(status_code=404, detail="未找到答题记录")
+
+    answers_data = attempt.get("answers")
+    if isinstance(answers_data, str):
+        answers_data = json.loads(answers_data)
+
+    if not answers_data:
+        raise HTTPException(status_code=404, detail="无答题数据")
+
+    # 获取所有题目
+    questions = execute_query(
+        """SELECT q.id, q.type, q.question_text, q.correct_answer,
+                  q.knowledge_points, q.options, q.analysis
+           FROM exam_questions eq
+           JOIN question_bank q ON q.id = eq.question_id
+           WHERE eq.exam_id = ? AND q.status = 'active'""",
+        (exam_id,),
+    )
+
+    explanations = []
+    for q in questions:
+        qid = str(q["id"])
+        if qid not in answers_data:
+            continue
+        ans = answers_data[qid]
+        # 只讲解错题
+        if ans.get("is_correct", False):
+            continue
+
+        # 构建讲解 Prompt
+        from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
+        from backend.api.chat_router import get_api_keys
+        from backend.api.ai_service import call_ai_sync
+
+        prompt = KNOWLEDGE_EXPLAIN_PROMPT.format(
+            question_text=q["question_text"],
+            question_type=q["type"],
+            correct_answer=q["correct_answer"],
+            student_answer=ans.get("student_answer", ""),
+            knowledge_points=q.get("knowledge_points", ""),
+        )
+
+        try:
+            keys = get_api_keys(username)
+            api_key = keys.get("dashscope_key") or keys.get("deepseek_key") or ""
+            if not api_key:
+                explanations.append({
+                    "question_id": q["id"],
+                    "question_text": q["question_text"],
+                    "error": "未配置 API Key",
+                })
+                continue
+
+            ai_response = call_ai_sync(prompt, api_key)
+            explanations.append({
+                "question_id": q["id"],
+                "question_text": q["question_text"],
+                "question_type": q["type"],
+                "knowledge_points": q.get("knowledge_points", ""),
+                "explanation": ai_response,
+                "student_answer": ans.get("student_answer", ""),
+                "correct_answer": q["correct_answer"],
+            })
+        except Exception as e:
+            logger.error(f"AI 讲解生成失败: {e}")
+            explanations.append({
+                "question_id": q["id"],
+                "question_text": q["question_text"],
+                "error": f"AI 讲解生成失败: {str(e)}",
+            })
+
+    return {
+        "exam_title": exam["title"],
+        "explanations": explanations,
+        "total_wrong": len(explanations),
+    }
+
+
+@router.post("/{exam_id}/ai-grade-short")
+async def ai_grade_short_answers(exam_id: int, request: Request):
+    """AI 批改简答题：对考试中所有简答题进行 AI 评分"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可进行 AI 批改")
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+
+    if not _can_manage_exam(username, exam):
+        raise HTTPException(status_code=403, detail="无权操作此考试")
+
+    # 获取所有简答题
+    short_questions = execute_query(
+        """SELECT q.id, q.question_text, q.correct_answer, eq.score
+           FROM exam_questions eq
+           JOIN question_bank q ON q.id = eq.question_id
+           WHERE eq.exam_id = ? AND q.type = 'short' AND q.status = 'active'""",
+        (exam_id,),
+    )
+
+    if not short_questions:
+        raise HTTPException(status_code=400, detail="该考试没有简答题")
+
+    # 获取所有已提交的答题记录
+    attempts = execute_query(
+        """SELECT * FROM exam_attempts
+           WHERE exam_id = ? AND status = 'submitted'""",
+        (exam_id,),
+    )
+
+    from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_sync
+
+    keys = get_api_keys(username)
+    api_key = keys.get("dashscope_key") or keys.get("deepseek_key") or ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    graded_count = 0
+    errors = []
+
+    for attempt in attempts:
+        answers_data = attempt.get("answers")
+        if isinstance(answers_data, str):
+            answers_data = json.loads(answers_data)
+        if not answers_data:
+            continue
+
+        need_update = False
+        for q in short_questions:
+            qid = str(q["id"])
+            if qid not in answers_data:
+                continue
+
+            ans = answers_data[qid]
+            # 如果已经是 AI 评过分或人工复核过，跳过
+            if ans.get("ai_graded") or ans.get("reviewed"):
+                continue
+
+            max_score = q["score"] or 5
+            half_score = max_score * 0.5
+            near_full = max_score * 0.8
+            half_minus = max_score * 0.4
+
+            prompt = SHORT_ANSWER_GRADING_PROMPT.format(
+                question_text=q["question_text"],
+                correct_answer=q["correct_answer"] or "",
+                max_score=max_score,
+                half_score=half_score,
+                near_full=near_full,
+                half_minus=half_minus,
+                student_answer=ans.get("student_answer", ""),
+            )
+
+            try:
+                ai_response = call_ai_sync(prompt, api_key)
+                # 解析 AI 返回的 JSON
+                import re
+                json_match = re.search(r'\{[^}]+\}', ai_response)
+                if json_match:
+                    result = json.loads(json_match.group())
+                    ai_score = float(result.get("score", 0))
+                    ai_score = max(0, min(ai_score, max_score))
+
+                    ans["score"] = ai_score
+                    ans["is_correct"] = ai_score >= max_score * 0.6
+                    ans["ai_graded"] = True
+                    ans["ai_comment"] = result.get("comment", "")
+                    ans["ai_feedback"] = result.get("feedback", "")
+                    need_update = True
+                    graded_count += 1
+                else:
+                    errors.append(f"学生 {attempt['student_username']} 题目 {qid}: AI 返回格式异常")
+            except Exception as e:
+                errors.append(f"学生 {attempt['student_username']} 题目 {qid}: {str(e)}")
+
+        if need_update:
+            # 重新计算总分
+            total_earned = sum(
+                v.get("score", 0) for v in answers_data.values()
+            )
+            execute_update(
+                """UPDATE exam_attempts
+                   SET answers = ?, score = ?
+                   WHERE id = ?""",
+                (json.dumps(answers_data, ensure_ascii=False),
+                 round(total_earned, 1), attempt["id"]),
+            )
+
+    return {
+        "message": f"AI 批改完成，共评分 {graded_count} 道简答题",
+        "graded_count": graded_count,
+        "errors": errors[:10],
+    }
