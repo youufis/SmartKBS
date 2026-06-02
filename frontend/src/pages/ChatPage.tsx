@@ -98,8 +98,8 @@ const ChatPage: React.FC = () => {
   // 智能教育助手 - SmartKB
   const {
     messages, isStreaming, currentText, filePaths,
-    contextEnhance, sendMessage, stopStreaming, newTopic,
-    setFilePaths, setContextEnhance,
+    contextEnhance, ragEnabled, sendMessage, stopStreaming, newTopic,
+    setFilePaths, setContextEnhance, setRagEnabled,
     historyTree, historyLoading,
     loadHistoryTree,
   } = useChatStore()
@@ -530,6 +530,16 @@ const ChatPage: React.FC = () => {
               <Checkbox checked={contextEnhance}
                 onChange={(e) => setContextEnhance(e.target.checked)}>
                 摘要
+              </Checkbox>
+            </Tooltip>
+            <Tooltip title={
+              <span style={{ fontSize: 12, lineHeight: 1.6 }}>
+                开启后 AI 会从试题库和课程大纲中检索相关知识辅助回答
+              </span>
+            }>
+              <Checkbox checked={ragEnabled}
+                onChange={(e) => setRagEnabled(e.target.checked)}>
+                学科知识
               </Checkbox>
             </Tooltip>
             {hasHtmlInResponse && (

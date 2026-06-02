@@ -307,6 +307,18 @@ def _chat_event_generator(
         enhanced_prompt = enhance_prompt_with_user_context(prompt, user_payload)
         valid_file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
 
+        # ── V3.2 RAG 增强：从试题库和课程大纲检索相关知识 ──
+        try:
+            from backend.rag import retrieve_knowledge
+            rag_context = retrieve_knowledge(prompt, username)
+            if rag_context:
+                system_role = "你是一位高中信息技术与通用技术教师。请用你的学科知识回答用户的问题。"
+                if "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
+                    rag_context = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
+                enhanced_prompt = f"{system_role}\n\n{rag_context}\n\n用户问题：{enhanced_prompt}"
+        except Exception as e:
+            logger.warning(f"RAG 检索失败: {e}")
+
         if context_enhance and valid_file_paths:
             summaries = []
             for fp in valid_file_paths:
