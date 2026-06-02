@@ -10,6 +10,7 @@ import {
   TeamOutlined, CheckCircleOutlined, ClockCircleOutlined,
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
 } from '@ant-design/icons'
+import ReactMarkdown from 'react-markdown'
 import * as curriculumApi from '../api/curriculum'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -1053,23 +1054,24 @@ const CurriculumPage: React.FC = () => {
         open={lessonPlanModal}
         onCancel={() => setLessonPlanModal(false)}
         width={800}
-        footer={<Button onClick={() => setLessonPlanModal(false)}>关闭</Button>}
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <Button icon={<DownloadOutlined />} onClick={() => {
+              if (!lessonPlanData) { message.warning('请先生成教案'); return }
+              // 先获取知识点 ID — 从当前选中的知识点获取
+              if (!selectedKp) { message.warning('未选中知识点'); return }
+              const token = localStorage.getItem('smartkb_token')
+              const url = `/api/curriculum/ai-lesson-plan/${selectedKp.id}/export${token ? `?token=${token}` : ''}`
+              window.open(url, '_blank')
+            }}>导出 Word</Button>
+            <Button onClick={() => setLessonPlanModal(false)}>关闭</Button>
+          </Space>
+        }
       >
         {lessonPlanData && (
-          <div style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 14, lineHeight: 1.8 }}>
+          <div style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 14, lineHeight: 1.8, padding: '0 4px' }}>
             <div className="markdown-content">
-              {lessonPlanData.lesson_plan.split('\n').map((line, i) => {
-                if (line.startsWith('### ')) return <Typography.Title key={i} level={4}>{line.replace('### ', '')}</Typography.Title>
-                if (line.startsWith('## ')) return <Typography.Title key={i} level={3}>{line.replace('## ', '')}</Typography.Title>
-                if (line.startsWith('**') && line.endsWith('**')) return <Typography.Text key={i} strong>{line.slice(2, -2)}</Typography.Text>
-                if (line.startsWith('- **')) {
-                  const match = line.match(/- \*\*(.*?)\*\*[：:]\s*(.*)/)
-                  if (match) return <div key={i} style={{ margin: '4px 0' }}><Typography.Text strong>{match[1]}</Typography.Text>：{match[2]}</div>
-                }
-                if (line.startsWith('- ')) return <li key={i} style={{ margin: '2px 0' }}>{line.slice(2)}</li>
-                if (line.trim() === '') return <div key={i} style={{ height: 8 }} />
-                return <Typography.Paragraph key={i} style={{ margin: '4px 0' }}>{line}</Typography.Paragraph>
-              })}
+              <ReactMarkdown>{lessonPlanData.lesson_plan}</ReactMarkdown>
             </div>
           </div>
         )}

@@ -1114,6 +1114,55 @@ def _check_short_answer(student: str, correct: str) -> bool:
     return False
 
 
+# ── 学生查看自己的答题详情 ──
+
+@router.get("/attempt/{attempt_id}/exam/{exam_id}")
+async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request):
+    """获取学生自己的答题详情（学生可查看自己的，教师/管理员可查看任何）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    attempt = execute_query_one("SELECT * FROM exam_attempts WHERE id = ? AND exam_id = ?",
+                                 (attempt_id, exam_id))
+    if not attempt:
+        raise HTTPException(status_code=404, detail="答题记录不存在")
+
+    # 权限检查：学生只能看自己的，教师/管理员可看任何
+    if role == 2 and attempt["student_username"] != username:
+        raise HTTPException(status_code=403, detail="无权查看他人的答题详情")
+
+    # 解析答案
+    answers = attempt.get("answers")
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except (json.JSONDecodeError, TypeError):
+            answers = {}
+
+    # 获取题目信息
+    questions = execute_query(
+        """SELECT q.id, q.type, q.question_text, q.correct_answer,
+                  q.knowledge_points, eq.score as question_score
+           FROM exam_questions eq
+           JOIN question_bank q ON q.id = eq.question_id
+           WHERE eq.exam_id = ? AND q.status = 'active'
+           ORDER BY eq.sort_order""",
+        (exam_id,),
+    )
+
+    return {
+        "attempt": {
+            "id": attempt["id"],
+            "score": attempt["score"],
+            "total_score": attempt["total_score"],
+            "submitted_at": attempt["submitted_at"],
+            "answers": answers,
+        },
+        "questions": questions,
+    }
+
+
 # ── 成绩与统计 ──
 
 # 注意：/student/results 必须定义在 /{exam_id}/results 之前，避免路由冲突
@@ -1242,7 +1291,7 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
     # 获取所有题目
     questions = execute_query(
         """SELECT q.id, q.type, q.question_text, q.correct_answer,
-                  q.knowledge_points, q.options, q.analysis
+                  q.knowledge_points, q.options, q.explanation
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'""",
@@ -1250,20 +1299,29 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
     )
 
     explanations = []
-    for q in questions:
-        qid = str(q["id"])
-        if qid not in answers_data:
-            continue
-        ans = answers_data[qid]
-        # 只讲解错题
-        if ans.get("is_correct", False):
-            continue
 
-        # 构建讲解 Prompt（安全转义，防止 question_text 包含 { 或 } 导致 format 失败）
-        from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
-        from backend.api.chat_router import get_api_keys
-        from backend.api.ai_service import call_ai_sync
+    # 先获取 API Key，避免每个循环都调用
+    from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_sync
 
+    keys = get_api_keys(username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        return {
+            "exam_title": exam["title"],
+            "explanations": [{"error": "未配置 API Key，请在系统配置中设置"}],
+            "total_wrong": 0,
+        }
+
+    import asyncio
+    import concurrent.futures
+
+    loop = asyncio.get_event_loop()
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+
+    def _call_ai_for_question(q, ans):
+        """为单个题目调用 AI 讲解"""
         def _safe(s):
             return str(s).replace('{', '{{').replace('}', '}}')
 
@@ -1274,35 +1332,41 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
             student_answer=_safe(ans.get("student_answer", "")),
             knowledge_points=_safe(q.get("knowledge_points", "")),
         )
+        ai_response = call_ai_sync(prompt, api_key)
+        return {
+            "question_id": q["id"],
+            "question_text": q["question_text"],
+            "question_type": q["type"],
+            "knowledge_points": q.get("knowledge_points", ""),
+            "explanation": ai_response,
+            "student_answer": ans.get("student_answer", ""),
+            "correct_answer": q["correct_answer"],
+        }
 
-        try:
-            keys = get_api_keys(username)
-            api_key = keys.get("dashscope_key") or keys.get("deepseek_key") or ""
-            if not api_key:
-                explanations.append({
-                    "question_id": q["id"],
-                    "question_text": q["question_text"],
-                    "error": "未配置 API Key",
-                })
-                continue
+    # 收集需要讲解的错题
+    wrong_questions = []
+    for q in questions:
+        qid = str(q["id"])
+        if qid not in answers_data:
+            continue
+        ans = answers_data[qid]
+        if not ans.get("is_correct", False):
+            wrong_questions.append((q, ans))
 
-            ai_response = call_ai_sync(prompt, api_key)
-            explanations.append({
-                "question_id": q["id"],
-                "question_text": q["question_text"],
-                "question_type": q["type"],
-                "knowledge_points": q.get("knowledge_points", ""),
-                "explanation": ai_response,
-                "student_answer": ans.get("student_answer", ""),
-                "correct_answer": q["correct_answer"],
-            })
-        except Exception as e:
-            logger.error(f"AI 讲解生成失败: {e}")
-            explanations.append({
-                "question_id": q["id"],
-                "question_text": q["question_text"],
-                "error": f"AI 讲解生成失败: {str(e)}",
-            })
+    # 并发调用 AI（最多5个并发）
+    futures = []
+    for q, ans in wrong_questions:
+        future = loop.run_in_executor(executor, _call_ai_for_question, q, ans)
+        futures.append(future)
+
+    if futures:
+        done, _ = await asyncio.wait(futures, timeout=120)
+        for future in done:
+            try:
+                explanations.append(future.result())
+            except Exception as e:
+                logger.error(f"AI 讲解生成失败: {e}")
+                explanations.append({"error": f"AI 讲解生成失败: {str(e)}"})
 
     return {
         "exam_title": exam["title"],
@@ -1352,7 +1416,7 @@ async def ai_grade_short_answers(exam_id: int, request: Request):
     from backend.api.ai_service import call_ai_sync
 
     keys = get_api_keys(username)
-    api_key = keys.get("dashscope_key") or keys.get("deepseek_key") or ""
+    api_key = keys[0] if keys and keys[0] else ""
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
