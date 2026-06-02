@@ -274,9 +274,51 @@ async def api_delete(request: Request):
 
     try:
         _rm_and_clean(filepath)
+        # 文件删除后清理空目录共享记录
+        try:
+            from backend.api.sharing_router import _cleanup_empty_dir_shares
+            _cleanup_empty_dir_shares(username)
+        except Exception:
+            pass
         return {"success": True, "filename": rel}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@router.get("/shared-list", summary="浏览共享目录内容")
+async def api_shared_list(request: Request, owner: str = "", dir_path: str = ""):
+    """浏览共享给当前用户的目录内容
+
+    接收方点击共享的目录卡片后，调用此接口列出该目录下的文件。
+    需要验证该目录确实已共享给当前用户。
+    """
+    user = getattr(request.state, "user", None)
+    if not user:
+        return {"files": [], "error": "未登录"}
+    username = user["username"]
+    viewer_role = user.get("role", 2)
+
+    if not owner or not dir_path:
+        return {"files": [], "error": "缺少 owner 或 dir_path"}
+
+    # 检查共享权限：该目录是否对当前用户可见
+    from backend.api.sharing_router import is_file_shared_with_user
+    clean_dir = dir_path.strip("/")
+    if not is_file_shared_with_user(clean_dir, "download", owner, username):
+        return {"files": [], "error": "无权访问该目录"}
+
+    # 构建实际目录路径
+    from backend.utils import get_user_base_dir
+    base = get_user_base_dir(owner)
+    full_dir = os.path.join(str(BASE_DIR), base, "downloads", clean_dir)
+
+    if not os.path.isdir(full_dir):
+        return {"files": [], "error": "目录不存在"}
+
+    entries = _scan_dir(full_dir, clean_dir)
+    # 过滤掉目录项（只保留文件），因为接收方只需看到可下载的文件
+    files_only = [e for e in entries if not e.get("is_dir")]
+    return {"files": files_only, "dir_path": clean_dir, "owner": owner}
 
 
 @router.get("/check", summary="诊断用户状态")

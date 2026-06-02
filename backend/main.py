@@ -28,6 +28,12 @@ async def lifespan(app: FastAPI):
     os.environ.setdefault("MPLCONFIGDIR", str(BASE_DIR / "matplotlib"))
     init_db()
     init_question_db()
+    # 启动时清理残留的空目录共享记录
+    try:
+        from backend.api.sharing_router import _cleanup_empty_dir_shares
+        _cleanup_empty_dir_shares()
+    except Exception:
+        pass
     logger.info("SmartKB 后端启动完成")
     yield
     # ── 关闭 ──
@@ -38,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="高中信息技术与通用技术课程 AI 智慧教学管理平台",
-    version="2.7.0",
+    version="3.0.0",
     docs_url="/docs",
     lifespan=lifespan,
 )
@@ -112,7 +118,7 @@ app.include_router(curriculum_router, prefix="/api/curriculum", tags=["课程大
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    return {"status": "ok", "version": "2.8.0"}
+    return {"status": "ok", "version": "3.0.0"}
 
 
 # ── 静态文件服务（前端构建产物） ──

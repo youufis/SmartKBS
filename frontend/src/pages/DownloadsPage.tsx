@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown } from 'antd'
+import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List } from 'antd'
 import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined } from '@ant-design/icons'
 import * as sharingApi from '../api/sharing'
 import ShareDialog from '../components/ShareDialog'
@@ -30,7 +30,35 @@ const DownloadsPage: React.FC = () => {
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [shareFile, setShareFile] = useState<{ path: string; name: string }>({ path: '', name: '' })
   const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
+  const [shareInherited, setShareInherited] = useState(false)
   const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
+
+  // ── 浏览共享目录 ──
+  const [browseDirOpen, setBrowseDirOpen] = useState(false)
+  const [browseDirInfo, setBrowseDirInfo] = useState<{ owner: string; dirPath: string; dirName: string } | null>(null)
+  const [browseDirFiles, setBrowseDirFiles] = useState<DownloadFile[]>([])
+  const [browseDirLoading, setBrowseDirLoading] = useState(false)
+  const openBrowseDir = async (owner: string, dirPath: string, dirName: string) => {
+    setBrowseDirInfo({ owner, dirPath, dirName })
+    setBrowseDirOpen(true)
+    setBrowseDirLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/downloads/shared-list', {
+        params: { owner, dir_path: dirPath },
+      })
+      if (data.error) {
+        message.error(data.error)
+        setBrowseDirFiles([])
+      } else {
+        setBrowseDirFiles(data.files || [])
+      }
+    } catch {
+      message.error('加载共享目录失败')
+      setBrowseDirFiles([])
+    } finally {
+      setBrowseDirLoading(false)
+    }
+  }
   const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
   const loadShares = async () => {
     try {
@@ -41,14 +69,35 @@ const DownloadsPage: React.FC = () => {
     } catch { /* ignore */ }
   }
 
+  // 检查文件/目录是否已共享（精确匹配或继承自目录共享）
   const isFileShared = (filePath: string) => {
-    return myShares.some(s => s.file_path === filePath)
+    return myShares.some(s => {
+      // 规范化路径，去掉末尾的 /
+      const sp = s.file_path.replace(/\/+$/, '')
+      const fp = filePath.replace(/\/+$/, '')
+      return sp === fp || fp.startsWith(sp + '/')
+    })
+  }
+
+  // 查找文件最相关的共享记录：优先精确匹配，其次找最近的父目录共享
+  const findShareRecord = (filePath: string): { record: sharingApi.ShareItem | null; inherited: boolean } => {
+    const fp = filePath.replace(/\/+$/, '')
+    // 精确匹配优先
+    const exact = myShares.find(s => s.file_path.replace(/\/+$/, '') === fp)
+    if (exact) return { record: exact, inherited: false }
+    // 按路径深度排序，找最匹配的目录共享（路径最长的前缀）
+    const dirShares = myShares
+      .filter(s => fp.startsWith(s.file_path.replace(/\/+$/, '') + '/'))
+      .sort((a, b) => b.file_path.length - a.file_path.length)
+    if (dirShares[0]) return { record: dirShares[0], inherited: true }
+    return { record: null, inherited: false }
   }
 
   const openShare = (filePath: string, fileName: string) => {
     setShareFile({ path: filePath, name: fileName })
-    const existing = myShares.find(s => s.file_path === filePath) || null
-    setShareExisting(existing)
+    const { record, inherited } = findShareRecord(filePath)
+    setShareExisting(record)
+    setShareInherited(inherited)
     setShareDialogOpen(true)
   }
 
@@ -200,8 +249,9 @@ const DownloadsPage: React.FC = () => {
 
   // 构造下载链接（按用户隔离）
   const buildDownloadUrl = (record: DownloadFile) => {
-    const dir = record.path.replace('/' + record.name, '')
-    const sep = dir ? `${dir}/${record.name}` : record.name
+    // 如果 path 就是文件名本身（根目录），sep 直接使用 name
+    // 如果 path 包含子目录（如 "subdir/文件.png"），则保留子目录路径
+    const sep = record.path
     const baseUrl = `/api/files/${encodeURIComponent(`${username}/downloads/${sep}`)}`
     return baseUrl
   }
@@ -242,27 +292,28 @@ const DownloadsPage: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 150,
-      render: (_: unknown, record: DownloadFile) =>
-        record.is_dir ? null : (
-          <Space>
+      width: 180,
+      render: (_: unknown, record: DownloadFile) => (
+        <Space>
+          {!record.is_dir && (
             <Tooltip title="下载">
               <Button type="link" icon={<DownloadOutlined />}
                 href={buildDownloadUrl(record)}
                 target="_blank" />
             </Tooltip>
-            <Tooltip title={isFileShared(record.path) ? '已共享 - 点击取消共享' : '点击共享'}>
-              <Button type="link" size="small"
-                icon={<ShareAltOutlined />}
-                style={{ color: isFileShared(record.path) ? '#ff4d4f' : '#999' }}
-                onClick={() => openShare(record.path, record.name)} />
-            </Tooltip>
-            <Tooltip title="删除">
-              <Button type="link" danger icon={<DeleteOutlined />}
-                onClick={() => handleDelete(record.path)} />
-            </Tooltip>
-          </Space>
-        ),
+          )}
+          <Tooltip title={record.is_dir ? '共享整个目录' : (isFileShared(record.path) ? '已共享 - 点击管理' : '点击共享')}>
+            <Button type="link" size="small"
+              icon={<ShareAltOutlined />}
+              style={{ color: isFileShared(record.path) ? '#ff4d4f' : '#999' }}
+              onClick={() => openShare(record.path, record.name)} />
+          </Tooltip>
+          <Tooltip title="删除">
+            <Button type="link" danger icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record.path)} />
+          </Tooltip>
+        </Space>
+      ),
     },
   ]
 
@@ -329,33 +380,109 @@ const DownloadsPage: React.FC = () => {
         )}
 
         {/* 共享文件列表 */}
-        {(() => { const downloadShares = receivedShares.filter(s => s.resource_type === 'download'); return downloadShares.length > 0 ? (
-          <Card size="small" title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> 共享文件 ({downloadShares.length})</>}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-              {downloadShares.map((s) => {
-                const fullPath = s.url_path || s.file_path
-                const fileUrl = `/api/files/${fullPath}`
-                return (
-                  <Card key={s.id} size="small" hoverable>
+        {(() => {
+          const downloadShares = receivedShares.filter(s => s.resource_type === 'download')
+          // 检测是否为目录共享（file_path 不含扩展名且接收方看不到精确匹配的文件时视为目录）
+          const dirShares = downloadShares.filter(s => {
+            const hasExt = /\.[a-zA-Z0-9]+$/.test(s.file_path)
+            return !hasExt
+          })
+          const fileShares = downloadShares.filter(s => !dirShares.includes(s))
+          return downloadShares.length > 0 ? (
+            <Card size="small" title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> 共享文件 ({downloadShares.length})</>}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                {dirShares.map((s) => (
+                  <Card key={s.id} size="small" hoverable
+                    onClick={() => openBrowseDir(s.owner_username, s.file_path, s.file_name)}
+                    style={{ cursor: 'pointer' }}>
                     <Card.Meta
-                      avatar={<FileOutlined style={{ color: '#1677ff' }} />}
+                      avatar={<FolderOutlined style={{ color: '#faad14' }} />}
                       title={
-                        <a href={fileUrl} target="_blank" rel="noreferrer"
+                        <Typography.Text strong
                           style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-                          {s.file_name}
-                        </a>
+                          📁 {s.file_name}/
+                        </Typography.Text>
                       }
-                      description={<span style={{ fontSize: 11 }}>来自 {s.owner_username}</span>}
+                      description={<span style={{ fontSize: 11 }}>来自 {s.owner_username}（点击浏览）</span>}
                     />
                   </Card>
-                )
-              })}
-            </div>
-          </Card>
-        ) : null; })()}
+                ))}
+                {fileShares.map((s) => {
+                  const fullPath = s.url_path || s.file_path
+                  const fileUrl = `/api/files/${fullPath}`
+                  return (
+                    <Card key={s.id} size="small" hoverable>
+                      <Card.Meta
+                        avatar={<FileOutlined style={{ color: '#1677ff' }} />}
+                        title={
+                          <a href={fileUrl} target="_blank" rel="noreferrer"
+                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                            {s.file_name}
+                          </a>
+                        }
+                        description={<span style={{ fontSize: 11 }}>来自 {s.owner_username}</span>}
+                      />
+                    </Card>
+                  )
+                })}
+              </div>
+            </Card>
+          ) : null;
+        })()}
         {!isStudent && receivedShares.filter(s => s.resource_type === 'download').length === 0 && (
           <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>暂无共享文件</Typography.Text>
         )}
+
+        {/* 浏览共享目录抽屉 */}
+        <Drawer
+          title={<><FolderOpenOutlined style={{ color: '#faad14', marginRight: 8 }} />{browseDirInfo?.dirName || '共享目录'}</>}
+          open={browseDirOpen}
+          onClose={() => setBrowseDirOpen(false)}
+          width={600}
+          extra={
+            <Button type="text" icon={<ReloadOutlined />} onClick={() => {
+              if (browseDirInfo) openBrowseDir(browseDirInfo.owner, browseDirInfo.dirPath, browseDirInfo.dirName)
+            }} loading={browseDirLoading}>刷新</Button>
+          }
+        >
+          {browseDirInfo && (
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+              来自 <strong>{browseDirInfo.owner}</strong> 的共享目录
+            </Typography.Text>
+          )}
+          {browseDirFiles.length === 0 && !browseDirLoading ? (
+            <Typography.Text type="secondary">该目录下暂无文件</Typography.Text>
+          ) : (
+            <List
+              loading={browseDirLoading}
+              dataSource={browseDirFiles}
+              renderItem={(item) => {
+                const fileUrl = browseDirInfo
+                  ? `/api/files/${encodeURIComponent(`${browseDirInfo.owner}/downloads/${item.path}`)}`
+                  : '#'
+                return (
+                  <List.Item
+                    actions={[
+                      <a href={fileUrl} target="_blank" rel="noreferrer">
+                        <DownloadOutlined /> 下载
+                      </a>,
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={<FileOutlined style={{ color: '#1677ff' }} />}
+                      title={item.name}
+                      description={
+                        item.size < 1024 ? `${item.size} B` :
+                        item.size < 1048576 ? `${(item.size/1024).toFixed(1)} KB` :
+                        `${(item.size/1048576).toFixed(1)} MB`
+                      }
+                    />
+                  </List.Item>
+                )
+              }}
+            />
+          )}
+        </Drawer>
 
         {/* 共享弹窗 */}
         <ShareDialog
@@ -365,6 +492,7 @@ const DownloadsPage: React.FC = () => {
           fileName={shareFile.name}
           resourceType="download"
           existingShare={shareExisting}
+          inheritedFromDir={shareInherited}
           onSuccess={loadShares}
         />
       </Space>
