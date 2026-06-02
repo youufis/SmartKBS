@@ -1259,17 +1259,20 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
         if ans.get("is_correct", False):
             continue
 
-        # 构建讲解 Prompt
+        # 构建讲解 Prompt（安全转义，防止 question_text 包含 { 或 } 导致 format 失败）
         from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
         from backend.api.chat_router import get_api_keys
         from backend.api.ai_service import call_ai_sync
 
+        def _safe(s):
+            return str(s).replace('{', '{{').replace('}', '}}')
+
         prompt = KNOWLEDGE_EXPLAIN_PROMPT.format(
-            question_text=q["question_text"],
-            question_type=q["type"],
-            correct_answer=q["correct_answer"],
-            student_answer=ans.get("student_answer", ""),
-            knowledge_points=q.get("knowledge_points", ""),
+            question_text=_safe(q["question_text"]),
+            question_type=_safe(q["type"]),
+            correct_answer=_safe(q["correct_answer"]),
+            student_answer=_safe(ans.get("student_answer", "")),
+            knowledge_points=_safe(q.get("knowledge_points", "")),
         )
 
         try:
@@ -1379,14 +1382,17 @@ async def ai_grade_short_answers(exam_id: int, request: Request):
             near_full = max_score * 0.8
             half_minus = max_score * 0.4
 
+            def _safe(s):
+                return str(s).replace('{', '{{').replace('}', '}}')
+
             prompt = SHORT_ANSWER_GRADING_PROMPT.format(
-                question_text=q["question_text"],
-                correct_answer=q["correct_answer"] or "",
-                max_score=max_score,
-                half_score=half_score,
-                near_full=near_full,
-                half_minus=half_minus,
-                student_answer=ans.get("student_answer", ""),
+                question_text=_safe(q["question_text"]),
+                correct_answer=_safe(q["correct_answer"] or ""),
+                max_score=_safe(max_score),
+                half_score=_safe(half_score),
+                near_full=_safe(near_full),
+                half_minus=_safe(half_minus),
+                student_answer=_safe(ans.get("student_answer", "")),
             )
 
             try:
