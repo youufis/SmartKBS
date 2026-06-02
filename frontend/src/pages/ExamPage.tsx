@@ -87,7 +87,7 @@ const ExamPage: React.FC = () => {
   const [explainModal, setExplainModal] = useState(false)
   const [explainLoading, setExplainLoading] = useState(false)
   const [explainData, setExplainData] = useState<{ exam_title: string; explanations: any[]; total_wrong: number } | null>(null)
-  const handleExplainWrong = async (examId: number, _examTitle: string) => {
+  const handleExplainWrong = async (examId: number) => {
     setExplainModal(true)
     setExplainLoading(true)
     setExplainData(null)
@@ -772,7 +772,7 @@ const ExamPage: React.FC = () => {
                       title: '操作', key: 'actions', width: 120,
                       render: (_: any, r: ExamAttempt) => (
                         <Button type="link" size="small" icon={<BulbOutlined />}
-                          onClick={() => handleExplainWrong(r.exam_id, r.exam_title || '')}>
+                          onClick={() => handleExplainWrong(r.exam_id)}>
                           AI 讲解
                         </Button>
                       ),
