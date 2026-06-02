@@ -29,6 +29,9 @@ def get_ai_config():
 
 def call_ai_sync(prompt: str, api_key: str) -> str:
     """同步调用 AI，返回完整响应文本"""
+    if not api_key or not api_key.strip():
+        raise ValueError("API Key 为空，请在系统配置中设置 API Key")
+
     cfg = get_ai_config()
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
@@ -74,7 +77,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> st
             f"{api_base}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
-            timeout=600,
+            timeout=(30, 120),  # (连接超时30秒, 读取超时120秒)
         )
         if resp.status_code == 200:
             data = resp.json()
