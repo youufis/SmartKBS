@@ -698,7 +698,6 @@ async def broadcast_message(disc_id: int, req: BroadcastMessage, request: Reques
         # WebSocket 广播
         msg_data = {
             "type": "new_message",
-            "id": 0,
             "username": user["username"] or "教师",
             "content": req.content,
             "msg_type": "broadcast",
@@ -727,13 +726,14 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
             raise HTTPException(status_code=403, detail="你不在该小组中")
 
     now = _now()
-    execute_insert_update(
+    msg_id = execute_insert_update(
         "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, ?, ?, 'text', ?)",
         (group_id, username, req.content, now),
     )
-    # 广播新消息到 WebSocket
+    # 广播新消息到 WebSocket（带上真实 ID，供前端去重）
     msg_data = {
         "type": "new_message",
+        "id": msg_id,
         "username": username,
         "content": req.content,
         "msg_type": "text",
@@ -898,13 +898,14 @@ async def ai_suggest(group_id: int, request: Request):
         if content:
             # 将 AI 回复作为消息存入
             now_str = _now()
-            execute_insert_update(
+            msg_id = execute_insert_update(
                 "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, NULL, ?, 'ai_suggest', ?)",
                 (group_id, content, now_str),
             )
-            # WebSocket 广播，实时推送给所有小组成员
+            # WebSocket 广播，实时推送给所有小组成员（带上真实 ID）
             asyncio.create_task(ws_manager.broadcast(group_id, {
                 "type": "new_message",
+                "id": msg_id,
                 "username": None,
                 "content": content,
                 "msg_type": "ai_suggest",
