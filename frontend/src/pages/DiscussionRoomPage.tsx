@@ -79,6 +79,11 @@ const DiscussionRoomPage: React.FC = () => {
       )
       if (Array.isArray(data) && data.length > 0) {
         setMessages(data)
+        // 更新轮询 ID 为最新消息 ID
+        const maxId = Math.max(...data.map(m => m.id))
+        if (maxId > lastPollIdRef.current) {
+          lastPollIdRef.current = maxId
+        }
       }
     } catch {
       // 忽略
@@ -87,9 +92,15 @@ const DiscussionRoomPage: React.FC = () => {
     }
   }, [groupId])
 
+  // 轮询用的最新消息 ID ref
+  const lastPollIdRef = useRef(0)
+
   // 初始加载消息
   useEffect(() => {
-    loadInitialMessages().then(scrollToBottom)
+    loadInitialMessages().then(() => {
+      // 初始化轮询 ID 为当前最大消息 ID
+      setTimeout(scrollToBottom, 50)
+    })
   }, [loadInitialMessages])
 
   // WebSocket 连接（替代轮询）
@@ -97,8 +108,11 @@ const DiscussionRoomPage: React.FC = () => {
     if (!groupId) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    // 优先使用当前页面 host，若连接失败 WebSocket 会自动重连
+    // 如果通过 IIS 反向代理访问，需确保 IIS 配置了 WebSocket 转发
     const token = localStorage.getItem('smartkb_token') || ''
-    const wsUrl = `${protocol}//${window.location.host}/api/interaction/ws/${groupId}?token=${encodeURIComponent(token)}`
+    const host = window.location.host
+    const wsUrl = `${protocol}//${host}/api/interaction/ws/${groupId}?token=${encodeURIComponent(token)}`
     let reconnectTimer: ReturnType<typeof setTimeout>
 
     const connectWs = () => {
@@ -114,14 +128,19 @@ const DiscussionRoomPage: React.FC = () => {
           try {
             const data = JSON.parse(event.data)
             if (data.type === 'new_message') {
+              // 使用后端返回的真实消息 ID，确保与轮询数据 ID 一致，避免重复
               const newMsg: Message = {
-                id: Date.now(), // 临时 ID
+                id: data.id || Date.now(),
                 username: data.username || 'AI助教',
                 content: data.content,
                 msg_type: data.msg_type || 'text',
                 created_at: data.created_at || new Date().toISOString(),
               }
-              setMessages(prev => [...prev, newMsg])
+              setMessages(prev => {
+                // 去重：避免与轮询带回的消息重复
+                if (prev.some(m => m.id === newMsg.id)) return prev
+                return [...prev, newMsg]
+              })
               scrollToBottom()
             }
           } catch {
@@ -145,12 +164,42 @@ const DiscussionRoomPage: React.FC = () => {
 
     connectWs()
 
+    // 轮询 fallback：每 3 秒拉取新消息（WebSocket 的补充，确保 IIS 下也能实时同步）
+    const pollInterval = setInterval(async () => {
+      const afterId = lastPollIdRef.current
+      try {
+        const { data } = await apiClient.get(
+          `/api/interaction/groups/${groupId}/messages`,
+          { params: { after_id: afterId } }
+        )
+        if (Array.isArray(data) && data.length > 0) {
+          setMessages(prev => {
+            // 去重：避免与 WebSocket 推送的消息重复
+            const existingIds = new Set(prev.map(m => m.id))
+            const newMsgs = data.filter(m => !existingIds.has(m.id))
+            if (newMsgs.length > 0) {
+              setTimeout(scrollToBottom, 50)
+              return [...prev, ...newMsgs]
+            }
+            return prev
+          })
+          const maxId = Math.max(...data.map(m => m.id))
+          if (maxId > lastPollIdRef.current) {
+            lastPollIdRef.current = maxId
+          }
+        }
+      } catch {
+        // 忽略轮询错误
+      }
+    }, 2000)
+
     return () => {
       if (reconnectTimer) clearTimeout(reconnectTimer)
       if (wsRef.current) {
         wsRef.current.close()
         wsRef.current = null
       }
+      clearInterval(pollInterval)
     }
   }, [groupId])
 
@@ -163,16 +212,7 @@ const DiscussionRoomPage: React.FC = () => {
     try {
       await apiClient.post(`/api/interaction/groups/${groupId}/messages`, { content })
       setInput('')
-      // 本地立即追加消息，不依赖 WebSocket 回显（确保发送者即时看到）
-      const newMsg: Message = {
-        id: Date.now(),
-        username: user?.username || '我',
-        content,
-        msg_type: 'text',
-        created_at: new Date().toISOString(),
-      }
-      setMessages(prev => [...prev, newMsg])
-      setTimeout(scrollToBottom, 50)
+      // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
     } catch {
       message.error('发送失败')
     } finally {
@@ -195,16 +235,7 @@ const DiscussionRoomPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-suggest`)
       if (data.status === 'ok' && data.content) {
-        // 直接追加到消息列表（WebSocket 推送可能延迟，先本地显示）
-        const newMsg: Message = {
-          id: Date.now(),
-          username: 'AI助教',
-          content: data.content,
-          msg_type: 'ai_suggest',
-          created_at: new Date().toISOString(),
-        }
-        setMessages(prev => [...prev, newMsg])
-        setTimeout(scrollToBottom, 50)
+        // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
         message.success('AI 助教已回复')
       } else {
         message.info(data.content || 'AI 暂无建议')
