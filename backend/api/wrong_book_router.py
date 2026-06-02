@@ -114,31 +114,115 @@ async def get_wrong_questions(request: Request):
 
 
 @router.get("/students", summary="获取有错题记录的学生列表")
-async def get_students_with_wrong(request: Request):
+async def get_students_with_wrong(
+    request: Request,
+    grade: str = Query("", description="年级筛选"),
+    class_name: str = Query("", description="班级筛选"),
+):
     """获取有错题记录的学生列表（供教师/管理员选择）"""
     user = get_current_user(request)
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
 
+    # 先查有错题记录的学生用户名
     rows = execute_query(
-        """SELECT DISTINCT ea.student_username, u.name
-           FROM exam_attempts ea
-           LEFT JOIN users u ON u.username = ea.student_username
-           WHERE ea.status = 'submitted'
-           ORDER BY ea.submitted_at DESC"""
+        """SELECT DISTINCT ea.student_username FROM exam_attempts ea
+           WHERE ea.status = 'submitted'"""
     )
-    seen = set()
+    usernames = [r["student_username"] for r in rows]
+    if not usernames:
+        return {"students": []}
+
+    # 再查这些学生的信息
+    conditions = ["username IN ({})".format(",".join("?" * len(usernames)))]
+    params = list(usernames)
+
+    if grade:
+        conditions.append("grade = ?")
+        params.append(grade)
+    if class_name:
+        conditions.append("class = ?")
+        params.append(class_name)
+
+    where = " AND ".join(conditions)
+    student_rows = user_query(
+        f"""SELECT username, name, grade, class FROM users
+           WHERE {where}
+           ORDER BY grade, class""",
+        tuple(params),
+    )
+
     students = []
-    for r in rows:
-        uname = r["student_username"]
-        if uname not in seen:
-            seen.add(uname)
-            students.append({
-                "username": uname,
-                "name": r.get("name") or uname,
-            })
+    for r in student_rows:
+        students.append({
+            "username": r[0],
+            "name": r[1] or r[0],
+            "grade": r[2] or "",
+            "class": str(r[3] or ""),
+        })
     return {"students": students}
+
+
+@router.get("/grades", summary="获取有错题记录的年级列表")
+async def get_grades_with_wrong(request: Request):
+    """获取有错题记录的年级列表"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+
+    # 先查有错题记录的学生用户名
+    rows = execute_query(
+        """SELECT DISTINCT ea.student_username FROM exam_attempts ea
+           WHERE ea.status = 'submitted'"""
+    )
+    usernames = [r["student_username"] for r in rows]
+    if not usernames:
+        return {"grades": []}
+
+    # 再查这些学生的年级
+    placeholders = ",".join("?" * len(usernames))
+    grade_rows = user_query(
+        f"""SELECT DISTINCT grade FROM users
+           WHERE username IN ({placeholders}) AND grade IS NOT NULL AND grade != ''
+           ORDER BY grade""",
+        tuple(usernames),
+    )
+    return {"grades": [r[0] for r in grade_rows]}
+
+
+@router.get("/classes", summary="获取指定年级下有错题记录的班级列表")
+async def get_classes_with_wrong(
+    request: Request,
+    grade: str = Query("", description="年级"),
+):
+    """获取指定年级下有错题记录的班级列表"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+
+    # 先查有错题记录的学生用户名
+    rows = execute_query(
+        """SELECT DISTINCT ea.student_username FROM exam_attempts ea
+           WHERE ea.status = 'submitted'"""
+    )
+    usernames = [r["student_username"] for r in rows]
+    if not usernames:
+        return {"classes": []}
+
+    # 再查这些学生的班级
+    placeholders = ",".join("?" * len(usernames))
+    params = [grade] + usernames
+    class_rows = user_query(
+        f"""SELECT DISTINCT class FROM users
+           WHERE grade = ? AND username IN ({placeholders})
+           AND class IS NOT NULL AND class != ''
+           ORDER BY class""",
+        tuple(params),
+    )
+    return {"classes": [str(r[0]) for r in class_rows]}
 
 
 @router.get("/review-plan", summary="AI 生成错题复习计划")
