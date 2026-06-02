@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select } from 'antd'
 import { ReloadOutlined, BookOutlined, RobotOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 
@@ -30,7 +31,7 @@ interface ExamWrongGroup {
 }
 
 const typeLabel: Record<string, string> = {
-  single: '单选', multiple: '多选', true_false: '判断', short: '简答',
+  single: '单选题', multiple: '多选题', true_false: '判断题', short: '简答题',
 }
 
 const WrongBookPage: React.FC = () => {
@@ -40,20 +41,80 @@ const WrongBookPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<{ total_wrong: number; exams: ExamWrongGroup[]; student_username?: string } | null>(null)
 
-  const [students, setStudents] = useState<{ username: string; name: string }[]>([])
+  // 年级/班级/学生三级联动
+  const [grades, setGrades] = useState<string[]>([])
+  const [classes, setClasses] = useState<string[]>([])
+  const [students, setStudents] = useState<{ username: string; name: string; grade: string; class: string }[]>([])
+  const [selectedGrade, setSelectedGrade] = useState<string>('')
+  const [selectedClass, setSelectedClass] = useState<string>('')
   const [selectedStudent, setSelectedStudent] = useState<string>('')
 
   const [planModal, setPlanModal] = useState(false)
   const [planLoading, setPlanLoading] = useState(false)
   const [planData, setPlanData] = useState<{ plan: string; total_wrong: number; knowledge_points: string[]; weak_types: string[] } | null>(null)
 
-  const loadStudents = async () => {
+  const loadGrades = async () => {
     if (isStudent) return
     try {
-      const { data: res } = await apiClient.get('/api/wrong-book/students')
-      setStudents(res.students || [])
+      const { data: res } = await apiClient.get('/api/wrong-book/grades')
+      setGrades(res.grades || [])
+      if (res.grades?.length > 0) {
+        setSelectedGrade(res.grades[0])
+        // 自动加载第一个年级的班级
+        loadClasses(res.grades[0])
+      }
     } catch { /* ignore */ }
   }
+
+  const loadClasses = async (grade: string) => {
+    try {
+      const { data: res } = await apiClient.get('/api/wrong-book/classes', { params: { grade } })
+      setClasses(res.classes || [])
+      if (res.classes?.length > 0) {
+        setSelectedClass(res.classes[0])
+        // 自动加载第一个班级的学生
+        loadStudents(grade, res.classes[0])
+      } else {
+        setSelectedClass('')
+        setSelectedStudent('')
+        setStudents([])
+      }
+    } catch { /* ignore */ }
+  }
+
+  const loadStudents = async (grade: string, cls: string) => {
+    try {
+      const params: any = { grade }
+      if (cls) params.class_name = cls
+      const { data: res } = await apiClient.get('/api/wrong-book/students', { params })
+      setStudents(res.students || [])
+      if (res.students?.length > 0) {
+        // 自动选择第一个学生并加载错题
+        setSelectedStudent(res.students[0].username)
+        loadData(res.students[0].username)
+      } else {
+        setSelectedStudent('')
+        setData(null)
+      }
+    } catch { /* ignore */ }
+  }
+
+  const handleGradeChange = (grade: string) => {
+    setSelectedGrade(grade)
+    setSelectedClass('')
+    setSelectedStudent('')
+    setStudents([])
+    setData(null)
+    loadClasses(grade)
+  }
+
+  const handleClassChange = (cls: string) => {
+    setSelectedClass(cls)
+    setSelectedStudent('')
+    setData(null)
+    if (cls) loadStudents(selectedGrade, cls)
+  }
+
 
   const loadData = async (studentUsername?: string) => {
     setLoading(true)
@@ -69,7 +130,7 @@ const WrongBookPage: React.FC = () => {
 
   const handleStudentChange = (username: string) => {
     setSelectedStudent(username)
-    loadData(username)
+    if (username) loadData(username)
   }
 
   const loadReviewPlan = async () => {
@@ -87,7 +148,7 @@ const WrongBookPage: React.FC = () => {
     setPlanLoading(false)
   }
 
-  useEffect(() => { if (isStudent) loadData(); else loadStudents() }, [isStudent])
+  useEffect(() => { if (isStudent) loadData(); else loadGrades() }, [isStudent])
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
@@ -100,7 +161,22 @@ const WrongBookPage: React.FC = () => {
             )}
           </Space>
           <Space>
-            {!isStudent && students.length > 0 && (
+            {!isStudent && (
+            <Space>
+              <Select
+                style={{ width: 100 }}
+                placeholder="年级"
+                value={selectedGrade || undefined}
+                onChange={handleGradeChange}
+                options={grades.map(g => ({ label: g, value: g }))}
+              />
+              <Select
+                style={{ width: 100 }}
+                placeholder="班级"
+                value={selectedClass || undefined}
+                onChange={handleClassChange}
+                options={classes.map(c => ({ label: `${c}班`, value: c }))}
+              />
               <Select
                 style={{ width: 160 }}
                 placeholder="选择学生"
@@ -108,7 +184,8 @@ const WrongBookPage: React.FC = () => {
                 onChange={handleStudentChange}
                 options={students.map(s => ({ label: `${s.name} (${s.username})`, value: s.username }))}
               />
-            )}
+            </Space>
+          )}
             <Button icon={<RobotOutlined />} onClick={loadReviewPlan} loading={planLoading}
               disabled={!data || data.total_wrong === 0}>
               AI 复习计划
@@ -183,7 +260,7 @@ const WrongBookPage: React.FC = () => {
                 </Space>
               )}
               <div className="markdown-content">
-                <ReactMarkdown>{planData.plan}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{planData.plan}</ReactMarkdown>
               </div>
             </div>
           )}
