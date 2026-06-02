@@ -2,15 +2,16 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card, Row, Col, Statistic, Typography, Spin, Tag, Space,
-  Timeline, Empty, Alert, Button,
-  Table, List,
+  Timeline, Empty, Alert, Button, Select, message,
+  Table, List, Modal,
 } from 'antd'
 import {
   TrophyOutlined, FileAddOutlined, CheckCircleOutlined,
   AuditOutlined, MessageOutlined, UserOutlined,
   RightOutlined,
-  BookOutlined, CalendarOutlined,
+  BookOutlined, CalendarOutlined, RobotOutlined, DownloadOutlined,
 } from '@ant-design/icons'
+import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 
@@ -102,6 +103,28 @@ const PortfolioPage: React.FC = () => {
       .finally(() => setLoading(false))
   }, [targetUsername])
 
+  // ── AI 学习报告 ──
+  const [reportModal, setReportModal] = useState(false)
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportData, setReportData] = useState<{ report: string; period: string; data?: any } | null>(null)
+  const [reportDays, setReportDays] = useState<number>(30)
+
+  const handleGenerateReport = async () => {
+    setReportLoading(true)
+    setReportData(null)
+    setReportModal(true)
+    try {
+      const { data } = await apiClient.get(`/api/portfolio/${targetUsername}/report`, {
+        params: { days: reportDays, period: `近${reportDays}天` },
+      })
+      setReportData(data)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '生成报告失败')
+      setReportModal(false)
+    }
+    setReportLoading(false)
+  }
+
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
@@ -166,6 +189,29 @@ const PortfolioPage: React.FC = () => {
         }
         style={{ marginBottom: 16, background: '#f6f8ff', border: '1px solid #d6e4ff' }}
       />
+
+      {/* ─── AI 学习报告 ─── */}
+      <Card size="small" style={{ marginBottom: 16, background: '#fffbe6', border: '1px solid #ffe58f' }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Space>
+            <RobotOutlined style={{ color: '#faad14', fontSize: 18 }} />
+            <Text strong>AI 学习报告</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>基于 AI 对学习数据深度分析，生成个性化学习报告</Text>
+          </Space>
+          <Space>
+            <Select value={reportDays} onChange={setReportDays} style={{ width: 100 }} size="small"
+              options={[
+                { value: 7, label: '近7天' },
+                { value: 30, label: '近30天' },
+                { value: 90, label: '近90天' },
+              ]} />
+            <Button type="primary" size="small" icon={<RobotOutlined />}
+              loading={reportLoading} onClick={handleGenerateReport}>
+              生成报告
+            </Button>
+          </Space>
+        </Space>
+      </Card>
 
       {/* ─── 数据总览卡片 ─── */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
@@ -358,6 +404,42 @@ const PortfolioPage: React.FC = () => {
           </Card>
         </Col>
       </Row>
+
+      {/* ── AI 学习报告弹窗 ── */}
+      <Modal
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 学习报告 - {student.name}（{reportData?.period || ''}）</>}
+        open={reportModal}
+        onCancel={() => setReportModal(false)}
+        width={700}
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <Button icon={<DownloadOutlined />} onClick={() => {
+              if (!targetUsername) return
+              const token = localStorage.getItem('smartkb_token')
+              window.open(`/api/portfolio/${targetUsername}/report/export?days=${reportDays}&period=近${reportDays}天&token=${token}`, '_blank')
+            }}>导出 Word</Button>
+            <Button onClick={() => setReportModal(false)}>关闭</Button>
+          </Space>
+        }
+      >
+        <Spin spinning={reportLoading}>
+          {reportData && (
+            <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
+              {reportData.data && (
+                <Row gutter={12} style={{ marginBottom: 16 }}>
+                  <Col span={6}><Statistic title="考试次数" value={reportData.data.exams} suffix="次" /></Col>
+                  <Col span={6}><Statistic title="累计积分" value={reportData.data.total_score} /></Col>
+                  <Col span={6}><Statistic title="点名正确率" value={reportData.data.rollcall_rate} suffix="%" /></Col>
+                  <Col span={6}><Statistic title="对话天数" value={reportData.data.chat_days} suffix="天" /></Col>
+                </Row>
+              )}
+              <div className="markdown-content">
+                <ReactMarkdown>{reportData.report}</ReactMarkdown>
+              </div>
+            </div>
+          )}
+        </Spin>
+      </Modal>
     </div>
   )
 }

@@ -5,7 +5,7 @@
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query
@@ -314,3 +314,350 @@ async def get_timeline(username: str, request: Request):
     # 按时间排序
     events.sort(key=lambda x: x["time"] or "")
     return events
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.3 新增：AI 学习报告
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/{username}/report", summary="AI 生成学生学习报告")
+async def get_learning_report(username: str, request: Request):
+    """AI 根据学生数据生成个性化学习报告"""
+    user = get_current_user(request)
+    current_username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2 and current_username != username:
+        raise HTTPException(status_code=403, detail="无权查看其他学生的报告")
+
+    # 获取学生信息
+    user_rows = execute_query(
+        "SELECT username, name, class, grade FROM users WHERE username = ?",
+        (username,),
+    )
+    if not user_rows:
+        raise HTTPException(status_code=404, detail="学生不存在")
+    student_name = user_rows[0][1] or user_rows[0][0]
+    student_grade = user_rows[0][3] or ""
+    student_class = user_rows[0][2] or ""
+
+    # 获取报告周期参数
+    days = int(request.query_params.get("days", 30))
+    period = request.query_params.get("period", f"近{days}天")
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    # ── 1. 考试成绩（周期内） ──
+    exam_results = q_execute_query(
+        """SELECT e.title, ea.score, ea.total_score, e.pass_score, ea.submitted_at, e.subject
+           FROM exam_attempts ea
+           JOIN exams e ON ea.exam_id = e.id
+           WHERE ea.student_username = ? AND ea.status IN ('submitted', 'graded')
+           AND ea.submitted_at >= ?
+           ORDER BY ea.submitted_at ASC""",
+        (username, since),
+    )
+
+    exam_text = ""
+    if exam_results:
+        for r in exam_results:
+            pct = round(r['score'] / max(r['total_score'], 1) * 100, 1)
+            passed = "通过" if r['score'] >= r['pass_score'] else "未通过"
+            exam_text += f"- 《{r['title']}》({r['subject']}): {r['score']}/{r['total_score']}分 ({pct}%) {passed}\n"
+    else:
+        exam_text = "周期内暂无考试记录"
+
+    # ── 2. 积分 ──
+    score_rows = execute_query(
+        """SELECT COALESCE(SUM(score),0), COALESCE(AVG(score),0),
+                  COUNT(*), COALESCE(MAX(score),0), COALESCE(MIN(score),0)
+           FROM scores WHERE student_name = ? AND updated_at >= ?""",
+        (student_name, since),
+    )
+    sr = score_rows[0] if score_rows else (0, 0, 0, 0, 0)
+    total_score = sr[0]
+    score_count = sr[2]
+
+    # 积分趋势（scores 表用 updated_at）
+    score_trend_rows = execute_query(
+        """SELECT DATE(updated_at), SUM(score)
+           FROM scores WHERE student_name = ? AND updated_at >= ?
+           GROUP BY DATE(updated_at) ORDER BY DATE(updated_at)""",
+        (student_name, since),
+    )
+    if score_trend_rows:
+        scores_list = [r[1] for r in score_trend_rows]
+        if len(scores_list) >= 2:
+            if scores_list[-1] > scores_list[0]:
+                score_trend = "上升趋势 📈"
+            elif scores_list[-1] < scores_list[0]:
+                score_trend = "下降趋势 📉"
+            else:
+                score_trend = "保持稳定 ➡️"
+        else:
+            score_trend = "数据较少"
+    else:
+        score_trend = "暂无数据"
+
+    # ── 3. 点名 ──
+    rc_rows = execute_query(
+        """SELECT COUNT(*), COALESCE(SUM(CASE WHEN result='1' THEN 1 ELSE 0 END), 0)
+           FROM rollcall_history WHERE student_name = ? AND created_at >= ?""",
+        (student_name, since),
+    )
+    rc_total = rc_rows[0][0] if rc_rows else 0
+    rc_correct = rc_rows[0][1] if rc_rows else 0
+
+    # ── 4. 任务 ──
+    task_rows = execute_query(
+        "SELECT COUNT(*) FROM task_submissions WHERE student_username = ? AND submitted_at >= ?",
+        (username, since),
+    )
+    task_count = task_rows[0][0] if task_rows else 0
+
+    # ── 5. 对话 ──
+    chat_rows = execute_query(
+        """SELECT COUNT(DISTINCT date), COUNT(*)
+           FROM conversations WHERE username = ? AND date >= ?""",
+        (username, since),
+    )
+    chat_days = chat_rows[0][0] if chat_rows else 0
+    chat_total = chat_rows[0][1] if chat_rows else 0
+
+    # ── 构建 Prompt ──
+    from backend.prompts.report import LEARNING_REPORT_PROMPT
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_sync
+
+    keys = get_api_keys(username if role == 2 else current_username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    def _safe(s):
+        return str(s).replace('{', '{{').replace('}', '}}')
+
+    prompt = LEARNING_REPORT_PROMPT.format(
+        student_name=_safe(student_name),
+        grade=_safe(student_grade),
+        cls=_safe(student_class),
+        period=_safe(period),
+        exam_text=_safe(exam_text),
+        total_score=_safe(total_score),
+        score_trend=_safe(score_trend),
+        rollcall_total=_safe(rc_total),
+        rollcall_correct=_safe(rc_correct),
+        rollcall_rate=_safe(round(rc_correct / max(rc_total, 1) * 100, 1)),
+        task_count=_safe(task_count),
+        chat_days=_safe(chat_days),
+        chat_total=_safe(chat_total),
+    )
+
+    try:
+        report = call_ai_sync(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 学习报告生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生成学习报告失败: {str(e)}")
+
+    return {
+        "student": {"username": username, "name": student_name, "grade": student_grade, "class": student_class},
+        "period": period,
+        "report": report,
+        "data": {
+            "exams": len(exam_results),
+            "total_score": total_score,
+            "rollcall_rate": round(rc_correct / max(rc_total, 1) * 100, 1),
+            "tasks": task_count,
+            "chat_days": chat_days,
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.3 新增：学习报告导出 Word 文档
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/{username}/report/export", summary="导出学习报告为 Word 文档")
+async def export_learning_report_docx(username: str, request: Request, token: str = Query("")):
+    """导出 AI 学习报告为 Word 文档"""
+    import io
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from fastapi.responses import StreamingResponse
+    import urllib.parse
+
+    # 支持 token 参数认证（用于 window.open 下载）
+    if token:
+        request.state.user = None
+        from backend.auth import decode_jwt_token
+        payload = decode_jwt_token(token)
+        if payload:
+            request.state.user = payload
+
+    user = get_current_user(request)
+    current_username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2 and current_username != username:
+        raise HTTPException(status_code=403, detail="无权查看其他学生的报告")
+
+    # 获取学生信息
+    user_rows = execute_query(
+        "SELECT username, name, class, grade FROM users WHERE username = ?",
+        (username,),
+    )
+    if not user_rows:
+        raise HTTPException(status_code=404, detail="学生不存在")
+    student_name = user_rows[0][1] or user_rows[0][0]
+    student_grade = user_rows[0][3] or ""
+    student_class = user_rows[0][2] or ""
+
+    days = int(request.query_params.get("days", 30))
+    period = request.query_params.get("period", f"近{days}天")
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    # ── 收集数据 ──
+    exam_results = q_execute_query(
+        """SELECT e.title, ea.score, ea.total_score, e.pass_score, ea.submitted_at, e.subject
+           FROM exam_attempts ea JOIN exams e ON ea.exam_id = e.id
+           WHERE ea.student_username = ? AND ea.status IN ('submitted', 'graded')
+           AND ea.submitted_at >= ? ORDER BY ea.submitted_at ASC""",
+        (username, since),
+    )
+
+    score_rows = execute_query(
+        """SELECT COALESCE(SUM(score),0), COALESCE(AVG(score),0), COUNT(*), COALESCE(MAX(score),0), COALESCE(MIN(score),0)
+           FROM scores WHERE student_name = ? AND updated_at >= ?""",
+        (student_name, since),
+    )
+    sr = score_rows[0] if score_rows else (0, 0, 0, 0, 0)
+    total_score = sr[0]
+
+    rc_rows = execute_query(
+        """SELECT COUNT(*), COALESCE(SUM(CASE WHEN result='1' THEN 1 ELSE 0 END), 0)
+           FROM rollcall_history WHERE student_name = ? AND created_at >= ?""",
+        (student_name, since),
+    )
+    rc_total = rc_rows[0][0] if rc_rows else 0
+    rc_correct = rc_rows[0][1] if rc_rows else 0
+
+    task_rows = execute_query(
+        "SELECT COUNT(*) FROM task_submissions WHERE student_username = ? AND submitted_at >= ?",
+        (username, since),
+    )
+    task_count = task_rows[0][0] if task_rows else 0
+
+    chat_rows = execute_query(
+        """SELECT COUNT(DISTINCT date), COUNT(*) FROM conversations WHERE username = ? AND date >= ?""",
+        (username, since),
+    )
+    chat_days = chat_rows[0][0] if chat_rows else 0
+    chat_total = chat_rows[0][1] if chat_rows else 0
+
+    # ── 生成报告文本 ──
+    from backend.prompts.report import LEARNING_REPORT_PROMPT
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_sync
+
+    keys = get_api_keys(username if role == 2 else current_username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    def _safe(s):
+        return str(s).replace('{', '{{').replace('}', '}}')
+
+    exam_text = ""
+    if exam_results:
+        for r in exam_results:
+            pct = round(r['score'] / max(r['total_score'], 1) * 100, 1)
+            passed = "通过" if r['score'] >= r['pass_score'] else "未通过"
+            exam_text += f"- 《{r['title']}》({r['subject']}): {r['score']}/{r['total_score']}分 ({pct}%) {passed}\n"
+    else:
+        exam_text = "周期内暂无考试记录"
+
+    score_trend = "暂无数据"
+
+    prompt = LEARNING_REPORT_PROMPT.format(
+        student_name=_safe(student_name),
+        grade=_safe(student_grade),
+        cls=_safe(student_class),
+        period=_safe(period),
+        exam_text=_safe(exam_text),
+        total_score=_safe(total_score),
+        score_trend=_safe(score_trend),
+        rollcall_total=_safe(rc_total),
+        rollcall_correct=_safe(rc_correct),
+        rollcall_rate=_safe(round(rc_correct / max(rc_total, 1) * 100, 1)),
+        task_count=_safe(task_count),
+        chat_days=_safe(chat_days),
+        chat_total=_safe(chat_total),
+    )
+
+    report_text = call_ai_sync(prompt, api_key)
+
+    # ── 生成 Word 文档 ──
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Microsoft YaHei'
+    style.font.size = Pt(11)
+    style.paragraph_format.line_spacing = 1.5
+
+    title = doc.add_heading(f"{student_name} 的学习报告", level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    info = doc.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = info.add_run(f"{student_grade}{student_class}班  |  报告周期：{period}")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    doc.add_paragraph()
+
+    for line in report_text.split('\n'):
+        line = line.strip()
+        if not line:
+            doc.add_paragraph()
+            continue
+        if line.startswith('### '):
+            doc.add_heading(line[4:], level=3)
+        elif line.startswith('## '):
+            doc.add_heading(line[3:], level=2)
+        elif line.startswith('# '):
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith('- **') and '：' in line:
+            content = line.lstrip('- ')
+            p = doc.add_paragraph()
+            bold_end = content.find('**', 2)
+            if bold_end > 0:
+                run = p.add_run(content[2:bold_end])
+                run.bold = True
+                p.add_run(content[bold_end + 2:])
+            else:
+                p.add_run(content)
+        elif line.startswith('- '):
+            doc.add_paragraph(line[2:], style='List Bullet')
+        elif any(line.startswith(f'{i}. ') for i in range(1, 10)):
+            doc.add_paragraph(line, style='List Number')
+        else:
+            if '**' in line:
+                p = doc.add_paragraph()
+                parts = line.split('**')
+                for i, part in enumerate(parts):
+                    if part:
+                        run = p.add_run(part)
+                        if i % 2 == 1:
+                            run.bold = True
+            else:
+                doc.add_paragraph(line)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    safe_filename = urllib.parse.quote(f"{student_name}_学习报告.docx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
+    )

@@ -1499,3 +1499,147 @@ async def ai_grade_short_answers(exam_id: int, request: Request):
         "graded_count": graded_count,
         "errors": errors[:10],
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.3 新增：AI 智能组卷优化
+# ═══════════════════════════════════════════════════════════
+
+class AIComposeRequest(BaseModel):
+    """AI 智能组卷请求"""
+    target_count: int = 10
+    knowledge_focus: str = ""
+    difficulty_distribution: str = "easy:medium:hard = 2:5:3"
+
+
+@router.post("/{exam_id}/ai-compose", summary="AI 智能组卷")
+async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request):
+    """AI 智能组卷：根据考试目标从题库自动选择最优试题组合"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+
+    if not _can_manage_exam(username, exam):
+        raise HTTPException(status_code=403, detail="无权操作此考试")
+
+    # 获取候选题目（排除已添加的）
+    candidates = execute_query(
+        """SELECT q.id, q.type, q.question_text, q.difficulty,
+                  q.knowledge_points, q.subject
+           FROM question_bank q
+           WHERE q.status = 'active'
+           AND q.subject = ?
+           AND q.id NOT IN (SELECT question_id FROM exam_questions WHERE exam_id = ?)
+           ORDER BY q.difficulty
+           LIMIT 50""",
+        (exam["subject"], exam_id),
+    )
+
+    if not candidates:
+        raise HTTPException(status_code=400, detail="题库中没有可选的题目，请先导入试题")
+
+    # 构建候选题目文本
+    type_map = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题"}
+    diff_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
+
+    candidate_text = ""
+    for i, q in enumerate(candidates, 1):
+        q_type = type_map.get(q["type"], q["type"])
+        q_diff = diff_map.get(q["difficulty"], q["difficulty"])
+        q_text = q["question_text"][:80]
+        q_kp = q.get("knowledge_points", "") or "无"
+        candidate_text += f"{i}. [{q_type}][{q_diff}] {q_text} (知识点: {q_kp})\n"
+
+    from backend.prompts.exam import AI_EXAM_COMPOSE_PROMPT
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_sync
+
+    keys = get_api_keys(username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    def _safe(s):
+        return str(s).replace('{', '{{').replace('}', '}}')
+
+    prompt = AI_EXAM_COMPOSE_PROMPT.format(
+        exam_title=_safe(exam["title"]),
+        subject=_safe(exam["subject"]),
+        total_score=_safe(exam["total_score"]),
+        target_count=_safe(req.target_count),
+        knowledge_focus=_safe(req.knowledge_focus or "无特定要求"),
+        candidate_questions=_safe(candidate_text),
+    )
+
+    try:
+        ai_response = call_ai_sync(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 组卷调用失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 组卷失败: {str(e)}")
+
+    # 解析 AI 返回的 JSON
+    import re
+    json_match = re.search(r'\{[^}]+\}', ai_response)
+    if not json_match:
+        raise HTTPException(status_code=500, detail="AI 返回格式异常，请重试")
+
+    try:
+        result = json.loads(json_match.group())
+        selected_ids = result.get("selected_ids", [])
+        reason = result.get("reason", "")
+    except (json.JSONDecodeError, TypeError):
+        raise HTTPException(status_code=500, detail="AI 返回格式解析失败")
+
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail="AI 未选择任何题目，请调整条件后重试")
+
+    # 验证选中的题目是否都在候选列表中
+    valid_ids = {q["id"] for q in candidates}
+    selected_ids = [sid for sid in selected_ids if sid in valid_ids]
+
+    if not selected_ids:
+        raise HTTPException(status_code=400, detail="AI 选择的题目无效，请重试")
+
+    # 添加题目到考试
+    max_order_row = execute_query_one(
+        "SELECT COALESCE(MAX(sort_order), -1) as max_order FROM exam_questions WHERE exam_id = ?",
+        (exam_id,),
+    )
+    next_order = (max_order_row["max_order"] + 1) if max_order_row else 0
+
+    score_per_question = round(exam["total_score"] / len(selected_ids), 1)
+    score_per_question = max(score_per_question, 1)
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    added = 0
+    for i, qid in enumerate(selected_ids):
+        existing = execute_query_one(
+            "SELECT id FROM exam_questions WHERE exam_id = ? AND question_id = ?",
+            (exam_id, qid),
+        )
+        if existing:
+            continue
+        execute_insert(
+            """INSERT INTO exam_questions (exam_id, question_id, sort_order, score)
+               VALUES (?, ?, ?, ?)""",
+            (exam_id, qid, next_order + i, score_per_question),
+        )
+        added += 1
+
+    execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
+
+    logger.info(f"AI 组卷: 考试{exam_id} by {username}, 推荐{len(selected_ids)}题, 实际添加{added}题")
+
+    return {
+        "message": f"AI 组卷完成，共添加 {added} 道试题",
+        "added": added,
+        "recommended": len(selected_ids),
+        "reason": reason,
+    }

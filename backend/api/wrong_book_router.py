@@ -70,7 +70,7 @@ async def get_wrong_questions(request: Request):
         # 获取该考试的题目信息
         questions = execute_query(
             """SELECT q.id, q.type, q.question_text, q.correct_answer,
-                      q.knowledge_points, eq.score as question_score
+                      q.knowledge_points, q.options, eq.score as question_score
                FROM exam_questions eq
                JOIN question_bank q ON q.id = eq.question_id
                WHERE eq.exam_id = ? AND q.status = 'active'""",
@@ -82,10 +82,21 @@ async def get_wrong_questions(request: Request):
         for qid, ans in answers_data.items():
             if isinstance(ans, dict) and not ans.get("is_correct", False):
                 q_info = q_map.get(qid, {})
+                # 解析选项
+                options_raw = q_info.get("options", "")
+                options = {}
+                if options_raw:
+                    try:
+                        opts = json.loads(options_raw) if isinstance(options_raw, str) else options_raw
+                        if isinstance(opts, dict):
+                            options = opts
+                    except (json.JSONDecodeError, TypeError):
+                        pass
                 exam_wrong.append({
                     "question_id": qid,
                     "question_text": q_info.get("question_text", ""),
                     "question_type": q_info.get("type", ""),
+                    "options": options,
                     "correct_answer": q_info.get("correct_answer", ""),
                     "student_answer": ans.get("student_answer", ""),
                     "score": ans.get("score", 0),
