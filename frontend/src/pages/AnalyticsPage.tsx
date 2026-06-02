@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
-  Card, Row, Col, Typography, Spin, Select, Button, Space,
+  Card, Row, Col, Typography, Spin, Select, Button, Space, message,
   Empty, Tabs, Statistic, Table, Tag, Tooltip,
 } from 'antd'
 import {
   RobotOutlined, BarChartOutlined,
   TeamOutlined, ThunderboltOutlined, BookOutlined,
   CheckCircleOutlined, ClockCircleOutlined, StopOutlined, ReloadOutlined, DownloadOutlined,
+  BulbOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
@@ -232,6 +233,24 @@ const AnalyticsPage: React.FC = () => {
     setLoading(false)
   }
 
+  // ── AI 教学建议 ──
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [suggestionsData, setSuggestionsData] = useState<{ suggestions: string; data?: any } | null>(null)
+  const handleTeachingSuggestions = async () => {
+    if (!cls) return
+    setSuggestionsLoading(true)
+    setSuggestionsData(null)
+    try {
+      const { data } = await apiClient.get('/api/analytics/teaching-suggestions', {
+        params: { grade, cls, teacher_username: user?.username },
+      })
+      setSuggestionsData(data)
+    } catch {
+      message.error('获取教学建议失败')
+    }
+    setSuggestionsLoading(false)
+  }
+
   // 考试分析
   const handleExamAnalysis = async () => {
     if (!selectedExam) return
@@ -323,6 +342,10 @@ const AnalyticsPage: React.FC = () => {
                       loading={loading} disabled={!cls}>
                       AI 分析
                     </Button>
+                    <Button icon={<BulbOutlined />} onClick={handleTeachingSuggestions}
+                      loading={suggestionsLoading} disabled={!cls}>
+                      AI 教学建议
+                    </Button>
                   </Space>
 
                   {loading && (
@@ -358,6 +381,26 @@ const AnalyticsPage: React.FC = () => {
                         </div>
                       </Card>
                     </>
+                  )}
+
+                  {/* AI 教学建议 */}
+                  {suggestionsData && !suggestionsLoading && (
+                    <div style={{ marginTop: 16 }}>
+                      <Typography.Title level={5}><BulbOutlined style={{ color: '#faad14' }} /> AI 教学建议</Typography.Title>
+                      {suggestionsData.data && (
+                        <Row gutter={16} style={{ marginBottom: 12 }}>
+                          <Col span={6}><Statistic title="学生人数" value={suggestionsData.data.total_students} /></Col>
+                          <Col span={6}><Statistic title="平均积分" value={suggestionsData.data.score_avg} /></Col>
+                          <Col span={6}><Statistic title="点名正确率" value={suggestionsData.data.rollcall_rate} suffix="%" /></Col>
+                          <Col span={6}><Statistic title="任务参与率" value={suggestionsData.data.task_rate} suffix="%" /></Col>
+                        </Row>
+                      )}
+                      <Card style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
+                        <div className="markdown-report">
+                          <ReactMarkdown>{suggestionsData.suggestions}</ReactMarkdown>
+                        </div>
+                      </Card>
+                    </div>
                   )}
                 </div>
               ),
