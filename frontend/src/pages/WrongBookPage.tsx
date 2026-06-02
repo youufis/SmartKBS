@@ -12,6 +12,7 @@ interface WrongQuestion {
   question_id: string
   question_text: string
   question_type: string
+  options: Record<string, string>
   correct_answer: string
   student_answer: string
   score: number
@@ -223,10 +224,48 @@ const WrongBookPage: React.FC = () => {
                     { title: '题型', dataIndex: 'question_type', width: 70,
                       render: (t: string) => <Tag>{typeLabel[t] || t}</Tag> },
                     { title: '题目', dataIndex: 'question_text', ellipsis: true },
-                    { title: '你的答案', dataIndex: 'student_answer', width: 120, ellipsis: true,
-                      render: (t: string) => <Text type="danger">{t || '未作答'}</Text> },
-                    { title: '正确答案', dataIndex: 'correct_answer', width: 120, ellipsis: true,
-                      render: (t: string) => <Text type="success">{t}</Text> },
+                    { title: '选项', key: 'options', width: 200,
+                      render: (_: any, r: WrongQuestion) => {
+                        const opts = r.options || {}
+                        return (
+                          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                            {Object.entries(opts).map(([k, v]) => {
+                              const isStudent = r.student_answer === k
+                              const isCorrect = r.correct_answer === k
+                              let color = '#333'
+                              if (isStudent && isCorrect) color = '#52c41a'
+                              else if (isStudent) color = '#ff4d4f'
+                              else if (isCorrect) color = '#52c41a'
+                              return (
+                                <div key={k} style={{
+                                  color, fontSize: 12, lineHeight: 1.6,
+                                  background: isStudent ? '#fff2f0' : 'transparent',
+                                  padding: '1px 4px', borderRadius: 3,
+                                  border: isCorrect ? '1px solid #b7eb8f' : 'none',
+                                }}>
+                                  <Text style={{ fontWeight: isStudent || isCorrect ? 600 : 400, color, fontSize: 12 }}>
+                                    {k}. {v}
+                                  </Text>
+                                  {isStudent && <Text style={{ fontSize: 10, color: '#ff4d4f', marginLeft: 4 }}>你的选择</Text>}
+                                  {isCorrect && <Text style={{ fontSize: 10, color: '#52c41a', marginLeft: 4 }}>✓</Text>}
+                                </div>
+                              )
+                            })}
+                          </Space>
+                        )
+                      }},
+                    { title: '你的答案', dataIndex: 'student_answer', width: 100,
+                      render: (t: string, r: WrongQuestion) => {
+                        const opts = r.options || {}
+                        const display = opts[t] ? `${t}. ${opts[t]}` : (t || '未作答')
+                        return <Text type="danger" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
+                      }},
+                    { title: '正确答案', dataIndex: 'correct_answer', width: 100,
+                      render: (t: string, r: WrongQuestion) => {
+                        const opts = r.options || {}
+                        const display = opts[t] ? `${t}. ${opts[t]}` : t
+                        return <Text type="success" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
+                      }},
                     { title: '知识点', dataIndex: 'knowledge_points', width: 150, ellipsis: true },
                     { title: '得分', key: 'score', width: 80,
                       render: (_: any, r: WrongQuestion) => (
