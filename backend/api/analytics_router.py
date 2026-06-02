@@ -419,3 +419,136 @@ async def exam_analytics(exam_id: int, request: Request):
         "question_accuracy": q_accuracy,
         "report": ai_report,
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.2 新增：AI 教学建议
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/teaching-suggestions", summary="AI 教学建议")
+async def teaching_suggestions(
+    request: Request,
+    grade: str = Query(...),
+    cls: str = Query(...),
+    teacher_username: str = Query(""),
+):
+    """AI 生成具体可操作的教学建议"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
+
+    # 确定查询的教师（管理员可指定，教师只能看自己）
+    query_teacher = teacher_username if (role == 0 and teacher_username) else username
+
+    # 班级号格式处理：users.class 存数字(1)，下拉框传"高一1班"
+    class_num = _extract_class_num(cls)
+    cls_display = class_num
+    cls_name = f"{grade}{cls_display}班"
+
+    # ── 收集数据 ──
+    # 1. 学生人数
+    student_count = execute_query(
+        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND class = ?",
+        (grade, cls_display),
+    )
+    total_students = student_count[0][0] if student_count else 0
+    if total_students == 0:
+        return {"suggestions": "暂无该班级的数据", "data": {}}
+
+    # 2. 积分统计
+    score_stats = execute_query(
+        """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
+                  COALESCE(MAX(score),0), COALESCE(MIN(score),0)
+           FROM scores WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
+        (query_teacher, grade, cls_name),
+    )
+
+    # 3. 点名统计
+    rc_stats = execute_query(
+        """SELECT COUNT(*),
+                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
+           FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
+        (query_teacher, grade, cls_name),
+    )
+
+    # 4. 考试统计
+    exam_stats = q_execute_query(
+        """SELECT e.title, e.subject, COUNT(ea.id) as attempt_count,
+                  COALESCE(AVG(ea.score),0) as avg_score,
+                  e.pass_score, e.total_score
+           FROM exams e
+           LEFT JOIN exam_attempts ea ON ea.exam_id = e.id
+           WHERE e.creator_username = ? AND e.status IN ('published', 'ended')
+           GROUP BY e.id
+           ORDER BY e.created_at DESC LIMIT 5""",
+        (query_teacher,),
+    )
+
+    # 5. 任务统计
+    task_stats = execute_query(
+        "SELECT COUNT(*) FROM tasks WHERE creator_username = ? AND status = 'active'",
+        (query_teacher,),
+    )
+    task_submissions = execute_query(
+        """SELECT COUNT(DISTINCT ts.student_username)
+           FROM task_submissions ts
+           JOIN tasks t ON ts.task_id = t.id
+           WHERE t.creator_username = ?""",
+        (query_teacher,),
+    )
+
+    sc = score_stats[0] if score_stats else (0, 0, 0, 0, 0)
+    rc = rc_stats[0] if rc_stats else (0, 0, 0)
+    rc_total = _safe_int(rc[0])
+    rc_correct = _safe_int(rc[1])
+
+    exam_text = ""
+    for e in exam_stats:
+        exam_text += f"- 《{e['title']}》({e['subject']}): 参考{e['attempt_count']}人, 平均分{round(_safe_float(e['avg_score']),1)}/{e['total_score']}\n"
+    if not exam_text:
+        exam_text = "暂无考试数据"
+
+    active_tasks = _safe_int(task_stats[0][0] if task_stats else 0)
+    submitted = _safe_int(task_submissions[0][0] if task_submissions else 0)
+
+    # ── 构建 Prompt ──
+    from backend.prompts.analytics import TEACHING_SUGGESTIONS_PROMPT
+
+    prompt = TEACHING_SUGGESTIONS_PROMPT.format(
+        grade=grade,
+        cls=cls_display,
+        total_students=total_students,
+        score_count=_safe_int(sc[0]),
+        score_total=_safe_int(sc[1]),
+        score_avg=round(_safe_float(sc[2]), 1),
+        score_max=_safe_int(sc[3]),
+        score_min=_safe_int(sc[4]),
+        rollcall_total=rc_total,
+        rollcall_correct=rc_correct,
+        rollcall_wrong=rc_total - rc_correct,
+        rollcall_rate=round(rc_correct / max(rc_total, 1) * 100, 1),
+        exam_text=exam_text,
+        active_tasks=active_tasks,
+        submitted_students=submitted,
+        task_rate=round(submitted / max(total_students, 1) * 100, 1),
+    )
+
+    ai_suggestions = _call_ai(prompt)
+
+    data_summary = {
+        "total_students": total_students,
+        "score_avg": round(_safe_float(sc[2]), 1),
+        "rollcall_rate": round(rc_correct / max(rc_total, 1) * 100, 1),
+        "exam_count": len(exam_stats),
+        "task_rate": round(submitted / max(total_students, 1) * 100, 1),
+    }
+
+    return {
+        "suggestions": ai_suggestions,
+        "data": data_summary,
+    }
+
