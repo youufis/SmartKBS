@@ -9,10 +9,11 @@ import {
   PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
-  DownloadOutlined,
+  DownloadOutlined, BulbOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
+import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import type { ExamInfo, ExamAttempt } from '../types'
 import { useNavigate } from 'react-router-dom'
@@ -80,6 +81,25 @@ const ExamPage: React.FC = () => {
   // ── 学生：我的成绩 ──
   const [myResults, setMyResults] = useState<ExamAttempt[]>([])
   const [myResultsLoading, setMyResultsLoading] = useState(false)
+
+  // ── AI 错题讲解 ──
+  const [explainModal, setExplainModal] = useState(false)
+  const [explainLoading, setExplainLoading] = useState(false)
+  const [explainData, setExplainData] = useState<{ exam_title: string; explanations: any[]; total_wrong: number } | null>(null)
+  const handleExplainWrong = async (examId: number, _examTitle: string) => {
+    setExplainModal(true)
+    setExplainLoading(true)
+    setExplainData(null)
+    try {
+      const { data } = await apiClient.get(`/api/exams/${examId}/explain-wrong`)
+      setExplainData(data)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '获取讲解失败')
+      setExplainModal(false)
+    } finally {
+      setExplainLoading(false)
+    }
+  }
 
   const isAdmin = user?.role === 'admin'
 
@@ -732,6 +752,15 @@ const ExamPage: React.FC = () => {
                       title: '提交时间', dataIndex: 'submitted_at', key: 'submitted_at', width: 160,
                       render: (t: string) => t ? t.slice(0, 16) : '-',
                     },
+                    {
+                      title: '操作', key: 'actions', width: 120,
+                      render: (_: any, r: ExamAttempt) => (
+                        <Button type="link" size="small" icon={<BulbOutlined />}
+                          onClick={() => handleExplainWrong(r.exam_id, r.exam_title || '')}>
+                          AI 讲解
+                        </Button>
+                      ),
+                    },
                   ]}
                   locale={{ emptyText: <Empty description="暂无考试记录" /> }}
                 />
@@ -1171,6 +1200,42 @@ const ExamPage: React.FC = () => {
                 pagination={false}
               />
             </>
+          )}
+        </Spin>
+      </Modal>
+
+      {/* ── AI 错题讲解弹窗 ── */}
+      <Modal title={<><BulbOutlined style={{ color: '#faad14' }} /> AI 错题讲解 - {explainData?.exam_title || ''}</>}
+        open={explainModal}
+        onCancel={() => setExplainModal(false)}
+        width={800}
+        footer={<Button onClick={() => setExplainModal(false)}>关闭</Button>}
+      >
+        <Spin spinning={explainLoading}>
+          {explainData && (
+            <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+              {explainData.total_wrong === 0 ? (
+                <Typography.Text type="success" style={{ fontSize: 16 }}>
+                  <CheckCircleOutlined /> 太棒了！你没有错题，全部答对了！
+                </Typography.Text>
+              ) : (
+                <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+                  共 {explainData.total_wrong} 道错题，点击下方标签页查看详细讲解
+                </Typography.Text>
+              )}
+              {explainData.explanations.map((exp: any, idx: number) => (
+                <Card key={idx} size="small" style={{ marginBottom: 12 }}
+                  title={<Space><Tag color="error">错题 {idx + 1}</Tag>{exp.question_text}</Space>}>
+                  {exp.error ? (
+                    <Typography.Text type="danger">{exp.error}</Typography.Text>
+                  ) : (
+                    <div className="markdown-content">
+                      <div dangerouslySetInnerHTML={{ __html: exp.explanation.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+                    </div>
+                  )}
+                </Card>
+              ))}
+            </div>
           )}
         </Spin>
       </Modal>
