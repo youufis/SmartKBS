@@ -4,6 +4,7 @@
 支持多选教师、多选年级、多选班级
 """
 import asyncio
+import os
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -14,7 +15,7 @@ from backend.auth import is_admin, is_teacher
 from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.logger import logger
 from backend.api.config_router import get_config_value
-from backend.config import STU_DIR, ROOT_DIR
+from backend.config import STU_DIR, ROOT_DIR, BASE_DIR
 
 router = APIRouter()
 
@@ -40,6 +41,46 @@ def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
     if file_path.startswith(f"{owner}/{dir_name}/") or file_path.startswith(f"{STU_DIR}/{owner}/{dir_name}/"):
         return file_path
     return f"{owner}/{dir_name}/{file_path}"
+
+
+def _cleanup_empty_dir_shares(owner_username: str = None):
+    """清理不存在的空目录的共享记录
+
+    目录共享是指共享目录下的所有文件。如果目录不存在或为空，
+    则该共享记录无意义，应自动清除。
+
+    如果指定 owner_username，只清理该用户的记录。
+    """
+    dir_name_map = {"download": "downloads", "html": "html"}
+    try:
+        cond = "WHERE resource_type='download'"
+        params = []
+        if owner_username:
+            cond += " AND owner_username=?"
+            params.append(owner_username)
+
+        rows = execute_query(
+            f"SELECT id, owner_username, file_path, resource_type FROM shared_resources {cond}",
+            tuple(params),
+        )
+        removed = 0
+        for rid, owner, file_path, res_type in rows:
+            # 判断是否为目录共享：路径以 / 结尾，或者路径中不含扩展名
+            last_part = file_path.rstrip("/").split("/")[-1]
+            is_dir = file_path.endswith("/") or "." not in last_part
+            if not is_dir:
+                continue
+            dir_name = dir_name_map.get(res_type, "downloads")
+            clean_path = file_path.strip("/")
+            full_dir = os.path.join(str(BASE_DIR), owner, dir_name, clean_path)
+            if not os.path.isdir(full_dir) or not os.listdir(full_dir):
+                execute_insert_update("DELETE FROM shared_resources WHERE id=?", (rid,))
+                removed += 1
+                logger.info(f"自动清理空目录共享: id={rid}, owner={owner}, path={file_path}")
+        if removed:
+            logger.info(f"共清理 {removed} 条空目录共享记录")
+    except Exception as e:
+        logger.warning(f"清理空目录共享时出错: {e}")
 
 
 _VALID_SCOPES = {"all", "teacher", "staff", "class"}
@@ -105,6 +146,9 @@ async def share_resource(request: Request, body: ShareRequest):
              body.share_scope, target_users_csv, target_grades_csv, target_classes_csv, now, now),
         )
         logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
+
+        # 共享后清理空目录共享记录（如果共享的是空目录，会自动删除）
+        _cleanup_empty_dir_shares(username)
 
         # ── 后台批量发送通知（不阻塞共享操作） ──
         def _send_notifications_sync():
@@ -201,6 +245,9 @@ async def unshare_resource(request: Request, id: int = Query(...)):
             (id,),
         )
         logger.info(f"共享已取消: id={id}, by={username}")
+
+        # 取消共享后清理空目录共享
+        _cleanup_empty_dir_shares(owner)
 
         # ── 后台发送取消通知（不阻塞取消操作） ──
         loop = asyncio.get_event_loop()
@@ -394,20 +441,57 @@ async def received_shares(request: Request):
 
 def is_file_shared_with_user(file_rel_path: str, resource_type: str,
                              owner_username: str, viewer_username: str) -> bool:
-    """检查一个文件是否通过共享对当前用户可见"""
+    """检查一个文件是否通过共享对当前用户可见
+
+    支持目录共享：如果文件的父目录被共享，该文件也对用户可见。
+    """
     if not viewer_username:
         return False
 
-    rows = execute_query(
-        """SELECT s.share_scope, s.target_users, s.target_grade, s.target_class
-           FROM shared_resources s
-           WHERE s.owner_username=? AND s.file_path=? AND s.resource_type=?""",
-        (owner_username, file_rel_path, resource_type),
-    )
-    if not rows:
-        return False
+    # 先尝试精确匹配（同时尝试带 / 和不带 / 的格式）
+    # 数据库中目录共享的 file_path 可能以 / 结尾（如 "pics/"）
+    # 但前端传入的 file_rel_path 可能不带 /（如 "pics"）
+    candidates = [file_rel_path]
+    if file_rel_path.endswith("/"):
+        candidates.append(file_rel_path.rstrip("/"))
+    else:
+        candidates.append(file_rel_path + "/")
 
-    share_scope, target_users, target_grade, target_class = rows[0]
+    for candidate in candidates:
+        rows = execute_query(
+            """SELECT s.share_scope, s.target_users, s.target_grade, s.target_class
+               FROM shared_resources s
+               WHERE s.owner_username=? AND s.file_path=? AND s.resource_type=?""",
+            (owner_username, candidate, resource_type),
+        )
+        if rows:
+            if _check_share_scope(rows[0], viewer_username):
+                return True
+
+    # 目录共享匹配：逐级向上检查父目录是否被共享
+    # 例如 file_rel_path = "subdir/images/photo.png"
+    # 检查 "subdir/images" 和 "subdir" 是否有共享记录
+    parts = file_rel_path.strip("/").split("/")
+    for i in range(len(parts) - 1, 0, -1):
+        dir_path = "/".join(parts[:i])
+        # 同时尝试带 / 和不带 / 的格式
+        for d in [dir_path, dir_path + "/"]:
+            rows = execute_query(
+                """SELECT s.share_scope, s.target_users, s.target_grade, s.target_class
+                   FROM shared_resources s
+                   WHERE s.owner_username=? AND s.file_path=? AND s.resource_type=?""",
+                (owner_username, d, resource_type),
+            )
+            if rows:
+                if _check_share_scope(rows[0], viewer_username):
+                    return True
+
+    return False
+
+
+def _check_share_scope(row, viewer_username: str) -> bool:
+    """检查共享范围是否对 viewer_username 可见"""
+    share_scope, target_users, target_grade, target_class = row
 
     # scope='all'：所有人可见
     if share_scope == 'all':
