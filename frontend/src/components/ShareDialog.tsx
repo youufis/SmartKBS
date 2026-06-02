@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Modal, message, Space, Typography, Button, Radio, Select, Divider, Tag, Checkbox } from 'antd'
-import { ShareAltOutlined, StopOutlined, TeamOutlined, GlobalOutlined, BookOutlined, UserOutlined } from '@ant-design/icons'
+import { ShareAltOutlined, StopOutlined, TeamOutlined, GlobalOutlined, BookOutlined, UserOutlined, FolderOutlined } from '@ant-design/icons'
 import * as sharingApi from '../api/sharing'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -13,12 +13,15 @@ interface ShareDialogProps {
   resourceType: 'html' | 'download'
   existingShare?: sharingApi.ShareItem | null
   onSuccess?: () => void
+  /** 是否通过目录共享继承（非精确匹配） */
+  inheritedFromDir?: boolean
 }
 
 type ShareScope = 'all' | 'teacher' | 'staff' | 'class'
 
 const ShareDialog: React.FC<ShareDialogProps> = ({
   open, onClose, filePath, fileName, resourceType, existingShare, onSuccess,
+  inheritedFromDir = false,
 }) => {
   const user = useAuthStore((s) => s.user)
   const isAdmin = user?.role === 'admin'
@@ -159,7 +162,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
       footer={
         <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
           <div>
-            {isShared && (
+            {isShared && !inheritedFromDir && (
               <Button danger type="text" icon={<StopOutlined />} onClick={handleUnshare} loading={loading}>
                 取消共享
               </Button>
@@ -167,7 +170,14 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
           </div>
           <Space>
             <Button onClick={onClose}>关闭</Button>
-            {!isShared && (
+            {inheritedFromDir ? (
+              <>
+                <Button type="primary" icon={<ShareAltOutlined />} onClick={handleShare} loading={loading}
+                  disabled={!canShare}>
+                  单独共享此文件
+                </Button>
+              </>
+            ) : !isShared && (
               <Button type="primary" icon={<ShareAltOutlined />} onClick={handleShare} loading={loading}
                 disabled={!canShare}>
                 确认共享
@@ -183,7 +193,19 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
           <strong>文件：</strong>{fileName}
         </Typography.Text>
 
-        {isShared ? (
+        {inheritedFromDir ? (
+          <>
+            <Typography.Text type="secondary">
+              <FolderOutlined style={{ marginRight: 4 }} />
+              此文件因其所在目录 <strong>{existingShare?.file_name}</strong> 被共享而自动对共享范围内的用户可见。
+            </Typography.Text>
+            <Divider style={{ margin: '4px 0' }} />
+            <Typography.Text strong>为此文件单独设置共享</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 13, display: 'block' }}>
+              单独共享将覆盖目录共享设置，可为此文件指定不同的共享范围。
+            </Typography.Text>
+          </>
+        ) : isShared ? (
           <Typography.Text type="secondary">
             该文件已共享，可修改共享范围后重新共享，或点击「取消共享」按钮停止共享。
           </Typography.Text>
