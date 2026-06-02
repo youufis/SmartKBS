@@ -11,6 +11,7 @@ import {
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import * as curriculumApi from '../api/curriculum'
+import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
@@ -93,6 +94,23 @@ const CurriculumPage: React.FC = () => {
   const [selectedKp, setSelectedKp] = useState<KnowledgePoint | null>(null)
   const [kpResources, setKpResources] = useState<CurriculumResource[]>([])
   const [kpLoading, setKpLoading] = useState(false)
+
+  // ── AI 备课 ──
+  const [lessonPlanLoading, setLessonPlanLoading] = useState(false)
+  const [lessonPlanModal, setLessonPlanModal] = useState(false)
+  const [lessonPlanData, setLessonPlanData] = useState<{ knowledge_point: string; lesson_plan: string } | null>(null)
+  const handleAiLessonPlan = async (kpId: number) => {
+    setLessonPlanLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/curriculum/ai-lesson-plan', { params: { knowledge_point_id: kpId } })
+      setLessonPlanData(data)
+      setLessonPlanModal(true)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'AI 备课失败')
+    } finally {
+      setLessonPlanLoading(false)
+    }
+  }
 
   // ── 资源绑定弹窗 ──
   const [binderOpen, setBinderOpen] = useState(false)
@@ -769,29 +787,40 @@ const CurriculumPage: React.FC = () => {
                 }
                 loading={kpLoading}
                 extra={
-                  isStudent && (
-                    <Space>
-                      {selectedKp.progress_status !== 'completed' && (
-                        <Button
-                          type="primary"
-                          size="small"
-                          icon={<CheckCircleOutlined />}
-                          onClick={() => handleUpdateProgress(selectedKp.id, 'completed')}
-                        >
-                          标记已完成
+                  <Space>
+                    {isTeacherOrAdmin && (
+                      <Tooltip title="AI 生成教案">
+                        <Button type="link" size="small" icon={<RobotOutlined />}
+                          loading={lessonPlanLoading}
+                          onClick={() => handleAiLessonPlan(selectedKp.id)}>
+                          AI 备课
                         </Button>
-                      )}
-                      {selectedKp.progress_status === 'not_started' && (
-                        <Button
-                          size="small"
-                          icon={<ClockCircleOutlined />}
-                          onClick={() => handleUpdateProgress(selectedKp.id, 'in_progress')}
-                        >
-                          开始学习
-                        </Button>
-                      )}
-                    </Space>
-                  )
+                      </Tooltip>
+                    )}
+                    {isStudent && (
+                      <>
+                        {selectedKp.progress_status !== 'completed' && (
+                          <Button
+                            type="primary"
+                            size="small"
+                            icon={<CheckCircleOutlined />}
+                            onClick={() => handleUpdateProgress(selectedKp.id, 'completed')}
+                          >
+                            标记已完成
+                          </Button>
+                        )}
+                        {selectedKp.progress_status === 'not_started' && (
+                          <Button
+                            size="small"
+                            icon={<ClockCircleOutlined />}
+                            onClick={() => handleUpdateProgress(selectedKp.id, 'in_progress')}
+                          >
+                            开始学习
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </Space>
                 }
               >
                 {/* 知识点信息 */}
@@ -1017,6 +1046,34 @@ const CurriculumPage: React.FC = () => {
           }
         }}
       />
+
+      {/* ── AI 备课结果弹窗 ── */}
+      <Modal
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 备课 - {lessonPlanData?.knowledge_point || ''}</>}
+        open={lessonPlanModal}
+        onCancel={() => setLessonPlanModal(false)}
+        width={800}
+        footer={<Button onClick={() => setLessonPlanModal(false)}>关闭</Button>}
+      >
+        {lessonPlanData && (
+          <div style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 14, lineHeight: 1.8 }}>
+            <div className="markdown-content">
+              {lessonPlanData.lesson_plan.split('\n').map((line, i) => {
+                if (line.startsWith('### ')) return <Typography.Title key={i} level={4}>{line.replace('### ', '')}</Typography.Title>
+                if (line.startsWith('## ')) return <Typography.Title key={i} level={3}>{line.replace('## ', '')}</Typography.Title>
+                if (line.startsWith('**') && line.endsWith('**')) return <Typography.Text key={i} strong>{line.slice(2, -2)}</Typography.Text>
+                if (line.startsWith('- **')) {
+                  const match = line.match(/- \*\*(.*?)\*\*[：:]\s*(.*)/)
+                  if (match) return <div key={i} style={{ margin: '4px 0' }}><Typography.Text strong>{match[1]}</Typography.Text>：{match[2]}</div>
+                }
+                if (line.startsWith('- ')) return <li key={i} style={{ margin: '2px 0' }}>{line.slice(2)}</li>
+                if (line.trim() === '') return <div key={i} style={{ height: 8 }} />
+                return <Typography.Paragraph key={i} style={{ margin: '4px 0' }}>{line}</Typography.Paragraph>
+              })}
+            </div>
+          </div>
+        )}
+      </Modal>
     </Layout>
   )
 }

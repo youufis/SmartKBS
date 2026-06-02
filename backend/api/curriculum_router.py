@@ -1626,11 +1626,14 @@ async def ai_lesson_plan(
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
 
+    def _safe(s):
+        return str(s).replace('{', '{{').replace('}', '}}')
+
     prompt = LESSON_PLAN_PROMPT.format(
-        course_name=kp["course_name"],
-        chapter_name=kp["chapter_name"],
-        knowledge_point=kp["name"],
-        grade=kp.get("grade", ""),
+        course_name=_safe(kp["course_name"]),
+        chapter_name=_safe(kp["chapter_name"]),
+        knowledge_point=_safe(kp["name"]),
+        grade=_safe(kp.get("grade", "")),
     )
 
     try:
