@@ -740,7 +740,7 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
         "created_at": now,
     }
     asyncio.create_task(ws_manager.broadcast(group_id, msg_data))
-    return {"status": "ok"}
+    return {"status": "ok", "id": msg_id}
 
 
 # ── 获取消息（轮询）──
