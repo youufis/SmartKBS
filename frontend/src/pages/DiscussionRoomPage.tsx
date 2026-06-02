@@ -129,12 +129,17 @@ const DiscussionRoomPage: React.FC = () => {
             const data = JSON.parse(event.data)
             if (data.type === 'new_message') {
               // 使用后端返回的真实消息 ID，确保与轮询数据 ID 一致，避免重复
+              const msgId = data.id || Date.now()
               const newMsg: Message = {
-                id: data.id || Date.now(),
+                id: msgId,
                 username: data.username || 'AI助教',
                 content: data.content,
                 msg_type: data.msg_type || 'text',
                 created_at: data.created_at || new Date().toISOString(),
+              }
+              // 同步更新轮询 ID，防止轮询再次拉取同一条消息
+              if (typeof msgId === 'number' && msgId > lastPollIdRef.current) {
+                lastPollIdRef.current = msgId
               }
               setMessages(prev => {
                 // 去重：避免与轮询带回的消息重复
@@ -210,8 +215,12 @@ const DiscussionRoomPage: React.FC = () => {
 
     setSending(true)
     try {
-      await apiClient.post(`/api/interaction/groups/${groupId}/messages`, { content })
+      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/messages`, { content })
       setInput('')
+      // 用后端返回的真实 ID 更新轮询 ID，防止轮询再次拉取同一条消息
+      if (data?.id && typeof data.id === 'number' && data.id > lastPollIdRef.current) {
+        lastPollIdRef.current = data.id
+      }
       // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
     } catch {
       message.error('发送失败')
