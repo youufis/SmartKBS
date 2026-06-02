@@ -9,7 +9,7 @@ import {
   PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
-  DownloadOutlined, BulbOutlined,
+  DownloadOutlined, BulbOutlined, FileOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -117,6 +117,25 @@ const ExamPage: React.FC = () => {
     }
   }
 
+  // ── 学生查看答题详情 ──
+  const [detailModal, setDetailModal] = useState(false)
+  const [detailData, setDetailData] = useState<any>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const handleViewMyDetail = async (attempt: ExamAttempt) => {
+    setDetailModal(true)
+    setDetailLoading(true)
+    setDetailData(null)
+    try {
+      const { data } = await apiClient.get(`/api/exams/attempt/${attempt.id}/exam/${attempt.exam_id}`)
+      setDetailData(data)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '加载详情失败')
+      setDetailModal(false)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   const isAdmin = user?.role === 'admin'
 
   // ── 加载考试列表 ──
@@ -139,7 +158,7 @@ const ExamPage: React.FC = () => {
     }
   }, [statusFilter, page, pageSize, isStudent])
 
-  useEffect(() => { loadExams() }, [loadExams])
+  useEffect(() => { const fn = async () => { loadExams() }; fn() }, [loadExams])
 
   // ── 加载学生成绩 ──
   const loadMyResults = useCallback(async () => {
@@ -157,7 +176,8 @@ const ExamPage: React.FC = () => {
   }, [isStudent])
 
   useEffect(() => {
-    if (isStudent) loadMyResults()
+    const fn = async () => { if (isStudent) loadMyResults() }
+    fn()
   }, [isStudent, loadMyResults])
 
   // ── 创建考试 ──
@@ -322,9 +342,8 @@ const ExamPage: React.FC = () => {
   }
 
   useEffect(() => {
-    if (questionModal) {
-      loadAllQuestions(1)
-    }
+    const fn = async () => { if (questionModal) { loadAllQuestions(1) } }
+    fn()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionModal, qSubject, qType, qDifficulty])
 
@@ -769,12 +788,18 @@ const ExamPage: React.FC = () => {
                       render: (t: string) => t ? t.slice(0, 16) : '-',
                     },
                     {
-                      title: '操作', key: 'actions', width: 120,
+                      title: '操作', key: 'actions', width: 200,
                       render: (_: any, r: ExamAttempt) => (
-                        <Button type="link" size="small" icon={<BulbOutlined />}
-                          onClick={() => handleExplainWrong(r.exam_id)}>
-                          AI 讲解
-                        </Button>
+                        <Space>
+                          <Button type="link" size="small" icon={<FileOutlined />}
+                            onClick={() => handleViewMyDetail(r)}>
+                            查看详情
+                          </Button>
+                          <Button type="link" size="small" icon={<BulbOutlined />}
+                            onClick={() => handleExplainWrong(r.exam_id)}>
+                            AI 讲解
+                          </Button>
+                        </Space>
                       ),
                     },
                   ]}
@@ -1220,6 +1245,29 @@ const ExamPage: React.FC = () => {
                     render: (t: string) => t ? t.slice(0, 16) : '-' },
                 ]}
                 pagination={false}
+                expandable={{
+                  expandedRowRender: (record: any) => {
+                    const answers = record.answers || {}
+                    const answerList = Object.entries(answers).map(([qid, ans]: [string, any]) => ({
+                      qid, ...ans,
+                    }))
+                    return (
+                      <Table dataSource={answerList} rowKey="qid" size="small" pagination={false}
+                        columns={[
+                          { title: '题号', key: 'idx', width: 50, render: (_: any, __: any, idx: number) => idx + 1 },
+                          { title: '学生答案', dataIndex: 'student_answer', width: 150, ellipsis: true },
+                          { title: '正确答案', dataIndex: 'correct_answer', width: 150, ellipsis: true },
+                          { title: '得分', dataIndex: 'score', width: 60,
+                            render: (s: number, r: any) => <span style={{ color: s >= (r.max_score || 1) * 0.6 ? '#52c41a' : '#ff4d4f' }}>{s} / {r.max_score}</span> },
+                          { title: 'AI 评语', dataIndex: 'ai_comment', width: 200, ellipsis: true,
+                            render: (t: string) => t || '-' },
+                          { title: '学习建议', dataIndex: 'ai_feedback', width: 200, ellipsis: true,
+                            render: (t: string) => t || '-' },
+                        ]}
+                      />
+                    )
+                  },
+                }}
               />
             </>
           )}
@@ -1258,6 +1306,65 @@ const ExamPage: React.FC = () => {
                 </Card>
               ))}
             </div>
+          )}
+        </Spin>
+      </Modal>
+
+      {/* ── 答题详情弹窗（学生查看） ── */}
+      <Modal title="答题详情" open={detailModal}
+        onCancel={() => setDetailModal(false)}
+        width={800}
+        footer={<Button onClick={() => setDetailModal(false)}>关闭</Button>}
+      >
+        <Spin spinning={detailLoading}>
+          {detailData ? (
+            <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+              <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
+                has attempt: {String(!!detailData.attempt)}, questions: {detailData.questions?.length || 0}道
+              </div>
+              {detailData.attempt ? (
+                <>
+              <Card size="small" style={{ marginBottom: 16 }}>
+                <Space>
+                  <Statistic title="得分" value={detailData.attempt.score} suffix={`/ ${detailData.attempt.total_score}`}
+                    valueStyle={{ color: detailData.attempt.score >= (detailData.attempt.total_score || 100) * 0.6 ? '#52c41a' : '#ff4d4f' }} />
+                </Space>
+              </Card>
+              {(!detailData.questions || detailData.questions.length === 0) ? (
+                <Typography.Text type="secondary">暂无题目数据</Typography.Text>
+              ) : detailData.questions.map((q: any, idx: number) => {
+                const answers = detailData.attempt.answers || {}
+                const ans = answers[String(q.id)] || {}
+                const isCorrect = ans.is_correct
+                const isAiGraded = ans.ai_graded
+                return (
+                  <Card key={q.id} size="small" style={{ marginBottom: 8 }}
+                    title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
+                      {q.type === 'single' ? '单选' : q.type === 'multiple' ? '多选' : q.type === 'true_false' ? '判断' : '简答'} | 第{idx + 1}题</Space>}>
+                    <Typography.Paragraph style={{ fontWeight: 500 }}>{q.question_text}</Typography.Paragraph>
+                    <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                      <Typography.Text><strong>你的答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
+                      <Typography.Text><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
+                      <Typography.Text><strong>得分：</strong>
+                        <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
+                      </Typography.Text>
+                      {isAiGraded && ans.ai_comment && (
+                        <Card size="small" style={{ background: '#f6ffed', marginTop: 4 }}>
+                          <Typography.Text><strong>AI 评语：</strong>{ans.ai_comment}</Typography.Text>
+                          {ans.ai_feedback && <div style={{ marginTop: 4 }}><Typography.Text><strong>学习建议：</strong>{ans.ai_feedback}</Typography.Text></div>}
+                        </Card>
+                      )}
+                    </Space>
+                  </Card>
+                )
+              })}
+              </>
+              ) : (
+                <Typography.Text type="danger">无法加载答题数据</Typography.Text>
+              )}
+            </div>
+          ) : (
+            <Typography.Text type="secondary">加载中...</Typography.Text>
           )}
         </Spin>
       </Modal>

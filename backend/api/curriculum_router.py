@@ -1622,7 +1622,7 @@ async def ai_lesson_plan(
     from backend.api.ai_service import call_ai_sync
 
     keys = get_api_keys(username)
-    api_key = keys.get("dashscope_key") or keys.get("deepseek_key") or ""
+    api_key = keys[0] if keys and keys[0] else ""
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
 
@@ -1647,3 +1647,147 @@ async def ai_lesson_plan(
     except Exception as e:
         logger.error(f"AI 备课助手生成失败: {e}")
         raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.1 新增：导出教案为 Word 文档
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/ai-lesson-plan/{kp_id}/export")
+async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Query("")):
+    """导出 AI 教案为 Word 文档"""
+    import io
+    import traceback
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from fastapi.responses import StreamingResponse
+
+    # 支持 token 参数认证（用于 window.open 下载）
+    if token:
+        request.state.user = None
+        from backend.auth import decode_jwt_token
+        payload = decode_jwt_token(token)
+        if payload:
+            request.state.user = payload
+
+    try:
+        user = get_current_user(request)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"认证失败: {str(e)}")
+
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可导出教案")
+
+    try:
+        kp_rows = execute_query(
+            """SELECT kp.id, kp.name, kp.chapter_id, c.name as chapter_name,
+                      co.name as course_name, co.grade
+               FROM knowledge_points kp
+               JOIN chapters c ON c.id = kp.chapter_id
+               JOIN courses co ON co.id = c.course_id
+               WHERE kp.id = ?""",
+            (kp_id,),
+        )
+        if not kp_rows:
+            raise HTTPException(status_code=404, detail="知识点不存在")
+        kp = kp_rows[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询知识点失败: {e}")
+        raise HTTPException(status_code=500, detail=f"查询知识点失败: {str(e)}")
+
+    from backend.prompts.teaching import LESSON_PLAN_PROMPT
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_sync
+
+    keys = get_api_keys(username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    def _safe(s):
+        return str(s).replace('{', '{{').replace('}', '}}')
+
+    prompt = LESSON_PLAN_PROMPT.format(
+        course_name=_safe(kp["course_name"]),
+        chapter_name=_safe(kp["chapter_name"]),
+        knowledge_point=_safe(kp["name"]),
+        grade=_safe(kp.get("grade", "")),
+    )
+
+    try:
+        lesson_plan_text = call_ai_sync(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 备课助手生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
+
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Microsoft YaHei'
+    style.font.size = Pt(11)
+    style.paragraph_format.line_spacing = 1.5
+
+    title = doc.add_heading(kp["name"], level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    info = doc.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = info.add_run(f"课程：{kp['course_name']}  章节：{kp['chapter_name']}  年级：{kp.get('grade', '')}")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    doc.add_paragraph()
+
+    for line in lesson_plan_text.split('\n'):
+        line = line.strip()
+        if not line:
+            doc.add_paragraph()
+            continue
+        if line.startswith('### '):
+            doc.add_heading(line[4:], level=3)
+        elif line.startswith('## '):
+            doc.add_heading(line[3:], level=2)
+        elif line.startswith('# '):
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith('- **') and '：' in line:
+            content = line.lstrip('- ')
+            p = doc.add_paragraph()
+            bold_end = content.find('**', 2)
+            if bold_end > 0:
+                run = p.add_run(content[2:bold_end])
+                run.bold = True
+                p.add_run(content[bold_end + 2:])
+            else:
+                p.add_run(content)
+        elif line.startswith('- '):
+            doc.add_paragraph(line[2:], style='List Bullet')
+        elif any(line.startswith(f'{i}. ') for i in range(1, 10)):
+            doc.add_paragraph(line, style='List Number')
+        else:
+            if '**' in line:
+                p = doc.add_paragraph()
+                parts = line.split('**')
+                for i, part in enumerate(parts):
+                    if part:
+                        run = p.add_run(part)
+                        if i % 2 == 1:
+                            run.bold = True
+            else:
+                doc.add_paragraph(line)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    import urllib.parse
+    safe_filename = urllib.parse.quote(f"{kp['name']}.docx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
+    )
