@@ -64,8 +64,8 @@ async def login(req: LoginRequest):
     if not check_password(password, hashed_password):
         raise HTTPException(status_code=401, detail="密码错误")
 
-    # 生成 JWT token（不递增版本号，允许多标签页共存）
-    # 版本号仅在显式登出时递增，以清除所有在线会话
+    # 登录前递增 token_version，使旧 token 失效（强制单点登录）
+    increment_token_version(username)
     token = create_jwt_token(username, role_val)
 
     # 格式化用户信息
