@@ -9,7 +9,7 @@ import {
   PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
-  DownloadOutlined, BulbOutlined, FileOutlined,
+  DownloadOutlined, BulbOutlined, FileOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -71,6 +71,11 @@ const ExamPage: React.FC = () => {
   const [qKeyword, setQKeyword] = useState('')
   const [autoSelectForm] = Form.useForm()
   const [autoSelecting, setAutoSelecting] = useState(false)
+
+  // ── AI 智能组卷 ──
+  const [aiComposing, setAiComposing] = useState(false)
+  const [aiComposeCount, setAiComposeCount] = useState(10)
+  const [aiComposeFocus, setAiComposeFocus] = useState('')
 
   // ── 成绩查看弹窗 ──
   const [resultModal, setResultModal] = useState(false)
@@ -453,6 +458,30 @@ const ExamPage: React.FC = () => {
       }
     } finally {
       setAutoSelecting(false)
+    }
+  }
+
+  // ── AI 智能组卷 ──
+  const handleAiCompose = async () => {
+    if (!questionExam) return
+    setAiComposing(true)
+    try {
+      const { data } = await apiClient.post(`/api/exams/${questionExam.id}/ai-compose`, {
+        target_count: aiComposeCount,
+        knowledge_focus: aiComposeFocus,
+      })
+      message.success(data.message || 'AI 组卷完成')
+      if (data.reason) {
+        Modal.info({
+          title: 'AI 组卷思路',
+          content: data.reason,
+        })
+      }
+      await loadExamQuestions(questionExam.id)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'AI 组卷失败')
+    } finally {
+      setAiComposing(false)
     }
   }
 
@@ -1115,6 +1144,33 @@ const ExamPage: React.FC = () => {
             </Form>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
               💡 将根据筛选条件智能随机选题，自动排除已添加的题目。添加后可用「自动均衡」统一分配分值
+            </Typography.Text>
+          </Card>
+
+          {/* ── AI 智能组卷卡片 ── */}
+          <Card
+            size="small"
+            title={<Space><RobotOutlined />AI 智能组卷</Space>}
+            style={{ marginBottom: 16, background: '#f0fff0', border: '1px solid #52c41a44' }}
+            extra={
+              <Button type="primary" size="small" icon={<RobotOutlined />}
+                loading={aiComposing} onClick={handleAiCompose}
+                disabled={!questionExam?.id}>
+                AI 组卷
+              </Button>
+            }
+          >
+            <Space wrap style={{ gap: 8 }}>
+              <Typography.Text style={{ fontSize: 13 }}>目标题数：</Typography.Text>
+              <InputNumber size="small" min={1} max={100} value={aiComposeCount}
+                onChange={(v) => setAiComposeCount(v || 10)} style={{ width: 80 }} />
+              <Typography.Text style={{ fontSize: 13 }}>知识点要求：</Typography.Text>
+              <Input size="small" value={aiComposeFocus}
+                onChange={(e) => setAiComposeFocus(e.target.value)}
+                placeholder="如：算法、数据结构" style={{ width: 200 }} />
+            </Space>
+            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+              🤖 AI 会根据知识点覆盖、难度分布、题型搭配自动选择最优试题组合
             </Typography.Text>
           </Card>
 

@@ -51,14 +51,42 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
             stream=False,
             headers={"X-DashScope-OssResourceResolve": "enable"},
         )
+        # 尝试多种方式提取响应文本
+        text = None
+        # 方式1: response.output.text
         output = getattr(response, "output", None)
-        if output:
-            text = getattr(output, "text", None)
-            if text:
-                return text
-        if hasattr(response, "text"):
-            return response.text
-        raise Exception("AI 响应为空")
+        if output is not None:
+            if isinstance(output, str):
+                text = output
+            elif hasattr(output, "get"):
+                text = output.get("text", None) or getattr(output, "text", None)
+            else:
+                text = getattr(output, "text", None)
+        # 方式2: response.text（兼容旧版 SDK）
+        if not text:
+            try:
+                if hasattr(response, "text"):
+                    text = response.text
+            except (KeyError, AttributeError, TypeError):
+                pass
+        # 方式3: response 本身是 dict
+        if not text:
+            try:
+                if isinstance(response, dict):
+                    out = response.get("output", {})
+                    if isinstance(out, dict):
+                        text = out.get("text", "")
+            except (KeyError, TypeError):
+                pass
+        if text:
+            return str(text)
+        # 智能体返回空时，降级到直接调模型
+        logger.warning(f"智能体返回为空，降级到直接调模型 (app_id={app_id})")
+        from backend.api.config_router import get_config_value
+        model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+        api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                     "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        return _call_model_sync(prompt, api_key, model, api_base)
     except Exception as e:
         logger.error(f"智能体调用失败 (app_id={app_id}): {e}")
         raise
