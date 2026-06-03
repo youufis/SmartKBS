@@ -183,8 +183,8 @@ async def list_exams(
     params = []
 
     # 权限控制
-    if role == 2:  # 学生：只能看到已发布且是本班教师或管理员创建的考试
-        conditions.append("e.status = 'published'")
+    if role == 2:  # 学生：只能看到已发布或已结束且是本班教师或管理员创建的考试
+        conditions.append("e.status IN ('published', 'ended')")
     elif role == 1:  # 教师：只能看到自己创建的考试
         conditions.append("e.creator_username = ?")
         params.append(username)
@@ -268,7 +268,7 @@ async def list_exams(
         # 补充答题状态
         for row in rows:
             attempt = execute_query_one(
-                """SELECT status, score, total_score
+                """SELECT id, exam_id, status, score, total_score
                    FROM exam_attempts
                    WHERE exam_id = ? AND student_username = ?
                    ORDER BY id DESC LIMIT 1""",
@@ -292,6 +292,16 @@ async def list_exams(
                 LIMIT ? OFFSET ?""",
             tuple(params) + (page_size, offset),
         )
+
+    # 补充 creator_name
+    for row in rows:
+        creator = row.get("creator_username", "")
+        if creator and not row.get("creator_name"):
+            name_rows = user_query(
+                "SELECT COALESCE(NULLIF(name, ''), username) FROM users WHERE username = ?",
+                (creator,),
+            )
+            row["creator_name"] = name_rows[0][0] if name_rows and name_rows[0] else creator
 
     return {
         "exams": rows,
@@ -1142,14 +1152,24 @@ async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request)
 
     # 获取题目信息
     questions = execute_query(
-        """SELECT q.id, q.type, q.question_text, q.correct_answer,
-                  q.knowledge_points, eq.score as question_score
+        """SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
+                  q.explanation, q.knowledge_points, eq.score as question_score
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'
            ORDER BY eq.sort_order""",
         (exam_id,),
     )
+
+    # 解析 options JSON
+    for q in questions:
+        if q.get("options"):
+            try:
+                q["options"] = json.loads(q["options"])
+            except (json.JSONDecodeError, TypeError):
+                q["options"] = None
+        else:
+            q["options"] = None
 
     return {
         "attempt": {
@@ -1181,7 +1201,7 @@ async def get_my_results(request: Request):
     if role == 2:
         rows = execute_query(
             """SELECT ea.*, e.title as exam_title, e.subject as exam_subject,
-                      e.pass_score
+                      e.pass_score, e.creator_username
                FROM exam_attempts ea
                JOIN exams e ON e.id = ea.exam_id
                WHERE ea.student_username = ?
@@ -1199,6 +1219,18 @@ async def get_my_results(request: Request):
                ORDER BY ea.submitted_at DESC""",
             (username, username),
         )
+
+    # 补充 creator_name（从 smartkb.db 查询）
+    for r in rows:
+        creator = r.get("creator_username", "")
+        if creator:
+            name_rows = user_query(
+                "SELECT COALESCE(NULLIF(name, ''), username) FROM users WHERE username = ?",
+                (creator,),
+            )
+            r["creator_name"] = name_rows[0][0] if name_rows and name_rows[0] else creator
+        else:
+            r["creator_name"] = ""
 
     return {"results": rows}
 
@@ -1220,21 +1252,15 @@ async def get_exam_results(exam_id: int, request: Request):
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权查看此考试的结果")
 
-    # 获取所有提交记录
+    # 获取所有提交记录（不包含 answers 详情，展开时再按学生加载）
     attempts = execute_query(
-        """SELECT * FROM exam_attempts
+        """SELECT id, exam_id, student_username, student_name, score, total_score,
+                  submitted_at, status, auto_graded
+           FROM exam_attempts
            WHERE exam_id = ? AND status = 'submitted'
            ORDER BY score DESC""",
         (exam_id,),
     )
-
-    # 解析答案
-    for a in attempts:
-        if a.get("answers"):
-            try:
-                a["answers"] = json.loads(a["answers"])
-            except (json.JSONDecodeError, TypeError):
-                a["answers"] = None
 
     # 统计数据
     total_students = len(attempts)
@@ -1254,6 +1280,64 @@ async def get_exam_results(exam_id: int, request: Request):
             "max_score": max_score,
             "min_score": min_score,
         },
+    }
+
+
+@router.get("/{exam_id}/attempt/{attempt_id}/detail", summary="获取学生答题详情（教师展开时按需加载）")
+async def get_student_attempt_detail(exam_id: int, attempt_id: int, request: Request):
+    """教师/管理员展开学生成绩时，按需加载该学生的答题详情"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="无权查看")
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+
+    attempt = execute_query_one("SELECT * FROM exam_attempts WHERE id = ? AND exam_id = ?",
+                                 (attempt_id, exam_id))
+    if not attempt:
+        raise HTTPException(status_code=404, detail="答题记录不存在")
+
+    # 解析答案
+    answers = attempt.get("answers")
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except (json.JSONDecodeError, TypeError):
+            answers = {}
+
+    # 获取题目信息（含选项和解析）
+    questions = execute_query(
+        """SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
+                  q.explanation, q.knowledge_points, eq.score as question_score
+           FROM exam_questions eq
+           JOIN question_bank q ON q.id = eq.question_id
+           WHERE eq.exam_id = ? AND q.status = 'active'
+           ORDER BY eq.sort_order""",
+        (exam_id,),
+    )
+
+    # 解析 options JSON
+    for q in questions:
+        if q.get("options"):
+            try:
+                q["options"] = json.loads(q["options"])
+            except (json.JSONDecodeError, TypeError):
+                q["options"] = None
+        else:
+            q["options"] = None
+
+    return {
+        "attempt": {
+            "id": attempt["id"],
+            "score": attempt["score"],
+            "total_score": attempt["total_score"],
+            "submitted_at": attempt["submitted_at"],
+            "answers": answers,
+        },
+        "questions": questions,
     }
 
 

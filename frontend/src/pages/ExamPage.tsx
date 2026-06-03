@@ -637,12 +637,25 @@ const ExamPage: React.FC = () => {
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
+      render: (text: string, record: ExamInfo) => (
+        <Space>
+          <span>{text}</span>
+          {record.status === 'ended' && <Tag color="red">已结束</Tag>}
+        </Space>
+      ),
     },
     {
       title: '科目',
       dataIndex: 'subject',
       key: 'subject',
       width: 100,
+    },
+    {
+      title: '发布者',
+      dataIndex: 'creator_name',
+      key: 'creator_name',
+      width: 90,
+      render: (name: string, record: ExamInfo) => <Tag color="blue">{name || record.creator_username || '-'}</Tag>,
     },
     {
       title: '时长',
@@ -689,6 +702,19 @@ const ExamPage: React.FC = () => {
       width: 200,
       render: (_: any, record: ExamInfo) => {
         const attempt = record.my_attempt
+
+        if (record.status === 'ended') {
+          return (
+            <Space>
+              {attempt ? (
+                <Button size="small" icon={<BarChartOutlined />}
+                  onClick={() => handleViewMyDetail(attempt)}>查看成绩</Button>
+              ) : (
+                <Tag>已结束</Tag>
+              )}
+            </Space>
+          )
+        }
 
         return (
           <Space>
@@ -797,7 +823,9 @@ const ExamPage: React.FC = () => {
                 <Table dataSource={myResults} rowKey="id" loading={myResultsLoading} size="small"
                   columns={[
                     { title: '考试名称', dataIndex: 'exam_title', key: 'exam_title', ellipsis: true },
-                    { title: '科目', dataIndex: 'exam_subject', key: 'exam_subject', width: 100 },
+                    { title: '科目', dataIndex: 'exam_subject', key: 'exam_subject', width: 80 },
+                    { title: '发布者', dataIndex: 'creator_name', key: 'creator_name', width: 90,
+                      render: (name: string) => <Tag color="blue">{name || '-'}</Tag> },
                     {
                       title: '得分', key: 'score', width: 100,
                       render: (_: any, r: ExamAttempt) => {
@@ -1302,27 +1330,12 @@ const ExamPage: React.FC = () => {
                 ]}
                 pagination={false}
                 expandable={{
-                  expandedRowRender: (record: any) => {
-                    const answers = record.answers || {}
-                    const answerList = Object.entries(answers).map(([qid, ans]: [string, any]) => ({
-                      qid, ...ans,
-                    }))
-                    return (
-                      <Table dataSource={answerList} rowKey="qid" size="small" pagination={false}
-                        columns={[
-                          { title: '题号', key: 'idx', width: 50, render: (_: any, __: any, idx: number) => idx + 1 },
-                          { title: '学生答案', dataIndex: 'student_answer', width: 150, ellipsis: true },
-                          { title: '正确答案', dataIndex: 'correct_answer', width: 150, ellipsis: true },
-                          { title: '得分', dataIndex: 'score', width: 60,
-                            render: (s: number, r: any) => <span style={{ color: s >= (r.max_score || 1) * 0.6 ? '#52c41a' : '#ff4d4f' }}>{s} / {r.max_score}</span> },
-                          { title: 'AI 评语', dataIndex: 'ai_comment', width: 200, ellipsis: true,
-                            render: (t: string) => t || '-' },
-                          { title: '学习建议', dataIndex: 'ai_feedback', width: 200, ellipsis: true,
-                            render: (t: string) => t || '-' },
-                        ]}
-                      />
-                    )
-                  },
+                  expandedRowRender: (record: any) => <StudentExamDetail
+                    examId={resultExam?.id ?? 0}
+                    attemptId={record.id}
+                    studentName={record.student_name}
+                  />,
+                  rowExpandable: () => true,
                 }}
               />
             </>
@@ -1375,9 +1388,6 @@ const ExamPage: React.FC = () => {
         <Spin spinning={detailLoading}>
           {detailData ? (
             <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
-              <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
-                has attempt: {String(!!detailData.attempt)}, questions: {detailData.questions?.length || 0}道
-              </div>
               {detailData.attempt ? (
                 <>
               <Card size="small" style={{ marginBottom: 16 }}>
@@ -1393,17 +1403,44 @@ const ExamPage: React.FC = () => {
                 const ans = answers[String(q.id)] || {}
                 const isCorrect = ans.is_correct
                 const isAiGraded = ans.ai_graded
+                const options = q.options || {}
+                const optionLabels = Object.keys(options)
                 return (
                   <Card key={q.id} size="small" style={{ marginBottom: 8 }}
                     title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
                       {q.type === 'single' ? '单选' : q.type === 'multiple' ? '多选' : q.type === 'true_false' ? '判断' : '简答'} | 第{idx + 1}题</Space>}>
-                    <Typography.Paragraph style={{ fontWeight: 500 }}>{q.question_text}</Typography.Paragraph>
+                    <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8 }}>{q.question_text}</Typography.Paragraph>
+                    {/* 选项展示 */}
+                    {optionLabels.length > 0 && (
+                      <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                        {optionLabels.map((key: string) => {
+                          const isSelected = ans.student_answer?.includes(key)
+                          const isCorrectOpt = q.correct_answer?.includes(key)
+                          return (
+                            <div key={key} style={{
+                              padding: '4px 8px', marginBottom: 2, borderRadius: 4,
+                              background: isSelected && isCorrectOpt ? '#f6ffed' : isSelected ? '#fff2f0' : isCorrectOpt ? '#e6f7ff' : 'transparent',
+                              border: isSelected ? '1px solid ' + (isCorrectOpt ? '#b7eb8f' : '#ffccc7') : isCorrectOpt ? '1px solid #91d5ff' : '1px solid transparent',
+                            }}>
+                              <Typography.Text style={{ fontSize: 13 }}>
+                                <strong>{key}.</strong> {options[key]}
+                                {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 你的答案' : '✗ 你的答案'}</Tag>}
+                                {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>正确答案</Tag>}
+                              </Typography.Text>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                     <Space direction="vertical" style={{ width: '100%' }} size={4}>
                       <Typography.Text><strong>你的答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
                       <Typography.Text><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
                       <Typography.Text><strong>得分：</strong>
                         <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
                       </Typography.Text>
+                      {q.explanation && (
+                        <Typography.Text><strong>解析：</strong>{q.explanation}</Typography.Text>
+                      )}
                       {isAiGraded && ans.ai_comment && (
                         <Card size="small" style={{ background: '#f6ffed', marginTop: 4 }}>
                           <Typography.Text><strong>AI 评语：</strong>{ans.ai_comment}</Typography.Text>
@@ -1425,6 +1462,94 @@ const ExamPage: React.FC = () => {
         </Spin>
       </Modal>
     </Layout>
+  )
+}
+
+/** 学生答题详情子组件（教师端展开时按需加载） */
+const StudentExamDetail: React.FC<{ examId: number; attemptId: number; studentName: string }> = ({ examId, attemptId, studentName }) => {
+  const [loading, setLoading] = useState(true)
+  const [detail, setDetail] = useState<any>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    apiClient.get(`/api/exams/${examId}/attempt/${attemptId}/detail`).then(({ data }) => {
+      if (!cancelled) setDetail(data)
+    }).catch(() => {
+      if (!cancelled) message.error('加载学生答题详情失败')
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [examId, attemptId])
+
+  if (loading) return <Spin size="small" style={{ display: 'block', textAlign: 'center', padding: 24 }} />
+  if (!detail) return <Typography.Text type="danger">加载失败</Typography.Text>
+
+  const answers = detail.attempt?.answers || {}
+  const questions = detail.questions || []
+
+  return (
+    <div style={{ maxHeight: 400, overflow: 'auto' }}>
+      <div style={{ marginBottom: 8 }}>
+        <Typography.Text strong>{studentName}</Typography.Text>
+        <Tag style={{ marginLeft: 8 }}>{detail.attempt.score} / {detail.attempt.total_score} 分</Tag>
+      </div>
+      {questions.length === 0 ? (
+        <Typography.Text type="secondary">暂无题目数据</Typography.Text>
+      ) : questions.map((q: any, idx: number) => {
+        const ans = answers[String(q.id)] || {}
+        const isCorrect = ans.is_correct
+        const isAiGraded = ans.ai_graded
+        const options = q.options || {}
+        const optionLabels = Object.keys(options)
+        return (
+          <Card key={q.id} size="small" style={{ marginBottom: 6 }}
+            title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
+              {q.type === 'single' ? '单选' : q.type === 'multiple' ? '多选' : q.type === 'true_false' ? '判断' : '简答'} | 第{idx + 1}题</Space>}>
+            <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>{q.question_text}</Typography.Paragraph>
+            {/* 选项展示 */}
+            {optionLabels.length > 0 && (
+              <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                {optionLabels.map((key: string) => {
+                  const isSelected = ans.student_answer?.includes(key)
+                  const isCorrectOpt = q.correct_answer?.includes(key)
+                  return (
+                    <div key={key} style={{
+                      padding: '3px 8px', marginBottom: 2, borderRadius: 4, fontSize: 13,
+                      background: isSelected && isCorrectOpt ? '#f6ffed' : isSelected ? '#fff2f0' : isCorrectOpt ? '#e6f7ff' : 'transparent',
+                      border: isSelected ? '1px solid ' + (isCorrectOpt ? '#b7eb8f' : '#ffccc7') : isCorrectOpt ? '1px solid #91d5ff' : '1px solid transparent',
+                    }}>
+                      <Typography.Text style={{ fontSize: 13 }}>
+                        <strong>{key}.</strong> {options[key]}
+                        {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 你的答案' : '✗ 你的答案'}</Tag>}
+                        {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>正确答案</Tag>}
+                      </Typography.Text>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <Space direction="vertical" size={2} style={{ fontSize: 13 }}>
+              <Typography.Text style={{ fontSize: 13 }}><strong>学生答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
+              <Typography.Text style={{ fontSize: 13 }}><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
+              <Typography.Text style={{ fontSize: 13 }}><strong>得分：</strong>
+                <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
+              </Typography.Text>
+              {q.explanation && (
+                <Typography.Text style={{ fontSize: 13 }}><strong>解析：</strong>{q.explanation}</Typography.Text>
+              )}
+              {isAiGraded && ans.ai_comment && (
+                <Typography.Text style={{ fontSize: 13 }}><strong>AI 评语：</strong>{ans.ai_comment}</Typography.Text>
+              )}
+              {isAiGraded && ans.ai_feedback && (
+                <Typography.Text style={{ fontSize: 13 }}><strong>学习建议：</strong>{ans.ai_feedback}</Typography.Text>
+              )}
+            </Space>
+          </Card>
+        )
+      })}
+    </div>
   )
 }
 
