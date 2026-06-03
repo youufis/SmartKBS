@@ -43,18 +43,32 @@ def _call_ai(prompt: str) -> str:
         return f"AI 分析出错：{str(e)}"
 
 
-async def _call_ai_async(prompt: str) -> str:
-    """调用 AI 分析（异步）- 不阻塞工作线程"""
+async def _call_ai_task(description: str, prompt: str) -> str:
+    """提交 AI 分析后台任务，返回 task_id"""
     api_key = _get_dashscope_api_key()
     if not api_key:
-        return "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
+        # 无 API Key 时直接返回错误信息（不创建任务）
+        task_id = __import__('uuid').uuid4().hex[:12]
+        from backend.ai_task_manager import task_manager, AITask, TaskStatus
+        task = AITask(task_id, description)
+        task.status = TaskStatus.FAILED
+        task.error = "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
+        task.completed_at = __import__('time').time()
+        task_manager._tasks[task_id] = task
+        return task_id
 
     from backend.api.ai_service import call_ai_async
-    try:
-        return await call_ai_async(prompt, api_key)
-    except Exception as e:
-        logger.error(f"AI 学情分析异步调用失败: {e}")
-        return f"AI 分析出错：{str(e)}"
+
+    async def _do_analysis() -> dict:
+        try:
+            result = await call_ai_async(prompt, api_key)
+            return {"result": result}
+        except Exception as e:
+            logger.error(f"AI 学情分析调用失败: {e}")
+            return {"error": f"AI 分析出错：{str(e)}"}
+
+    from backend.ai_task_manager import task_manager
+    return await task_manager.create_task(description=description, coro_factory=_do_analysis)
 
 
 def _safe_int(val) -> int:
@@ -224,10 +238,11 @@ async def class_overview(
 
 请使用自然、亲切的语气，直接以分析内容开头，不要出现"根据提供的数据"等冗余表述。"""
 
-    ai_report = await _call_ai_async(prompt)
+    task_id = await _call_ai_task("班级学情分析", prompt)
 
     return {
-        "report": ai_report,
+        "task_id": task_id,
+        "message": "AI 分析已提交，请稍后查询结果",
         "data": data_summary,
     }
 
@@ -318,11 +333,12 @@ async def student_analytics(target_username: str, request: Request):
 
 语气亲切、鼓励为主。"""
 
-    ai_report = await _call_ai_async(prompt)
+    task_id = await _call_ai_task("学生个体学情分析", prompt)
 
     return {
+        "task_id": task_id,
+        "message": "AI 分析已提交，请稍后查询结果",
         "student": {"username": target_username, "name": student_name, "grade": student_grade, "class": student_class},
-        "report": ai_report,
     }
 
 
@@ -417,9 +433,11 @@ async def exam_analytics(exam_id: int, request: Request):
 3. ⚠️ **薄弱知识点**
 4. 💡 **教学改进建议"""
 
-    ai_report = await _call_ai_async(prompt)
+    task_id = await _call_ai_task("考试分析报告", prompt)
 
     return {
+        "task_id": task_id,
+        "message": "AI 分析已提交，请稍后查询结果",
         "exam": {"id": exam['id'], "title": exam['title'], "subject": exam['subject']},
         "statistics": {
             "total_students": total_count,
@@ -551,7 +569,7 @@ async def teaching_suggestions(
         task_rate=round(submitted / max(total_students, 1) * 100, 1),
     )
 
-    ai_suggestions = await _call_ai_async(prompt)
+    task_id = await _call_ai_task("AI 教学建议", prompt)
 
     data_summary = {
         "total_students": total_students,
@@ -562,7 +580,8 @@ async def teaching_suggestions(
     }
 
     return {
-        "suggestions": ai_suggestions,
+        "task_id": task_id,
+        "message": "AI 分析已提交，请稍后查询结果",
         "data": data_summary,
     }
 

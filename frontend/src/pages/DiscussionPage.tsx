@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 
 const { Title, Text } = Typography
@@ -90,8 +91,17 @@ const DiscussionPage: React.FC = () => {
       setAiLoading(true)
       const values = aiForm.getFieldsValue()
       const { data } = await apiClient.post('/api/interaction/discussions/ai-generate', values)
-      if (data.status === 'ok' && data.data) {
-        // 自动填充创建表单
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result && result.status === 'ok' && result.data) {
+          createForm.setFieldsValue(result.data)
+          message.success('AI 已生成讨论方案，请确认后创建')
+          setAiModal(false)
+          setCreateOpen(true)
+        } else {
+          message.error(result?.content || 'AI 生成失败')
+        }
+      } else if (data.status === 'ok' && data.data) {
         createForm.setFieldsValue(data.data)
         message.success('AI 已生成讨论方案，请确认后创建')
         setAiModal(false)

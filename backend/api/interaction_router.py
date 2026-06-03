@@ -23,7 +23,7 @@ def _get_user_grade_class(username: str) -> tuple:
         (username,),
     )
     if rows and rows[0]:
-        return rows[0][0] or "", rows[0][1] or ""
+        return str(rows[0][0] or ""), str(rows[0][1] or "")
     return "", ""
 
 
@@ -247,6 +247,38 @@ async def create_quiz(req: QuizCreate, request: Request):
     )
 
     logger.info(f"用户 {user['username']} 创建随堂测验: {req.title} (id={quiz_id})")
+
+    # ── 异步通知学生（不阻塞创建操作） ──
+    async def _notify_quiz():
+        try:
+            from backend.api.notification_router import _notify_users
+            from backend.database import execute_query as db_query
+            creator = user["username"]
+            role_u = user.get("role", 2)
+            if role_u == 0:
+                students = db_query("SELECT username FROM users WHERE role = 2")
+            else:
+                grade, cls = _get_user_grade_class(creator)
+                if grade:
+                    cls_param = f",{cls}," if cls else ""
+                    students = db_query(
+                        f"SELECT username FROM users WHERE role = 2 AND grade = ?"
+                        + (" AND INSTR(',' || class || ',', ?) > 0" if cls else ""),
+                        (grade, cls_param) if cls else (grade,),
+                    )
+                else:
+                    students = []
+            if students:
+                _notify_users(
+                    [r[0] for r in students], "info",
+                    f"新随堂测验「{req.title}」已发布",
+                    f"共 {len(questions)} 题，请及时完成",
+                    "/interaction",
+                )
+        except Exception as e:
+            logger.warning(f"发送测验通知失败: {e}")
+    asyncio.create_task(_notify_quiz())
+
     return {"message": "测验创建成功", "quiz_id": quiz_id}
 
 
@@ -664,6 +696,37 @@ async def create_poll(req: PollCreate, request: Request):
            VALUES (?, ?, ?, ?, 'active', ?)""",
         (user["username"], req.question, json.dumps(req.options, ensure_ascii=False), req.poll_type, now),
     )
+
+    # ── 异步通知学生（不阻塞创建操作） ──
+    async def _notify_poll():
+        try:
+            from backend.api.notification_router import _notify_users
+            from backend.database import execute_query as db_query
+            creator = user["username"]
+            role_u = user.get("role", 2)
+            if role_u == 0:
+                students = db_query("SELECT username FROM users WHERE role = 2")
+            else:
+                grade, cls = _get_user_grade_class(creator)
+                if grade:
+                    cls_param = f",{cls}," if cls else ""
+                    students = db_query(
+                        f"SELECT username FROM users WHERE role = 2 AND grade = ?"
+                        + (" AND INSTR(',' || class || ',', ?) > 0" if cls else ""),
+                        (grade, cls_param) if cls else (grade,),
+                    )
+                else:
+                    students = []
+            if students:
+                _notify_users(
+                    [r[0] for r in students], "info",
+                    f"新投票「{req.question}」已发布",
+                    f"共 {len(req.options)} 个选项，请参与投票",
+                    "/interaction",
+                )
+        except Exception as e:
+            logger.warning(f"发送投票通知失败: {e}")
+    asyncio.create_task(_notify_poll())
 
     return {"message": "投票创建成功", "poll_id": poll_id}
 

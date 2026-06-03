@@ -336,14 +336,21 @@ async def get_review_plan(request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    try:
-        plan = await call_ai_async(prompt, api_key)
-    except Exception as e:
-        logger.error(f"AI 复习计划生成失败: {e}")
-        raise HTTPException(status_code=500, detail=f"生成复习计划失败: {str(e)}")
+    from backend.ai_task_manager import task_manager
+
+    async def _do_plan() -> dict:
+        try:
+            result = await call_ai_async(prompt, api_key)
+            return {"plan": result}
+        except Exception as e:
+            logger.error(f"AI 复习计划生成失败: {e}")
+            return {"error": f"生成复习计划失败: {str(e)}"}
+
+    task_id = await task_manager.create_task(description="错题复习计划", coro_factory=_do_plan)
 
     return {
-        "plan": plan,
+        "task_id": task_id,
+        "message": "AI 复习计划已提交，请稍后查询结果",
         "total_wrong": len(all_wrong),
         "knowledge_points": list(kp_set),
         "weak_types": list(type_set),
