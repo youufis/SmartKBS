@@ -8,6 +8,7 @@ import io
 import time
 import re
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query, UploadFile, File, Form
 from pydantic import BaseModel
@@ -97,7 +98,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
     # 调用 AI
     try:
-        result_text = _call_dashscope_agent(prompt, api_key)
+        result_text = await _call_dashscope_agent(prompt, api_key)
         logger.info(f"AI 返回原始内容: {result_text[:300]}")
     except Exception as e:
         logger.error(f"AI 生成试题失败: {e}")
@@ -191,13 +192,13 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 - 题目和选项要与高中{subject}课程内容紧密相关"""
 
 
-def _call_dashscope_agent(prompt: str, api_key: str) -> str:
-    """调用 AI（非流式）- 支持智能体/直接调大模型双模式"""
-    from backend.api.ai_service import call_ai_sync
-    return call_ai_sync(prompt, api_key)
+async def _call_dashscope_agent(prompt: str, api_key: str) -> str:
+    """调用 AI（异步）- 支持智能体/直接调大模型双模式"""
+    from backend.api.ai_service import call_ai_async
+    return await call_ai_async(prompt, api_key)
 
 
-def _parse_ai_response(text: str) -> list:
+def _parse_ai_response(text: str) -> list[dict[str, Any]]:
     """解析 AI 返回的 JSON 试题列表"""
     # 尝试直接解析
     text = text.strip()
@@ -502,9 +503,12 @@ async def extract_questions_from_text(
 
     # ── JSON 文件直接解析（不调用 AI） ──
     questions = None
-    if source_label == "json":
+    json_bytes: bytes | None = None
+    if file and file.filename and source_label == "json":
+        json_bytes = content.encode("utf-8") if isinstance(content, str) else content
+    if json_bytes:
         try:
-            parsed = json.loads(file_bytes.decode("utf-8", errors="replace"))
+            parsed = json.loads(json_bytes.decode("utf-8", errors="replace"))
             if isinstance(parsed, list):
                 raw_questions = parsed
             elif isinstance(parsed, dict) and "questions" in parsed:
@@ -544,7 +548,7 @@ async def extract_questions_from_text(
 
         # 调用 AI
         try:
-            result_text = _call_dashscope_agent(prompt, api_key)
+            result_text = await _call_dashscope_agent(prompt, api_key)
             logger.info(f"AI 返回原始内容: {result_text[:300]}")
         except Exception as e:
             logger.error(f"AI 提取试题失败: {e}")
@@ -609,7 +613,7 @@ async def extract_questions_from_text(
     }
 
 
-def _normalize_question_json(q: dict) -> dict:
+def _normalize_question_json(q: dict[str, Any]) -> dict[str, Any]:
     """智能识别并规范化 JSON 试题字段名，兼容多种常见命名格式"""
     import re
 

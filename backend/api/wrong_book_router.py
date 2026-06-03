@@ -12,7 +12,7 @@ from backend.question_db import execute_query, execute_query_one
 from backend.database import execute_query as user_query
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
-from backend.api.ai_service import call_ai_sync
+from backend.api.ai_service import call_ai_async
 
 router = APIRouter()
 
@@ -337,7 +337,7 @@ async def get_review_plan(request: Request):
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
     try:
-        plan = call_ai_sync(prompt, api_key)
+        plan = await call_ai_async(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 复习计划生成失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成复习计划失败: {str(e)}")

@@ -1303,7 +1303,7 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
     # 先获取 API Key，避免每个循环都调用
     from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
     from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     keys = get_api_keys(username)
     api_key = keys[0] if keys and keys[0] else ""
@@ -1315,13 +1315,9 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
         }
 
     import asyncio
-    import concurrent.futures
 
-    loop = asyncio.get_event_loop()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
-
-    def _call_ai_for_question(q, ans):
-        """为单个题目调用 AI 讲解"""
+    async def _call_ai_for_question(q, ans):
+        """为单个题目异步调用 AI 讲解"""
         def _safe(s):
             return str(s).replace('{', '{{').replace('}', '}}')
 
@@ -1332,7 +1328,7 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
             student_answer=_safe(ans.get("student_answer", "")),
             knowledge_points=_safe(q.get("knowledge_points", "")),
         )
-        ai_response = call_ai_sync(prompt, api_key)
+        ai_response = await call_ai_async(prompt, api_key)
         return {
             "question_id": q["id"],
             "question_text": q["question_text"],
@@ -1353,20 +1349,22 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
         if not ans.get("is_correct", False):
             wrong_questions.append((q, ans))
 
-    # 并发调用 AI（最多5个并发）
-    futures = []
-    for q, ans in wrong_questions:
-        future = loop.run_in_executor(executor, _call_ai_for_question, q, ans)
-        futures.append(future)
+    # 并发异步调用 AI（最多5个并发）
+    sem = asyncio.Semaphore(5)
 
-    if futures:
-        done, _ = await asyncio.wait(futures, timeout=120)
-        for future in done:
-            try:
-                explanations.append(future.result())
-            except Exception as e:
-                logger.error(f"AI 讲解生成失败: {e}")
-                explanations.append({"error": f"AI 讲解生成失败: {str(e)}"})
+    async def _limited(q, ans):
+        async with sem:
+            return await _call_ai_for_question(q, ans)
+
+    if wrong_questions:
+        tasks = [_limited(q, ans) for q, ans in wrong_questions]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.error(f"AI 讲解生成失败: {r}")
+                explanations.append({"error": f"AI 讲解生成失败: {str(r)}"})
+            else:
+                explanations.append(r)
 
     return {
         "exam_title": exam["title"],
@@ -1413,7 +1411,7 @@ async def ai_grade_short_answers(exam_id: int, request: Request):
 
     from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
     from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     keys = get_api_keys(username)
     api_key = keys[0] if keys and keys[0] else ""
@@ -1423,6 +1421,9 @@ async def ai_grade_short_answers(exam_id: int, request: Request):
     graded_count = 0
     errors = []
 
+    # 收集所有需要 AI 批改的任务
+    grading_tasks = []
+
     for attempt in attempts:
         answers_data = attempt.get("answers")
         if isinstance(answers_data, str):
@@ -1430,38 +1431,42 @@ async def ai_grade_short_answers(exam_id: int, request: Request):
         if not answers_data:
             continue
 
-        need_update = False
         for q in short_questions:
             qid = str(q["id"])
             if qid not in answers_data:
                 continue
 
             ans = answers_data[qid]
-            # 如果已经是 AI 评过分或人工复核过，跳过
             if ans.get("ai_graded") or ans.get("reviewed"):
                 continue
 
-            max_score = q["score"] or 5
-            half_score = max_score * 0.5
-            near_full = max_score * 0.8
-            half_minus = max_score * 0.4
+            grading_tasks.append((attempt, answers_data, q, qid, ans))
 
-            def _safe(s):
-                return str(s).replace('{', '{{').replace('}', '}}')
+    # 并发异步调用 AI 批改（最多5个并发）
+    sem = asyncio.Semaphore(5)
 
-            prompt = SHORT_ANSWER_GRADING_PROMPT.format(
-                question_text=_safe(q["question_text"]),
-                correct_answer=_safe(q["correct_answer"] or ""),
-                max_score=_safe(max_score),
-                half_score=_safe(half_score),
-                near_full=_safe(near_full),
-                half_minus=_safe(half_minus),
-                student_answer=_safe(ans.get("student_answer", "")),
-            )
+    async def _grade_one(attempt, answers_data, q, qid, ans):
+        max_score = q["score"] or 5
+        half_score = max_score * 0.5
+        near_full = max_score * 0.8
+        half_minus = max_score * 0.4
 
+        def _safe(s):
+            return str(s).replace('{', '{{').replace('}', '}}')
+
+        prompt = SHORT_ANSWER_GRADING_PROMPT.format(
+            question_text=_safe(q["question_text"]),
+            correct_answer=_safe(q["correct_answer"] or ""),
+            max_score=_safe(max_score),
+            half_score=_safe(half_score),
+            near_full=_safe(near_full),
+            half_minus=_safe(half_minus),
+            student_answer=_safe(ans.get("student_answer", "")),
+        )
+
+        async with sem:
             try:
-                ai_response = call_ai_sync(prompt, api_key)
-                # 解析 AI 返回的 JSON
+                ai_response = await call_ai_async(prompt, api_key)
                 import re
                 json_match = re.search(r'\{[^}]+\}', ai_response)
                 if json_match:
@@ -1474,12 +1479,36 @@ async def ai_grade_short_answers(exam_id: int, request: Request):
                     ans["ai_graded"] = True
                     ans["ai_comment"] = result.get("comment", "")
                     ans["ai_feedback"] = result.get("feedback", "")
-                    need_update = True
-                    graded_count += 1
+                    return attempt, True
                 else:
                     errors.append(f"学生 {attempt['student_username']} 题目 {qid}: AI 返回格式异常")
             except Exception as e:
                 errors.append(f"学生 {attempt['student_username']} 题目 {qid}: {str(e)}")
+        return attempt, False
+
+    if grading_tasks:
+        results = await asyncio.gather(*[_grade_one(*t) for t in grading_tasks], return_exceptions=True)
+        # 按 attempt 分组更新
+        attempt_updates = {}
+        for r in results:
+            if isinstance(r, Exception):
+                continue
+            attempt_obj, changed = r
+            if changed:
+                attempt_updates[attempt_obj["id"]] = attempt_obj
+                graded_count += 1
+
+        for att_id, att in attempt_updates.items():
+            total_earned = sum(
+                v.get("score", 0) for v in att["answers"].values() if isinstance(v, dict)
+            )
+            execute_update(
+                """UPDATE exam_attempts
+                   SET answers = ?, score = ?
+                   WHERE id = ?""",
+                (json.dumps(att["answers"], ensure_ascii=False),
+                 round(total_earned, 1), att_id),
+            )
 
         if need_update:
             # 重新计算总分
@@ -1559,7 +1588,7 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
 
     from backend.prompts.exam import AI_EXAM_COMPOSE_PROMPT
     from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     keys = get_api_keys(username)
     api_key = keys[0] if keys and keys[0] else ""
@@ -1579,7 +1608,7 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
     )
 
     try:
-        ai_response = call_ai_sync(prompt, api_key)
+        ai_response = await call_ai_async(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 组卷调用失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 组卷失败: {str(e)}")

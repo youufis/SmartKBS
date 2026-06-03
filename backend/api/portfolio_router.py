@@ -426,7 +426,7 @@ async def get_learning_report(username: str, request: Request):
     # ── 构建 Prompt ──
     from backend.prompts.report import LEARNING_REPORT_PROMPT
     from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     keys = get_api_keys(username if role == 2 else current_username)
     api_key = keys[0] if keys and keys[0] else ""
@@ -453,7 +453,7 @@ async def get_learning_report(username: str, request: Request):
     )
 
     try:
-        report = call_ai_sync(prompt, api_key)
+        report = await call_ai_async(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 学习报告生成失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成学习报告失败: {str(e)}")
@@ -557,7 +557,7 @@ async def export_learning_report_docx(username: str, request: Request, token: st
     # ── 生成报告文本 ──
     from backend.prompts.report import LEARNING_REPORT_PROMPT
     from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     keys = get_api_keys(username if role == 2 else current_username)
     api_key = keys[0] if keys and keys[0] else ""
@@ -594,7 +594,7 @@ async def export_learning_report_docx(username: str, request: Request, token: st
         chat_total=_safe(chat_total),
     )
 
-    report_text = call_ai_sync(prompt, api_key)
+    report_text = await call_ai_async(prompt, api_key)
 
     # ── 生成 Word 文档 ──
     doc = Document()

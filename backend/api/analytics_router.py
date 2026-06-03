@@ -30,7 +30,7 @@ def _get_dashscope_api_key() -> str:
 
 
 def _call_ai(prompt: str) -> str:
-    """调用 AI 分析（非流式）- 支持智能体/直接调大模型双模式"""
+    """调用 AI 分析（同步，保留兼容）"""
     api_key = _get_dashscope_api_key()
     if not api_key:
         return "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
@@ -40,6 +40,20 @@ def _call_ai(prompt: str) -> str:
         return call_ai_sync(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 学情分析调用失败: {e}")
+        return f"AI 分析出错：{str(e)}"
+
+
+async def _call_ai_async(prompt: str) -> str:
+    """调用 AI 分析（异步）- 不阻塞工作线程"""
+    api_key = _get_dashscope_api_key()
+    if not api_key:
+        return "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
+
+    from backend.api.ai_service import call_ai_async
+    try:
+        return await call_ai_async(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 学情分析异步调用失败: {e}")
         return f"AI 分析出错：{str(e)}"
 
 
@@ -210,7 +224,7 @@ async def class_overview(
 
 请使用自然、亲切的语气，直接以分析内容开头，不要出现"根据提供的数据"等冗余表述。"""
 
-    ai_report = _call_ai(prompt)
+    ai_report = await _call_ai_async(prompt)
 
     return {
         "report": ai_report,
@@ -304,7 +318,7 @@ async def student_analytics(target_username: str, request: Request):
 
 语气亲切、鼓励为主。"""
 
-    ai_report = _call_ai(prompt)
+    ai_report = await _call_ai_async(prompt)
 
     return {
         "student": {"username": target_username, "name": student_name, "grade": student_grade, "class": student_class},
@@ -403,7 +417,7 @@ async def exam_analytics(exam_id: int, request: Request):
 3. ⚠️ **薄弱知识点**
 4. 💡 **教学改进建议"""
 
-    ai_report = _call_ai(prompt)
+    ai_report = await _call_ai_async(prompt)
 
     return {
         "exam": {"id": exam['id'], "title": exam['title'], "subject": exam['subject']},
@@ -537,7 +551,7 @@ async def teaching_suggestions(
         task_rate=round(submitted / max(total_students, 1) * 100, 1),
     )
 
-    ai_suggestions = _call_ai(prompt)
+    ai_suggestions = await _call_ai_async(prompt)
 
     data_summary = {
         "total_students": total_students,
