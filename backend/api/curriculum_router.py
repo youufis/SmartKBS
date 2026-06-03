@@ -284,8 +284,8 @@ def _get_resource_info(resource_type: str, resource_id: int) -> dict[str, Any]:
 class AIGenerateRequest(BaseModel):
     """AI 生成课程请求"""
     content: str = ""           # 文本内容
-    subject: str = "信息技术"    # 科目
-    grade: str = "高一"          # 年级
+    subject: str = ""  # 科目（由前端传递）
+    grade: str = ""    # 年级（由前端传递）
     course_name: str = ""       # 课程名称（留空由 AI 推断）
     auto_save: bool = False     # 是否自动保存到数据库
 
@@ -365,16 +365,16 @@ async def ai_generate_from_file(request: Request):
     from fastapi import UploadFile
     form = await request.form()
     file_raw = form.get("file")
-    subject_val = form.get("subject", "信息技术")
-    grade_val = form.get("grade", "高一")
+    subject_val = form.get("subject", "")
+    grade_val = form.get("grade", "")
     course_name = form.get("course_name", "")
     auto_save = form.get("auto_save", "false") == "true"
 
     if not file_raw or not isinstance(file_raw, UploadFile) or not file_raw.filename:
         raise HTTPException(status_code=400, detail="请上传文件")
     file: UploadFile = file_raw
-    subject: str = str(subject_val) if subject_val else "信息技术"
-    grade: str = str(grade_val) if grade_val else "高一"
+    subject: str = str(subject_val) if subject_val else ""
+    grade: str = str(grade_val) if grade_val else ""
 
     # 读取文件内容
     content_bytes = await file.read()

@@ -93,7 +93,7 @@ const AnalyticsPage: React.FC = () => {
   const [rawData, setRawData] = useState<ClassOverviewData | null>(null)
 
   // 班级分析参数
-  const [grade, setGrade] = useState('高一')
+  const [grade, setGrade] = useState('')
   const [cls, setCls] = useState('')
   const [classes, setClasses] = useState<string[]>([])
   const [allowedGrades, setAllowedGrades] = useState<string[]>([])

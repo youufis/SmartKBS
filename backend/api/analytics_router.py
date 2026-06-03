@@ -207,7 +207,7 @@ async def class_overview(
         "submitted_students": _safe_int(task_submissions[0][0] if task_submissions else 0),
     }
 
-    prompt = f"""你是一位经验丰富的高中信息技术/通用技术教师。请根据以下班级数据，生成一份专业的学情分析报告。
+    prompt = f"""你是一位经验丰富的高中信息科技/通用技术教师。请根据以下班级数据，生成一份专业的学情分析报告。
 
 班级：{grade}{cls}班
 学生人数：{total_students}
@@ -312,7 +312,7 @@ async def student_analytics(target_username: str, request: Request):
     for e in exam_results:
         exam_text += f"- 《{e['title']}》({e['subject']}): {e['score']}/{e['total_score']}分 ({'通过' if e['score'] >= e['pass_score'] else '未通过'})\n"
 
-    prompt = f"""你是一位高中信息技术教师。请根据以下学生数据，生成一份个性化的学情分析报告。
+    prompt = f"""你是一位高中信息科技教师。请根据以下学生数据，生成一份个性化的学情分析报告。
 
 学生：{student_name}
 班级：{student_grade}{student_class}
