@@ -120,7 +120,7 @@ app.include_router(wrong_book_router, prefix="/api/wrong-book", tags=["错题本
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    return {"status": "ok", "version": "3.2.0"}
+    return {"status": "ok", "version": "3.3.0"}
 
 
 # ── 静态文件服务（前端构建产物） ──
