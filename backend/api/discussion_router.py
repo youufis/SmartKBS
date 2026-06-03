@@ -159,10 +159,10 @@ AI 助教角色：{ai_role_desc}
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 DashScope API Key"}
 
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     try:
-        result = call_ai_sync(prompt, api_key)
+        result = await call_ai_async(prompt, api_key)
         if result:
             json_match = re.search(r'\{[\s\S]*\}', result)
             if json_match:
@@ -530,8 +530,8 @@ async def _auto_generate_report(disc_id: int):
 简要分析："""
 
                 try:
-                    from backend.api.ai_service import call_ai_sync
-                    summary = call_ai_sync(prompt, api_key)
+                    from backend.api.ai_service import call_ai_async
+                    summary = await call_ai_async(prompt, api_key)
                     if summary:
                         overall_parts.append(f"\n**AI 分析**：{summary}")
 
@@ -891,10 +891,10 @@ async def ai_suggest(group_id: int, request: Request):
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     try:
-        content = call_ai_sync(prompt, api_key)
+        content = await call_ai_async(prompt, api_key)
         if content:
             # 将 AI 回复作为消息存入
             now_str = _now()

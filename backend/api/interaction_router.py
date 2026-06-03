@@ -422,18 +422,16 @@ async def list_quizzes(
     params: list = []
 
     if role == 2:
-        # 学生：只看自己班级教师的测验，排除已答过的
+        # 学生：看自己班级的测验（管理员创建的全体可见，教师创建的需匹配班级）
         grade, cls = _get_user_grade_class(username)
         conditions.append("q.status = 'active'")
-        conditions.append("q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)")
-        params.append(username)
         if grade:
-            conditions.append("u.grade = ?")
+            conditions.append("(u.role = 0 OR u.grade = ?)")
             params.append(grade)
         if cls:
             # 教师 class 可能是 "1" 或 "1,2,3,4"，用 INSTR 匹配
             cls_param = f",{cls},"
-            conditions.append("INSTR(',' || u.class || ',', ?) > 0")
+            conditions.append("(u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)")
             params.append(cls_param)
     elif role == 1:
         conditions.append("q.creator_username = ?")
@@ -452,7 +450,8 @@ async def list_quizzes(
     if role == 2:
         # 学生：JOIN users 表筛选同班教师的测验（包括管理员创建的内容）
         rows = execute_query(
-            f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at
+            f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at,
+                        COALESCE(u.name, u.username) AS creator_name
                 FROM interaction_quizzes q
                 JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
                 WHERE {where}
@@ -461,8 +460,10 @@ async def list_quizzes(
         )
     else:
         rows = execute_query(
-            f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at
+            f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at,
+                        COALESCE(u.name, u.username) AS creator_name
                 FROM interaction_quizzes q
+                LEFT JOIN users u ON q.creator_username = u.username
                 WHERE {where}
                 ORDER BY q.created_at DESC LIMIT ? OFFSET ?""",
             tuple(params + [page_size, offset]),
@@ -479,6 +480,7 @@ async def list_quizzes(
             "status": r[5],
             "created_at": r[6],
             "updated_at": r[7],
+            "creator_name": r[8] if len(r) > 8 else r[1],
         }
         # 计算答题人数
         count_rows = execute_query(
@@ -486,6 +488,13 @@ async def list_quizzes(
             (r[0],),
         )
         q["answer_count"] = count_rows[0][0] if count_rows else 0
+        # 学生端标记是否已答题
+        if role == 2:
+            answered = execute_query(
+                "SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = ? AND student_username = ?",
+                (r[0], username),
+            )
+            q["answered"] = (answered[0][0] if answered else 0) > 0
         quizzes.append(q)
 
     return {"quizzes": quizzes}
@@ -1015,3 +1024,301 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
     )
 
     return {"message": "回答成功"}
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.4 新增：AI 实时答题分析
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/quizzes/{quiz_id}/ai-analysis", summary="AI 实时答题分析")
+async def ai_quiz_analysis(quiz_id: int, request: Request):
+    """AI 分析随堂测验结果，生成教学建议"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
+
+    quiz = execute_query(
+        "SELECT * FROM interaction_quizzes WHERE id = ?",
+        (quiz_id,),
+    )
+    if not quiz:
+        raise HTTPException(status_code=404, detail="测验不存在")
+
+    quiz_data = quiz[0]
+    questions = json.loads(quiz_data[4]) if isinstance(quiz_data[4], str) else quiz_data[4]
+
+    answers = execute_query(
+        "SELECT student_username, answers, score FROM interaction_quiz_answers WHERE quiz_id = ?",
+        (quiz_id,),
+    )
+
+    participant_count = len(answers)
+    total_possible = sum(q.get("score", 1) for q in questions)
+
+    # 每题正确率统计
+    question_stats = []
+    for i, q in enumerate(questions):
+        correct_count = 0
+        q_type = q.get("type", "single")
+        correct_ans = str(q.get("answer", "")).strip()
+        wrong_options = {}  # 统计错误选项分布
+
+        for a in answers:
+            user_ans_list = json.loads(a[1]) if isinstance(a[1], str) else a[1]
+            user_ans = ""
+            for ua in user_ans_list:
+                if ua.get("question_index") == i:
+                    user_ans = str(ua.get("answer", "")).strip()
+                    break
+
+            if q_type == "multiple":
+                user_set = sorted([x.strip().upper() for x in user_ans.split(",") if x.strip()])
+                correct_set = sorted([x.strip().upper() for x in correct_ans.split(",") if x.strip()])
+                if user_set == correct_set:
+                    correct_count += 1
+                else:
+                    # 记录错误选项
+                    for ans_part in user_set:
+                        wrong_options[ans_part] = wrong_options.get(ans_part, 0) + 1
+            else:
+                if user_ans.upper() == correct_ans.upper():
+                    correct_count += 1
+                elif user_ans:
+                    wrong_options[user_ans.upper()] = wrong_options.get(user_ans.upper(), 0) + 1
+
+        rate = round(correct_count / max(participant_count, 1) * 100, 1)
+        wrong_text = ""
+        if wrong_options:
+            sorted_wrong = sorted(wrong_options.items(), key=lambda x: -x[1])
+            wrong_text = "，错误选项分布：" + "、".join(f"{k}({v}人)" for k, v in sorted_wrong[:3])
+
+        question_stats.append({
+            "index": i + 1,
+            "text": q.get("question", "")[:60],
+            "type": q_type,
+            "correct_rate": rate,
+            "correct_count": correct_count,
+            "total": participant_count,
+            "wrong_distribution": wrong_text,
+        })
+
+    # 构建统计文本
+    stats_text = ""
+    for qs in question_stats:
+        stats_text += f"第{qs['index']}题 ({qs['type']}): 正确率{qs['correct_rate']}% ({qs['correct_count']}/{qs['total']}人){qs['wrong_distribution']}\n"
+        stats_text += f"  题目：{qs['text']}\n\n"
+
+    from backend.api.ai_service import call_ai_async
+    from backend.ai_task_manager import task_manager
+
+    async def _do_analysis() -> dict:
+        from backend.prompts.interaction import QUIZ_ANALYSIS_PROMPT
+        from backend.api.chat_router import get_api_keys
+
+        keys = get_api_keys(user["username"])
+        api_key = keys[0] if keys and keys[0] else ""
+        if not api_key:
+            raise HTTPException(status_code=400, detail="未配置 API Key")
+
+        def _safe(s):
+            return str(s).replace('{', '{{').replace('}', '}}')
+
+        prompt = QUIZ_ANALYSIS_PROMPT.format(
+            quiz_title=_safe(quiz_data[2] or ""),
+            subject=_safe("信息技术"),
+            participant_count=_safe(participant_count),
+            question_stats=_safe(stats_text),
+        )
+
+        analysis = await call_ai_async(prompt, api_key)
+        return {
+            "analysis": analysis,
+            "stats": question_stats,
+            "participant_count": participant_count,
+            "avg_score": round(sum(a[2] for a in answers) / max(participant_count, 1), 1),
+            "total_score": total_possible,
+        }
+
+    task_id = await task_manager.create_task(
+        description=f"测验 #{quiz_id} AI 答题分析",
+        coro_factory=_do_analysis,
+    )
+    return {"task_id": task_id, "message": "AI 分析已提交，请稍后查询结果"}
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.4 新增：AI 课堂总结
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/class-summary", summary="AI 课堂总结")
+async def ai_class_summary(
+    request: Request,
+    grade: str = Query("", description="年级"),
+    cls: str = Query("", description="班级"),
+    subject: str = Query("信息技术", description="学科"),
+    teacher_username: str = Query("", description="教师用户名"),
+    time_range: str = Query("本堂课", description="时间范围"),
+):
+    """AI 综合分析课堂互动数据，生成课堂总结"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
+
+    query_teacher = teacher_username or user["username"]
+
+    # 构建班级名称
+    cls_display = cls
+    cls_name = f"{grade}{cls_display}班" if not cls.endswith("班") else f"{grade}{cls}"
+
+    # ── 1. 随堂测验数据 ──
+    quizzes = execute_query(
+        """SELECT q.id, q.title, q.questions,
+                  (SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = q.id) as answer_count
+           FROM interaction_quizzes q
+           WHERE q.creator_username = ? AND q.status = 'active'
+           ORDER BY q.created_at DESC LIMIT 5""",
+        (query_teacher,),
+    )
+
+    quiz_data = ""
+    quiz_participants = set()
+    for q in quizzes:
+        questions = json.loads(q[2]) if isinstance(q[2], str) else q[2]
+        q_count = len(questions) if isinstance(questions, list) else 0
+        quiz_data += f"- 《{q[1]}》: {q_count}题, {q[3]}人参与\n"
+        # 获取参与学生
+        participants = execute_query(
+            "SELECT student_username FROM interaction_quiz_answers WHERE quiz_id = ?",
+            (q[0],),
+        )
+        for p in participants:
+            quiz_participants.add(p[0])
+
+    if not quiz_data:
+        quiz_data = "暂无随堂测验数据"
+
+    # ── 2. 投票数据 ──
+    polls = execute_query(
+        """SELECT p.id, p.question, p.options,
+                  (SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = p.id) as vote_count
+           FROM interaction_polls p
+           WHERE p.creator_username = ?
+           ORDER BY p.created_at DESC LIMIT 5""",
+        (query_teacher,),
+    )
+
+    poll_data = ""
+    poll_participants = set()
+    for p in polls:
+        options = json.loads(p[2]) if isinstance(p[2], str) else p[2]
+        opt_count = len(options) if isinstance(options, list) else 0
+        poll_data += f"- 「{p[1]}」: {opt_count}个选项, {p[3]}人投票\n"
+        voters = execute_query(
+            "SELECT student_username FROM interaction_poll_votes WHERE poll_id = ?",
+            (p[0],),
+        )
+        for v in voters:
+            poll_participants.add(v[0])
+
+    if not poll_data:
+        poll_data = "暂无投票数据"
+
+    # ── 3. 学生提问 ──
+    questions_data = execute_query(
+        """SELECT id, content, is_anonymous, status, created_at
+           FROM interaction_questions
+           ORDER BY created_at DESC LIMIT 10""",
+    )
+
+    question_data = ""
+    for q in questions_data:
+        status = "已回答" if q[3] == "answered" else "待回答"
+        question_data += f"- {q[1][:60]} ({status})\n"
+
+    if not question_data:
+        question_data = "暂无学生提问"
+
+    # ── 4. 分组讨论 ──
+    discussions = execute_query(
+        """SELECT d.id, d.title, d.status,
+                  (SELECT COUNT(*) FROM discussion_groups g
+                   INNER JOIN discussion_members m ON m.group_id = g.id
+                   WHERE g.discussion_id = d.id) as member_count,
+                  (SELECT COUNT(*) FROM discussion_groups g
+                   INNER JOIN discussion_messages m ON m.group_id = g.id
+                   WHERE g.discussion_id = d.id) as msg_count
+           FROM discussions d
+           WHERE d.creator_username = ?
+           ORDER BY d.created_at DESC LIMIT 5""",
+        (query_teacher,),
+    )
+
+    discussion_data = ""
+    for d in discussions:
+        discussion_data += f"- 《{d[1]}》: {d[3]}人参与, {d[4]}条消息 ({d[2]})\n"
+
+    if not discussion_data:
+        discussion_data = "暂无分组讨论数据"
+
+    # 计算总参与人数
+    all_participants = quiz_participants | poll_participants
+    student_count = len(all_participants)
+
+    from backend.api.ai_service import call_ai_async
+    from backend.ai_task_manager import task_manager
+
+    async def _do_summary() -> dict:
+        from backend.prompts.class_summary import CLASS_SUMMARY_PROMPT
+        from backend.api.chat_router import get_api_keys
+
+        keys = get_api_keys(user["username"])
+        api_key = keys[0] if keys and keys[0] else ""
+        if not api_key:
+            raise HTTPException(status_code=400, detail="未配置 API Key")
+
+        def _safe(s):
+            return str(s).replace('{', '{{').replace('}', '}}')
+
+        prompt = CLASS_SUMMARY_PROMPT.format(
+            subject=_safe(subject),
+            time_range=_safe(time_range),
+            student_count=_safe(student_count),
+            quiz_data=_safe(quiz_data),
+            poll_data=_safe(poll_data),
+            question_data=_safe(question_data),
+            discussion_data=_safe(discussion_data),
+        )
+
+        summary = await call_ai_async(prompt, api_key)
+        return {
+            "summary": summary,
+            "data": {
+                "quiz_count": len(quizzes),
+                "poll_count": len(polls),
+                "question_count": len(questions_data),
+                "discussion_count": len(discussions),
+                "student_count": student_count,
+            },
+        }
+
+    task_id = await task_manager.create_task(
+        description="AI 课堂总结",
+        coro_factory=_do_summary,
+    )
+    return {"task_id": task_id, "message": "课堂总结已提交，请稍后查询结果"}
+
+
+# ═══════════════════════════════════════════════════════════
+# V3.4 新增：AI 异步任务状态查询
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/ai-task/{task_id}", summary="查询 AI 异步任务状态")
+async def get_ai_task_status(task_id: str):
+    """查询 AI 后台任务的执行状态和结果"""
+    from backend.ai_task_manager import task_manager
+    task = task_manager.get_task_dict(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    return task

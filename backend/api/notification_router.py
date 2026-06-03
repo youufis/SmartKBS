@@ -246,10 +246,10 @@ async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     try:
-        result = call_ai_sync(prompt, api_key)
+        result = await call_ai_async(prompt, api_key)
         if result:
             json_match = re.search(r'\{[\s\S]*\}', result)
             if json_match:
