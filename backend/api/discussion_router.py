@@ -1199,8 +1199,7 @@ async def auto_trigger_ai(disc_id: int, request: Request):
     if not api_key:
         return {"status": "error", "triggered": 0, "message": "API Key 未配置"}
 
-    from dashscope import Application as DashScopeApp
-    from backend.api.config_router import get_config_value
+    from backend.api.ai_service import call_ai_async
 
     for g in groups:
         last_msg = execute_query(
@@ -1230,14 +1229,8 @@ async def auto_trigger_ai(disc_id: int, request: Request):
 简短引导："""
 
         try:
-            os.environ["DASHSCOPE_API_KEY"] = api_key
-            response = DashScopeApp.call(
-                app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-                prompt=prompt,
-                stream=False,
-            )
-            if hasattr(response, "output") and hasattr(response.output, "text"):
-                content = response.output.text
+            content = await call_ai_async(prompt, api_key)
+            if content:
                 now_str = _now()
                 execute_insert_update(
                     "INSERT INTO discussion_messages (group_id, username, content, msg_type, created_at) VALUES (?, NULL, ?, 'ai_suggest', ?)",
