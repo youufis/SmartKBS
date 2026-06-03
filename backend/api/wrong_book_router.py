@@ -355,3 +355,190 @@ async def get_review_plan(request: Request):
         "knowledge_points": list(kp_set),
         "weak_types": list(type_set),
     }
+
+
+@router.get("/review-plan/export", summary="导出 AI 复习计划为 Word 文档")
+async def export_review_plan_docx(
+    request: Request,
+    student_username: str = Query("", description="学生用户名"),
+    token: str = Query("", description="JWT token 用于 window.open 下载"),
+):
+    """导出 AI 复习计划为 Word 文档"""
+    import io
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from fastapi.responses import StreamingResponse
+
+    if token:
+        request.state.user = None
+        from backend.auth import decode_jwt_token
+        payload = decode_jwt_token(token)
+        if payload:
+            request.state.user = payload
+
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    target_username = username
+    if role != 2:
+        target_username = student_username or username
+
+    # 先调用 AI 生成复习计划
+    user_rows = user_query(
+        "SELECT name, grade, class FROM users WHERE username=?",
+        (target_username,),
+    )
+    student_name = user_rows[0][0] if user_rows and user_rows[0][0] else target_username
+    student_grade = user_rows[0][1] if user_rows else ""
+    student_class = user_rows[0][2] if user_rows else ""
+
+    attempts = execute_query(
+        """SELECT ea.id, ea.exam_id, ea.answers
+           FROM exam_attempts ea
+           JOIN exams e ON e.id = ea.exam_id
+           WHERE ea.student_username = ? AND ea.status = 'submitted'
+           ORDER BY ea.submitted_at DESC""",
+        (target_username,),
+    )
+
+    all_wrong = []
+    kp_set = set()
+    type_set = set()
+
+    for a in attempts:
+        answers_data = a.get("answers")
+        if isinstance(answers_data, str):
+            try:
+                answers_data = json.loads(answers_data)
+            except (json.JSONDecodeError, TypeError):
+                answers_data = {}
+        if not answers_data:
+            continue
+
+        questions = execute_query(
+            """SELECT q.id, q.type, q.question_text, q.correct_answer, q.knowledge_points
+               FROM exam_questions eq
+               JOIN question_bank q ON q.id = eq.question_id
+               WHERE eq.exam_id = ? AND q.status = 'active'""",
+            (a["exam_id"],),
+        )
+        q_map = {str(q["id"]): q for q in questions}
+
+        for qid, ans in answers_data.items():
+            if isinstance(ans, dict) and not ans.get("is_correct", False):
+                q_info = q_map.get(qid, {})
+                kp = q_info.get("knowledge_points", "") or "未知"
+                kp_set.add(kp)
+                q_type = q_info.get("type", "")
+                type_set.add(q_type)
+                all_wrong.append({
+                    "question": q_info.get("question_text", ""),
+                    "type": q_type,
+                    "correct": q_info.get("correct_answer", ""),
+                    "your_answer": ans.get("student_answer", ""),
+                    "knowledge": kp,
+                })
+
+    if not all_wrong:
+        raise HTTPException(status_code=400, detail="暂无错题，无需生成复习计划")
+
+    wrong_text = ""
+    for i, w in enumerate(all_wrong[:15], 1):
+        wrong_text += f"{i}. [{w['type']}] {w['question']}\n"
+        wrong_text += f"   你的答案：{w['your_answer']} | 正确答案：{w['correct']}\n"
+        wrong_text += f"   知识点：{w['knowledge']}\n\n"
+
+    type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题"}
+    weak_types = "、".join(type_labels.get(t, t) for t in type_set)
+
+    from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
+
+    prompt = WRONG_BOOK_REVIEW_PROMPT.format(
+        student_name=student_name,
+        grade=student_grade,
+        cls=student_class,
+        total_wrong=len(all_wrong),
+        knowledge_points="、".join(sorted(kp_set)[:10]),
+        weak_types=weak_types,
+        wrong_questions=wrong_text,
+    )
+
+    keys = get_api_keys(username if role == 2 else username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    try:
+        plan_text = await call_ai_async(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 复习计划生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生成复习计划失败: {str(e)}")
+
+    # 生成 Word 文档
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Microsoft YaHei'
+    style.font.size = Pt(11)
+    style.paragraph_format.line_spacing = 1.5
+
+    title = doc.add_heading(f"{student_name} 的 AI 复习计划", level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    info = doc.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = info.add_run(f"学生：{student_name}  年级：{student_grade}  班级：{student_class}班  错题数：{len(all_wrong)} 道")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    doc.add_paragraph()
+
+    for line in plan_text.split('\n'):
+        line = line.strip()
+        if not line:
+            doc.add_paragraph()
+            continue
+        if line.startswith('### '):
+            doc.add_heading(line[4:], level=3)
+        elif line.startswith('## '):
+            doc.add_heading(line[3:], level=2)
+        elif line.startswith('# '):
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith('- **') and '：' in line:
+            content = line.lstrip('- ')
+            p = doc.add_paragraph()
+            bold_end = content.find('**', 2)
+            if bold_end > 0:
+                run = p.add_run(content[2:bold_end])
+                run.bold = True
+                p.add_run(content[bold_end + 2:])
+            else:
+                p.add_run(content)
+        elif line.startswith('- '):
+            doc.add_paragraph(line[2:], style='List Bullet')
+        elif any(line.startswith(f'{i}. ') for i in range(1, 10)):
+            doc.add_paragraph(line, style='List Number')
+        else:
+            if '**' in line:
+                p = doc.add_paragraph()
+                parts = line.split('**')
+                for i, part in enumerate(parts):
+                    if part:
+                        run = p.add_run(part)
+                        if i % 2 == 1:
+                            run.bold = True
+            else:
+                doc.add_paragraph(line)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    import urllib.parse
+    safe_filename = urllib.parse.quote(f"{student_name}_复习计划.docx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
+    )
