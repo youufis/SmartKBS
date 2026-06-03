@@ -178,8 +178,8 @@ AI 智能试题库系统，支持一键生成（按科目/题型/知识点/难�
 ### 环境要求
 
 - Python 3.9+
-- Node.js 18+
-- npm 或 yarn
+
+> 前端已预编译至 `frontend/dist/`，**无需 Node.js / npm**。如需修改前端代码，才需要 Node.js 18+。
 
 ### 1️⃣ 启动后端服务
 
@@ -192,9 +192,9 @@ python backend/main.py
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8086 --reload
 ```
 
-后端服务默认运行在 `http://localhost:8086`
+后端服务默认运行在 `http://localhost:8086`，自动提供前端静态文件服务。
 
-### 2️⃣ 启动前端开发服务器（可选）
+### 2️⃣ 启动前端开发服务器（仅开发/修改前端时需要）
 
 ```bash
 cd frontend
