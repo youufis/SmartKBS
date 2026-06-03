@@ -452,24 +452,29 @@ async def get_learning_report(username: str, request: Request):
         chat_total=_safe(chat_total),
     )
 
-    try:
-        report = await call_ai_async(prompt, api_key)
-    except Exception as e:
-        logger.error(f"AI 学习报告生成失败: {e}")
-        raise HTTPException(status_code=500, detail=f"生成学习报告失败: {str(e)}")
+    from backend.ai_task_manager import task_manager
 
-    return {
-        "student": {"username": username, "name": student_name, "grade": student_grade, "class": student_class},
-        "period": period,
-        "report": report,
-        "data": {
-            "exams": len(exam_results),
-            "total_score": total_score,
-            "rollcall_rate": round(rc_correct / max(rc_total, 1) * 100, 1),
-            "tasks": task_count,
-            "chat_days": chat_days,
-        },
-    }
+    async def _do_report() -> dict:
+        try:
+            result = await call_ai_async(prompt, api_key)
+            return {
+                "report": result,
+                "student": {"username": username, "name": student_name, "grade": student_grade, "class": student_class},
+                "period": period,
+                "data": {
+                    "exams": len(exam_results),
+                    "total_score": total_score,
+                    "rollcall_rate": round(rc_correct / max(rc_total, 1) * 100, 1),
+                    "tasks": task_count,
+                    "chat_days": chat_days,
+                },
+            }
+        except Exception as e:
+            logger.error(f"AI 学习报告生成失败: {e}")
+            return {"error": f"生成学习报告失败: {str(e)}"}
+
+    task_id = await task_manager.create_task(description="AI 学习报告", coro_factory=_do_report)
+    return {"task_id": task_id, "message": "AI 学习报告已提交，请稍后查询结果"}
 
 
 # ═══════════════════════════════════════════════════════════

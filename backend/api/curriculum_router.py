@@ -1659,17 +1659,23 @@ async def ai_lesson_plan(
         grade=_safe(kp.get("grade", "")),
     )
 
-    try:
-        lesson_plan = await call_ai_async(prompt, api_key)
-        return {
-            "knowledge_point": kp["name"],
-            "chapter_name": kp["chapter_name"],
-            "course_name": kp["course_name"],
-            "lesson_plan": lesson_plan,
-        }
-    except Exception as e:
-        logger.error(f"AI 备课助手生成失败: {e}")
-        raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
+    from backend.ai_task_manager import task_manager
+
+    async def _do_plan() -> dict:
+        try:
+            result = await call_ai_async(prompt, api_key)
+            return {
+                "knowledge_point": kp["name"],
+                "chapter_name": kp["chapter_name"],
+                "course_name": kp["course_name"],
+                "lesson_plan": result,
+            }
+        except Exception as e:
+            logger.error(f"AI 备课助手生成失败: {e}")
+            return {"error": f"教案生成失败: {str(e)}"}
+
+    task_id = await task_manager.create_task(description="AI 备课", coro_factory=_do_plan)
+    return {"task_id": task_id, "message": "AI 备课已提交，请稍后查询结果"}
 
 
 # ═══════════════════════════════════════════════════════════
