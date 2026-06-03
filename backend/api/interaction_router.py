@@ -676,20 +676,21 @@ async def list_polls(request: Request):
     username = user["username"]
 
     if role == 2:
-        # 学生：只看自己班级教师的投票
+        # 学生：看自己班级的投票（管理员创建的全体可见，教师创建的需匹配班级）
         grade, cls = _get_user_grade_class(username)
         conditions = ["p.status = 'active'"]
         params: list = []
         if grade:
-            conditions.append("u.grade = ?")
+            conditions.append("(u.role = 0 OR u.grade = ?)")
             params.append(grade)
         if cls:
             cls_param = f",{cls},"
-            conditions.append("INSTR(',' || u.class || ',', ?) > 0")
+            conditions.append("(u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)")
             params.append(cls_param)
         where = " AND ".join(conditions)
         rows = execute_query(
-            f"""SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at
+            f"""SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
+                        COALESCE(u.name, u.username) AS creator_name
                 FROM interaction_polls p
                 JOIN users u ON p.creator_username = u.username AND u.role IN (0, 1)
                 WHERE {where}
@@ -699,22 +700,29 @@ async def list_polls(request: Request):
     elif role == 1:
         # 教师：只看自己创建的投票
         rows = execute_query(
-            """SELECT id, creator_username, question, options, poll_type, status, created_at
-               FROM interaction_polls WHERE status = 'active' AND creator_username = ?
-               ORDER BY created_at DESC LIMIT 50""",
+            """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
+                        COALESCE(u.name, u.username) AS creator_name
+               FROM interaction_polls p
+               LEFT JOIN users u ON p.creator_username = u.username
+               WHERE p.status = 'active' AND p.creator_username = ?
+               ORDER BY p.created_at DESC LIMIT 50""",
             (username,),
         )
     else:
         rows = execute_query(
-            """SELECT id, creator_username, question, options, poll_type, status, created_at
-               FROM interaction_polls WHERE status = 'active'
-               ORDER BY created_at DESC LIMIT 50""",
+            """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
+                        COALESCE(u.name, u.username) AS creator_name
+               FROM interaction_polls p
+               LEFT JOIN users u ON p.creator_username = u.username
+               WHERE p.status = 'active'
+               ORDER BY p.created_at DESC LIMIT 50""",
         )
 
     polls = []
     for r in rows:
         options = json.loads(r[3]) if isinstance(r[3], str) else r[3]
         poll_type = r[4] if r[4] else "single"
+        creator_name = r[7] if len(r) > 7 else r[1]
         vote_counts = []
         for i in range(len(options)):
             cnt = execute_query(
@@ -733,14 +741,25 @@ async def list_polls(request: Request):
             )
             unique_voters = voters[0][0] if voters else 0
 
+        # 学生端标记是否已投票
+        voted = False
+        if role == 2:
+            voted_row = execute_query(
+                "SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?",
+                (r[0], username),
+            )
+            voted = (voted_row[0][0] if voted_row else 0) > 0
+
         polls.append({
             "id": r[0],
-            "creator": r[1],
+            "creator_username": r[1],
+            "creator_name": creator_name,
             "question": r[2],
             "poll_type": poll_type,
             "options": [{"index": i, "text": opt, "votes": vote_counts[i]} for i, opt in enumerate(options)],
             "total_votes": total_votes,
             "unique_voters": unique_voters or total_votes,
+            "voted": voted,
             "created_at": r[6],
         })
 
