@@ -247,22 +247,28 @@ async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
     from backend.api.ai_service import call_ai_async
+    from backend.ai_task_manager import task_manager
 
-    try:
-        result = await call_ai_async(prompt, api_key)
-        if result:
-            json_match = re.search(r'\{[\s\S]*\}', result)
-            if json_match:
-                try:
-                    data = json.loads(json_match.group())
-                    return {"status": "ok", "data": data, "raw": result}
-                except json.JSONDecodeError:
-                    pass
-            return {"status": "error", "content": result}
-        return {"status": "error", "content": "AI 未返回有效结果"}
-    except Exception as e:
-        logger.warning(f"AI 生成公告失败: {e}")
-        return {"status": "error", "content": f"AI 调用出错: {str(e)}"}
+    async def _do_generate() -> dict:
+        try:
+            result = await call_ai_async(prompt, api_key)
+            if result:
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', result)
+                if json_match:
+                    try:
+                        data = json.loads(json_match.group())
+                        return {"status": "ok", "data": data, "raw": result}
+                    except json.JSONDecodeError:
+                        pass
+                return {"status": "error", "content": result}
+            return {"status": "error", "content": "AI 未返回有效结果"}
+        except Exception as e:
+            logger.warning(f"AI 生成公告失败: {e}")
+            return {"status": "error", "content": f"AI 调用出错: {str(e)}"}
+
+    task_id = await task_manager.create_task(description="AI 生成公告", coro_factory=_do_generate)
+    return {"task_id": task_id, "message": "AI 生成已提交，请稍后查询结果"}
 
 
 @router.post("/announcements", summary="发布公告")

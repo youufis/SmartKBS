@@ -10,6 +10,7 @@ import {
 import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 
 const { Text, Paragraph } = Typography
@@ -72,8 +73,23 @@ const AnnouncementsPage: React.FC = () => {
       const values = await aiForm.validateFields()
       setAiLoading(true)
       const { data } = await apiClient.post('/api/notifications/announcements/ai-generate', values)
-      if (data.status === 'ok' && data.data) {
-        // 填充到创建表单
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result && result.status === 'ok' && result.data) {
+          form.setFieldsValue({
+            title: result.data.title,
+            content: result.data.content,
+            target_role: values.target_role,
+            priority: values.priority,
+          })
+          message.success('AI 已生成公告内容，请确认后发布')
+          setAiModal(false)
+          aiForm.resetFields()
+          setCreateModal(true)
+        } else {
+          message.error(result?.content || 'AI 生成失败')
+        }
+      } else if (data.status === 'ok' && data.data) {
         form.setFieldsValue({
           title: data.data.title,
           content: data.data.content,

@@ -49,6 +49,11 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_users_role_grade ON users(role, grade)")
             except sqlite3.OperationalError:
                 pass
+            # 用户姓名搜索索引
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_users_name ON users(name)")
+            except sqlite3.OperationalError:
+                pass
 
             # ── 每日使用量统计表（限流用，与日志解耦） ──
             c.execute(
@@ -311,6 +316,11 @@ def init_db():
                 created_at TEXT NOT NULL,
                 answered_at TEXT
             )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_iq_student ON interaction_questions(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_iq_status ON interaction_questions(status)")
+            except sqlite3.OperationalError:
+                pass
 
             # ── 迁移：interaction_polls 添加 poll_type 列 ──
             try:

@@ -1,7 +1,8 @@
 """
 报告导出 API 路由
-生成 Excel 格式的成绩单、考试报告、点名记录等
+生成 Excel/CSV 格式的成绩单、考试报告、点名记录、课堂互动数据等
 """
+import csv
 import io
 import json
 from datetime import datetime
@@ -203,13 +204,17 @@ async def export_exam_result(exam_id: int, request: Request):
         (exam_id,),
     )
 
-    # 补充学生姓名（users 表在 smartkb.db 中，无法跨库 JOIN）
-    for a in attempts:
+    # 批量补充学生姓名（避免 N+1 查询）
+    if attempts:
+        usernames = [a['student_username'] for a in attempts]
+        placeholders = ",".join("?" for _ in usernames)
         user_rows = execute_query(
-            "SELECT name FROM users WHERE username = ?",
-            (a['student_username'],),
+            f"SELECT username, name FROM users WHERE username IN ({placeholders})",
+            tuple(usernames),
         )
-        a['student_real_name'] = user_rows[0][0] if user_rows else a.get('student_name', '')
+        name_map = {r[0]: r[1] for r in user_rows} if user_rows else {}
+        for a in attempts:
+            a['student_real_name'] = name_map.get(a['student_username'], a.get('student_name', ''))
 
     # 获取考试的题目（exam_questions 和 question_bank 在 questions.db 中）
     questions = q_execute_query(
@@ -585,3 +590,136 @@ def _safe_sheet_name(name: str) -> str:
     """Excel sheet name max 31 chars, no special chars"""
     safe = "".join(c if c.isalnum() or c in "_ -" else "_" for c in name)
     return safe[:31] or "Sheet"
+
+
+# ── CSV 响应辅助 ──
+
+def _csv_response(rows: list[list], headers: list[str], filename: str) -> StreamingResponse:
+    """将数据转为 CSV 响应（带 UTF-8 BOM，Excel 可直接打开）"""
+    buf = io.StringIO()
+    # 写入 BOM + 内容
+    import codecs
+    bom = codecs.BOM_UTF8.decode('utf-8')
+    buf.write(bom)
+    writer = csv.writer(buf)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow(row)
+    buf.seek(0)
+    from urllib.parse import quote
+    encoded_name = quote(filename, safe='')
+    return StreamingResponse(
+        iter([buf.getvalue().encode('utf-8-sig')]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}",
+        },
+    )
+
+
+# ── 6. 导出随堂测验结果 ──
+
+@router.get("/quiz/{quiz_id}", summary="导出随堂测验结果 (CSV)")
+async def export_quiz_result(quiz_id: int, request: Request,
+                              token: str = Query("", description="JWT token 用于 window.open 下载")):
+    """导出随堂测验的答题结果为 CSV 或 Excel"""
+    # 支持 token 参数认证（用于 window.open 下载）
+    if token:
+        request.state.user = None
+        from backend.auth import decode_jwt_token
+        payload = decode_jwt_token(token)
+        if payload:
+            request.state.user = payload
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    # 获取测验信息
+    quiz = execute_query("SELECT * FROM interaction_quizzes WHERE id = ?", (quiz_id,))
+    if not quiz:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    quiz = quiz[0]
+    questions = json.loads(quiz[4]) if isinstance(quiz[4], str) else quiz[4]
+
+    # 获取答题记录
+    answers = execute_query(
+        """SELECT student_username, answers, score, submitted_at
+           FROM interaction_quiz_answers WHERE quiz_id = ? ORDER BY score DESC""",
+        (quiz_id,),
+    )
+
+    csv_headers = ["学生", "得分"]
+    for i, q in enumerate(questions):
+        csv_headers.append(f"第{i + 1}题答案")
+        csv_headers.append(f"第{i + 1}题是否正确")
+
+    csv_rows = []
+    for a in answers:
+        student = a[0]
+        ans_data = json.loads(a[1]) if isinstance(a[1], str) else a[1]
+        score = a[2]
+        row = [student, str(score)]
+        for i, q in enumerate(questions):
+            user_ans = ""
+            correct = ""
+            for item in ans_data:
+                if item.get("question_index") == i:
+                    user_ans = item.get("answer", "")
+                    correct_ans = q.get("answer", "")
+                    if isinstance(q.get("options"), dict):
+                        correct_ans = q.get("answer", "")
+                    is_correct = "是" if str(user_ans).upper() == str(correct_ans).upper() else "否"
+                    row.append(user_ans)
+                    row.append(is_correct)
+                    break
+            else:
+                row.append("")
+                row.append("")
+        csv_rows.append(row)
+
+    filename = f"随堂测验_{quiz[2]}.csv"
+    return _csv_response(csv_rows, csv_headers, filename)
+
+
+# ── 7. 导出投票结果 ──
+
+@router.get("/poll/{poll_id}", summary="导出投票结果 (CSV)")
+async def export_poll_result(poll_id: int, request: Request,
+                              token: str = Query("", description="JWT token 用于 window.open 下载")):
+    """导出投票结果为 CSV"""
+    # 支持 token 参数认证（用于 window.open 下载）
+    if token:
+        request.state.user = None
+        from backend.auth import decode_jwt_token
+        payload = decode_jwt_token(token)
+        if payload:
+            request.state.user = payload
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    poll = execute_query("SELECT * FROM interaction_polls WHERE id = ?", (poll_id,))
+    if not poll:
+        raise HTTPException(status_code=404, detail="投票不存在")
+    poll = poll[0]
+    options = json.loads(poll[3]) if isinstance(poll[3], str) else poll[3]
+
+    # 获取投票记录
+    votes = execute_query(
+        """SELECT student_username, selected_option FROM interaction_poll_votes
+           WHERE poll_id = ? ORDER BY student_username""",
+        (poll_id,),
+    )
+
+    csv_headers = ["学生", "所选选项编号", "所选选项内容"]
+    csv_rows = []
+    for v in votes:
+        student = v[0]
+        opt_idx = v[1]
+        opt_text = options[opt_idx] if opt_idx < len(options) else f"选项{opt_idx}"
+        csv_rows.append([student, str(opt_idx), opt_text])
+
+    filename = f"投票结果_{poll[2]}.csv"
+    return _csv_response(csv_rows, csv_headers, filename)

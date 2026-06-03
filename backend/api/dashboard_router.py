@@ -2,6 +2,7 @@
 首页仪表盘 API 路由
 聚合展示系统关键数据：考试、积分、任务、点名、用户统计等
 """
+import time
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request
@@ -13,6 +14,29 @@ from backend.auth import get_online_count
 from backend.logger import logger
 
 router = APIRouter()
+
+# ── 简单内存缓存（TTL 30 秒） ──
+_dashboard_cache: dict[str, tuple[float, dict]] = {}
+_DASHBOARD_CACHE_TTL = 30
+
+
+def _get_cached(key: str) -> dict | None:
+    """获取缓存"""
+    cached = _dashboard_cache.get(key)
+    if cached and (time.time() - cached[0]) < _DASHBOARD_CACHE_TTL:
+        return cached[1]
+    return None
+
+
+def _set_cache(key: str, data: dict):
+    """设置缓存"""
+    _dashboard_cache[key] = (time.time(), data)
+    # 限制缓存大小，防止内存泄漏
+    if len(_dashboard_cache) > 200:
+        now = time.time()
+        keys_to_del = [k for k, v in _dashboard_cache.items() if now - v[0] > _DASHBOARD_CACHE_TTL * 2]
+        for k in keys_to_del:
+            del _dashboard_cache[k]
 
 
 def _q_count(sql: str, params: tuple = ()) -> int:
@@ -28,7 +52,7 @@ def _get_user_grade_class(username: str) -> tuple:
         (username,),
     )
     if rows and rows[0]:
-        return rows[0][0] or "", rows[0][1] or ""
+        return str(rows[0][0] or ""), str(rows[0][1] or "")
     return "", ""
 
 
@@ -44,6 +68,12 @@ async def dashboard_summary(request: Request):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+
+    # 尝试从缓存读取
+    cache_key = f"{role}:{username}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
 
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
@@ -164,22 +194,20 @@ async def dashboard_summary(request: Request):
         # ── 课堂互动数据 ──
         grade, cls = _get_user_grade_class(username)
         if grade:
-            active_quiz_count = _db_count(
-                """SELECT COUNT(*) FROM interaction_quizzes q
-                   JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
-                   WHERE q.status = 'active' AND u.grade = ?
-                   AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)""",
-                (grade, username),
+            cls_param = "," + cls + "," if cls else ""
+            cls_cond = "AND (u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)" if cls else ""
+            sql = (
+                "SELECT COUNT(*) FROM interaction_quizzes q "
+                "JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1) "
+                "WHERE q.status = 'active' "
+                "AND (u.role = 0 OR u.grade = ?) "
+                + cls_cond + " "
+                "AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)"
             )
-            if cls:
-                cls_param = f",{cls},"
-                active_quiz_count = _db_count(
-                    """SELECT COUNT(*) FROM interaction_quizzes q
-                       JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
-                       WHERE q.status = 'active' AND u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0
-                       AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)""",
-                    (grade, cls_param, username),
-                )
+            active_quiz_count = _db_count(
+                sql,
+                (grade, cls_param, username) if cls else (grade, username),
+            )
         else:
             active_quiz_count = 0
         my_quiz_answers = _db_count(
@@ -445,6 +473,8 @@ async def dashboard_summary(request: Request):
                 result["teacher_grades"] = rows[0][0] or ""
                 result["teacher_classes"] = rows[0][1] or ""
 
+    # 写入缓存
+    _set_cache(cache_key, result)
     return result
 
 

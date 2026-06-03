@@ -4,6 +4,7 @@ import { ReloadOutlined, BookOutlined, RobotOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 
 const { Title, Text } = Typography
@@ -141,7 +142,17 @@ const WrongBookPage: React.FC = () => {
     try {
       const params = selectedStudent ? { student_username: selectedStudent } : {}
       const { data: res } = await apiClient.get('/api/wrong-book/review-plan', { params })
-      setPlanData(res)
+      if (res.task_id) {
+        const result = await pollAiTask(res.task_id)
+        if (result) {
+          setPlanData({ plan: result.plan || result.result, total_wrong: res.total_wrong, knowledge_points: res.knowledge_points, weak_types: res.weak_types })
+        } else {
+          message.error('AI 分析超时')
+          setPlanModal(false)
+        }
+      } else {
+        setPlanData(res)
+      }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || '生成复习计划失败')
       setPlanModal(false)

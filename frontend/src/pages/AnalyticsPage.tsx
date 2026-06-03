@@ -12,6 +12,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { pollAiTask } from '../api/aiTask'
 
 const { Title, Text } = Typography
 
@@ -225,8 +226,18 @@ const AnalyticsPage: React.FC = () => {
       const { data } = await apiClient.get('/api/analytics/class-overview', {
         params: { grade, cls, teacher: user?.username },
       })
-      setReport(data.report || '暂无分析结果')
-      setRawData(data.data)
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result) {
+          setReport(result.result || '暂无分析结果')
+          setRawData(data.data)
+        } else {
+          setReport('❌ AI 分析超时，请稍后重试')
+        }
+      } else {
+        setReport(data.report || '暂无分析结果')
+        setRawData(data.data)
+      }
     } catch {
       setReport('❌ 分析失败，请稍后重试')
     }
@@ -244,7 +255,16 @@ const AnalyticsPage: React.FC = () => {
       const { data } = await apiClient.get('/api/analytics/teaching-suggestions', {
         params: { grade, cls, teacher_username: user?.username },
       })
-      setSuggestionsData(data)
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result) {
+          setSuggestionsData({ suggestions: result.result || '', data: data.data })
+        } else {
+          message.error('AI 分析超时')
+        }
+      } else {
+        setSuggestionsData(data)
+      }
     } catch {
       message.error('获取教学建议失败')
     }
@@ -258,7 +278,16 @@ const AnalyticsPage: React.FC = () => {
     setExamAnalytics(null)
     try {
       const { data } = await apiClient.get(`/api/analytics/exam/${selectedExam}/report`)
-      setExamAnalytics(data)
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result) {
+          setExamAnalytics({ ...(data as any), report: result.result || '' })
+        } else {
+          setReport('❌ AI 分析超时')
+        }
+      } else {
+        setExamAnalytics(data)
+      }
     } catch {
       setReport('❌ 分析失败')
     }

@@ -160,22 +160,27 @@ AI 助教角色：{ai_role_desc}
         return {"status": "error", "content": "AI 功能不可用：请配置 DashScope API Key"}
 
     from backend.api.ai_service import call_ai_async
+    from backend.ai_task_manager import task_manager
 
-    try:
-        result = await call_ai_async(prompt, api_key)
-        if result:
-            json_match = re.search(r'\{[\s\S]*\}', result)
-            if json_match:
-                try:
-                    data = json.loads(json_match.group())
-                    return {"status": "ok", "data": data, "raw": result}
-                except json.JSONDecodeError:
-                    pass
-            return {"status": "error", "content": result, "raw": result}
-        return {"status": "error", "content": "AI 未返回有效结果"}
-    except Exception as e:
-        logger.warning(f"AI 生成讨论方案失败: {e}")
-        return {"status": "error", "content": f"AI 调用出错: {str(e)}"}
+    async def _do_generate() -> dict:
+        try:
+            result = await call_ai_async(prompt, api_key)
+            if result:
+                json_match = __import__('re').search(r'\{[\s\S]*\}', result)
+                if json_match:
+                    try:
+                        data = __import__('json').loads(json_match.group())
+                        return {"status": "ok", "data": data, "raw": result}
+                    except json.JSONDecodeError:
+                        pass
+                return {"status": "error", "content": result, "raw": result}
+            return {"status": "error", "content": "AI 未返回有效结果"}
+        except Exception as e:
+            logger.warning(f"AI 生成讨论方案失败: {e}")
+            return {"status": "error", "content": f"AI 调用出错: {str(e)}"}
+
+    task_id = await task_manager.create_task(description="AI 生成讨论方案", coro_factory=_do_generate)
+    return {"task_id": task_id, "message": "AI 生成已提交，请稍后查询结果"}
 
 
 # ── 获取讨论列表 ──
@@ -997,16 +1002,8 @@ async def generate_report(disc_id: int, request: Request):
                     cfg = load_config()
                     api_key = cfg.get("dashscope_api_key", "")
                 if api_key:
-                    from dashscope import Application as DashScopeApp
-                    from backend.api.config_router import get_config_value
-                    os.environ["DASHSCOPE_API_KEY"] = api_key
-                    response = DashScopeApp.call(
-                        app_id=get_config_value("APPID", "6fcb54e8f16f4e3b94e4b9fd4eab1125"),
-                        prompt=prompt,
-                        stream=False,
-                    )
-                    if hasattr(response, "output") and hasattr(response.output, "text"):
-                        ai_summary = response.output.text
+                    from backend.api.ai_service import call_ai_async
+                    ai_summary = await call_ai_async(prompt, api_key)
             except Exception:
                 pass
 
