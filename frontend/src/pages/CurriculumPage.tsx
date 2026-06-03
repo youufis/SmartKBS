@@ -1078,31 +1078,37 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── AI 备课结果弹窗 ── */}
       <Modal
-        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 备课 - {lessonPlanData?.knowledge_point || ''}</>}
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 备课 - {lessonPlanData?.knowledge_point || '生成中...'}</>}
         open={lessonPlanModal}
-        onCancel={() => setLessonPlanModal(false)}
+        onCancel={() => { if (lessonPlanLoading) return; setLessonPlanModal(false) }}
         width={800}
         footer={
-          <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-            <Button icon={<DownloadOutlined />} onClick={() => {
-              if (!lessonPlanData) { message.warning('请先生成教案'); return }
-              // 先获取知识点 ID — 从当前选中的知识点获取
-              if (!selectedKp) { message.warning('未选中知识点'); return }
-              const token = localStorage.getItem('smartkb_token')
-              const url = `/api/curriculum/ai-lesson-plan/${selectedKp.id}/export${token ? `?token=${token}` : ''}`
-              window.open(url, '_blank')
-            }}>导出 Word</Button>
-            <Button onClick={() => setLessonPlanModal(false)}>关闭</Button>
-          </Space>
+          lessonPlanLoading ? null : (
+            <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+              <Button icon={<DownloadOutlined />} onClick={() => {
+                if (!lessonPlanData) { message.warning('请先生成教案'); return }
+                if (!selectedKp) { message.warning('未选中知识点'); return }
+                const token = localStorage.getItem('smartkb_token')
+                const url = `/api/curriculum/ai-lesson-plan/${selectedKp.id}/export${token ? `?token=${token}` : ''}`
+                window.open(url, '_blank')
+              }}>导出 Word</Button>
+              <Button onClick={() => setLessonPlanModal(false)}>关闭</Button>
+            </Space>
+          )
         }
       >
-        {lessonPlanData && (
+        {lessonPlanLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>AI 正在生成教案，请稍候...</div>
+          </div>
+        ) : lessonPlanData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 14, lineHeight: 1.8, padding: '0 4px' }}>
             <div className="markdown-content">
               <ReactMarkdown>{lessonPlanData.lesson_plan}</ReactMarkdown>
             </div>
           </div>
-        )}
+        ) : null}
       </Modal>
     </Layout>
   )

@@ -230,10 +230,20 @@ async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
     import concurrent.futures
 
     loop = asyncio.get_event_loop()
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
         return await loop.run_in_executor(
             executor, _call_agent_sync, prompt, api_key, app_id
         )
+    except Exception as e:
+        logger.error(f"智能体异步调用失败 (app_id={app_id}): {e}，降级到直接调模型")
+        from backend.api.config_router import get_config_value
+        model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+        api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                      "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        return await _call_model_async(prompt, api_key, model, api_base)
+    finally:
+        executor.shutdown(wait=False)
 
 
 async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str) -> str:

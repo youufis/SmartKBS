@@ -453,13 +453,14 @@ async def get_learning_report(username: str, request: Request):
     )
 
     from backend.ai_task_manager import task_manager
+    _student_username = username
 
     async def _do_report() -> dict:
         try:
             result = await call_ai_async(prompt, api_key)
             return {
                 "report": result,
-                "student": {"username": username, "name": student_name, "grade": student_grade, "class": student_class},
+                "student": {"username": _student_username, "name": student_name, "grade": student_grade, "class": student_class},
                 "period": period,
                 "data": {
                     "exams": len(exam_results),

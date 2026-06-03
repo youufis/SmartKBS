@@ -1361,39 +1361,42 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── AI 错题讲解弹窗 ── */}
-      <Modal title={<><BulbOutlined style={{ color: '#faad14' }} /> AI 错题讲解 - {explainData?.exam_title || ''}</>}
+      <Modal title={<><BulbOutlined style={{ color: '#faad14' }} /> AI 错题讲解 - {explainData?.exam_title || '加载中...'}</>}
         open={explainModal}
-        onCancel={() => setExplainModal(false)}
+        onCancel={() => { if (explainLoading) return; setExplainModal(false) }}
         width={800}
-        footer={<Button onClick={() => setExplainModal(false)}>关闭</Button>}
+        footer={explainLoading ? null : <Button onClick={() => setExplainModal(false)}>关闭</Button>}
       >
-        <Spin spinning={explainLoading}>
-          {explainData && (
-            <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
-              {explainData.total_wrong === 0 ? (
-                <Typography.Text type="success" style={{ fontSize: 16 }}>
-                  <CheckCircleOutlined /> 太棒了！你没有错题，全部答对了！
-                </Typography.Text>
-              ) : (
-                <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-                  共 {explainData.total_wrong} 道错题，点击下方标签页查看详细讲解
-                </Typography.Text>
-              )}
-              {explainData.explanations.map((exp: any, idx: number) => (
-                <Card key={idx} size="small" style={{ marginBottom: 12 }}
-                  title={<Space><Tag color="error">错题 {idx + 1}</Tag>{exp.question_text}</Space>}>
-                  {exp.error ? (
-                    <Typography.Text type="danger">{exp.error}</Typography.Text>
-                  ) : (
-                    <div className="markdown-content">
-                      <div dangerouslySetInnerHTML={{ __html: exp.explanation.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
-                    </div>
-                  )}
-                </Card>
-              ))}
-            </div>
-          )}
-        </Spin>
+        {explainLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>AI 正在分析错题，请稍候...</div>
+          </div>
+        ) : explainData ? (
+          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+            {explainData.total_wrong === 0 ? (
+              <Typography.Text type="success" style={{ fontSize: 16 }}>
+                <CheckCircleOutlined /> 太棒了！你没有错题，全部答对了！
+              </Typography.Text>
+            ) : (
+              <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+                共 {explainData.total_wrong} 道错题
+              </Typography.Text>
+            )}
+            {explainData.explanations.map((exp: any, idx: number) => (
+              <Card key={idx} size="small" style={{ marginBottom: 12 }}
+                title={<Space><Tag color="error">错题 {idx + 1}</Tag>{exp.question_text}</Space>}>
+                {exp.error ? (
+                  <Typography.Text type="danger">{exp.error}</Typography.Text>
+                ) : (
+                  <div className="markdown-content">
+                    <div dangerouslySetInnerHTML={{ __html: exp.explanation.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        ) : null}
       </Modal>
 
       {/* ── 答题详情弹窗（学生查看） ── */}

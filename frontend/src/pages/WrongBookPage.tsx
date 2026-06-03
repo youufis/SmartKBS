@@ -293,37 +293,42 @@ const WrongBookPage: React.FC = () => {
       <Modal
         title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 复习计划</>}
         open={planModal}
-        onCancel={() => setPlanModal(false)}
+        onCancel={() => { if (planLoading) return; setPlanModal(false) }}
         width={700}
         footer={
-          <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-            <Button icon={<DownloadOutlined />} onClick={() => {
-              const token = localStorage.getItem('smartkb_token')
-              const studentParam = selectedStudent ? `&student_username=${selectedStudent}` : ''
-              window.open(`/api/wrong-book/review-plan/export?token=${token}${studentParam}`, '_blank')
-            }}>导出 Word</Button>
-            <Button onClick={() => setPlanModal(false)}>关闭</Button>
-          </Space>
+          planLoading ? null : (
+            <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+              <Button icon={<DownloadOutlined />} onClick={() => {
+                const token = localStorage.getItem('smartkb_token')
+                const studentParam = selectedStudent ? `&student_username=${selectedStudent}` : ''
+                window.open(`/api/wrong-book/review-plan/export?token=${token}${studentParam}`, '_blank')
+              }}>导出 Word</Button>
+              <Button onClick={() => setPlanModal(false)}>关闭</Button>
+            </Space>
+          )
         }
       >
-        <Spin spinning={planLoading}>
-          {planData && (
-            <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
-              {planData.total_wrong > 0 && (
-                <Space style={{ marginBottom: 16 }} wrap>
-                  <Tag icon={<BookOutlined />} color="blue">共 {planData.total_wrong} 道错题</Tag>
-                  {planData.weak_types?.map(t => <Tag key={t} color="orange">{t}</Tag>)}
-                  {planData.knowledge_points?.slice(0, 5).map(kp => (
-                    <Tag key={kp} color="purple">{kp}</Tag>
-                  ))}
-                </Space>
-              )}
-              <div className="markdown-content">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{planData.plan}</ReactMarkdown>
-              </div>
+        {planLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>AI 正在生成复习计划，请稍候...</div>
+          </div>
+        ) : planData ? (
+          <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
+            {planData.total_wrong > 0 && (
+              <Space style={{ marginBottom: 16 }} wrap>
+                <Tag icon={<BookOutlined />} color="blue">共 {planData.total_wrong} 道错题</Tag>
+                {planData.weak_types?.map(t => <Tag key={t} color="orange">{t}</Tag>)}
+                {planData.knowledge_points?.slice(0, 5).map(kp => (
+                  <Tag key={kp} color="purple">{kp}</Tag>
+                ))}
+              </Space>
+            )}
+            <div className="markdown-content">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{planData.plan}</ReactMarkdown>
             </div>
-          )}
-        </Spin>
+          </div>
+        ) : null}
       </Modal>
     </Layout>
   )
