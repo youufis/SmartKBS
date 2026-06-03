@@ -17,6 +17,50 @@ from backend.api.ai_service import call_ai_async
 router = APIRouter()
 
 
+def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:
+    """解析教师的年级和班级字段，返回 {年级: [班级列表]} 的映射"""
+    result = {}
+    if not grade or not grade.strip():
+        return result
+
+    grade_parts = [g.strip() for g in grade.split("|")]
+    class_parts = [c.strip() for c in class_str.split("|")] if class_str else []
+
+    for i, g in enumerate(grade_parts):
+        if not g:
+            continue
+        if i < len(class_parts) and class_parts[i]:
+            classes = [c.strip() for c in class_parts[i].split(",") if c.strip()]
+            result[g] = classes
+        else:
+            result[g] = []
+    return result
+
+
+def _check_teacher_can_view_student(teacher_username: str, student_username: str):
+    """检查教师是否有权限查看该学生的错题（教师只能看自己班级的学生）"""
+    teacher_rows = user_query(
+        "SELECT grade, class FROM users WHERE username=?", (teacher_username,)
+    )
+    teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
+    teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
+    grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+
+    student_rows = user_query(
+        "SELECT grade, class FROM users WHERE username=?", (student_username,)
+    )
+    if not student_rows:
+        raise HTTPException(status_code=404, detail="学生不存在")
+    student_grade = (student_rows[0][0] or "").strip()
+    student_class = str(student_rows[0][1] or "").strip()
+
+    allowed_classes = grade_class_map.get(student_grade, [])
+    if allowed_classes and student_class not in allowed_classes:
+        raise HTTPException(status_code=403, detail="无权查看其他班级学生的错题")
+    if not allowed_classes and student_grade not in grade_class_map:
+        raise HTTPException(status_code=403, detail="无权查看其他年级学生的错题")
+
+
 @router.get("/list", summary="获取我的错题")
 async def get_wrong_questions(request: Request):
     """获取当前学生的所有错题，按考试归类"""
@@ -31,14 +75,52 @@ async def get_wrong_questions(request: Request):
         # 教师/管理员看指定学生，默认看第一个有错题记录的学生
         target = request.query_params.get("student_username", "")
         if target:
+            # 教师只能查看自己班级的学生
+            if role == 1:
+                _check_teacher_can_view_student(username, target)
             target_username = target
         else:
-            # 自动查找有错题记录的第一个学生
-            first = execute_query(
-                """SELECT DISTINCT ea.student_username FROM exam_attempts ea
-                   WHERE ea.status = 'submitted' ORDER BY ea.submitted_at DESC LIMIT 1"""
-            )
-            target_username = first[0]["student_username"] if first else ""
+            # 自动查找有错题记录的第一个学生（教师只能看自己班级的）
+            if role == 1:
+                teacher_rows = user_query(
+                    "SELECT grade, class FROM users WHERE username=?", (username,)
+                )
+                teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
+                teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
+                grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+
+                # 构建教师班级的 OR 条件
+                grade_conditions = []
+                params = []
+                for g, classes in grade_class_map.items():
+                    if classes:
+                        cls_placeholders = ",".join("?" * len(classes))
+                        grade_conditions.append("(u.grade = ? AND u.class IN ({}))".format(cls_placeholders))
+                        params.extend([g] + classes)
+                    else:
+                        grade_conditions.append("u.grade = ?")
+                        params.append(g)
+
+                if grade_conditions:
+                    where_clause = " OR ".join(grade_conditions)
+                    first = execute_query(
+                        f"""SELECT ea.student_username FROM exam_attempts ea
+                           JOIN exams e ON e.id = ea.exam_id
+                           JOIN (SELECT username, grade, class FROM users) u ON u.username = ea.student_username
+                           WHERE ea.status = 'submitted' AND ({where_clause})
+                           ORDER BY ea.submitted_at DESC LIMIT 1""",
+                        tuple(params),
+                    )
+                else:
+                    first = []
+                target_username = first[0]["student_username"] if first else ""
+            else:
+                # 管理员看到所有
+                first = execute_query(
+                    """SELECT DISTINCT ea.student_username FROM exam_attempts ea
+                       WHERE ea.status = 'submitted' ORDER BY ea.submitted_at DESC LIMIT 1"""
+                )
+                target_username = first[0]["student_username"] if first else ""
 
     if not target_username:
         return {"total_wrong": 0, "exams": []}
@@ -130,8 +212,9 @@ async def get_students_with_wrong(
     grade: str = Query("", description="年级筛选"),
     class_name: str = Query("", description="班级筛选"),
 ):
-    """获取有错题记录的学生列表（供教师/管理员选择）"""
+    """获取有错题记录的学生列表（教师只返回自己所教班级的学生）"""
     user = get_current_user(request)
+    username = user["username"]
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
@@ -145,7 +228,7 @@ async def get_students_with_wrong(
     if not usernames:
         return {"students": []}
 
-    # 再查这些学生的信息
+    # 构建查询条件
     conditions = ["username IN ({})".format(",".join("?" * len(usernames)))]
     params = list(usernames)
 
@@ -155,6 +238,36 @@ async def get_students_with_wrong(
     if class_name:
         conditions.append("class = ?")
         params.append(class_name)
+
+    # 教师只能看自己所教班级的学生
+    if role == 1:
+        teacher_rows = user_query(
+            "SELECT grade, class FROM users WHERE username=?", (username,)
+        )
+        teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
+        teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
+        grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+
+        if not grade:
+            # 没有指定年级，限制在所有所教年级和班级
+            grade_conditions = []
+            for g, classes in grade_class_map.items():
+                if classes:
+                    cls_placeholders = ",".join("?" * len(classes))
+                    grade_conditions.append("(grade = ? AND class IN ({}))".format(cls_placeholders))
+                    params.extend([g] + classes)
+                else:
+                    grade_conditions.append("grade = ?")
+                    params.append(g)
+            if grade_conditions:
+                conditions.append("(" + " OR ".join(grade_conditions) + ")")
+        else:
+            # 指定了年级，只限制该年级下的班级
+            allowed_classes = grade_class_map.get(grade, [])
+            if allowed_classes:
+                cls_placeholders = ",".join("?" * len(allowed_classes))
+                conditions.append("class IN ({})".format(cls_placeholders))
+                params.extend(allowed_classes)
 
     where = " AND ".join(conditions)
     student_rows = user_query(
@@ -177,8 +290,9 @@ async def get_students_with_wrong(
 
 @router.get("/grades", summary="获取有错题记录的年级列表")
 async def get_grades_with_wrong(request: Request):
-    """获取有错题记录的年级列表"""
+    """获取有错题记录的年级列表（教师只返回自己所教年级）"""
     user = get_current_user(request)
+    username = user["username"]
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
@@ -192,13 +306,36 @@ async def get_grades_with_wrong(request: Request):
     if not usernames:
         return {"grades": []}
 
-    # 再查这些学生的年级
+    # 管理员看到所有年级
+    if role == 0:
+        placeholders = ",".join("?" * len(usernames))
+        grade_rows = user_query(
+            f"""SELECT DISTINCT grade FROM users
+               WHERE username IN ({placeholders}) AND grade IS NOT NULL AND grade != ''
+               ORDER BY grade""",
+            tuple(usernames),
+        )
+        return {"grades": [r[0] for r in grade_rows]}
+
+    # 教师只返回自己所教年级
+    teacher_rows = user_query(
+        "SELECT grade, class FROM users WHERE username=?", (username,)
+    )
+    teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
+    teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
+    grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+    teacher_grades = list(grade_class_map.keys())
+
+    if not teacher_grades:
+        return {"grades": []}
+
     placeholders = ",".join("?" * len(usernames))
     grade_rows = user_query(
         f"""SELECT DISTINCT grade FROM users
            WHERE username IN ({placeholders}) AND grade IS NOT NULL AND grade != ''
+           AND grade IN ({','.join('?' * len(teacher_grades))})
            ORDER BY grade""",
-        tuple(usernames),
+        tuple(usernames + teacher_grades),
     )
     return {"grades": [r[0] for r in grade_rows]}
 
@@ -208,11 +345,15 @@ async def get_classes_with_wrong(
     request: Request,
     grade: str = Query("", description="年级"),
 ):
-    """获取指定年级下有错题记录的班级列表"""
+    """获取指定年级下有错题记录的班级列表（教师只返回自己所教班级）"""
     user = get_current_user(request)
+    username = user["username"]
     role = user.get("role", 2)
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+
+    if not grade:
+        return {"classes": []}
 
     # 先查有错题记录的学生用户名
     rows = execute_query(
@@ -223,15 +364,40 @@ async def get_classes_with_wrong(
     if not usernames:
         return {"classes": []}
 
-    # 再查这些学生的班级
+    # 管理员看到该年级所有班级
     placeholders = ",".join("?" * len(usernames))
     params = [grade] + usernames
+
+    if role == 0:
+        class_rows = user_query(
+            f"""SELECT DISTINCT class FROM users
+               WHERE grade = ? AND username IN ({placeholders})
+               AND class IS NOT NULL AND class != ''
+               ORDER BY class""",
+            tuple(params),
+        )
+        return {"classes": [str(r[0]) for r in class_rows]}
+
+    # 教师只返回自己所教班级
+    teacher_rows = user_query(
+        "SELECT grade, class FROM users WHERE username=?", (username,)
+    )
+    teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
+    teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
+    grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+    allowed_classes = grade_class_map.get(grade, [])
+
+    if not allowed_classes:
+        return {"classes": []}
+
+    class_placeholders = ",".join("?" * len(allowed_classes))
     class_rows = user_query(
         f"""SELECT DISTINCT class FROM users
            WHERE grade = ? AND username IN ({placeholders})
            AND class IS NOT NULL AND class != ''
+           AND class IN ({class_placeholders})
            ORDER BY class""",
-        tuple(params),
+        tuple(params + allowed_classes),
     )
     return {"classes": [str(r[0]) for r in class_rows]}
 
