@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select } from 'antd'
-import { ReloadOutlined, BookOutlined, RobotOutlined } from '@ant-design/icons'
+import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import apiClient from '../api/client'
@@ -295,7 +295,16 @@ const WrongBookPage: React.FC = () => {
         open={planModal}
         onCancel={() => setPlanModal(false)}
         width={700}
-        footer={<Button onClick={() => setPlanModal(false)}>关闭</Button>}
+        footer={
+          <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <Button icon={<DownloadOutlined />} onClick={() => {
+              const token = localStorage.getItem('smartkb_token')
+              const studentParam = selectedStudent ? `&student_username=${selectedStudent}` : ''
+              window.open(`/api/wrong-book/review-plan/export?token=${token}${studentParam}`, '_blank')
+            }}>导出 Word</Button>
+            <Button onClick={() => setPlanModal(false)}>关闭</Button>
+          </Space>
+        }
       >
         <Spin spinning={planLoading}>
           {planData && (
