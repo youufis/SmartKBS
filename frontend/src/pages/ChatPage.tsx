@@ -539,7 +539,7 @@ const ChatPage: React.FC = () => {
             }>
               <Checkbox checked={ragEnabled}
                 onChange={(e) => setRagEnabled(e.target.checked)}>
-                学科知识
+                知识
               </Checkbox>
             </Tooltip>
             {hasHtmlInResponse && (

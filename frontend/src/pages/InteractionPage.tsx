@@ -32,6 +32,8 @@ const InteractionPage: React.FC = () => {
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({})
   const [quizResult, setQuizResult] = useState<any>(null)
   const [quizResultsView, setQuizResultsView] = useState<any>(null)
+  const [quizAiAnalysis, setQuizAiAnalysis] = useState<string | null>(null)
+  const [quizAiAnalysisLoading, setQuizAiAnalysisLoading] = useState(false)
   const [aiQuizModal, setAiQuizModal] = useState(false)
   const [aiQuizLoading, setAiQuizLoading] = useState(false)
   const [aiQuizResult, setAiQuizResult] = useState<any>(null)
@@ -165,7 +167,6 @@ const InteractionPage: React.FC = () => {
       try {
         await apiClient.post('/api/interaction/quizzes', {
           title: aiQuizForm.getFieldValue('topic') + ' - 随堂测验',
-          description: '由 AI 自动生成',
           questions: JSON.stringify(aiQuizResult.questions),
         })
         message.success(`成功创建测验，共 ${aiQuizResult.questions.length} 题`)
@@ -267,7 +268,75 @@ const InteractionPage: React.FC = () => {
     try {
       const { data } = await apiClient.get(`/api/interaction/quizzes/${quizId}/results`)
       setQuizResultsView(data)
+      setQuizAiAnalysis(null)
     } catch { message.error('加载结果失败') }
+  }
+
+  const handleQuizAiAnalysis = async (quizId: number) => {
+    if (!quizId) return
+    setQuizAiAnalysisLoading(true)
+    setQuizAiAnalysis(null)
+    try {
+      const { data } = await apiClient.get(`/api/interaction/quizzes/${quizId}/ai-analysis`)
+      if (data.task_id) {
+        // 异步任务，轮询结果
+        const result = await pollAiTask(data.task_id)
+        if (result) setQuizAiAnalysis(result.analysis)
+        else message.error('AI 分析超时')
+      } else {
+        // 兼容旧版同步返回
+        setQuizAiAnalysis(data.analysis)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'AI 分析失败')
+    }
+    setQuizAiAnalysisLoading(false)
+  }
+
+  /** 轮询 AI 异步任务直到完成 */
+  const pollAiTask = async (taskId: string, maxWait = 120000): Promise<any> => {
+    const start = Date.now()
+    while (Date.now() - start < maxWait) {
+      try {
+        const { data } = await apiClient.get(`/api/interaction/ai-task/${taskId}`)
+        if (data.status === 'completed') return data.result
+        if (data.status === 'failed') {
+          message.error(data.error || 'AI 任务执行失败')
+          return null
+        }
+      } catch { /* 任务还未就绪，继续等待 */ }
+      await new Promise(r => setTimeout(r, 2000))
+    }
+    message.error('AI 任务超时，请稍后重试')
+    return null
+  }
+
+  // ── AI 课堂总结 ──
+  const [classSummaryModal, setClassSummaryModal] = useState(false)
+  const [classSummaryLoading, setClassSummaryLoading] = useState(false)
+  const [classSummaryData, setClassSummaryData] = useState<{ summary: string; data?: any } | null>(null)
+  const handleClassSummary = async () => {
+    setClassSummaryLoading(true)
+    setClassSummaryData(null)
+    setClassSummaryModal(true)
+    try {
+      const { data } = await apiClient.get('/api/interaction/class-summary', {
+        params: { grade: user?.grade || '', cls: user?.class || '', subject: '信息技术', teacher_username: user?.username },
+      })
+      if (data.task_id) {
+        // 异步任务，轮询结果
+        const result = await pollAiTask(data.task_id)
+        if (result) setClassSummaryData(result)
+        else setClassSummaryModal(false)
+      } else {
+        // 兼容旧版同步返回
+        setClassSummaryData(data)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '生成课堂总结失败')
+      setClassSummaryModal(false)
+    }
+    setClassSummaryLoading(false)
   }
 
   // ── 投票 ──
@@ -389,19 +458,23 @@ const InteractionPage: React.FC = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1 }}>
                         <Text strong>{quiz.title}</Text>
-                        {quiz.description && <Text type="secondary" style={{ marginLeft: 8 }}>{quiz.description}</Text>}
                         <div style={{ marginTop: 4 }}>
                           <Tag>{quiz.questions?.length || 0} 题</Tag>
                           <Tag color={quiz.status === 'active' ? 'green' : 'default'}>
                             {quiz.status === 'active' ? '进行中' : '已结束'}
                           </Tag>
+                          <Tag color="blue">{quiz.creator_name || quiz.creator_username}</Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>{quiz.answer_count || 0} 人参与</Text>
                         </div>
                       </div>
                       <Space>
-                        {quiz.status === 'active' && isStudent && (
+                        {quiz.status === 'active' && isStudent && !quiz.answered && (
                           <Button size="small" type="primary" icon={<PlayCircleOutlined />}
                             onClick={() => handleStartQuiz(quiz)}>开始答题</Button>
+                        )}
+                        {quiz.status === 'active' && isStudent && quiz.answered && (
+                          <Button size="small" icon={<BarChartOutlined />}
+                            onClick={() => handleViewQuizResults(quiz.id)}>查看结果</Button>
                         )}
                         {isTeacherOrAdmin && (
                           <>
@@ -605,19 +678,52 @@ const InteractionPage: React.FC = () => {
         </div>
       ),
     },
+    ...(isTeacherOrAdmin ? [{
+      key: 'summary',
+      label: <span><RobotOutlined /> 课堂总结</span>,
+      children: (
+        <div>
+          {isTeacherOrAdmin && (
+            <Space style={{ marginBottom: 16 }}>
+              <Button icon={<RobotOutlined />} onClick={handleClassSummary} loading={classSummaryLoading}>
+                AI 课堂总结
+              </Button>
+            </Space>
+          )}
+          {classSummaryData && (
+            <>
+              <Row gutter={12} style={{ marginBottom: 12 }}>
+                <Col span={6}><Statistic title="测验数" value={classSummaryData.data?.quiz_count || 0} /></Col>
+                <Col span={6}><Statistic title="投票数" value={classSummaryData.data?.poll_count || 0} /></Col>
+                <Col span={6}><Statistic title="提问数" value={classSummaryData.data?.question_count || 0} /></Col>
+                <Col span={6}><Statistic title="参与学生" value={classSummaryData.data?.student_count || 0} /></Col>
+              </Row>
+              <Card style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                <div className="markdown-content">
+                  <ReactMarkdown>{classSummaryData.summary}</ReactMarkdown>
+                </div>
+              </Card>
+            </>
+          )}
+          {!classSummaryData && !classSummaryLoading && (
+            <Empty description="点击「AI 课堂总结」生成综合分析报告" />
+          )}
+        </div>
+      ),
+    }] : []),
   ]
 
   return (
     <div>
-      <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #fa8c16 0%, #f5222d 100%)', border: 'none' }}>
-        <div style={{ color: '#fff' }}>
+      <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
+        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
             <ThunderboltOutlined style={{ fontSize: 28 }} />
             <Title level={3} style={{ color: '#fff', margin: 0 }}>课堂互动</Title>
+            <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
+              随堂测验 · 快速投票 · 课堂提问
+            </Text>
           </Space>
-          <Text style={{ color: 'rgba(255,255,255,0.85)', display: 'block', marginTop: 8 }}>
-            随堂测验 · 快速投票 · 课堂提问
-          </Text>
         </div>
       </Card>
 
@@ -694,6 +800,13 @@ const InteractionPage: React.FC = () => {
               <Col span={8}><Statistic title="题目数" value={quizResultsView.quiz?.question_count} /></Col>
               <Col span={8}><Statistic title="参与人数" value={quizResultsView.total_answers} /></Col>
             </Row>
+            <div style={{ textAlign: 'right', marginBottom: 8 }}>
+              <Button icon={<RobotOutlined />} size="small"
+                loading={quizAiAnalysisLoading}
+                onClick={() => handleQuizAiAnalysis(quizResultsView.quiz?.id)}>
+                AI 分析
+              </Button>
+            </div>
             <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small" pagination={false}
               columns={[
                 { title: '题号', dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
@@ -704,6 +817,13 @@ const InteractionPage: React.FC = () => {
                   ),
                 },
               ]} />
+            {quizAiAnalysis && (
+              <Card size="small" style={{ marginTop: 12, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                <div className="markdown-content">
+                  <ReactMarkdown>{quizAiAnalysis}</ReactMarkdown>
+                </div>
+              </Card>
+            )}
           </>
         )}
       </Modal>

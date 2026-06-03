@@ -5,7 +5,7 @@
 """
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
@@ -88,7 +88,7 @@ class ProgressUpdate(BaseModel):
 # 辅助函数
 # ═══════════════════════════════════════════════════════════
 
-def _can_manage(user: dict) -> bool:
+def _can_manage(user: dict[str, Any]) -> bool:
     """检查是否有管理权限（教师/管理员）"""
     role = user.get("role", 2)
     return role in (0, 1)
@@ -136,7 +136,7 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _build_course_tree(course_id: int) -> list[dict]:
+def _build_course_tree(course_id: int) -> list[dict[str, Any]]:
     """构建课程的完整章节-知识点树（批量查询优化版）
 
     优化说明：将 N+1 次递归查询合并为 2 次批量查询，
@@ -171,18 +171,18 @@ def _build_course_tree(course_id: int) -> list[dict]:
             resource_count_map[row["knowledge_point_id"]] = row["cnt"]
 
     # 3) 构建 parent_id → 章节列表 的映射
-    children_map: dict[int, list[dict]] = {}
+    children_map: dict[int, list[dict[str, Any]]] = {}
     for ch in all_chapters:
         pid = ch["parent_id"] or 0  # 顶层用 0 表示
         children_map.setdefault(pid, []).append(ch)
 
     # 4) 构建 chapter_id → 知识点列表 的映射
-    kp_map: dict[int, list[dict]] = {}
+    kp_map: dict[int, list[dict[str, Any]]] = {}
     for kp in all_kps:
         kp_map.setdefault(kp["chapter_id"], []).append(kp)
 
     # 5) 递归组装树
-    def _build_node(ch: dict) -> dict:
+    def _build_node(ch: dict[str, Any]) -> dict[str, Any]:
         node = dict(ch)
         # 子章节
         node["children"] = [_build_node(c) for c in children_map.get(ch["id"], [])]
@@ -196,7 +196,7 @@ def _build_course_tree(course_id: int) -> list[dict]:
     return [_build_node(ch) for ch in children_map.get(0, [])]
 
 
-def _inject_progress(kps: list[dict], username: str):
+def _inject_progress(kps: list[dict[str, Any]], username: str):
     """为学生注入学习进度状态"""
     if not kps:
         return
@@ -217,7 +217,7 @@ def _inject_progress(kps: list[dict], username: str):
             kp["progress_score"] = 0
 
 
-def _get_resource_info(resource_type: str, resource_id: int) -> dict:
+def _get_resource_info(resource_type: str, resource_id: int) -> dict[str, Any]:
     """根据资源类型和 ID 获取资源名称和访问路径"""
     result = {"name": "", "url": ""}
     try:
@@ -327,8 +327,8 @@ async def ai_generate_curriculum(req: AIGenerateRequest, request: Request):
 {req.content[:8000]}"""
 
     try:
-        from backend.api.ai_service import call_ai_sync
-        ai_response = call_ai_sync(prompt, api_key)
+        from backend.api.ai_service import call_ai_async
+        ai_response = await call_ai_async(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 生成课程失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 调用失败: {str(e)}")
@@ -362,15 +362,19 @@ async def ai_generate_from_file(request: Request):
         raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
 
     # 解析 multipart 表单
+    from fastapi import UploadFile
     form = await request.form()
-    file = form.get("file")
-    subject = form.get("subject", "信息技术")
-    grade = form.get("grade", "高一")
+    file_raw = form.get("file")
+    subject_val = form.get("subject", "信息技术")
+    grade_val = form.get("grade", "高一")
     course_name = form.get("course_name", "")
     auto_save = form.get("auto_save", "false") == "true"
 
-    if not file or not hasattr(file, "filename") or not file.filename:
+    if not file_raw or not isinstance(file_raw, UploadFile) or not file_raw.filename:
         raise HTTPException(status_code=400, detail="请上传文件")
+    file: UploadFile = file_raw
+    subject: str = str(subject_val) if subject_val else "信息技术"
+    grade: str = str(grade_val) if grade_val else "高一"
 
     # 读取文件内容
     content_bytes = await file.read()
@@ -434,8 +438,8 @@ async def ai_generate_from_file(request: Request):
 {text_content}"""
 
     try:
-        from backend.api.ai_service import call_ai_sync
-        ai_response = call_ai_sync(prompt, api_key)
+        from backend.api.ai_service import call_ai_async
+        ai_response = await call_ai_async(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 文件生成课程失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 调用失败: {str(e)}")
@@ -457,7 +461,7 @@ async def ai_generate_from_file(request: Request):
     return result
 
 
-def _parse_ai_json(text: str) -> dict | None:
+def _parse_ai_json(text: str) -> dict[str, Any] | None:
     """从 AI 返回文本中提取 JSON"""
     # 尝试直接解析
     try:
@@ -486,7 +490,7 @@ def _parse_ai_json(text: str) -> dict | None:
     return None
 
 
-def _save_ai_result(result: dict, subject: str, grade: str, username: str) -> dict:
+def _save_ai_result(result: dict[str, Any], subject: str, grade: str, username: str) -> dict[str, Any]:
     """将 AI 生成的结构保存到数据库"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     saved = {"course_id": None, "chapters": 0, "knowledge_points": 0}
@@ -545,12 +549,13 @@ def _save_ai_result(result: dict, subject: str, grade: str, username: str) -> di
             saved["chapters"] += 1
 
             # 该节下专属的知识点
-            for kp_idx, kp in enumerate(sec.get("knowledge_points", [])):
-                _insert_kp(sec_id, kp, kp_idx, now)
-                saved["knowledge_points"] += 1
+            if sec_id is not None:
+                for kp_idx, kp in enumerate(sec.get("knowledge_points", [])):
+                    _insert_kp(sec_id, kp, kp_idx, now)
+                    saved["knowledge_points"] += 1
 
         # 只有章完全没有子节时，知识点才挂在章下
-        if top_kps and not children:
+        if top_kps and not children and ch_id is not None:
             for kp_idx, kp in enumerate(top_kps):
                 _insert_kp(ch_id, kp, kp_idx, now)
                 saved["knowledge_points"] += 1
@@ -559,7 +564,7 @@ def _save_ai_result(result: dict, subject: str, grade: str, username: str) -> di
     return saved
 
 
-def _insert_kp(chapter_id: int, kp: dict, sort_order: int, now: str):
+def _insert_kp(chapter_id: int, kp: dict[str, Any], sort_order: int, now: str):
     """插入单个知识点"""
     execute_insert_update(
         """INSERT INTO knowledge_points (chapter_id, name, description, learning_objectives, difficulty, estimated_minutes, sort_order, status, created_at, updated_at)
@@ -582,7 +587,7 @@ def _insert_kp(chapter_id: int, kp: dict, sort_order: int, now: str):
 # AI 结果后处理：修正不合格的知识点
 # ═══════════════════════════════════════════════════════════
 
-def _fix_kp_names(result: dict):
+def _fix_kp_names(result: dict[str, Any]):
     """修正 AI 返回结果中知识点名称不合格的情况"""
     for ch in result.get("chapters", []):
         for sec in ch.get("children", []):
@@ -614,7 +619,7 @@ def _fix_kp_names(result: dict):
             sec["knowledge_points"] = new_kps
 
 
-def _split_section_to_kps(sec_name: str, original_kp: dict) -> list[dict]:
+def _split_section_to_kps(sec_name: str, original_kp: dict[str, Any]) -> list[dict[str, Any]]:
     """将节名拆解为多个具体的知识点名称"""
     difficulty = original_kp.get("difficulty", "medium")
     minutes = original_kp.get("estimated_minutes", 30)
@@ -859,6 +864,24 @@ async def delete_course(course_id: int, request: Request):
 # ═══════════════════════════════════════════════════════════
 # 章节 CRUD
 # ═══════════════════════════════════════════════════════════
+
+def _build_chapter_node(ch: dict[str, Any]) -> dict[str, Any]:
+    """构建单个章节的节点（含子章节和知识点）"""
+    node = dict(ch)
+    # 子章节
+    children = execute_query(
+        "SELECT * FROM chapters WHERE parent_id=? AND status='active' ORDER BY sort_order, id",
+        (ch["id"],),
+    )
+    node["children"] = [_build_chapter_node(c) for c in children]
+    # 知识点
+    kps = execute_query(
+        "SELECT * FROM knowledge_points WHERE chapter_id=? AND status='active' ORDER BY sort_order, id",
+        (ch["id"],),
+    )
+    node["knowledge_points"] = kps
+    return node
+
 
 @router.get("/chapters/{chapter_id}", summary="获取章节详情")
 async def get_chapter(chapter_id: int, request: Request):
@@ -1580,7 +1603,7 @@ async def get_class_progress_overview(
 # 辅助：获取单个行（复用 execute_query_one 不存在的情况）
 # ═══════════════════════════════════════════════════════════
 
-def execute_query_one(sql: str, params: tuple = ()):
+def execute_query_one(sql: str, params: tuple[Any, ...] = ()):
     """执行查询并返回单条结果"""
     rows = execute_query(sql, params)
     return rows[0] if rows else None
@@ -1619,7 +1642,7 @@ async def ai_lesson_plan(
 
     from backend.prompts.teaching import LESSON_PLAN_PROMPT
     from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     keys = get_api_keys(username)
     api_key = keys[0] if keys and keys[0] else ""
@@ -1637,7 +1660,7 @@ async def ai_lesson_plan(
     )
 
     try:
-        lesson_plan = call_ai_sync(prompt, api_key)
+        lesson_plan = await call_ai_async(prompt, api_key)
         return {
             "knowledge_point": kp["name"],
             "chapter_name": kp["chapter_name"],
@@ -1703,7 +1726,7 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
 
     from backend.prompts.teaching import LESSON_PLAN_PROMPT
     from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync
+    from backend.api.ai_service import call_ai_async
 
     keys = get_api_keys(username)
     api_key = keys[0] if keys and keys[0] else ""
@@ -1721,7 +1744,7 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
     )
 
     try:
-        lesson_plan_text = call_ai_sync(prompt, api_key)
+        lesson_plan_text = await call_ai_async(prompt, api_key)
     except Exception as e:
         logger.error(f"AI 备课助手生成失败: {e}")
         raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
