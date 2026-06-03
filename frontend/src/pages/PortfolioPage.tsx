@@ -416,38 +416,43 @@ const PortfolioPage: React.FC = () => {
 
       {/* ── AI 学习报告弹窗 ── */}
       <Modal
-        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 学习报告 - {student.name}（{reportData?.period || ''}）</>}
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 学习报告 - {student.name}（{reportData?.period || '生成中...'}）</>}
         open={reportModal}
-        onCancel={() => setReportModal(false)}
+        onCancel={() => { if (reportLoading) return; setReportModal(false) }}
         width={700}
         footer={
-          <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-            <Button icon={<DownloadOutlined />} onClick={() => {
-              if (!targetUsername) return
-              const token = localStorage.getItem('smartkb_token')
-              window.open(`/api/portfolio/${targetUsername}/report/export?days=${reportDays}&period=近${reportDays}天&token=${token}`, '_blank')
-            }}>导出 Word</Button>
-            <Button onClick={() => setReportModal(false)}>关闭</Button>
-          </Space>
+          reportLoading ? null : (
+            <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+              <Button icon={<DownloadOutlined />} onClick={() => {
+                if (!targetUsername) return
+                const token = localStorage.getItem('smartkb_token')
+                window.open(`/api/portfolio/${targetUsername}/report/export?days=${reportDays}&period=近${reportDays}天&token=${token}`, '_blank')
+              }}>导出 Word</Button>
+              <Button onClick={() => setReportModal(false)}>关闭</Button>
+            </Space>
+          )
         }
       >
-        <Spin spinning={reportLoading}>
-          {reportData && (
-            <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
-              {reportData.data && (
-                <Row gutter={12} style={{ marginBottom: 16 }}>
-                  <Col span={6}><Statistic title="考试次数" value={reportData.data.exams} suffix="次" /></Col>
-                  <Col span={6}><Statistic title="累计积分" value={reportData.data.total_score} /></Col>
-                  <Col span={6}><Statistic title="点名正确率" value={reportData.data.rollcall_rate} suffix="%" /></Col>
-                  <Col span={6}><Statistic title="对话天数" value={reportData.data.chat_days} suffix="天" /></Col>
-                </Row>
-              )}
-              <div className="markdown-content">
-                <ReactMarkdown>{reportData.report}</ReactMarkdown>
-              </div>
+        {reportLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>AI 正在生成学习报告，请稍候...</div>
+          </div>
+        ) : reportData ? (
+          <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
+            {reportData.data && (
+              <Row gutter={12} style={{ marginBottom: 16 }}>
+                <Col span={6}><Statistic title="考试次数" value={reportData.data.exams} suffix="次" /></Col>
+                <Col span={6}><Statistic title="累计积分" value={reportData.data.total_score} /></Col>
+                <Col span={6}><Statistic title="点名正确率" value={reportData.data.rollcall_rate} suffix="%" /></Col>
+                <Col span={6}><Statistic title="对话天数" value={reportData.data.chat_days} suffix="天" /></Col>
+              </Row>
+            )}
+            <div className="markdown-content">
+              <ReactMarkdown>{reportData.report}</ReactMarkdown>
             </div>
-          )}
-        </Spin>
+          </div>
+        ) : null}
       </Modal>
     </div>
   )
