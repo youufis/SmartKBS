@@ -1208,7 +1208,7 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
 
         prompt = QUIZ_ANALYSIS_PROMPT.format(
             quiz_title=_safe(quiz_data[2] or ""),
-            subject=_safe(req.subject or "信息科技"),
+            subject=_safe("信息科技"),
             participant_count=_safe(participant_count),
             question_stats=_safe(stats_text),
         )
@@ -1351,6 +1351,10 @@ async def ai_class_summary(
     from backend.api.ai_service import call_ai_async
     from backend.ai_task_manager import task_manager
 
+    # 将参数复制到局部变量，避免闭包引用外层参数
+    _subject = subject
+    _time_range = time_range
+
     async def _do_summary() -> dict:
         from backend.prompts.class_summary import CLASS_SUMMARY_PROMPT
         from backend.api.chat_router import get_api_keys
@@ -1364,8 +1368,8 @@ async def ai_class_summary(
             return str(s).replace('{', '{{').replace('}', '}}')
 
         prompt = CLASS_SUMMARY_PROMPT.format(
-            subject=_safe(subject),
-            time_range=_safe(time_range),
+            subject=_safe(_subject),
+            time_range=_safe(_time_range),
             student_count=_safe(student_count),
             quiz_data=_safe(quiz_data),
             poll_data=_safe(poll_data),
