@@ -13,6 +13,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import * as curriculumApi from '../api/curriculum'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
@@ -110,12 +111,24 @@ const CurriculumPage: React.FC = () => {
   const [lessonPlanData, setLessonPlanData] = useState<{ knowledge_point: string; lesson_plan: string } | null>(null)
   const handleAiLessonPlan = async (kpId: number) => {
     setLessonPlanLoading(true)
+    setLessonPlanData(null)
+    setLessonPlanModal(true)  // 立即打开弹窗，显示加载状态
     try {
       const { data } = await apiClient.get('/api/curriculum/ai-lesson-plan', { params: { knowledge_point_id: kpId } })
-      setLessonPlanData(data)
-      setLessonPlanModal(true)
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result && result.lesson_plan) {
+          setLessonPlanData(result)
+        } else {
+          message.error(result?.error || 'AI 备课失败')
+          setLessonPlanModal(false)
+        }
+      } else {
+        setLessonPlanData(data)
+      }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'AI 备课失败')
+      setLessonPlanModal(false)
     } finally {
       setLessonPlanLoading(false)
     }

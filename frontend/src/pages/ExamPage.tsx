@@ -14,6 +14,7 @@ import {
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { ExamInfo, ExamAttempt } from '../types'
 import { useNavigate } from 'react-router-dom'
@@ -110,7 +111,13 @@ const ExamPage: React.FC = () => {
     setExplainData(null)
     try {
       const { data } = await apiClient.get(`/api/exams/${examId}/explain-wrong`)
-      setExplainData(data)
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result) setExplainData(result)
+        else message.error('AI 讲解超时')
+      } else {
+        setExplainData(data)
+      }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || '获取讲解失败')
       setExplainModal(false)

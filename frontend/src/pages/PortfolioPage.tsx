@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 
 const { Title, Text } = Typography
@@ -117,7 +118,13 @@ const PortfolioPage: React.FC = () => {
       const { data } = await apiClient.get(`/api/portfolio/${targetUsername}/report`, {
         params: { days: reportDays, period: `近${reportDays}天` },
       })
-      setReportData(data)
+      if (data.task_id) {
+        const result = await pollAiTask(data.task_id)
+        if (result) setReportData(result)
+        else message.error('AI 分析超时')
+      } else {
+        setReportData(data)
+      }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || '生成报告失败')
       setReportModal(false)
