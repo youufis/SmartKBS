@@ -1382,79 +1382,76 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
         (exam_id,),
     )
 
-    explanations = []
+    from backend.ai_task_manager import task_manager
 
-    # 先获取 API Key，避免每个循环都调用
-    from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
-    from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_async
+    async def _do_explain() -> dict:
+        from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
+        from backend.api.chat_router import get_api_keys
+        from backend.api.ai_service import call_ai_async
+        import asyncio
 
-    keys = get_api_keys(username)
-    api_key = keys[0] if keys and keys[0] else ""
-    if not api_key:
+        keys = get_api_keys(username)
+        api_key = keys[0] if keys and keys[0] else ""
+        if not api_key:
+            return {
+                "exam_title": exam["title"],
+                "explanations": [{"error": "未配置 API Key"}],
+                "total_wrong": 0,
+            }
+
+        async def _call_ai_for_question(q, ans):
+            def _safe(s):
+                return str(s).replace('{', '{{').replace('}', '}}')
+            prompt = KNOWLEDGE_EXPLAIN_PROMPT.format(
+                question_text=_safe(q["question_text"]),
+                question_type=_safe(q["type"]),
+                correct_answer=_safe(q["correct_answer"]),
+                student_answer=_safe(ans.get("student_answer", "")),
+                knowledge_points=_safe(q.get("knowledge_points", "")),
+            )
+            ai_response = await call_ai_async(prompt, api_key)
+            return {
+                "question_id": q["id"],
+                "question_text": q["question_text"],
+                "question_type": q["type"],
+                "knowledge_points": q.get("knowledge_points", ""),
+                "explanation": ai_response,
+                "student_answer": ans.get("student_answer", ""),
+                "correct_answer": q["correct_answer"],
+            }
+
+        wrong_questions = []
+        for q in questions:
+            qid = str(q["id"])
+            if qid not in answers_data:
+                continue
+            ans = answers_data[qid]
+            if not ans.get("is_correct", False):
+                wrong_questions.append((q, ans))
+
+        explanations = []
+        if wrong_questions:
+            sem = asyncio.Semaphore(5)
+            async def _limited(q, ans):
+                async with sem:
+                    return await _call_ai_for_question(q, ans)
+            tasks = [_limited(q, ans) for q, ans in wrong_questions]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in results:
+                if isinstance(r, Exception):
+                    logger.error(f"AI 讲解生成失败: {r}")
+                    explanations.append({"error": f"AI 讲解生成失败: {str(r)}"})
+                else:
+                    explanations.append(r)
+
         return {
             "exam_title": exam["title"],
-            "explanations": [{"error": "未配置 API Key，请在系统配置中设置"}],
-            "total_wrong": 0,
+            "explanations": explanations,
+            "total_wrong": len(explanations),
         }
 
-    import asyncio
-
-    async def _call_ai_for_question(q, ans):
-        """为单个题目异步调用 AI 讲解"""
-        def _safe(s):
-            return str(s).replace('{', '{{').replace('}', '}}')
-
-        prompt = KNOWLEDGE_EXPLAIN_PROMPT.format(
-            question_text=_safe(q["question_text"]),
-            question_type=_safe(q["type"]),
-            correct_answer=_safe(q["correct_answer"]),
-            student_answer=_safe(ans.get("student_answer", "")),
-            knowledge_points=_safe(q.get("knowledge_points", "")),
-        )
-        ai_response = await call_ai_async(prompt, api_key)
-        return {
-            "question_id": q["id"],
-            "question_text": q["question_text"],
-            "question_type": q["type"],
-            "knowledge_points": q.get("knowledge_points", ""),
-            "explanation": ai_response,
-            "student_answer": ans.get("student_answer", ""),
-            "correct_answer": q["correct_answer"],
-        }
-
-    # 收集需要讲解的错题
-    wrong_questions = []
-    for q in questions:
-        qid = str(q["id"])
-        if qid not in answers_data:
-            continue
-        ans = answers_data[qid]
-        if not ans.get("is_correct", False):
-            wrong_questions.append((q, ans))
-
-    # 并发异步调用 AI（最多5个并发）
-    sem = asyncio.Semaphore(5)
-
-    async def _limited(q, ans):
-        async with sem:
-            return await _call_ai_for_question(q, ans)
-
-    if wrong_questions:
-        tasks = [_limited(q, ans) for q, ans in wrong_questions]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for r in results:
-            if isinstance(r, Exception):
-                logger.error(f"AI 讲解生成失败: {r}")
-                explanations.append({"error": f"AI 讲解生成失败: {str(r)}"})
-            else:
-                explanations.append(r)
-
-    return {
-        "exam_title": exam["title"],
-        "explanations": explanations,
-        "total_wrong": len(explanations),
-    }
+    task_id = await task_manager.create_task(description="AI 错题讲解", coro_factory=_do_explain)
+    return {"task_id": task_id, "message": "AI 讲解已提交，请稍后查询结果"}
 
 
 @router.post("/{exam_id}/ai-grade-short")
