@@ -99,7 +99,7 @@ const RollcallTool: React.FC = () => {
   useEffect(() => {
     apiClient.get('/api/rollcall/grades')
       .then(({ data }) => setGrades(Array.isArray(data) ? data : []))
-      .catch(() => setGrades(['高一', '高二']))
+      .catch(() => setGrades([]))
   }, [])
 
   // ── 年级变更 → 加载班级 ──

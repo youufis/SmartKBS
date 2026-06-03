@@ -52,6 +52,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         '.xls', '.xlsx', '.ppt', '.pptx', '.csv',
         '.json', '.html', '.htm',
     ],
+    # 课程名称列表
+    "SUBJECTS": ["信息科技", "通用技术"],
     # 消息通知类型（默认只启用考试通知，管理员可在系统配置中调整）
     "enabled_notification_types": ["exam"],
 }
@@ -165,4 +167,14 @@ async def get_apikey_status(request: Request):
         "source": source,
         "hint": hint,
         "configured": status != "missing",
+    }
+
+
+@router.get("/subjects", summary="获取启用的课程列表")
+async def get_subjects():
+    """从系统配置返回课程列表"""
+    from backend.subject_config import get_subjects, get_default_subject
+    return {
+        "subjects": get_subjects(),
+        "default": get_default_subject(),
     }

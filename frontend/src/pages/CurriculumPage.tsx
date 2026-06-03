@@ -70,6 +70,14 @@ const CurriculumPage: React.FC = () => {
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
 
+  // ── 从系统配置加载课程名称列表 ──
+  const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+  useEffect(() => {
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
+    }).catch(() => {})
+  }, [])
+
   // ── 课程树数据 ──
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(false)
@@ -915,11 +923,18 @@ const CurriculumPage: React.FC = () => {
         confirmLoading={savingCourse}
       >
         <Form form={courseForm} layout="vertical">
+          <Form.Item name="subject" label="所属科目" rules={[{ required: true, message: '请选择科目' }]}>
+            <Select placeholder="从系统配置中选择科目">
+              {subjectOptions.length > 0 ? subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>) : (
+                <Option value="" disabled>⚠️ 请先在系统配置中设置课程名称</Option>
+              )}
+            </Select>
+          </Form.Item>
           <Form.Item name="name" label="课程名称" rules={[{ required: true, message: '请输入课程名称' }]}>
-            <Input placeholder="例如：信息技术 / 通用技术" />
+            <Input placeholder="例如：信息科技基础 / 人工智能入门" />
           </Form.Item>
           <Form.Item name="code" label="课程代码">
-            <Input placeholder="例如：IT / GT" />
+            <Input placeholder="例如：IT / AI" />
           </Form.Item>
           <Form.Item name="description" label="课程简介">
             <TextArea rows={3} placeholder="简要描述课程内容" />

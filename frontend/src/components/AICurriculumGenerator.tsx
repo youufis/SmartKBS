@@ -73,6 +73,18 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [saveDone, setSaveDone] = useState(false)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [subjects, setSubjects] = useState<string[]>(['信息科技', '通用技术'])
+  const [gradeOptions, setGradeOptions] = useState<string[]>([])
+
+  // 从后端加载课程列表和年级列表
+  useEffect(() => {
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) setSubjects(data.subjects)
+    }).catch(() => {})
+    apiClient.get('/api/scores/my-grades', { params: { teacher: 'root' } }).then(({ data }) => {
+      if (Array.isArray(data) && data.length > 0) setGradeOptions(data)
+    }).catch(() => {})
+  }, [])
 
   // ── 动态进度 ──
   const [progressPercent, setProgressPercent] = useState(0)
@@ -172,6 +184,11 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       return
     }
     const values = form.getFieldsValue(['subject', 'grade', 'course_name'])
+    if (!values.subject) {
+      message.warning('请选择科目')
+      setLoading(false)
+      return
+    }
     setErrorMsg('')
     setLoading(true)
     setStep(1)
@@ -179,8 +196,8 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     try {
       const formData = new FormData()
       formData.append('file', uploadFile)
-      formData.append('subject', values.subject || '信息技术')
-      formData.append('grade', values.grade || '高一')
+      formData.append('subject', values.subject)
+      formData.append('grade', values.grade || '')
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'false')
       const data = await callApi('/api/curriculum/ai-generate-from-file', formData, {
@@ -207,8 +224,8 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     try {
       const formData = new FormData()
       formData.append('file', uploadFile!)
-      formData.append('subject', values.subject || '信息技术')
-      formData.append('grade', values.grade || '高一')
+      formData.append('subject', values.subject || subjects[0] || '信息科技')
+      formData.append('grade', values.grade || '')
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'true')
       const data = await callApi('/api/curriculum/ai-generate-from-file', formData, {
@@ -358,7 +375,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
 
       {/* ── 步骤 0：输入 ── */}
       {step === 0 && (
-        <Form form={form} layout="vertical" initialValues={{ subject: '信息技术', grade: '高一' }}>
+        <Form form={form} layout="vertical" initialValues={{ subject: '', grade: '' }}>
           <Form.Item label="上传文档（txt/md/pdf/docx）" required>
             <Dragger
               accept=".txt,.md,.pdf,.docx"
@@ -381,20 +398,20 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           </Form.Item>
 
           <Space style={{ width: '100%' }} align="start" wrap>
-            <Form.Item name="subject" label="科目" style={{ width: 160 }}>
-              <Select>
-                <Option value="信息技术">信息技术</Option>
-                <Option value="通用技术">通用技术</Option>
+            <Form.Item name="subject" label="科目" style={{ width: 160 }} rules={[{ required: true, message: '请选择科目' }]}>
+              <Select placeholder="选择科目">
+                {subjects.length > 0 ? subjects.map(s => <Option key={s} value={s}>{s}</Option>) : (
+                  <Option value="" disabled>⚠️ 请先在系统配置中设置课程名称</Option>
+                )}
               </Select>
             </Form.Item>
             <Form.Item name="grade" label="年级" style={{ width: 160 }}>
-              <Select>
-                <Option value="高一">高一</Option>
-                <Option value="高二">高二</Option>
+              <Select placeholder="选择年级" allowClear>
+                {gradeOptions.map(g => <Option key={g} value={g}>{g}</Option>)}
               </Select>
             </Form.Item>
             <Form.Item name="course_name" label="课程名称（留空由 AI 推断）" style={{ width: 280 }}>
-              <Input placeholder="例如：信息技术必修1" />
+              <Input placeholder="例如：信息科技必修1" />
             </Form.Item>
           </Space>
 

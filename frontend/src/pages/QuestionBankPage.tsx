@@ -8,6 +8,7 @@ import {
   LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined,
 } from '@ant-design/icons'
 import * as questionsApi from '../api/questions'
+import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 
@@ -40,10 +41,19 @@ const DIFFICULTY_LABELS: Record<string, string> = {
   hard: '困难',
 }
 
-const subjectOptions = ['信息技术', '通用技术']
+let subjectOptions = ['信息科技', '通用技术']
 
 const QuestionBankPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
+
+  // 从后端加载课程列表
+  useEffect(() => {
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) {
+        subjectOptions = data.subjects
+      }
+    }).catch(() => {})
+  }, [])
   // ── 生成试题表单 ──
   const [generateForm] = Form.useForm()
   const [generating, setGenerating] = useState(false)
@@ -53,7 +63,7 @@ const QuestionBankPage: React.FC = () => {
   const [genTab, setGenTab] = useState('generate')
 
   // ── 提取试题 ──
-  const [extractSubject, setExtractSubject] = useState('信息技术')
+  const [extractSubject, setExtractSubject] = useState('')
   const [extractDifficulty, setExtractDifficulty] = useState('medium')
   const [extractText, setExtractText] = useState('')
   const [extractFile, setExtractFile] = useState<File | null>(null)
@@ -409,7 +419,7 @@ const QuestionBankPage: React.FC = () => {
                         form={generateForm}
                         layout="vertical"
                         initialValues={{
-                          subject: '信息技术',
+                          subject: extractSubject || subjectOptions[0] || '信息科技',
                           question_type: 'single',
                           count: 5,
                           difficulty: 'medium',

@@ -44,7 +44,7 @@ const ScorePage: React.FC = () => {
   // 教师隔离：默认当前用户，管理员可切换
   const [currentTeacher, setCurrentTeacher] = useState(user?.username || 'root')
   const [teacherList, setTeacherList] = useState<string[]>([])
-  const [allowedGrades, setAllowedGrades] = useState<string[]>(['高一', '高二'])
+  const [allowedGrades, setAllowedGrades] = useState<string[]>([])
 
   useEffect(() => {
     if (user?.username) setCurrentTeacher(user.username)
@@ -83,7 +83,7 @@ const ScorePage: React.FC = () => {
     ...extra, teacher: currentTeacher,
   }), [currentTeacher])
 
-  const [grade, setGrade] = useState<string>('高一')
+  const [grade, setGrade] = useState<string>('')
   const [classes, setClasses] = useState<string[]>([])
   const [cls, setCls] = useState<string>('')
   const [students, setStudents] = useState<Student[]>([])
