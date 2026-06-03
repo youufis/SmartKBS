@@ -1204,7 +1204,7 @@ async def get_my_results(request: Request):
                       e.pass_score, e.creator_username
                FROM exam_attempts ea
                JOIN exams e ON e.id = ea.exam_id
-               WHERE ea.student_username = ?
+               WHERE ea.student_username = ? AND ea.status = 'submitted'
                ORDER BY ea.submitted_at DESC""",
             (username,),
         )
@@ -1215,7 +1215,7 @@ async def get_my_results(request: Request):
                       e.pass_score, e.creator_username
                FROM exam_attempts ea
                JOIN exams e ON e.id = ea.exam_id
-               WHERE e.creator_username = ? OR ? = 'root'
+               WHERE (e.creator_username = ? OR ? = 'root') AND ea.status = 'submitted'
                ORDER BY ea.submitted_at DESC""",
             (username, username),
         )
