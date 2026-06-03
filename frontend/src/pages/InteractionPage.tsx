@@ -8,10 +8,11 @@ import {
   ThunderboltOutlined, BarChartOutlined, QuestionCircleOutlined,
   PlusOutlined, PlayCircleOutlined, CheckCircleOutlined,
   SendOutlined, RobotOutlined,
-  EditOutlined, DeleteOutlined,
+  EditOutlined, DeleteOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
@@ -300,24 +301,6 @@ const InteractionPage: React.FC = () => {
     setQuizAiAnalysisLoading(false)
   }
 
-  /** 轮询 AI 异步任务直到完成 */
-  const pollAiTask = async (taskId: string, maxWait = 120000): Promise<any> => {
-    const start = Date.now()
-    while (Date.now() - start < maxWait) {
-      try {
-        const { data } = await apiClient.get(`/api/interaction/ai-task/${taskId}`)
-        if (data.status === 'completed') return data.result
-        if (data.status === 'failed') {
-          message.error(data.error || 'AI 任务执行失败')
-          return null
-        }
-      } catch { /* 任务还未就绪，继续等待 */ }
-      await new Promise(r => setTimeout(r, 2000))
-    }
-    message.error('AI 任务超时，请稍后重试')
-    return null
-  }
-
   // ── AI 课堂总结 ──
   const [classSummaryModal, setClassSummaryModal] = useState(false)
   const [classSummaryLoading, setClassSummaryLoading] = useState(false)
@@ -494,6 +477,11 @@ const InteractionPage: React.FC = () => {
                           <>
                             <Button size="small" icon={<BarChartOutlined />}
                               onClick={() => handleViewQuizResults(quiz.id)}>查看结果</Button>
+                            <Button size="small" icon={<DownloadOutlined />}
+                              onClick={() => {
+                                const token = localStorage.getItem('smartkb_token')
+                                window.open(`/api/export/quiz/${quiz.id}?token=${token}`, '_blank')
+                              }}>导出</Button>
                             <Button size="small" icon={<EditOutlined />}
                               onClick={() => { editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }}>编辑</Button>
                             <Popconfirm title="删除此测验？" onConfirm={() => handleDeleteQuiz(quiz.id)}>
@@ -559,6 +547,11 @@ const InteractionPage: React.FC = () => {
                             <>
                               <Button size="small" icon={<BarChartOutlined />}
                                 onClick={() => handleViewPollResults(poll.id)}>查看结果</Button>
+                              <Button size="small" icon={<DownloadOutlined />}
+                                onClick={() => {
+                                  const token = localStorage.getItem('smartkb_token')
+                                  window.open(`/api/export/poll/${poll.id}?token=${token}`, '_blank')
+                                }}>导出</Button>
                               <Button size="small" type="text" icon={<EditOutlined />}
                                 onClick={() => {
                                   editPollForm.setFieldsValue({
