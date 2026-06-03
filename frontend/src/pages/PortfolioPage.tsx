@@ -190,28 +190,30 @@ const PortfolioPage: React.FC = () => {
         style={{ marginBottom: 16, background: '#f6f8ff', border: '1px solid #d6e4ff' }}
       />
 
-      {/* ─── AI 学习报告 ─── */}
-      <Card size="small" style={{ marginBottom: 16, background: '#fffbe6', border: '1px solid #ffe58f' }}>
-        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-          <Space>
-            <RobotOutlined style={{ color: '#faad14', fontSize: 18 }} />
-            <Text strong>AI 学习报告</Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>基于 AI 对学习数据深度分析，生成个性化学习报告</Text>
+      {/* ─── AI 学习报告（仅教师/管理员可见） ─── */}
+      {isTeacherOrAdmin && (
+        <Card size="small" style={{ marginBottom: 16, background: '#fffbe6', border: '1px solid #ffe58f' }}>
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+            <Space>
+              <RobotOutlined style={{ color: '#faad14', fontSize: 18 }} />
+              <Text strong>AI 学习报告</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>基于 AI 对学习数据深度分析，生成个性化学习报告</Text>
+            </Space>
+            <Space>
+              <Select value={reportDays} onChange={setReportDays} style={{ width: 100 }} size="small"
+                options={[
+                  { value: 7, label: '近7天' },
+                  { value: 30, label: '近30天' },
+                  { value: 90, label: '近90天' },
+                ]} />
+              <Button type="primary" size="small" icon={<RobotOutlined />}
+                loading={reportLoading} onClick={handleGenerateReport}>
+                生成报告
+              </Button>
+            </Space>
           </Space>
-          <Space>
-            <Select value={reportDays} onChange={setReportDays} style={{ width: 100 }} size="small"
-              options={[
-                { value: 7, label: '近7天' },
-                { value: 30, label: '近30天' },
-                { value: 90, label: '近90天' },
-              ]} />
-            <Button type="primary" size="small" icon={<RobotOutlined />}
-              loading={reportLoading} onClick={handleGenerateReport}>
-              生成报告
-            </Button>
-          </Space>
-        </Space>
-      </Card>
+        </Card>
+      )}
 
       {/* ─── 数据总览卡片 ─── */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
