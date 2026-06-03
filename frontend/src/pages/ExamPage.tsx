@@ -33,13 +33,25 @@ const STATUS_LABELS: Record<string, string> = {
   ended: '已结束',
 }
 
-const subjectOptions = ['信息技术', '通用技术']
+// 课程列表将从后端动态加载
+let subjectOptions: string[] = ['信息科技', '通用技术']
 
 const ExamPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
+
+  // 从后端加载课程列表
+  const [subjects, setSubjects] = useState<string[]>(['信息科技', '通用技术'])
+  useEffect(() => {
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) {
+        setSubjects(data.subjects)
+        subjectOptions = data.subjects
+      }
+    }).catch(() => {})
+  }, [])
 
   // ── 考试列表 ──
   const [exams, setExams] = useState<ExamInfo[]>([])
@@ -738,7 +750,7 @@ const ExamPage: React.FC = () => {
 
   // ── 创建表单初始值 ──
   const createInitialValues = {
-    subject: '信息技术',
+    subject: subjects[0] || '信息科技',
     duration: 45,
     total_score: 100,
     pass_score: 60,
@@ -1144,8 +1156,7 @@ const ExamPage: React.FC = () => {
               style={{ flexWrap: 'wrap', gap: 8 }}>
               <Form.Item name="subject" style={{ minWidth: 120 }}>
                 <Select allowClear placeholder="科目">
-                  <Option value="信息技术">信息技术</Option>
-                  <Option value="通用技术">通用技术</Option>
+                  {subjects.map(s => <Option key={s} value={s}>{s}</Option>)}
                 </Select>
               </Form.Item>
               <Form.Item name="question_types" style={{ minWidth: 160 }}>
@@ -1208,8 +1219,7 @@ const ExamPage: React.FC = () => {
           <Space wrap style={{ marginBottom: 8 }}>
             <Select allowClear placeholder="科目" style={{ width: 120 }}
               value={qSubject} onChange={(v) => { setQSubject(v); setQPage(1) }}>
-              <Option value="信息技术">信息技术</Option>
-              <Option value="通用技术">通用技术</Option>
+              {subjects.map(s => <Option key={s} value={s}>{s}</Option>)}
             </Select>
             <Select allowClear placeholder="题型" style={{ width: 110 }}
               value={qType} onChange={(v) => { setQType(v); setQPage(1) }}>

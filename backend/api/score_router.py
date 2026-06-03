@@ -48,14 +48,16 @@ def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str
 
 def _get_teacher_allowed_grades(teacher: str) -> list[str]:
     """获取教师有权限的年级列表，管理员返回全部"""
+    from backend.subject_config import get_grade_list
+    all_grades = get_grade_list()
     if teacher == "root":
-        return ["高一", "高二"]
+        return all_grades
     rows = execute_query("SELECT grade FROM users WHERE username=?", (teacher,))
     if not rows:
-        return ["高一", "高二"]
+        return all_grades
     grade_str = (rows[0][0] or "").strip()
     if not grade_str:
-        return ["高一", "高二"]
+        return all_grades
     return [g.strip() for g in grade_str.split("|") if g.strip()]
 
 
@@ -200,7 +202,8 @@ async def api_student_save(request: Request):
     body = await request.json()
     teacher = body.get("teacher") or _get_teacher(request)
     grade = body.get("grade")
-    if grade not in ("高一", "高二"):
+    from backend.subject_config import get_grade_list
+    if grade not in get_grade_list():
         return {"success": False, "error": "无效年级"}
 
     name = (body.get("name") or "").strip()
@@ -228,7 +231,8 @@ async def api_student_delete(request: Request):
     grade = body.get("grade")
     name = (body.get("name") or "").strip()
     cls = (body.get("class") or "").strip()
-    if grade not in ("高一", "高二") or not name or not cls:
+    from backend.subject_config import get_grade_list
+    if grade not in get_grade_list() or not name or not cls:
         return {"success": False, "error": "参数错误"}
     scores = load_teacher_scores(teacher)
     scores.pop(teacher_score_key(teacher, grade, cls, name), None)

@@ -39,6 +39,14 @@ const InteractionPage: React.FC = () => {
   const [aiQuizLoading, setAiQuizLoading] = useState(false)
   const [aiQuizResult, setAiQuizResult] = useState<any>(null)
   const [aiQuizForm] = Form.useForm()
+  const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
+
+  // 从系统配置加载课程列表
+  useEffect(() => {
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
+    }).catch(() => {})
+  }, [])
 
   // ── 投票 ──
   const [polls, setPolls] = useState<any[]>([])
@@ -311,7 +319,7 @@ const InteractionPage: React.FC = () => {
     setClassSummaryModal(true)
     try {
       const { data } = await apiClient.get('/api/interaction/class-summary', {
-        params: { grade: user?.grade || '', cls: user?.class || '', subject: '信息技术', teacher_username: user?.username },
+        params: { grade: user?.grade || '', cls: user?.class || '', subject: '信息科技', teacher_username: user?.username },
       })
       if (data.task_id) {
         // 异步任务，轮询结果
@@ -851,12 +859,11 @@ const InteractionPage: React.FC = () => {
         ] : null}>
         <Form form={aiQuizForm} layout="vertical" onFinish={handleAiGenerateQuiz}>
           <Form.Item name="topic" label="输入主题" rules={[{ required: true, message: '请输入主题' }]}>
-            <Input placeholder="例如：信息技术的发展历程、通用技术中的设计原则" />
+            <Input placeholder="例如：信息科技的发展历程、通用技术中的设计原则" />
           </Form.Item>
-          <Form.Item name="subject" label="学科" initialValue="信息技术">
+          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || '信息科技'}>
             <Select>
-              <Select.Option value="信息技术">信息技术</Select.Option>
-              <Select.Option value="通用技术">通用技术</Select.Option>
+              {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
           </Form.Item>
           <Form.Item name="question_type" label="题型" initialValue="single">

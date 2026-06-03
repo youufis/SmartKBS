@@ -47,6 +47,9 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MAX_ALLOWED_REQUESTS', label: '每日最大请求数', type: 'number', group: 'limit' },
   { key: 'TEACHER_DOWNLOAD_QUOTA_GB', label: '教师下载配额 (GB)', type: 'number', group: 'limit',
     desc: '每位教师下载中心的最大存储空间' },
+  // 课程设置
+  { key: 'SUBJECTS', label: '课程名称列表', type: 'tags', group: 'subjects',
+    desc: '系统中使用的课程名称，多个用逗号分隔，如 信息科技,通用技术。修改后需重启服务生效' },
   // 消息通知
   { key: 'enabled_notification_types', label: '启用的通知类型', type: 'notifications', group: 'notify',
     desc: '关闭的通知类型将不会推送给任何用户' },
@@ -62,6 +65,7 @@ const GROUP_LABELS: Record<string, string> = {
   api: '🔑 API 密钥',
   model: '🤖 模型与应用配置',
   ai: '💬 AI 对话设置',
+  subjects: '📚 课程设置',
   limit: '⚙️ 系统限制',
   notify: '🔔 消息通知',
   filetype: '📁 文件类型白名单',
@@ -118,7 +122,7 @@ const SystemConfigPage: React.FC = () => {
       // 使用 getFieldsValue 确保所有字段（包括空值）都被提交
       const allValues = form.getFieldsValue()
       // 将 Tags 输入框的逗号分隔字符串转回数组
-      for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS']) {
+      for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS', 'SUBJECTS']) {
         if (typeof allValues[key] === 'string') {
           allValues[key] = allValues[key].split(',').map((s: string) => s.trim()).filter(Boolean)
         }
@@ -144,7 +148,7 @@ const SystemConfigPage: React.FC = () => {
         const { data } = await apiClient.get('/api/config')
         setConfig(data)
         const formValues = { ...data }
-        for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS']) {
+        for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS', 'SUBJECTS']) {
           if (Array.isArray(formValues[key])) {
             formValues[key] = formValues[key].join(',')
           }
@@ -367,7 +371,7 @@ const SystemConfigPage: React.FC = () => {
                 initialValues={config}
                 style={{ maxWidth: 900 }}
               >
-                {['brand', 'api', 'model', 'ai', 'limit', 'notify', 'filetype'].map(renderGroup)}
+                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype'].map(renderGroup)}
 
                 <Divider />
                 <Space>

@@ -70,7 +70,7 @@ class BroadcastMessage(BaseModel):
 
 class AiGenerateDiscussion(BaseModel):
     topic: str
-    subject: str = "信息技术"
+    subject: str = ""  # 由前端传递
     ai_role: str = "guide"
     duration_minutes: int = 30
 

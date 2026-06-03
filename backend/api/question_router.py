@@ -34,7 +34,7 @@ router = APIRouter()
 
 class GenerateRequest(BaseModel):
     """AI 生成试题请求"""
-    subject: str = "信息技术"          # 科目
+    subject: str = ""  # 科目（由前端传递）
     knowledge_points: str = ""         # 知识点
     question_type: str = "single"      # single | multiple | true_false | short
     count: int = 5                     # 生成数量
@@ -466,7 +466,7 @@ async def list_question_types():
 @router.post("/extract")
 async def extract_questions_from_text(
     request: Request,
-    subject: str = Form("信息技术"),
+    subject: str = Form(""),  # 由前端传递
     difficulty: str = Form("medium"),
     text: str = Form(""),
     file: UploadFile = File(None),

@@ -56,7 +56,7 @@ class QuestionAnswer(BaseModel):
 
 class AiGenerateQuiz(BaseModel):
     topic: str
-    subject: str = "信息技术"
+    subject: str = ""  # 由前端传递
     count: int = 5
     question_type: str = "single"  # single / true_false / mixed
 
@@ -1208,7 +1208,7 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
 
         prompt = QUIZ_ANALYSIS_PROMPT.format(
             quiz_title=_safe(quiz_data[2] or ""),
-            subject=_safe("信息技术"),
+            subject=_safe(req.subject or "信息科技"),
             participant_count=_safe(participant_count),
             question_stats=_safe(stats_text),
         )
@@ -1238,7 +1238,7 @@ async def ai_class_summary(
     request: Request,
     grade: str = Query("", description="年级"),
     cls: str = Query("", description="班级"),
-    subject: str = Query("信息技术", description="学科"),
+    subject: str = Query("", description="学科（由前端传递）"),
     teacher_username: str = Query("", description="教师用户名"),
     time_range: str = Query("本堂课", description="时间范围"),
 ):

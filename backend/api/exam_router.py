@@ -29,7 +29,7 @@ class ExamCreate(BaseModel):
     """创建考试请求"""
     title: str
     description: str = ""
-    subject: str = "信息技术"
+    subject: str = ""  # 默认值由前端传递
     duration: int = 45
     total_score: float = 100
     pass_score: float = 60

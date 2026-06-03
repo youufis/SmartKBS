@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, Tabs, Button, Space, Typography, Tag, Modal,
   Form, Input, Select, InputNumber, message, Empty, Spin,
@@ -47,9 +47,17 @@ const DiscussionPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('all')
   const [createForm] = Form.useForm()
   const [aiForm] = Form.useForm()
+  const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
+
+  // 从系统配置加载课程列表
+  useEffect(() => {
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
+    }).catch(() => {})
+  }, [])
 
   // 加载讨论列表
-  const loadDiscussions = async () => {
+  const loadDiscussions = useCallback(async () => {
     setLoading(true)
     try {
       const { data } = await apiClient.get('/api/interaction/discussions')
@@ -59,11 +67,13 @@ const DiscussionPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    loadDiscussions()
-  }, [])
+    (async () => {
+      await loadDiscussions()
+    })()
+  }, [loadDiscussions])
 
   // 创建讨论
   const handleCreate = async () => {
@@ -202,11 +212,10 @@ const DiscussionPage: React.FC = () => {
         <TextArea rows={3} placeholder="描述讨论的目标和要点" />
       </Form.Item>
       <Form.Item name="subject" label="学科">
-        <Select placeholder="选择学科（可选）" allowClear>
-          <Select.Option value="信息技术">信息技术</Select.Option>
-          <Select.Option value="通用技术">通用技术</Select.Option>
-          <Select.Option value="人工智能通识">人工智能通识</Select.Option>
-        </Select>
+          <Select placeholder="选择学科（可选）" allowClear>
+            {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
+            <Select.Option value="人工智能通识">人工智能通识</Select.Option>
+          </Select>
       </Form.Item>
       <Form.Item name="group_mode" label="分组方式" initialValue="auto">
         <Select>
@@ -448,11 +457,9 @@ const DiscussionPage: React.FC = () => {
           <Form.Item name="topic" label="讨论主题" rules={[{ required: true, message: '请输入讨论主题' }]}>
             <Input placeholder="如：人工智能的伦理困境" />
           </Form.Item>
-          <Form.Item name="subject" label="学科" initialValue="信息技术">
+          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || '信息科技'}>
             <Select>
-              <Select.Option value="信息技术">信息技术</Select.Option>
-              <Select.Option value="通用技术">通用技术</Select.Option>
-              <Select.Option value="人工智能通识">人工智能通识</Select.Option>
+              {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
           </Form.Item>
           <Form.Item name="ai_role" label="AI 助教角色" initialValue="guide">

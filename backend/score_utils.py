@@ -35,7 +35,7 @@ def save_teacher_scores(scores_data, teacher):
         conn.commit()
 
 
-def load_students(grade="高一"):
+def load_students(grade=""):
     """从数据库加载学生名单，按年级和班级筛选"""
     students = []
     try:

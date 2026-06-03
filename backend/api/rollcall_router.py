@@ -33,7 +33,7 @@ def _get_rollcall_teacher(request: Request, body: dict = None) -> str:
     return "root"
 
 
-def _load_students(grade="高一"):
+def _load_students(grade: str = ""):
     """从数据库加载学生名单，按年级和班级筛选"""
     return load_students(grade)
 
@@ -235,7 +235,8 @@ async def api_grades(request: Request):
             )
             return [row[0] for row in rows]
         except Exception:
-            return ["高一", "高二"]
+            from backend.subject_config import get_grade_list
+            return get_grade_list()
     else:
         # 教师：只返回自己任教的年级
         t_rows = execute_query(
