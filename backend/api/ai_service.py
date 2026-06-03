@@ -225,55 +225,15 @@ async def call_ai_async(prompt: str, api_key: str) -> str:
 
 
 async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
-    """异步调用百炼智能体应用"""
-    import httpx
-    from backend.api.config_router import get_config_value
+    """调用百炼智能体应用（使用 DashScope SDK，与同步版一致）"""
+    import asyncio
+    import concurrent.futures
 
-    try:
-        async with httpx.AsyncClient(timeout=180) as client:
-            # 百炼智能体应用的 HTTP 接口
-            url = "https://dashscope.aliyuncs.com/api/v1/apps/completion"
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "X-DashScope-OssResourceResolve": "enable",
-            }
-            payload = {
-                "app_id": app_id,
-                "prompt": prompt,
-                "stream": False,
-            }
-            resp = await client.post(url, json=payload, headers=headers)
-            if resp.status_code != 200:
-                logger.warning(f"智能体异步调用失败 (HTTP {resp.status_code})，降级到直接调模型")
-                model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-                api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                             "https://dashscope.aliyuncs.com/compatible-mode/v1")
-                return await _call_model_async(prompt, api_key, model, api_base)
-
-            data = resp.json()
-            text = ""
-            output = data.get("output", {})
-            if isinstance(output, dict):
-                text = output.get("text", "")
-            if not text:
-                text = data.get("text", "")
-            if text:
-                return str(text)
-
-            logger.warning("智能体异步返回为空，降级到直接调模型")
-            model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-            api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                         "https://dashscope.aliyuncs.com/compatible-mode/v1")
-            return await _call_model_async(prompt, api_key, model, api_base)
-    except Exception as e:
-        logger.error(f"智能体异步调用失败 (app_id={app_id}): {e}")
-        # 降级到直接调模型
-        from backend.api.config_router import get_config_value
-        model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-        api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                     "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        return await _call_model_async(prompt, api_key, model, api_base)
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        return await loop.run_in_executor(
+            executor, _call_agent_sync, prompt, api_key, app_id
+        )
 
 
 async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str) -> str:
