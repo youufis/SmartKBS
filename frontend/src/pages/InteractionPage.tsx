@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Card, Tabs, Button, Space, Typography, List, Tag, Modal,
   Form, Input, Select, message, Empty, Spin, Radio, Result,
-  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox,
+  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Divider,
 } from 'antd'
 import {
   ThunderboltOutlined, BarChartOutlined, QuestionCircleOutlined,
@@ -47,12 +47,12 @@ const InteractionPage: React.FC = () => {
   const [selectedOption, setSelectedOption] = useState<Record<number, number | null>>({})
   const [selectedOptions, setSelectedOptions] = useState<Record<number, number[]>>({})
   const [pollForm] = Form.useForm()
-  const [pollResults, setPollResults] = useState<any>(null)
+  const [takingPoll, setTakingPoll] = useState<any>(null)
+  const [pollResult, setPollResult] = useState<any>(null)
   const [aiPollModal, setAiPollModal] = useState(false)
   const [aiPollLoading, setAiPollLoading] = useState(false)
   const [aiPollResult, setAiPollResult] = useState<any>(null)
   const [aiPollForm] = Form.useForm()
-  const [myVotedPolls, setMyVotedPolls] = useState<Record<number, any>>({})
 
   // ── 提问 ──
   const [questions, setQuestions] = useState<any[]>([])
@@ -123,7 +123,14 @@ const InteractionPage: React.FC = () => {
     setPollLoading(true)
     try {
       const { data } = await apiClient.get('/api/interaction/polls')
-      setPolls(data.polls || [])
+      const polls = data.polls || []
+      setPolls(polls)
+      // 同步后端 voted 字段到 votedPolls 状态
+      const votedMap: Record<number, boolean> = {}
+      for (const p of polls) {
+        votedMap[p.id] = p.voted === true
+      }
+      setVotedPolls(votedMap)
     } catch { /* ignore */ }
     setPollLoading(false)
   }
@@ -373,8 +380,8 @@ const InteractionPage: React.FC = () => {
         })
         message.success('投票成功')
         setVotedPolls({ ...votedPolls, [pollId]: true })
-        setMyVotedPolls({ ...myVotedPolls, [pollId]: selOpts })
         loadPolls()
+        setTakingPoll(null)
       } catch (err: any) {
         message.error(err.response?.data?.detail || '投票失败')
       }
@@ -387,8 +394,8 @@ const InteractionPage: React.FC = () => {
         })
         message.success('投票成功')
         setVotedPolls({ ...votedPolls, [pollId]: true })
-        setMyVotedPolls({ ...myVotedPolls, [pollId]: selOpt })
         loadPolls()
+        setTakingPoll(null)
       } catch (err: any) {
         message.error(err.response?.data?.detail || '投票失败')
       }
@@ -398,8 +405,15 @@ const InteractionPage: React.FC = () => {
   const handleViewPollResults = async (pollId: number) => {
     try {
       const { data } = await apiClient.get(`/api/interaction/polls/${pollId}/results`)
-      setPollResults(data)
+      setPollResult(data)
     } catch { message.error('加载结果失败') }
+  }
+
+  const handleStartPoll = (poll: any) => {
+    setSelectedOption({})
+    setSelectedOptions({})
+    setTakingPoll(poll)
+    setPollResult(null)
   }
 
   // ── 提问 ──
@@ -518,22 +532,33 @@ const InteractionPage: React.FC = () => {
                 dataSource={polls}
                 renderItem={(poll: any) => {
                   const isMultiple = poll.poll_type === 'multiple'
-                  const hasVoted = votedPolls[poll.id]
+                  const hasVoted = poll.voted ?? votedPolls[poll.id]
                   return (
                     <Card size="small" style={{ marginBottom: 8 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Space>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
                           <Text strong>{poll.question}</Text>
-                          <Tag color={isMultiple ? 'purple' : 'blue'}>
-                            {isMultiple ? '多选' : '单选'}
-                          </Tag>
-                        </Space>
+                          <div style={{ marginTop: 4 }}>
+                            <Tag color={isMultiple ? 'purple' : 'blue'}>
+                              {isMultiple ? '多选' : '单选'}
+                            </Tag>
+                            <Tag color="blue">{poll.creator_name || poll.creator_username}</Tag>
+                            <Text type="secondary" style={{ fontSize: 12 }}>{poll.unique_voters || poll.total_votes} 人参与</Text>
+                          </div>
+                        </div>
                         <Space>
-                          <Text type="secondary">
-                            {poll.unique_voters || poll.total_votes} 人参与
-                          </Text>
+                          {isStudent && !hasVoted && (
+                            <Button size="small" type="primary" icon={<CheckCircleOutlined />}
+                              onClick={() => handleStartPoll(poll)}>开始投票</Button>
+                          )}
+                          {isStudent && hasVoted && (
+                            <Button size="small" icon={<BarChartOutlined />}
+                              onClick={() => handleViewPollResults(poll.id)}>已投票</Button>
+                          )}
                           {isTeacherOrAdmin && (
                             <>
+                              <Button size="small" icon={<BarChartOutlined />}
+                                onClick={() => handleViewPollResults(poll.id)}>查看结果</Button>
                               <Button size="small" type="text" icon={<EditOutlined />}
                                 onClick={() => {
                                   editPollForm.setFieldsValue({
@@ -550,54 +575,6 @@ const InteractionPage: React.FC = () => {
                           )}
                         </Space>
                       </div>
-                      <div style={{ marginTop: 8 }}>
-                        {poll.options.map((opt: any, i: number) => (
-                          <div key={i} style={{ marginBottom: 4 }}>
-                            {isStudent && !hasVoted ? (
-                              isMultiple ? (
-                                <Checkbox
-                                  checked={(selectedOptions[poll.id] || []).includes(i)}
-                                  onChange={(e) => {
-                                    const current = selectedOptions[poll.id] || []
-                                    const updated = e.target.checked
-                                      ? [...current, i]
-                                      : current.filter((v: number) => v !== i)
-                                    setSelectedOptions({ ...selectedOptions, [poll.id]: updated })
-                                  }}
-                                >
-                                  {opt.text}
-                                </Checkbox>
-                              ) : (
-                                <Radio
-                                  checked={selectedOption[poll.id] === i}
-                                  onChange={() => setSelectedOption({ ...selectedOption, [poll.id]: i })}
-                                >
-                                  {opt.text}
-                                </Radio>
-                              )
-                            ) : (
-                              <div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                  <Text>{opt.text}</Text>
-                                  <Text type="secondary">{opt.votes} 票 ({opt.percentage || 0}%)</Text>
-                                </div>
-                                <Progress percent={opt.percentage || 0} size="small" style={{ marginTop: 2 }} />
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      {isStudent && !hasVoted && (
-                        <Button type="primary" size="small" icon={<CheckCircleOutlined />}
-                          onClick={() => handleVote(poll.id)} style={{ marginTop: 8 }}>提交投票</Button>
-                      )}
-                      {hasVoted && isStudent && (
-                        <Tag color="green" style={{ marginTop: 8 }}>✓ 已投票</Tag>
-                      )}
-                      {isTeacherOrAdmin && (
-                        <Button size="small" icon={<BarChartOutlined />}
-                          onClick={() => handleViewPollResults(poll.id)} style={{ marginTop: 8 }}>查看结果</Button>
-                      )}
                     </Card>
                   )
                 }}
@@ -622,56 +599,48 @@ const InteractionPage: React.FC = () => {
             {questions.length === 0 ? <Empty description="暂无提问" /> : (
               <List
                 dataSource={questions}
-                renderItem={(q: any) => (
-                  <Card size="small" style={{ marginBottom: 8 }}>
-                    <div>
-                      {/* 顶栏：学生信息左，操作按钮右 */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                renderItem={(q: any) => {
+                  const qContent = q.content?.length > 50 ? q.content.slice(0, 50) + '...' : q.content
+                  return (
+                    <Card size="small" style={{ marginBottom: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
+                          <Text strong>{qContent}</Text>
+                          <div style={{ marginTop: 4 }}>
+                            {q.is_anonymous ? <Tag>匿名</Tag> : !isStudent && <Tag>{q.student_username}</Tag>}
+                            <Tag color={q.status === 'answered' ? 'green' : 'orange'}>
+                              {q.status === 'answered' ? '已回答' : '待回答'}
+                            </Tag>
+                            <Text type="secondary" style={{ fontSize: 12 }}>{q.created_at?.slice(0, 16)}</Text>
+                          </div>
+                        </div>
                         <Space>
-                          {q.is_anonymous ? <Tag>匿名</Tag> : !isStudent && <Tag>{q.student_username}</Tag>}
-                          <Tag color={q.status === 'answered' ? 'green' : 'orange'}>
-                            {q.status === 'answered' ? '已回答' : '待回答'}
-                          </Tag>
-                          <Text type="secondary" style={{ fontSize: 11 }}>{q.created_at?.slice(0, 16)}</Text>
-                        </Space>
-                        <Space size={4}>
+                          {isStudent && (
+                            <Button size="small" type="primary" icon={<QuestionCircleOutlined />}
+                              onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>查看详情</Button>
+                          )}
                           {isTeacherOrAdmin && (
-                            <Button size="small" type={q.status === 'pending' ? 'primary' : 'default'}
-                              icon={<SendOutlined />}
-                              onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>
-                              {q.status === 'pending' ? '回答' : '编辑'}
-                            </Button>
+                            <>
+                              <Button size="small" type={q.status === 'pending' ? 'primary' : 'default'}
+                                icon={<SendOutlined />}
+                                onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>
+                                {q.status === 'pending' ? '回答' : '编辑'}
+                              </Button>
+                              <Popconfirm title="删除此提问？" onConfirm={() => handleDeleteQuestion(q.id)}>
+                                <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                              </Popconfirm>
+                            </>
                           )}
                           {isStudent && q.student_username === user?.username && (
-                            <Button size="small" type="text" icon={<EditOutlined />}
-                              onClick={() => {
-                                editQuestionForm.setFieldsValue({ content: q.content })
-                                setEditQuestionModal(q)
-                              }} />
-                          )}
-                          {(isTeacherOrAdmin || q.student_username === user?.username) && (
                             <Popconfirm title="删除此提问？" onConfirm={() => handleDeleteQuestion(q.id)}>
                               <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                             </Popconfirm>
                           )}
                         </Space>
                       </div>
-                      {/* 问题内容 */}
-                      <div style={{ marginTop: 8 }} className="markdown-content">
-                        <ReactMarkdown>{q.content}</ReactMarkdown>
-                      </div>
-                      {/* 教师回答 */}
-                      {q.answer && (
-                        <div style={{ marginTop: 8, padding: 10, background: '#f6f8ff', borderRadius: 6, borderLeft: '3px solid #1677ff' }}>
-                          <Text type="secondary" strong>教师回答：</Text>
-                          <div className="markdown-content">
-                            <ReactMarkdown>{q.answer}</ReactMarkdown>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </Card>
-                )}
+                    </Card>
+                  )
+                }}
               />
             )}
           </Spin>
@@ -777,6 +746,58 @@ const InteractionPage: React.FC = () => {
             </div>
           </div>
         ))}
+      </Modal>
+
+      {/* ── 投票弹窗 ── */}
+      <Modal title={takingPoll?.question} open={!!takingPoll && !pollResult}
+        onCancel={() => { setTakingPoll(null); setPollResult(null) }}
+        footer={[
+          <Button key="submit" type="primary" onClick={() => handleVote(takingPoll?.id)}>提交投票</Button>,
+        ]}
+        width={500}>
+        {takingPoll?.options?.map((opt: any, i: number) => (
+          <div key={i} style={{ marginBottom: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+            {takingPoll.poll_type === 'multiple' ? (
+              <Checkbox
+                checked={(selectedOptions[takingPoll.id] || []).includes(i)}
+                onChange={(e) => {
+                  const current = selectedOptions[takingPoll.id] || []
+                  const updated = e.target.checked
+                    ? [...current, i]
+                    : current.filter((v: number) => v !== i)
+                  setSelectedOptions({ ...selectedOptions, [takingPoll.id]: updated })
+                }}
+              >
+                {opt.text}
+              </Checkbox>
+            ) : (
+              <Radio
+                checked={selectedOption[takingPoll.id] === i}
+                onChange={() => setSelectedOption({ ...selectedOption, [takingPoll.id]: i })}
+              >
+                {opt.text}
+              </Radio>
+            )}
+          </div>
+        ))}
+      </Modal>
+
+      {/* ── 投票结果弹窗 ── */}
+      <Modal title={pollResult?.question || '投票结果'} open={!!pollResult}
+        onCancel={() => setPollResult(null)}
+        footer={<Button onClick={() => setPollResult(null)}>关闭</Button>}
+        width={500}>
+        {pollResult?.options?.map((opt: any, i: number) => (
+          <div key={i} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text>{opt.text}</Text>
+              <Text type="secondary">{opt.votes} 票 ({opt.percentage || 0}%)</Text>
+            </div>
+            <Progress percent={opt.percentage || 0} size="small" />
+          </div>
+        ))}
+        <Divider />
+        <Text type="secondary">共 {pollResult?.unique_voters || pollResult?.total_votes} 人参与</Text>
       </Modal>
 
       {/* ── 答题结果 ── */}
@@ -950,36 +971,34 @@ const InteractionPage: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* ── 投票结果弹窗 ── */}
-      <Modal title="投票结果" open={!!pollResults} onCancel={() => setPollResults(null)}
-        footer={null}>
-        {pollResults && (
+      {/* ── 投票结果弹窗（教师查看用） ── */}
+      <Modal title={pollResult?.question || '投票结果'} open={!!pollResult}
+        onCancel={() => setPollResult(null)}
+        footer={<Button onClick={() => setPollResult(null)}>关闭</Button>}
+        width={500}>
+        {pollResult && (
           <>
             <Space style={{ marginBottom: 12 }}>
-              <Text strong style={{ fontSize: 16 }}>{pollResults.question}</Text>
-              <Tag color={pollResults.poll_type === 'multiple' ? 'purple' : 'blue'}>
-                {pollResults.poll_type === 'multiple' ? '多选' : '单选'}
+              <Tag color={pollResult.poll_type === 'multiple' ? 'purple' : 'blue'}>
+                {pollResult.poll_type === 'multiple' ? '多选' : '单选'}
               </Tag>
             </Space>
-            <div style={{ marginTop: 8 }}>
-              {pollResults.options.map((opt: any, i: number) => (
-                <div key={i} style={{ marginBottom: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Text>{opt.text}</Text>
-                    <Text type="secondary">{opt.votes} 票 ({opt.percentage}%)</Text>
-                  </div>
-                  <Progress percent={opt.percentage} size="small" />
+            {pollResult.options?.map((opt: any, i: number) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text>{opt.text}</Text>
+                  <Text type="secondary">{opt.votes} 票 ({opt.percentage || 0}%)</Text>
                 </div>
-              ))}
-            </div>
-            <div>
-              <Text type="secondary">共 {pollResults.unique_voters ?? pollResults.total_votes} 人参与</Text>
-              {pollResults.poll_type === 'multiple' && pollResults.unique_voters ? (
-                <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                  （共 {pollResults.total_votes} 票）
-                </Text>
-              ) : null}
-            </div>
+                <Progress percent={opt.percentage || 0} size="small" />
+              </div>
+            ))}
+            <Divider />
+            <Text type="secondary">共 {pollResult.unique_voters || pollResult.total_votes} 人参与</Text>
+            {pollResult.poll_type === 'multiple' && pollResult.unique_voters ? (
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                （共 {pollResult.total_votes} 票）
+              </Text>
+            ) : null}
           </>
         )}
       </Modal>
@@ -1046,21 +1065,50 @@ const InteractionPage: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* ── 回答弹窗 ── */}
-      <Modal title={answerModal?.status === 'answered' ? '编辑回答' : '回答提问'} open={!!answerModal} onCancel={() => setAnswerModal(null)}
-        footer={[
+      {/* ── 提问详情/回答弹窗 ── */}
+      <Modal title="提问详情" open={!!answerModal} onCancel={() => setAnswerModal(null)}
+        footer={isTeacherOrAdmin ? [
           <Button key="cancel" onClick={() => setAnswerModal(null)}>取消</Button>,
           <Button key="aisuggest" icon={<RobotOutlined />} onClick={() => handleAiSuggestAnswer(answerModal?.id)}>
             AI 建议
           </Button>,
-          <Button key="submit" type="primary" onClick={() => handleAnswerQuestion(answerModal?.id)}>提交回答</Button>,
-        ]}>
-        <Text strong>问题：</Text>
-        <div className="markdown-content"><ReactMarkdown>{answerModal?.content || ''}</ReactMarkdown></div>
-        <div style={{ marginTop: 12 }}>
-          <TextArea rows={4} value={answerText} onChange={(e) => setAnswerText(e.target.value)}
-            placeholder="输入回答（支持 Markdown），或点击「AI 建议」生成..." />
-        </div>
+          <Button key="submit" type="primary" onClick={() => handleAnswerQuestion(answerModal?.id)}>
+            {answerModal?.status === 'answered' ? '更新回答' : '提交回答'}
+          </Button>,
+        ] : [
+          <Button key="close" onClick={() => setAnswerModal(null)}>关闭</Button>,
+        ]}
+        width={640}>
+        {/* 问题信息 */}
+        <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
+          <div style={{ marginBottom: 8 }}>
+            {answerModal?.is_anonymous ? <Tag>匿名</Tag> : <Tag>{answerModal?.student_username}</Tag>}
+            <Tag color={answerModal?.status === 'answered' ? 'green' : 'orange'}>
+              {answerModal?.status === 'answered' ? '已回答' : '待回答'}
+            </Tag>
+            <Text type="secondary" style={{ fontSize: 12 }}>{answerModal?.created_at?.slice(0, 16)}</Text>
+          </div>
+          <div className="markdown-content">
+            <ReactMarkdown>{answerModal?.content || ''}</ReactMarkdown>
+          </div>
+        </Card>
+        {/* 教师回答区 */}
+        {answerModal?.answer && (
+          <div style={{ marginBottom: 12, padding: 12, background: '#f6f8ff', borderRadius: 6, borderLeft: '3px solid #1677ff' }}>
+            <Text type="secondary" strong>教师回答：</Text>
+            <div className="markdown-content" style={{ marginTop: 4 }}>
+              <ReactMarkdown>{answerModal.answer}</ReactMarkdown>
+            </div>
+          </div>
+        )}
+        {/* 教师编辑区 */}
+        {isTeacherOrAdmin && (
+          <div style={{ marginTop: 12 }}>
+            <Text strong>{answerModal?.status === 'answered' ? '编辑回答' : '撰写回答'}</Text>
+            <TextArea rows={4} value={answerText} onChange={(e) => setAnswerText(e.target.value)}
+              placeholder="输入回答（支持 Markdown），或点击「AI 建议」生成..." style={{ marginTop: 8 }} />
+          </div>
+        )}
       </Modal>
     </div>
   )
