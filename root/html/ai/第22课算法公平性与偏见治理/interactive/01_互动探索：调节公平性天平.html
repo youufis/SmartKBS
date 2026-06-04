@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>算法公平性博弈：贷款审批模拟</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chart-container { position: relative; height: 200px; width: 100%; }
+        input[type=range] { width: 100%; cursor: pointer; }
+        .metric-card { transition: all 0.3s ease; }
+        .fairness-indicator { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+        .status-pass { background-color: #10b981; }
+        .status-fail { background-color: #ef4444; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans p-4 md:p-8">
+    <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">算法公平性博弈</h1>
+            <p class="text-slate-600 max-w-2xl mx-auto">
+                作为信贷主管，请为两个不同背景的群体设定贷款审批阈值。
+                观察不同的公平性定义（人口统计学公平 vs 机会均等）如何在数学上产生冲突。
+            </p>
+        </header>
+
+        <!-- Main Dashboard -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            
+            <!-- Group A Control -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-blue-600">群体 A (多数群体)</h2>
+                    <span class="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-1 rounded">基础还款率: 70%</span>
+                </div>
+                <div class="chart-container mb-4">
+                    <canvas id="chartA"></canvas>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">审批阈值: <span id="valA">50</span></label>
+                        <input type="range" id="sliderA" min="0" max="100" value="50" class="accent-blue-600">
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div class="p-2 bg-slate-50 rounded">
+                            <div class="text-slate-500">通过率</div>
+                            <div id="accA" class="text-lg font-bold">0%</div>
+                        </div>
+                        <div class="p-2 bg-slate-50 rounded">
+                            <div class="text-slate-500">真阳性率 (TPR)</div>
+                            <div id="tprA" class="text-lg font-bold text-emerald-600">0%</div>
+                        </div>
+                        <div class="p-2 bg-slate-50 rounded">
+                            <div class="text-slate-500">假阳性率 (FPR)</div>
+                            <div id="fprA" class="text-lg font-bold text-rose-600">0%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Group B Control -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-purple-600">群体 B (少数群体)</h2>
+                    <span class="text-sm font-mono bg-purple-50 text-purple-700 px-2 py-1 rounded">基础还款率: 40%</span>
+                </div>
+                <div class="chart-container mb-4">
+                    <canvas id="chartB"></canvas>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">审批阈值: <span id="valB">50</span></label>
+                        <input type="range" id="sliderB" min="0" max="100" value="50" class="accent-purple-600">
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div class="p-2 bg-slate-50 rounded">
+                            <div class="text-slate-500">通过率</div>
+                            <div id="accB" class="text-lg font-bold">0%</div>
+                        </div>
+                        <div class="p-2 bg-slate-50 rounded">
+                            <div class="text-slate-500">真阳性率 (TPR)</div>
+                            <div id="tprB" class="text-lg font-bold text-emerald-600">0%</div>
+                        </div>
+                        <div class="p-2 bg-slate-50 rounded">
+                            <div class="text-slate-500">假阳性率 (FPR)</div>
+                            <div id="fprB" class="text-lg font-bold text-rose-600">0%</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fairness Evaluation Section -->
+        <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            <!-- Metric 1: Demographic Parity -->
+            <div class="metric-card bg-white p-5 rounded-xl shadow-md border-l-4 border-blue-500">
+                <h3 class="font-bold text-slate-800 mb-2">1. 人口统计学公平</h3>
+                <p class="text-xs text-slate-500 mb-3">\(P(\hat{Y}=1 | G=A) = P(\hat{Y}=1 | G=B)\)</p>
+                <div class="flex items-center mb-1">
+                    <span id="stat-dp-icon" class="fairness-indicator"></span>
+                    <span id="stat-dp-text" class="text-sm font-medium">检测中...</span>
+                </div>
+                <div class="text-xs text-slate-600">通过率差异: <span id="diff-dp">0%</span></div>
+            </div>
+
+            <!-- Metric 2: Equal Opportunity -->
+            <div class="metric-card bg-white p-5 rounded-xl shadow-md border-l-4 border-emerald-500">
+                <h3 class="font-bold text-slate-800 mb-2">2. 机会均等</h3>
+                <p class="text-xs text-slate-500 mb-3">\(P(\hat{Y}=1 | Y=1, G=A) = P(\hat{Y}=1 | Y=1, G=B)\)</p>
+                <div class="flex items-center mb-1">
+                    <span id="stat-eo-icon" class="fairness-indicator"></span>
+                    <span id="stat-eo-text" class="text-sm font-medium">检测中...</span>
+                </div>
+                <div class="text-xs text-slate-600">真阳性率差异: <span id="diff-eo">0%</span></div>
+            </div>
+
+            <!-- Metric 3: Total Accuracy -->
+            <div class="metric-card bg-white p-5 rounded-xl shadow-md border-l-4 border-slate-800">
+                <h3 class="font-bold text-slate-800 mb-2">整体准确率</h3>
+                <p class="text-xs text-slate-500 mb-3">\( (TP + TN) / \text{Total} \)</p>
+                <div class="text-2xl font-bold" id="total-accuracy">0%</div>
+                <div class="text-xs text-slate-500 mt-1 italic">追求极致公平往往会牺牲整体准确率。</div>
+            </div>
+        </div>
+
+        <!-- Logic Footer -->
+        <footer class="mt-8 p-6 bg-slate-800 text-slate-300 rounded-xl">
+            <h4 class="text-white font-bold mb-2">核心洞察：数学不可能性定理</h4>
+            <p class="text-sm leading-relaxed mb-4">
+                当两个群体的基础还款率（Base Rate）不一致时，调整阈值几乎<b>无法同时满足</b>上述所有公平性指标。
+                如果你试图通过降低 B 组阈值来达成“人口统计学公平”，B 组的假阳性率（误批）会显著上升，这可能会导致信贷风险增加。
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono bg-slate-900 p-4 rounded border border-slate-700">
+                <div>
+                    \(FPR = \frac{FP}{FP + TN}\) (误伤率)
+                </div>
+                <div>
+                    \(TPR = \frac{TP}{TP + FN}\) (机会/召回率)
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Constants for distributions
+        const CONFIG = {
+            A: { mean0: 45, mean1: 75, sd: 12, weight0: 0.3, weight1: 0.7, color: '#2563eb' },
+            B: { mean0: 35, mean1: 60, sd: 12, weight0: 0.6, weight1: 0.4, color: '#9333ea' }
+        };
+
+        const samples = 1000;
+        const tolerance = 0.05; // 5% diff for fairness
+
+        function gaussian(x, mean, sd) {
+            return (1 / (sd * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * Math.pow((x - mean) / sd, 2));
+        }
+
+        function getStats(group, threshold) {
+            let tp = 0, fp = 0, tn = 0, fn = 0;
+            const cfg = CONFIG[group];
+            
+            // Numerical integration across 0-100 scores
+            for (let x = 0; x <= 100; x += 0.5) {
+                const d0 = gaussian(x, cfg.mean0, cfg.sd) * cfg.weight0; // Actual Defaulters
+                const d1 = gaussian(x, cfg.mean1, cfg.sd) * cfg.weight1; // Actual Repayers
+                
+                if (x >= threshold) {
+                    tp += d1;
+                    fp += d0;
+                } else {
+                    tn += d0;
+                    fn += d1;
+                }
+            }
+
+            const total = tp + fp + tn + fn;
+            const tpr = tp / (tp + fn);
+            const fpr = fp / (fp + tn);
+            const approvalRate = (tp + fp) / total;
+            const accuracy = (tp + tn) / total;
+
+            return { tpr, fpr, approvalRate, accuracy, tp, fp, tn, fn };
+        }
+
+        function drawChart(canvasId, group, threshold) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const cfg = CONFIG[group];
+            const w = canvas.width = canvas.offsetWidth * 2;
+            const h = canvas.height = canvas.offsetHeight * 2;
+            ctx.scale(2, 2);
+            const sw = w/2;
+            const sh = h/2;
+
+            ctx.clearRect(0, 0, sw, sh);
+
+            // Draw distributions
+            const points0 = [];
+            const points1 = [];
+            let maxVal = 0;
+
+            for (let x = 0; x <= 100; x++) {
+                const y0 = gaussian(x, cfg.mean0, cfg.sd) * cfg.weight0;
+                const y1 = gaussian(x, cfg.mean1, cfg.sd) * cfg.weight1;
+                points0.push({x, y: y0});
+                points1.push({x, y: y1});
+                maxVal = Math.max(maxVal, y0 + y1);
+            }
+
+            const scaleX = sw / 100;
+            const scaleY = (sh - 20) / maxVal;
+
+            // Helper to draw area
+            function drawArea(points, color, isFilled, fromX) {
+                ctx.beginPath();
+                ctx.moveTo(0, sh);
+                points.forEach(p => {
+                    if (p.x >= fromX || !isFilled) {
+                        ctx.lineTo(p.x * scaleX, sh - p.y * scaleY);
+                    } else {
+                        ctx.lineTo(p.x * scaleX, sh);
+                    }
+                });
+                ctx.lineTo(100 * scaleX, sh);
+                if (isFilled) {
+                    ctx.fillStyle = color + '33';
+                    ctx.fill();
+                }
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            // Fill areas
+            drawArea(points0, '#f43f5e', true, 0); // Defaulters (Red)
+            drawArea(points1, '#10b981', true, 0); // Repayers (Green)
+
+            // Threshold line
+            const tx = threshold * scaleX;
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.moveTo(tx, 0);
+            ctx.lineTo(tx, sh);
+            ctx.strokeStyle = '#334155';
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Label
+            ctx.fillStyle = '#334155';
+            ctx.font = '10px sans-serif';
+            ctx.fillText("通过区 →", tx + 5, 15);
+        }
+
+        function update() {
+            const threshA = parseInt(document.getElementById('sliderA').value);
+            const threshB = parseInt(document.getElementById('sliderB').value);
+
+            document.getElementById('valA').innerText = threshA;
+            document.getElementById('valB').innerText = threshB;
+
+            const statsA = getStats('A', threshA);
+            const statsB = getStats('B', threshB);
+
+            // Update UI A
+            document.getElementById('accA').innerText = (statsA.approvalRate * 100).toFixed(1) + '%';
+            document.getElementById('tprA').innerText = (statsA.tpr * 100).toFixed(1) + '%';
+            document.getElementById('fprA').innerText = (statsA.fpr * 100).toFixed(1) + '%';
+
+            // Update UI B
+            document.getElementById('accB').innerText = (statsB.approvalRate * 100).toFixed(1) + '%';
+            document.getElementById('tprB').innerText = (statsB.tpr * 100).toFixed(1) + '%';
+            document.getElementById('fprB').innerText = (statsB.fpr * 100).toFixed(1) + '%';
+
+            // Fairness Logic
+            const diffDP = Math.abs(statsA.approvalRate - statsB.approvalRate);
+            const diffEO = Math.abs(statsA.tpr - statsB.tpr);
+            const totalAcc = (statsA.accuracy + statsB.accuracy) / 2;
+
+            updateFairnessUI('dp', diffDP);
+            updateFairnessUI('eo', diffEO);
+            document.getElementById('total-accuracy').innerText = (totalAcc * 100).toFixed(1) + '%';
+            document.getElementById('diff-dp').innerText = (diffDP * 100).toFixed(1) + '%';
+            document.getElementById('diff-eo').innerText = (diffEO * 100).toFixed(1) + '%';
+
+            drawChart('chartA', 'A', threshA);
+            drawChart('chartB', 'B', threshB);
+        }
+
+        function updateFairnessUI(key, diff) {
+            const icon = document.getElementById(`stat-${key}-icon`);
+            const text = document.getElementById(`stat-${key}-text`);
+            const isFair = diff <= tolerance;
+            
+            icon.className = 'fairness-indicator ' + (isFair ? 'status-pass' : 'status-fail');
+            text.innerText = isFair ? '基本公平' : '存在偏差';
+            text.className = 'text-sm font-medium ' + (isFair ? 'text-emerald-700' : 'text-rose-700');
+        }
+
+        document.getElementById('sliderA').addEventListener('input', update);
+        document.getElementById('sliderB').addEventListener('input', update);
+
+        // Initial run
+        window.addEventListener('resize', update);
+        update();
+    </script>
+</body>
+</html>

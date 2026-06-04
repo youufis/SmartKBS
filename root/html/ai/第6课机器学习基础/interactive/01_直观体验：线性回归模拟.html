@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>线性回归拟合交互学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f8fafc; overflow-x: hidden; }
+        .canvas-container { position: relative; width: 100%; max-width: 600px; aspect-ratio: 1 / 1; }
+        canvas { cursor: crosshair; touch-action: none; background: white; border-radius: 8px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        .slider-label { min-width: 80px; }
+        .math-text { font-family: 'Times New Roman', Times, serif; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="flex flex-col items-center p-4 md:p-8">
+    <div class="max-w-4xl w-full space-y-6">
+        <!-- Header -->
+        <header class="text-center">
+            <h1 class="text-3xl font-bold text-slate-800 mb-2">线性回归拟合交互可视化</h1>
+            <p class="text-slate-600">通过调整斜率 \(k\) 和截距 \(b\)，寻找一条最能拟合散点分布的直线。</p>
+        </header>
+
+        <!-- Main Interaction Area -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
+            <!-- Left: Controls & Stats -->
+            <div class="bg-white p-6 rounded-xl shadow-sm space-y-6 border border-slate-100 order-2 md:order-1">
+                <div>
+                    <h2 class="text-lg font-semibold text-slate-700 mb-4">参数控制</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <div class="flex justify-between text-sm mb-1 text-slate-500">
+                                <span>斜率 (k): <span id="val-k" class="font-mono font-bold text-blue-600">1.00</span></span>
+                            </div>
+                            <input type="range" id="slider-k" min="-2" max="4" step="0.01" value="0.5" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-sm mb-1 text-slate-500">
+                                <span>截距 (b): <span id="val-b" class="font-mono font-bold text-indigo-600">0.00</span></span>
+                            </div>
+                            <input type="range" id="slider-b" min="-50" max="150" step="1" value="20" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-slate-100">
+                    <h2 class="text-lg font-semibold text-slate-700 mb-2">当前指标</h2>
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-slate-500">回归方程:</span>
+                            <span class="font-mono text-sm font-semibold" id="eq-display">y = 1.00x + 0.00</span>
+                        </div>
+                        <div class="p-3 bg-slate-50 rounded-lg">
+                            <div class="text-xs text-slate-400 uppercase tracking-wider mb-1">均方误差 (MSE)</div>
+                            <div class="text-2xl font-bold font-mono transition-colors duration-300" id="mse-display">0.00</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-xs text-slate-400 leading-relaxed">
+                    注：红色竖线代表残差 \(e_i = y_i - \hat{y}_i\)。我们的目标是使所有残差的平方和（MSE）达到最小。
+                </div>
+                <button id="reset-btn" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg transition-colors text-sm font-medium">
+                    重新生成随机点
+                </button>
+            </div>
+
+            <!-- Middle/Right: Visualization -->
+            <div class="md:col-span-2 order-1 md:order-2 flex flex-col items-center">
+                <div class="canvas-container" id="container">
+                    <canvas id="regCanvas"></canvas>
+                </div>
+                <div class="mt-4 flex gap-6 text-sm text-slate-500">
+                    <div class="flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-blue-500"></span> 观测数据点 \((x_i, y_i)\)
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="w-6 h-0.5 bg-blue-600"></span> 拟合直线 \(\hat{y} = kx + b\)
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Math Footer -->
+        <footer class="bg-blue-50 p-6 rounded-xl border border-blue-100">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h3 class="font-bold text-blue-800 mb-2">什么是残差？</h3>
+                    <p class="text-sm text-blue-900/80 mb-2">
+                        在回归分析中，残差是观测值与预测值之间的垂直距离：
+                    </p>
+                    <div class="text-center py-2">
+                        \[e_i = y_i - (kx_i + b)\]
+                    </div>
+                </div>
+                <div>
+                    <h3 class="font-bold text-blue-800 mb-2">损失函数 (MSE)</h3>
+                    <p class="text-sm text-blue-900/80 mb-2">
+                        我们通过最小化均方误差来获得“最优”直线：
+                    </p>
+                    <div class="text-center py-2">
+                        \[L = \frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2\]
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('regCanvas');
+        const ctx = canvas.getContext('2d');
+        const sliderK = document.getElementById('slider-k');
+        const sliderB = document.getElementById('slider-b');
+        const valK = document.getElementById('val-k');
+        const valB = document.getElementById('val-b');
+        const mseDisplay = document.getElementById('mse-display');
+        const eqDisplay = document.getElementById('eq-display');
+        const resetBtn = document.getElementById('reset-btn');
+
+        let points = [];
+        const padding = 50;
+        let width, height;
+        let optimalMse = 0;
+
+        function initCanvas() {
+            const container = document.getElementById('container');
+            width = container.clientWidth;
+            height = container.clientHeight;
+            canvas.width = width;
+            canvas.height = height;
+            generatePoints();
+            draw();
+        }
+
+        function generatePoints() {
+            points = [];
+            const n = 15;
+            // Target line: y = 1.2x + 30 (internal logic)
+            const targetK = 0.8 + Math.random() * 1.5;
+            const targetB = 10 + Math.random() * 40;
+            
+            for (let i = 0; i < n; i++) {
+                const x = 20 + Math.random() * 160; // 0-200 range logic
+                const noise = (Math.random() - 0.5) * 40;
+                const y = targetK * x + targetB + noise;
+                points.push({ x, y });
+            }
+            
+            // Calculate OLS for optimal MSE reference
+            const xMean = points.reduce((a, b) => a + b.x, 0) / n;
+            const yMean = points.reduce((a, b) => a + b.y, 0) / n;
+            let num = 0, den = 0;
+            points.forEach(p => {
+                num += (p.x - xMean) * (p.y - yMean);
+                den += (p.x - xMean) ** 2;
+            });
+            const bestK = num / den;
+            const bestB = yMean - bestK * xMean;
+            optimalMse = points.reduce((sum, p) => sum + Math.pow(p.y - (bestK * p.x + bestB), 2), 0) / n;
+        }
+
+        // Coordinate transformation: Logic (0-200) to Canvas pixels
+        function transformX(x) {
+            return padding + (x / 200) * (width - 2 * padding);
+        }
+
+        function transformY(y) {
+            // Flip Y axis: 0 is bottom
+            return height - (padding + (y / 200) * (height - 2 * padding));
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            const k = parseFloat(sliderK.value);
+            const b = parseFloat(sliderB.value);
+
+            // Update Text
+            valK.textContent = k.toFixed(2);
+            valB.textContent = b.toFixed(1);
+            eqDisplay.textContent = `y = ${k.toFixed(2)}x + ${b > 0 ? '+' : ''}${b.toFixed(1)}`;
+
+            // Draw Axes
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(padding, height - padding);
+            ctx.lineTo(width - padding, height - padding); // X
+            ctx.moveTo(padding, height - padding);
+            ctx.lineTo(padding, padding); // Y
+            ctx.stroke();
+
+            // Draw Residuals (Vertical Lines)
+            let totalSqError = 0;
+            ctx.setLineDash([4, 4]);
+            points.forEach(p => {
+                const predY = k * p.x + b;
+                const error = p.y - predY;
+                totalSqError += error * error;
+
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(transformX(p.x), transformY(p.y));
+                ctx.lineTo(transformX(p.x), transformY(predY));
+                ctx.stroke();
+            });
+            ctx.setLineDash([]);
+
+            const mse = totalSqError / points.length;
+            mseDisplay.textContent = mse.toFixed(2);
+            
+            // Color feedback based on MSE
+            // Close to optimal?
+            const ratio = optimalMse / mse;
+            if (ratio > 0.9) {
+                mseDisplay.style.color = '#10b981'; // Green
+            } else if (ratio > 0.6) {
+                mseDisplay.style.color = '#f59e0b'; // Amber
+            } else {
+                mseDisplay.style.color = '#64748b'; // Slate
+            }
+
+            // Draw Regression Line
+            const x1 = 0;
+            const y1 = k * x1 + b;
+            const x2 = 200;
+            const y2 = k * x2 + b;
+
+            ctx.strokeStyle = ratio > 0.9 ? '#10b981' : '#2563eb';
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(transformX(x1), transformY(y1));
+            ctx.lineTo(transformX(x2), transformY(y2));
+            ctx.stroke();
+
+            // Draw Points
+            points.forEach(p => {
+                ctx.fillStyle = '#3b82f6';
+                ctx.beginPath();
+                ctx.arc(transformX(p.x), transformY(p.y), 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+        }
+
+        sliderK.addEventListener('input', draw);
+        sliderB.addEventListener('input', draw);
+        resetBtn.addEventListener('click', () => {
+            generatePoints();
+            draw();
+        });
+
+        window.addEventListener('resize', initCanvas);
+        
+        // Initial call
+        initCanvas();
+    </script>
+</body>
+</html>

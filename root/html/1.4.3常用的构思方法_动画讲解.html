@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>常用的构思方法 · 创意工具箱</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Toolbox / Strategy Card Theme
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#1e1b16;
+  --bg2:#2a251f;
+  --text:#f0ebe3;
+  --text-dim:#9a8c7c;
+  --gold:#d4a853;
+  --gold-light:#f0d68a;
+  --red:#e85d4a;
+  --blue:#5b8def;
+  --green:#5bc88d;
+  --purple:#a78bfa;
+  --orange:#f59e0b;
+  --card-bg:rgba(42,37,31,0.85);
+  --card-border:rgba(212,168,83,0.08);
+  --radius:14px;
+  --shadow:0 4px 24px rgba(0,0,0,0.4);
+  --font-mono:'Courier New','Consolas','JetBrains Mono',monospace;
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.8;
+  font-size:18px;
+}
+
+/* woodgrain bg */
+body::before {
+  content:''; position:fixed; inset:0;
+  background:
+    linear-gradient(90deg, rgba(42,37,31,0.5) 0%, transparent 3%, rgba(42,37,31,0.3) 6%, transparent 9%);
+  background-size:40px 100%;
+  pointer-events:none; z-index:0;
+}
+
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .anime { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   Progress
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:5px;
+  z-index:999;
+}
+.progress-bar {
+  height:100%; width:0;
+  background:linear-gradient(90deg, var(--gold), var(--gold-light), var(--gold));
+  box-shadow:0 0 8px rgba(212,168,83,0.3);
+  animation:progGrow both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO — Toolbox
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:2rem; position:relative; overflow:hidden;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(212,168,83,0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at 30% 100%, rgba(91,205,141,0.03) 0%, transparent 50%);
+}
+
+.hero-corners { position:absolute; inset:0; pointer-events:none; }
+.hero-corners .corner {
+  position:absolute;
+  width:40px; height:40px;
+  border-color:rgba(212,168,83,0.08);
+  border-style:solid;
+}
+.hero-corners .corner.tl { top:20px; left:20px; border-width:2px 0 0 2px; }
+.hero-corners .corner.tr { top:20px; right:20px; border-width:2px 2px 0 0; }
+.hero-corners .corner.bl { bottom:20px; left:20px; border-width:0 0 2px 2px; }
+.hero-corners .corner.br { bottom:20px; right:20px; border-width:0 2px 2px 0; }
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  border:1px solid rgba(212,168,83,0.15);
+  padding:0.5rem 1.2rem;
+  font-family:var(--font-mono); font-size:0.85rem;
+  color:var(--gold); letter-spacing:3px;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; } to { opacity:1; } }
+
+.hero h1 {
+  font-size:clamp(2.5rem,6vw,4.5rem); font-weight:800;
+  letter-spacing:4px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 .line1 { font-size:clamp(1.3rem,2.5vw,2rem); font-weight:400; color:var(--text-dim); display:block; letter-spacing:6px; }
+.hero h1 .line2 { color:var(--gold-light); }
+@keyframes titleIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,1.8vw,1.3rem);
+  color:var(--text-dim);
+  font-family:var(--font-mono);
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2.5rem;
+  font-family:var(--font-mono); font-size:0.8rem;
+  color:var(--text-dim); letter-spacing:4px;
+  animation:bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(10px); } }
+
+/* ============================================================
+   SECTION
+   ============================================================ */
+.section {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem; position:relative; z-index:1;
+}
+.section-inner { max-width:1100px; width:100%; }
+
+.section-header {
+  display:flex; align-items:center; gap:16px;
+  margin-bottom:2.5rem;
+  animation:headIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 60%;
+}
+@keyframes headIn { from { opacity:0; transform:translateX(-15px); } to { opacity:1; transform:translateX(0); } }
+
+.section-icon {
+  width:52px; height:52px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  border:2px solid rgba(212,168,83,0.15);
+  font-size:1.5rem;
+}
+.section-title {
+  font-size:clamp(1.6rem,3vw,2.6rem); font-weight:700;
+  letter-spacing:2px;
+}
+.section-sub {
+  font-size:0.9rem; color:var(--text-dim); font-family:var(--font-mono);
+  margin-top:0.2rem; letter-spacing:2px;
+}
+
+/* ===== Intro card ===== */
+.tool-intro {
+  background:var(--card-bg); backdrop-filter:blur(12px);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius);
+  padding:2rem 2.5rem; margin-bottom:3rem;
+  box-shadow:var(--shadow);
+  animation:cardIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+@keyframes cardIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.tool-intro h3 {
+  font-size:1.3rem; color:var(--gold);
+  margin-bottom:1rem; display:flex; align-items:center; gap:10px;
+}
+.tool-intro p, .tool-intro li {
+  font-size:1rem; color:var(--text-dim); line-height:1.9;
+}
+.tool-intro li { padding:0.3rem 0; }
+.tool-intro strong { color:var(--text); }
+
+/* ===== Method Card (the toolkit) ===== */
+.method-grid { display:grid; grid-template-columns:1fr 1fr; gap:2rem; }
+
+.method-tool {
+  background:var(--card-bg); backdrop-filter:blur(12px);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius);
+  padding:2rem; position:relative;
+  box-shadow:var(--shadow);
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.method-tool:nth-child(1) { animation-range:entry 0% entry 55%; }
+.method-tool:nth-child(2) { animation-range:entry 0% entry 48%; }
+.method-tool:nth-child(3) { animation-range:entry 0% entry 41%; }
+.method-tool:nth-child(4) { animation-range:entry 0% entry 34%; }
+
+/* Rarity / Level tag */
+.method-tool .mt-rarity {
+  position:absolute; top:1rem; right:1rem;
+  font-family:var(--font-mono); font-size:0.65rem;
+  padding:0.15rem 0.5rem; border-radius:3px;
+  letter-spacing:2px;
+}
+.rarity-common { background:rgba(91,205,141,0.1); color:var(--green); border:1px solid rgba(91,205,141,0.15); }
+.rarity-uncommon { background:rgba(91,143,239,0.1); color:var(--blue); border:1px solid rgba(91,143,239,0.15); }
+.rarity-rare { background:rgba(245,158,11,0.1); color:var(--orange); border:1px solid rgba(245,158,11,0.15); }
+.rarity-legend { background:rgba(167,139,250,0.1); color:var(--purple); border:1px solid rgba(167,139,250,0.15); }
+
+.method-tool .mt-icon { font-size:2.5rem; margin-bottom:0.5rem; }
+.method-tool .mt-name {
+  display:flex; align-items:center; gap:8px;
+  margin-bottom:0.8rem;
+}
+.method-tool .mt-name h4 { font-size:1.3rem; font-weight:700; color:var(--text); }
+.method-tool .mt-name .mt-level {
+  font-family:var(--font-mono); font-size:0.65rem;
+  color:var(--text-dim); background:rgba(154,140,124,0.08);
+  padding:0.1rem 0.4rem; border-radius:2px;
+}
+
+.method-tool .mt-desc { font-size:0.95rem; color:var(--text-dim); line-height:1.8; margin-bottom:0.8rem; }
+.method-tool .mt-desc strong { color:var(--text); }
+
+.method-tool .mt-steps {
+  background:rgba(212,168,83,0.03);
+  border-left:2px solid rgba(212,168,83,0.1);
+  padding:0.6rem 1rem;
+  margin-bottom:0.8rem;
+}
+.method-tool .mt-steps .ms-label {
+  font-family:var(--font-mono); font-size:0.7rem;
+  color:var(--gold); letter-spacing:2px; margin-bottom:0.2rem;
+}
+.method-tool .mt-steps p { font-size:0.88rem; color:var(--text-dim); line-height:1.6; }
+
+.method-tool .mt-example {
+  background:rgba(232,93,74,0.03);
+  border:1px solid rgba(232,93,74,0.06);
+  border-radius:8px;
+  padding:0.6rem 0.8rem;
+}
+.method-tool .mt-example .me-label {
+  font-family:var(--font-mono); font-size:0.7rem;
+  color:var(--red); margin-bottom:0.2rem;
+}
+.method-tool .mt-example p { font-size:0.85rem; color:var(--text-dim); line-height:1.6; font-style:italic; }
+.method-tool .mt-example strong { color:var(--text); }
+
+/* ============================================================
+   SUMMARY
+   ============================================================ */
+.summary {
+  min-height:60vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(212,168,83,0.04) 0%, transparent 60%);
+}
+.summary h2 {
+  font-size:clamp(1.6rem,3vw,2.5rem); font-weight:700;
+  color:var(--gold-light); letter-spacing:3px;
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.summary .toolkit-summary {
+  display:flex; flex-wrap:wrap; justify-content:center; gap:1rem;
+  margin:2rem 0;
+  animation:cardIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+.summary .ts-item {
+  background:var(--card-bg); border:1px solid var(--card-border);
+  border-radius:10px; padding:0.6rem 1.2rem;
+  font-family:var(--font-mono); font-size:0.85rem;
+  color:var(--text-dim); letter-spacing:1px;
+}
+.summary .ts-item strong { color:var(--gold); }
+.summary p {
+  font-size:1.1rem; color:var(--text-dim); max-width:550px;
+  animation:cardIn 1.2s both; animation-timeline:view(); animation-range:entry 0% entry 40%;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .method-grid { grid-template-columns:1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  body { font-size:16px; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:rgba(212,168,83,0.1); border-radius:3px; }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-corners">
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+  </div>
+  <div class="hero-badge">◆ TOOLKIT · CREATIVE METHODS</div>
+  <h1>
+    <span class="line1">常用的</span>
+    <span class="line2">构思方法</span>
+  </h1>
+  <p class="hero-sub">_ 4 tools to unlock better designs _</p>
+  <div class="hero-scroll">▼ OPEN TOOLBOX</div>
+</section>
+
+<!-- ===== SECTION: 为什么需要构思方法 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-icon">❓</div>
+      <div>
+        <h2 class="section-title">为什么需要构思方法？</h2>
+        <div class="section-sub">why use structured methods</div>
+      </div>
+    </div>
+
+    <div class="tool-intro">
+      <h3>🎯 从直觉到方法</h3>
+      <p>方案的构思是设计的核心环节。面对复杂的设计任务，仅靠直觉难以产生高质量方案。科学运用构思方法，有助于：</p>
+      <ul style="margin-top:1rem;">
+        <li>✦ <strong>激发创意</strong> — 突破思维定势，打开想象空间</li>
+        <li>✦ <strong>系统生成方案</strong> — 有章可循，避免"想不出"的窘境</li>
+        <li>✦ <strong>提高效率与创新性</strong> — 方法对了，事半功倍</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION: 四大方法 (CARD GRID) ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-icon">🧰</div>
+      <div>
+        <h2 class="section-title">四大常用构思方法</h2>
+        <div class="section-sub">4 essential creativity tools</div>
+      </div>
+    </div>
+
+    <div class="method-grid">
+
+      <!-- Card 1: 形态分析法 -->
+      <div class="method-tool">
+        <span class="mt-rarity rarity-common">COMMON</span>
+        <div class="mt-icon">🧩</div>
+        <div class="mt-name">
+          <h4>形态分析法</h4>
+          <span class="mt-level">⭐ 基础工具</span>
+        </div>
+        <div class="mt-desc">
+          <strong>定义：</strong>从整体出发，将产品拆分为若干功能部分，分别寻找实现方法，再重新组合形成多种方案。
+        </div>
+        <div class="mt-steps">
+          <div class="ms-label">◈ 步骤</div>
+          <p>① 确定功能模块 → ② 列出每种模块的可能实现方式 → ③ 排列组合 → ④ 评价筛选</p>
+        </div>
+        <div class="mt-example">
+          <div class="me-label">◆ CASE</div>
+          <p>台灯设计：光源（LED/白炽灯/节能灯）× 支撑（伸缩/折叠/固定）× 控制（机械/触摸/光感）× 供电（电池/USB/插电）→ 最多 <strong>3×3×3×3 = 81</strong> 种组合方案！</p>
+        </div>
+      </div>
+
+      <!-- Card 2: 联想法 -->
+      <div class="method-tool">
+        <span class="mt-rarity rarity-uncommon">UNCOMMON</span>
+        <div class="mt-icon">🔗</div>
+        <div class="mt-name">
+          <h4>联想法</h4>
+          <span class="mt-level">⭐⭐ 进阶工具</span>
+        </div>
+        <div class="mt-desc">
+          <strong>定义：</strong>由甲事物联想到乙事物的思维过程，借助想象将形似、相连、相对或相关的事物加以联结。
+        </div>
+        <div class="mt-steps">
+          <div class="ms-label">◈ 四种联想</div>
+          <p><strong>相似</strong>（荷叶→伞） · <strong>接近</strong>（教室→黑板） · <strong>对比</strong>（冷→热） · <strong>因果</strong>（下雨→伞）</p>
+        </div>
+        <div class="mt-example">
+          <div class="me-label">◆ CASE</div>
+          <p>鲁班被<strong>茅草割伤</strong>（锋利齿缘）→ 联想到<strong>锯子</strong>的设计。这是典型的<strong>相似联想</strong>——外形结构相似触发创意。</p>
+        </div>
+      </div>
+
+      <!-- Card 3: 设问法 -->
+      <div class="method-tool">
+        <span class="mt-rarity rarity-rare">RARE</span>
+        <div class="mt-icon">❓</div>
+        <div class="mt-name">
+          <h4>设问法</h4>
+          <span class="mt-level">⭐⭐⭐ 高级工具</span>
+        </div>
+        <div class="mt-desc">
+          <strong>定义：</strong>通过系统提问来启发思维、发现问题与创新突破口的方法——提出问题往往比解决问题更重要。
+        </div>
+        <div class="mt-steps">
+          <div class="ms-label">◈ 常用形式</div>
+          <p><strong>检核表法</strong>（奥斯本）：能否他用/借用/改变/扩大/缩小/代用/替换/颠倒/组合<br>
+          <strong>5W2H法</strong>：Why / What / Who / When / Where / How / How much<br>
+          <strong>和田12动词法</strong>：加、减、扩、缩、变、改、联、学、代、搬、反、定</p>
+        </div>
+        <div class="mt-example">
+          <div class="me-label">◆ CASE</div>
+          <p>用5W2H法分析"教室雨伞架"：Who用？(中学生)→ When用？(雨天)→ Where放？(教室门口)→ How放？(直立/悬挂)→ How many？(全班40人)→ 从而确定容量、结构和尺寸。</p>
+        </div>
+      </div>
+
+      <!-- Card 4: 仿生法 -->
+      <div class="method-tool">
+        <span class="mt-rarity rarity-legend">LEGENDARY</span>
+        <div class="mt-icon">🦅</div>
+        <div class="mt-name">
+          <h4>仿生法</h4>
+          <span class="mt-level">⭐⭐⭐⭐ 终极工具</span>
+        </div>
+        <div class="mt-desc">
+          <strong>定义：</strong>通过模拟自然生物的结构、功能或行为来启发技术发明和设计创新的方法。
+        </div>
+        <div class="mt-steps">
+          <div class="ms-label">◈ 三种仿生</div>
+          <p><strong>形态仿生</strong>（飞鸟→飞机翼型）· <strong>功能仿生</strong>（蝙蝠→雷达）· <strong>结构仿生</strong>（蜂巢→轻质高强材料）</p>
+        </div>
+        <div class="mt-example">
+          <div class="me-label">◆ CASE</div>
+          <p>科学家观察<strong>壁虎脚掌</strong>的微观结构，模仿其带细微毛刺的吸附原理，发明了<strong>"壁虎胶带"</strong>——一种无需胶水就能粘附的超强材料。</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ===== SUMMARY ===== -->
+<section class="summary">
+  <h2>🛠️ 选对工具，事半功倍</h2>
+  <div class="toolkit-summary">
+    <span class="ts-item"><strong>🧩</strong> 形态分析</span>
+    <span class="ts-item"><strong>🔗</strong> 联想法</span>
+    <span class="ts-item"><strong>❓</strong> 设问法</span>
+    <span class="ts-item"><strong>🦅</strong> 仿生法</span>
+  </div>
+  <p>方法不是束缚，是解放。合适的构思方法，让创意不请自来。</p>
+</section>
+
+</body>
+</html>

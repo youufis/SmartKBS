@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>技术的价值 · 文明展馆</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Museum / Civilization Timeline Theme
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#f5eddf;
+  --bg-dark:#e8dcc9;
+  --text:#2c2416;
+  --text-dim:#7a6b54;
+  --gold:#c9a84c;
+  --gold-light:#e8d48b;
+  --deepred:#7a2020;
+  --brown:#5c3d2e;
+  --teal:#2a7a6e;
+  --card-bg:rgba(255,252,245,0.85);
+  --card-border:rgba(201,168,76,0.15);
+  --radius:4px;
+  --shadow:0 4px 24px rgba(0,0,0,0.06);
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.8;
+  font-size:18px;
+}
+
+/* Parchment texture */
+body::before {
+  content:''; position:fixed; inset:0;
+  background-image:radial-gradient(circle at 30% 20%, rgba(201,168,76,0.02) 0%, transparent 40%),
+                   radial-gradient(circle at 70% 80%, rgba(122,32,32,0.01) 0%, transparent 40%);
+  pointer-events:none; z-index:0;
+}
+
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .anime { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   Progress — Timeline bar
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:5px;
+  z-index:999; background:rgba(44,36,22,0.06);
+  backdrop-filter:blur(6px);
+}
+.progress-bar {
+  height:100%; width:0;
+  background:linear-gradient(90deg, var(--deepred), var(--gold), var(--teal));
+  animation:progGrow both; animation-timeline:scroll(root); animation-range:0% 100%;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO — Museum Entrance
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:2rem; position:relative; overflow:hidden;
+  background:linear-gradient(160deg, #f5eddf, #e8dcc9, #f5eddf);
+}
+
+/* Arch decoration */
+.hero-arch {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:700px; height:700px; pointer-events:none;
+  border:1px solid rgba(201,168,76,0.04);
+  border-radius:50%;
+}
+.hero-arch2 { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:500px; height:500px; pointer-events:none;
+  border:1px solid rgba(122,32,32,0.03);
+  border-radius:50%; }
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  background:rgba(201,168,76,0.06);
+  border:1px solid rgba(201,168,76,0.15);
+  padding:0.4rem 1.5rem;
+  font-size:0.82rem; color:var(--gold); letter-spacing:4px;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; } to { opacity:1; } }
+
+.hero h1 {
+  font-size:clamp(2.5rem,6vw,4.5rem); font-weight:800;
+  letter-spacing:6px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 .line1 { font-size:clamp(1.2rem,2.5vw,2rem); font-weight:400; color:var(--text-dim); display:block; letter-spacing:8px; }
+.hero h1 .line2 { color:var(--deepred); }
+@keyframes titleIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,1.8vw,1.3rem);
+  color:var(--text-dim); font-style:italic;
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2.5rem;
+  color:var(--text-dim); font-size:0.85rem; letter-spacing:3px;
+  animation:bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(8px); } }
+.hero-scroll::before { content:'—— 向下进入展厅 ——'; }
+
+/* ============================================================
+   SECTION — Exhibition Hall
+   ============================================================ */
+.section {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem; position:relative; z-index:1;
+  border-top:1px solid rgba(201,168,76,0.05);
+}
+.section-inner { max-width:1100px; width:100%; }
+
+.section-header {
+  margin-bottom:3rem; text-align:center;
+  animation:headIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 60%;
+}
+@keyframes headIn { from { opacity:0; transform:translateY(-15px); } to { opacity:1; transform:translateY(0); } }
+
+.section-era {
+  display:inline-block; font-size:0.78rem; letter-spacing:6px;
+  color:var(--gold); font-weight:700;
+  padding:0.2rem 1rem;
+  border-top:1px solid rgba(201,168,76,0.15);
+  border-bottom:1px solid rgba(201,168,76,0.15);
+}
+.section-title {
+  font-size:clamp(1.6rem,3vw,2.5rem); font-weight:700;
+  color:var(--deepred); margin-top:0.5rem;
+}
+
+/* ===== Exhibit Card ===== */
+.exhibit {
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:2.5rem 3rem; margin-bottom:2.5rem;
+  box-shadow:var(--shadow);
+  animation:exhibitIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+@keyframes exhibitIn { from { opacity:0; transform:translateY(30px); } to { opacity:1; transform:translateY(0); } }
+
+.exhibit h3 {
+  font-size:1.3rem; color:var(--deepred); margin-bottom:1rem;
+  display:flex; align-items:center; gap:12px;
+  font-weight:700;
+}
+.exhibit p, .exhibit li {
+  font-size:1rem; color:var(--text); line-height:1.9;
+}
+.exhibit li { padding:0.35rem 0; }
+.exhibit strong { color:var(--brown); }
+
+/* ===== Grid ===== */
+.g3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; }
+.g2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+
+/* ===== Artifact Card ===== */
+.artifact {
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:2rem; text-align:center;
+  box-shadow:var(--shadow);
+  animation:exhibitIn 0.8s both; animation-timeline:view();
+}
+.artifact .art-icon { font-size:3.5rem; margin-bottom:0.5rem; }
+.artifact h4 { font-size:1.1rem; color:var(--brown); margin-bottom:0.5rem; }
+.artifact p { font-size:0.92rem; color:var(--text-dim); line-height:1.7; }
+
+/* ===== Example ===== */
+.inscription {
+  background:rgba(122,32,32,0.02);
+  border-left:3px solid var(--deepred);
+  padding:0.8rem 1.2rem; margin-top:1rem;
+}
+.inscription .ins-label { font-size:0.78rem; color:var(--deepred); letter-spacing:3px; margin-bottom:0.3rem; }
+.inscription p { font-size:0.92rem; color:var(--text-dim); line-height:1.7; font-style:italic; }
+
+/* ===== Timeline ===== */
+.tl-row { display:flex; flex-direction:column; gap:0.8rem; }
+.tl-item {
+  display:flex; align-items:flex-start; gap:1.2rem;
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:1rem 1.5rem;
+  animation:exhibitIn 0.8s both; animation-timeline:view();
+}
+.tl-item .tl-dot {
+  width:12px; height:12px; flex-shrink:0;
+  border-radius:50%; background:var(--gold);
+  margin-top:0.5rem;
+  box-shadow:0 0 0 3px rgba(201,168,76,0.15);
+}
+.tl-item .tl-body h4 { font-size:1rem; color:var(--text); margin-bottom:0.2rem; }
+.tl-item .tl-body p { font-size:0.92rem; color:var(--text-dim); line-height:1.6; }
+
+/* ============================================================
+   SUMMARY
+   ============================================================ */
+.summary {
+  min-height:50vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem;
+  background:linear-gradient(160deg, #f5eddf, #e8dcc9);
+}
+.summary h2 {
+  font-size:clamp(1.5rem,3vw,2.5rem); color:var(--deepred); letter-spacing:4px;
+  animation:exhibitIn 0.8s both; animation-timeline:view();
+}
+.summary .epitaph {
+  margin-top:1.5rem; font-size:1.1rem; color:var(--text-dim); max-width:600px; font-style:italic;
+  animation:exhibitIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .g2, .g3 { grid-template-columns:1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  .exhibit { padding:1.5rem; }
+  body { font-size:16px; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:rgba(201,168,76,0.2); }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-arch"></div><div class="hero-arch2"></div>
+  <div class="hero-badge">✦ 展馆 · 文明与技术</div>
+  <h1>
+    <span class="line1">技术的</span>
+    <span class="line2">价值</span>
+  </h1>
+  <p class="hero-sub">—— 技术如何塑造人与世界的三重关系 ——</p>
+  <div class="hero-scroll"></div>
+</section>
+
+<!-- ===== EXHIBIT 1: 技术与人的关系（三重价值） ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-era">◆ 第一展区</div>
+      <h2 class="section-title">技术与人的关系</h2>
+    </div>
+
+    <div class="g3">
+      <div class="artifact">
+        <div class="art-icon">🛡️</div>
+        <h4>保护人</h4>
+        <p>技术增强人类抵抗自然和抵御侵害的能力</p>
+        <div class="inscription">
+          <p>心率监测手环自动出药提醒 · 疫苗防控传染病 · 安全头盔抵御撞击</p>
+        </div>
+      </div>
+      <div class="artifact">
+        <div class="art-icon">🕊️</div>
+        <h4>解放人</h4>
+        <p>技术使人从繁重劳动中解脱，拓展能力边界</p>
+        <div class="inscription">
+          <p>洗衣机解放双手 · 汽车拓展出行空间 · 计算机替代脑力计算</p>
+        </div>
+      </div>
+      <div class="artifact">
+        <div class="art-icon">🌱</div>
+        <h4>发展人</h4>
+        <p>技术促进人的自我成长与价值实现</p>
+        <div class="inscription">
+          <p>"大国工匠"通过技术创新实现自我 · 编程提升逻辑思维</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="exhibit" style="margin-top:1.5rem;">
+      <h3>🧑 核心认知</h3>
+      <p>技术对人有三重作用：<strong>保护</strong>使人安全生存，<strong>解放</strong>使人拥有自由，<strong>发展</strong>使人实现价值。三者层层递进，构成了技术"以人为本"的完整意义。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== EXHIBIT 2: 技术与社会 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-era">◆ 第二展区</div>
+      <h2 class="section-title">技术与社会</h2>
+    </div>
+
+    <div class="exhibit">
+      <h3>🏛️ 技术——推动社会文明的引擎</h3>
+      <p>技术是推动社会发展和文明进步的主要动力之一。从农业革命到工业革命再到信息革命，每一次技术飞跃都重塑了社会形态。</p>
+    </div>
+
+    <div class="tl-row">
+      <div class="tl-item">
+        <div class="tl-dot"></div>
+        <div class="tl-body">
+          <h4>🚗 促进社会生产发展</h4>
+          <p>福特 T 型车流水线 —— 大规模生产改变制造业格局</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot"></div>
+        <div class="tl-body">
+          <h4>📱 改变生活方式</h4>
+          <p>智能手机普及 —— 从通讯工具到"人体新器官"</p>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-dot"></div>
+        <div class="tl-body">
+          <h4>🎨 丰富文化内容</h4>
+          <p>数字媒体、虚拟现实艺术 —— 全新的创作与表达形式</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== EXHIBIT 3: 技术与自然 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-era">◆ 第三展区</div>
+      <h2 class="section-title">技术与自然</h2>
+    </div>
+
+    <div class="exhibit">
+      <h3>🌍 合理尺度，可持续之道</h3>
+      <p>人类依靠技术利用和改造自然，但必须注重生态保护。开发需兼顾<strong>效率与可持续性</strong>，这就是技术的"合理尺度"原则。</p>
+    </div>
+
+    <div class="g2">
+      <div class="artifact" style="border-left:3px solid var(--teal);">
+        <div class="art-icon">✅</div>
+        <h4 style="color:var(--teal);">正面实践</h4>
+        <ul style="text-align:left;font-size:0.92rem;color:var(--text-dim);list-style:none;padding:0;">
+          <li>✦ 都江堰 — 千年水利工程</li>
+          <li>✦ 南水北调 — 跨区域调水</li>
+          <li>✦ 西气东输 — 能源优化配置</li>
+          <li>✦ 退耕还林 — 生态修复工程</li>
+        </ul>
+      </div>
+      <div class="artifact" style="border-left:3px solid var(--deepred);">
+        <div class="art-icon">⚠️</div>
+        <h4 style="color:var(--deepred);">警示案例</h4>
+        <ul style="text-align:left;font-size:0.92rem;color:var(--text-dim);list-style:none;padding:0;">
+          <li>✦ 电池污染 — 重金属危害土壤</li>
+          <li>✦ 电子废弃物 — 难以降解</li>
+          <li>✦ 过度开采 — 资源枯竭</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SUMMARY ===== -->
+<section class="summary">
+  <h2>🏛️ 技术的三重价值</h2>
+  <p class="epitaph">
+    <strong>保护人</strong> · <strong>解放人</strong> · <strong>发展人</strong><br>
+    推动社会进步，兼顾自然可持续<br><br>
+    <span style="font-size:0.9rem;">—— 技术不是目的，让人活得更好才是 ——</span>
+  </p>
+</section>
+
+</body>
+</html>

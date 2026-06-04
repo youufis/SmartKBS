@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>技术与设计 | 发现与明确问题挑战</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #1a2a6c, #2c3e50);
+            color: #ecf0f1;
+            min-height: 100vh;
+            padding: 20px;
+            position: relative;
+        }
+
+        .current-time {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 0.9rem;
+            color: #bdc3c7;
+            opacity: 0.8;
+            text-align: right;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeInDown 1s ease-out;
+        }
+
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.8rem;
+            color: #3498db;
+            text-shadow: 0 0 10px rgba(52, 152, 219, 0.7);
+            letter-spacing: 2px;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.8;
+            margin-top: 10px;
+        }
+
+        .question-card {
+            background: rgba(30, 40, 60, 0.85);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(52, 152, 219, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+        }
+
+        .question-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.4), 0 0 20px rgba(52, 152, 219, 0.4);
+        }
+
+        .question-number {
+            font-family: 'Orbitron', sans-serif;
+            color: #f39c12;
+            font-size: 1.4rem;
+            margin-bottom: 10px;
+        }
+
+        .question-text {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        .options label {
+            display: block;
+            padding: 15px;
+            margin-bottom: 12px;
+            background: rgba(40, 50, 70, 0.7);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .options label:hover {
+            background: rgba(50, 60, 80, 0.9);
+            border-color: #3498db;
+        }
+
+        .options input[type="radio"] {
+            margin-right: 15px;
+        }
+
+        .action-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+        }
+
+        .submit-btn {
+            background: linear-gradient(to right, #27ae60, #2ecc71);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);
+        }
+
+        .submit-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 20px rgba(46, 204, 113, 0.5);
+        }
+
+        .submit-btn:disabled {
+            background: linear-gradient(to right, #7f8c8d, #95a5a6);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .feedback {
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 8px;
+            display: none;
+            animation: fadeIn 0.5s ease-out;
+            margin-top: 10px;
+        }
+
+        .feedback.correct {
+            background-color: rgba(46, 204, 113, 0.2);
+            color: #2ecc71;
+            border: 1px solid #2ecc71;
+        }
+
+        .feedback.incorrect {
+            background-color: rgba(231, 76, 60, 0.2);
+            color: #e74c3c;
+            border: 1px solid #e74c3c;
+        }
+
+        .progress-bar-container {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            height: 20px;
+            margin: 30px 0;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(to right, #3498db, #f39c12);
+            border-radius: 10px;
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        .results-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .results-content {
+            background: linear-gradient(135deg, #2c3e50, #1a2a6c);
+            width: 90%;
+            max-width: 800px;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 0 50px rgba(52, 152, 219, 0.5);
+            border: 1px solid #3498db;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .results-header {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .results-title {
+            font-family: 'Orbitron', sans-serif;
+            color: #f1c40f;
+            font-size: 2.5rem;
+        }
+
+        .summary-stats {
+            text-align: center;
+            font-size: 1.4rem;
+            margin-bottom: 20px;
+            line-height: 1.8;
+        }
+
+        .chart-container {
+            width: 100%;
+            height: 300px;
+            margin: 20px auto;
+        }
+
+        .close-btn {
+            display: block;
+            margin: 30px auto 0;
+            background: linear-gradient(to right, #e74c3c, #c0392b);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1.1rem;
+            transition: all 0.3s ease;
+        }
+
+        .close-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 20px rgba(231, 76, 60, 0.5);
+        }
+
+        .detailed-results {
+            margin-top: 20px;
+        }
+
+        .detail-item {
+            background: rgba(40, 50, 70, 0.7);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #3498db;
+        }
+
+        .detail-item.correct {
+            border-left-color: #2ecc71;
+        }
+
+        .detail-item.incorrect {
+            border-left-color: #e74c3c;
+        }
+
+        .detail-item.unanswered {
+            border-left-color: #f39c12;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 600px) {
+            h1 { font-size: 2rem; }
+            .question-card { padding: 15px; }
+            .action-row { flex-direction: column; gap: 10px; }
+        }
+    
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="container">
+    <div class="current-time" id="current-time-display">2026年03月02日，星期一 09时48分</div>
+
+    <header>
+        <h1>TECH DESIGN CHALLENGE</h1>
+        <p class="subtitle">通用技术必修一 第三章 发现与明确问题 课堂练习</p>
+    </header>
+
+    <div class="progress-bar-container">
+        <div class="progress-bar" id="overall-progress-bar"></div>
+    </div>
+
+    <div id="questions-container">
+        <!-- 题目将由JavaScript动态生成 -->
+    </div>
+
+    <button id="show-results-btn" class="submit-btn" style="display: none; width: 100%; margin-top: 20px;">查看最终成绩</button>
+</div>
+
+<div id="results-overlay" class="results-overlay">
+    <div class="results-content">
+        <div class="results-header">
+            <h2 class="results-title">挑战完成！</h2>
+            <div class="summary-stats" id="final-summary"></div>
+        </div>
+        
+        <div class="chart-container">
+            <canvas id="results-chart"></canvas>
+        </div>
+
+        <h3 style="margin-top: 30px; color: #3498db;">题目解析</h3>
+        <div id="detailed-results"></div>
+
+        <button class="close-btn" id="close-results-btn">关闭</button>
+    </div>
+</div>
+
+<script>
+    // 题目数据 (来自您提供的文件)
+    const questions = [
+        {
+            id: 1,
+            text: "小明发现妈妈打开煲汤锅的锅盖时，锅盖上的钮非常热，很容易烫手。于是他模仿矿泉水瓶上的塑料方便夹结构设计了一个防烫手锅盖扳手。小明发现问题的途径是（ ）",
+            options: [
+                {text: "A. 观察日常生活", value: "A"},
+                {text: "B. 收集和分析信息", value: "B"},
+                {text: "C. 技术研究和技术试验", value: "C"},
+                {text: "D. 模仿法", value: "D"}
+            ],
+            correctAnswer: "A",
+            explanation: "小明是在日常生活中观察到妈妈烫手这一现象从而发现问题的。"
+        },
+        {
+            id: 2,
+            text: "小黄同学在采摘桑叶时，发现手工采桑叶不仅速度慢，而且劳动强度大，于是他设计了“方便采桑树器”。该设计想法主要来源于（ ）",
+            options: [
+                {text: "A. 桑叶的结构", value: "A"},
+                {text: "B. 对桑叶进行技术研究", value: "B"},
+                {text: "C. 对桑叶进行技术试验", value: "C"},
+                {text: "D. 采桑叶过程中的观察", value: "D"}
+            ],
+            correctAnswer: "D",
+            explanation: "他在采摘过程中亲身体验到了问题，这是来源于实践活动的观察。"
+        },
+        {
+            id: 3,
+            text: "2003年1月，黑鹰直升机在伊拉克被火箭弹击落，之后新泽西发明家理查德·格拉森发明了火箭弹防护网。该案例说明重要问题的发现来源于（ ）",
+            options: [
+                {text: "A. 对日常生活的观察", value: "A"},
+                {text: "B. 收集信息", value: "B"},
+                {text: "C. 技术试验、技术研究", value: "C"},
+                {text: "D. 灵感", value: "D"}
+            ],
+            correctAnswer: "C",
+            explanation: "这是一个在特定事件（技术应用失败）后进行研究，从而发现问题的案例。"
+        },
+        {
+            id: 4,
+            text: "小张在工厂修磨钻头的实践中，发现手工修磨钻头无依靠及参照物，影响到工作的精度和质量，于是开发研制了“钻头刃磨器”。该课题的发现来源于（ ）",
+            options: [
+                {text: "A. 观察日常生活", value: "A"},
+                {text: "B. 收集信息和分析信息", value: "B"},
+                {text: "C. 技术试验和技术研究", value: "C"},
+                {text: "D. 专家的指点", value: "D"}
+            ],
+            correctAnswer: "C",
+            explanation: "在技术实践（修磨钻头）中发现了问题。"
+        },
+        {
+            id: 5,
+            text: "瓦特在生火烧水的过程中，发现水烧开后会使壶盖跳动，由此发明了高效率蒸汽机。瓦特发现问题的途径是（ ）",
+            options: [
+                {text: "A. 观察日常生活", value: "A"},
+                {text: "B. 技术研究", value: "B"},
+                {text: "C. 撰写方案", value: "C"},
+                {text: "D. 收集和分析信息", value: "D"}
+            ],
+            correctAnswer: "A",
+            explanation: "瓦特是在日常烧水过程中偶然观察到的现象。"
+        },
+        {
+            id: 6,
+            text: "我们常常会遇到“好的创意不一定会实现”的情况，这主要出现在以下哪个环节？",
+            options: [
+                {text: "A. 明确问题的内容和价值", value: "A"},
+                {text: "B. 明确解决问题受到的限制及具体的设计任务", value: "B"},
+                {text: "C. 设计计划", value: "C"},
+                {text: "D. 提供问题的人员的素质水准", value: "D"}
+            ],
+            correctAnswer: "B",
+            explanation: "好的创意可能因受客观条件（如技术、成本、时间等）的限制而无法实现。"
+        },
+        {
+            id: 7,
+            text: "为了充分利用肥皂，有人在肥皂中央加了一个小方木块，但该产品未推广。最可能的原因是（ ）",
+            options: [
+                {text: "A. 不符合基本的科学原理", value: "A"},
+                {text: "B. 弊大于利", value: "B"},
+                {text: "C. 生产时质量不好", value: "C"},
+                {text: "D. 应用范围狭窄", value: "D"}
+            ],
+            correctAnswer: "B",
+            explanation: "加入木块可能导致肥皂易碎、使用不便或不卫生等问题，弊大于利。"
+        },
+        {
+            id: 8,
+            text: "伽利略看到水温升高后罐内水位上升，想到利用热胀冷缩原理制造体温计。他发现问题的方法是（ ）",
+            options: [
+                {text: "A. 观察日常生活", value: "A"},
+                {text: "B. 收集和分析信息", value: "B"},
+                {text: "C. 科学研究和实验", value: "C"},
+                {text: "D. 理论猜想和科学数据", value: "D"}
+            ],
+            correctAnswer: "C",
+            explanation: "伽利略是在科学研究实验中观察到物理现象的。"
+        },
+        {
+            id: 9,
+            text: "小明发现教室一体机屏幕反光看不清，准备解决。以下不属于‘明确问题’范畴的是（ ）",
+            options: [
+                {text: "A. 明确技术试验的方法与途径", value: "A"},
+                {text: "B. 明确该问题是否遵循科学原理", value: "B"},
+                {text: "C. 明确小明自身的能力与条件", value: "C"},
+                {text: "D. 明确具体可行的设计要求", value: "D"}
+            ],
+            correctAnswer: "A",
+            explanation: "技术试验的方法与途径是问题明确后，在后续环节（如测试、评价）中考虑的内容。"
+        },
+        {
+            id: 10,
+            text: "“能否制造一个不消耗任何能源的空调……”对此问题的正确叙述是（ ）",
+            options: [
+                {text: "A. 此问题有价值，解决了热传递问题", value: "A"},
+                {text: "B. 此问题有价值，解决了能源紧缺问题", value: "B"},
+                {text: "C. 此问题没有价值，成本太高", value: "C"},
+                {text: "D. 此问题没有价值，违背了基本的科学原理", value: "D"}
+            ],
+            correctAnswer: "D",
+            explanation: "该问题违背了能量守恒定律，没有价值。"
+        },
+        {
+            id: 11,
+            text: "问题的来源不包括以下哪一项？",
+            options: [
+                {text: "A. 人类生存必然会遇到的问题", value: "A"},
+                {text: "B. 他人提出、设计者必须面对的问题", value: "B"},
+                {text: "C. 设计者自己主动发现问题", value: "C"},
+                {text: "D. 随机猜测产生的问题", value: "D"}
+            ],
+            correctAnswer: "D",
+            explanation: "问题来源于实践和需求，而不是随机猜测。"
+        },
+        {
+            id: 12,
+            text: "判断一个问题是否有价值，不需要考虑以下哪项？",
+            options: [
+                {text: "A. 是否遵循基本科学原理", value: "A"},
+                {text: "B. 是否具有普遍意义", value: "B"},
+                {text: "C. 是否能带来高利润", value: "C"},
+                {text: "D. 投入产出比是否理想", value: "D"}
+            ],
+            correctAnswer: "C",
+            explanation: "价值判断的核心是科学性、可行性和意义，而非单纯的商业利润。"
+        },
+        {
+            id: 13,
+            text: "某企业通过走访城市小区住户，开发出自动炒菜机。该企业发现问题的途径是（ ）",
+            options: [
+                {text: "A. 观察日常生活", value: "A"},
+                {text: "B. 收集和分析信息", value: "B"},
+                {text: "C. 技术研究和技术试验", value: "C"},
+                {text: "D. 团队研究", value: "D"}
+            ],
+            correctAnswer: "B",
+            explanation: "通过走访用户收集信息来发现问题。"
+        },
+        {
+            id: 14,
+            text: "在开展技术设计前，一般不需要明确以下哪项？",
+            options: [
+                {text: "A. 设计的价值", value: "A"},
+                {text: "B. 设计的技术要求", value: "B"},
+                {text: "C. 设计的限制", value: "C"},
+                {text: "D. 产品的广告文案", value: "D"}
+            ],
+            correctAnswer: "D",
+            explanation: "广告文案是产品设计完成后的市场推广环节，不在设计前明确。"
+        },
+        {
+            id: 15,
+            text: "以下哪项属于‘明确解决问题受到的限制’中的客观条件？",
+            options: [
+                {text: "A. 设计者的知识水平", value: "A"},
+                {text: "B. 设计者的技能", value: "B"},
+                {text: "C. 可用的人力、物力、财力", value: "C"},
+                {text: "D. 设计者的兴趣", value: "D"}
+            ],
+            correctAnswer: "C",
+            explanation: "人力、物力、财力是外部客观存在的资源限制。"
+        },
+        {
+            id: 16,
+            text: "技术问题主要回答‘是什么’和‘为什么’的问题。",
+            options: [
+                {text: "A. 正确", value: "A"},
+                {text: "B. 错误", value: "B"}
+            ],
+            correctAnswer: "B",
+            explanation: "技术问题主要回答‘怎么办’的问题，即如何实现、如何操作。"
+        },
+        {
+            id: 17,
+            text: "通过问卷调查、文献查阅等方式收集信息，是发现问题的重要途径之一。",
+            options: [
+                {text: "A. 正确", value: "A"},
+                {text: "B. 错误", value: "B"}
+            ],
+            correctAnswer: "A",
+            explanation: "收集和分析信息是发现问题的有效途径。"
+        },
+        {
+            id: 18,
+            text: "只要问题有创新性，就一定具有价值，值得解决。",
+            options: [
+                {text: "A. 正确", value: "A"},
+                {text: "B. 错误", value: "B"}
+            ],
+            correctAnswer: "B",
+            explanation: "问题的价值还需要考虑科学性、可行性、意义等因素，不能仅凭创新性判断。"
+        },
+        {
+            id: 19,
+            text: "明确问题时，需要考虑设计者的技术能力和条件。",
+            options: [
+                {text: "A. 正确", value: "A"},
+                {text: "B. 错误", value: "B"}
+            ],
+            correctAnswer: "A",
+            explanation: "明确问题时必须考虑主观条件，包括设计者的能力。"
+        },
+        {
+            id: 20,
+            text: "‘别人提出的问题’不属于设计者主动发现的问题，因此不值得重视。",
+            options: [
+                {text: "A. 正确", value: "A"},
+                {text: "B. 错误", value: "B"}
+            ],
+            correctAnswer: "B",
+            explanation: "他人提出的问题同样是重要的问题来源，同样值得重视和解决。"
+        }
+    ];
+
+    let userAnswers = {};
+    let answerStatus = {}; // 记录每道题的回答状态: 'correct', 'incorrect', 'unanswered'
+
+    // 动态生成题目HTML
+    function renderQuestions() {
+        const container = document.getElementById('questions-container');
+        container.innerHTML = '';
+
+        questions.forEach(question => {
+            const questionEl = document.createElement('div');
+            questionEl.className = 'question-card';
+            questionEl.innerHTML = `
+                <div class="question-number">Question #${question.id}</div>
+                <div class="question-text">${question.text}</div>
+                <div class="options">
+                    ${question.options.map(opt => `
+                        <label>
+                            <input type="radio" name="q${question.id}" value="${opt.value}">
+                            ${opt.text}
+                        </label>
+                    `).join('')}
+                </div>
+                <div class="action-row">
+                    <button class="submit-btn" data-question-id="${question.id}">提交答案</button>
+                    <div class="feedback" id="feedback-${question.id}"></div>
+                </div>
+            `;
+            container.appendChild(questionEl);
+
+            const submitBtn = questionEl.querySelector(`.submit-btn[data-question-id="${question.id}"]`);
+            submitBtn.addEventListener('click', () => handleSingleSubmit(question.id));
+        });
+    }
+
+    // 处理单个提交
+    function handleSingleSubmit(questionId) {
+        const selectedRadio = document.querySelector(`input[name="q${questionId}"]:checked`);
+        const questionData = questions.find(q => q.id === questionId);
+        const feedbackEl = document.getElementById(`feedback-${questionId}`);
+        const submitBtn = document.querySelector(`.submit-btn[data-question-id="${questionId}"]`);
+        
+        if (!selectedRadio) {
+            alert("请先选择一个答案！");
+            return;
+        }
+
+        const userChoice = selectedRadio.value;
+        
+        userAnswers[questionId] = userChoice;
+
+        if (userChoice === questionData.correctAnswer) {
+            feedbackEl.textContent = `正确！ ${questionData.explanation}`;
+            feedbackEl.className = 'feedback correct';
+            answerStatus[questionId] = 'correct';
+        } else {
+            feedbackEl.textContent = `错误！正确答案是 ${questionData.correctAnswer}。${questionData.explanation}`;
+            feedbackEl.className = 'feedback incorrect';
+            answerStatus[questionId] = 'incorrect';
+        }
+        
+        feedbackEl.style.display = 'block';
+        submitBtn.disabled = true;
+        // 禁用该题的所有选项
+        document.querySelectorAll(`input[name="q${questionId}"]`).forEach(radio => radio.disabled = true);
+
+        updateProgressBar();
+        checkAllAnswered();
+    }
+
+    // 更新进度条
+    function updateProgressBar() {
+        const total = questions.length;
+        const answered = Object.keys(userAnswers).length;
+        const percentage = (answered / total) * 100;
+        document.getElementById('overall-progress-bar').style.width = `${percentage}%`;
+    }
+
+    // 检查是否全部回答完毕
+    function checkAllAnswered() {
+        if (Object.keys(userAnswers).length === questions.length) {
+            document.getElementById('show-results-btn').style.display = 'block';
+        }
+    }
+
+    // 显示最终结果
+    function showResults() {
+        let correctCount = 0;
+        let incorrectCount = 0;
+        let unansweredCount = 0;
+
+        for (let i = 1; i <= questions.length; i++) {
+            switch (answerStatus[i]) {
+                case 'correct': correctCount++; break;
+                case 'incorrect': incorrectCount++; break;
+                default: unansweredCount++; break;
+            }
+        }
+
+        const score = Math.round((correctCount / questions.length) * 100);
+
+        document.getElementById('final-summary').innerHTML = `
+            <p>总分: <strong style="color:#f1c40f; font-size: 2rem;">${score}</strong> / 100</p>
+            <p>答对: ${correctCount} &nbsp;&nbsp; 答错: ${incorrectCount} &nbsp;&nbsp; 未答: ${unansweredCount}</p>
+        `;
+
+        // 创建图表
+        const ctx = document.getElementById('results-chart').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['答对', '答错', '未答'],
+                datasets: [{
+                    data: [correctCount, incorrectCount, unansweredCount],
+                    backgroundColor: [
+                        'rgba(46, 204, 113, 0.7)',
+                        'rgba(231, 76, 60, 0.7)',
+                        'rgba(243, 156, 18, 0.7)'
+                    ],
+                    borderColor: [
+                        'rgb(46, 204, 113)',
+                        'rgb(231, 76, 60)',
+                        'rgb(243, 156, 18)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'top', labels: { color: '#ecf0f1' } },
+                    title: {
+                        display: true,
+                        text: '答题统计',
+                        color: '#ecf0f1',
+                        font: { size: 18 }
+                    }
+                }
+            }
+        });
+
+        // 填充详细结果
+        const detailsContainer = document.getElementById('detailed-results');
+        detailsContainer.innerHTML = '';
+        questions.forEach(question => {
+            const userAns = userAnswers[question.id];
+            const status = answerStatus[question.id] || 'unanswered';
+            let statusText = '未作答';
+            let statusColor = '#f39c12';
+
+            if (userAns) {
+                statusText = userAns === question.correctAnswer ? '回答正确' : `回答错误 (你的答案: ${userAns})`;
+                statusColor = userAns === question.correctAnswer ? '#2ecc71' : '#e74c3c';
+            }
+
+            const detailDiv = document.createElement('div');
+            detailDiv.className = `detail-item ${status}`;
+            detailDiv.innerHTML = `
+                <p><strong>第 ${question.id} 题:</strong> <span style="color:${statusColor};">${statusText}</span></p>
+                <p><em>${question.explanation}</em></p>
+            `;
+            detailsContainer.appendChild(detailDiv);
+        });
+
+        document.getElementById('results-overlay').style.display = 'flex';
+    }
+
+    // 页面初始化
+    window.onload = function() {
+        renderQuestions();
+
+        document.getElementById('show-results-btn').addEventListener('click', showResults);
+        document.getElementById('close-results-btn').addEventListener('click', () => {
+            document.getElementById('results-overlay').style.display = 'none';
+        });
+    };
+</script>
+
+</body>
+</html>

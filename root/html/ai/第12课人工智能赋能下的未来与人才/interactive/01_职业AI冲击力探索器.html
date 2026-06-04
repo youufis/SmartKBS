@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>职业AI影响因子模拟器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .slider-thumb::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 5px rgba(0,0,0,0.1);
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .gauge-transition { transition: stroke-dashoffset 0.5s ease-out; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="min-h-screen p-4 md:p-8 flex items-center justify-center">
+
+    <div class="max-w-5xl w-full grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- Left Column: Controls -->
+        <div class="lg:col-span-5 space-y-6">
+            <header>
+                <h1 class="text-3xl font-bold text-slate-800 tracking-tight">职业AI影响因子模拟</h1>
+                <p class="text-slate-500 mt-2 text-sm leading-relaxed">
+                    基于 Frey & Osborne 模型与任务偏向型技术进步 (TBTC) 理论，量化职业的任务自动化风险与人类剩余价值。
+                </p>
+            </header>
+
+            <div class="glass-panel p-6 rounded-2xl shadow-sm space-y-8">
+                <!-- Slider 1: Routine -->
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-semibold text-slate-700">任务重复度 (Routine)</label>
+                        <span id="val-routine" class="text-blue-600 font-mono font-bold">50%</span>
+                    </div>
+                    <input type="range" id="routine" min="0" max="100" value="50" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer slider-thumb">
+                    <p class="text-[10px] text-slate-400">基于规则、高度可预测的标准化流程程度</p>
+                </div>
+
+                <!-- Slider 2: Empathy -->
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-semibold text-slate-700">情感沟通深度 (Social)</label>
+                        <span id="val-empathy" class="text-blue-600 font-mono font-bold">50%</span>
+                    </div>
+                    <input type="range" id="empathy" min="0" max="100" value="50" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer slider-thumb">
+                    <p class="text-[10px] text-slate-400">人际协商、移情理解与复杂社会协作需求</p>
+                </div>
+
+                <!-- Slider 3: Creativity -->
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-semibold text-slate-700">创新决策频率 (Creative)</label>
+                        <span id="val-creativity" class="text-blue-600 font-mono font-bold">50%</span>
+                    </div>
+                    <input type="range" id="creativity" min="0" max="100" value="50" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer slider-thumb">
+                    <p class="text-[10px] text-slate-400">原发性思想生成、非结构化环境下的决策频率</p>
+                </div>
+            </div>
+
+            <!-- Formula Display -->
+            <div class="p-4 bg-slate-100 rounded-xl text-[11px] text-slate-600 font-serif">
+                <p class="mb-1 font-bold">自动化风险模型 (简化版):</p>
+                \[ P_{auto} = \text{Routine} \times e^{-(w_c \cdot \text{Creative} + w_s \cdot \text{Social})} \]
+                <p class="mt-1 opacity-70">注：AI 影响具有“瓶颈约束机制”，软技能提供非线性风险对冲。</p>
+            </div>
+        </div>
+
+        <!-- Right Column: Visualization & Strategy -->
+        <div class="lg:col-span-7 flex flex-col gap-6">
+            
+            <div class="glass-panel p-8 rounded-2xl shadow-sm flex flex-col items-center justify-center flex-grow relative overflow-hidden">
+                <!-- Main Gauge -->
+                <div class="relative w-64 h-64">
+                    <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="45" fill="none" stroke="#e2e8f0" stroke-width="8"></circle>
+                        <circle id="risk-gauge" cx="50" cy="50" r="45" fill="none" stroke="#3b82f6" stroke-width="8" stroke-dasharray="282.7" stroke-dashoffset="141" stroke-linecap="round" class="gauge-transition"></circle>
+                    </svg>
+                    <div class="absolute inset-0 flex flex-col items-center justify-center text-center">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">自动化风险</span>
+                        <span id="risk-percent" class="text-5xl font-black text-slate-800">50%</span>
+                        <span id="risk-label" class="text-xs mt-1 font-semibold px-2 py-0.5 rounded bg-blue-100 text-blue-700">中度风险</span>
+                    </div>
+                </div>
+
+                <!-- Radar Map Preview (Simplified as Info Tags) -->
+                <div class="grid grid-cols-2 gap-4 mt-8 w-full">
+                    <div class="p-4 rounded-xl bg-white border border-slate-100 shadow-sm">
+                        <div class="text-[10px] text-slate-400 uppercase">AI 赋能潜力</div>
+                        <div id="ai-potential" class="text-lg font-bold text-slate-700">--</div>
+                    </div>
+                    <div class="p-4 rounded-xl bg-white border border-slate-100 shadow-sm">
+                        <div class="text-[10px] text-slate-400 uppercase">剩余人类价值</div>
+                        <div id="human-value" class="text-lg font-bold text-slate-700">--</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Strategy Suggestions -->
+            <div id="strategy-card" class="bg-slate-800 text-white p-6 rounded-2xl shadow-xl">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+                    <h3 class="text-lg font-bold">转型与生存策略建议</h3>
+                </div>
+                <div id="strategy-content" class="space-y-4">
+                    <!-- Dynamic Content -->
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const inputs = ['routine', 'empathy', 'creativity'];
+        const elements = {};
+        inputs.forEach(id => {
+            elements[id] = document.getElementById(id);
+            elements[`val-${id}`] = document.getElementById(`val-${id}`);
+        });
+
+        const riskGauge = document.getElementById('risk-gauge');
+        const riskPercent = document.getElementById('risk-percent');
+        const riskLabel = document.getElementById('risk-label');
+        const aiPotential = document.getElementById('ai-potential');
+        const humanValue = document.getElementById('human-value');
+        const strategyContent = document.getElementById('strategy-content');
+
+        function calculateRisk() {
+            const R = parseInt(elements.routine.value) / 100;
+            const E = parseInt(elements.empathy.value) / 100;
+            const C = parseInt(elements.creativity.value) / 100;
+
+            // Update value displays
+            inputs.forEach(id => {
+                elements[`val-${id}`].innerText = `${elements[id].value}%`;
+            });
+
+            // Scientific Model Logic:
+            // Non-linear bottleneck: Creativity and Empathy are much harder to automate.
+            // Even with 100% routine, high C or E can drastically drop automation probability.
+            const wC = 1.2; // Creativity weight
+            const wE = 0.8; // Empathy weight
+            
+            // Frey & Osborne probability function simulation (Exponential decay of risk with bottlenecks)
+            let risk = R * Math.exp(-(wC * C + wE * E));
+            
+            // Scale and constraint to [0.01, 0.99] as no job is 100% safe or 100% gone
+            risk = Math.max(0.01, Math.min(0.99, risk));
+            const riskValue = Math.round(risk * 100);
+
+            // Update UI
+            updateUI(riskValue, R, E, C);
+        }
+
+        function updateUI(risk, R, E, C) {
+            // Gauge Logic: dasharray 282.7 (2 * PI * 45)
+            const offset = 282.7 - (282.7 * risk / 100);
+            riskGauge.style.strokeDashoffset = offset;
+            riskPercent.innerText = `${risk}%`;
+
+            // Color & Label
+            let color = '#3b82f6';
+            let labelText = '低风险';
+            let labelClass = 'bg-blue-100 text-blue-700';
+
+            if (risk > 70) {
+                color = '#ef4444';
+                labelText = '高风险';
+                labelClass = 'bg-red-100 text-red-700';
+            } else if (risk > 40) {
+                color = '#f59e0b';
+                labelText = '中度风险';
+                labelClass = 'bg-amber-100 text-amber-700';
+            }
+            
+            riskGauge.style.stroke = color;
+            riskLabel.innerText = labelText;
+            riskLabel.className = `text-xs mt-1 font-semibold px-2 py-0.5 rounded ${labelClass}`;
+
+            // AI Potential (Enhancement)
+            const potential = Math.round((R * 0.4 + (1-E) * 0.3 + (1-C) * 0.3) * 100);
+            aiPotential.innerText = `${potential}%`;
+            
+            // Human Value (Residual)
+            const value = Math.round((E * 0.5 + C * 0.5) * 100);
+            humanValue.innerText = `${value}%`;
+
+            // Strategy Suggestions Logic
+            let strategy = '';
+            if (risk > 75) {
+                strategy = `
+                    <div class="flex gap-3">
+                        <div class="text-amber-400 font-bold">01</div>
+                        <p class="text-sm"><b>技能重塑：</b>当前任务高度标准化，建议将核心职能向“非结构化环境”转移，例如处理突发状况而非日常流程。</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <div class="text-amber-400 font-bold">02</div>
+                        <p class="text-sm"><b>防御路径：</b>寻找该行业中涉及深度人际博弈或艺术性决策的细分赛道。</p>
+                    </div>
+                `;
+            } else if (risk < 30) {
+                strategy = `
+                    <div class="flex gap-3">
+                        <div class="text-green-400 font-bold">01</div>
+                        <p class="text-sm"><b>协同进化：</b>利用AI处理辅助性低价值任务，将精力集中于高频次的策略制定与复杂共情。</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <div class="text-green-400 font-bold">02</div>
+                        <p class="text-sm"><b>价值深耕：</b>强化行业内的“社会资本”，AI难以复制长期建立的信任关系与品味判断。</p>
+                    </div>
+                `;
+            } else {
+                strategy = `
+                    <div class="flex gap-3">
+                        <div class="text-blue-400 font-bold">01</div>
+                        <p class="text-sm"><b>职能拆解：</b>识别并保留职业中的“移情瓶颈”任务，将机械部分主动交给算法管理。</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <div class="text-blue-400 font-bold">02</div>
+                        <p class="text-sm"><b>混合增能：</b>学习成为“AI指令师”，通过提升提示词工程能力，扩大个人在创作环节的产出倍率。</p>
+                    </div>
+                `;
+            }
+            strategyContent.innerHTML = strategy;
+        }
+
+        // Initial update
+        calculateRisk();
+
+        // Listeners
+        inputs.forEach(id => {
+            elements[id].addEventListener('input', calculateRisk);
+        });
+    </script>
+</body>
+</html>

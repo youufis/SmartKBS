@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>技术的发展 · 进化数据流</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Futuristic / Cyber Data-Stream
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#0a0a1a;
+  --bg2:#12122a;
+  --text:#e0e0ff;
+  --text-dim:#7a7aaa;
+  --pink:#ff2d78;
+  --blue:#00b8ff;
+  --cyan:#00f5d4;
+  --purple:#a855f7;
+  --orange:#fb923c;
+  --card-bg:rgba(18,18,42,0.6);
+  --card-border:rgba(0,184,255,0.08);
+  --glow-pink:0 0 20px rgba(255,45,120,0.08);
+  --glow-blue:0 0 20px rgba(0,184,255,0.08);
+  --radius:12px;
+  --font-mono:'Courier New','Consolas','JetBrains Mono',monospace;
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.8;
+  font-size:18px;
+}
+
+/* Particle grid */
+body::before {
+  content:''; position:fixed; inset:0;
+  background-image:
+    radial-gradient(circle 1px, rgba(0,184,255,0.04) 50%, transparent 50%);
+  background-size:40px 40px;
+  pointer-events:none; z-index:0;
+}
+
+/* Scan line subtle */
+body::after {
+  content:''; position:fixed; inset:0;
+  background:repeating-linear-gradient(0deg,
+    transparent, transparent 2px,
+    rgba(0,184,255,0.008) 2px, rgba(0,184,255,0.008) 4px);
+  pointer-events:none; z-index:0;
+}
+
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .anime { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   Progress — Neon pulse line
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:3px;
+  z-index:999; background:rgba(18,18,42,0.8);
+  backdrop-filter:blur(8px);
+}
+.progress-bar {
+  height:100%; width:0;
+  background:linear-gradient(90deg, var(--pink), var(--purple), var(--blue), var(--cyan));
+  box-shadow:0 0 12px rgba(255,45,120,0.3), 0 0 24px rgba(0,184,255,0.15);
+  animation:progGrow both; animation-timeline:scroll(root); animation-range:0% 100%;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO — Futuristic intro
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:2rem; position:relative; overflow:hidden;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(255,45,120,0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 80%, rgba(0,184,255,0.03) 0%, transparent 50%);
+}
+
+/* Orbital rings */
+.hero-orbits { position:absolute; inset:0; pointer-events:none; }
+.hero-orbits span {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  border-radius:50%;
+  border:1px solid rgba(0,184,255,0.03);
+  animation:orbitPulse 6s infinite ease-in-out;
+}
+.hero-orbits span:nth-child(1) { width:300px; height:300px; }
+.hero-orbits span:nth-child(2) { width:500px; height:500px; animation-delay:-3s; }
+.hero-orbits span:nth-child(3) { width:700px; height:700px; animation-delay:-1.5s; }
+@keyframes orbitPulse {
+  0%,100% { transform:translate(-50%,-50%) scale(1); opacity:0.3; }
+  50% { transform:translate(-50%,-50%) scale(1.08); opacity:0.1; }
+}
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  background:rgba(255,45,120,0.04);
+  border:1px solid rgba(255,45,120,0.08);
+  padding:0.4rem 1.2rem;
+  font-family:var(--font-mono); font-size:0.75rem;
+  color:var(--pink); letter-spacing:6px;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; } to { opacity:1; } }
+
+.hero h1 {
+  font-size:clamp(2.5rem,6vw,4.5rem); font-weight:800;
+  letter-spacing:6px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 .line1 { font-size:clamp(1.2rem,2.5vw,2rem); font-weight:400; color:var(--text-dim); display:block; letter-spacing:10px; }
+.hero h1 .line2 { background:linear-gradient(135deg, var(--pink), var(--blue));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text; }
+@keyframes titleIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,1.8vw,1.3rem);
+  color:var(--text-dim); font-family:var(--font-mono);
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2.5rem;
+  font-family:var(--font-mono); font-size:0.7rem;
+  color:var(--text-dim); letter-spacing:6px;
+  animation:bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(8px); } }
+
+/* ============================================================
+   SECTION
+   ============================================================ */
+.section {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem; position:relative; z-index:1;
+}
+.section-inner { max-width:1100px; width:100%; }
+
+.section-header {
+  margin-bottom:3rem;
+  animation:headIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 60%;
+}
+@keyframes headIn { from { opacity:0; transform:translateX(-15px); } to { opacity:1; transform:translateX(0); } }
+
+.section-node {
+  display:inline-flex; align-items:center; gap:8px;
+  font-family:var(--font-mono); font-size:0.7rem;
+  color:var(--cyan); letter-spacing:4px;
+}
+.section-node::before {
+  content:''; display:inline-block; width:8px; height:8px;
+  background:var(--cyan); border-radius:50%;
+  box-shadow:0 0 8px rgba(0,245,212,0.4);
+}
+.section-title {
+  font-size:clamp(1.5rem,3vw,2.4rem); font-weight:700;
+  letter-spacing:2px; margin-top:0.3rem;
+}
+
+/* ===== Holo card ===== */
+.holo {
+  background:var(--card-bg); backdrop-filter:blur(16px);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius);
+  padding:2rem 2.5rem; margin-bottom:2rem;
+  box-shadow:var(--glow-blue);
+  animation:holoIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+@keyframes holoIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.holo h3 {
+  font-size:1.3rem; color:var(--blue); margin-bottom:1rem;
+  display:flex; align-items:center; gap:10px;
+  font-family:var(--font-mono); letter-spacing:1px;
+}
+.holo p, .holo li {
+  font-size:1rem; color:var(--text); line-height:1.9;
+}
+.holo li { padding:0.3rem 0; }
+.holo strong { color:var(--cyan); }
+
+/* ===== Data card ===== */
+.data-card {
+  background:var(--card-bg); backdrop-filter:blur(16px);
+  border:1px solid rgba(255,45,120,0.06);
+  border-radius:var(--radius);
+  padding:2rem; text-align:center;
+  box-shadow:var(--glow-pink);
+  animation:holoIn 0.8s both; animation-timeline:view();
+}
+.data-card .dc-era { font-family:var(--font-mono); font-size:0.65rem; color:var(--pink); letter-spacing:4px; }
+.data-card .dc-icon { font-size:3rem; margin:0.5rem 0; }
+.data-card h4 { font-size:1.2rem; color:var(--text); margin-bottom:0.5rem; }
+.data-card p { font-size:0.9rem; color:var(--text-dim); line-height:1.7; }
+.data-card .dc-tag {
+  display:inline-block; margin-top:0.5rem;
+  padding:0.15rem 0.6rem; border-radius:4px;
+  font-family:var(--font-mono); font-size:0.6rem; letter-spacing:2px;
+}
+.dc-tag-stone { background:rgba(168,85,247,0.08); color:var(--purple); border:1px solid rgba(168,85,247,0.1); }
+.dc-tag-bronze { background:rgba(251,146,60,0.08); color:var(--orange); border:1px solid rgba(251,146,60,0.1); }
+.dc-tag-steam { background:rgba(0,184,255,0.08); color:var(--blue); border:1px solid rgba(0,184,255,0.1); }
+.dc-tag-electric { background:rgba(0,245,212,0.08); color:var(--cyan); border:1px solid rgba(0,245,212,0.1); }
+.dc-tag-info { background:rgba(255,45,120,0.08); color:var(--pink); border:1px solid rgba(255,45,120,0.1); }
+
+/* ===== Timeline stream ===== */
+.stream-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:1.2rem; }
+
+/* ===== Grid ===== */
+.g2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+
+/* ===== Data table ===== */
+.evo-table {
+  width:100%; border-collapse:collapse;
+  background:var(--card-bg); backdrop-filter:blur(16px);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius); overflow:hidden;
+  animation:holoIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 45%;
+}
+.evo-table th {
+  background:rgba(0,184,255,0.04);
+  color:var(--blue); font-size:0.82rem;
+  padding:0.7rem 1rem; text-align:left;
+  font-family:var(--font-mono); letter-spacing:1px;
+  border-bottom:1px solid rgba(0,184,255,0.04);
+}
+.evo-table td {
+  padding:0.6rem 1rem; font-size:0.82rem;
+  color:var(--text-dim); border-bottom:1px solid rgba(0,184,255,0.02);
+}
+.evo-table tr:last-child td { border-bottom:none; }
+.evo-table .era-name { color:var(--text); font-weight:600; }
+
+/* ===== Insight box ===== */
+.insight {
+  background:linear-gradient(135deg, rgba(255,45,120,0.02), rgba(0,184,255,0.02));
+  border:1px solid rgba(0,184,255,0.04);
+  border-radius:var(--radius);
+  padding:1.2rem 2rem; margin-top:1.5rem;
+  animation:holoIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 30%;
+}
+.insight .is-label { font-family:var(--font-mono); font-size:0.7rem; color:var(--pink); letter-spacing:3px; margin-bottom:0.3rem; }
+.insight p { font-size:0.95rem; color:var(--text-dim); line-height:1.8; }
+.insight strong { color:var(--cyan); }
+
+/* ============================================================
+   SUMMARY
+   ============================================================ */
+.summary {
+  min-height:50vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(255,45,120,0.02) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 0%, rgba(0,184,255,0.02) 0%, transparent 50%);
+}
+.summary h2 {
+  font-size:clamp(1.5rem,3vw,2.5rem); font-weight:700;
+  background:linear-gradient(135deg, var(--pink), var(--blue));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+  animation:holoIn 0.8s both; animation-timeline:view();
+}
+.summary .nexus {
+  display:flex; flex-wrap:wrap; justify-content:center; gap:0.8rem;
+  margin:1.5rem 0;
+  animation:holoIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+.summary .nexus span {
+  background:var(--card-bg); backdrop-filter:blur(16px);
+  border:1px solid var(--card-border);
+  padding:0.4rem 1.2rem; border-radius:50px;
+  font-family:var(--font-mono); font-size:0.75rem;
+  color:var(--text-dim); letter-spacing:2px;
+}
+.summary .nexus .hl { color:var(--cyan); }
+.summary .tagline {
+  margin-top:0.5rem; font-size:1rem; color:var(--text-dim); font-style:italic;
+  animation:holoIn 1.2s both; animation-timeline:view(); animation-range:entry 0% entry 40%;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:900px) { .stream-grid { grid-template-columns:repeat(3,1fr); } }
+@media (max-width:768px) {
+  .g2 { grid-template-columns:1fr; }
+  .stream-grid { grid-template-columns:1fr 1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  .holo { padding:1.5rem; }
+  body { font-size:16px; }
+}
+@media (max-width:480px) { .stream-grid { grid-template-columns:1fr; } }
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:rgba(0,184,255,0.06); }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-orbits"><span></span><span></span><span></span></div>
+  <div class="hero-badge">⟁ EVOLUTION · TECH TIMELINE</div>
+  <h1>
+    <span class="line1">技术的</span>
+    <span class="line2">发展</span>
+  </h1>
+  <p class="hero-sub">_ from stone to singularity _</p>
+  <div class="hero-scroll">▼ INITIALIZE TIMELINE</div>
+</section>
+
+<!-- ===== 追溯历史的脉络 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-node">⬡ NODE.01</div>
+      <h2 class="section-title">追溯技术的历史脉络</h2>
+    </div>
+
+    <div class="holo">
+      <h3>🌍 从钻木取火到人工智能</h3>
+      <p>技术的起源从人类掌握<strong>钻木取火</strong>开始，拉开了人类文明的序幕。随后经历了石器时代→青铜/铁器时代→蒸汽时代→电气时代→信息时代，每一次飞跃都重塑了人类社会的面貌。</p>
+    </div>
+
+    <div class="stream-grid">
+      <div class="data-card">
+        <div class="dc-era">ERA.01</div>
+        <div class="dc-icon">🪨</div>
+        <h4>石器时代</h4>
+        <p>钻木取火、磨制石器<br>手工·简单·直接利用自然</p>
+        <span class="dc-tag dc-tag-stone">人类"采集者"</span>
+      </div>
+      <div class="data-card">
+        <div class="dc-era">ERA.02</div>
+        <div class="dc-icon">⚔️</div>
+        <h4>青铜/铁器时代</h4>
+        <p>冶炼铸造、金属工具<br>材料革命·效率提升</p>
+        <span class="dc-tag dc-tag-bronze">自然的"改造者"</span>
+      </div>
+      <div class="data-card">
+        <div class="dc-era">ERA.03</div>
+        <div class="dc-icon">💨</div>
+        <h4>蒸汽时代</h4>
+        <p>蒸汽机、火车、纺织机<br>动力革命·机器代替人力</p>
+        <span class="dc-tag dc-tag-steam">机器的"操作者"</span>
+      </div>
+      <div class="data-card">
+        <div class="dc-era">ERA.04</div>
+        <div class="dc-icon">⚡</div>
+        <h4>电气时代</h4>
+        <p>发电机、电灯、电话<br>能源革命·信息加速</p>
+        <span class="dc-tag dc-tag-electric">能源的"驾驭者"</span>
+      </div>
+      <div class="data-card">
+        <div class="dc-era">ERA.05</div>
+        <div class="dc-icon">💻</div>
+        <h4>信息时代</h4>
+        <p>计算机、互联网、AI<br>智能革命·万物互联</p>
+        <span class="dc-tag dc-tag-info">信息的"创造者"</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 驱动力 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-node">⬡ NODE.02</div>
+      <h2 class="section-title">技术发展的两大驱动力</h2>
+    </div>
+
+    <div class="g2">
+      <div class="holo" style="margin-bottom:0;border-color:rgba(255,45,120,0.08);">
+        <h3 style="color:var(--pink);">🧑‍🍼 需求驱动</h3>
+        <p>人类为满足<strong>生存、安全、交往、效率</strong>等需求而不断创造技术——这是最根本的动力。</p>
+        <ul>
+          <li>✦ 照明需求：火把 → 油灯 → 白炽灯 → LED → 智能照明</li>
+          <li>✦ 通信需求：驿站 → 电报 → 电话 → 手机 → 5G / 卫星互联网</li>
+        </ul>
+        <div class="insight" style="margin-top:1rem;">
+          <p>技术就是人类"<strong>想要变得更好</strong>"的欲望的产物</p>
+        </div>
+      </div>
+      <div class="holo" style="margin-bottom:0;border-color:rgba(0,184,255,0.08);">
+        <h3 style="color:var(--blue);">🔬 科学推动</h3>
+        <p>科学探索未知世界的规律，技术则把这些规律变成现实——科学是技术的"光源"。</p>
+        <ul>
+          <li>✦ 电磁学理论 → 发电机、电动机 → 电气时代</li>
+          <li>✦ 量子力学 + 半导体物理 → 芯片、智能手机 → 信息时代</li>
+        </ul>
+        <div class="insight" style="margin-top:1rem;">
+          <p>科学负责"<strong>提出问题</strong>"，技术负责"<strong>解决问题</strong>"</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 发展对比表 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-node">⬡ NODE.03</div>
+      <h2 class="section-title">技术发展全景对比</h2>
+    </div>
+
+    <table class="evo-table">
+      <thead>
+        <tr>
+          <th>时代</th>
+          <th>核心技术</th>
+          <th>代表成就</th>
+          <th>人类角色</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="era-name" style="color:var(--purple);">🪨 石器</td>
+          <td>打制/磨制</td>
+          <td>钻木取火、石斧</td>
+          <td>自然的"采集者"</td>
+        </tr>
+        <tr>
+          <td class="era-name" style="color:var(--orange);">⚔️ 青铜/铁器</td>
+          <td>冶炼铸造</td>
+          <td>青铜鼎、铁犁</td>
+          <td>自然的"改造者"</td>
+        </tr>
+        <tr>
+          <td class="era-name" style="color:var(--blue);">💨 蒸汽</td>
+          <td>热力学机械</td>
+          <td>蒸汽机、火车</td>
+          <td>机器的"操作者"</td>
+        </tr>
+        <tr>
+          <td class="era-name" style="color:var(--cyan);">⚡ 电气</td>
+          <td>电磁学电力</td>
+          <td>发电机、电灯</td>
+          <td>能源的"驾驭者"</td>
+        </tr>
+        <tr>
+          <td class="era-name" style="color:var(--pink);">💻 信息</td>
+          <td>计算机网络AI</td>
+          <td>互联网、智能手机</td>
+          <td>信息的"创造者"</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="insight">
+      <div class="is-label">◆ INSIGHT</div>
+      <p>技术不是一蹴而就的——它像一棵大树，从石器时代那个小小的"种子"开始，历经百万年，才长成今天枝繁叶茂的参天大树。<strong>技术与人类是"双向奔赴"</strong>：人类需求催生了技术，技术的发展又反过来改变了人类的生活方式、思维模式乃至社会结构。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 展望未来 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-node">⬡ NODE.04</div>
+      <h2 class="section-title">展望技术的未来</h2>
+    </div>
+
+    <div class="holo">
+      <h3>🚀 未来已来</h3>
+      <p>我们正处在信息时代的浪潮之巅。未来的技术方向：</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;">
+      <div class="data-card" style="border-color:rgba(0,245,212,0.06);">
+        <div class="dc-icon">🌿</div>
+        <h4 style="color:var(--cyan);">绿色节能</h4>
+        <p>太阳能+LED一体化</p>
+      </div>
+      <div class="data-card" style="border-color:rgba(0,245,212,0.06);">
+        <div class="dc-icon">🧠</div>
+        <h4 style="color:var(--cyan);">智能化</h4>
+        <p>全屋智能·生态联动</p>
+      </div>
+      <div class="data-card" style="border-color:rgba(0,245,212,0.06);">
+        <div class="dc-icon">🖨️</div>
+        <h4 style="color:var(--cyan);">3D打印</h4>
+        <p>纳米·生物工程</p>
+      </div>
+      <div class="data-card" style="border-color:rgba(0,245,212,0.06);">
+        <div class="dc-icon">✨</div>
+        <h4 style="color:var(--cyan);">人文融合</h4>
+        <p>文化情感·用光讲故事</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SUMMARY ===== -->
+<section class="summary">
+  <h2>⟁ 永不止步的进化</h2>
+  <div class="nexus">
+    <span>🪨 石器</span>
+    <span>⚔️ 青铜</span>
+    <span>💨 蒸汽</span>
+    <span>⚡ 电气</span>
+    <span class="hl">💻 信息</span>
+    <span class="hl">🚀 未来 →</span>
+  </div>
+  <p class="tagline">"下一个时代掌握在你们手中——未来的工程师、设计师和科学家。"</p>
+</section>
+
+</body>
+</html>

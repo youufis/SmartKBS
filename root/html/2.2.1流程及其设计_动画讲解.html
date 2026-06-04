@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>流程及其设计 · 流水线车间</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#f4f6f5;--bg2:#e8ece9;
+  --text:#1e2822;--text-dim:#6b7a72;
+  --factory:#274b6b;--conveyor:#3d6b8c;
+  --belt:#5a8aa5;--amber:#d49a3a;
+  --green:#3a9a6a;--white:#fafcfa;
+  --card-bg:rgba(250,252,250,0.85);
+  --radius:6px;
+}
+html{scroll-behavior:smooth;overflow-x:hidden}
+body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;background:var(--bg);color:var(--text);line-height:1.8;font-size:18px}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(90deg,transparent 0,transparent 60px,rgba(39,75,107,0.005) 60px,rgba(39,75,107,0.005) 61px);pointer-events:none;z-index:0}
+
+@supports(animation-timeline:view()){@media(prefers-reduced-motion:no-preference){.anime{animation-timeline:view()}}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}
+
+.progress-wrap{position:fixed;top:0;left:0;width:100%;height:3px;z-index:999;background:rgba(244,246,245,0.9);backdrop-filter:blur(6px)}
+.progress-bar{height:100%;width:0;background:linear-gradient(90deg,var(--conveyor),var(--amber),var(--green));animation:progScroll both;animation-timeline:scroll(root);animation-range:0% 100%}
+@keyframes progScroll{from{width:0}to{width:100%}}
+
+/* HERO */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2rem;position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 80%,rgba(61,107,140,0.02) 0%,transparent 50%)}
+.hero-belt{position:absolute;bottom:0;left:0;width:200%;height:4px;background:repeating-linear-gradient(90deg,var(--belt) 0,var(--belt) 20px,transparent 20px,transparent 40px);opacity:0.04;animation:beltMove 6s infinite linear;pointer-events:none}
+@keyframes beltMove{from{transform:translateX(0)}to{transform:translateX(-40px)}}
+
+.hero-badge{font-size:0.65rem;letter-spacing:8px;color:var(--conveyor);margin-bottom:1rem;animation:fadeUp 0.8s 0.3s both}
+.hero h1{font-size:clamp(2rem,5vw,4rem);font-weight:700;letter-spacing:4px;animation:fadeUp 1s 0.5s both}
+.hero h1 .sub{font-size:clamp(0.9rem,1.8vw,1.2rem);font-weight:400;display:block;color:var(--text-dim);letter-spacing:8px;margin-top:0.5rem}
+.hero h1 .hl{color:var(--factory)}
+.hero-sub{margin-top:1rem;font-size:1rem;color:var(--text-dim);font-style:italic;animation:fadeUp 0.8s 0.8s both}
+.hero-scroll{position:absolute;bottom:2.5rem;font-size:0.65rem;color:var(--text-dim);letter-spacing:4px;animation:bounceY 2s 2s infinite}
+@keyframes bounceY{0%,100%{transform:translateY(0)}50%{transform:translateY(8px)}}
+
+/* Section */
+.section{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:4rem 1.2rem;position:relative;z-index:1}
+.section-inner{max-width:1100px;width:100%}
+.section-tag{font-size:0.65rem;letter-spacing:6px;color:var(--conveyor);margin-bottom:0.3rem}
+.section-title{font-size:clamp(1.4rem,2.8vw,2.2rem);font-weight:700;letter-spacing:3px;margin-bottom:2rem;color:var(--text)}
+.section-title .hl{color:var(--factory)}
+
+/* Station card — like assembly line station */
+.station{background:var(--card-bg);backdrop-filter:blur(8px);border:1px solid rgba(61,107,140,0.02);border-radius:var(--radius);padding:1.5rem 2rem;margin-bottom:1.5rem;animation:fadeUp 0.8s both;animation-timeline:view();animation-range:entry 0% entry 45%}
+.station h3{font-size:1.1rem;font-weight:600;color:var(--factory);margin-bottom:0.8rem;display:flex;align-items:center;gap:8px}
+.station p{font-size:0.95rem;color:var(--text-dim);line-height:1.8;margin-bottom:0.3rem}
+.station ul{list-style:none;padding:0}
+.station li{padding:0.3rem 0;font-size:0.95rem;color:var(--text-dim);line-height:1.7;border-bottom:1px solid rgba(61,107,140,0.02)}
+.station li:last-child{border-bottom:none}
+.station li strong{color:var(--text)}
+.station .ex{border-left:2px solid var(--amber);padding-left:1rem;margin-top:0.5rem;font-size:0.85rem;color:var(--text-dim);font-style:italic}
+.station .note{background:rgba(61,107,140,0.01);border:1px solid rgba(61,107,140,0.02);padding:0.8rem 1rem;border-radius:var(--radius);margin-top:0.8rem;font-size:0.88rem;color:var(--text-dim)}
+.station .note strong{color:var(--factory)}
+
+/* Flow diagram — horizontal stations */
+.flow-line{display:flex;flex-wrap:wrap;gap:0.8rem;justify-content:center;margin:1.5rem 0;position:relative}
+.flow-station{background:var(--card-bg);backdrop-filter:blur(8px);border:1px solid rgba(61,107,140,0.02);border-radius:var(--radius);padding:1.2rem;text-align:center;flex:1;min-width:130px;max-width:200px;animation:fadeUp 0.8s both;animation-timeline:view();animation-range:entry 0% entry 50%}
+.flow-station .fs-num{font-size:0.6rem;letter-spacing:4px;color:var(--conveyor);margin-bottom:0.2rem}
+.flow-station .fs-icon{font-size:1.8rem;margin-bottom:0.2rem}
+.flow-station h4{font-size:0.95rem;font-weight:600;color:var(--text);margin-bottom:0.2rem}
+.flow-station p{font-size:0.75rem;color:var(--text-dim);line-height:1.5}
+.flow-arrow{display:flex;align-items:center;color:var(--conveyor);font-size:0.7rem;padding:0 0.2rem}
+
+/* Grids */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem}
+.g-auto{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem}
+@media(max-width:768px){.g2{grid-template-columns:1fr}}
+
+/* Type tag */
+.type-tag{display:inline-block;padding:0.2rem 0.6rem;border-radius:3px;font-size:0.75rem;font-weight:600;letter-spacing:2px}
+.tt-proc{background:rgba(61,107,140,0.02);color:var(--factory);border:1px solid rgba(61,107,140,0.04)}
+.tt-cycle{background:rgba(212,154,58,0.02);color:var(--amber);border:1px solid rgba(212,154,58,0.04)}
+
+/* Step card */
+.step-card{background:var(--card-bg);backdrop-filter:blur(8px);border:1px solid rgba(61,107,140,0.02);border-radius:var(--radius);padding:1.5rem;text-align:center;animation:fadeUp 0.8s both;animation-timeline:view();animation-range:entry 0% entry 40%}
+.step-card .sc-icon{font-size:2rem;margin-bottom:0.3rem}
+.step-card h4{font-size:1rem;font-weight:600;color:var(--text);margin-bottom:0.3rem}
+.step-card p{font-size:0.85rem;color:var(--text-dim);line-height:1.7}
+.step-card .ex{font-size:0.8rem;color:var(--text-dim);font-style:italic;margin-top:0.3rem}
+
+/* Design card */
+.design-card{background:var(--card-bg);backdrop-filter:blur(8px);border:1px solid rgba(61,107,140,0.02);border-left:3px solid var(--amber);border-radius:var(--radius);padding:1.5rem;animation:fadeUp 0.8s both;animation-timeline:view();animation-range:entry 0% entry 40%}
+.design-card h4{font-size:1rem;font-weight:600;color:var(--text);margin-bottom:0.3rem}
+.design-card p{font-size:0.85rem;color:var(--text-dim);line-height:1.7}
+.design-card .ex{font-size:0.82rem;color:var(--text-dim);font-style:italic;margin-top:0.3rem}
+
+/* Summary */
+.summary{min-height:50vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:4rem 1.5rem;background:radial-gradient(ellipse at 50% 0%,rgba(61,107,140,0.02) 0%,transparent 50%)}
+.summary h2{font-size:clamp(1.5rem,3vw,2.5rem);font-weight:700;letter-spacing:4px;animation:fadeUp 0.8s both;animation-timeline:view()}
+.summary .tags{display:flex;flex-wrap:wrap;justify-content:center;gap:0.7rem;margin:2rem 0;animation:fadeUp 1s both;animation-timeline:view();animation-range:entry 0% entry 40%}
+.summary .tags span{background:var(--card-bg);backdrop-filter:blur(8px);border:1px solid rgba(61,107,140,0.02);padding:0.3rem 1rem;border-radius:50px;font-size:0.8rem;color:var(--text-dim)}
+.summary .tags .hl{border-color:rgba(212,154,58,0.04);color:var(--amber)}
+.summary .tagline{font-style:italic;color:var(--text-dim);animation:fadeUp 1.2s both;animation-timeline:view();animation-range:entry 0% entry 30%}
+
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important}}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:rgba(61,107,140,0.02);border-radius:3px}
+@media(max-width:768px){.section{padding:3rem 1rem;min-height:auto}}
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<section class="hero">
+  <div class="hero-belt"></div>
+  <div class="hero-badge">⟡ ASSEMBLY LINE · PROCESS DESIGN</div>
+  <h1>
+    流程及其<span class="hl">设计</span>
+    <span class="sub">Process &amp; Workflow Design</span>
+  </h1>
+  <p class="hero-sub">—— 拆解步骤，优化路径，提升效率 ——</p>
+  <div class="hero-scroll">▼ 启动流水线</div>
+</section>
+
+<!-- 认识流程 -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-tag">⟡ STATION.01</div>
+    <h2 class="section-title">认识<span class="hl">流程</span></h2>
+
+    <div class="g2">
+      <div class="station">
+        <h3>📋 流程的概念</h3>
+        <p>一项活动或一系列连续发生的<strong>工作环节</strong>，以及工作的<strong>顺序和程序</strong>。</p>
+        <div class="ex">"流程就是做事的顺序"——先做什么，再做什么，最后做什么</div>
+        <div class="note" style="margin-top:1rem;">
+          <strong>两个基本要素</strong>：<br>
+          ◆ <strong>环节</strong> — 完成一件事要经历的各个阶段<br>
+          ◆ <strong>时序</strong> — 环节进行的先后顺序
+        </div>
+      </div>
+      <div class="station">
+        <h3>🏷️ 流程的分类</h3>
+        <div class="g-auto" style="margin-bottom:0.5rem;">
+          <div style="text-align:center;padding:0.8rem;background:rgba(61,107,140,0.01);border-radius:var(--radius);"><div style="font-size:1.5rem;margin-bottom:0.2rem;">🏭</div><span class="tt-proc">生产过程</span><p style="font-size:0.75rem;color:var(--text-dim);margin-top:0.3rem;">原材料的输入→成品输出</p></div>
+          <div style="text-align:center;padding:0.8rem;background:rgba(61,107,140,0.01);border-radius:var(--radius);"><div style="font-size:1.5rem;margin-bottom:0.2rem;">💼</div><span class="tt-proc">管理过程</span><p style="font-size:0.75rem;color:var(--text-dim);margin-top:0.3rem;">计划→组织→领导→控制</p></div>
+        </div>
+        <div class="ex">同一项活动可以有不同顺序——时序不可颠倒时叫"串行"，可并行时叫"并行"</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 流程的组成与描述 -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-tag">⟡ STATION.02</div>
+    <h2 class="section-title">流程的<span class="hl">组成与描述</span></h2>
+
+    <div class="flow-line">
+      <div class="flow-station"><div class="fs-num">INPUT</div><div class="fs-icon">📦</div><h4>输入</h4><p>原材料、数据</p></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-station"><div class="fs-num">STEP.1</div><div class="fs-icon">⚙️</div><h4>环节A</h4><p>加工处理</p></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-station"><div class="fs-num">STEP.2</div><div class="fs-icon">⚙️</div><h4>环节B</h4><p>检验调整</p></div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-station"><div class="fs-num">OUTPUT</div><div class="fs-icon">📤</div><h4>输出</h4><p>成品、结果</p></div>
+    </div>
+
+    <div class="g2">
+      <div class="station">
+        <h3>📐 流程图</h3>
+        <p>用图形符号表达流程的<strong>工具</strong>。</p>
+        <ul>
+          <li>⬜ 圆角矩形 — 开始/结束</li>
+          <li>▭ 矩形 — 环节/处理</li>
+          <li>⬟ 菱形 — 判断/决策</li>
+          <li>⟹ 箭头 — 时序方向</li>
+        </ul>
+        <div class="ex">用流程图可以把复杂的活动清晰地展示出来，便于分析和优化</div>
+      </div>
+      <div class="station">
+        <h3>🔄 串行 vs 并行</h3>
+        <div class="note"><strong>串行</strong>：各环节依次进行<br>"一个完成，下一个才能开始"</div>
+        <div class="note" style="margin-top:0.5rem;border-color:rgba(212,154,58,0.04);"><strong>并行</strong>：多个环节同时进行<br>"多线并进，缩短总时间"</div>
+        <div class="ex" style="margin-top:0.8rem;">煮饭的同时做菜——并行提高效率</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 流程的设计 -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-tag">⟡ STATION.03</div>
+    <h2 class="section-title">流程的<span class="hl">设计</span></h2>
+
+    <div class="g2">
+      <div class="station">
+        <h3>🎯 设计目标</h3>
+        <ul>
+          <li><strong>提高效率</strong>：缩短时间、减少环节</li>
+          <li><strong>保证质量</strong>：标准规范、减少差错</li>
+          <li><strong>节约成本</strong>：降低资源消耗</li>
+          <li><strong>安全可靠</strong>：消除安全隐患</li>
+        </ul>
+      </div>
+      <div class="station">
+        <h3>🧩 设计步骤</h3>
+        <div class="steps" style="padding:0;">
+          <div style="padding:0.5rem 0;border-bottom:1px solid rgba(61,107,140,0.02);display:flex;gap:0.8rem;">
+            <span style="flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(61,107,140,0.02);border-radius:50%;font-size:0.65rem;color:var(--conveyor);font-weight:700;">01</span>
+            <div><strong style="font-size:0.9rem;color:var(--text);">明确目标</strong><p style="font-size:0.82rem;color:var(--text-dim);">要达成什么？</p></div>
+          </div>
+          <div style="padding:0.5rem 0;border-bottom:1px solid rgba(61,107,140,0.02);display:flex;gap:0.8rem;">
+            <span style="flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(61,107,140,0.02);border-radius:50%;font-size:0.65rem;color:var(--conveyor);font-weight:700;">02</span>
+            <div><strong style="font-size:0.9rem;color:var(--text);">划分环节</strong><p style="font-size:0.82rem;color:var(--text-dim);">拆解步骤</p></div>
+          </div>
+          <div style="padding:0.5rem 0;border-bottom:1px solid rgba(61,107,140,0.02);display:flex;gap:0.8rem;">
+            <span style="flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(61,107,140,0.02);border-radius:50%;font-size:0.65rem;color:var(--conveyor);font-weight:700;">03</span>
+            <div><strong style="font-size:0.9rem;color:var(--text);">安排时序</strong><p style="font-size:0.82rem;color:var(--text-dim);;">确定先后、串/并行</p></div>
+          </div>
+          <div style="padding:0.5rem 0;border-bottom:1px solid rgba(61,107,140,0.02);display:flex;gap:0.8rem;">
+            <span style="flex-shrink:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:rgba(61,107,140,0.02);border-radius:50%;font-size:0.65rem;color:var(--conveyor);font-weight:700;">04</span>
+            <div><strong style="font-size:0.9rem;color:var(--text);">绘制流程图</strong><p style="font-size:0.82rem;color:var(--text-dim);">可视化表达</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="station" style="margin-top:0;">
+      <h3>💡 设计要考虑的因素</h3>
+      <div class="g-auto">
+        <div style="text-align:center;padding:0.8rem;"><div style="font-size:1.5rem;">🧠</div><p style="font-size:0.85rem;color:var(--text-dim);">事物的内在规律</p></div>
+        <div style="text-align:center;padding:0.8rem;"><div style="font-size:1.5rem;">🎯</div><p style="font-size:0.85rem;color:var(--text-dim);">要达到的目标</p></div>
+        <div style="text-align:center;padding:0.8rem;"><div style="font-size:1.5rem;">🔧</div><p style="font-size:0.85rem;color:var(--text-dim);">可用的条件资源</p></div>
+        <div style="text-align:center;padding:0.8rem;"><div style="font-size:1.5rem;">⚠️</div><p style="font-size:0.85rem;color:var(--text-dim);">安全和环保要求</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 流程的优化 -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-tag">⟡ STATION.04</div>
+    <h2 class="section-title">流程的<span class="hl">优化</span></h2>
+
+    <div class="g2">
+      <div class="station" style="border-left:3px solid var(--green);">
+        <h3>🚀 优化的目的</h3>
+        <ul>
+          <li>⏱️ <strong>工期优化</strong> — 缩短总时间</li>
+          <li>📊 <strong>质量优化</strong> — 提升产品质量</li>
+          <li>💰 <strong>成本优化</strong> — 节约资源</li>
+          <li>🌱 <strong>工艺优化</strong> — 改进方法</li>
+        </ul>
+      </div>
+      <div class="station" style="border-left:3px solid var(--amber);">
+        <h3>🛠️ 优化方法</h3>
+        <ul>
+          <li>✂️ <strong>减少环节</strong> — 消除不必要的步骤</li>
+          <li>🔄 <strong>改串为并</strong> — 并行缩短总时间</li>
+          <li>🔧 <strong>改进工艺</strong> — 引入新技术</li>
+          <li>🤖 <strong>自动化</strong> — 机器替代人工</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="station">
+      <h3>📌 经典优化案例</h3>
+      <div class="g2">
+        <div class="design-card" style="border-left-color:var(--factory);">
+          <h4>🍞 面包生产流程</h4>
+          <p><strong>优化前</strong>：和面→发酵→烘烤（串行，各工序间有空闲等待）</p>
+          <p><strong>优化后</strong>：输送带连接和面机→发酵箱→烘烤炉（连续流水线）</p>
+          <div class="ex">并行+连续化，效率提升数倍</div>
+        </div>
+        <div class="design-card" style="border-left-color:var(--green);">
+          <h4>📄 纸质报名流程</h4>
+          <p><strong>优化前</strong>：填表→交照片→审核→缴费→领证（排5次队）</p>
+          <p><strong>优化后</strong>：线上填表+上传照片→自动审核→在线支付→邮寄（一次都不用跑）</p>
+          <div class="ex">信息化+自动化，环节大幅减少</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="summary">
+  <h2>⟡ 流程 · 效率之道</h2>
+  <div class="tags">
+    <span>环节</span><span>时序</span><span>流程图</span>
+    <span>串行</span><span>并行</span><span class="hl">优化</span>
+    <span>效率</span><span>质量</span><span>成本</span>
+  </div>
+  <p class="tagline">"流程的价值，在于让复杂的事情变得简单，让混乱的事情变得有序。"</p>
+</section>
+
+</body>
+</html>

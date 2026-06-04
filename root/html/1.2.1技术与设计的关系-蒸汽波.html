@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌅 VAPORWAVE · 技术与设计的关系</title>
+<style>
+/* ═══════════════════════════════════════
+   蒸汽波 Vaporwave 风格
+   霓虹渐变 · 故障艺术 · 棕榈树 · 80s复古
+   ═══════════════════════════════════════ */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg1: #0a0a2e;
+  --bg2: #1a0a3e;
+  --pink: #ff6ec7;
+  --pink-glow: rgba(255,110,199,.25);
+  --cyan: #00d4ff;
+  --cyan-glow: rgba(0,212,255,.2);
+  --purple: #a855f7;
+  --gold: #fbbf24;
+  --sunset: #ff7eb3;
+  --text: #f0e6ff;
+  --text-dim: #8877bb;
+  --card-bg: rgba(10,10,50,.7);
+  --font: 'Orbitron','Courier New',monospace;
+  --font-body: 'Noto Sans SC','Microsoft YaHei','PingFang SC',sans-serif;
+}
+html{font-size:20px}
+body{
+  font-family:var(--font-body);
+  background:linear-gradient(135deg,var(--bg1),var(--bg2),#0d0d35);
+  color:var(--text);
+  min-height:100vh;
+  overflow-x:hidden;
+  display:flex;
+  justify-content:center;
+  position:relative;
+}
+/* 棕榈树剪影 */
+body::before{
+  content:'🌴🌴🌴';position:fixed;bottom:0;left:0;right:0;
+  font-size:8rem;text-align:center;
+  opacity:.06;letter-spacing:40px;pointer-events:none;z-index:0;
+  line-height:1;
+}
+/* 网格地面 */
+body::after{
+  content:'';position:fixed;bottom:0;left:0;right:0;height:40vh;z-index:0;pointer-events:none;
+  background:repeating-linear-gradient(90deg,transparent,transparent 30px,rgba(255,110,199,.03) 30px,rgba(255,110,199,.03) 31px);
+  mask-image:linear-gradient(to top,rgba(0,0,0,.15),transparent);
+}
+
+#app{
+  position:relative;z-index:1;
+  width:100%;max-width:880px;
+  min-height:100vh;
+  padding:28px 20px 50px;
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+}
+/* 霓虹头部 */
+.vp-header{
+  width:100%;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 20px;
+  background:rgba(0,0,0,.3);
+  border:1px solid rgba(255,110,199,.2);
+  position:relative;
+  backdrop-filter:blur(6px);
+}
+.vp-header::after{
+  content:'';position:absolute;bottom:-1px;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--pink),var(--cyan),transparent);
+}
+.vp-header h1{
+  font-family:var(--font);
+  font-size:.7rem;font-weight:600;
+  background:linear-gradient(90deg,var(--pink),var(--cyan));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  letter-spacing:3px;
+}
+.vp-strip{display:flex;gap:6px;}
+.vp-strip span{
+  display:block;width:20px;height:4px;
+  background:var(--text-dim);transition:all .4s;
+}
+.vp-strip span.done{background:var(--pink);box-shadow:0 0 8px var(--pink-glow);}
+.vp-strip span.active{background:var(--cyan);box-shadow:0 0 10px var(--cyan-glow);animation:strip-cyber 1s infinite;}
+.vp-strip span.future{background:rgba(255,255,255,.06);}
+@keyframes strip-cyber{50%{opacity:.3}}
+
+/* 霓虹卡片 */
+.vp-card{
+  width:100%;
+  padding:26px 22px;
+  background:var(--card-bg);
+  backdrop-filter:blur(10px);
+  border:1px solid rgba(255,110,199,.15);
+  animation:vp-fade .4s ease-out;
+  position:relative;
+}
+.vp-card::before{
+  content:'';position:absolute;top:-1px;left:20%;right:20%;height:1px;
+  background:linear-gradient(90deg,transparent,var(--pink),transparent);
+}
+@keyframes vp-fade{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.vp-title{
+  font-family:var(--font);
+  font-size:.85rem;font-weight:600;text-align:center;margin-bottom:16px;
+  letter-spacing:4px;text-transform:uppercase;
+  color:var(--pink);text-shadow:0 0 20px var(--pink-glow);
+}
+.vp-title::before{content:'◆ ';color:var(--cyan);}
+.vp-title::after{content:' ◆';color:var(--cyan);}
+
+/* 设置 */
+.setup-group{display:flex;flex-direction:column;gap:14px;max-width:380px;margin:0 auto;}
+.setup-row{display:flex;flex-direction:column;gap:4px;}
+.setup-row label{font-size:.75rem;font-weight:400;color:var(--cyan);letter-spacing:2px;}
+.setup-row select,.setup-row button{
+  width:100%;padding:12px 16px;
+  background:rgba(0,0,0,.3);
+  border:1px solid rgba(255,110,199,.2);
+  color:var(--text);font-size:.9rem;font-family:var(--font-body);
+  cursor:pointer;transition:all .3s;outline:none;
+}
+.setup-row select:hover,.setup-row select:focus{border-color:var(--pink);box-shadow:0 0 12px var(--pink-glow);}
+.setup-row select option{background:#0a0a2e;color:var(--text);}
+.btn-vp{
+  background:linear-gradient(135deg,var(--pink),var(--purple))!important;
+  border:none!important;color:#fff!important;font-size:.85rem!important;
+  font-weight:600!important;letter-spacing:3px;text-transform:uppercase;
+  transition:all .3s!important;
+}
+.btn-vp:hover{box-shadow:0 0 25px var(--pink-glow)!important;}
+.btn-vp:disabled{opacity:.25!important;cursor:not-allowed;box-shadow:none!important;}
+
+/* 点名 - 霓虹抽选 */
+.pick-section{text-align:center;min-height:260px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.pick-vp-area{position:relative;width:100%;max-width:380px;min-height:120px;display:flex;align-items:center;justify-content:center;margin:4px 0;}
+.pick-vp-name{
+  font-family:var(--font);
+  font-size:4rem;font-weight:600;z-index:2;
+  background:linear-gradient(90deg,var(--pink),var(--gold));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+  letter-spacing:6px;
+  transition:all .12s;
+  text-shadow:none;
+}
+.pick-vp-name.rolling{animation:vp-glitch .08s infinite;}
+@keyframes vp-glitch{0%{opacity:1;transform:translate(0)}25%{opacity:.6;transform:translate(-3px,2px)}50%{opacity:1;transform:translate(2px,-1px)}75%{opacity:.7;transform:translate(-1px,3px)}100%{opacity:1;transform:translate(0)}}
+.pick-vp-name.result{
+  animation:vp-reveal .5s cubic-bezier(.34,1.56,.64,1);
+  font-size:4.4rem;
+  text-shadow:0 0 30px var(--pink-glow);
+}
+@keyframes vp-reveal{0%{opacity:0;transform:scale(.5) rotate(-10deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+.pick-hint{font-size:.78rem;color:var(--text-dim);margin-top:4px;letter-spacing:2px;}
+.pick-class-tag{font-size:.7rem;color:var(--cyan);margin-top:2px;letter-spacing:3px;}
+.btn-vp-pick{
+  margin-top:12px;padding:10px 44px;
+  background:transparent;border:1px solid var(--cyan);
+  color:var(--cyan);font-family:var(--font);font-size:.85rem;
+  cursor:pointer;letter-spacing:3px;text-transform:uppercase;transition:all .3s;
+}
+.btn-vp-pick:hover{background:rgba(0,212,255,.08);box-shadow:0 0 20px var(--cyan-glow);}
+.btn-vp-pick:disabled{opacity:.2;cursor:not-allowed;}
+/* 答题 */
+.quiz-section{text-align:center;}
+.q-vp-num{font-family:var(--font);font-size:.8rem;color:var(--purple);letter-spacing:2px;}
+.q-vp-princ{font-size:.7rem;color:var(--gold);margin-left:8px;letter-spacing:1px;}
+.q-vp-text{
+  font-size:1rem;line-height:1.8;margin:10px 0 16px;
+  text-align:left;padding:14px 18px;
+  background:rgba(0,0,0,.2);
+  border-left:3px solid var(--pink);
+  color:var(--text);
+}
+.options-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.option-btn{
+  padding:13px 14px;
+  background:rgba(0,0,0,.25);
+  border:1px solid rgba(255,110,199,.12);
+  color:var(--text);font-size:.9rem;text-align:left;cursor:pointer;
+  transition:all .25s;font-family:var(--font-body);line-height:1.5;
+  display:flex;align-items:flex-start;gap:10px;
+}
+.option-btn .opt-label{
+  display:inline-flex;width:26px;height:26px;
+  align-items:center;justify-content:center;
+  font-family:var(--font);font-size:.8rem;flex-shrink:0;
+  border:1px solid rgba(255,110,199,.2);
+  color:var(--text-dim);
+}
+.option-btn:hover{border-color:var(--cyan);background:rgba(0,212,255,.04);}
+.option-btn.selected{border-color:var(--gold);background:rgba(251,191,36,.06);}
+.option-btn.selected .opt-label{border-color:var(--gold);color:var(--gold);}
+.option-btn.correct{border-color:var(--cyan)!important;background:rgba(0,212,255,.06)!important;}
+.option-btn.correct .opt-label{border-color:var(--cyan);color:var(--cyan);}
+.option-btn.wrong{border-color:#f43f5e!important;background:rgba(244,63,94,.06)!important;}
+.option-btn.wrong .opt-label{border-color:#f43f5e;color:#f43f5e;}
+.option-btn.disabled{pointer-events:none;opacity:.4;}
+.feedback-box{margin-top:12px;padding:10px 16px;font-size:.88rem;animation:vp-fade .3s;}
+@keyframes vp-fade2{from{opacity:0}to{opacity:1}}
+.feedback-box.correct-fb{border-left:3px solid var(--cyan);color:var(--cyan);}
+.feedback-box.wrong-fb{border-left:3px solid #f43f5e;color:#f43f5e;}
+.btn-vp-next{
+  margin-top:12px;padding:10px 36px;
+  background:transparent;border:1px solid var(--pink);
+  color:var(--pink);font-family:var(--font);font-size:.8rem;
+  cursor:pointer;letter-spacing:3px;text-transform:uppercase;transition:all .3s;
+}
+.btn-vp-next:hover{background:rgba(255,110,199,.08);box-shadow:0 0 15px var(--pink-glow);}
+/* 计分 */
+.score-section{text-align:center;}
+.score-big{
+  font-family:var(--font);
+  font-size:3.6rem;font-weight:900;
+  background:linear-gradient(135deg,var(--pink),var(--gold));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  animation:vp-score .7s cubic-bezier(.34,1.56,.64,1);
+  margin:4px 0;
+}
+@keyframes vp-score{0%{opacity:0;transform:rotate(-10deg) scale(.5)}100%{opacity:1;transform:rotate(0) scale(1)}}
+.score-label{font-size:.8rem;color:var(--text-dim);letter-spacing:2px;}
+.score-detail{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin:10px 0;}
+.score-stat{font-size:.82rem;color:var(--text-dim);}
+.score-stat strong{color:var(--gold);font-size:.95rem;}
+.vp-bar-wrap{width:100%;max-width:400px;margin:8px auto;}
+.vp-bar-bg{width:100%;height:6px;background:rgba(255,255,255,.05);}
+.vp-bar-fill{height:100%;background:linear-gradient(90deg,var(--pink),var(--cyan));transition:width 1s;box-shadow:0 0 8px var(--pink-glow);}
+.vp-bar-label{display:flex;justify-content:space-between;font-size:.7rem;color:var(--text-dim);margin-top:2px;letter-spacing:1px;}
+/* 最终 */
+.final-section{text-align:center;}
+.final-title{font-family:var(--font);font-size:.9rem;font-weight:600;margin-bottom:4px;
+  background:linear-gradient(90deg,var(--pink),var(--cyan));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  letter-spacing:4px;
+}
+.final-sub{color:var(--text-dim);margin-bottom:16px;font-size:.8rem;letter-spacing:2px;}
+.final-table{width:100%;border-collapse:collapse;margin:6px 0 16px;}
+.final-table th{padding:8px 10px;text-align:left;font-size:.7rem;color:var(--cyan);border-bottom:1px solid rgba(255,110,199,.15);letter-spacing:2px;font-weight:400;}
+.final-table td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.04);font-size:.85rem;}
+.final-table tr:hover td{background:rgba(255,110,199,.03);}
+.final-table .rank-num{color:var(--pink);}
+.final-table .rank-score{color:var(--gold);font-weight:600;}
+.hidden{display:none!important;}
+.toast-container{position:fixed;top:20px;right:20px;z-index:1000;display:flex;flex-direction:column;gap:6px;pointer-events:none;}
+.toast{padding:10px 20px;background:rgba(10,10,40,.92);border:1px solid rgba(255,110,199,.2);font-family:var(--font);font-size:.8rem;color:var(--text);animation:vp-toast .3s forwards;display:flex;align-items:center;gap:8px;letter-spacing:1px;backdrop-filter:blur(6px);}
+.toast .toast-icon{font-size:.9rem;}
+.toast .toast-score{color:var(--gold);}
+.toast.out{animation:vp-toast-out .25s forwards;}
+@keyframes vp-toast{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes vp-toast-out{from{opacity:1}to{transform:translateX(100%);opacity:0}}
+.particle-container{position:fixed;inset:0;pointer-events:none;z-index:999;}
+.cele-particle{position:fixed;pointer-events:none;animation:vp-part .9s ease-out forwards;border-radius:50%;}
+@keyframes vp-part{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(0)}}
+@media(max-width:640px){
+  #app{padding:18px 12px 36px;}
+  .vp-card{padding:20px 16px;}
+  .pick-vp-name{font-size:3.2rem;}
+  .pick-vp-name.result{font-size:3.6rem;}
+  .options-grid{grid-template-columns:1fr;}
+  .q-vp-text{font-size:.9rem;}
+  .score-big{font-size:2.4rem;}
+}
+
+/* 错题解析 */
+.review-section{text-align:left;margin-top:10px;border-top:1px solid rgba(255,255,255,.12);padding-top:14px;max-height:400px;overflow-y:auto}
+.rev-empty{text-align:center;color:#4ecdc4;font-family:var(--font-mono);font-size:.75rem;padding:20px 0}
+.rev-student{font-family:var(--font-mono);font-size:.85rem;font-weight:600;color:#d4a843;margin:10px 0 6px;padding-bottom:4px;border-bottom:1px dashed rgba(255,255,255,.1)}
+.rev-item{padding:10px 12px;margin-bottom:8px;background:rgba(0,0,0,.15);border-left:3px solid #ff6b6b;border-radius:0 4px 4px 0}
+.rev-q{font-size:.88rem;line-height:1.5;margin-bottom:6px}
+.rev-princ{display:inline-block;font-family:var(--font-mono);font-size:.75rem;color:rgba(255,255,255,.5);border:1px solid rgba(255,255,255,.1);padding:1px 6px;margin-bottom:6px}
+.rev-opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px}
+.rev-opt{padding:6px 8px;font-size:.78rem;line-height:1.4;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.08);border-radius:2px;display:flex;align-items:flex-start;gap:6px;color:inherit}
+.rev-opt .rev-opt-label{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:.8rem;font-weight:700;flex-shrink:0;border:1px solid rgba(255,255,255,.15);color:rgba(255,255,255,.4)}
+.rev-opt.rev-chosen{background:rgba(255,107,107,.1);border-color:#ff6b6b}
+.rev-opt.rev-chosen .rev-opt-label{background:#ff6b6b;color:#fff;border-color:#ff6b6b}
+.rev-opt.rev-right{background:rgba(78,205,196,.1);border-color:#4ecdc4}
+.rev-opt.rev-right .rev-opt-label{background:#4ecdc4;color:#1a1a2e;border-color:#4ecdc4}
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+<div class="toast-container" id="toastContainer"></div>
+<div class="particle-container" id="particleContainer"></div>
+<div id="app">
+  <header class="vp-header">
+    <h1>VAPORWAVE · 技术与设计的关系</h1>
+    <div class="vp-strip" id="vpStrip"></div>
+  </header>
+  <div class="vp-card" id="sceneSetup">
+    <div class="vp-title">INIT</div>
+    <div class="setup-group">
+      <div class="setup-row"><label>GRADE</label><select id="gradeSelect"><option value="高一">高一</option><option value="高二">高二</option></select></div>
+      <div class="setup-row"><label>CLASS</label><select id="classSelect" disabled><option value="">—</option></select></div>
+      <div class="setup-row" style="margin-top:6px"><button class="btn-vp" id="btnStart" disabled>启动</button></div>
+    </div>
+  </div>
+  <div class="vp-card hidden" id="scenePick">
+    <div class="vp-title" id="pickTitle">PICK</div>
+    <div class="pick-section">
+      <div class="pick-hint" id="pickHint">>> 扫描用户</div>
+      <div class="pick-vp-area"><div class="pick-vp-name" id="pickName">✦</div></div>
+      <div class="pick-class-tag hidden" id="pickClassTag"></div>
+      <button class="btn-vp-pick hidden" id="btnPickStart">抽选</button>
+      <button class="btn-vp-pick hidden" id="btnPickConfirm" style="border-color:var(--gold);color:var(--gold)">确认</button>
+    <button class="btn-vp-pick hidden" id="btnRepick" style="margin-top:8px">↻ 重抽</button>
+    </div>
+  </div>
+  <div class="vp-card hidden" id="sceneQuiz">
+    <div class="vp-title" id="quizTitle">QUIZ</div>
+    <div class="quiz-section">
+      <div><span class="q-vp-num" id="qNumber">1/2</span><span class="q-vp-princ" id="qPrinciple">关系</span></div>
+      <div class="q-vp-text" id="qText">—</div>
+      <div class="options-grid" id="optionsGrid"></div>
+      <div class="feedback-box hidden" id="feedbackBox"></div>
+      <button class="btn-vp-next hidden" id="btnNextQ">NEXT</button>
+    </div>
+  </div>
+  <div class="vp-card hidden" id="sceneScore">
+    <div class="vp-title">SCORE</div>
+    <div class="score-section">
+      <div class="score-label">学生</div>
+      <div style="font-size:1rem;color:var(--pink);margin:3px 0 6px" id="scoreStudent"></div>
+      <div class="score-big" id="scorePoints">+10</div>
+      <div class="score-label" id="scoreLabel">正确 1 题</div>
+      <div class="score-detail" id="scoreDetail"></div>
+      <div class="vp-bar-wrap"><div class="vp-bar-bg"><div class="vp-bar-fill" id="energyBar" style="width:0%"></div></div><div class="vp-bar-label"><span>PROGRESS</span><span id="energyText">0%</span></div></div>
+      <button class="btn-vp-next" id="btnNextRound">NEXT</button>
+    </div>
+  </div>
+  <div class="vp-card hidden" id="sceneFinal">
+    <div class="vp-title" id="finalTitle">COMPLETE</div>
+    <div class="final-sub">排行榜</div>
+    <div style="overflow-x:auto"><table class="final-table"><thead><tr><th>#</th><th>NAME</th><th>CLASS</th><th>正确</th><th>积分</th></tr></thead><tbody id="finalBody"></tbody></table></div>
+        <button class="rev-btn" id="btnReview" style="padding:10px 36px;font-size:.8rem;margin-top:6px;cursor:pointer;border:2px solid #5bc0eb;background:transparent;color:#5bc0eb;font-family:var(--font-mono);border-radius:6px">📋 查看错题解析</button>
+    <div class="review-section hidden" id="reviewSection"></div>
+<button class="btn-vp" style="padding:10px 36px;font-size:.75rem;cursor:pointer;border:none;" onclick="location.reload()">RESTART</button>
+  </div>
+</div>
+<script>// 从 URL 路径自动提取教师用户名
+const pathMatch = window.location.pathname.match(/\/api\/files\/([^\/]+)\/html\//);
+const TEACHER = (pathMatch ? pathMatch[1] : '') || '';
+const Q=[{question:"乐器演奏者通常用乐谱架摆放乐谱，演奏进行时需人工翻动换页，极为不便。随着液晶显示屏技术的发展，出现了一种电子乐谱，从而使换页变得方便、快捷。这一案例主要说明什么？",options:{A:"技术是设计实现的平台",B:"设计的核心是艺术设计",C:"技术设计就是艺术设计",D:"设计促进了技术发展"},answer:"A",principle:"技术是设计的平台"},{question:"电动剃须刀发明之初体积很大，携带不方便。于是有人设计出一种小巧、便携式的电动剃须刀。这一设计推动了微型化技术的发展。这个案例说明了什么？",options:{A:"设计是技术发展的重要驱动力",B:"技术的发展与设计无关",C:"技术的发展对设计不产生影响",D:"技术是设计的平台"},answer:"A",principle:"设计是技术发展的驱动力"},{question:"下列关于技术与设计关系的说法，错误的是（ ）。",options:{A:"设计是技术发展的重要驱动力",B:"技术的进步为设计提供了更广阔的空间",C:"技术离不开设计，设计可以脱离技术独立存在",D:"很多技术发明都是在设计的推动下完成的"},answer:"C",principle:"技术与设计的关系"},{question:"近几年，电动汽车行业的蓬勃发展促进了电池技术向高能轻量化方向发展，同时，各种新型电池技术的发展，也使得电动汽车的设计有了更多方向的可能。这个案例说明（ ）。",options:{A:"技术的发展不需要设计",B:"设计与技术的发展无关",C:"技术总是无法满足设计的要求",D:"设计创新促进了技术的发展，技术发展为设计提供了平台"},answer:"D",principle:"技术与设计相互促进"},{question:"小明家养了猫和狗，两只宠物经常为了吃对方的宠物粮而打架。小明妈妈买了如图所示的智能宠物喂食碗。关于该智能宠物喂食碗，下列说法不正确的是（ ）。",options:{A:"解决了宠物争粮问题，体现了技术的目的性",B:"运用AI新技术，体现了技术的创新性",C:"AI技术的发展促进了智能宠物喂食碗的设计",D:"该智能宠物喂食碗侧重于艺术设计"},answer:"D",principle:"技术是设计的平台"},{question:"如图所示的一款智能儿童手环，除了具有通话等功能外，还可以实现实时定位、SOS求救以及电子围栏功能，保护小孩的安全。下列关于该手环说法不正确的是（ ）。",options:{A:"采用多种智能技术实现功能，体现了技术的综合性",B:"设计推动了相关技术的发展",C:"电子围栏技术为设计提供了实现平台",D:"该设计重点关注了儿童的心理需求"},answer:"D",principle:"技术是设计的平台"},{question:"随着LED照明技术的发展，设计师不再局限于传统灯泡造型，设计出了各种形态的灯具，如柔性灯带、智能感应灯等。这说明（ ）。",options:{A:"技术发展限制了设计的想象空间",B:"设计是技术发展的唯一推动力",C:"技术的发展拓展了设计的实现空间",D:"设计对技术发展没有影响"},answer:"C",principle:"技术拓展设计空间"},{question:"达·芬奇曾在15世纪设计出飞行器的草图，但由于当时缺乏轻质高强材料和动力技术，一直无法实现。这个案例说明（ ）。",options:{A:"设计不需要技术的支撑",B:"设计是技术发展的驱动力",C:"技术是设计实现的物质基础",D:"达·芬奇的设计水平不够"},answer:"C",principle:"设计依赖技术实现"},{question:"洗碗机的发明是为了解决人们手工洗碗费时费力的问题，让人们能够从繁重的家务劳动中解脱出来。这一设计需求主要推动了（ ）的发展。",options:{A:"自动控制技术",B:"艺术设计理论",C:"教育学",D:"社会学"},answer:"A",principle:"设计推动技术革新"},{question:"关于技术与设计的关系，以下说法最准确的是（ ）。",options:{A:"先有技术，后有设计，两者互不影响",B:"技术和设计相互独立、各自发展",C:"技术与设计相互促进、相辅相成",D:"设计比技术更重要"},answer:"C",principle:"技术与设计的关系"}];
+const G=[];for(let i=0;i<5;i++)G.push(Q.slice(i*2,i*2+2));
+
+let S={grade:'高一',class:'',students:[],available:[],picks:[],cr:0,cq:0,sa:'',ans:false,rr:[],total:0},_c=0;
+function $(i){return document.getElementById(i)}
+function sh(i){$(i).classList.remove('hidden')}
+function hd(i){$(i).classList.add('hidden')}
+function sf(a){const b=[...a];for(let i=b.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[b[i],b[j]]=[b[j],b[i]];}return b}
+function st(i,m,s){const t=document.createElement('div');t.className='toast';t.innerHTML='<span class="toast-icon">'+i+'</span>'+m+(s?' <span class="toast-pts">'+s+'</span>':'');$('toastContainer').appendChild(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),250)},3000)}
+function fp(x,y,c,cnt){const pc=$('particleContainer');for(let i=0;i<cnt;i++){const e=document.createElement('div');e.className='cele-particle';const a=Math.random()*Math.PI*2,d=60+Math.random()*130;e.style.cssText='left:'+(x||innerWidth/2)+'px;top:'+(y||innerHeight/2)+'px;width:'+(5+Math.random()*7)+'px;height:'+(5+Math.random()*7)+'px;background:'+(c||'var(--bp-cyan)')+';--dx:'+(Math.cos(a)*d)+'px;--dy:'+(Math.sin(a)*d)+'px';pc.appendChild(e);setTimeout(()=>e.remove(),1200)}}
+function ud(){try{const h=$('bpBlocks')||$('memBlocks')||$('progressDots')||$('popDots');if(!h)return;h.innerHTML='';for(let i=0;i<5;i++){const e=document.createElement('div');e.className='bp-block'+(i<S.cr?' done':i===S.cr?' active':'');e.innerHTML='';h.appendChild(e)}}catch(e){}}
+function sv(g,c,n,p){fetch('/api/scores/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,name:n,points:p,teacher:TEACHER})}).then(r=>r.ok?st('💰','保存','+'+p):st('⚠️','异常')).catch(()=>st('📝','本地'))}
+function saveRecord(g,c,s,cc,t,pts,ans,title){fetch('/api/rollcall/save-record',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:g,class:c,student:s,type:'互动答题',title:title||'',correctCount:cc,totalQuestions:t,points:pts,answers:ans||[],teacher:TEACHER})}).catch(()=>{})}
+async function lc(){const g=$('gradeSelect').value;S.grade=g;const cs=$('classSelect');cs.disabled=true;cs.innerHTML='<option value="">...</option>';try{const r=await fetch('/api/rollcall/classes?grade='+encodeURIComponent(g)+'&teacher='+TEACHER);const cls=await r.json();cs.innerHTML='<option value="">— 选择 —</option>';cls.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;cs.appendChild(o)});cs.disabled=false}catch(e){cs.innerHTML='<option value="">失败</option>'}}
+$('gradeSelect').addEventListener('change',lc);$('classSelect').addEventListener('change',async function(){const c=this.value;S.class=c;$('btnStart').disabled=!c;if(c){try{const r=await fetch('/api/rollcall/students?grade='+encodeURIComponent(S.grade)+'&class='+encodeURIComponent(c)+'&teacher='+TEACHER);const data=await r.json();S.students=data.map(s=>s.name)}catch(e){S.students=[];st('⚠️','加载学生失败')}}});
+$('btnStart').addEventListener('click',function(){if(!S.class||S.students.length<5){st('⚠️','人数不足');return}hd('sceneSetup');sr(0)});
+function sr(ri){S.cr=ri;S.cq=0;_c=0;if(!S.rr[ri])S.rr[ri]={correctCount:0,points:0,answers:[]};S.rr[ri].answers=[];ud();sp()}
+function sp(){sh('scenePick');hd('sceneQuiz');hd('sceneScore');hd('sceneFinal');$('pickTitle').textContent=(S.cr+1)+'/5';$('pickHint').textContent='点击抽取';$('pickHint').classList.remove('hidden');$('pickClassTag').classList.add('hidden');$('btnPickStart').classList.remove('hidden');$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('pickName').textContent='——';$('pickName').className='pick-name';$('btnPickStart').disabled=false;$('btnPickStart').textContent='🎲 抽取'}
+function rp(){const pool=S.students.length>0?S.students:['---'];const pn=$('pickName');pn.className='pick-name rolling';$('pickHint').textContent='抽取中...';$('btnPickConfirm').classList.add('hidden');$('btnRepick').classList.add('hidden');$('btnPickStart').disabled=true;let rc=0,mx=18+Math.floor(Math.random()*10);let iv=setInterval(()=>{pn.textContent=pool[Math.floor(Math.random()*pool.length)];rc++;if(rc>=mx){clearInterval(iv);fetch('/api/rollcall/pick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,teacher:TEACHER})}).then(d=>d.json()).then(d=>{if(d.error){st('⚠️',d.error);pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false;return}const c=d.student;pn.textContent=c;pn.className='pick-name result';$('pickHint').classList.add('hidden');$('pickClassTag').textContent=S.grade+' · '+S.class;$('pickClassTag').classList.remove('hidden');$('btnPickConfirm').classList.remove('hidden');$('btnRepick').classList.remove('hidden');fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',30);st('🎯','已选',c);S.picks[S.cr]=c}).catch(()=>{st('⚠️','服务异常');pn.textContent='——';pn.className='pick-name';$('btnPickStart').disabled=false})}},60+Math.random()*40)}
+
+$('btnPickStart').addEventListener('click',function(){this.disabled=true;rp()});
+$('btnRepick').addEventListener('click',rp);
+
+$('btnPickConfirm').addEventListener('click',function(){hd('scenePick');sq()});
+function sq(){sh('sceneQuiz');S.cq=0;sQ()}
+function sQ(){const g=G[S.cr],q=g[S.cq];$('quizTitle').textContent='第'+(S.cr+1)+'组';$('qNumber').textContent=(S.cq+1)+'/2';$('qPrinciple').textContent=q.principle;$('qText').textContent=q.question;S.sa='';S.ans=false;$('feedbackBox').classList.add('hidden');$('btnNextQ').classList.add('hidden');const grid=$('optionsGrid');grid.innerHTML='';['A','B','C','D'].forEach(l=>{const b=document.createElement('button');b.className='option-btn';b.innerHTML='<span class="opt-label">'+l+'</span><span>'+q.options[l]+'</span>';b.dataset.label=l;b.addEventListener('click',()=>hA(l));grid.appendChild(b)})}
+function hA(l){if(S.ans)return;S.ans=true;const g=G[S.cr],q=g[S.cq],c=q.answer,ic=l===c;if(ic)_c++;S.rr[S.cr].correctCount=_c;let p=5;if(_c===1)p=10;else if(_c===2)p=15;S.rr[S.cr].points=p;S.rr[S.cr].answers.push({question:q.question,options:q.options,correctAnswer:c,yourAnswer:l,principle:q.principle,isCorrect:ic});const btns=$('optionsGrid').querySelectorAll('.option-btn');btns.forEach(b=>{b.classList.add('disabled');if(b.dataset.label===c)b.classList.add('correct');if(b.dataset.label===l&&!ic)b.classList.add('wrong');if(b.dataset.label===l&&ic)b.classList.add('selected')});const fb=$('feedbackBox');fb.classList.remove('hidden');if(ic){fb.className='feedback-box correct-fb';fb.textContent='✅ '+c+'. '+q.options[c];fp(innerWidth/2,innerHeight-80,'var(--bp-green)',12)}else{fb.className='feedback-box wrong-fb';fb.textContent='❌ 正确答案：'+c+'. '+q.options[c]}$('btnNextQ').classList.remove('hidden');$('btnNextQ').textContent=S.cq===0?'下一题 ▸':'结算'}
+$('btnNextQ').addEventListener('click',function(){if(S.cq===0){S.cq=1;sQ()}else{hd('sceneQuiz');sSc()}});
+function sSc(){sh('sceneScore');const s=S.picks[S.cr];$('scoreStudent').textContent=s+' · '+S.class;const cr=S.rr[S.cr],cc=cr?.correctCount||0,pts=cr?.points||5;$('scorePoints').textContent='+'+pts;$('scoreLabel').textContent='正确 '+cc+' 题';$('scoreDetail').innerHTML='<div class="score-stat">正确 <strong>'+cc+'</strong></div><div class="score-stat">错误 <strong>'+(2-cc)+'</strong></div><div class="score-stat">保底 <strong>5</strong></div>';sv(S.grade,S.class,s,pts);S.total+=pts;fetch('/api/rollcall/mark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grade:S.grade,class:S.class,student:s,result:'quiz',teacher:TEACHER})}).catch(()=>{});saveRecord(S.grade,S.class,s,cc,2,pts,S.rr[S.cr]?.answers,'技术的发展-蓝图');fp(innerWidth/2,innerHeight/2-100,'var(--bp-gold)',25);$('btnNextRound').textContent=S.cr<4?'下一轮 ▸':'完成'}
+$('btnNextRound').addEventListener('click',function(){if(S.cr<4){hd('sceneScore');sr(S.cr+1)}else{hd('sceneScore');sF()}});
+function sF(){sh('sceneFinal');$('reviewSection').classList.add('hidden');$('btnReview').textContent='📋 查看错题解析';const tb=$('finalBody');tb.innerHTML='';const rows=S.picks.map((n,i)=>{const cr=S.rr[i];return{name:n,correct:cr?.correctCount||0,points:cr?.points||5}}).sort((a,b)=>b.points-a.points);rows.forEach((r,i)=>{const tr=document.createElement('tr');tr.innerHTML='<td class="rank-num">#'+(i+1)+'</td><td>'+r.name+'</td><td>'+r.correct+'/2</td><td class="rank-score">+'+r.points+'</td>';tb.appendChild(tr)});fp(innerWidth/2,innerHeight/2,'var(--bp-cyan)',50);setTimeout(()=>fp(innerWidth/2,innerHeight/2,'var(--bp-gold)',30),400)}
+$('btnReview').addEventListener('click',function(){const rs=$('reviewSection');if(!rs.classList.contains('hidden')){rs.classList.add('hidden');this.textContent='📋 查看错题解析';return}this.textContent='📋 收起解析';buildReview();rs.classList.remove('hidden')});
+function buildReview(){const rs=$('reviewSection');rs.innerHTML='';let hasWrong=false;const labels=['A','B','C','D'];S.picks.forEach((n,ri)=>{const cr=S.rr[ri];if(!cr||!cr.answers)return;const wrongs=cr.answers.filter(a=>!a.isCorrect);if(!wrongs.length)return;hasWrong=true;let h='<div class="rev-student">⚙ '+n+' · '+S.class+'</div>';wrongs.forEach(a=>{h+='<div class="rev-item"><span class="rev-princ">'+a.principle+'</span><div class="rev-q">'+a.question+'</div><div class="rev-opt-grid">';labels.forEach(l=>{let cls='rev-opt';if(l===a.yourAnswer)cls+=' rev-chosen';if(l===a.correctAnswer)cls+=' rev-right';h+='<div class="'+cls+'"><span class="rev-opt-label">'+l+'</span><span>'+a.options[l]+'</span></div>'});h+='</div></div>'});rs.innerHTML+=h});if(!hasWrong)rs.innerHTML='<div class="rev-empty">\u2705 \u6240\u6709\u540c\u5b66\u5168\u90e8\u7b54\u5bf9\uff01</div>'}
+lc();sh('sceneSetup');ud();
+</script>
+</body>
+</html>

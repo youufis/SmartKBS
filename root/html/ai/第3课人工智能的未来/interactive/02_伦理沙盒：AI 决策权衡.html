@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 伦理决策模拟：医疗资源分配</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .patient-card { transition: all 0.3s ease; }
+        .slider-thumb::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #3b82f6;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        .bg-gradient-ethic { background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="bg-gradient-ethic min-h-screen text-slate-800 font-sans">
+
+<div class="max-w-6xl mx-auto p-4 md:p-8">
+    <!-- Header -->
+    <header class="mb-8 text-center">
+        <h1 class="text-3xl font-bold text-slate-900 mb-2">AI 伦理决策模拟系统</h1>
+        <p class="text-slate-600">场景：极端资源匮乏下的医疗救助优先级排序 (Triage Simulation)</p>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <!-- Controls Column -->
+        <div class="lg:col-span-4 space-y-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <div>
+                <h2 class="text-lg font-semibold mb-4 flex items-center">
+                    <span class="w-2 h-6 bg-blue-500 rounded mr-2"></span>
+                    决策权重配置 (MCDA)
+                </h2>
+                <p class="text-xs text-slate-500 mb-4">调整权重以定义 AI 的核心逻辑。总和必须为 100%。</p>
+                
+                <div class="space-y-6">
+                    <!-- Weight 1: Efficiency -->
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="font-medium text-blue-700">救助效率 (Efficiency)</span>
+                            <span id="val-efficiency" class="font-mono">33%</span>
+                        </div>
+                        <input type="range" id="weight-efficiency" min="0" max="100" value="33" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                        <p class="text-[10px] text-slate-400">优先考虑保存质量调整寿命年 (QALYs)。</p>
+                    </div>
+
+                    <!-- Weight 2: Equity -->
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="font-medium text-emerald-700">社会公平 (Equity)</span>
+                            <span id="val-equity" class="font-mono">33%</span>
+                        </div>
+                        <input type="range" id="weight-equity" min="0" max="100" value="33" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600">
+                        <p class="text-[10px] text-slate-400">优先考虑病情最严重或资源获取机会最少的群体。</p>
+                    </div>
+
+                    <!-- Weight 3: Risk -->
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="font-medium text-amber-700">风险最小化 (Risk)</span>
+                            <span id="val-risk" class="font-mono">34%</span>
+                        </div>
+                        <input type="range" id="weight-risk" min="0" max="100" value="34" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-600">
+                        <p class="text-[10px] text-slate-400">基于贝叶斯推断 \(P(Outcome|Action)\) 优先确保救助成功率。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-6 border-t border-slate-100">
+                <h3 class="text-sm font-semibold text-slate-700 mb-3">系统约束</h3>
+                <div class="space-y-2 text-xs text-slate-500">
+                    <div class="flex justify-between">
+                        <span>可用医疗资源 (ICU Beds):</span>
+                        <span class="font-bold text-slate-900">5 / 12</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>强制决策状态:</span>
+                        <span class="text-green-600 font-medium">已激活 (必须分配)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Math Preview -->
+            <div class="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                <p class="text-[10px] uppercase tracking-wider text-slate-400 mb-1">效用函数模型</p>
+                <div class="text-sm text-slate-700">
+                    \[U(x) = \sum_{i=1}^{n} w_i \cdot f_i(x)\]
+                </div>
+            </div>
+        </div>
+
+        <!-- Visualization Column -->
+        <div class="lg:col-span-8 space-y-6">
+            <!-- Impact Dashboard -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <p class="text-xs text-slate-500 mb-1">总生存年限获益 (QALYs)</p>
+                    <div id="stat-qaly" class="text-2xl font-bold text-blue-600">0</div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <p class="text-xs text-slate-500 mb-1">社会公平性指数 (Gini)</p>
+                    <div id="stat-fairness" class="text-2xl font-bold text-emerald-600">0.00</div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <p class="text-xs text-slate-500 mb-1">公众信任度 (Trust)</p>
+                    <div id="stat-trust" class="text-2xl font-bold text-amber-600">0%</div>
+                </div>
+            </div>
+
+            <!-- Patient Grid -->
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-lg font-semibold mb-4">待审病患列表 (N=12)</h2>
+                <div id="patient-container" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    <!-- Cards injected by JS -->
+                </div>
+            </div>
+
+            <!-- Logic Explanation -->
+            <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-800">
+                <p><strong>帕累托观察：</strong> 注意当你试图最大化“公平”时，“总生存年限”往往会下降。由于资源稀缺性，AI 无法在不损害效率的情况下无限提升公平性，这体现了伦理编程中的非零和博弈代价。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Constants & Initial State
+    const TOTAL_RESOURCES = 5;
+    let weights = { efficiency: 33, equity: 33, risk: 34 };
+    
+    // Patient Data: Scientific logic for attributes
+    // f_eff: estimated life years remaining
+    // f_eq: severity (1-10, high is more urgent)
+    // f_risk: survival probability (0-1)
+    const patients = [
+        { id: 1, name: "病患 A", age: 24, severity: 8, survival: 0.9, info: "年轻，无基础病" },
+        { id: 2, name: "病患 B", age: 72, severity: 9, survival: 0.4, info: "高龄，多器官衰竭" },
+        { id: 3, name: "病患 C", age: 45, severity: 6, survival: 0.8, info: "中年，单亲家长" },
+        { id: 4, name: "病患 D", age: 12, severity: 7, survival: 0.95, info: "儿童，先天性心脏病" },
+        { id: 5, name: "病患 E", age: 35, severity: 10, survival: 0.2, info: "极度危险，抢救希望渺茫" },
+        { id: 6, name: "病患 F", age: 58, severity: 5, survival: 0.85, info: "慢病史，生命体征平稳" },
+        { id: 7, name: "病患 G", age: 85, severity: 4, survival: 0.6, info: "临终关怀阶段" },
+        { id: 8, name: "病患 H", age: 30, severity: 7, survival: 0.75, info: "关键行业工作者" },
+        { id: 9, name: "病患 I", age: 19, severity: 6, survival: 0.9, info: "大学生，轻微并发症" },
+        { id: 10, name: "病患 J", age: 50, severity: 9, survival: 0.5, info: "突发心梗，需即刻干预" },
+        { id: 11, name: "病患 K", age: 62, severity: 7, survival: 0.65, info: "社区志愿者" },
+        { id: 12, name: "病患 L", age: 28, severity: 3, survival: 0.98, info: "轻症转重症风险" }
+    ];
+
+    // Initialization
+    function init() {
+        setupListeners();
+        updateSimulation();
+    }
+
+    function setupListeners() {
+        ['efficiency', 'equity', 'risk'].forEach(key => {
+            const el = document.getElementById(`weight-${key}`);
+            el.addEventListener('input', (e) => {
+                adjustWeights(key, parseInt(e.target.value));
+                updateUI();
+                updateSimulation();
+            });
+        });
+    }
+
+    // Weight Normalization logic: Sum must be 100
+    function adjustWeights(changedKey, newValue) {
+        const keys = Object.keys(weights);
+        const otherKeys = keys.filter(k => k !== changedKey);
+        
+        weights[changedKey] = newValue;
+        
+        let sumOthers = weights[otherKeys[0]] + weights[otherKeys[1]];
+        let targetOthers = 100 - newValue;
+
+        if (sumOthers === 0) {
+            weights[otherKeys[0]] = targetOthers / 2;
+            weights[otherKeys[1]] = targetOthers / 2;
+        } else {
+            const ratio = targetOthers / sumOthers;
+            weights[otherKeys[0]] = Math.round(weights[otherKeys[0]] * ratio);
+            weights[otherKeys[1]] = 100 - weights[changedKey] - weights[otherKeys[0]];
+        }
+    }
+
+    function updateUI() {
+        ['efficiency', 'equity', 'risk'].forEach(key => {
+            document.getElementById(`val-${key}`).innerText = `${weights[key]}%`;
+            document.getElementById(`weight-${key}`).value = weights[key];
+        });
+    }
+
+    function calculateScore(p) {
+        // Multi-Criteria Scoring Logic
+        // f1: Efficiency (Life years saved projection: (90-age) * survival)
+        const f_eff = ((90 - p.age) * p.survival) / 90;
+        // f2: Equity (Prioritize high severity)
+        const f_eq = p.severity / 10;
+        // f3: Risk (Direct survival probability)
+        const f_risk = p.survival;
+
+        return (weights.efficiency/100 * f_eff) + 
+               (weights.equity/100 * f_eq) + 
+               (weights.risk/100 * f_risk);
+    }
+
+    function updateSimulation() {
+        // Calculate scores for all
+        const scoredPatients = patients.map(p => ({
+            ...p,
+            score: calculateScore(p)
+        }));
+
+        // Sort by score descending (Mandatory Decision Logic)
+        scoredPatients.sort((a, b) => b.score - a.score);
+
+        // Top N get resources
+        const selectedIds = new Set(scoredPatients.slice(0, TOTAL_RESOURCES).map(p => p.id));
+
+        renderPatients(scoredPatients, selectedIds);
+        calculateImpact(scoredPatients, selectedIds);
+    }
+
+    function renderPatients(scoredPatients, selectedIds) {
+        const container = document.getElementById('patient-container');
+        container.innerHTML = '';
+
+        // Sort by ID to keep layout stable
+        const displayList = [...scoredPatients].sort((a,b) => a.id - b.id);
+
+        displayList.forEach(p => {
+            const isSelected = selectedIds.has(p.id);
+            const card = document.createElement('div');
+            card.className = `patient-card p-4 rounded-xl border-2 ${isSelected ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-slate-100 bg-white opacity-60'} relative overflow-hidden`;
+            
+            card.innerHTML = `
+                ${isSelected ? '<div class="absolute top-0 right-0 bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-bl">获救</div>' : ''}
+                <div class="flex justify-between items-start mb-2">
+                    <span class="font-bold text-slate-900">${p.name}</span>
+                    <span class="text-xs px-2 py-0.5 bg-slate-200 rounded-full text-slate-600">${p.age}岁</span>
+                </div>
+                <div class="text-[11px] text-slate-500 mb-2 h-8 leading-tight">${p.info}</div>
+                <div class="space-y-1">
+                    <div class="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                        <div class="bg-blue-400 h-full" style="width: ${p.score * 100}%"></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-slate-400">
+                        <span>AI 综合评分:</span>
+                        <span>${(p.score * 100).toFixed(1)}</span>
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
+        });
+    }
+
+    function calculateImpact(scoredPatients, selectedIds) {
+        const selectedPatients = scoredPatients.filter(p => selectedIds.has(p.id));
+        const unselectedPatients = scoredPatients.filter(p => !selectedIds.has(p.id));
+
+        // 1. Total QALYs (Efficiency)
+        const totalQaly = selectedPatients.reduce((acc, p) => acc + ((90 - p.age) * p.survival), 0);
+        document.getElementById('stat-qaly').innerText = Math.round(totalQaly);
+
+        // 2. Fairness (Based on the range of severity treated)
+        // High fairness = treating sicker people regardless of efficiency
+        const avgSeveritySelected = selectedPatients.reduce((acc, p) => acc + p.severity, 0) / TOTAL_RESOURCES;
+        const fairnessIdx = (avgSeveritySelected / 10).toFixed(2);
+        document.getElementById('stat-fairness').innerText = fairnessIdx;
+
+        // 3. Public Trust (Based on balance and Bayesian risk)
+        // Extreme weights lower trust. Balanced weights increase it.
+        const weightVariance = Math.pow(weights.efficiency - 33.3, 2) + Math.pow(weights.equity - 33.3, 2) + Math.pow(weights.risk - 33.3, 2);
+        const trustBase = 100 - (weightVariance / 50);
+        const trust = Math.max(10, Math.min(98, Math.round(trustBase)));
+        document.getElementById('stat-trust').innerText = `${trust}%`;
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>

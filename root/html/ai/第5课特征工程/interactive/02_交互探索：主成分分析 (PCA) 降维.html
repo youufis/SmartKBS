@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCA 降维交互演示</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; overflow-x: hidden; }
+        canvas { cursor: move; touch-action: none; }
+        .stat-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1); }
+        .transition-all { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="flex flex-col min-h-screen">
+
+    <!-- Header -->
+    <header class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+        <div>
+            <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-400">PCA 降维交互演示</h1>
+            <p class="text-xs text-slate-400">主成分分析：寻找最大方差方向，实现信息压缩</p>
+        </div>
+        <div class="flex gap-2">
+            <button id="resetBtn" class="px-4 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 rounded-md transition-colors">重新生成数据</button>
+            <button id="projectBtn" class="px-4 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 rounded-md transition-colors font-bold">执行降维投影</button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 relative flex flex-col md:flex-row overflow-hidden">
+        
+        <!-- Visualization Canvas -->
+        <div class="flex-1 relative">
+            <canvas id="pcaCanvas" class="w-full h-full"></canvas>
+            
+            <!-- Floating Instructions -->
+            <div class="absolute bottom-4 left-4 pointer-events-none text-slate-500 text-sm">
+                <p>🖱️ 拖拽旋转空间  |  ↕️ 滚轮缩放</p>
+                <p id="viewMode" class="text-indigo-400 font-medium mt-1">当前状态: 3D 原始空间</p>
+            </div>
+        </div>
+
+        <!-- Sidebar / Stats -->
+        <aside class="w-full md:w-80 p-6 border-l border-slate-800 flex flex-col gap-6 overflow-y-auto">
+            
+            <!-- Concept Math -->
+            <div class="stat-card p-4 rounded-xl">
+                <h3 class="text-sm font-semibold text-slate-300 mb-2 border-b border-slate-700 pb-1">数学原理</h3>
+                <div class="text-xs space-y-2 text-slate-400">
+                    <p>1. 数据中心化: \(X_{centered} = X - \mu\)</p>
+                    <p>2. 协方差矩阵: \(C = \frac{1}{n-1} X^T X\)</p>
+                    <p>3. 特征分解: \(CV = V\Lambda\)</p>
+                    <p>4. 投影: \(Y = X \cdot V_{top\_k}\)</p>
+                </div>
+            </div>
+
+            <!-- Variance Explained -->
+            <div class="stat-card p-4 rounded-xl">
+                <h3 class="text-sm font-semibold text-slate-300 mb-4 border-b border-slate-700 pb-1">解释方差比 (Eigenvalues)</h3>
+                <div id="varianceList" class="space-y-4">
+                    <!-- Dynamic Content -->
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span>PC1 (主成分 1)</span>
+                            <span id="v1-per">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                            <div id="v1-bar" class="bg-indigo-500 h-full transition-all" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span>PC2 (主成分 2)</span>
+                            <span id="v2-per">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                            <div id="v2-bar" class="bg-cyan-500 h-full transition-all" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="space-y-1 opacity-50">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span>PC3 (主成分 3 - 舍弃)</span>
+                            <span id="v3-per">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                            <div id="v3-bar" class="bg-slate-500 h-full transition-all" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4 pt-2 border-t border-slate-700">
+                    <p class="text-[10px] text-slate-500">累计解释率: <span id="total-per" class="text-indigo-400 font-bold">0%</span></p>
+                </div>
+            </div>
+
+            <!-- Interaction Logic -->
+            <div class="stat-card p-4 rounded-xl">
+                <h3 class="text-sm font-semibold text-slate-300 mb-2">降维原则</h3>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                    PCA 通过旋转坐标轴，找到方差最大的方向作为 PC1。后续的 PC 必须与前方方向<span class="text-indigo-300">正交</span>。将 3D 点云压缩至 PC1-PC2 平面，能够最大限度保留数据的离散程度。
+                </p>
+            </div>
+
+        </aside>
+    </main>
+
+    <script>
+        /**
+         * PCA & Visualization Logic
+         */
+        const canvas = document.getElementById('pcaCanvas');
+        const ctx = canvas.getContext('2d');
+        const projectBtn = document.getElementById('projectBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const viewModeText = document.getElementById('viewMode');
+
+        let width, height;
+        let points = [];
+        let pcaResult = {
+            mean: [0, 0, 0],
+            eigenvalues: [0, 0, 0],
+            eigenvectors: [[1,0,0],[0,1,0],[0,0,1]]
+        };
+        let cameraRotation = { x: 0.5, y: 0.5 };
+        let zoom = 1.0;
+        let isProjected = false;
+        let animationProgress = 0; // 0 for 3D, 1 for 2D
+
+        // Point Configuration
+        const NUM_POINTS = 300;
+        const POINT_SIZE = 2.5;
+
+        class Vector3 {
+            static dot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+            static normalize(v) {
+                const len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+                return [v[0]/len, v[1]/len, v[2]/len];
+            }
+            static multiply(v, s) { return [v[0]*s, v[1]*s, v[2]*s]; }
+            static add(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+            static sub(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+        }
+
+        function resize() {
+            width = canvas.width = canvas.clientWidth;
+            height = canvas.height = canvas.clientHeight;
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        /**
+         * Generate Synthetic Data: Oriented Ellipsoid
+         */
+        function generateData() {
+            points = [];
+            // Random target variances
+            const s1 = 150 + Math.random() * 100;
+            const s2 = 60 + Math.random() * 40;
+            const s3 = 10 + Math.random() * 15;
+
+            // Random rotation for the cloud
+            const q = () => (Math.random() - 0.5) * 2;
+            let axis1 = Vector3.normalize([q(), q(), q()]);
+            let axis2 = Vector3.normalize([q(), q(), q()]);
+            // Force orthogonality
+            const dot = Vector3.dot(axis1, axis2);
+            axis2 = Vector3.normalize(Vector3.sub(axis2, Vector3.multiply(axis1, dot)));
+            let axis3 = [
+                axis1[1]*axis2[2] - axis1[2]*axis2[1],
+                axis1[2]*axis2[0] - axis1[0]*axis2[2],
+                axis1[0]*axis2[1] - axis1[1]*axis2[0]
+            ];
+
+            for (let i = 0; i < NUM_POINTS; i++) {
+                // Generate in canonical space
+                const r1 = (Math.random() - 0.5 + Math.random() - 0.5) * s1;
+                const r2 = (Math.random() - 0.5 + Math.random() - 0.5) * s2;
+                const r3 = (Math.random() - 0.5 + Math.random() - 0.5) * s3;
+
+                // Transform to random orientation
+                const p = Vector3.add(
+                    Vector3.add(Vector3.multiply(axis1, r1), Vector3.multiply(axis2, r2)),
+                    Vector3.multiply(axis3, r3)
+                );
+                points.push({
+                    original: p,
+                    current: [...p],
+                    projected: [0, 0, 0] // will compute after PCA
+                });
+            }
+            runPCA();
+        }
+
+        /**
+         * Scientific PCA Implementation
+         */
+        function runPCA() {
+            // 1. Centering
+            let mean = [0, 0, 0];
+            points.forEach(p => {
+                mean[0] += p.original[0];
+                mean[1] += p.original[1];
+                mean[2] += p.original[2];
+            });
+            mean = mean.map(m => m / NUM_POINTS);
+
+            const centered = points.map(p => Vector3.sub(p.original, mean));
+
+            // 2. Covariance Matrix
+            let cov = [[0,0,0],[0,0,0],[0,0,0]];
+            for(let i=0; i<3; i++) {
+                for(let j=0; j<3; j++) {
+                    let sum = 0;
+                    centered.forEach(p => sum += p[i] * p[j]);
+                    cov[i][j] = sum / (NUM_POINTS - 1);
+                }
+            }
+
+            // 3. Eigen Decomposition (Jacobi Algorithm for 3x3 Symmetric)
+            const result = jacobiEigen(cov);
+            
+            // Sort eigenvalues descending
+            const indices = [0, 1, 2].sort((a, b) => result.values[b] - result.values[a]);
+            pcaResult = {
+                mean: mean,
+                eigenvalues: indices.map(i => result.values[i]),
+                eigenvectors: indices.map(i => result.vectors[i])
+            };
+
+            // 4. Precompute Projected Positions
+            points.forEach(p => {
+                const centeredP = Vector3.sub(p.original, mean);
+                // Projection onto PC1 and PC2
+                const p1 = Vector3.dot(centeredP, pcaResult.eigenvectors[0]);
+                const p2 = Vector3.dot(centeredP, pcaResult.eigenvectors[1]);
+                
+                // Represent projection in 3D space: PC1*v1 + PC2*v2 + mean
+                const projIn3D = Vector3.add(
+                    mean,
+                    Vector3.add(
+                        Vector3.multiply(pcaResult.eigenvectors[0], p1),
+                        Vector3.multiply(pcaResult.eigenvectors[1], p2)
+                    )
+                );
+                p.projected = projIn3D;
+            });
+
+            updateStatsUI();
+        }
+
+        // Jacobi eigenvalue algorithm
+        function jacobiEigen(matrix) {
+            let A = JSON.parse(JSON.stringify(matrix));
+            let V = [[1,0,0],[0,1,0],[0,0,1]];
+            const maxIter = 50;
+            
+            for (let iter = 0; iter < maxIter; iter++) {
+                // Find largest off-diagonal element
+                let p = 0, q = 1;
+                let maxVal = Math.abs(A[0][1]);
+                if (Math.abs(A[0][2]) > maxVal) { p = 0; q = 2; maxVal = Math.abs(A[0][2]); }
+                if (Math.abs(A[1][2]) > maxVal) { p = 1; q = 2; maxVal = Math.abs(A[1][2]); }
+
+                if (maxVal < 1e-10) break;
+
+                // Compute rotation
+                let theta = 0.5 * Math.atan2(2 * A[p][q], A[q][q] - A[p][p]);
+                let c = Math.cos(theta);
+                let s = Math.sin(theta);
+
+                // Update A
+                let app = A[p][p], aqq = A[q][q], apq = A[p][q];
+                A[p][p] = c*c*app - 2*s*c*apq + s*s*aqq;
+                A[q][q] = s*s*app + 2*s*c*apq + c*c*aqq;
+                A[p][q] = A[q][p] = 0;
+
+                for (let i = 0; i < 3; i++) {
+                    if (i !== p && i !== q) {
+                        let api = A[p][i], aqi = A[q][i];
+                        A[p][i] = A[i][p] = c * api - s * aqi;
+                        A[i][q] = A[q][i] = s * api + c * aqi;
+                    }
+                    // Update V
+                    let vpi = V[p][i], vqi = V[q][i];
+                    V[p][i] = c * vpi - s * vqi;
+                    V[q][i] = s * vpi + c * vqi;
+                }
+            }
+            return {
+                values: [A[0][0], A[1][1], A[2][2]],
+                vectors: V // note: these are rows after update logic
+            };
+        }
+
+        function updateStatsUI() {
+            const sum = pcaResult.eigenvalues.reduce((a,b) => a+b, 0);
+            const ratios = pcaResult.eigenvalues.map(v => (v/sum*100));
+            
+            document.getElementById('v1-per').innerText = ratios[0].toFixed(1) + '%';
+            document.getElementById('v2-per').innerText = ratios[1].toFixed(1) + '%';
+            document.getElementById('v3-per').innerText = ratios[2].toFixed(1) + '%';
+            
+            document.getElementById('v1-bar').style.width = ratios[0] + '%';
+            document.getElementById('v2-bar').style.width = ratios[1] + '%';
+            document.getElementById('v3-bar').style.width = ratios[2] + '%';
+
+            document.getElementById('total-per').innerText = (ratios[0] + ratios[1]).toFixed(1) + '%';
+        }
+
+        /**
+         * Rendering Engine
+         */
+        function project3D(v) {
+            // Rotate around Y
+            let x = v[0] * Math.cos(cameraRotation.y) + v[2] * Math.sin(cameraRotation.y);
+            let z = -v[0] * Math.sin(cameraRotation.y) + v[2] * Math.cos(cameraRotation.y);
+            let y = v[1];
+
+            // Rotate around X
+            let y1 = y * Math.cos(cameraRotation.x) - z * Math.sin(cameraRotation.x);
+            let z1 = y * Math.sin(cameraRotation.x) + z * Math.cos(cameraRotation.x);
+
+            // Simple perspective
+            const factor = 800 * zoom / (z1 + 1000);
+            return {
+                x: x * factor + width / 2,
+                y: y1 * factor + height / 2,
+                z: z1,
+                scale: factor
+            };
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            // Interpolate point positions based on animation progress
+            points.forEach(p => {
+                p.current[0] = p.original[0] * (1 - animationProgress) + p.projected[0] * animationProgress;
+                p.current[1] = p.original[1] * (1 - animationProgress) + p.projected[1] * animationProgress;
+                p.current[2] = p.original[2] * (1 - animationProgress) + p.projected[2] * animationProgress;
+            });
+
+            // Sort points by Z for depth buffering (painter's algorithm)
+            const projectedPoints = points.map(p => ({...project3D(p.current), p}));
+            projectedPoints.sort((a, b) => b.z - a.z);
+
+            // Draw PCA Plane if projecting
+            if (animationProgress > 0) {
+                const s = 300;
+                const v1 = pcaResult.eigenvectors[0];
+                const v2 = pcaResult.eigenvectors[1];
+                const m = pcaResult.mean;
+                
+                const corners = [
+                    Vector3.add(m, Vector3.add(Vector3.multiply(v1, s), Vector3.multiply(v2, s))),
+                    Vector3.add(m, Vector3.add(Vector3.multiply(v1, -s), Vector3.multiply(v2, s))),
+                    Vector3.add(m, Vector3.add(Vector3.multiply(v1, -s), Vector3.multiply(v2, -s))),
+                    Vector3.add(m, Vector3.add(Vector3.multiply(v1, s), Vector3.multiply(v2, -s)))
+                ].map(project3D);
+
+                ctx.fillStyle = `rgba(79, 70, 229, ${0.1 * animationProgress})`;
+                ctx.beginPath();
+                ctx.moveTo(corners[0].x, corners[0].y);
+                corners.forEach(c => ctx.lineTo(c.x, c.y));
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = `rgba(99, 102, 241, ${0.3 * animationProgress})`;
+                ctx.stroke();
+            }
+
+            // Draw Axes
+            const origin = project3D(pcaResult.mean);
+            const axesLength = 200;
+            const colors = ['#818cf8', '#22d3ee', '#64748b'];
+            
+            pcaResult.eigenvectors.forEach((v, i) => {
+                const end = project3D(Vector3.add(pcaResult.mean, Vector3.multiply(v, axesLength)));
+                ctx.beginPath();
+                ctx.strokeStyle = colors[i];
+                ctx.lineWidth = i === 2 ? 1 : 2;
+                if (i === 2) ctx.setLineDash([5, 5]); else ctx.setLineDash([]);
+                ctx.globalAlpha = i === 2 ? (1 - animationProgress * 0.8) : 1;
+                ctx.moveTo(origin.x, origin.y);
+                ctx.lineTo(end.x, end.y);
+                ctx.stroke();
+                
+                // Label
+                ctx.fillStyle = colors[i];
+                ctx.font = '10px sans-serif';
+                ctx.fillText(`PC${i+1}`, end.x + 5, end.y + 5);
+            });
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1;
+
+            // Draw Points
+            projectedPoints.forEach(pp => {
+                const alpha = isProjected ? 0.8 : 0.6;
+                ctx.fillStyle = `rgba(129, 140, 248, ${alpha})`;
+                // Flash points that are far from plane during projection transition
+                if (animationProgress > 0 && animationProgress < 1) {
+                    const dist = Vector3.dot(Vector3.sub(pp.p.original, pcaResult.mean), pcaResult.eigenvectors[2]);
+                    if (Math.abs(dist) > 50) ctx.fillStyle = `rgba(165, 180, 252, 0.9)`;
+                }
+                
+                ctx.beginPath();
+                ctx.arc(pp.x, pp.y, POINT_SIZE * pp.scale / 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Handle Animation
+            if (isProjected && animationProgress < 1) {
+                animationProgress += 0.04;
+                if (animationProgress > 1) animationProgress = 1;
+            } else if (!isProjected && animationProgress > 0) {
+                animationProgress -= 0.04;
+                if (animationProgress < 0) animationProgress = 0;
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        /**
+         * Interactivity
+         */
+        let isDragging = false;
+        let lastMouse = { x: 0, y: 0 };
+
+        canvas.addEventListener('mousedown', e => {
+            isDragging = true;
+            lastMouse = { x: e.clientX, y: e.clientY };
+        });
+
+        window.addEventListener('mousemove', e => {
+            if (!isDragging) return;
+            const dx = e.clientX - lastMouse.x;
+            const dy = e.clientY - lastMouse.y;
+            cameraRotation.y += dx * 0.01;
+            cameraRotation.x += dy * 0.01;
+            lastMouse = { x: e.clientX, y: e.clientY };
+        });
+
+        window.addEventListener('mouseup', () => isDragging = false);
+
+        canvas.addEventListener('wheel', e => {
+            e.preventDefault();
+            zoom *= (e.deltaY > 0 ? 0.9 : 1.1);
+            zoom = Math.max(0.2, Math.min(zoom, 5));
+        }, { passive: false });
+
+        projectBtn.addEventListener('click', () => {
+            isProjected = !isProjected;
+            projectBtn.innerText = isProjected ? "重置空间" : "执行降维投影";
+            projectBtn.className = isProjected 
+                ? "px-4 py-1.5 text-sm bg-rose-600 hover:bg-rose-500 rounded-md transition-colors font-bold"
+                : "px-4 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 rounded-md transition-colors font-bold";
+            viewModeText.innerText = isProjected ? "当前状态: 2D 投影平面" : "当前状态: 3D 原始空间";
+        });
+
+        resetBtn.addEventListener('click', () => {
+            isProjected = false;
+            animationProgress = 0;
+            projectBtn.innerText = "执行降维投影";
+            projectBtn.className = "px-4 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 rounded-md transition-colors font-bold";
+            viewModeText.innerText = "当前状态: 3D 原始空间";
+            generateData();
+        });
+
+        // Initialize
+        generateData();
+        draw();
+
+    </script>
+</body>
+</html>

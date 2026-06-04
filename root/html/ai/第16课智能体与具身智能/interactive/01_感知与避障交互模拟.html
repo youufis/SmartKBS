@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能体避障模拟 - 交互式学习</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #f8fafc; overflow: hidden; }
+        #canvas-container { position: relative; width: 100%; height: 60vh; background: #fff; border-radius: 8px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
+        canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+        .control-panel { background: white; border-top: 1px solid #e2e8f0; padding: 1.5rem; }
+        input[type="range"] { height: 6px; -webkit-appearance: none; background: #cbd5e1; border-radius: 5px; outline: none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #3b82f6; border-radius: 50%; cursor: pointer; }
+    </style>
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const katexOptions = {
+        delimiters: [
+            {left: '\\[', right: '\\]', display: true},
+            {left: '\\(', right: '\\)', display: false},
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ],
+        throwOnError: false,
+        strict: false,
+        trust: true
+    };
+
+    let renderTimeout;
+    function safeRender() {
+        if (renderTimeout) clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(() => {
+            renderMathInElement(document.body, katexOptions);
+        }, 100);
+    }
+
+    renderMathInElement(document.body, katexOptions);
+
+    const observer = new MutationObserver((mutations) => {
+        let shouldRender = false;
+        mutations.forEach((mutation) => {
+            if (mutation.target &&
+                mutation.target.className &&
+                typeof mutation.target.className === 'string' &&
+                mutation.target.className.includes('katex')) {
+                return;
+            }
+            shouldRender = true;
+        });
+
+        if (shouldRender) {
+            safeRender();
+        }
+    });
+
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    setInterval(() => {
+        const text = document.body.innerText;
+        if (text.includes('\\(') || text.includes('$$')) {
+            safeRender();
+        }
+    }, 2000);
+});
+</script>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- Header -->
+    <header class="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+        <div>
+            <h1 class="text-xl font-bold">智能体避障：感知-决策-执行</h1>
+            <p class="text-xs text-slate-400">基于人工势场法 (APF) 与 射线检测 (Ray Casting) 的局部路径规划模拟</p>
+        </div>
+        <div class="flex space-x-2">
+            <button id="startBtn" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded text-sm font-bold transition">运行模拟</button>
+            <button id="resetBtn" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded text-sm font-bold transition">重置</button>
+        </div>
+    </header>
+
+    <!-- Simulation Area -->
+    <main class="flex-grow p-4 overflow-hidden flex flex-col gap-4">
+        <div id="canvas-container">
+            <canvas id="simCanvas"></canvas>
+            <!-- Overlay Labels -->
+            <div class="absolute top-2 left-2 pointer-events-none">
+                <span class="bg-white/80 px-2 py-1 rounded text-xs border border-slate-200">目标: 旗帜区域</span>
+                <span class="bg-white/80 px-2 py-1 rounded text-xs border border-slate-200 ml-2">可拖动障碍物</span>
+            </div>
+        </div>
+
+        <!-- Controls Area -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <!-- Sensor Controls -->
+            <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                    <label class="text-sm font-bold text-slate-700">感知距离 (Range)</label>
+                    <span id="val-range" class="text-xs font-mono text-blue-600">150 px</span>
+                </div>
+                <input type="range" id="sensorRange" min="50" max="300" value="150" class="w-full">
+                
+                <div class="flex justify-between items-center pt-2">
+                    <label class="text-sm font-bold text-slate-700">视场角 (FOV)</label>
+                    <span id="val-fov" class="text-xs font-mono text-blue-600">120°</span>
+                </div>
+                <input type="range" id="sensorFOV" min="30" max="360" value="120" class="w-full">
+            </div>
+
+            <!-- Theory explanation -->
+            <div class="text-xs text-slate-500 space-y-2 border-x border-slate-100 px-4">
+                <p class="font-bold text-slate-700">核心原理：</p>
+                <p>1. **感知**：机器人发射探测射线，计算欧几里得距离 \(d = \sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}\)。</p>
+                <p>2. **决策**：通过人工势场 \(U_{total} = U_{attract} + U_{repel}\) 计算合力方向。</p>
+                <p>3. **执行**：根据运动学公式 \(P_{new} = P_{old} + V \cdot \Delta t\) 实时更新位置。</p>
+            </div>
+
+            <!-- Status -->
+            <div class="flex flex-col justify-center items-center bg-slate-50 rounded-lg p-4">
+                <div id="statusText" class="text-lg font-bold text-slate-400 italic">等待开始...</div>
+                <div class="text-[10px] text-slate-400 mt-2 uppercase tracking-widest">Sense-Think-Act Loop</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        
+        // Settings elements
+        const rangeSlider = document.getElementById('sensorRange');
+        const fovSlider = document.getElementById('sensorFOV');
+        const valRange = document.getElementById('val-range');
+        const valFOV = document.getElementById('val-fov');
+        const statusText = document.getElementById('statusText');
+
+        let isRunning = false;
+        let animationId = null;
+
+        // Constants & Physics
+        const ROBOT_RADIUS = 15;
+        const TARGET_RADIUS = 20;
+        const OBSTACLE_MIN_DIST = 25;
+        const MAX_SPEED = 2.5;
+        const TURN_SPEED = 0.12;
+        const RAY_COUNT = 21;
+        
+        // State
+        let robot = { x: 80, y: 0, angle: 0, vx: 0, vy: 0 };
+        let target = { x: 0, y: 0 };
+        let obstacles = [
+            { x: 300, y: 0, r: 40, dragging: false },
+            { x: 500, y: 150, r: 50, dragging: false },
+            { x: 450, y: -100, r: 35, dragging: false }
+        ];
+        let sensorData = []; // [{angle, dist, hitX, hitY}]
+
+        function init() {
+            resize();
+            resetSimulation();
+            loop();
+        }
+
+        function resize() {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            
+            // Adjust coordinates to centered logic
+            target.x = rect.width - 100;
+            target.y = rect.height / 2;
+            robot.y = rect.height / 2;
+            obstacles[0].y = rect.height / 2;
+            obstacles[1].y = rect.height / 2 + 100;
+            obstacles[2].y = rect.height / 2 - 120;
+        }
+
+        function resetSimulation() {
+            isRunning = false;
+            startBtn.innerText = "运行模拟";
+            startBtn.className = "bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded text-sm font-bold transition text-white";
+            statusText.innerText = "等待开始...";
+            statusText.className = "text-lg font-bold text-slate-400 italic";
+            
+            robot.x = 80;
+            robot.y = canvas.height / (2 * window.devicePixelRatio);
+            robot.angle = 0;
+            robot.vx = 0;
+            robot.vy = 0;
+            sensorData = [];
+        }
+
+        // Raycasting Logic: Find closest intersection
+        function getRayIntersection(rayAngle) {
+            const maxRange = parseInt(rangeSlider.value);
+            const startX = robot.x;
+            const startY = robot.y;
+            const dirX = Math.cos(rayAngle);
+            const dirY = Math.sin(rayAngle);
+            
+            let minT = maxRange;
+            let hit = false;
+
+            obstacles.forEach(obs => {
+                // Line-circle intersection
+                const ocX = startX - obs.x;
+                const ocY = startY - obs.y;
+                const b = ocX * dirX + ocY * dirY;
+                const c = ocX * ocX + ocY * ocY - obs.r * obs.r;
+                const h = b * b - c;
+                if (h >= 0) {
+                    const t = -b - Math.sqrt(h);
+                    if (t > 0 && t < minT) {
+                        minT = t;
+                        hit = true;
+                    }
+                }
+            });
+
+            return {
+                dist: minT,
+                hit: hit,
+                x: startX + dirX * minT,
+                y: startY + dirY * minT,
+                angle: rayAngle
+            };
+        }
+
+        function sense() {
+            sensorData = [];
+            const fov = (parseInt(fovSlider.value) * Math.PI) / 180;
+            const halfFov = fov / 2;
+            const step = fov / (RAY_COUNT - 1);
+
+            for (let i = 0; i < RAY_COUNT; i++) {
+                const angle = robot.angle - halfFov + i * step;
+                sensorData.push(getRayIntersection(angle));
+            }
+        }
+
+        function think() {
+            if (!isRunning) return;
+
+            // Target Attraction
+            const dx = target.x - robot.x;
+            const dy = target.y - robot.y;
+            const distToTarget = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distToTarget < 20) {
+                isRunning = false;
+                statusText.innerText = "成功到达目标！";
+                statusText.className = "text-lg font-bold text-emerald-600 animate-bounce";
+                return;
+            }
+
+            // APF Calculation
+            let forceX = (dx / distToTarget) * 1.5;
+            let forceY = (dy / distToTarget) * 1.5;
+
+            // Repulsion from sensed points
+            const maxRange = parseInt(rangeSlider.value);
+            sensorData.forEach(s => {
+                if (s.hit) {
+                    const repulseDist = s.dist;
+                    const strength = Math.pow((maxRange - repulseDist) / maxRange, 2) * 5.0;
+                    forceX -= Math.cos(s.angle) * strength;
+                    forceY -= Math.sin(s.angle) * strength;
+                }
+            });
+
+            // Update Angle toward Force
+            const desiredAngle = Math.atan2(forceY, forceX);
+            let angleDiff = desiredAngle - robot.angle;
+            while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+            while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+            
+            robot.angle += Math.max(-TURN_SPEED, Math.min(TURN_SPEED, angleDiff));
+            
+            // Speed control based on closeness to obstacles
+            let speed = MAX_SPEED;
+            sensorData.forEach(s => {
+                if (s.hit && s.dist < 40) speed *= 0.8;
+            });
+
+            robot.vx = Math.cos(robot.angle) * speed;
+            robot.vy = Math.sin(robot.angle) * speed;
+        }
+
+        function act() {
+            if (!isRunning) return;
+
+            robot.x += robot.vx;
+            robot.y += robot.vy;
+
+            // Collision check
+            obstacles.forEach(obs => {
+                const d = Math.sqrt((robot.x - obs.x)**2 + (robot.y - obs.y)**2);
+                if (d < obs.r + ROBOT_RADIUS) {
+                    isRunning = false;
+                    statusText.innerText = "发生碰撞！";
+                    statusText.className = "text-lg font-bold text-red-600";
+                    // Push back slightly
+                    const angle = Math.atan2(robot.y - obs.y, robot.x - obs.x);
+                    robot.x = obs.x + Math.cos(angle) * (obs.r + ROBOT_RADIUS);
+                    robot.y = obs.y + Math.sin(angle) * (obs.r + ROBOT_RADIUS);
+                }
+            });
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Target
+            ctx.beginPath();
+            ctx.arc(target.x, target.y, TARGET_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = '#fef3c7';
+            ctx.fill();
+            ctx.strokeStyle = '#d97706';
+            ctx.setLineDash([2, 2]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#d97706';
+            ctx.font = '16px serif';
+            ctx.fillText('🏁', target.x - 8, target.y + 6);
+
+            // Draw Obstacles
+            obstacles.forEach(obs => {
+                ctx.beginPath();
+                ctx.arc(obs.x, obs.y, obs.r, 0, Math.PI * 2);
+                ctx.fillStyle = obs.dragging ? '#cbd5e1' : '#64748b';
+                ctx.fill();
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+
+            // Draw Sensors
+            sensorData.forEach(s => {
+                ctx.beginPath();
+                ctx.moveTo(robot.x, robot.y);
+                ctx.lineTo(s.x, s.y);
+                ctx.strokeStyle = s.hit ? 'rgba(239, 68, 68, 0.4)' : 'rgba(59, 130, 246, 0.1)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                if (s.hit) {
+                    ctx.beginPath();
+                    ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ef4444';
+                    ctx.fill();
+                }
+            });
+
+            // Draw Robot
+            ctx.save();
+            ctx.translate(robot.x, robot.y);
+            ctx.rotate(robot.angle);
+            
+            // Body
+            ctx.beginPath();
+            ctx.arc(0, 0, ROBOT_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = '#3b82f6';
+            ctx.fill();
+            ctx.strokeStyle = '#1d4ed8';
+            ctx.stroke();
+            
+            // Direction Indicator
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(ROBOT_RADIUS + 5, 0);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function loop() {
+            sense();
+            think();
+            act();
+            draw();
+            animationId = requestAnimationFrame(loop);
+        }
+
+        // Interactivity
+        canvas.addEventListener('mousedown', e => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            obstacles.forEach(obs => {
+                const d = Math.sqrt((mouseX - obs.x)**2 + (mouseY - obs.y)**2);
+                if (d < obs.r) obs.dragging = true;
+            });
+        });
+
+        window.addEventListener('mousemove', e => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            obstacles.forEach(obs => {
+                if (obs.dragging) {
+                    obs.x = mouseX;
+                    obs.y = mouseY;
+                }
+            });
+        });
+
+        window.addEventListener('mouseup', () => {
+            obstacles.forEach(obs => obs.dragging = false);
+        });
+
+        startBtn.addEventListener('click', () => {
+            isRunning = !isRunning;
+            if (isRunning) {
+                if (statusText.innerText.includes("碰撞") || statusText.innerText.includes("成功")) {
+                    resetSimulation();
+                    isRunning = true;
+                }
+                startBtn.innerText = "暂停模拟";
+                startBtn.className = "bg-amber-600 hover:bg-amber-500 px-4 py-2 rounded text-sm font-bold transition text-white";
+                statusText.innerText = "模拟运行中...";
+                statusText.className = "text-lg font-bold text-blue-600 animate-pulse";
+            } else {
+                startBtn.innerText = "继续运行";
+                startBtn.className = "bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded text-sm font-bold transition text-white";
+                statusText.innerText = "模拟已暂停";
+                statusText.className = "text-lg font-bold text-slate-400";
+            }
+        });
+
+        resetBtn.addEventListener('click', resetSimulation);
+
+        rangeSlider.addEventListener('input', () => {
+            valRange.innerText = `${rangeSlider.value} px`;
+        });
+        
+        fovSlider.addEventListener('input', () => {
+            valFOV.innerText = `${fovSlider.value}°`;
+        });
+
+        window.addEventListener('resize', resize);
+
+        // Start
+        init();
+    </script>
+</body>
+</html>

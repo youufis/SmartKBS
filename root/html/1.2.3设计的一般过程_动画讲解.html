@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>设计的一般过程 · 小创的冒险</title>
+<style>
+
+/* ============================================================
+   GLOBAL RESET & BASE
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#faf8f5;
+  --text:#1e293b;
+  --text-light:#64748b;
+  --c1:#2d6a9f;
+  --c2:#f59e0b;
+  --c3:#10b981;
+  --c4:#8b5cf6;
+  --c5:#ef4444;
+  --c6:#0d9488;
+  --card-bg:rgba(255,255,255,0.85);
+  --shadow:0 8px 32px rgba(0,0,0,0.08);
+  --radius:20px;
+}
+
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: "Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+}
+
+/* Scroll-Driven Animations - only when supported */
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .animate { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   PROGRESS BAR (scroll-driven)
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:5px;
+  z-index:999; background:rgba(0,0,0,0.06);
+  backdrop-filter:blur(6px);
+}
+.progress-bar {
+  height:100%; width:0;
+  background:linear-gradient(90deg,var(--c1),var(--c2),var(--c3),var(--c6));
+  animation:progressGrow both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+}
+@keyframes progressGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO SECTION
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  position:relative; overflow:hidden;
+  padding:2rem;
+  background:linear-gradient(135deg,#1a365d 0%,#2d6a9f 40%,#4a9bd9 70%,#7fc8f8 100%);
+  color:#fff;
+}
+.hero::before {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(circle at 30% 50%,rgba(245,158,11,0.15) 0%,transparent 60%),
+             radial-gradient(circle at 70% 80%,rgba(16,185,129,0.12) 0%,transparent 50%);
+  pointer-events:none;
+}
+
+/* floating shapes */
+.hero-shapes {
+  position:absolute; inset:0; overflow:hidden; pointer-events:none;
+}
+.hero-shapes span {
+  position:absolute; border-radius:50%;
+  opacity:0.08; animation:floatShape 20s infinite ease-in-out;
+}
+.hero-shapes span:nth-child(1) {
+  width:180px; height:180px; background:var(--c2);
+  top:10%; left:8%; animation-delay:0s; animation-duration:25s;
+}
+.hero-shapes span:nth-child(2) {
+  width:120px; height:120px; background:var(--c3);
+  top:60%; right:12%; animation-delay:-5s; animation-duration:20s;
+}
+.hero-shapes span:nth-child(3) {
+  width:240px; height:240px; background:var(--c4);
+  bottom:10%; left:20%; animation-delay:-10s; animation-duration:30s;
+}
+.hero-shapes span:nth-child(4) {
+  width:80px; height:80px; background:var(--c1);
+  top:30%; right:30%; animation-delay:-15s; animation-duration:18s;
+}
+@keyframes floatShape {
+  0%,100% { transform:translate(0,0) scale(1); }
+  25% { transform:translate(30px,-40px) scale(1.1); }
+  50% { transform:translate(-20px,20px) scale(0.9); }
+  75% { transform:translate(40px,30px) scale(1.05); }
+}
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:6px;
+  background:rgba(255,255,255,0.12); backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,0.2);
+  padding:0.5rem 1.2rem; border-radius:50px;
+  font-size:0.85rem; font-weight:500; letter-spacing:1px;
+  margin-bottom:1.5rem; animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; transform:translateY(-20px); } to { opacity:1; transform:translateY(0); } }
+
+.hero h1 {
+  font-size:clamp(2.2rem,6vw,4.5rem); font-weight:800;
+  letter-spacing:2px; line-height:1.2;
+  animation:heroTitleIn 1s 0.5s both;
+}
+.hero h1 span {
+  background:linear-gradient(135deg,var(--c2),#ffd700,#fff);
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+@keyframes heroTitleIn { from { opacity:0; transform:translateY(30px) scale(0.95); } to { opacity:1; transform:translateY(0) scale(1); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,2vw,1.3rem);
+  opacity:0.85; max-width:500px;
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll-hint {
+  position:absolute; bottom:2rem;
+  display:flex; flex-direction:column; align-items:center; gap:8px;
+  animation:heroScrollHint 1.2s 1.5s both, bounceY 2s 2.5s infinite;
+  color:rgba(255,255,255,0.7); font-size:0.85rem; cursor:default;
+}
+@keyframes bounceY {
+  0%,100% { transform:translateY(0); }
+  50% { transform:translateY(10px); }
+}
+.hero-scroll-hint svg { width:24px; height:24px; }
+
+/* ============================================================
+   CHAPTER — each step
+   ============================================================ */
+.chapter {
+  position:relative; min-height:100vh;
+  display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem;
+  overflow:hidden;
+}
+.chapter-inner {
+  max-width:1100px; width:100%;
+  position:relative; z-index:2;
+}
+
+/* Number badge */
+.chapter-num {
+  display:inline-flex; align-items:center; gap:10px;
+  font-size:0.9rem; font-weight:700; letter-spacing:2px;
+  text-transform:uppercase; margin-bottom:0.5rem;
+  animation:slideDown 0.6s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 60%;
+}
+@keyframes slideDown { from { opacity:0; transform:translateY(-20px); } to { opacity:1; transform:translateY(0); } }
+
+.chapter-title {
+  font-size:clamp(1.8rem,4vw,3rem);
+  font-weight:800; margin-bottom:2rem;
+  animation:fadeUp 0.8s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 50%;
+}
+
+/* ===== SCENE ILLUSTRATION ===== */
+.scene {
+  position:relative; width:100%; max-width:500px; margin:0 auto 2rem;
+  aspect-ratio:16/9; border-radius:var(--radius);
+  overflow:hidden;
+  background:linear-gradient(180deg, #e0f2fe 0%, #bae6fd 50%, #f0f9ff 100%);
+  box-shadow:var(--shadow);
+  animation:sceneReveal 1s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 40%;
+}
+@keyframes sceneReveal { from { opacity:0; transform:scale(0.9) translateY(30px); } to { opacity:1; transform:scale(1) translateY(0); } }
+
+/* ===== CONTENT CARDS ===== */
+.chapter-content {
+  display:grid; grid-template-columns:1fr 1fr; gap:1.5rem;
+  margin-top:1.5rem;
+}
+.chapter-content .card {
+  background:var(--card-bg); backdrop-filter:blur(10px);
+  border-radius:var(--radius); padding:1.5rem 1.8rem;
+  box-shadow:var(--shadow);
+  border:1px solid rgba(255,255,255,0.5);
+  animation:cardSlide 0.8s both;
+  animation-timeline:view();
+}
+.chapter-content .card:nth-child(1) { animation-range:entry 0% entry 55%; }
+.chapter-content .card:nth-child(2) { animation-range:entry 0% entry 45%; }
+.chapter-content .card:nth-child(3) { animation-range:entry 0% entry 35%; }
+@keyframes cardSlide {
+  from { opacity:0; transform:translateY(40px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+.card h3 {
+  display:flex; align-items:center; gap:8px;
+  font-size:1.1rem; margin-bottom:0.6rem;
+  color:var(--c1);
+}
+.card p, .card li {
+  font-size:0.95rem; color:var(--text);
+  line-height:1.7;
+}
+.card ul { list-style:none; padding:0; }
+.card li {
+  padding:0.3rem 0; padding-left:1.2rem;
+  position:relative;
+}
+.card li::before {
+  content:'✦'; position:absolute; left:0;
+  color:var(--c2); font-size:0.75rem;
+  top:0.45rem;
+}
+
+/* Fun-fact popup */
+.fun-fact {
+  margin-top:1.5rem;
+  background:linear-gradient(135deg, rgba(245,158,11,0.10), rgba(245,158,11,0.05));
+  border-left:4px solid var(--c2);
+  border-radius:0 var(--radius) var(--radius) 0;
+  padding:1rem 1.5rem;
+  animation:funFactIn 1s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 25%;
+}
+@keyframes funFactIn { from { opacity:0; transform:translateX(-20px) scale(0.95); } to { opacity:1; transform:translateX(0) scale(1); } }
+.fun-fact .label {
+  display:flex; align-items:center; gap:6px;
+  font-weight:700; font-size:0.85rem;
+  color:var(--c2); margin-bottom:0.3rem;
+}
+.fun-fact p { font-size:0.9rem; color:var(--text-light); line-height:1.6; }
+
+/* ============================================================
+   PER-STEP THEMES
+   ============================================================ */
+
+/* Step 1: 发现与明确问题 — Blue/Park */
+.ch1 { background:linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 50%, #dbeafe 100%); }
+.ch1 .scene { background:linear-gradient(180deg, #bae6fd 0%, #7dd3fc 40%, #f0f9ff 100%); }
+.ch1 .chapter-title { color:var(--c1); }
+.ch1 .card h3 { color:var(--c1); }
+
+/* Step 2: 制订设计方案 — Purple/Creative */
+.ch2 { background:linear-gradient(180deg, #f5f3ff 0%, #ede9fe 50%, #e0e7ff 100%); }
+.ch2 .scene { background:linear-gradient(180deg, #ddd6fe 0%, #c4b5fd 40%, #f5f3ff 100%); }
+.ch2 .chapter-title { color:var(--c4); }
+.ch2 .card h3 { color:var(--c4); }
+
+/* Step 3: 制作模型或原型 — Orange/Workshop */
+.ch3 { background:linear-gradient(180deg, #fff7ed 0%, #ffedd5 50%, #fef3c7 100%); }
+.ch3 .scene { background:linear-gradient(180deg, #fdba74 0%, #fb923c 40%, #fff7ed 100%); }
+.ch3 .chapter-title { color:#c2410c; }
+.ch3 .card h3 { color:#c2410c; }
+
+/* Step 4: 优化设计方案 — Green/Test */
+.ch4 { background:linear-gradient(180deg, #f0fdf4 0%, #dcfce7 50%, #ccfbf1 100%); }
+.ch4 .scene { background:linear-gradient(180deg, #86efac 0%, #6ee7b7 40%, #f0fdf4 100%); }
+.ch4 .chapter-title { color:var(--c3); }
+.ch4 .card h3 { color:var(--c3); }
+
+/* Step 5: 编写产品说明书 — Teal/Document */
+.ch5 { background:linear-gradient(180deg, #f0fdfa 0%, #ccfbf1 50%, #ecfdf5 100%); }
+.ch5 .scene { background:linear-gradient(180deg, #5eead4 0%, #2dd4bf 40%, #f0fdfa 100%); }
+.ch5 .chapter-title { color:var(--c6); }
+.ch5 .card h3 { color:var(--c6); }
+
+/* ============================================================
+   SCENE CONTENT (CSS illustrations + emoji)
+   ============================================================ */
+.scene-content {
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  font-size:5rem;
+}
+.scene .ground {
+  position:absolute; bottom:0; left:0; right:0;
+  height:35%; border-radius:0;
+}
+.scene .ground.g1 { background:linear-gradient(0deg, #86efac 0%, #bef264 100%); }
+.scene .ground.g2 { background:linear-gradient(0deg, #fde68a 0%, #fef3c7 100%); }
+.scene .ground.g3 { background:linear-gradient(0deg, #d4d4d8 0%, #f4f4f5 100%); }
+
+.scene-char {
+  position:absolute;
+  bottom:38%; left:50%;
+  transform:translateX(-50%);
+  font-size:3.5rem; line-height:1;
+  animation:charBounce 3s infinite ease-in-out;
+}
+@keyframes charBounce {
+  0%,100% { transform:translateX(-50%) translateY(0); }
+  50% { transform:translateX(-50%) translateY(-8px); }
+}
+
+.scene-elem {
+  position:absolute; font-size:2.5rem;
+  animation:elemBob 4s infinite ease-in-out;
+}
+@keyframes elemBob {
+  0%,100% { transform:translateY(0); }
+  50% { transform:translateY(-10px); }
+}
+
+/* Step 1 scene elements */
+.ch1 .scene-elem:nth-child(1) { bottom:45%; left:8%; animation-delay:0s; }  /* tree */
+.ch1 .scene-elem:nth-child(2) { bottom:50%; right:10%; animation-delay:-1s; } /* sun */
+.ch1 .scene-elem:nth-child(3) { bottom:40%; left:70%; animation-delay:-2s; }  /* flower */
+
+/* Step 2 scene */
+.ch2 .scene-elem:nth-child(1) { bottom:45%; left:5%; }
+.ch2 .scene-elem:nth-child(2) { bottom:42%; right:8%; }
+.ch2 .scene-elem:nth-child(3) { bottom:45%; left:35%; font-size:4rem; }
+
+/* Step 3 scene */
+.ch3 .scene-elem:nth-child(1) { bottom:42%; left:10%; }
+.ch3 .scene-elem:nth-child(2) { bottom:44%; right:12%; }
+.ch3 .scene-elem:nth-child(3) { bottom:40%; left:55%; }
+
+/* Step 4 scene */
+.ch4 .scene-elem:nth-child(1) { bottom:44%; left:8%; }
+.ch4 .scene-elem:nth-child(2) { bottom:42%; right:8%; }
+.ch4 .scene-elem:nth-child(3) { bottom:46%; left:55%; }
+
+/* Step 5 scene */
+.ch5 .scene-elem:nth-child(1) { bottom:44%; left:10%; }
+.ch5 .scene-elem:nth-child(2) { bottom:43%; right:12%; }
+.ch5 .scene-elem:nth-child(3) { bottom:40%; left:50%; }
+
+/* ============================================================
+   SUMMARY SECTION
+   ============================================================ */
+.summary {
+  min-height:80vh;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center; padding:4rem 1.5rem;
+  background:linear-gradient(135deg,#1a365d,#2d6a9f,#1e293b);
+  color:#fff; position:relative; overflow:hidden;
+}
+.summary::before {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(circle at 20% 50%,rgba(245,158,11,0.1) 0%,transparent 50%),
+             radial-gradient(circle at 80% 50%,rgba(16,185,129,0.08) 0%,transparent 50%);
+  pointer-events:none;
+}
+
+.summary h2 {
+  font-size:clamp(1.8rem,4vw,2.8rem); font-weight:800;
+  margin-bottom:1.5rem; position:relative; z-index:1;
+}
+
+.mindmap {
+  display:flex; flex-wrap:wrap; justify-content:center;
+  gap:0.8rem; max-width:700px; margin:1.5rem auto;
+  position:relative; z-index:1;
+}
+.mindmap-item {
+  background:rgba(255,255,255,0.1); backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,0.15);
+  padding:0.6rem 1.2rem; border-radius:50px;
+  font-size:0.85rem; font-weight:500;
+  animation:mindmapIn 0.6s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 60%;
+}
+.mindmap-item:nth-child(1) { animation-delay:0s; }
+.mindmap-item:nth-child(2) { animation-delay:0.1s; }
+.mindmap-item:nth-child(3) { animation-delay:0.2s; }
+.mindmap-item:nth-child(4) { animation-delay:0.3s; }
+.mindmap-item:nth-child(5) { animation-delay:0.4s; }
+@keyframes mindmapIn { from { opacity:0; transform:scale(0.8) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
+
+.flow-arrow {
+  font-size:1.5rem; opacity:0.4; animation:flowPulse 1.5s infinite;
+}
+@keyframes flowPulse { 0%,100% { opacity:0.3; } 50% { opacity:0.7; } }
+
+.summary-quote {
+  margin-top:2rem; font-size:1.1rem;
+  opacity:0.8; font-style:italic; position:relative; z-index:1;
+  animation:fadeUp 1s both;
+  animation-timeline:view();
+  animation-range:entry 0% entry 50%;
+}
+.summary-quote strong { color:var(--c2); }
+
+/* ============================================================
+   PARALLAX DECORATIVE ELEMENTS
+   ============================================================ */
+.parallax-dot {
+  position:absolute; width:6px; height:6px; border-radius:50%;
+  background:rgba(255,255,255,0.08);
+  animation:parallaxDrift both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+  pointer-events:none;
+}
+@keyframes parallaxDrift { from { transform:translateY(0); } to { transform:translateY(-100px); } }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .chapter-content { grid-template-columns:1fr; }
+  .chapter { padding:3rem 1rem; min-height:auto; }
+  .scene { max-width:100%; }
+  .hero h1 { font-size:2rem; }
+  .mindmap { gap:0.5rem; }
+  .mindmap-item { font-size:0.75rem; padding:0.4rem 0.8rem; }
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after {
+    animation-duration:0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.01ms !important;
+  }
+}
+
+/* ============================================================
+   FLOATING CHARACTER — 小创 follows you
+   ============================================================ */
+.floating-char {
+  position:fixed; bottom:1.5rem; right:1.5rem;
+  z-index:100;
+  font-size:2.5rem; line-height:1;
+  animation:float 3s infinite ease-in-out;
+  opacity:0.7;
+  transition:opacity 0.3s;
+  cursor:default;
+  pointer-events:none;
+}
+.floating-char:hover { opacity:1; }
+@keyframes float {
+  0%,100% { transform:translateY(0) rotate(-2deg); }
+  50% { transform:translateY(-12px) rotate(2deg); }
+}
+
+/* Step labels on floating char */
+.floating-char .speech {
+  position:absolute; bottom:110%; right:0;
+  background:rgba(255,255,255,0.95);
+  backdrop-filter:blur(8px);
+  border-radius:12px; padding:0.4rem 0.8rem;
+  font-size:0.75rem; color:var(--text);
+  white-space:nowrap;
+  box-shadow:0 4px 12px rgba(0,0,0,0.1);
+  opacity:0; transform:translateY(5px) scale(0.95);
+  transition:all 0.3s;
+  pointer-events:none;
+}
+.floating-char:hover .speech { opacity:1; transform:translateY(0) scale(1); }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<!-- ===== Progress Bar ===== -->
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== Floating Xiao Chuang ===== -->
+<div class="floating-char">
+  🧑‍🎨
+  <span class="speech">卷起来吧！</span>
+</div>
+
+<!-- =============================================================
+     HERO
+     ============================================================= -->
+<section class="hero" id="top">
+  <div class="hero-shapes">
+    <span></span><span></span><span></span><span></span>
+  </div>
+  <div class="hero-badge">🧑‍🎨 通用技术 · 必修一</div>
+  <h1>设计的一般<br><span>过程</span></h1>
+  <p class="hero-sub">跟着 <strong>小创</strong> 一起探索从灵感到产品的奇妙旅程</p>
+  <div class="hero-scroll-hint">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2v20M5 15l7 7 7-7"/>
+    </svg>
+    向下滚动开始探索
+  </div>
+</section>
+
+<!-- =============================================================
+     STEP 1: 发现与明确问题
+     ============================================================= -->
+<section class="chapter ch1">
+  <div class="chapter-inner">
+    <div class="chapter-num" style="color:var(--c1);">🔍 第一步</div>
+    <h2 class="chapter-title">发现与明确问题</h2>
+
+    <div class="scene">
+      <div class="scene-content">
+        <span class="scene-elem">🌳</span>
+        <span class="scene-elem">☀️</span>
+        <span class="scene-elem">🌷</span>
+        <div class="ground g1"></div>
+        <div class="scene-char">🧑‍🎨</div>
+      </div>
+      <div style="position:absolute;bottom:10%;left:50%;transform:translateX(-50%);
+                  font-size:0.85rem;color:#fff;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.2);
+                  background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);padding:0.3rem 1rem;border-radius:50px;
+                  white-space:nowrap;">
+        🏞️ 公园里的小发现
+      </div>
+    </div>
+
+    <div class="chapter-content">
+      <div class="card">
+        <h3>📋 发现需求</h3>
+        <p>小创在公园里看到小朋友想坐却没地方坐——从生活、学习或社会需求中<strong>发现问题</strong>，这是设计的起点！</p>
+      </div>
+      <div class="card">
+        <h3>🔬 调查分析</h3>
+        <p>通过问卷、访谈、观察等<strong>收集信息</strong>，分析问题的价值与可行性，明确设计的具体要求。</p>
+      </div>
+      <div class="card" style="grid-column:1/-1;">
+        <h3>🎯 明确项目</h3>
+        <p>确定设计目标：便携式小凳——要求轻便、承重≥50kg、成本低、可折叠。问题越明确，方向越清晰！</p>
+      </div>
+    </div>
+
+    <div class="fun-fact">
+      <div class="label">💡 趣味知识</div>
+      <p>世界上第一个"随身听"诞生，就是因为索尼创始人发现年轻人想随时随地听音乐又不打扰别人。伟大设计，都从发现一个问题开始！</p>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     STEP 2: 制订设计方案
+     ============================================================= -->
+<section class="chapter ch2">
+  <div class="chapter-inner">
+    <div class="chapter-num" style="color:var(--c4);">✏️ 第二步</div>
+    <h2 class="chapter-title">制订设计方案</h2>
+
+    <div class="scene">
+      <div class="scene-content">
+        <span class="scene-elem">📚</span>
+        <span class="scene-elem">💡</span>
+        <span class="scene-elem" style="font-size:5rem;">✏️</span>
+        <div class="ground g2"></div>
+        <div class="scene-char">🧑‍🎨</div>
+      </div>
+      <div style="position:absolute;bottom:10%;left:50%;transform:translateX(-50%);
+                  font-size:0.85rem;color:#fff;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.2);
+                  background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);padding:0.3rem 1rem;border-radius:50px;
+                  white-space:nowrap;">
+        💭 小创的创意工坊
+      </div>
+    </div>
+
+    <div class="chapter-content">
+      <div class="card">
+        <h3>🔎 收集信息</h3>
+        <p>通过<strong>用户调查、专家咨询、查阅图书资料、收听广播、收看电视、浏览互联网</strong>等渠道，广泛收集与便携式小凳相关的各种信息——了解现有产品的材料、结构、功能、成本等，为后续设计分析提供充足依据。</p>
+      </div>
+      <div class="card">
+        <h3>📊 设计分析</h3>
+        <p>对收集到的信息进行归类、比较、权衡，<strong>找出主要问题，分析可能的解决方法</strong>。思考如何选择材料（木材/塑料/金属？）、如何使结构稳固、如何便于携带——明确设计的约束条件和关键点。</p>
+      </div>
+      <div class="card">
+        <h3>💡 方案构思</h3>
+        <p>大胆突破传统观念的束缚，运用不同的材料、结构，提出多个创造性的设计想法。小创开展"头脑风暴"，画出 5 种方案——折叠凳、充气凳、嵌套凳、三角凳、布袋凳！</p>
+      </div>
+      <div class="card">
+        <h3>✏️ 方案呈现</h3>
+        <p>将设计构思转化为视觉形象。通常用<strong>草图</strong>作为主要的呈现方式，把设计想法直观地画出来——快速表达设计意图，让创意"看得见"！</p>
+      </div>
+      <div class="card">
+        <h3>⚖️ 方案筛选</h3>
+        <p>依据<strong>设计的一般原则</strong>（实用、创新、经济、美观、道德、规范、可持续）、<strong>设计要求</strong>、<strong>材料与工艺的可行性</strong>及<strong>经济性</strong>，对多个方案进行综合比较评估，选出最符合目标要求的最优方案。</p>
+      </div>
+      <div class="card" style="grid-column:1/-1;">
+        <h3>📐 绘制图样</h3>
+        <p>对筛选出的最终方案，绘制规范的<strong>技术图样</strong>（三视图、效果图、尺寸图等），标明结构、尺寸、材料、连接方式等细节——既可手工绘制，也可采用计算机辅助绘图，为后续制作模型或原型提供精确依据！</p>
+      </div>
+    </div>
+
+    <div class="fun-fact">
+      <div class="label">💡 趣味知识</div>
+      <p>你知道吗？教材中孙宇同学为设计便携式小凳，共构思了 5 个方案，最终根据设计要求筛选出最合适的方案——设计方案从来不是一步到位的，"好方案绝不会仅有一个"！</p>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     STEP 3: 制作模型或原型
+     ============================================================= -->
+<section class="chapter ch3">
+  <div class="chapter-inner">
+    <div class="chapter-num" style="color:#c2410c;">🔨 第三步</div>
+    <h2 class="chapter-title">制作模型或原型</h2>
+
+    <div class="scene">
+      <div class="scene-content">
+        <span class="scene-elem">🔧</span>
+        <span class="scene-elem">🪚</span>
+        <span class="scene-elem">📏</span>
+        <div class="ground g3"></div>
+        <div class="scene-char">🧑‍🎨</div>
+      </div>
+      <div style="position:absolute;bottom:10%;left:50%;transform:translateX(-50%);
+                  font-size:0.85rem;color:#fff;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.2);
+                  background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);padding:0.3rem 1rem;border-radius:50px;
+                  white-space:nowrap;">
+        🛠️ 动手制作啦！
+      </div>
+    </div>
+
+    <div class="chapter-content">
+      <div class="card">
+        <h3>🏗️ 原型 vs 模型</h3>
+        <p>简单产品直接做<strong>原型</strong>（最终样机）；复杂产品先做<strong>模型</strong>测试验证，再定最终方案。</p>
+      </div>
+      <div class="card">
+        <h3>🧱 材料与工艺</h3>
+        <p>选择合适材料：木材、金属、塑料、布料……以及对应的加工工艺：锯、锉、粘接、缝纫等。</p>
+      </div>
+      <div class="card" style="grid-column:1/-1;">
+        <h3>🖥️ 数字工具</h3>
+        <p>现代设计还能用激光切割机、3D 打印机等数字化设备快速制作原型，效率大大提升！</p>
+      </div>
+    </div>
+
+    <div class="fun-fact">
+      <div class="label">💡 趣味知识</div>
+      <p>波音 777 是第一架完全用 3D 数字模型设计的飞机，没有传统图纸！它在电脑里"飞"了无数次才造出第一架真机。</p>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     STEP 4: 优化设计方案
+     ============================================================= -->
+<section class="chapter ch4">
+  <div class="chapter-inner">
+    <div class="chapter-num" style="color:var(--c3);">🔄 第四步</div>
+    <h2 class="chapter-title">优化设计方案</h2>
+
+    <div class="scene">
+      <div class="scene-content">
+        <span class="scene-elem">📊</span>
+        <span class="scene-elem">✅</span>
+        <span class="scene-elem">🔄</span>
+        <div class="ground g1"></div>
+        <div class="scene-char">🧑‍🎨</div>
+      </div>
+      <div style="position:absolute;bottom:10%;left:50%;transform:translateX(-50%);
+                  font-size:0.85rem;color:#fff;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.2);
+                  background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);padding:0.3rem 1rem;border-radius:50px;
+                  white-space:nowrap;">
+        🔄 测试·评价·优化
+      </div>
+    </div>
+
+    <div class="chapter-content">
+      <div class="card">
+        <h3>🧪 测试</h3>
+        <p>模型或原型制作完成后进行技术测试。小创做了提拉、承重、稳定性测试——小凳能承受 50kg 吗？折叠顺畅吗？有没有安全隐患？</p>
+      </div>
+      <div class="card">
+        <h3>📋 评价</h3>
+        <p>在测试基础上，对设计方案和产品进行<strong>全面评价</strong>。邀请同学试坐、填写评价表，从功能、人机关系、美观、经济等多维度收集客观反馈。</p>
+      </div>
+      <div class="card" style="grid-column:1/-1;">
+        <h3>🔄 优化</h3>
+        <p>根据测试和评价的结果，分析具体记录，明确改进方向。发现凳腿不够稳？——加防滑垫！折叠太紧？——调整铰链角度！好设计是改出来的，不是一次画出来的！</p>
+      </div>
+    </div>
+
+    <div class="fun-fact">
+      <div class="label">💡 趣味知识</div>
+      <p>SpaceX 的猎鹰火箭经历了 3 次爆炸测试才成功回收！马斯克说："如果你造的东西没有爆炸过，那就是不够努力。"——迭代优化，是通往卓越的唯一路径！</p>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     STEP 5: 编写产品说明书
+     ============================================================= -->
+<section class="chapter ch5">
+  <div class="chapter-inner">
+    <div class="chapter-num" style="color:var(--c6);">📝 第五步</div>
+    <h2 class="chapter-title">编写产品说明书</h2>
+
+    <div class="scene">
+      <div class="scene-content">
+        <span class="scene-elem">📄</span>
+        <span class="scene-elem">✍️</span>
+        <span class="scene-elem">📋</span>
+        <div class="ground g2"></div>
+        <div class="scene-char">🧑‍🎨</div>
+      </div>
+      <div style="position:absolute;bottom:10%;left:50%;transform:translateX(-50%);
+                  font-size:0.85rem;color:#fff;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,0.2);
+                  background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);padding:0.3rem 1rem;border-radius:50px;
+                  white-space:nowrap;">
+        📖 让用户看懂
+      </div>
+    </div>
+
+    <div class="chapter-content">
+      <div class="card">
+        <h3>📑 说明书结构</h3>
+        <p>产品名称、结构示意、使用方法、注意事项、保养维护、联系方式——缺一不可！</p>
+      </div>
+      <div class="card">
+        <h3>🎯 用户友好</h3>
+        <p>小创用<strong>图示+文字</strong>结合的方式，让小朋友也能看懂怎么折叠、怎么收纳。好的说明书是无声的老师。</p>
+      </div>
+      <div class="card" style="grid-column:1/-1;">
+        <h3>✨ 设计的意义</h3>
+        <p>从发现问题到交付产品，设计不仅解决了"没地方坐"的问题，更体现了<strong>以人为本</strong>的关怀。这就是设计的价值！</p>
+      </div>
+    </div>
+
+    <div class="fun-fact">
+      <div class="label">💡 趣味知识</div>
+      <p>宜家家具说明书采用"纯图示、零文字"设计，全球都能看懂。每年节约数百万印刷费，还减少了翻译错误——好设计连说明书本身都是设计！</p>
+    </div>
+  </div>
+</section>
+
+<!-- =============================================================
+     SUMMARY
+     ============================================================= -->
+<section class="summary">
+  <h2>🧠 设计的一般过程 · 总结</h2>
+
+  <div class="mindmap">
+    <span class="mindmap-item" style="background:rgba(45,106,159,0.3);border-color:rgba(45,106,159,0.5);">🔍 发现问题</span>
+    <span class="flow-arrow">→</span>
+    <span class="mindmap-item" style="background:rgba(139,92,246,0.3);border-color:rgba(139,92,246,0.5);">✏️ 设计方案</span>
+    <span class="flow-arrow">→</span>
+    <span class="mindmap-item" style="background:rgba(194,65,12,0.3);border-color:rgba(194,65,12,0.5);">🔨 制作模型</span>
+    <span class="flow-arrow">→</span>
+    <span class="mindmap-item" style="background:rgba(16,185,129,0.3);border-color:rgba(16,185,129,0.5);">🔄 优化设计方案</span>
+    <span class="flow-arrow">→</span>
+    <span class="mindmap-item" style="background:rgba(13,148,136,0.3);border-color:rgba(13,148,136,0.5);">📝 编写说明</span>
+  </div>
+
+  <p class="summary-quote">
+    "设计不是一步到位的灵光一现，而是<strong>发现问题→解决问题→持续改进</strong>的科学过程。"<br>
+    <span style="font-size:0.85rem;opacity:0.6;">—— 每个人都是设计师，从今天开始观察世界吧！</span>
+  </p>
+</section>
+
+</body>
+</html>
