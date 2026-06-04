@@ -1,18 +1,42 @@
-# 智慧教学平台-高中信通版 (SmartKBS)
+# 智慧教学平台 (SmartKBS)
 
-> 面向高中信息科技与通用技术课程的 AI 智慧教学管理平台
+> 通用学科 AI 智慧教学管理平台（以高中信息科技、通用技术课程为例开发设计）
 > 集成流式 AI 对话、资源管理、试题库、在线考试、任务管理、课程大纲、课堂互动、分组讨论、课堂积分、智能点名、学情分析、成长档案等功能。基于 FastAPI + React 构建。
 
 ![版本](https://img.shields.io/badge/版本-3.6.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
+![许可证](https://img.shields.io/badge/许可证-AGPL--3.0-red)
 
 ---
 
 ## 📋 项目简介
 
-**SmartKBS** 是一款面向高中信息技术与通用技术课程的 AI 智能问答与教学管理平台。系统基于 **FastAPI + React** 构建，融合云端 AI 能力（阿里云 DashScope 与 DeepSeek），为教师和学生提供全方位教学辅助服务。
+**SmartKBS** 是一款通用学科的 AI 智能问答与教学管理平台。系统基于 **FastAPI + React** 构建，融合云端 AI 能力（阿里云 DashScope 与 DeepSeek），为教师和学生提供全方位教学辅助服务。
+
+> 💡 **学科无关设计**：平台以高中信息科技、通用技术课程为例进行开发设计，但不限定特定学科。通过配置 AI 智能体（Agent）的知识库内容，可接入任意学科的教学资源。教师可根据自身教学需要，自由配置学科知识库，实现个性化教学支持。
+
+---
+
+## 📄 许可证
+
+本项目基于 **GNU Affero General Public License v3.0 (AGPL-3.0)** 开源。
+
+Copyright © 2026 youufis
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as published
+    by the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ---
 
