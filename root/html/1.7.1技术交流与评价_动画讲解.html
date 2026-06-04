@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>技术交流与评价 · 设计评审会</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Conference / Stage Theme
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#0d0d1a;
+  --stage:#1a1a30;
+  --text:#f0eeff;
+  --text-dim:#8a88b0;
+  --gold:#f5c542;
+  --gold-light:#ffe68a;
+  --violet:#8b5cf6;
+  --cyan:#22d3ee;
+  --pink:#ec4899;
+  --spot:rgba(245,197,66,0.04);
+  --card-bg:rgba(26,26,48,0.7);
+  --card-border:rgba(139,92,246,0.08);
+  --radius:12px;
+  --shadow:0 8px 40px rgba(0,0,0,0.5);
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.8;
+  font-size:18px;
+}
+
+/* Stage curtain sides */
+body::before {
+  content:''; position:fixed; top:0; bottom:0;
+  left:0; width:15px;
+  background:linear-gradient(90deg, rgba(139,92,246,0.06), transparent);
+  pointer-events:none; z-index:1;
+}
+body::after {
+  content:''; position:fixed; top:0; bottom:0;
+  right:0; width:15px;
+  background:linear-gradient(270deg, rgba(139,92,246,0.06), transparent);
+  pointer-events:none; z-index:1;
+}
+
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .anime { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   Progress — Spotlight beam
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:4px;
+  z-index:999; background:rgba(26,26,48,0.8);
+  backdrop-filter:blur(8px);
+}
+.progress-bar {
+  height:100%; width:0;
+  background:linear-gradient(90deg, var(--violet), var(--gold), var(--pink));
+  box-shadow:0 0 12px rgba(139,92,246,0.3);
+  animation:progGrow both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO — Stage opening
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:2rem; position:relative; overflow:hidden;
+  background:
+    radial-gradient(ellipse at 50% 80%, rgba(139,92,246,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 30% 20%, rgba(245,197,66,0.02) 0%, transparent 40%);
+}
+
+/* Spotlight effect */
+.hero::before {
+  content:''; position:absolute;
+  top:-20%; left:50%; transform:translateX(-50%);
+  width:600px; height:600px;
+  background:radial-gradient(ellipse, rgba(245,197,66,0.03) 0%, transparent 70%);
+  pointer-events:none;
+}
+
+/* Stage lights */
+.hero-lights { position:absolute; inset:0; pointer-events:none; }
+.hero-lights span {
+  position:absolute; bottom:0;
+  width:2px; height:30%;
+  background:linear-gradient(0deg, rgba(139,92,246,0.04), transparent);
+}
+.hero-lights span:nth-child(1) { left:15%; } .hero-lights span:nth-child(2) { left:35%; }
+.hero-lights span:nth-child(3) { left:55%; } .hero-lights span:nth-child(4) { left:75%; }
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  background:rgba(139,92,246,0.06);
+  border:1px solid rgba(139,92,246,0.1);
+  padding:0.4rem 1.5rem;
+  font-size:0.78rem; color:var(--violet);
+  letter-spacing:4px; font-weight:600;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; } to { opacity:1; } }
+
+.hero h1 {
+  font-size:clamp(2.2rem,5vw,4rem); font-weight:800;
+  letter-spacing:4px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 .line1 { font-size:clamp(1.2rem,2.2vw,1.8rem); font-weight:400; color:var(--text-dim); display:block; letter-spacing:8px; }
+.hero h1 .line2 { background:linear-gradient(135deg, var(--gold), var(--gold-light));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text; }
+@keyframes titleIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,1.8vw,1.3rem);
+  color:var(--text-dim);
+  letter-spacing:2px;
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2.5rem;
+  display:flex; flex-direction:column; align-items:center;
+  font-size:0.85rem; color:var(--text-dim); letter-spacing:3px;
+  animation:bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(8px); } }
+.hero-scroll::after { content:'▼'; font-size:0.7rem; margin-top:4px; }
+
+/* ============================================================
+   SECTION
+   ============================================================ */
+.section {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem; position:relative; z-index:1;
+}
+.section-inner { max-width:1100px; width:100%; }
+
+.section-header {
+  text-align:center; margin-bottom:3rem;
+  animation:headIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 60%;
+}
+@keyframes headIn { from { opacity:0; transform:translateY(-15px); } to { opacity:1; transform:translateY(0); } }
+
+.section-slide {
+  display:inline-block;
+  font-size:0.8rem; color:var(--violet);
+  letter-spacing:4px; font-weight:600;
+  font-family:'Courier New',monospace;
+}
+.section-title {
+  font-size:clamp(1.5rem,3vw,2.5rem); font-weight:700;
+  letter-spacing:3px; margin-top:0.3rem;
+}
+
+/* ===== Slide card ===== */
+.slide-card {
+  background:var(--card-bg); backdrop-filter:blur(12px);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius);
+  padding:2.5rem 3rem; margin-bottom:2rem;
+  box-shadow:var(--shadow);
+  animation:slideIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+@keyframes slideIn { from { opacity:0; transform:translateY(30px) scale(0.97); } to { opacity:1; transform:translateY(0) scale(1); } }
+
+.slide-card h3 {
+  font-size:1.3rem; color:var(--gold);
+  margin-bottom:1rem; display:flex; align-items:center; gap:10px;
+}
+.slide-card p, .slide-card li {
+  font-size:1rem; color:var(--text); line-height:1.9;
+}
+.slide-card li { padding:0.3rem 0; }
+.slide-card strong { color:var(--gold-light); }
+
+/* ===== Grid ===== */
+.g2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+.g3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; }
+
+/* ===== Point card ===== */
+.point-card {
+  background:var(--card-bg); backdrop-filter:blur(12px);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius);
+  padding:1.5rem 2rem;
+  box-shadow:var(--shadow);
+  animation:slideIn 0.8s both; animation-timeline:view();
+  position:relative; overflow:hidden;
+}
+.point-card::after {
+  content:''; position:absolute; top:0; right:0;
+  width:80px; height:80px;
+  background:radial-gradient(circle, rgba(245,197,66,0.02), transparent 70%);
+  pointer-events:none;
+}
+.point-card:nth-child(1) { animation-range:entry 0% entry 55%; }
+.point-card:nth-child(2) { animation-range:entry 0% entry 48%; }
+.point-card:nth-child(3) { animation-range:entry 0% entry 41%; }
+
+.point-card .pc-icon { font-size:2.2rem; margin-bottom:0.5rem; }
+.point-card h4 { font-size:1.1rem; color:var(--gold); margin-bottom:0.5rem; }
+.point-card p, .point-card li {
+  font-size:0.92rem; color:var(--text-dim); line-height:1.7;
+}
+.point-card li { padding:0.15rem 0; }
+
+/* ===== Table ===== */
+.pres-table {
+  width:100%; border-collapse:collapse;
+  background:var(--card-bg); backdrop-filter:blur(12px);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius); overflow:hidden;
+  animation:slideIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 45%;
+}
+.pres-table th {
+  background:rgba(139,92,246,0.08);
+  color:var(--violet); font-size:0.9rem;
+  padding:0.8rem 1.2rem; text-align:left;
+  font-weight:600; border-bottom:1px solid rgba(139,92,246,0.06);
+}
+.pres-table td {
+  padding:0.7rem 1.2rem; font-size:0.88rem;
+  color:var(--text-dim); border-bottom:1px solid rgba(139,92,246,0.03);
+}
+
+/* ===== Example ===== */
+.demo-callout {
+  background:linear-gradient(135deg, rgba(245,197,66,0.03), rgba(236,72,153,0.03));
+  border:1px solid rgba(245,197,66,0.06);
+  border-radius:var(--radius);
+  padding:1.2rem 2rem; margin-top:1.5rem;
+  animation:slideIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 30%;
+}
+.demo-callout .dc-label {
+  font-size:0.8rem; color:var(--violet); letter-spacing:2px;
+  margin-bottom:0.3rem;
+}
+.demo-callout p { font-size:0.95rem; color:var(--text-dim); line-height:1.8; }
+.demo-callout strong { color:var(--text); }
+
+/* ============================================================
+   SUMMARY — Finale
+   ============================================================ */
+.summary {
+  min-height:50vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem;
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(139,92,246,0.04) 0%, transparent 50%);
+}
+.summary h2 {
+  font-size:clamp(1.5rem,3vw,2.5rem); font-weight:700;
+  color:var(--gold); letter-spacing:3px;
+  animation:slideIn 0.8s both; animation-timeline:view();
+}
+.summary .closing {
+  font-size:1.1rem; color:var(--text-dim); max-width:600px;
+  margin-top:1rem; font-style:italic;
+  animation:slideIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+.summary .closing strong { color:var(--text); }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .g2, .g3 { grid-template-columns:1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  .slide-card { padding:1.5rem; }
+  body { font-size:16px; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:rgba(139,92,246,0.08); }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-lights"><span></span><span></span><span></span><span></span></div>
+  <div class="hero-badge">◆ DESIGN REVIEW · 技术评审会</div>
+  <h1>
+    <span class="line1">技术交流与</span>
+    <span class="line2">评价</span>
+  </h1>
+  <p class="hero-sub">— 好设计不怕被看见，不怕被评价 —</p>
+  <div class="hero-scroll">进入会场</div>
+</section>
+
+<!-- ===== SECTION 1: 评价概述 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-slide">SLIDE 1/4</div>
+      <h2 class="section-title">设计的评价概述</h2>
+    </div>
+
+    <div class="slide-card">
+      <h3>🎯 什么是设计的评价？</h3>
+      <p>依据<strong>设计的一般原则</strong>和<strong>事先制订的设计要求</strong>，采取一定方法和手段，对设计所涉及的<strong>过程及结果</strong>进行事实判断和价值认定的活动。</p>
+    </div>
+
+    <div class="g3">
+      <div class="point-card">
+        <div class="pc-icon">📊</div>
+        <h4>评价的意义</h4>
+        <ul>
+          <li>✦ 树立质量管理意识</li>
+          <li>✦ 强化过程控制</li>
+          <li>✦ 高质量完成任务</li>
+          <li>✦ 促进信息交流与反思</li>
+          <li>✦ 及时发现问题，避免安全隐患</li>
+        </ul>
+      </div>
+      <div class="point-card">
+        <div class="pc-icon">🧑‍🤝‍🧑</div>
+        <h4>自评 vs 他评</h4>
+        <ul>
+          <li><strong>自评</strong> — 设计者自我反思，调整方向</li>
+          <li><strong>他评</strong> — 他人客观视角，发现盲区</li>
+        </ul>
+      </div>
+      <div class="point-card">
+        <div class="pc-icon">⚖️</div>
+        <h4>重要前提</h4>
+        <p>所有评价必须建立在<strong>事实判断</strong>基础上，避免主观臆断。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 2: 评价分类 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-slide">SLIDE 2/4</div>
+      <h2 class="section-title">评价的维度与分类</h2>
+    </div>
+
+    <table class="pres-table">
+      <thead>
+        <tr>
+          <th>分类角度</th>
+          <th>类型</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong style="color:var(--text);">评价对象</strong></td>
+          <td>过程评价 / 成果评价</td>
+          <td>既看结果好不好，也看过程切实不切实</td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--text);">评价者</strong></td>
+          <td>自我评价 / 他人评价</td>
+          <td>自评+他评=完整视角</td>
+        </tr>
+        <tr>
+          <td><strong style="color:var(--text);">评价内容</strong></td>
+          <td>功能 / 外观 / 人机 / 经济 / 创新</td>
+          <td>从多维指标综合判断</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="demo-callout">
+      <div class="dc-label">🗣️ 课堂实例</div>
+      <p>一个完整的评价应当包含：<strong>事实描述</strong>（"凳腿连接处有 0.5mm 缝隙"）+ <strong>价值判断</strong>（"影响稳定性，需改进"）。只说"好看/不好看"不是有效评价。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 3: 过程评价 & 成果评价 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-slide">SLIDE 3/4</div>
+      <h2 class="section-title">过程评价 &amp; 成果评价</h2>
+    </div>
+
+    <div class="g2">
+      <div class="slide-card" style="margin-bottom:0;">
+        <h3>📋 对设计过程的评价</h3>
+        <ul>
+          <li>✦ 问题发现是否真实、有价值</li>
+          <li>✦ 信息收集是否充分、有效</li>
+          <li>✦ 方案构思是否科学、有创意</li>
+          <li>✦ 模型制作是否按计划推进</li>
+          <li>✦ 各环节衔接是否协调</li>
+        </ul>
+        <div class="demo-callout" style="margin-top:1rem;">
+          <p>过程评价<strong>不是简单的"对错"</strong>，而是看每个环节的<strong>质量与协调性</strong></p>
+        </div>
+      </div>
+      <div class="slide-card" style="margin-bottom:0;">
+        <h3>🏆 对最终产品的评价</h3>
+        <ul>
+          <li>✦ <strong>功能</strong> — 是否达到设计目标</li>
+          <li>✦ <strong>人机关系</strong> — 安全、舒适、健康</li>
+          <li>✦ <strong>外观</strong> — 造型、色彩、质感</li>
+          <li>✦ <strong>经济性</strong> — 成本控制</li>
+          <li>✦ <strong>创新性</strong> — 有无独到之处</li>
+          <li>✦ <strong>可持续性</strong> — 环保、可回收</li>
+          <li>✦ <strong>道德</strong> — 遵循伦理、不损害公共利益</li>
+          <li>✦ <strong>技术规范</strong> — 符合行业标准与安全规范</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 4: 评价方式 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-slide">SLIDE 4/4</div>
+      <h2 class="section-title">评价方式 &amp; 交流</h2>
+    </div>
+
+    <div class="g2">
+      <div class="point-card">
+        <div class="pc-icon">📝</div>
+        <h4>设计评价报告</h4>
+        <p>完整记录：设计目标 → 评价依据 → 逐项评分 → 优缺点分析 → 改进建议。让评价<strong>可追溯、可量化</strong>。</p>
+      </div>
+      <div class="point-card">
+        <div class="pc-icon">🗣️</div>
+        <h4>技术交流方式</h4>
+        <ul>
+          <li>✦ 口头报告 — 现场答辩/评审会</li>
+          <li>✦ 展示板 — 图文结合呈现成果</li>
+          <li>✦ 实物演示 — 现场操作展示作品</li>
+          <li>✦ 数字媒体 — PPT/视频/网站</li>
+        </ul>
+        <div style="margin-top:0.8rem;padding:0.8rem;background:rgba(139,92,246,0.05);border-radius:6px;font-size:0.88rem;color:var(--text-dim);">
+          <strong style="color:var(--gold);">💡 技术交流的意义：</strong>分享设计思想、获取反馈 → 发现问题和不足 → 集思广益优化方案 → 促进团队协作
+        </div>
+      </div>
+    </div>
+
+    <div class="slide-card" style="margin-bottom:0;">
+      <h3>📐 两种经典评价工具</h3>
+      <p><strong>① 表格分析法</strong> — 将评价维度（功能、创新、人机、经济、美观、道德、技术规范、可持续性）逐项列出，按<strong>设计的一般原则</strong>和<strong>设计要求</strong>分别打分，清晰呈现每项的达标情况。</p>
+      <p><strong>② 雷达图</strong> — 从多个维度对产品打分，用<strong>雷达图</strong>直观呈现——面积越大越优异，凹陷处就是改进方向。这是一种非常直观的<strong>定量+定性</strong>结合的评价方法。</p>
+      <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:1rem;">
+        <span style="background:rgba(245,197,66,0.06);border:1px solid rgba(245,197,66,0.08);padding:0.25rem 0.8rem;border-radius:20px;font-size:0.8rem;color:var(--gold);">功能 4/5</span>
+        <span style="background:rgba(245,197,66,0.06);border:1px solid rgba(245,197,66,0.08);padding:0.25rem 0.8rem;border-radius:20px;font-size:0.8rem;color:var(--gold);">创新 5/5</span>
+        <span style="background:rgba(245,197,66,0.06);border:1px solid rgba(245,197,66,0.08);padding:0.25rem 0.8rem;border-radius:20px;font-size:0.8rem;color:var(--gold);">人机 3/5</span>
+        <span style="background:rgba(245,197,66,0.06);border:1px solid rgba(245,197,66,0.08);padding:0.25rem 0.8rem;border-radius:20px;font-size:0.8rem;color:var(--gold);">经济 4/5</span>
+        <span style="background:rgba(245,197,66,0.06);border:1px solid rgba(245,197,66,0.08);padding:0.25rem 0.8rem;border-radius:20px;font-size:0.8rem;color:var(--gold);">美观 4/5</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SUMMARY ===== -->
+<section class="summary">
+  <h2>🎤 评价让设计更美好</h2>
+  <p class="closing">
+    评价不是"找茬"，而是让设计师看到<strong>自己看不到的角落</strong>。<br>
+    交流不是"展示"，而是让好想法<strong>影响更多人</strong>。<br><br>
+    <span style="font-size:0.9rem;color:var(--text-dim);">— 感谢聆听 · 欢迎评价 —</span>
+  </p>
+</section>
+
+</body>
+</html>

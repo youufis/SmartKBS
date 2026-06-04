@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>通用技术：模型或原型的制作 知识纲要</title>
+  <style>
+    body {
+      font-family: "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f8f9fa;
+      color: #333;
+    }
+    h1 {
+      text-align: center;
+      color: #1a5276;
+      border-bottom: 2px solid #2980b9;
+      padding-bottom: 10px;
+    }
+    h2 {
+      color: #2874a6;
+      margin-top: 25px;
+    }
+    .section {
+      background: #eaf7ff;
+      padding: 15px;
+      margin: 20px 0;
+      border-left: 4px solid #2980b9;
+      border-radius: 4px;
+    }
+    ul, ol {
+      margin-left: 20px;
+    }
+    .example {
+      background: #f0f8ff;
+      padding: 8px;
+      margin: 8px 0;
+      border-left: 2px solid #aad5ff;
+      font-style: italic;
+      color: #555;
+    }
+    .note {
+      font-size: 0.95em;
+      color: #666;
+    }
+    .highlight {
+      background-color: #fffacd;
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>通用技术 · 模型或原型的制作</h1>
+<p class="note">依据苏教版《技术与设计1》第六章及学业水平考试要求整理</p>
+
+<div class="section">
+  <h2>一、模型与原型的概念</h2>
+  <ul>
+    <li><strong>模型</strong>：根据实物、设计图样或构思，按比例、形态或其他特征制成的<strong>与实物相似的物体</strong>。</li>
+    <li><strong>原型</strong>：在产品正式生产前制作的<strong>功能、尺寸与最终产品一致</strong>的实体，有时就是产品本身。</li>
+    <li><strong>关系</strong>：模型是原型的前期探索形式；复杂产品必须通过模型验证后才能投入原型试制。</li>
+  </ul>
+  <div class="example">【例】神舟飞船发射前使用缩比模型进行风洞试验；首艘量产车即为原型</div>
+</div>
+
+<div class="section">
+  <h2>二、模型的两大核心功能</h2>
+  <ol>
+    <li><strong>使设计对象具体化</strong><br>
+      模型可视、可触、可控制，能直观表达产品的比例、尺度、线型、色彩、材质等，是一种<strong>实体设计语言</strong>，便于设计者、委托方、生产单位沟通。</li>
+    <li><strong>帮助分析设计的可能性</strong><br>
+      对于高成本、大规模生产的产品，仅靠图纸难以验证可靠性。通过模型可提前发现结构、功能、人机等问题，<strong>避免重大经济损失</strong>。</li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>三、不同设计阶段的模型类型</h2>
+  
+  <table style="width:100%; border-collapse: collapse; margin: 15px 0;">
+    <thead>
+      <tr style="background:#d4e6f1;">
+        <th style="padding:8px; border:1px solid #ccc;">模型类型</th>
+        <th style="padding:8px; border:1px solid #ccc;">用途与特点</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:8px; border:1px solid #ccc;"><strong>草模</strong></td>
+        <td style="padding:8px; border:1px solid #ccc;">设计初期快速表达构思，形式简单，材料随意（如纸板、泡沫）</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border:1px solid #ccc;"><strong>概念模型</strong></td>
+        <td style="padding:8px; border:1px solid #ccc;">在草模基础上，用概括手法表现造型风格、布局、人机关系等整体概念</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border:1px solid #ccc;"><strong>结构模型</strong></td>
+        <td style="padding:8px; border:1px solid #ccc;">研究产品内部结构、连接方式、尺寸配合，常用于强度试验</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border:1px solid #ccc;"><strong>功能模型</strong></td>
+        <td style="padding:8px; border:1px solid #ccc;">测试产品性能（如照明、承重）、人机交互，并检查组件配合关系</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border:1px solid #ccc;"><strong>展示模型</strong></td>
+        <td style="padding:8px; border:1px solid #ccc;">采用真实材料、准确尺寸制作，与成品高度相似，用于市场宣传、方案审核</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="example">【教材案例】榨汁机：<br>
+    • 草模：纸板拼接外形<br>
+    • 功能模型：可模拟榨汁动作<br>
+    • 展示模型：金属+塑料，外观逼真</div>
+</div>
+
+<div class="section">
+  <h2>四、材料的选择与规划</h2>
+  <h3>1. 常见材料分类</h3>
+  <ul>
+    <li><strong>金属材料</strong>：钢、铝、铜等，强度高但加工复杂</li>
+    <li><strong>无机非金属材料</strong>：陶瓷、玻璃</li>
+    <li><strong>有机高分子材料</strong>：塑料、橡胶、木材</li>
+    <li><strong>复合材料</strong>：碳纤维、胶合板</li>
+  </ul>
+
+  <h3>2. 材料选择原则</h3>
+  <ul>
+    <li>满足功能与结构要求</li>
+    <li>考虑加工工艺可行性</li>
+    <li>控制成本与环保性</li>
+    <li>兼顾美观与安全性</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>五、常用工艺类别</h2>
+  <h3>1. 木工工艺</h3>
+  <ul>
+    <li>量具画线 → 锯割 → 刨削 → 钻孔 → 连接（榫接/钉接/胶接）→ 表面处理（打磨、上漆）</li>
+  </ul>
+
+  <h3>2. 金工工艺</h3>
+  <ul>
+    <li>划线 → 锯割 → 锉削 → 钻孔 → 攻丝 → 连接（铆接/焊接）</li>
+  </ul>
+
+  <h3>3. 其他工艺</h3>
+  <ul>
+    <li>塑料热弯、3D打印、激光切割、粘接等</li>
+  </ul>
+
+  <p><strong>注意</strong>：操作工具时必须遵守安全规范！</p>
+</div>
+
+<div class="section">
+  <h2>六、台灯模型制作实践（典型项目）</h2>
+  <ol>
+    <li>准备材料：木条、LED灯、电池盒、导线、开关等</li>
+    <li>选择工艺：木工（底座+支架）+ 电工（电路连接）</li>
+    <li>制作过程：按设计图下料 → 加工 → 组装 → 测试照明功能</li>
+    <li>反思优化：稳定性是否足够？开关是否方便？光线是否刺眼？</li>
+  </ol>
+</div>
+
+<div class="section">
+  <h2>七、重要思考题（来自教材“学习反思”）</h2>
+  <ul>
+    <li>设计过程的不同阶段是否都需要制作模型？<br>
+      → <span class="highlight">不一定。简单产品可跳过某些模型；复杂产品需多阶段验证</span></li>
+    <li>是否存在一种模型兼有各种模型的功能？<br>
+      → <span class="highlight">展示模型最接近，但仍难完全替代功能/结构专项测试</span></li>
+  </ul>
+</div>
+
+<p class="note" style="text-align: right; margin-top: 30px;">
+  整理时间：2025年12月3日<br>
+  适用年级：高中通用技术必修1（高一/高二）<br>
+  参考资料：苏教版《技术与设计1》第六章、学考复习课件、知识要点汇编
+</p>
+
+</body>
+</html>

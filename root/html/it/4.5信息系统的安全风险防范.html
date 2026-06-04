@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>信息系统的安全风险防范 - 知识纲要</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; line-height: 1.6; margin: 30px; color: #333; }
+    h1, h2, h3 { color: #2c3e50; }
+    ul { margin-bottom: 1em; }
+    .section { margin-bottom: 2em; padding-bottom: 1em; border-bottom: 1px solid #eee; }
+  </style>
+</head>
+<body>
+
+<h1>第五章 信息系统的安全风险防范</h1>
+
+<div class="section">
+  <h2>5.1 信息系统应用中的安全风险</h2>
+  <ul>
+    <li><strong>人为威胁</strong>：
+      <ul>
+        <li>有意行为：黑客攻击、内部人员泄密、计算机犯罪（如窃取机密、传播病毒）</li>
+        <li>无意行为：操作失误、弱密码设置、未及时更新系统</li>
+      </ul>
+    </li>
+    <li><strong>非人为威胁</strong>：
+      <ul>
+        <li>自然灾害：火灾、洪水、地震导致硬件损毁</li>
+        <li>设备故障：服务器宕机、硬盘损坏、网络中断</li>
+      </ul>
+    </li>
+    <li><strong>典型问题表现</strong>：
+      <ul>
+        <li>虚假信息泛滥，影响信息真实性</li>
+        <li>信息垃圾过载，干扰有效决策</li>
+        <li>网络犯罪频发（如钓鱼、勒索软件、DDoS攻击）</li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>5.2 信息系统安全风险防范的技术和方法</h2>
+  <ul>
+    <li><strong>1. 加密技术</strong>
+      <ul>
+        <li>作用：保障数据的<strong>保密性</strong>与<strong>完整性</strong></li>
+        <li>传统加密：对称加密（密钥K=解密密钥P），安全性依赖密钥保密</li>
+        <li>量子加密：利用单光子传输，任何窃听行为将导致通信中止（如“墨子号”卫星）</li>
+      </ul>
+    </li>
+    <li><strong>2. 认证技术</strong>
+      <ul>
+        <li>验证用户身份（如用户名+密码、数字证书、生物识别）</li>
+        <li>确保信息来源真实、未被篡改</li>
+      </ul>
+    </li>
+    <li><strong>3. 主机系统安全技术</strong>
+      <ul>
+        <li>操作系统安全加固</li>
+        <li>数据库访问控制与审计</li>
+        <li>可信计算环境构建</li>
+      </ul>
+    </li>
+    <li><strong>4. 网络与系统安全应急响应技术</strong>
+      <ul>
+        <li>防火墙：过滤非法流量</li>
+        <li>入侵检测系统（IDS）/入侵防御系统（IPS）：实时监控异常行为</li>
+        <li>应急响应机制：快速隔离、恢复、溯源</li>
+      </ul>
+    </li>
+    <li><strong>5. 恶意代码检测与防范</strong>
+      <ul>
+        <li>预防：安装杀毒软件、不随意点击链接</li>
+        <li>检测：特征码扫描、行为分析</li>
+        <li>清除：隔离感染文件、系统修复</li>
+        <li>AI应用：专家系统动态识别新型病毒</li>
+      </ul>
+    </li>
+    <li><strong>6. 物理与管理措施</strong>
+      <ul>
+        <li>机房门禁、监控、温湿度控制</li>
+        <li>定期备份关键数据（异地存储）</li>
+        <li>最小权限原则与多因素认证（MFA）</li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>5.3 合理使用信息系统</h2>
+  <ul>
+    <li><strong>树立信息安全意识</strong>
+      <ul>
+        <li>了解常见风险（如社保系统漏洞致5279万条信息泄露）</li>
+        <li>主动学习安全操作规范</li>
+      </ul>
+    </li>
+    <li><strong>遵守信息社会道德与法律</strong>
+      <ul>
+        <li>抵制不良信息传播，尤其保护青少年</li>
+        <li>遵守《中华人民共和国网络安全法》等法律法规</li>
+        <li>尊重知识产权（软件、算法、数据库版权）</li>
+      </ul>
+    </li>
+    <li><strong>规范操作习惯</strong>
+      <ul>
+        <li>不随意插入未知U盘</li>
+        <li>定期更新系统与杀毒软件</li>
+        <li>强密码策略 + 定期更换</li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>补充：P2DR安全模型</h2>
+  <p>信息系统安全防护的经典框架，包含四个核心环节：</p>
+  <ul>
+    <li><strong>Policy（策略）</strong>：制定安全目标与管理制度</li>
+    <li><strong>Protection（防护）</strong>：部署防火墙、加密、访问控制等防护措施</li>
+    <li><strong>Detection（检测）</strong>：通过日志、IDS等手段发现异常</li>
+    <li><strong>Response（响应）</strong>：启动应急预案，遏制损失并恢复系统</li>
+  </ul>
+</div>
+
+<div class="section">
+  <h2>典型案例参考</h2>
+  <ul>
+    <li><strong>2015年社保系统漏洞</strong>：超5000万条个人信息泄露，主因系统未及时修补高危漏洞</li>
+    <li><strong>某保险公司内控缺陷</strong>：客户银行卡号、密码等敏感信息面临泄露风险</li>
+    <li><strong>著名病毒事件</strong>：
+      <ul>
+        <li>CIH病毒（1998）：破坏硬件，全球损失约5亿美元</li>
+        <li>冲击波（2003）、熊猫烧香（2006）、勒索病毒（2017）：造成大规模系统瘫痪</li>
+      </ul>
+    </li>
+  </ul>
+</div>
+
+</body>
+</html>

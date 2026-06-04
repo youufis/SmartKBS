@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>模型或原型的制作 · 创客工坊</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Workshop / Maker Space Theme
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#2a2520;
+  --bg2:#3d352e;
+  --text:#f0ead8;
+  --text-dim:#a89880;
+  --orange:#e87a30;
+  --yellow:#f5c542;
+  --steel:#7a8a9a;
+  --red:#d94a4a;
+  --green:#5cad6a;
+  --card-bg:rgba(61,53,46,0.7);
+  --card-border:rgba(232,122,48,0.08);
+  --shadow:0 4px 20px rgba(0,0,0,0.4);
+  --radius:6px;
+  --font-mono:'Courier New','Consolas','JetBrains Mono',monospace;
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.8;
+  font-size:18px;
+}
+
+/* Pegboard/cork texture */
+body::before {
+  content:''; position:fixed; inset:0;
+  background-image:
+    radial-gradient(circle 1.5px, rgba(200,180,150,0.02) 50%, transparent 50%);
+  background-size:30px 30px;
+  pointer-events:none; z-index:0;
+}
+
+/* Horizontal "shelf" lines */
+body::after {
+  content:''; position:fixed; inset:0;
+  background:
+    linear-gradient(rgba(200,180,150,0.015) 1px, transparent 1px);
+  background-size:100% 60px;
+  pointer-events:none; z-index:0;
+}
+
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .anime { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   Progress — measuring tape / saw blade
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:7px;
+  z-index:999; background:var(--bg2);
+}
+.progress-bar {
+  height:100%; width:0;
+  background:repeating-linear-gradient(45deg,
+    var(--orange), var(--orange) 15px,
+    var(--yellow) 15px, var(--yellow) 30px);
+  animation:progGrow both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO — Workshop entrance
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:2rem; position:relative; overflow:hidden;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(232,122,48,0.03) 0%, transparent 60%),
+    radial-gradient(ellipse at 30% 100%, rgba(92,172,106,0.02) 0%, transparent 50%);
+}
+
+.hero-peg { position:absolute; inset:0; pointer-events:none; }
+.hero-peg .p {
+  position:absolute; width:6px; height:6px; border-radius:50%;
+  background:rgba(200,180,150,0.04);
+}
+.hero-peg .p1 { top:40px; left:60px; }
+.hero-peg .p2 { top:40px; right:80px; }
+.hero-peg .p3 { bottom:60px; left:100px; }
+.hero-peg .p4 { bottom:60px; right:60px; }
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid rgba(232,122,48,0.12);
+  padding:0.5rem 1.2rem;
+  font-family:var(--font-mono); font-size:0.8rem;
+  color:var(--orange); letter-spacing:3px;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; } to { opacity:1; } }
+
+.hero h1 {
+  font-size:clamp(2.5rem,6vw,4.2rem); font-weight:800;
+  letter-spacing:4px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 .line1 { font-size:clamp(1.3rem,2.5vw,2rem); font-weight:400; color:var(--text-dim); display:block; letter-spacing:6px; }
+.hero h1 .line2 { background:linear-gradient(135deg, var(--orange), var(--yellow));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  background-clip:text; }
+@keyframes titleIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,1.8vw,1.3rem);
+  color:var(--text-dim);
+  font-family:var(--font-mono);
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2.5rem;
+  font-family:var(--font-mono); font-size:0.78rem;
+  color:var(--text-dim); letter-spacing:3px;
+  animation:bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(8px); } }
+
+/* ============================================================
+   SECTION
+   ============================================================ */
+.section {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem; position:relative; z-index:1;
+  border-top:1px solid rgba(232,122,48,0.03);
+}
+.section-inner { max-width:1100px; width:100%; }
+
+.section-header {
+  display:flex; align-items:center; gap:16px;
+  margin-bottom:2.5rem;
+  animation:headIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 60%;
+}
+@keyframes headIn { from { opacity:0; transform:translateX(-15px); } to { opacity:1; transform:translateX(0); } }
+
+.section-num {
+  width:44px; height:44px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(232,122,48,0.08);
+  border:1px solid rgba(232,122,48,0.15);
+  font-family:var(--font-mono); font-size:1rem;
+  color:var(--orange); font-weight:700;
+}
+.section-title {
+  font-size:clamp(1.5rem,3vw,2.4rem); font-weight:700;
+  letter-spacing:2px;
+}
+
+/* ===== Workshop card ===== */
+.ws-card {
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:2rem 2.5rem; margin-bottom:2rem;
+  animation:cardIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+@keyframes cardIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.ws-card h3 {
+  font-size:1.25rem; color:var(--orange);
+  margin-bottom:1rem; display:flex; align-items:center; gap:10px;
+}
+.ws-card p, .ws-card li {
+  font-size:1rem; color:var(--text); line-height:1.9;
+}
+.ws-card li { padding:0.3rem 0; }
+.ws-card strong { color:var(--yellow); }
+
+/* ===== Grid ===== */
+.g2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+.g3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; }
+.g4 { display:grid; grid-template-columns:repeat(4,1fr); gap:1.5rem; }
+
+/* ===== Sub card ===== */
+.sub-card {
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:1.5rem;
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.sub-card h4 {
+  font-size:1.1rem; color:var(--yellow); margin-bottom:0.5rem;
+}
+.sub-card p, .sub-card li {
+  font-size:0.92rem; color:var(--text-dim); line-height:1.7;
+}
+.sub-card li { padding:0.2rem 0; }
+
+/* ===== Process step ===== */
+.proc-chain { display:flex; flex-direction:column; gap:0.6rem; }
+.proc-item {
+  display:flex; align-items:flex-start; gap:1rem;
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:0.8rem 1.2rem;
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.proc-item .pi-tag {
+  flex-shrink:0; width:28px; height:28px;
+  display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-mono); font-size:0.7rem;
+  background:rgba(232,122,48,0.08); color:var(--orange);
+}
+.proc-item .pi-body { font-size:0.9rem; color:var(--text-dim); line-height:1.6; }
+.proc-item .pi-body strong { color:var(--text); }
+
+/* ===== Example box ===== */
+.ex-box {
+  background:rgba(245,197,66,0.03);
+  border-left:3px solid var(--yellow);
+  padding:0.8rem 1.2rem; margin-top:1rem;
+  font-size:0.92rem; color:var(--text-dim); line-height:1.7;
+}
+.ex-box .ex-label { font-family:var(--font-mono); font-size:0.7rem; color:var(--yellow); letter-spacing:2px; margin-bottom:0.2rem; }
+.ex-box strong { color:var(--text); }
+
+/* ============================================================
+   SUMMARY
+   ============================================================ */
+.summary {
+  min-height:50vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem;
+}
+.summary h2 {
+  font-size:clamp(1.5rem,3vw,2.5rem); font-weight:700;
+  color:var(--orange); letter-spacing:3px;
+  animation:headIn 0.8s both; animation-timeline:view();
+}
+.summary .tools-row {
+  display:flex; flex-wrap:wrap; justify-content:center; gap:1rem;
+  margin:1.5rem 0;
+  animation:cardIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+.summary .tools-row span {
+  background:var(--card-bg); border:1px solid var(--card-border);
+  padding:0.5rem 1.2rem; font-size:0.9rem; color:var(--text-dim);
+  font-family:var(--font-mono);
+}
+.summary p {
+  font-size:1.05rem; color:var(--text-dim);
+  animation:cardIn 1.2s both; animation-timeline:view(); animation-range:entry 0% entry 40%;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .g2, .g3, .g4 { grid-template-columns:1fr; }
+  .g4 { grid-template-columns:1fr 1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  body { font-size:16px; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:rgba(232,122,48,0.1); }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-peg">
+    <div class="p p1"></div><div class="p p2"></div>
+    <div class="p p3"></div><div class="p p4"></div>
+  </div>
+  <div class="hero-badge">◆ WORKSHOP — MAKER SPACE</div>
+  <h1>
+    <span class="line1">模型或原型的</span>
+    <span class="line2">制作</span>
+  </h1>
+  <p class="hero-sub">_ building ideas into reality _</p>
+  <div class="hero-scroll">▼ ENTER WORKSHOP</div>
+</section>
+
+<!-- ===== SECTION 1: 模型与原型的概念 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">01</div>
+      <h2 class="section-title">模型与原型的概念</h2>
+    </div>
+
+    <div class="g2">
+      <div class="sub-card" style="border-left:3px solid var(--orange);">
+        <h4>📦 模型</h4>
+        <p>根据<strong>实物、设计图样或构思</strong>，按比例、形态或其他特征制成的与实物相似的物体。是探索设计可能性的前期工具。</p>
+      </div>
+      <div class="sub-card" style="border-left:3px solid var(--yellow);">
+        <h4>🏭 原型</h4>
+        <p><strong>第一个能全面反映产品功能的形体</strong>，广泛应用于新产品的开发中，有时原型就是最终产品。是投产前最后的验证实物。</p>
+      </div>
+    </div>
+
+    <div class="ws-card" style="margin-bottom:0;">
+      <h3>🎯 模型的两大核心功能</h3>
+      <ul>
+        <li><strong>① 使设计对象具体化</strong> — 将抽象构思变为可视可触的实体，便于设计交流与讨论</li>
+        <li><strong>② 帮助分析设计的可能性</strong> — 提前发现结构、功能、人机关系问题，避免重大经济损失</li>
+      </ul>
+      <div class="ex-box">
+        <div class="ex-label">◆ 教材原文</div>
+        <p>在设计过程中，先通过<strong>模型验证设计方案</strong>，发现问题并优化后再投入原型试制，是降低设计风险的关键方法。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 2: 模型在不同阶段的作用 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">02</div>
+      <h2 class="section-title">模型在不同阶段的作用</h2>
+    </div>
+
+    <div class="ws-card">
+      <h3>🍊 教材主线案例：榨汁机的设计过程</h3>
+      <p>在设计榨汁机的过程中，设计师在不同阶段制作了不同类型的模型：</p>
+      <ul>
+        <li>初期用<strong>草模</strong>探索大体造型，供设计人员深入探讨</li>
+        <li>构思初步完成后用<strong>概念模型</strong>概括表现造型风格与布局安排</li>
+        <li>用<strong>结构模型</strong>研究产品结构尺寸与连接方法</li>
+        <li>制作<strong>功能模型</strong>测试产品性能及人机关系</li>
+        <li>最终用真实材料制作<strong>展示模型</strong>呈现最终效果</li>
+      </ul>
+      <p style="margin-top:0.8rem;">每一步模型都帮助设计师<strong>提前发现问题、优化方案</strong>，降低设计风险。</p>
+    </div>
+
+    <div class="g4">
+      <div class="sub-card" style="text-align:center;">
+        <div style="font-size:2rem;margin-bottom:0.3rem;">✏️</div>
+        <h4 style="font-size:0.9rem;">草模</h4>
+        <p style="font-size:0.82rem;">产品造型设计<strong>初期阶段</strong>，将设计构思简单地表示出来</p>
+      </div>
+      <div class="sub-card" style="text-align:center;">
+        <div style="font-size:2rem;margin-bottom:0.3rem;">🎨</div>
+        <h4 style="font-size:0.9rem;">概念模型</h4>
+        <p style="font-size:0.82rem;">用概括的手法表示<strong>造型风格、布局安排</strong>，以及产品与人、与环境的关系</p>
+      </div>
+      <div class="sub-card" style="text-align:center;">
+        <div style="font-size:2rem;margin-bottom:0.3rem;">🏗️</div>
+        <h4 style="font-size:0.9rem;">结构模型</h4>
+        <p style="font-size:0.82rem;">清晰地表达<strong>结构尺寸和连接方法</strong>，用于进行结构强度试验</p>
+      </div>
+      <div class="sub-card" style="text-align:center;">
+        <div style="font-size:2rem;margin-bottom:0.3rem;">⚡</div>
+        <h4 style="font-size:0.9rem;">功能模型</h4>
+        <p style="font-size:0.82rem;">研究产品的<strong>各种性能</strong>以及<strong>人机关系</strong>，验证使用需求</p>
+      </div>
+      <div class="sub-card" style="text-align:center;grid-column:span 2;">
+        <div style="font-size:2rem;margin-bottom:0.3rem;">🏛️</div>
+        <h4 style="font-size:0.9rem;">展示模型</h4>
+        <p style="font-size:0.82rem;">采用<strong>真实材料、准确尺寸</strong>，真实反映产品面貌，用于展示、评审</p>
+      </div>
+    </div>
+
+    <div class="ws-card" style="margin-bottom:0;">
+      <h3>💡 思考：台灯设计需要哪些模型？</h3>
+      <p>设计一盏台灯时，需要<strong>结构模型</strong>研究灯杆连接方式与稳定性，需要<strong>功能模型</strong>测试光照角度与照度。不同类型模型在不同阶段发挥不可替代的作用：模型既是<strong>思考的延伸</strong>，也是<strong>沟通的桥梁</strong>。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 3: 模型制作的一般步骤 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">03</div>
+      <h2 class="section-title">模型制作的一般步骤</h2>
+    </div>
+
+    <div class="ws-card">
+      <h3>📐 从图纸到实物：六步流程</h3>
+      <div class="proc-chain">
+        <div class="proc-item"><div class="pi-tag">1</div><div class="pi-body"><strong>设计方案</strong> — 确定模型类型、比例、材料要求</div></div>
+        <div class="proc-item"><div class="pi-tag">2</div><div class="pi-body"><strong>选择材料与工具</strong> — 根据设计要求选材（木/金属/塑料等）</div></div>
+        <div class="proc-item"><div class="pi-tag">3</div><div class="pi-body"><strong>划线</strong> — 按图样标记尺寸线和加工位置</div></div>
+        <div class="proc-item"><div class="pi-tag">4</div><div class="pi-body"><strong>加工制作</strong> — 锯割、锉削、钻孔等基本加工</div></div>
+        <div class="proc-item"><div class="pi-tag">5</div><div class="pi-body"><strong>组装与调试</strong> — 连接各部件、测试功能与尺寸</div></div>
+        <div class="proc-item"><div class="pi-tag">6</div><div class="pi-body"><strong>表面处理与润色</strong> — 打磨、上漆、标注说明</div></div>
+      </div>
+    </div>
+
+    <div class="ws-card" style="margin-bottom:0;">
+      <h3>🚢 教材经典案例：大东方号的教训</h3>
+      <p>在造船史上，有一艘著名的"大东方号"蒸汽轮船。设计师伊桑巴德·金德姆·布鲁内尔在建造这艘巨轮时，<strong>没有先制作模型进行验证就直接施工</strong>，导致下水后暴露出大量结构问题，最终以失败告终。</p>
+      <div class="ex-box">
+        <div class="ex-label">◆ 启示</div>
+        <p>这一反面案例充分说明了模型在设计中的重要性——<strong>没有经过模型验证的设计方案，直接投入生产可能要付出巨大的代价</strong>。模型不仅能帮我们"看到"设计，更能帮我们"预见"问题。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 4: 模型的价值与启示 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">04</div>
+      <h2 class="section-title">模型的价值：不只是"做出来"</h2>
+    </div>
+
+    <div class="g2">
+      <div class="ws-card" style="margin-bottom:0;">
+        <h3>📊 模型的三重价值</h3>
+        <ul>
+          <li><strong>🔍 验证价值</strong> — 验证设计的可行性、结构合理性、功能完整性</li>
+          <li><strong>💬 沟通价值</strong> — 用具体形态替代抽象描述，让合作方"看见"设计方案</li>
+          <li><strong>📚 学习价值</strong> — 制作过程中深化对材料、结构、工艺的理解，积累实践经验</li>
+        </ul>
+      </div>
+      <div class="ws-card" style="margin-bottom:0;">
+        <h3>🧪 模型在真实设计中的角色</h3>
+        <ul>
+          <li><strong>工业设计</strong> — 汽车油泥模型、手机外观手板</li>
+          <li><strong>建筑设计</strong> — 建筑沙盘、结构受力模型</li>
+          <li><strong>产品开发</strong> — 功能验证原型、用户体验测试</li>
+          <li><strong>航天航海</strong> — 风洞模型、水池拖曳模型</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="ws-card" style="margin-bottom:0;">
+      <h3>🎯 核心要点回顾</h3>
+      <p>模型是设计过程中<strong>从抽象到具体</strong>的关键环节。从草模到展示模型，每一种模型都在特定阶段服务于设计目标。而"大东方号"的教训提醒我们：<strong>模型不是可选项，而是设计的必要环节</strong>。</p>
+      <div class="ex-box">
+        <div class="ex-label">◆ 记住</div>
+        <p>最好的设计方案，也需要通过模型来验证。让我们的设计 <strong>"看得见、摸得着、试得了"</strong>。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SUMMARY ===== -->
+<section class="summary">
+  <h2>🔨 从概念到实物的桥梁</h2>
+  <div class="tools-row">
+    <span>📐 草图</span><span>🧊 草模</span><span>🎨 概念模型</span><span>🏗️ 结构模型</span><span>⚡ 功能模型</span><span>🏛️ 展示模型</span>
+  </div>
+  <p>— 模型让设计从"想一想"变成"做出来" —</p>
+</section>
+
+</body>
+</html>

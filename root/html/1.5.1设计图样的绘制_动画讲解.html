@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>设计图样的绘制 · 工程蓝图</title>
+<style>
+
+/* ============================================================
+   GLOBAL — Blueprint / Engineering Drawing Theme
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg:#0a1a3a;
+  --bg2:#0f2248;
+  --line:rgba(255,255,255,0.04);
+  --text:#c8d8ff;
+  --text-dim:#8098cc;
+  --blue:#3b82f6;
+  --cyan:#67e8f9;
+  --white:#e8eeff;
+  --amber:#fbbf24;
+  --red:#ef4444;
+  --card-bg:rgba(15,34,72,0.6);
+  --card-border:rgba(59,130,246,0.15);
+  --radius:0px;
+  --font-tech:'Courier New','Consolas','Lucida Console',monospace;
+}
+
+html { scroll-behavior:smooth; overflow-x:hidden; }
+body {
+  font-family: 'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  line-height:1.8;
+  font-size:18px;
+}
+
+/* Grid paper background */
+body::before {
+  content:''; position:fixed; inset:0;
+  background-image:
+    linear-gradient(rgba(59,130,246,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,0.04) 1px, transparent 1px);
+  background-size:20px 20px;
+  pointer-events:none; z-index:0;
+}
+
+/* Bigger grid lines */
+body::after {
+  content:''; position:fixed; inset:0;
+  background-image:
+    linear-gradient(rgba(59,130,246,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59,130,246,0.02) 1px, transparent 1px);
+  background-size:100px 100px;
+  pointer-events:none; z-index:0;
+}
+
+@supports (animation-timeline:view()) {
+  @media (prefers-reduced-motion:no-preference) { .anime { animation-timeline:view(); } }
+}
+
+/* ============================================================
+   Progress — Ruler
+   ============================================================ */
+.progress-wrap {
+  position:fixed; top:0; left:0; width:100%; height:8px;
+  z-index:999; background:var(--bg2);
+}
+.progress-wrap::before {
+  content:'0  10  20  30  40  50  60  70  80  90  100';
+  position:absolute; top:-12px; left:0; right:0;
+  font-family:var(--font-tech); font-size:0.45rem;
+  color:rgba(59,130,246,0.15); letter-spacing:1px;
+  text-align:center; overflow:hidden;
+}
+.progress-bar {
+  height:100%; width:0;
+  background:var(--blue);
+  box-shadow:0 0 8px rgba(59,130,246,0.3);
+  animation:progGrow both;
+  animation-timeline:scroll(root);
+  animation-range:0% 100%;
+}
+@keyframes progGrow { from { width:0 } to { width:100% } }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero {
+  min-height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:2rem; position:relative; overflow:hidden;
+  background:linear-gradient(160deg, #0a1a3a, #0f2248, #0a1a3a);
+}
+
+.hero::before {
+  content:''; position:absolute; inset:0;
+  background:
+    radial-gradient(ellipse at 30% 50%, rgba(59,130,246,0.03) 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 50%, rgba(103,232,249,0.02) 0%, transparent 50%);
+  pointer-events:none;
+}
+
+/* Drafting tools decoration */
+.hero-tools {
+  position:absolute; inset:0; pointer-events:none;
+  font-size:4rem; color:rgba(59,130,246,0.03); line-height:1;
+}
+.hero-tools .ht1 { position:absolute; bottom:10%; left:5%; transform:rotate(-15deg); }
+.hero-tools .ht2 { position:absolute; top:12%; right:6%; transform:rotate(20deg); }
+.hero-tools .ht3 { position:absolute; top:35%; left:3%; font-size:2.5rem; }
+.hero-tools .ht4 { position:absolute; bottom:30%; right:4%; font-size:2.5rem; }
+
+.hero-badge {
+  display:inline-flex; align-items:center; gap:8px;
+  border:1px solid rgba(59,130,246,0.15);
+  padding:0.4rem 1.2rem;
+  font-family:var(--font-tech); font-size:0.8rem;
+  color:var(--blue); letter-spacing:4px;
+  margin-bottom:1.5rem;
+  animation:badgeIn 0.8s 0.3s both;
+}
+@keyframes badgeIn { from { opacity:0; } to { opacity:1; } }
+
+.hero h1 {
+  font-size:clamp(2.5rem,6vw,4.5rem); font-weight:800;
+  letter-spacing:6px; line-height:1.3;
+  animation:titleIn 1s 0.5s both;
+}
+.hero h1 .line1 { font-size:clamp(1.2rem,2.5vw,2rem); font-weight:400; color:var(--text-dim); display:block; letter-spacing:8px; }
+.hero h1 .line2 { color:var(--cyan); }
+@keyframes titleIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-sub {
+  margin-top:1rem; font-size:clamp(1rem,1.8vw,1.3rem);
+  color:var(--text-dim);
+  font-family:var(--font-tech);
+  animation:fadeUp 0.8s 0.8s both;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+
+.hero-scroll {
+  position:absolute; bottom:2.5rem;
+  font-family:var(--font-tech); font-size:0.75rem;
+  color:var(--text-dim); letter-spacing:4px;
+  animation:bounceY 2s 2.5s infinite;
+}
+@keyframes bounceY { 0%,100% { transform:translateY(0); } 50% { transform:translateY(8px); } }
+
+/* ============================================================
+   SECTION
+   ============================================================ */
+.section {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:5rem 1.5rem; position:relative; z-index:1;
+  border-top:1px solid rgba(59,130,246,0.03);
+}
+.section-inner { max-width:1100px; width:100%; }
+
+.section-header {
+  display:flex; align-items:center; gap:16px;
+  margin-bottom:2.5rem; position:relative;
+  animation:headIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 60%;
+}
+@keyframes headIn { from { opacity:0; transform:translateX(-20px); } to { opacity:1; transform:translateX(0); } }
+
+.section-num {
+  width:44px; height:44px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  border:1px solid var(--blue);
+  font-family:var(--font-tech); font-size:1.1rem;
+  color:var(--blue);
+}
+.section-title {
+  font-size:clamp(1.5rem,3vw,2.4rem); font-weight:700;
+  letter-spacing:3px;
+}
+
+/* ===== Blueprint Card ===== */
+.bp-card {
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:2rem 2.5rem; margin-bottom:2rem;
+  position:relative;
+  animation:cardIn 0.8s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+@keyframes cardIn { from { opacity:0; transform:translateY(25px); } to { opacity:1; transform:translateY(0); } }
+
+.bp-card::before {
+  content:'┌──────────────────────────────────┐';
+  position:absolute; top:-1px; left:-1px;
+  font-family:var(--font-tech); font-size:0.5rem;
+  color:rgba(59,130,246,0.06);
+  pointer-events:none;
+}
+
+.bp-card h3 {
+  font-size:1.25rem; color:var(--cyan);
+  margin-bottom:1rem; display:flex; align-items:center; gap:10px;
+  font-family:var(--font-tech); letter-spacing:2px;
+}
+.bp-card p, .bp-card li {
+  font-size:1rem; color:var(--text); line-height:1.9;
+}
+.bp-card li { padding:0.3rem 0; }
+.bp-card strong { color:var(--white); }
+
+/* ===== Grid layouts ===== */
+.g2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+.g3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; }
+
+/* ===== Sub-card ===== */
+.sub-card {
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:1.5rem; position:relative;
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.sub-card h4 {
+  font-size:1.1rem; color:var(--blue); margin-bottom:0.5rem;
+  font-family:var(--font-tech); letter-spacing:1px;
+}
+.sub-card p, .sub-card li {
+  font-size:0.92rem; color:var(--text-dim); line-height:1.7;
+}
+.sub-card li { padding:0.2rem 0; }
+
+/* ===== Highlight box ===== */
+.hl-box {
+  background:rgba(251,191,36,0.03);
+  border:1px solid rgba(251,191,36,0.08);
+  padding:1rem 1.5rem; margin-top:1rem;
+  font-size:0.95rem; color:var(--amber);
+  font-family:var(--font-tech); line-height:1.8;
+}
+
+/* ===== Step card ===== */
+.step-row { display:flex; flex-direction:column; gap:0.8rem; }
+.step-item {
+  display:flex; align-items:flex-start; gap:1rem;
+  background:var(--card-bg); backdrop-filter:blur(8px);
+  border:1px solid var(--card-border);
+  padding:1rem 1.5rem;
+  animation:cardIn 0.8s both; animation-timeline:view();
+}
+.step-item .si-arr {
+  font-family:var(--font-tech); font-size:0.85rem;
+  color:var(--blue); flex-shrink:0; width:24px;
+}
+.step-item .si-body { font-size:0.92rem; color:var(--text-dim); line-height:1.7; }
+.step-item .si-body strong { color:var(--text); }
+
+/* ============================================================
+   SUMMARY
+   ============================================================ */
+.summary {
+  min-height:50vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; text-align:center;
+  padding:4rem 1.5rem;
+  background:linear-gradient(160deg, #0a1a3a, #0f2248, #0a1a3a);
+  border-top:1px solid rgba(59,130,246,0.05);
+}
+.summary h2 {
+  font-size:clamp(1.5rem,3vw,2.5rem);
+  color:var(--cyan); font-family:var(--font-tech); letter-spacing:4px;
+  animation:headIn 0.8s both; animation-timeline:view();
+}
+.summary .legend {
+  display:flex; flex-wrap:wrap; justify-content:center; gap:0.8rem;
+  margin:1.5rem 0;
+  animation:cardIn 1s both; animation-timeline:view(); animation-range:entry 0% entry 50%;
+}
+.summary .legend span {
+  background:var(--card-bg); border:1px solid var(--card-border);
+  padding:0.4rem 1rem; font-family:var(--font-tech); font-size:0.8rem;
+  color:var(--text-dim); letter-spacing:2px;
+}
+.summary .legend span strong { color:var(--cyan); }
+.summary p { font-size:1rem; color:var(--text-dim); font-family:var(--font-tech); }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width:768px) {
+  .g2, .g3 { grid-template-columns:1fr; }
+  .section { padding:3rem 1rem; min-height:auto; }
+  body { font-size:16px; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:rgba(59,130,246,0.1); }
+
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<div class="progress-wrap"><div class="progress-bar"></div></div>
+
+<!-- ===== HERO ===== -->
+<section class="hero">
+  <div class="hero-tools">
+    <div class="ht1">📐</div><div class="ht2">✏️</div><div class="ht3">📏</div><div class="ht4">🖊️</div>
+  </div>
+  <div class="hero-badge">◆ DWG NO. 1.5.1</div>
+  <h1>
+    <span class="line1">设计图样的</span>
+    <span class="line2">绘制</span>
+  </h1>
+  <p class="hero-sub">_ technical drawing · blueprint _</p>
+  <div class="hero-scroll">▼ SCROLL TO VIEW DRAWING</div>
+</section>
+
+<!-- ===== SECTION 1: 技术语言 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">01</div>
+      <h2 class="section-title">技术语言及其应用</h2>
+    </div>
+
+    <div class="bp-card">
+      <h3>◈ 什么是技术语言？</h3>
+      <p>在技术活动中进行<strong>信息交流</strong>的特有语言形式。言简意赅、通俗直观。</p>
+    </div>
+
+    <div class="g2">
+      <div class="sub-card">
+        <h4>◆ 常见类型</h4>
+        <ul>
+          <li>🗣️ 口头语言 — 方案讨论、评价</li>
+          <li>📐 技术图样 — 三视图、电路图</li>
+          <li>📊 图表 — 表格、效果图、流程图</li>
+          <li>🧊 模型 — 实物 / 数字模型</li>
+          <li>🔣 符号 — 电子元件符号、安全标识</li>
+          <li>💻 计算机演示 — 动态仿真</li>
+        </ul>
+      </div>
+      <div class="sub-card">
+        <h4>◆ 特点</h4>
+        <ul>
+          <li>✦ 言简意赅 — 用最少的表达传递最多的信息</li>
+          <li>✦ 通俗直观 — 一看就懂，减少沟通误差</li>
+          <li>✦ 标准化 — 图纸符号遵循国家标准</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 2: 草图 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">02</div>
+      <h2 class="section-title">草图的绘制</h2>
+    </div>
+
+    <div class="g2">
+      <div class="sub-card">
+        <h4>◆ 草图分类</h4>
+        <ul>
+          <li><strong>构思草图</strong> — 快速记录灵感，形式自由</li>
+          <li><strong>设计草图</strong> — 经整理修改后的正式方案草图</li>
+        </ul>
+      </div>
+      <div class="sub-card">
+        <h4>◆ 徒手绘图要领</h4>
+        <ul>
+          <li>握笔姿势正确，线条流畅</li>
+          <li>先画大轮廓，再细化细节</li>
+          <li>网格法：垂直线垂直画，平行线沿网格斜线</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="bp-card" style="margin-top:1.5rem;">
+      <h3>◈ 草图绘制 6 步骤</h3>
+      <div class="step-row">
+        <div class="step-item"><div class="si-arr">01→</div><div class="si-body">选用合适铅笔（如2H）</div></div>
+        <div class="step-item"><div class="si-arr">02→</div><div class="si-body">画出产品外观<strong>比例关系</strong></div></div>
+        <div class="step-item"><div class="si-arr">03→</div><div class="si-body">在网格纸上画<strong>透视轮廓</strong></div></div>
+        <div class="step-item"><div class="si-arr">04→</div><div class="si-body">添加<strong>中间色调</strong></div></div>
+        <div class="step-item"><div class="si-arr">05→</div><div class="si-body">描画<strong>亮部与高光</strong></div></div>
+        <div class="step-item"><div class="si-arr">06→</div><div class="si-body">绘制放置平面的<strong>阴影</strong></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 3: 三视图 ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">03</div>
+      <h2 class="section-title">正投影与三视图</h2>
+    </div>
+
+    <div class="g3">
+      <div class="sub-card">
+        <h4>◆ 正投影法</h4>
+        <p>投影光线与投影面<strong>垂直</strong>，真实反映物体形状。</p>
+      </div>
+      <div class="sub-card">
+        <h4>◆ 三视图组成</h4>
+        <ul>
+          <li><strong>主视图</strong> — 前→后，长+高</li>
+          <li><strong>俯视图</strong> — 上→下，长+宽</li>
+          <li><strong>左视图</strong> — 左→右，高+宽</li>
+        </ul>
+      </div>
+      <div class="sub-card">
+        <h4>◆ 安置方式</h4>
+        <ul>
+          <li>俯视图在主视图<strong>正下方</strong></li>
+          <li>左视图在主视图<strong>正右方</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="hl-box">
+      ⚡ 必记口诀：主、俯视图 — <strong>长对正</strong> ｜ 主、左视图 — <strong>高平齐</strong> ｜ 俯、左视图 — <strong>宽相等</strong>
+    </div>
+
+    <div class="bp-card" style="margin-top:1.5rem;">
+      <h3>◈ 其他技术图样</h3>
+      <div class="g3">
+        <div style="font-size:0.92rem;color:var(--text-dim);"><strong style="color:var(--white);">正等轴测图</strong><br>三坐标轴夹角120°，Z轴垂直，X/Y与水平成30°，表现立体效果</div>
+        <div style="font-size:0.92rem;color:var(--text-dim);"><strong style="color:var(--white);">剖视图</strong><br>切开展示内部结构，45°斜线表示材料</div>
+        <div style="font-size:0.92rem;color:var(--text-dim);"><strong style="color:var(--white);">机械加工图</strong><br>含三视图+标题栏+说明，是生产制造依据</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SECTION 4: 尺寸标注 + CAD ===== -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-header">
+      <div class="section-num">04</div>
+      <h2 class="section-title">尺寸标注 &amp; 计算机辅助设计</h2>
+    </div>
+
+    <div class="g2">
+      <div class="bp-card" style="margin-bottom:0;">
+        <h3>◈ 尺寸三要素</h3>
+        <ul>
+          <li><strong>尺寸界线</strong> — 从轮廓线引出</li>
+          <li><strong>尺寸线</strong> — 单独画出，终端箭头</li>
+          <li><strong>尺寸数字</strong> — mm省略，字头朝上/朝左</li>
+        </ul>
+        <div class="hl-box" style="margin-top:1rem;font-size:0.88rem;">
+          做到：<strong>正确 · 完整 · 清晰 · 合理</strong><br>
+          直径前加 ⌀ ｜ 半径前加 R
+        </div>
+      </div>
+      <div class="bp-card" style="margin-bottom:0;">
+        <h3>◈ CAD 优势与步骤</h3>
+        <ul>
+          <li>✦ 生成虚拟三维模型</li>
+          <li>✦ 提高效率，降低成本</li>
+          <li>✦ 便于修改，减小试错风险</li>
+          <li>✦ 激发灵感，多方案比选</li>
+        </ul>
+        <div style="margin-top:1rem;padding:0.8rem;background:rgba(103,232,249,0.03);border:1px solid rgba(103,232,249,0.06);">
+          <strong style="color:var(--cyan);">CAD 流程：</strong><br>
+          ① 建立数字模型 → ② 渲染效果图 → ③ 输出工程图样
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== SUMMARY ===== -->
+<section class="summary">
+  <h2>◆ PROJECT COMPLETE</h2>
+  <div class="legend">
+    <span><strong>📐</strong> 草图</span>
+    <span><strong>📏</strong> 三视图</span>
+    <span><strong>⌀</strong> 尺寸标注</span>
+    <span><strong>💻</strong> CAD</span>
+  </div>
+  <p>_ 图样是工程师的语言，让想法落地 _</p>
+</section>
+
+</body>
+</html>

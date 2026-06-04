@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通用技术必修二·系统及其设计 课堂练习</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+        header {
+            background: linear-gradient(to right, #4b6cb7, #182848);
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            font-size: 28px;
+            letter-spacing: 1px;
+        }
+        .subtitle {
+            font-size: 16px;
+            opacity: 0.9;
+            margin-top: 8px;
+        }
+        .instructions {
+            padding: 15px 25px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            font-size: 14px;
+            color: #666;
+        }
+        .question {
+            padding: 20px 25px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.3s;
+        }
+        .question:last-child {
+            border-bottom: none;
+        }
+        .question:hover {
+            background-color: #f9f9ff;
+        }
+        .question-number {
+            font-weight: bold;
+            color: #4b6cb7;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+        .question-text {
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+        .options {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        @media (max-width: 600px) {
+            .options {
+                grid-template-columns: 1fr;
+            }
+        }
+        .option {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            background: #f1f5f9;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            word-break: break-word;
+        }
+        .option:hover {
+            background: #e2e8f0;
+        }
+        .option input[type="radio"] {
+            margin-right: 10px;
+            transform: scale(1.2);
+            cursor: pointer;
+        }
+        .option span {
+            cursor: pointer;
+            flex-grow: 1;
+        }
+        .submit-btn {
+            background: linear-gradient(to right, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 5px;
+        }
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+        .feedback {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 8px;
+            display: none;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .correct {
+            background-color: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+        .incorrect {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-size: 14px;
+            background-color: #f8f9fa;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(to right, #4facfe, #00f2fe);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .progress-container {
+            height: 8px;
+            background-color: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+
+        /* ===== 答题结果详情 ===== */
+        .results-section {
+            padding: 30px 25px;
+            background: linear-gradient(135deg, #f0f8ff 0%, #e8f4fd 100%);
+            display: none;
+        }
+        .results-title {
+            text-align: center;
+            color: #4b6cb7;
+            font-size: 28px;
+            margin: 0 0 10px 0;
+        }
+        .results-subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .score-display {
+            text-align: center;
+            padding: 25px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            margin-bottom: 25px;
+        }
+        .score-number {
+            font-size: 48px;
+            font-weight: 800;
+            color: #4b6cb7;
+        }
+        .score-number.great { color: #28a745; }
+        .score-number.good { color: #17a2b8; }
+        .score-number.ok { color: #ffc107; }
+        .score-number.poor { color: #dc3545; }
+        .score-label {
+            font-size: 18px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .score-percentage {
+            font-size: 20px;
+            color: #888;
+            margin-top: 8px;
+        }
+        .score-grade {
+            display: inline-block;
+            margin-top: 12px;
+            padding: 6px 24px;
+            border-radius: 50px;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .score-grade.great { background: #d4edda; color: #155724; }
+        .score-grade.good { background: #d1ecf1; color: #0c5460; }
+        .score-grade.ok { background: #fff3cd; color: #856404; }
+        .score-grade.poor { background: #f8d7da; color: #721c24; }
+        .results-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .stat-number {
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .stat-number.green { color: #28a745; }
+        .stat-number.red { color: #dc3545; }
+        .stat-number.blue { color: #4b6cb7; }
+        .stat-label {
+            font-size: 13px;
+            color: #888;
+            margin-top: 4px;
+        }
+        .results-table-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #4b6cb7;
+            margin: 25px 0 15px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e0e7ff;
+        }
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+            font-size: 14px;
+        }
+        .results-table th {
+            background: #4b6cb7;
+            color: white;
+            padding: 10px 8px;
+            text-align: center;
+            font-size: 13px;
+        }
+        .results-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #f0f0f0;
+            text-align: center;
+            vertical-align: middle;
+        }
+        .results-table tr:last-child td {
+            border-bottom: none;
+        }
+        .results-table tr:hover td {
+            background: #f8f9ff;
+        }
+        .results-table .q-num {
+            font-weight: 700;
+            color: #4b6cb7;
+            width: 50px;
+        }
+        .results-table .q-text-cell {
+            text-align: left;
+            max-width: 280px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 13px;
+        }
+        .results-table .q-text-cell:hover {
+            white-space: normal;
+            overflow: visible;
+        }
+        .result-icon {
+            font-size: 18px;
+        }
+        .result-icon.correct { color: #28a745; }
+        .result-icon.wrong { color: #dc3545; }
+        .answer-tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .answer-tag.user {
+            background: #e8f0fe;
+            color: #1a73e8;
+        }
+        .answer-tag.correct-answer {
+            background: #d4edda;
+            color: #155724;
+        }
+        .reset-btn {
+            display: block;
+            margin: 25px auto 10px;
+            background: linear-gradient(to right, #ff7e5f, #feb47b);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        .reset-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255,126,95,0.4);
+        }
+        @media (max-width: 600px) {
+            .results-stats { grid-template-columns: 1fr; }
+            .results-table { font-size: 12px; }
+            .results-table th, .results-table td { padding: 6px 4px; }
+            .results-table .q-text-cell { max-width: 120px; }
+            .score-number { font-size: 36px; }
+        }
+    
+.gear-icon{display:none}/* hidden */
+</style>
+
+<style id="gt-enhanced-style">
+/* ===== 全局变量 ===== */
+:root {
+    --primary: #6366f1;
+    --secondary: #06b6d4;
+    --accent: #f59e0b;
+    --success: #10b981;
+    --warning: #ef4444;
+    --gradient-bg: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --card-bg: #ffffff;
+    --text-primary: #1f2937;
+    --text-secondary: #6b7280;
+}
+
+/* ===== 背景动画 ===== */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--gradient-bg);
+    z-index: -2;
+    opacity: 0.95;
+}
+
+.floating-shapes {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: -1;
+    overflow: hidden;
+}
+
+.float-circle {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    animation: float-shape 25s infinite ease-in-out;
+}
+
+@keyframes float-shape {
+    0%, 100% { transform: translate(0, 0) rotate(0deg); }
+    20% { transform: translate(50px, -60px) rotate(72deg); }
+    40% { transform: translate(-40px, 40px) rotate(144deg); }
+    60% { transform: translate(-50px, -50px) rotate(216deg); }
+    80% { transform: translate(40px, 60px) rotate(288deg); }
+}
+
+.pulse-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.1);
+    animation: pulse-ring 8s infinite;
+}
+
+@keyframes pulse-ring {
+    0% { transform: scale(0.8); opacity: 1; }
+    100% { transform: scale(1.5); opacity: 0; }
+}
+
+/* ===== 头部区域 ===== */
+.gt-header {
+    text-align: center;
+    color: white;
+    padding: 60px 30px;
+    background: rgba(255,255,255,0.1);
+    backdrop-filter: blur(20px);
+    border-radius: 24px;
+    margin: 30px auto;
+    max-width: 1200px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    animation: header-slide-down 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes header-slide-down {
+    from { opacity: 0; transform: translateY(-50px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.gt-header h1 {
+    font-size: 3.2em;
+    font-weight: 700;
+    margin-bottom: 15px;
+    text-shadow: 2px 2px 8px rgba(0,0,0,0.3);
+    letter-spacing: -0.5px;
+}
+
+.gt-header p {
+    font-size: 1.2em;
+    opacity: 0.95;
+    font-weight: 300;
+}
+
+.gt-badges {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+    margin-top: 25px;
+    flex-wrap: wrap;
+}
+
+.gt-badge {
+    background: rgba(255,255,255,0.2);
+    padding: 8px 20px;
+    border-radius: 50px;
+    font-size: 0.9em;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s;
+}
+
+.gt-badge:hover {
+    background: rgba(255,255,255,0.3);
+    transform: translateY(-2px);
+}
+
+/* ===== 游戏化面板 ===== */
+.gamification-panel {
+    position: fixed;
+    top: 30px;
+    right: 30px;
+    background: white;
+    padding: 16px 30px;
+    border-radius: 50px;
+    box-shadow: 0 10px 35px rgba(0,0,0,0.25);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 10000;
+    animation: panel-bounce 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes panel-bounce {
+    from { opacity: 0; transform: scale(0); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.score-icon {
+    font-size: 1.7em;
+    animation: icon-spin 8s linear infinite;
+}
+
+@keyframes icon-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.score-value {
+    font-size: 1.6em;
+    font-weight: 700;
+    color: var(--primary);
+    min-width: 50px;
+    text-align: center;
+}
+
+/* ===== 知识卡片容器 ===== */
+.knowledge-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(580px, 1fr));
+    gap: 35px;
+    margin: 30px auto;
+    max-width: 1300px;
+}
+
+/* ===== 主知识卡片 ===== */
+.knowledge-card {
+    background: var(--card-bg);
+    border-radius: 24px;
+    padding: 40px;
+    box-shadow: 0 15px 40px rgba(0,0,0,0.2);
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    animation: card-fade-in 0.6s ease-out backwards;
+}
+
+.knowledge-card:nth-child(1) { animation-delay: 0.1s; }
+.knowledge-card:nth-child(2) { animation-delay: 0.2s; }
+.knowledge-card:nth-child(3) { animation-delay: 0.3s; }
+.knowledge-card:nth-child(4) { animation-delay: 0.4s; }
+
+@keyframes card-fade-in {
+    from { opacity: 0; transform: translateY(50px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.knowledge-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 6px;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    transform: scaleX(0);
+    transition: transform 0.4s ease;
+}
+
+.knowledge-card:hover {
+    transform: translateY(-15px) scale(1.02);
+    box-shadow: 0 25px 60px rgba(0,0,0,0.3);
+}
+
+.knowledge-card:hover::before {
+    transform: scaleX(1);
+}
+
+.knowledge-card::after {
+    content: '📖';
+    position: absolute;
+    top: 25px;
+    right: 25px;
+    font-size: 2.2em;
+    opacity: 0.15;
+    transition: all 0.3s;
+}
+
+.knowledge-card:hover::after {
+    opacity: 0.3;
+    transform: scale(1.2) rotate(10deg);
+}
+
+/* 已阅读状态 */
+.knowledge-card.read {
+    border: 3px solid var(--success);
+}
+
+.knowledge-card.read::before {
+    background: linear-gradient(90deg, var(--success), #059669);
+}
+
+.knowledge-card.read .card-status {
+    background: var(--success);
+    color: white;
+}
+
+.enhanced-header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 28px;
+    padding-bottom: 22px;
+    border-bottom: 2px dashed #e0e7ff;
+}
+
+.card-badge {
+    width: 52px;
+    height: 52px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4em;
+    font-weight: 700;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+    flex-shrink: 0;
+}
+
+.card-title {
+    flex: 1;
+    font-size: 1.6em;
+    font-weight: 700;
+    color: var(--primary);
+    line-height: 1.3;
+}
+
+.card-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px;
+    background: var(--primary-50);
+    border-radius: 50px;
+    font-size: 0.85em;
+    color: var(--primary);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.card-status.read {
+    background: var(--success);
+    color: white;
+}
+
+.enhanced-content {
+    font-size: 1.05em;
+    color: var(--text-primary);
+    line-height: 1.9;
+}
+
+.enhanced-content p {
+    margin-bottom: 20px;
+    padding: 18px 20px;
+    background: #f0f4ff;
+    border-left: 4px solid var(--primary);
+    border-radius: 10px;
+    transition: all 0.3s;
+    cursor: pointer;
+}
+
+.enhanced-content p:hover {
+    background: #e0e7ff;
+    padding-left: 30px;
+    transform: translateX(10px);
+}
+
+.enhanced-content p.revealed {
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    border-left-color: var(--success);
+}
+
+.highlight-tip {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border-left: 5px solid var(--accent);
+    padding: 20px 22px;
+    border-radius: 12px;
+    margin: 22px 0;
+    position: relative;
+    transition: all 0.3s;
+    cursor: pointer;
+}
+
+.highlight-tip:hover {
+    transform: translateX(10px);
+    box-shadow: 0 5px 20px rgba(245, 158, 11, 0.2);
+}
+
+.highlight-tip::before {
+    content: '💡';
+    position: absolute;
+    top: 15px;
+    right: 18px;
+    font-size: 1.9em;
+    opacity: 0.2;
+}
+
+.highlight-text {
+    font-weight: 600;
+    color: #92400e;
+}
+
+/* ===== 彩带特效 ===== */
+.confetti {
+    position: fixed;
+    width: 12px;
+    height: 12px;
+    z-index: 99999;
+    pointer-events: none;
+    animation: confetti-fall 4s linear forwards;
+}
+
+@keyframes confetti-fall {
+    from { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+    to { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+/* ===== 成就弹窗 ===== */
+.achievement-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    background: white;
+    padding: 35px 45px;
+    border-radius: 28px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    z-index: 10001;
+    text-align: center;
+    animation: popup-scale 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+    max-width: 380px;
+}
+
+@keyframes popup-scale {
+    to { transform: translate(-50%, -50%) scale(1); }
+}
+
+.ach-emoji {
+    font-size: 4.5em;
+    margin-bottom: 20px;
+    animation: ach-bounce 1s infinite;
+}
+
+@keyframes ach-bounce {
+    from, to { transform: translateY(0); }
+    50% { transform: translateY(-18px); }
+}
+
+.ach-title {
+    font-size: 1.6em;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: 12px;
+}
+
+.ach-score {
+    font-size: 2.2em;
+    font-weight: 800;
+    color: var(--accent);
+    margin: 18px 0;
+}
+
+.close-btn {
+    margin-top: 22px;
+    padding: 12px 35px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+    border: none;
+    border-radius: 30px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.close-btn:hover {
+    transform: scale(1.08);
+    box-shadow: 0 8px 25px rgba(99, 102, 241, 0.4);
+}
+
+/* ===== 底部导航点 ===== */
+.nav-dots {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 50px;
+    padding: 20px;
+    background: rgba(255,255,255,0.15);
+    backdrop-filter: blur(15px);
+    border-radius: 60px;
+    flex-wrap: wrap;
+}
+
+.nav-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.4);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+.nav-dot:hover, .nav-dot.active {
+    background: white;
+    transform: scale(1.4);
+    box-shadow: 0 0 15px rgba(255,255,255,0.6);
+}
+
+.nav-dot.completed {
+    background: var(--success);
+}
+
+.nav-dot::after {
+    content: attr(data-label);
+    position: absolute;
+    bottom: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    color: white;
+    font-size: 0.8em;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.nav-dot:hover::after { opacity: 1; }
+
+/* ===== 响应式 ===== */
+@media (max-width: 768px) {
+    .gamification-panel {
+        padding: 12px 20px;
+        top: 15px;
+        right: 15px;
+    }
+    .knowledge-container {
+        grid-template-columns: 1fr;
+    }
+    .knowledge-card {
+        padding: 28px;
+    }
+    .gt-header {
+        padding: 40px 20px;
+        margin: 20px 15px;
+    }
+    .gt-header h1 {
+        font-size: 2em;
+    }
+}
+
+.gear-icon{display:none}/* hidden */
+</style>
+
+<script id="gt-enhanced-script">
+(function() {
+    // ===== 状态管理 =====
+    const state = {
+        score: 0,
+        readSections: new Set(),
+        revealedParagraphs: new Set()
+    };
+    
+    // 从内联数据获取内容
+    let sections = [];
+    try {
+        const dataEl = document.getElementById('gt-content-data');
+        if (dataEl) {
+            const data = JSON.parse(dataEl.textContent);
+            sections = data.sections || [];
+        }
+    } catch(e) {
+        console.warn('无法读取内容数据:', e);
+    }
+    
+    // ===== 渲染背景动画 =====
+    function renderBackground() {
+        const bg = document.createElement('div');
+        bg.className = 'floating-shapes';
+        
+        // 漂浮圆形
+        for (let i = 0; i < 12; i++) {
+            const circle = document.createElement('div');
+            circle.className = 'float-circle';
+            const size = Math.random() * 200 + 80;
+            circle.style.cssText = 
+                'width:' + size + 'px;height:' + size + 'px;' +
+                'left:' + (Math.random()*100) + '%;' +
+                'top:' + (Math.random()*100) + '%;' +
+                'animation-delay:' + (Math.random()*10 - 5) + 's';
+            bg.appendChild(circle);
+        }
+        
+        // 脉冲圆圈
+        for (let i = 0; i < 5; i++) {
+            const ring = document.createElement('div');
+            ring.className = 'pulse-ring';
+            const size = Math.random() * 300 + 200;
+            ring.style.cssText = 
+                'width:' + size + 'px;height:' + size + 'px;' +
+                'left:' + (Math.random()*100) + '%;' +
+                'top:' + (Math.random()*100) + '%;' +
+                'animation-delay:' + (Math.random()*5) + 's';
+            bg.appendChild(ring);
+        }
+        
+        document.body.prepend(bg);
+    }
+    
+    // ===== 创建彩带 =====
+    function createConfetti(isBig = false) {
+        const colors = ['#6366f1', '#06b6d4', '#f59e0b', '#10b981', '#ef4444', '#ec4899'];
+        const count = isBig ? 80 : 30;
+        
+        for (let i = 0; i < count; i++) {
+            const confetti = document.createElement('div');
+            confetti.className = 'confetti';
+            confetti.style.cssText = 
+                'background:' + colors[Math.floor(Math.random()*colors.length)] + ';' +
+                'left:' + (Math.random()*100) + 'vw;' +
+                'top:-10px;' +
+                'animation-duration:' + (Math.random()*2+3) + 's;' +
+                'animation-delay:' + (Math.random()*2) + 's;' +
+                'border-radius:' + (Math.random()>0.5?'50%':'0') + ';';
+            document.body.appendChild(confetti);
+            setTimeout(() => confetti.remove(), 5500);
+        }
+    }
+    
+    // ===== 增加分数 =====
+    function addPoints(points, title) {
+        state.score += points;
+        const el = document.querySelector('.score-value');
+        if (el) {
+            el.textContent = state.score;
+            
+            // 数字跳动动画
+            el.style.transform = 'scale(1.5)';
+            setTimeout(() => el.style.transform = 'scale(1)', 300);
+        }
+        createConfetti();
+        console.log('[积分] +' + points + '分 | 总分：' + state.score);
+    }
+    
+    // ===== 显示成就弹窗 =====
+    function showAchievement(emoji, title, scoreText) {
+        const html = 
+            '<div class="achievement-popup">' +
+                '<div class="ach-emoji">' + emoji + '</div>' +
+                '<div class="ach-title">' + title + '</div>' +
+                '<div class="ach-score">' + scoreText + '</div>' +
+                '<button class="close-btn" onclick="this.parentElement.remove()">继续学习</button>' +
+            '</div>';
+        document.body.insertAdjacentHTML('beforeend', html);
+        
+        // 自动关闭
+        setTimeout(() => {
+            const popup = document.querySelector('.achievement-popup');
+            if (popup) popup.remove();
+        }, 3500);
+    }
+    
+    // ===== 标记卡片为已读 =====
+    function markCardAsRead(cardId) {
+        if (!state.readSections.has(cardId)) {
+            state.readSections.add(cardId);
+            
+            const card = document.querySelector('.knowledge-card[data-id="' + cardId + '"]');
+            if (card) {
+                card.classList.add('read');
+                
+                // 更新状态徽章
+                const statusBadge = card.querySelector('.card-status');
+                if (statusBadge) {
+                    statusBadge.innerHTML = '✓ 已阅读';
+                    statusBadge.classList.add('read');
+                }
+            }
+            
+            // 更新导航点
+            const dot = document.querySelector('.nav-dot[data-section="' + cardId + '"]');
+            if (dot) {
+                dot.classList.add('completed');
+            }
+            
+            return true;
+        }
+        return false;
+    }
+    
+    // ===== 显示段落高亮 =====
+    function revealParagraph(paraId) {
+        if (!state.revealedParagraphs.has(paraId)) {
+            state.revealedParagraphs.add(paraId);
+            
+            const para = document.querySelector('.enhanced-content p[data-id="' + paraId + '"]');
+            if (para) {
+                para.classList.add('revealed');
+            }
+            
+            return true;
+        }
+        return false;
+    }
+    
+    // ===== 处理卡片点击 =====
+    function handleCardClick(cardId) {
+        const isNew = markCardAsRead(cardId);
+        
+        if (isNew) {
+            showAchievement('✨', '知识点解锁!', '+10 分');
+        }
+        addPoints(10);
+    }
+    
+    // ===== 处理段落点击 =====
+    function handleParagraphClick(paraId) {
+        const isNew = revealParagraph(paraId);
+        
+        if (isNew) {
+            addPoints(3);
+            showAchievement('📚', '深入学习!', '+3 分');
+        }
+    }
+    
+    // ===== 处理提示框点击 =====
+    function handleTipClick() {
+        addPoints(5);
+        showAchievement('💡', '发现要点!', '+5 分');
+    }
+    
+    // ===== 初始化 =====
+    function init() {
+        renderBackground();
+        setupEventListeners();
+        createNavDots();
+        console.log('[GT Enhanced] 页面加载完成! 🚀');
+    }
+    
+    // ===== 设置事件监听 =====
+    function setupEventListeners() {
+        // 给所有卡片添加点击事件
+        document.querySelectorAll('.knowledge-card').forEach((card, idx) => {
+            card.dataset.id = 'section-' + idx;
+            
+            // 整卡点击
+            card.addEventListener('click', function() {
+                const cardId = this.dataset.id;
+                handleCardClick(cardId);
+            });
+            
+            // 段落点击
+            const paragraphs = card.querySelectorAll('.enhanced-content p');
+            paragraphs.forEach((para, pIdx) => {
+                para.dataset.id = 'para-' + card.dataset.id + '-' + pIdx;
+                
+                const originalHandler = para.onclick;
+                para.onclick = function(e) {
+                    e.stopPropagation();
+                    handleParagraphClick(this.dataset.id);
+                    
+                    // 保留原有行为
+                    if (originalHandler) originalHandler.call(this, e);
+                };
+                
+                // 悬停效果
+                para.addEventListener('mouseenter', function() {
+                    this.style.transform = 'translateX(8px)';
+                });
+                para.addEventListener('mouseleave', function() {
+                    this.style.transform = 'translateX(0)';
+                });
+            });
+            
+            // 提示框点击
+            const tips = card.querySelectorAll('.highlight-tip');
+            tips.forEach(tip => {
+                tip.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    handleTipClick();
+                });
+            });
+        });
+    }
+    
+    // ===== 创建导航点 =====
+    function createNavDots() {
+        const navDots = document.createElement('div');
+        navDots.className = 'nav-dots';
+        
+        document.querySelectorAll('.knowledge-card').forEach((card, idx) => {
+            const dot = document.createElement('div');
+            dot.className = 'nav-dot';
+            dot.dataset.section = card.dataset.id;
+            dot.dataset.label = '第' + (idx+1) + '节';
+            
+            dot.addEventListener('click', function() {
+                // 移除所有激活状态
+                document.querySelectorAll('.nav-dot').forEach(d => d.classList.remove('active'));
+                this.classList.add('active');
+                
+                // 滚动到目标卡片
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+            
+            navDots.appendChild(dot);
+        });
+        
+        // 插入到最后
+        document.body.appendChild(navDots);
+    }
+    
+    // ===== 启动 =====
+    document.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+
+<script type="application/json" id="gt-content-data">
+{
+    "chapterTitle": "通用技术必修二·系统及其设计",
+    "sections": ["课堂练习 - 题目总数：25题", "说明：本练习包含20道单项选择题和5道判断题。每题作答后点击\"提交答案\"按钮查看解析。", "您已完成全部题目，感谢您的参与！", "通用技术必修二 · 第三单元 课堂练习"]
+}
+</script>
+</head>
+<body>
+<header class="gt-header">
+    <h1>通用技术必修二·系统及其设计</h1>
+    <p>交互式学习 · 探索 · 发现 · 成长</p>
+    <div class="gt-badges">
+        <span class="gt-badge">✨ 互动讲解</span>
+        <span class="gt-badge">🧩 趣味练习</span>
+        <span class="gt-badge">🏆 积分激励</span>
+    </div>
+</header>
+
+    <div class="container">
+        <header>
+            <h1>通用技术必修二·系统及其设计</h1>
+            <p class="subtitle">课堂练习 - 题目总数：25题</p>
+        </header>
+        <div class="instructions">
+            <p>说明：本练习包含20道单项选择题和5道判断题。每题作答后点击"提交答案"按钮查看解析。</p>
+            <div class="progress-container">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
+            <p>已完成：<span id="completedCount">0</span>/25 题</p>
+        </div>
+        
+        <div id="questions-container">
+            <!-- 单项选择题 -->
+            <div class="question">
+                <div class="question-number">第1题</div>
+                <div class="question-text">1. 关于系统的概念，下列理解不正确的是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q1" value="A"><span> A. 系统是由相互联系、相互作用的若干要素组成的统一整体</span></label>
+                    <label class="option"><input type="radio" name="q1" value="B"><span> B. 系统的功能等于各部分功能之和</span></label>
+                    <label class="option"><input type="radio" name="q1" value="C"><span> C. 构成系统的各要素之间存在着相互依存的关系</span></label>
+                    <label class="option"><input type="radio" name="q1" value="D"><span> D. 系统具有特定的功能，以实现一定的目标</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(1, 'B')">提交答案</button>
+                <div id="feedback1" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第2题</div>
+                <div class="question-text">2. “丢卒保车”、“一着不慎，满盘皆输”所体现的系统基本特性是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q2" value="A"><span> A. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q2" value="B"><span> B. 相关性</span></label>
+                    <label class="option"><input type="radio" name="q2" value="C"><span> C. 目的性</span></label>
+                    <label class="option"><input type="radio" name="q2" value="D"><span> D. 动态性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(2, 'A')">提交答案</button>
+                <div id="feedback2" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第3题</div>
+                <div class="question-text">3. 下列关于系统的基本特性的说法，不正确的是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q3" value="A"><span> A. 系统的整体功能大于各部分功能之和</span></label>
+                    <label class="option"><input type="radio" name="q3" value="B"><span> B. 系统的各要素之间是相互关联、相互影响的</span></label>
+                    <label class="option"><input type="radio" name="q3" value="C"><span> C. 一个系统可以包含若干个子系统</span></label>
+                    <label class="option"><input type="radio" name="q3" value="D"><span> D. 系统的内部环境必须保持完全稳定</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(3, 'D')">提交答案</button>
+                <div id="feedback3" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第4题</div>
+                <div class="question-text">4. 下列不属于系统的基本特性的是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q4" value="A"><span> A. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q4" value="B"><span> B. 相关性</span></label>
+                    <label class="option"><input type="radio" name="q4" value="C"><span> C. 复杂性</span></label>
+                    <label class="option"><input type="radio" name="q4" value="D"><span> D. 环境适应性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(4, 'C')">提交答案</button>
+                <div id="feedback4" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第5题</div>
+                <div class="question-text">5. 下列关于系统的说法，错误的是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q5" value="A"><span> A. 系统必须具有明确的目标</span></label>
+                    <label class="option"><input type="radio" name="q5" value="B"><span> B. 系统至少要有两个或两个以上的要素</span></label>
+                    <label class="option"><input type="radio" name="q5" value="C"><span> C. 系统的整体功能是各部分功能的总和</span></label>
+                    <label class="option"><input type="radio" name="q5" value="D"><span> D. 系统具有层次性，大系统可以包含子系统</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(5, 'C')">提交答案</button>
+                <div id="feedback5" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第6题</div>
+                <div class="question-text">6. 人们通过对系统的分析，权衡各种因素，最终做出决策，这体现了系统的（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q6" value="A"><span> A. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q6" value="B"><span> B. 相关性</span></label>
+                    <label class="option"><input type="radio" name="q6" value="C"><span> C. 目的性</span></label>
+                    <label class="option"><input type="radio" name="q6" value="D"><span> D. 动态性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(6, 'C')">提交答案</button>
+                <div id="feedback6" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第7题</div>
+                <div class="question-text">7. 为了应对市场变化，企业需要不断调整其经营策略，这体现了系统的（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q7" value="A"><span> A. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q7" value="B"><span> B. 相关性</span></label>
+                    <label class="option"><input type="radio" name="q7" value="C"><span> C. 目的性</span></label>
+                    <label class="option"><input type="radio" name="q7" value="D"><span> D. 环境适应性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(7, 'D')">提交答案</button>
+                <div id="feedback7" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第8题</div>
+                <div class="question-text">8. 系统分析的出发点是为了获得（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q8" value="A"><span> A. 决策方案</span></label>
+                    <label class="option"><input type="radio" name="q8" value="B"><span> B. 系统的最优解</span></label>
+                    <label class="option"><input type="radio" name="q8" value="C"><span> C. 问题的解决办法</span></label>
+                    <label class="option"><input type="radio" name="q8" value="D"><span> D. 详细的调查报告</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(8, 'B')">提交答案</button>
+                <div id="feedback8" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第9题</div>
+                <div class="question-text">9. 系统分析的一般步骤是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q9" value="A"><span> A. 明确问题→收集资料→分析计算→评价比较→检验核实</span></label>
+                    <label class="option"><input type="radio" name="q9" value="B"><span> B. 收集资料→明确问题→分析计算→评价比较→检验核实</span></label>
+                    <label class="option"><input type="radio" name="q9" value="C"><span> C. 明确问题→收集资料→评价比较→分析计算→检验核实</span></label>
+                    <label class="option"><input type="radio" name="q9" value="D"><span> D. 明确问题→分析计算→收集资料→评价比较→检验核实</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(9, 'A')">提交答案</button>
+                <div id="feedback9" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第10题</div>
+                <div class="question-text">10. 在系统分析中，我们常常运用“5W1H”的方法来发现问题，其中“Where”指的是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q10" value="A"><span> A. 何人（Who）</span></label>
+                    <label class="option"><input type="radio" name="q10" value="B"><span> B. 何处（Where）</span></label>
+                    <label class="option"><input type="radio" name="q10" value="C"><span> C. 何时（When）</span></label>
+                    <label class="option"><input type="radio" name="q10" value="D"><span> D. 为何（Why）</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(10, 'B')">提交答案</button>
+                <div id="feedback10" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第11题</div>
+                <div class="question-text">11. 中国载人航天工程作为一个复杂的巨系统，包含了载人飞船、运载火箭、测控通信、航天员、发射场、着陆场等多个系统，这主要体现了系统的（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q11" value="A"><span> A. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q11" value="B"><span> B. 相关性</span></label>
+                    <label class="option"><input type="radio" name="q11" value="C"><span> C. 层次性</span></label>
+                    <label class="option"><input type="radio" name="q11" value="D"><span> D. 环境适应性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(11, 'A')">提交答案</button>
+                <div id="feedback11" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第12题</div>
+                <div class="question-text">12. 为了提高汽车的安全性能，在设计时会综合考虑车身强度、安全气囊、防抱死刹车系统（ABS）等多个方面，这体现了系统分析的（ ）原则。</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q12" value="A"><span> A. 科学性</span></label>
+                    <label class="option"><input type="radio" name="q12" value="B"><span> B. 综合性</span></label>
+                    <label class="option"><input type="radio" name="q12" value="C"><span> C. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q12" value="D"><span> D. 目的性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(12, 'B')">提交答案</button>
+                <div id="feedback12" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第13题</div>
+                <div class="question-text">13. 系统设计的核心是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q13" value="A"><span> A. 方案构思</span></label>
+                    <label class="option"><input type="radio" name="q13" value="B"><span> B. 制定设计方案</span></label>
+                    <label class="option"><input type="radio" name="q13" value="C"><span> C. 明确设计要求和目标</span></label>
+                    <label class="option"><input type="radio" name="q13" value="D"><span> D. 技术测试</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(13, 'C')">提交答案</button>
+                <div id="feedback13" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第14题</div>
+                <div class="question-text">14. 在系统设计过程中，需要明确系统的边界，这里的“边界”是指（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q14" value="A"><span> A. 系统的物理形状</span></label>
+                    <label class="option"><input type="radio" name="q14" value="B"><span> B. 系统内部各要素的范围</span></label>
+                    <label class="option"><input type="radio" name="q14" value="C"><span> C. 系统与外部环境之间的界限</span></label>
+                    <label class="option"><input type="radio" name="q14" value="D"><span> D. 系统的大小尺寸</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(14, 'C')">提交答案</button>
+                <div id="feedback14" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第15题</div>
+                <div class="question-text">15. 以下哪项不属于系统设计的原则？（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q15" value="A"><span> A. 整体性原则</span></label>
+                    <label class="option"><input type="radio" name="q15" value="B"><span> B. 相关性原则</span></label>
+                    <label class="option"><input type="radio" name="q15" value="C"><span> C. 科学性原则</span></label>
+                    <label class="option"><input type="radio" name="q15" value="D"><span> D. 综合性原则</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(15, 'B')">提交答案</button>
+                <div id="feedback15" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第16题</div>
+                <div class="question-text">16. 修建桥梁时，工程师需要综合考虑水文、地质、气候、交通量等多种因素，这体现了系统分析的（ ）原则。</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q16" value="A"><span> A. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q16" value="B"><span> B. 科学性</span></label>
+                    <label class="option"><input type="radio" name="q16" value="C"><span> C. 综合性</span></label>
+                    <label class="option"><input type="radio" name="q16" value="D"><span> D. 目的性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(16, 'C')">提交答案</button>
+                <div id="feedback16" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第17题</div>
+                <div class="question-text">17. 在系统分析中，利用数学方法建立模型进行定量分析，这体现了系统分析的（ ）原则。</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q17" value="A"><span> A. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q17" value="B"><span> B. 科学性</span></label>
+                    <label class="option"><input type="radio" name="q17" value="C"><span> C. 综合性</span></label>
+                    <label class="option"><input type="radio" name="q17" value="D"><span> D. 目的性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(17, 'B')">提交答案</button>
+                <div id="feedback17" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第18题</div>
+                <div class="question-text">18. 一个完整的系统必须具备的基本要素是（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q18" value="A"><span> A. 输入、处理、输出</span></label>
+                    <label class="option"><input type="radio" name="q18" value="B"><span> B. 要素、结构、功能</span></label>
+                    <label class="option"><input type="radio" name="q18" value="C"><span> C. 要素、结构、功能、目标</span></label>
+                    <label class="option"><input type="radio" name="q18" value="D"><span> D. 输入、输出、反馈</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(18, 'C')">提交答案</button>
+                <div id="feedback18" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第19题</div>
+                <div class="question-text">19. 人体是一个复杂的系统，心脏、肺、胃、大脑等是这个系统的（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q19" value="A"><span> A. 结构</span></label>
+                    <label class="option"><input type="radio" name="q19" value="B"><span> B. 要素</span></label>
+                    <label class="option"><input type="radio" name="q19" value="C"><span> C. 功能</span></label>
+                    <label class="option"><input type="radio" name="q19" value="D"><span> D. 目标</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(19, 'B')">提交答案</button>
+                <div id="feedback19" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第20题</div>
+                <div class="question-text">20. 为了实现节能减排的目标，城市规划者将绿色建筑、公共交通、垃圾分类回收等措施整合起来，形成一个可持续发展的城市生态系统。这主要体现了系统的（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q20" value="A"><span> A. 相关性</span></label>
+                    <label class="option"><input type="radio" name="q20" value="B"><span> B. 整体性</span></label>
+                    <label class="option"><input type="radio" name="q20" value="C"><span> C. 层次性</span></label>
+                    <label class="option"><input type="radio" name="q20" value="D"><span> D. 动态性</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(20, 'B')">提交答案</button>
+                <div id="feedback20" class="feedback"></div>
+            </div>
+            
+            <!-- 判断题 -->
+            <div class="question">
+                <div class="question-number">第21题</div>
+                <div class="question-text">21. 系统的整体性意味着系统的总体功能一定大于各部分功能之和。（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q21" value="正确"><span> 正确</span></label>
+                    <label class="option"><input type="radio" name="q21" value="错误"><span> 错误</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(21, '错误')">提交答案</button>
+                <div id="feedback21" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第22题</div>
+                <div class="question-text">22. 系统的目的性是指系统都具有明确的、预期的功能或目标。（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q22" value="正确"><span> 正确</span></label>
+                    <label class="option"><input type="radio" name="q22" value="错误"><span> 错误</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(22, '正确')">提交答案</button>
+                <div id="feedback22" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第23题</div>
+                <div class="question-text">23. 系统分析和系统设计是同一个概念。（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q23" value="正确"><span> 正确</span></label>
+                    <label class="option"><input type="radio" name="q23" value="错误"><span> 错误</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(23, '错误')">提交答案</button>
+                <div id="feedback23" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第24题</div>
+                <div class="question-text">24. 系统设计时，应遵循科学性原则，确保设计方案的合理性和可行性。（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q24" value="正确"><span> 正确</span></label>
+                    <label class="option"><input type="radio" name="q24" value="错误"><span> 错误</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(24, '正确')">提交答案</button>
+                <div id="feedback24" class="feedback"></div>
+            </div>
+            
+            <div class="question">
+                <div class="question-number">第25题</div>
+                <div class="question-text">25. 系统的动态性是指系统作为一个整体，其功能大于部分功能之和。（ ）</div>
+                <div class="options">
+                    <label class="option"><input type="radio" name="q25" value="正确"><span> 正确</span></label>
+                    <label class="option"><input type="radio" name="q25" value="错误"><span> 错误</span></label>
+                </div>
+                <button class="submit-btn" onclick="checkAnswer(25, '错误')">提交答案</button>
+                <div id="feedback25" class="feedback"></div>
+            </div>
+        </div>
+        
+        <div id="resultsSection" class="results-section">
+            <h2 class="results-title">🏆 练习完成！</h2>
+            <p class="results-subtitle">以下是你的答题反馈报告</p>
+
+            <div class="score-display">
+                <div class="score-number" id="totalScore">0</div>
+                <div class="score-label">答对 <span id="correctCountDisplay">0</span> / 25 题</div>
+                <div class="score-percentage" id="scorePercentage">正确率：0%</div>
+                <div class="score-grade" id="scoreGrade">-</div>
+            </div>
+
+            <div class="results-stats">
+                <div class="stat-card">
+                    <div class="stat-number green" id="statCorrect">0</div>
+                    <div class="stat-label">✅ 答对</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number red" id="statWrong">0</div>
+                    <div class="stat-label">❌ 答错</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number blue" id="statAnswered">0</div>
+                    <div class="stat-label">📝 已答</div>
+                </div>
+            </div>
+
+            <div class="results-table-title">📋 逐题答题情况</div>
+            <div style="overflow-x: auto;">
+                <table class="results-table" id="resultsTable">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th style="text-align:left;">题目</th>
+                            <th>你的答案</th>
+                            <th>正确答案</th>
+                            <th>结果</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsTableBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <button class="reset-btn" onclick="resetQuiz()">🔄 重新开始</button>
+        </div>
+        
+        <footer>
+            <p>通用技术必修二 · 第三单元 课堂练习</p>
+        </footer>
+    </div>
+
+    <script>
+        let completedQuestions = new Set();
+        let correctCount = 0;
+        let userAnswers = {};
+        
+        // 按题号索引的所有题目问题文本（用于结果表展示）
+        const questionShortTexts = {
+            1: '下面关于系统的基本特性的说法，不正确的是',
+            2: '"一着不慎，满盘皆输"体现了系统的',
+            3: '以下关于系统与环境关系的说法，错误的是',
+            4: '以下哪一项不是系统的基本特性',
+            5: '以下对系统整体性的理解，正确的是',
+            6: '系统的"目的性"主要体现在',
+            7: '企业根据市场需求调整产品策略，体现了系统的',
+            8: '系统分析的最终目的是',
+            9: '系统分析的一般步骤中，首要步骤是',
+            10: '"5W1H"分析法中的"H"是指',
+            11: '中国载人航天工程包含多个子系统，体现了系统的',
+            12: '汽车安全设计综合考虑多个方面，体现了系统分析的',
+            13: '系统设计的核心是',
+            14: '在系统设计过程中，"边界"是指',
+            15: '以下不属于系统设计原则的是',
+            16: '修建桥梁时综合考虑多种因素，体现了系统分析的',
+            17: '利用数学方法进行定量分析，体现了系统分析的',
+            18: '以下对系统结构描述最准确的是',
+            19: '人体系统中，心脏、肺、胃等属于',
+            20: '绿色建筑+公交优先+垃圾分类回收，体现了系统的',
+            21: '系统的整体性是指整体功能大于各部分功能之和。',
+            22: '系统的目的性是指系统都具有明确的目标。',
+            23: '系统分析和系统设计是同一个概念。',
+            24: '系统设计应遵循科学性原则。',
+            25: '系统的动态性是指整体功能大于部分功能之和。'
+        };
+        // 正确答案列表（用于成绩判定和展示）
+        const correctAnswersMap = {
+            1: 'B', 2: 'A', 3: 'D', 4: 'C', 5: 'C',
+            6: 'C', 7: 'D', 8: 'B', 9: 'A', 10: 'B',
+            11: 'A', 12: 'B', 13: 'C', 14: 'C', 15: 'B',
+            16: 'C', 17: 'B', 18: 'C', 19: 'B', 20: 'B',
+            21: '错误', 22: '正确', 23: '错误', 24: '正确', 25: '错误'
+        };
+        
+        function checkAnswer(questionNum, correctAnswer) {
+            const selectedOption = document.querySelector(`input[name="q${questionNum}"]:checked`);
+            const feedbackDiv = document.getElementById(`feedback${questionNum}`);
+
+            // 为每道题准备对应的解释
+            const explanations = {
+                1: "B项错误。系统的基本特性之一是整体性，其整体功能往往大于各部分功能之和，而不是简单的相加。",
+                2: "A项正确。“一着不慎，满盘皆输”强调了局部（一个棋子）对全局（整盘棋）的影响，体现了系统的整体性。",
+                3: "D项错误。系统是开放的，需要与外部环境进行物质、能量、信息的交换，以维持其功能，而非保持内部环境完全稳定。",
+                4: "C项正确。复杂性不是系统的基本特性。系统的基本特性包括：整体性、相关性、目的性、动态性、环境适应性。",
+                5: "C项错误。此为对系统整体性的误解。系统的基本特性是整体性，即系统的整体功能大于各部分功能之和。",
+                6: "C项正确。系统具有明确的目标，人们分析系统正是为了实现这个目标而服务，因此体现了目的性。",
+                7: "D项正确。企业根据外部市场的变化调整策略，说明系统能够适应外部环境的变化，体现了环境适应性。",
+                8: "B项正确。系统分析的最终目的，是为了寻求解决问题的最优方案，即系统的最优解。",
+                9: "A项正确。系统分析的一般步骤为：明确问题、收集资料、分析计算、评价比较、检验核实。",
+                10: "B项正确。“5W1H”法是系统分析中常用的方法，包括：What(什么), Where(何处), When(何时), Who(何人), Why(为何), How(如何)。",
+                11: "A项正确。中国载人航天工程作为一个大系统，其下又包含多个子系统，这体现了系统的整体性。",
+                12: "B项正确。在设计汽车安全性能时，综合考虑多个方面的因素，正是系统分析综合性原则的体现。",
+                13: "C项正确。在进行任何设计之前，首要任务是明确“做什么”以及“要做到什么程度”，即明确设计要求和目标。",
+                14: "C项正确。系统边界定义了系统的范围，明确了哪些部分属于系统内部，哪些部分属于外部环境。",
+                15: "B项正确。相关性是系统的基本特性，而不是系统设计的原则。系统设计的原则包括：整体性、科学性、综合性。",
+                16: "C项正确。修建桥梁时综合考虑多种因素，是系统分析综合性原则的典型应用。",
+                17: "B项正确。利用数学方法进行定量分析，保证了分析的严谨和精确，体现了科学性原则。",
+                18: "C项正确。一个系统由多个要素构成，这些要素按照一定的结构组织在一起，共同实现系统的功能，而这一切都是为了达成系统的目标。",
+                19: "B项正确。心脏、肺、胃、大脑等器官是构成人体这个系统的基本组成部分，即系统的要素。",
+                20: "B项正确。将多个独立的措施（绿色建筑、公交、回收）整合为一个有机整体来实现目标，体现了系统的整体性。",
+                21: "错误。系统的整体性是指系统的整体功能不是各部分功能的简单相加，有时大于，有时也可能小于或等于，取决于各要素间的协调关系。",
+                22: "正确。任何系统都是为了实现特定的功能或目标而存在的，这体现了系统的目的性。",
+                23: "错误。系统分析是对已有系统进行研究，以了解其功能和特性；系统设计则是为了构建一个新系统或改进现有系统，二者目的不同。",
+                24: "正确。系统设计必须基于科学的理论和方法，确保方案在技术和实践上是可行的。",
+                25: "错误。描述的是系统的整体性，而非动态性。动态性是指系统随时间变化而发展演变的特性。"
+            };
+            
+            if (!selectedOption) {
+                alert("请先选择一个答案！");
+                return;
+            }
+            
+            // 如果已经回答过此题，则不再重复计算
+            if (completedQuestions.has(questionNum)) {
+                return;
+            }
+            
+            const userAnswer = selectedOption.value;
+            const explanation = explanations[questionNum];
+            
+            // 记录用户答案
+            userAnswers[questionNum] = userAnswer;
+            
+            feedbackDiv.style.display = "block";
+            
+            if (userAnswer === correctAnswer) {
+                feedbackDiv.className = "feedback correct";
+                feedbackDiv.innerHTML = `<strong>回答正确！</strong><br>${explanation}`;
+                completedQuestions.add(questionNum);
+                correctCount++;
+            } else {
+                feedbackDiv.className = "feedback incorrect";
+                feedbackDiv.innerHTML = `<strong>回答错误！正确答案：${correctAnswer}</strong><br>${explanation}`;
+                completedQuestions.add(questionNum);
+            }
+            
+            updateProgress();
+        }
+        
+        function updateProgress() {
+            const completedCount = completedQuestions.size;
+            document.getElementById('completedCount').textContent = completedCount;
+            
+            const progressPercent = (completedCount / 25) * 100;
+            document.getElementById('progressBar').style.width = `${progressPercent}%`;
+            
+            // 如果所有题目都已完成，显示结果
+            if (completedCount === 25) {
+                showResults();
+            }
+        }
+        
+        function showResults() {
+            console.log('[反馈] showResults 被调用，正确数：' + correctCount);
+            try {
+                // 隐藏题目区，显示结果区
+                const qContainer = document.getElementById('questions-container');
+                const rSection = document.getElementById('resultsSection');
+                if (qContainer) qContainer.style.display = 'none';
+                if (rSection) rSection.style.display = 'block';
+                
+                if (!rSection) {
+                    console.error('[反馈] 未找到 resultsSection 元素');
+                    return;
+                }
+                
+                // 成绩展示
+                const wrongCount = 25 - correctCount;
+                const percentage = Math.round((correctCount / 25) * 100);
+                
+                const totalScoreEl = document.getElementById('totalScore');
+                const correctCountEl = document.getElementById('correctCountDisplay');
+                const percentageEl = document.getElementById('scorePercentage');
+                
+                if (totalScoreEl) totalScoreEl.textContent = correctCount + ' / 25';
+                if (correctCountEl) correctCountEl.textContent = correctCount;
+                if (percentageEl) percentageEl.textContent = '正确率：' + percentage + '%';
+                
+                // 统计卡片
+                const statCorrect = document.getElementById('statCorrect');
+                const statWrong = document.getElementById('statWrong');
+                const statAnswered = document.getElementById('statAnswered');
+                if (statCorrect) statCorrect.textContent = correctCount;
+                if (statWrong) statWrong.textContent = wrongCount;
+                if (statAnswered) statAnswered.textContent = '25';
+                
+                // 评分等级
+                const gradeEl = document.getElementById('scoreGrade');
+                if (gradeEl) {
+                    let gradeText, gradeClass, numClass;
+                    if (percentage >= 90) {
+                        gradeText = '🌟 优秀！你太棒了！';
+                        gradeClass = 'score-grade great';
+                        numClass = 'score-number great';
+                    } else if (percentage >= 75) {
+                        gradeText = '👍 良好！继续保持！';
+                        gradeClass = 'score-grade good';
+                        numClass = 'score-number good';
+                    } else if (percentage >= 60) {
+                        gradeText = '💪 及格！还需加把劲！';
+                        gradeClass = 'score-grade ok';
+                        numClass = 'score-number ok';
+                    } else {
+                        gradeText = '📚 需努力！建议复习后再试一次！';
+                        gradeClass = 'score-grade poor';
+                        numClass = 'score-number poor';
+                    }
+                    gradeEl.textContent = gradeText;
+                    gradeEl.className = gradeClass;
+                    if (totalScoreEl) totalScoreEl.className = numClass;
+                }
+                
+                // 生成逐题答题表
+                const tbody = document.getElementById('resultsTableBody');
+                if (!tbody) {
+                    console.error('[反馈] 未找到 resultsTableBody 元素');
+                    return;
+                }
+                tbody.innerHTML = '';
+                
+                for (let i = 1; i <= 25; i++) {
+                    const userAns = userAnswers[i] || '未作答';
+                    const correctAns = correctAnswersMap[i];
+                    const isCorrect = userAns === correctAns;
+                    const shortText = questionShortTexts[i];
+                    
+                    const tr = document.createElement('tr');
+                    const safeTitle = shortText.replace(/"/g, '&quot;');
+                    tr.innerHTML = 
+                        '<td class="q-num">' + i + '</td>' +
+                        '<td class="q-text-cell" title="' + safeTitle + '">' + shortText + '</td>' +
+                        '<td><span class="answer-tag user">' + userAns + '</span></td>' +
+                        '<td><span class="answer-tag correct-answer">' + correctAns + '</span></td>' +
+                        '<td><span class="result-icon ' + (isCorrect ? 'correct' : 'wrong') + '">' + (isCorrect ? '✅' : '❌') + '</span></td>';
+                    tbody.appendChild(tr);
+                }
+                
+                // 滚动到结果区域
+                rSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                console.log('[反馈] 答题反馈已成功显示 ✅');
+            } catch (e) {
+                console.error('[反馈] 显示反馈时出错：', e);
+                alert('显示答题反馈时出错，请确认浏览器控制台(F12)查看详情。错误：' + e.message);
+            }
+        }
+        
+        function resetQuiz() {
+            // 重置所有选项
+            const allInputs = document.querySelectorAll('input[type="radio"]');
+            allInputs.forEach(input => input.checked = false);
+            
+            // 隐藏所有反馈
+            const allFeedbacks = document.querySelectorAll('.feedback');
+            allFeedbacks.forEach(feedback => {
+                feedback.style.display = 'none';
+            });
+            
+            // 重置进度和成绩
+            completedQuestions.clear();
+            correctCount = 0;
+            userAnswers = {};
+            document.getElementById('completedCount').textContent = '0';
+            document.getElementById('progressBar').style.width = '0%';
+            
+            // 隐藏结果部分
+            document.getElementById('questions-container').style.display = 'block';
+            document.getElementById('resultsSection').style.display = 'none';
+        }
+        
+        // 为选项添加点击事件，使其也能触发选中
+        document.querySelectorAll('.option').forEach(option => {
+            option.addEventListener('click', function(e) {
+                if (e.target.tagName !== 'INPUT') {
+                    const radio = this.querySelector('input[type="radio"]');
+                    radio.checked = true;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

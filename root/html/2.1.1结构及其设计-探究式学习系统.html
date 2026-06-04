@@ -1,0 +1,2307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第一单元：结构及其设计 | 高中通用技术探究式学习系统</title>
+<style>
+/* ========================================
+   专业教育软件风格 - 去游戏化设计
+   ======================================== */
+* { padding: 0; margin: 0; box-sizing: border-box; }
+body { 
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif; 
+  background: #f5f7fa; 
+  overflow-x: hidden;
+  color: #2c3e50;
+}
+
+/* ===== 启动/欢迎页面 ===== */
+#splash {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: #ffffff;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 1000; transition: opacity 0.8s ease;
+  overflow-y: auto;
+}
+#splash.hidden { opacity: 0; pointer-events: none; }
+
+.splash-content { text-align: center; max-width: 90vw; width: 100%; padding: clamp(20px, 5vw, 40px); }
+.splash-icon { font-size: clamp(3em, 8vw, 5em); margin-bottom: 20px; animation: float 3s ease-in-out infinite; }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+
+.splash-title {
+  font-size: clamp(1.8em, 5vw, 2.8em); color: #e74c3c; font-weight: bold; margin-bottom: 15px;
+}
+.splash-subtitle { font-size: clamp(1em, 3vw, 1.4em); color: #6b7280; margin-bottom: 30px; }
+.splash-desc { 
+  font-size: clamp(0.9em, 2vw, 1.1em); color: #374151; line-height: 1.8; 
+  margin-bottom: 40px; text-align: left; background: #f8fafc;
+  padding: clamp(15px, 3vw, 25px); border-radius: 12px; border-left: 4px solid #FF6B6B;
+}
+
+.learning-modules { 
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+  gap: clamp(10px, 2vw, 15px); margin: 30px 0; text-align: left; 
+}
+.module-card {
+  background: #ffffff; padding: clamp(10px, 2vw, 15px); border-radius: 8px;
+  border-left: 3px solid #FF6B6B; transition: all 0.3s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.module-card:hover { background: #fff5f5; transform: translateX(5px); }
+.module-card strong { color: #e74c3c; display: block; margin-bottom: 5px; }
+.module-card span { color: #6b7280; font-size: 0.9em; }
+
+.start-btn {
+  padding: clamp(12px, 3vw, 18px) clamp(30px, 8vw, 60px); font-size: clamp(1em, 2.5vw, 1.3em); border: none;
+  background: #FF6B6B; color: #fff; border-radius: 8px;
+  cursor: pointer; transition: all 0.3s; font-weight: bold;
+  box-shadow: 0 4px 15px rgba(255, 107, 107, 0.35);
+}
+.start-btn:hover { background: #e74c3c; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(255, 107, 107, 0.45); }
+
+/* ===== 主界面布局 ===== */
+#app-container { display: none; width: 100vw; height: 100vh; }
+#sidebar {
+  width: 280px; height: 100vh; background: #fff; 
+  border-right: 1px solid #e0e6ed; padding: 20px 0;
+  position: fixed; left: 0; top: 0; z-index: 100;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+  overflow-y: auto;
+}
+#main-content {
+  margin-left: 280px; padding: 0; height: 100vh;
+  position: relative; background: #f5f7fa;
+}
+
+/* ===== 侧边栏 ===== */
+.sidebar-header { padding: 15px 20px; border-bottom: 2px solid #e0e6ed; margin-bottom: 20px; }
+.sidebar-header h2 { font-size: 1.1em; color: #1a365d; margin-bottom: 5px; }
+.sidebar-header p { font-size: 0.85em; color: #64748b; }
+
+.nav-section { margin-bottom: 25px; }
+.nav-section-title {
+  font-size: 0.8em; color: #64748b; text-transform: uppercase;
+  letter-spacing: 1px; padding: 0 20px 10px; font-weight: bold;
+}
+.nav-item {
+  padding: 12px 20px; cursor: pointer; transition: all 0.2s;
+  display: flex; align-items: center; gap: 10px; color: #374151;
+  border-left: 3px solid transparent;
+}
+.nav-item:hover { background: #f0f4f9; }
+.nav-item.active { background: #e8f0fe; color: #1a365d; border-left-color: #4a8bf0; font-weight: bold; }
+.nav-item .icon { font-size: 1.2em; width: 25px; text-align: center; }
+
+.stat-panel { padding: 15px 20px; background: #f8fafc; border-top: 1px solid #e0e6ed; margin-top: auto; }
+.stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.9em; }
+.stat-label { color: #64748b; }
+.stat-value { font-weight: bold; color: #1a365d; }
+
+/* ===== 主内容区 ===== */
+.content-area { padding: 30px; min-height: 100vh; overflow-y: auto; }
+
+/* ===== 章节卡片 ===== */
+.section-card {
+  background: #fff; border-radius: 12px; padding: 35px;
+  margin-bottom: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  animation: fadeIn 0.5s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+.section-header { border-bottom: 2px solid #e0e6ed; padding-bottom: 15px; margin-bottom: 25px; }
+.section-title { font-size: 1.8em; color: #1a365d; margin-bottom: 8px; }
+.section-subtitle { font-size: 1em; color: #64748b; }
+
+/* ===== 知识呈现 ===== */
+.knowledge-block { margin: 20px 0; }
+.kv-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+.kv-table th, .kv-table td { padding: 12px; border: 1px solid #e0e6ed; text-align: left; }
+.kv-table th { background: #f0f4f9; font-weight: bold; color: #1a365d; }
+.kv-table tr:hover { background: #f8fafc; }
+
+.definition-box {
+  background: #e8f4fd; border-left: 4px solid #4a8bf0;
+  padding: 20px; margin: 15px 0; border-radius: 0 8px 8px 0;
+}
+.definition-box h4 { color: #1a365d; margin-bottom: 10px; }
+.definition-box p { color: #374151; line-height: 1.7; }
+
+.example-list { margin: 15px 0; }
+.example-item {
+  padding: 12px; margin: 8px 0; background: #f8fafc; border-left: 3px solid #10b981;
+  border-radius: 0 6px 6px 0; display: flex; align-items: center; gap: 10px;
+}
+.example-item .num { 
+  background: #10b981; color: #fff; width: 25px; height: 25px; 
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 0.9em; font-weight: bold;
+}
+.example-item .text { flex: 1; color: #374151; }
+
+.highlight-tag {
+  display: inline-block; padding: 4px 12px; background: #fef3c7; 
+  color: #92400e; border-radius: 15px; font-size: 0.85em; font-weight: bold;
+  margin: 0 5px;
+}
+
+.warning-box {
+  background: #fee2e2; border-left: 4px solid #ef4444;
+  padding: 15px 20px; margin: 15px 0; border-radius: 0 8px 8px 0;
+  color: #991b1b;
+}
+.warning-box strong { display: block; margin-bottom: 5px; color: #b91c1c; }
+
+diagram-placeholder {
+  background: #f1f5f9; border: 2px dashed #cbd5e1; border-radius: 8px;
+  padding: 40px; text-align: center; margin: 20px 0; color: #64748b;
+}
+
+/* ===== 问答互动 ===== */
+.quiz-container { margin-top: 30px; }
+.quiz-card {
+  background: #fff; border: 1px solid #e0e6ed; border-radius: 10px;
+  padding: 25px; margin-bottom: 20px; transition: all 0.3s;
+}
+.quiz-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+
+.quiz-header { display: flex; justify-content: space-between; margin-bottom: 15px; }
+.quiz-tag { 
+  padding: 4px 12px; border-radius: 12px; font-size: 0.8em; font-weight: bold; 
+  color: #fff;
+}
+.tag-basic { background: #10b981; }
+.tag-advance { background: #f59e0b; }
+.tag-challenge { background: #ef4444; }
+.quiz-timer { color: #f59e0b; font-weight: bold; font-size: 1.1em; }
+
+.question-text { font-size: 1.2em; color: #1a365d; line-height: 1.6; margin-bottom: 20px; }
+
+.option-btn {
+  display: block; width: 100%; padding: 14px 18px; margin: 10px 0;
+  background: #fff; border: 2px solid #e0e6ed; border-radius: 8px;
+  text-align: left; cursor: pointer; transition: all 0.25s;
+  color: #374151; font-size: 1em; position: relative;
+}
+.option-btn:hover:not(.disabled) { border-color: #4a8bf0; background: #f0f7ff; }
+.option-btn.correct { background: #d1fae5; border-color: #10b981; color: #065f46; }
+.option-btn.wrong { background: #fee2e2; border-color: #ef4444; color: #991b1b; }
+.option-btn.disabled { pointer-events: none; opacity: 0.6; }
+
+.explanation-box {
+  display: none; background: #f0f7ff; border-left: 4px solid #4a8bf0;
+  padding: 18px 20px; margin-top: 15px; border-radius: 0 8px 8px 0;
+}
+.explanation-box.show { display: block; animation: slideDown 0.3s ease; }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+.explanation-box strong { color: #1a365d; display: block; margin-bottom: 8px; }
+.explanation-box p { color: #374151; line-height: 1.7; }
+
+.btn-primary {
+  padding: 12px 30px; background: #4a8bf0; color: #fff; border: none;
+  border-radius: 8px; cursor: pointer; font-size: 1em; font-weight: bold;
+  transition: all 0.3s; box-shadow: 0 2px 8px rgba(74, 139, 240, 0.3);
+}
+.btn-primary:hover { background: #3a7be0; transform: translateY(-1px); }
+
+.btn-secondary {
+  padding: 10px 25px; background: transparent; color: #4a8bf0;
+  border: 2px solid #4a8bf0; border-radius: 8px; cursor: pointer;
+  font-size: 0.95em; transition: all 0.3s;
+}
+.btn-secondary:hover { background: #f0f7ff; }
+
+.hint-btn {
+  float: right; padding: 8px 16px; background: #fef3c7; color: #92400e;
+  border: none; border-radius: 6px; cursor: pointer; font-size: 0.9em;
+  display: flex; align-items: center; gap: 5px;
+}
+
+/* ===== 案例分析 ===== */
+.case-study {
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  border: 2px solid #f59e0b; border-radius: 12px; padding: 30px;
+  margin: 25px 0;
+}
+.case-study h3 { color: #92400e; margin-bottom: 15px; font-size: 1.3em; }
+.case-info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px; }
+.case-info-card { background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b; }
+.case-info-card h4 { color: #78350f; margin-bottom: 10px; }
+
+/* ===== 结果页 ===== */
+.result-screen {
+  text-align: center; padding: 60px 20px; max-width: 700px; margin: 0 auto;
+}
+.score-display { font-size: 4em; color: #4a8bf0; font-weight: bold; margin: 20px 0; }
+.rank-badge { 
+  font-size: 1.5em; padding: 12px 30px; background: #fef3c7; 
+  color: #92400e; border-radius: 25px; display: inline-block; margin-bottom: 20px;
+}
+.progress-section { margin: 30px 0; }
+.progressBar { height: 12px; background: #e0e6ed; border-radius: 6px; overflow: hidden; }
+.progressFill { height: 100%; background: linear-gradient(90deg, #4a8bf0, #10b981); transition: width 0.5s; }
+
+/* ===== 响应式 ===== */
+@media (max-width: 1024px) {
+  #sidebar { width: 70px; }
+  #sidebar .nav-section-title, #sidebar .nav-text, #sidebar .stat-panel { display: none; }
+  #main-content { margin-left: 70px; }
+  .sidebar-header h2::after { content: "学"; font-size: 1.5em; }
+  #app-container { flex-direction: column; }
+}
+
+@media (max-width: 768px) {
+  .content-area { padding: 15px; }
+  .section-card { padding: 20px; }
+  .quiz-card { padding: 15px; }
+}
+
+.bp-block{}/* block alias */
+.bp-block.done{}
+.bp-block.active{}
+
+.gear-icon{display:none}/* hidden */
+</style>
+</head>
+<body>
+
+<!-- ===== 欢迎/启动页 ===== -->
+<div id="splash">
+  <div class="splash-content">
+    <div class="splash-icon">🏛️</div>
+    <h1 class="splash-title">结构与设计的探究式学习系统</h1>
+    <p class="splash-subtitle">高中通用技术必修2 · 第一单元</p>
+    
+    <div class="splash-desc">
+      <strong>📚 学习内容概览：</strong><br>
+      • 结构的定义与受力类型（拉力、压力、剪切力、弯曲力、扭转力）<br>
+      • 三种基本结构类型（实体/框架/壳体）的特征与应用<br>
+      • 结构稳定性的量化分析与影响因素<br>
+      • 结构强度的材料性能与形状优化<br>
+      • 经典结构的艺术欣赏（埃菲尔铁塔、赵州桥等四大名作）<br>
+      • 结构设计原则与实践（纸桥制作等活动）<br>
+      • 经典工程案例研究<br>
+      • 分层练习检测掌握度
+    </div>
+
+    <div class="learning-modules">
+      <div class="module-card"><strong>📖 知识讲解</strong><span>系统学习核心概念</span></div>
+      <div class="module-card"><strong>💪 概念辨析</strong><span>区分易混淆知识点</span></div>
+      <div class="module-card"><strong>🔬 原理探究</strong><span>深入理解稳定/强度</span></div>
+      <div class="module-card"><strong>🌉 结构欣赏</strong><span>经典建筑艺术与美学</span></div>
+      <div class="module-card"><strong>✏️ 实践设计</strong><span>动手制作纸桥等</span></div>
+    </div>
+
+    <button class="start-btn" onclick="enterSystem()">进入学习系统 →</button>
+  </div>
+</div>
+
+<!-- ===== 主应用容器 ===== -->
+<div id="app-container" style="display:none;">
+  
+  <!-- 左侧导航栏 -->
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <h2>结构与设计的探究式学习系统</h2>
+      <p>高中通用技术 · 必修2</p>
+    </div>
+
+    <nav class="nav-section">
+      <div class="nav-section-title">学习模块</div>
+      <div class="nav-item active" onclick="switchSection('intro')">
+        <span class="icon">🏠</span><span class="nav-text">课程导学</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('forces')">
+        <span class="icon">⚡</span><span class="nav-text">受力分析</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('types')">
+        <span class="icon">📐</span><span class="nav-text">结构类型</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('stability')">
+        <span class="icon">⚖️</span><span class="nav-text">稳定性探究</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('strength')">
+        <span class="icon">💪</span><span class="nav-text">强度分析</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('appreciation')">
+        <span class="icon">🌉</span><span class="nav-text">结构欣赏</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('design')">
+        <span class="icon">✏️</span><span class="nav-text">结构设计</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('cases')">
+        <span class="icon">🏛️</span><span class="nav-text">案例研究</span>
+      </div>
+      <div class="nav-item" onclick="switchSection('practice')">
+        <span class="icon">📝</span><span class="nav-text">巩固练习</span>
+      </div>
+    </nav>
+
+    <div class="stat-panel">
+      <div class="stat-row"><span class="stat-label">学习进度</span><span class="stat-value" id="progress-text">0%</span></div>
+      <div class="stat-row"><span class="stat-label">得分</span><span class="stat-value" id="score-text">0</span></div>
+      <div class="stat-row"><span class="stat-label">正确率</span><span class="stat-value" id="accuracy-text">-</span></div>
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main id="main-content">
+    <div class="content-area" id="content-area">
+      <!-- 内容动态加载 -->
+    </div>
+  </main>
+</div>
+
+<script>
+// ========================================
+// 全局状态管理
+// ========================================
+const STATE = {
+  score: 0,
+  totalQuestions: 0,
+  correctAnswers: 0,
+  currentSection: 'intro',
+  completedSections: new Set(),
+};
+
+// ========================================
+// 知识库（来自 SmartKB 权威数据）
+// ========================================
+const KNOWLEDGE = {
+  intro: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">第一单元：结构与设计</h1>
+        <p class="section-subtitle">高中通用技术必修2 · 探究式学习系统</p>
+      </div>
+
+      <div class="knowledge-block">
+        <h2>🎯 学习目标</h2>
+        <ul style="margin: 15px 0 15px 25px; line-height: 2;">
+          <li>理解结构的广义定义和力学定义，能准确区分两种表述的侧重点</li>
+          <li>掌握五种基本受力形式（拉力、压力、剪切力、弯曲力、扭转力）的概念、作用方式及典型实例</li>
+          <li>能准确判断实体结构、框架结构、壳体结构的类型，并说明其受力特点</li>
+          <li>理解稳定性的精确定义，掌握影响稳定性的三大因素（重心位置、支撑面大小、几何形状）及其原理</li>
+          <li>理解结构强度的概念，了解材料性能指标（抗拉/抗压/抗剪强度）及结构形状对强度的影响</li>
+          <li>了解刚连接与铰连接的区别，能在具体结构中识别连接方式</li>
+          <li>能运用所学知识分析经典工程案例的结构特点</li>
+        </ul>
+      </div>
+
+      <div class="definition-box">
+        <h4>📚 本节内容简介</h4>
+        <p>本系统将引导你通过<b>知识讲解 → 概念辨析 → 原理解析 → 案例研究 → 分层练习</b>的路径，系统学习结构与设计的核心知识。每个模块都配有丰富的实例和互动练习，帮助你深入理解并灵活运用。</p>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <button class="btn-primary" onclick="switchSection('forces')">开始学习 →</button>
+      </div>
+    </div>
+  `,
+
+  appreciation: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">五、结构的欣赏</h1>
+        <p class="section-subtitle">经典结构与美学价值</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 结构的美学价值</h4>
+        <p>优秀的结构设计不仅满足功能需求，还体现了<b>技术美</b>与<b>艺术美</b>的完美结合。结构的形态美、力流美、材料美共同构成了结构艺术的独特魅力。</p>
+      </div>
+
+      <h3 style="color: #1a365d; margin-top: 25px;">🌉 经典结构赏析</h3>
+
+      <div style="margin: 25px 0;">
+        <!-- 埃菲尔铁塔 -->
+        <div style="background: linear-gradient(135deg, #fff7ed, #fef3c7); border: 2px solid #f59e0b; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🗼</div>
+            </div>
+            <div>
+              <h3 style="color: #92400e; font-size: 1.5em; margin-bottom: 15px;">巴黎埃菲尔铁塔（1889）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>框架结构（钢铁桁架）</td></tr>
+                <tr><td><strong>高度</strong></td><td>原高300米，现324米（含天线）</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>7300吨锻铁</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>空气动力学流线型+三角形稳定单元</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #78350f; line-height: 1.7;">
+                <b>美学特色：</b>镂空框架形成轻盈感，曲线造型符合力学传递路径，展现工业时代技术美。最初曾被艺术家们抨击为"无用而怪诞的铁柱子"，后成为法国象征。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 赵州桥 -->
+        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 2px solid #3b82f6; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🌉</div>
+            </div>
+            <div>
+              <h3 style="color: #1e40af; font-size: 1.5em; margin-bottom: 15px;">河北赵州桥（公元605年）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>敞肩石拱桥（壳体与实体结合）</td></tr>
+                <tr><td><strong>跨度</strong></td><td>主拱37.02米，首创敞肩式</td></tr>
+                <tr><td><strong>建造者</strong></td><td>李春</td></tr>
+                <tr><td><strong>历史地位</strong></td><td>世界现存最古老的大跨度石拱桥</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #1e3a8a; line-height: 1.7;">
+                <b>力学智慧：</b>大拱加小拱的设计既减轻了自重，又增加了泄洪能力。圆弧弧形使荷载沿拱圈传递，历经1400年洪水、地震仍稳固如初。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 悉尼歌剧院 -->
+        <div style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #22c55e; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏛️</div>
+            </div>
+            <div>
+              <h3 style="color: #166534; font-size: 1.5em; margin-bottom: 15px;">悉尼歌剧院（1973）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>壳体结构（预制混凝土壳体）</td></tr>
+                <tr><td><strong>设计者</strong></td><td>约恩·乌松（丹麦）</td></tr>
+                <tr><td><strong>屋顶特点</strong></td><td>由球面切割而成的薄壳结构</td></tr>
+                <tr><td><strong>建筑成就</strong></td><td>20世纪最具标志性建筑之一，世界遗产</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #166534; line-height: 1.7;">
+                <b>结构创新：</b>帆形屋顶采用预制肋拱拼装，每个壳片来自同一球面，既满足声学要求又具雕塑美感。结构形式与功能完美统一。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 鸟巢体育场 -->
+        <div style="background: linear-gradient(135deg, #fefce8, #fef9c3); border: 2px solid #eab308; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏟️</div>
+            </div>
+            <div>
+              <h3 style="color: #854d0e; font-size: 1.5em; margin-bottom: 15px;">北京国家体育场"鸟巢"（2008）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>空间网格框架结构</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>4.2万吨（世界最大钢结构建筑）</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>仿生学+中国传统纹样</td></tr>
+                <tr><td><strong>技术突破</strong></td><td>双向扭曲网格，无柱大跨度空间</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #854d0e; line-height: 1.7;">
+                <b>现代成就：</b>看似杂乱的钢筋网络实则是经过精确计算的空间结构，将荷载均匀传递到基础。"无序中的有序"体现东方哲学思想。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: #1a365d;">✨ 结构美的四大维度</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#f0f9ff; border-left-color:#0ea5e9;">
+          <div class="text"><strong>📐 形态美</strong><br>简洁、对称、韵律感，如拱桥弧线</div>
+        </div>
+        <div class="example-item" style="background:#ecfdf5; border-left-color:#10b981;">
+          <div class="text"><strong>⚡ 力流美</strong><br>结构形态反映力的传递路径，如悬索曲线</div>
+        </div>
+        <div class="example-item" style="background:#fffbeb; border-left-color:#f59e0b;">
+          <div class="text"><strong>🧱 材料美</strong><br>展现材料特性，如木构榫卯、石材厚重</div>
+        </div>
+        <div class="example-item" style="background:#faf5ff; border-left-color:#a855f7;">
+          <div class="text"><strong>🎨 文化美</strong><br>融合地域文化与时代精神</div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <button class="btn-secondary" onclick="loadAppreciationQuiz()">💭 思考：你最喜欢哪个结构？为什么？</button>
+      </div>
+    </div>
+  `,
+
+  design: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">六、简单结构的设计</h1>
+        <p class="section-subtitle">从理论到实践的跨越</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📋 结构设计的一般过程</h4>
+        <ol style="margin: 15px 0 15px 25px; line-height: 2;">
+          <li><strong>明确设计要求</strong>：确定功能、荷载、环境等基本条件</li>
+          <li><strong>方案构思</strong>：选择结构类型、初步确定形状和尺寸</li>
+          <li><strong>强度稳定性分析</strong>：计算验算或模型试验</li>
+          <li><strong>优化调整</strong>：根据分析结果改进设计</li>
+          <li><strong>绘制图样</strong>：制作施工图纸或三维模型</li>
+          <li><strong>制作原型</strong>：按比例制作模型验证</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 结构设计的基本原则</h3>
+      <table class="kv-table">
+        <thead><tr><th>原则</th><th>含义</th><th>实例说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>安全性</strong></td><td>保证结构不破坏、不倒</td><td>桥梁安全系数取2-3倍，考虑超载可能</td></tr>
+          <tr><td><strong>可靠性</strong></td><td>长期稳定使用</td><td>考虑腐蚀、疲劳、老化等因素</td></tr>
+          <tr><td><strong>经济性</strong></td><td>成本合理，材料省</td><td>合理选型避免浪费</td></tr>
+          <tr><td><strong>美观性</strong></td><td>与环境协调</td><td>地标建筑需考虑城市景观</td></tr>
+          <tr><td><strong>实用性</strong></td><td>满足使用需求</td><td>室内空间、采光通风等</td></tr>
+          <tr><td><strong>环保性</strong></td><td>绿色可持续</td><td>选用可再生材料，减少污染</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box" style="margin-top: 25px;">
+        <strong>🟢 优先级排序</strong>
+        <p>在实际工程中：<b>安全性 > 可靠性 > 实用性 > 经济性 > 美观性</b>。不能为了美观牺牲安全！</p>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🔨 课堂实践活动：制作纸桥</h3>
+
+      <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px; margin: 25px 0;">
+        <h4 style="color: #1e40af; margin-bottom: 20px;">🎯 任务目标</h4>
+        <p style="line-height: 1.8; color: #374151;">
+          用一张A4纸设计并制作一座跨距至少20cm的小桥，要求承受尽可能大的重量。
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 25px;">
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+            <h5 style="color: #1e40af; margin-bottom: 10px;">📋 设计要求</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li>只用一张A4普通打印纸</li>
+              <li>允许折叠、裁剪，不使用胶水</li>
+              <li>桥跨≥20cm，桥宽≥8cm</li>
+              <li>两端支撑在桌面上</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #10b981;">
+            <h5 style="color: #065f46; margin-bottom: 10px;">💡 设计思路参考</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>增强抗弯能力</strong>：折成波浪形、W形、U形槽</li>
+              <li><strong>利用三角形</strong>：制作三角桁架支撑</li>
+              <li><strong>增加厚度</strong>：多层折叠加厚</li>
+              <li><strong>合理分布荷载</strong>：设置承重梁分散压力</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <h5 style="color: #92400e; margin-bottom: 10px;">📊 评估标准</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>承载力</strong>：能承受的最大重量（主指标）</li>
+              <li><strong>结构效率</strong>：承载力÷用纸量</li>
+              <li><strong>创新性</strong>：结构形式的创意</li>
+              <li><strong>美观度</strong>：整体造型与细节</li>
+            </ul>
+          </div>
+        </div>
+
+        <h5 style="color: #1e40af; margin-top: 25px; margin-bottom: 15px;">🔄 迭代优化建议</h5>
+        <ol style="margin-left: 20px; line-height: 2; color: #374151;">
+          <li>先做简易测试版，加载重物观察变形</li>
+          <li>找出薄弱部位（哪里先变形/破裂）</li>
+          <li>针对性加强（局部加厚、增加支撑）</li>
+          <li>再次测试，重复优化直到满意</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📐 其他实践项目推荐</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#eef2ff; border-left-color:#6366f1;">
+          <div class="text"><strong>纸塔挑战</strong><br>用纸卷制作最高塔，顶部能放橡皮</div>
+        </div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;">
+          <div class="text"><strong>筷子桥</strong><br>用一次性筷子和胶枪搭桥，考验节点设计</div>
+        </div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;">
+          <div class="text"><strong>吸管结构</strong><br>用吸管制作立方体框架，测试刚度</div>
+        </div>
+        <div class="example-item" style="background:#fee2e2; border-left-color="#ef4444;">
+          <div class="text"><strong>鸡蛋保护器</strong><br>设计装置让鸡蛋从高处落下不碎</div>
+        </div>
+      </div>
+
+      <div id="design-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  forces: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">一、结构的受力形式</h1>
+        <p class="section-subtitle">构件承受外力的五种基本形式</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 基本概念</h4>
+        <p><b>受力和变形</b>是结构分析的核心。构件在受到外力作用时，会产生不同的变形趋势，理解这些受力形式是分析结构强度和稳定性的基础。</p>
+      </div>
+
+      <table class="kv-table">
+        <thead><tr><th>受力形式</th><th>概念</th><th>变形特点</th><th>作用方式</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>受拉</strong></td>
+            <td>构件两端承受沿轴线方向的拉拽力</td>
+            <td>构件被拉长，横截面积可能变小</td>
+            <td>力沿构件轴线向外拉伸</td>
+          </tr>
+          <tr>
+            <td><strong>受压</strong></td>
+            <td>构件两端承受沿轴线方向的压力</td>
+            <td>构件被压短，横截面积可能变大</td>
+            <td>力沿构件轴线向内挤压</td>
+          </tr>
+          <tr>
+            <td><strong>受剪切</strong></td>
+            <td>构件承受两个作用线相距很近、大小相等、方向相反的平行力</td>
+            <td>构件有被剪断的趋势</td>
+            <td>两个平行力反向作用</td>
+          </tr>
+          <tr>
+            <td><strong>受弯曲</strong></td>
+            <td>在通过构件轴线的平面内，承受垂直于构件轴线的外力</td>
+            <td>构件一侧受拉、一侧受压</td>
+            <td>力垂直于构件轴线作用</td>
+          </tr>
+          <tr>
+            <td><strong>受扭转</strong></td>
+            <td>构件两端受到两个在垂直于轴线平面内的力偶作用</td>
+            <td>构件发生扭转变形</td>
+            <td>反向力偶使构件扭转</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🌰 典型实例（每种至少3个）</h3>
+      
+      <div class="example-list">
+        <div class="example-item"><div class="num">1</div><div class="text"><strong>受拉</strong>：绳子提水桶、秋千吊索、斜拉桥钢索、起重机钢丝绳、帐篷拉绳</div></div>
+        <div class="example-item"><div class="num">2</div><div class="text"><strong>受压</strong>：地桩、桥墩、柱子、椅腿、书架竖直支撑杆</div></div>
+        <div class="example-item"><div class="num">3</div><div class="text"><strong>受剪切</strong>：剪刀剪纸、铆钉连接处、地震墙体错动、指甲刀剪指甲、螺栓连接处</div></div>
+        <div class="example-item"><div class="num">4</div><div class="text"><strong>受弯曲</strong>：鱼竿、木板承重、阳台悬挑梁、书架横向隔板、跳水跳板</div></div>
+        <div class="example-item"><div class="num">5</div><div class="text"><strong>受扭转</strong>：拧毛巾、汽车传动轴、螺丝刀拧螺丝、门把手、风力发电机主轴</div></div>
+      </div>
+
+      <div class="warning-box">
+        <strong>⚠️ 易错提醒</strong>
+        同一构件可能同时承受多种力！例如桥梁横梁既受弯曲又受剪切，需综合分析。
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">✍️ 概念辨析练习</h3>
+      <div id="force-quiz"></div>
+    </div>
+  `,
+
+  appreciation: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">五、结构的欣赏</h1>
+        <p class="section-subtitle">经典结构与美学价值</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 结构的美学价值</h4>
+        <p>优秀的结构设计不仅满足功能需求，还体现了<b>技术美</b>与<b>艺术美</b>的完美结合。结构的形态美、力流美、材料美共同构成了结构艺术的独特魅力。</p>
+      </div>
+
+      <h3 style="color: #1a365d; margin-top: 25px;">🌉 经典结构赏析</h3>
+
+      <div style="margin: 25px 0;">
+        <!-- 埃菲尔铁塔 -->
+        <div style="background: linear-gradient(135deg, #fff7ed, #fef3c7); border: 2px solid #f59e0b; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🗼</div>
+            </div>
+            <div>
+              <h3 style="color: #92400e; font-size: 1.5em; margin-bottom: 15px;">巴黎埃菲尔铁塔（1889）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>框架结构（钢铁桁架）</td></tr>
+                <tr><td><strong>高度</strong></td><td>原高300米，现324米（含天线）</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>7300吨锻铁</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>空气动力学流线型+三角形稳定单元</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #78350f; line-height: 1.7;">
+                <b>美学特色：</b>镂空框架形成轻盈感，曲线造型符合力学传递路径，展现工业时代技术美。最初曾被艺术家们抨击为"无用而怪诞的铁柱子"，后成为法国象征。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 赵州桥 -->
+        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 2px solid #3b82f6; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🌉</div>
+            </div>
+            <div>
+              <h3 style="color: #1e40af; font-size: 1.5em; margin-bottom: 15px;">河北赵州桥（公元605年）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>敞肩石拱桥（壳体与实体结合）</td></tr>
+                <tr><td><strong>跨度</strong></td><td>主拱37.02米，首创敞肩式</td></tr>
+                <tr><td><strong>建造者</strong></td><td>李春</td></tr>
+                <tr><td><strong>历史地位</strong></td><td>世界现存最古老的大跨度石拱桥</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #1e3a8a; line-height: 1.7;">
+                <b>力学智慧：</b>大拱加小拱的设计既减轻了自重，又增加了泄洪能力。圆弧弧形使荷载沿拱圈传递，历经1400年洪水、地震仍稳固如初。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 悉尼歌剧院 -->
+        <div style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #22c55e; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏛️</div>
+            </div>
+            <div>
+              <h3 style="color: #166534; font-size: 1.5em; margin-bottom: 15px;">悉尼歌剧院（1973）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>壳体结构（预制混凝土壳体）</td></tr>
+                <tr><td><strong>设计者</strong></td><td>约恩·乌松（丹麦）</td></tr>
+                <tr><td><strong>屋顶特点</strong></td><td>由球面切割而成的薄壳结构</td></tr>
+                <tr><td><strong>建筑成就</strong></td><td>20世纪最具标志性建筑之一，世界遗产</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #166534; line-height: 1.7;">
+                <b>结构创新：</b>帆形屋顶采用预制肋拱拼装，每个壳片来自同一球面，既满足声学要求又具雕塑美感。结构形式与功能完美统一。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 鸟巢体育场 -->
+        <div style="background: linear-gradient(135deg, #fefce8, #fef9c3); border: 2px solid #eab308; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏟️</div>
+            </div>
+            <div>
+              <h3 style="color: #854d0e; font-size: 1.5em; margin-bottom: 15px;">北京国家体育场"鸟巢"（2008）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>空间网格框架结构</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>4.2万吨（世界最大钢结构建筑）</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>仿生学+中国传统纹样</td></tr>
+                <tr><td><strong>技术突破</strong></td><td>双向扭曲网格，无柱大跨度空间</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #854d0e; line-height: 1.7;">
+                <b>现代成就：</b>看似杂乱的钢筋网络实则是经过精确计算的空间结构，将荷载均匀传递到基础。"无序中的有序"体现东方哲学思想。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: #1a365d;">✨ 结构美的四大维度</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#f0f9ff; border-left-color:#0ea5e9;">
+          <div class="text"><strong>📐 形态美</strong><br>简洁、对称、韵律感，如拱桥弧线</div>
+        </div>
+        <div class="example-item" style="background:#ecfdf5; border-left-color:#10b981;">
+          <div class="text"><strong>⚡ 力流美</strong><br>结构形态反映力的传递路径，如悬索曲线</div>
+        </div>
+        <div class="example-item" style="background:#fffbeb; border-left-color:#f59e0b;">
+          <div class="text"><strong>🧱 材料美</strong><br>展现材料特性，如木构榫卯、石材厚重</div>
+        </div>
+        <div class="example-item" style="background:#faf5ff; border-left-color:#a855f7;">
+          <div class="text"><strong>🎨 文化美</strong><br>融合地域文化与时代精神</div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <button class="btn-secondary" onclick="loadAppreciationQuiz()">💭 思考：你最喜欢哪个结构？为什么？</button>
+      </div>
+    </div>
+  `,
+
+  design: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">六、简单结构的设计</h1>
+        <p class="section-subtitle">从理论到实践的跨越</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📋 结构设计的一般过程</h4>
+        <ol style="margin: 15px 0 15px 25px; line-height: 2;">
+          <li><strong>明确设计要求</strong>：确定功能、荷载、环境等基本条件</li>
+          <li><strong>方案构思</strong>：选择结构类型、初步确定形状和尺寸</li>
+          <li><strong>强度稳定性分析</strong>：计算验算或模型试验</li>
+          <li><strong>优化调整</strong>：根据分析结果改进设计</li>
+          <li><strong>绘制图样</strong>：制作施工图纸或三维模型</li>
+          <li><strong>制作原型</strong>：按比例制作模型验证</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 结构设计的基本原则</h3>
+      <table class="kv-table">
+        <thead><tr><th>原则</th><th>含义</th><th>实例说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>安全性</strong></td><td>保证结构不破坏、不倒</td><td>桥梁安全系数取2-3倍，考虑超载可能</td></tr>
+          <tr><td><strong>可靠性</strong></td><td>长期稳定使用</td><td>考虑腐蚀、疲劳、老化等因素</td></tr>
+          <tr><td><strong>经济性</strong></td><td>成本合理，材料省</td><td>合理选型避免浪费</td></tr>
+          <tr><td><strong>美观性</strong></td><td>与环境协调</td><td>地标建筑需考虑城市景观</td></tr>
+          <tr><td><strong>实用性</strong></td><td>满足使用需求</td><td>室内空间、采光通风等</td></tr>
+          <tr><td><strong>环保性</strong></td><td>绿色可持续</td><td>选用可再生材料，减少污染</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box" style="margin-top: 25px;">
+        <strong>🟢 优先级排序</strong>
+        <p>在实际工程中：<b>安全性 > 可靠性 > 实用性 > 经济性 > 美观性</b>。不能为了美观牺牲安全！</p>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🔨 课堂实践活动：制作纸桥</h3>
+
+      <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px; margin: 25px 0;">
+        <h4 style="color: #1e40af; margin-bottom: 20px;">🎯 任务目标</h4>
+        <p style="line-height: 1.8; color: #374151;">
+          用一张A4纸设计并制作一座跨距至少20cm的小桥，要求承受尽可能大的重量。
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 25px;">
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+            <h5 style="color: #1e40af; margin-bottom: 10px;">📋 设计要求</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li>只用一张A4普通打印纸</li>
+              <li>允许折叠、裁剪，不使用胶水</li>
+              <li>桥跨≥20cm，桥宽≥8cm</li>
+              <li>两端支撑在桌面上</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #10b981;">
+            <h5 style="color: #065f46; margin-bottom: 10px;">💡 设计思路参考</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>增强抗弯能力</strong>：折成波浪形、W形、U形槽</li>
+              <li><strong>利用三角形</strong>：制作三角桁架支撑</li>
+              <li><strong>增加厚度</strong>：多层折叠加厚</li>
+              <li><strong>合理分布荷载</strong>：设置承重梁分散压力</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <h5 style="color: #92400e; margin-bottom: 10px;">📊 评估标准</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>承载力</strong>：能承受的最大重量（主指标）</li>
+              <li><strong>结构效率</strong>：承载力÷用纸量</li>
+              <li><strong>创新性</strong>：结构形式的创意</li>
+              <li><strong>美观度</strong>：整体造型与细节</li>
+            </ul>
+          </div>
+        </div>
+
+        <h5 style="color: #1e40af; margin-top: 25px; margin-bottom: 15px;">🔄 迭代优化建议</h5>
+        <ol style="margin-left: 20px; line-height: 2; color: #374151;">
+          <li>先做简易测试版，加载重物观察变形</li>
+          <li>找出薄弱部位（哪里先变形/破裂）</li>
+          <li>针对性加强（局部加厚、增加支撑）</li>
+          <li>再次测试，重复优化直到满意</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📐 其他实践项目推荐</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#eef2ff; border-left-color:#6366f1;">
+          <div class="text"><strong>纸塔挑战</strong><br>用纸卷制作最高塔，顶部能放橡皮</div>
+        </div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;">
+          <div class="text"><strong>筷子桥</strong><br>用一次性筷子和胶枪搭桥，考验节点设计</div>
+        </div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;">
+          <div class="text"><strong>吸管结构</strong><br>用吸管制作立方体框架，测试刚度</div>
+        </div>
+        <div class="example-item" style="background:#fee2e2; border-left-color="#ef4444;">
+          <div class="text"><strong>鸡蛋保护器</strong><br>设计装置让鸡蛋从高处落下不碎</div>
+        </div>
+      </div>
+
+      <div id="design-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  types: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">二、结构的基本类型</h1>
+        <p class="section-subtitle">实体结构、框架结构、壳体结构</p>
+      </div>
+
+      <table class="kv-table">
+        <thead><tr><th>类型</th><th>概念</th><th>受力特点</th><th>优点</th><th>缺点</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>实体结构</strong></td>
+            <td>结构体本身是实心的结构</td>
+            <td>外力分布在整个体积中</td>
+            <td>坚固稳定，承载能力强</td>
+            <td>材料用量大，自重较大</td>
+          </tr>
+          <tr>
+            <td><strong>框架结构</strong></td>
+            <td>由细长的构件组成的结构</td>
+            <td>既能承受竖向重力，也能承受水平荷载</td>
+            <td>支撑空间但不充满，材料利用率高</td>
+            <td>节点连接要求高</td>
+          </tr>
+          <tr>
+            <td><strong>壳体结构</strong></td>
+            <td>层状的结构</td>
+            <td>外力作用在结构体表面</td>
+            <td>较小厚度获得较大强度和刚度</td>
+            <td>表面受损易影响整体</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🌰 典型应用</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 20px;">
+        <div class="example-item" style="background:#e0f2fe; border-left-color:#0ea5e9;"><div class="num">实体</div><div class="text">实心墙、大坝、冰山、锤子、菜板、桥墩</div></div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;"><div class="num">框架</div><div class="text">栅栏、脚手架、自行车架、铁塔、厂房框架、桌子</div></div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;"><div class="num">壳体</div><div class="text">飞机外壳、水立方、安全帽、贝壳、鸡蛋、头盔</div></div>
+      </div>
+
+      <div class="definition-box" style="background:#fef3c7; border-left-color:#f59e0b; margin-top: 25px;">
+        <h4>🔗 组合结构</h4>
+        <p>实际中的很多物体是<b>两种或两种以上</b>基本类型的组合：</p>
+        <ul style="margin: 10px 0 0 25px;">
+          <li><strong>教学楼</strong>：框架（梁柱）+ 实体（墙体）+ 壳体（屋顶）</li>
+          <li><strong>汽车</strong>：车身壳体 + 车架框架 + 发动机实体部件</li>
+          <li><strong>埃菲尔铁塔</strong>：整体框架结构 + 局部实体连接</li>
+        </ul>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">✍️ 类型判断题</h3>
+      <div id="type-quiz"></div>
+    </div>
+  `,
+
+  appreciation: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">五、结构的欣赏</h1>
+        <p class="section-subtitle">经典结构与美学价值</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 结构的美学价值</h4>
+        <p>优秀的结构设计不仅满足功能需求，还体现了<b>技术美</b>与<b>艺术美</b>的完美结合。结构的形态美、力流美、材料美共同构成了结构艺术的独特魅力。</p>
+      </div>
+
+      <h3 style="color: #1a365d; margin-top: 25px;">🌉 经典结构赏析</h3>
+
+      <div style="margin: 25px 0;">
+        <!-- 埃菲尔铁塔 -->
+        <div style="background: linear-gradient(135deg, #fff7ed, #fef3c7); border: 2px solid #f59e0b; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🗼</div>
+            </div>
+            <div>
+              <h3 style="color: #92400e; font-size: 1.5em; margin-bottom: 15px;">巴黎埃菲尔铁塔（1889）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>框架结构（钢铁桁架）</td></tr>
+                <tr><td><strong>高度</strong></td><td>原高300米，现324米（含天线）</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>7300吨锻铁</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>空气动力学流线型+三角形稳定单元</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #78350f; line-height: 1.7;">
+                <b>美学特色：</b>镂空框架形成轻盈感，曲线造型符合力学传递路径，展现工业时代技术美。最初曾被艺术家们抨击为"无用而怪诞的铁柱子"，后成为法国象征。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 赵州桥 -->
+        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 2px solid #3b82f6; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🌉</div>
+            </div>
+            <div>
+              <h3 style="color: #1e40af; font-size: 1.5em; margin-bottom: 15px;">河北赵州桥（公元605年）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>敞肩石拱桥（壳体与实体结合）</td></tr>
+                <tr><td><strong>跨度</strong></td><td>主拱37.02米，首创敞肩式</td></tr>
+                <tr><td><strong>建造者</strong></td><td>李春</td></tr>
+                <tr><td><strong>历史地位</strong></td><td>世界现存最古老的大跨度石拱桥</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #1e3a8a; line-height: 1.7;">
+                <b>力学智慧：</b>大拱加小拱的设计既减轻了自重，又增加了泄洪能力。圆弧弧形使荷载沿拱圈传递，历经1400年洪水、地震仍稳固如初。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 悉尼歌剧院 -->
+        <div style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #22c55e; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏛️</div>
+            </div>
+            <div>
+              <h3 style="color: #166534; font-size: 1.5em; margin-bottom: 15px;">悉尼歌剧院（1973）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>壳体结构（预制混凝土壳体）</td></tr>
+                <tr><td><strong>设计者</strong></td><td>约恩·乌松（丹麦）</td></tr>
+                <tr><td><strong>屋顶特点</strong></td><td>由球面切割而成的薄壳结构</td></tr>
+                <tr><td><strong>建筑成就</strong></td><td>20世纪最具标志性建筑之一，世界遗产</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #166534; line-height: 1.7;">
+                <b>结构创新：</b>帆形屋顶采用预制肋拱拼装，每个壳片来自同一球面，既满足声学要求又具雕塑美感。结构形式与功能完美统一。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 鸟巢体育场 -->
+        <div style="background: linear-gradient(135deg, #fefce8, #fef9c3); border: 2px solid #eab308; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏟️</div>
+            </div>
+            <div>
+              <h3 style="color: #854d0e; font-size: 1.5em; margin-bottom: 15px;">北京国家体育场"鸟巢"（2008）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>空间网格框架结构</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>4.2万吨（世界最大钢结构建筑）</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>仿生学+中国传统纹样</td></tr>
+                <tr><td><strong>技术突破</strong></td><td>双向扭曲网格，无柱大跨度空间</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #854d0e; line-height: 1.7;">
+                <b>现代成就：</b>看似杂乱的钢筋网络实则是经过精确计算的空间结构，将荷载均匀传递到基础。"无序中的有序"体现东方哲学思想。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: #1a365d;">✨ 结构美的四大维度</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#f0f9ff; border-left-color:#0ea5e9;">
+          <div class="text"><strong>📐 形态美</strong><br>简洁、对称、韵律感，如拱桥弧线</div>
+        </div>
+        <div class="example-item" style="background:#ecfdf5; border-left-color:#10b981;">
+          <div class="text"><strong>⚡ 力流美</strong><br>结构形态反映力的传递路径，如悬索曲线</div>
+        </div>
+        <div class="example-item" style="background:#fffbeb; border-left-color:#f59e0b;">
+          <div class="text"><strong>🧱 材料美</strong><br>展现材料特性，如木构榫卯、石材厚重</div>
+        </div>
+        <div class="example-item" style="background:#faf5ff; border-left-color:#a855f7;">
+          <div class="text"><strong>🎨 文化美</strong><br>融合地域文化与时代精神</div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <button class="btn-secondary" onclick="loadAppreciationQuiz()">💭 思考：你最喜欢哪个结构？为什么？</button>
+      </div>
+    </div>
+  `,
+
+  design: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">六、简单结构的设计</h1>
+        <p class="section-subtitle">从理论到实践的跨越</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📋 结构设计的一般过程</h4>
+        <ol style="margin: 15px 0 15px 25px; line-height: 2;">
+          <li><strong>明确设计要求</strong>：确定功能、荷载、环境等基本条件</li>
+          <li><strong>方案构思</strong>：选择结构类型、初步确定形状和尺寸</li>
+          <li><strong>强度稳定性分析</strong>：计算验算或模型试验</li>
+          <li><strong>优化调整</strong>：根据分析结果改进设计</li>
+          <li><strong>绘制图样</strong>：制作施工图纸或三维模型</li>
+          <li><strong>制作原型</strong>：按比例制作模型验证</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 结构设计的基本原则</h3>
+      <table class="kv-table">
+        <thead><tr><th>原则</th><th>含义</th><th>实例说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>安全性</strong></td><td>保证结构不破坏、不倒</td><td>桥梁安全系数取2-3倍，考虑超载可能</td></tr>
+          <tr><td><strong>可靠性</strong></td><td>长期稳定使用</td><td>考虑腐蚀、疲劳、老化等因素</td></tr>
+          <tr><td><strong>经济性</strong></td><td>成本合理，材料省</td><td>合理选型避免浪费</td></tr>
+          <tr><td><strong>美观性</strong></td><td>与环境协调</td><td>地标建筑需考虑城市景观</td></tr>
+          <tr><td><strong>实用性</strong></td><td>满足使用需求</td><td>室内空间、采光通风等</td></tr>
+          <tr><td><strong>环保性</strong></td><td>绿色可持续</td><td>选用可再生材料，减少污染</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box" style="margin-top: 25px;">
+        <strong>🟢 优先级排序</strong>
+        <p>在实际工程中：<b>安全性 > 可靠性 > 实用性 > 经济性 > 美观性</b>。不能为了美观牺牲安全！</p>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🔨 课堂实践活动：制作纸桥</h3>
+
+      <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px; margin: 25px 0;">
+        <h4 style="color: #1e40af; margin-bottom: 20px;">🎯 任务目标</h4>
+        <p style="line-height: 1.8; color: #374151;">
+          用一张A4纸设计并制作一座跨距至少20cm的小桥，要求承受尽可能大的重量。
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 25px;">
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+            <h5 style="color: #1e40af; margin-bottom: 10px;">📋 设计要求</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li>只用一张A4普通打印纸</li>
+              <li>允许折叠、裁剪，不使用胶水</li>
+              <li>桥跨≥20cm，桥宽≥8cm</li>
+              <li>两端支撑在桌面上</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #10b981;">
+            <h5 style="color: #065f46; margin-bottom: 10px;">💡 设计思路参考</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>增强抗弯能力</strong>：折成波浪形、W形、U形槽</li>
+              <li><strong>利用三角形</strong>：制作三角桁架支撑</li>
+              <li><strong>增加厚度</strong>：多层折叠加厚</li>
+              <li><strong>合理分布荷载</strong>：设置承重梁分散压力</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <h5 style="color: #92400e; margin-bottom: 10px;">📊 评估标准</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>承载力</strong>：能承受的最大重量（主指标）</li>
+              <li><strong>结构效率</strong>：承载力÷用纸量</li>
+              <li><strong>创新性</strong>：结构形式的创意</li>
+              <li><strong>美观度</strong>：整体造型与细节</li>
+            </ul>
+          </div>
+        </div>
+
+        <h5 style="color: #1e40af; margin-top: 25px; margin-bottom: 15px;">🔄 迭代优化建议</h5>
+        <ol style="margin-left: 20px; line-height: 2; color: #374151;">
+          <li>先做简易测试版，加载重物观察变形</li>
+          <li>找出薄弱部位（哪里先变形/破裂）</li>
+          <li>针对性加强（局部加厚、增加支撑）</li>
+          <li>再次测试，重复优化直到满意</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📐 其他实践项目推荐</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#eef2ff; border-left-color:#6366f1;">
+          <div class="text"><strong>纸塔挑战</strong><br>用纸卷制作最高塔，顶部能放橡皮</div>
+        </div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;">
+          <div class="text"><strong>筷子桥</strong><br>用一次性筷子和胶枪搭桥，考验节点设计</div>
+        </div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;">
+          <div class="text"><strong>吸管结构</strong><br>用吸管制作立方体框架，测试刚度</div>
+        </div>
+        <div class="example-item" style="background:#fee2e2; border-left-color="#ef4444;">
+          <div class="text"><strong>鸡蛋保护器</strong><br>设计装置让鸡蛋从高处落下不碎</div>
+        </div>
+      </div>
+
+      <div id="design-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  stability: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">三、结构的稳定性</h1>
+        <p class="section-subtitle">维持原有平衡状态的能力</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 稳定性的精确定义</h4>
+        <p><b>结构稳定性</b>：结构在荷载作用下<b>维持其原有平衡状态</b>的能力。</p>
+        <p style="margin-top: 10px;"><b>关键理解</b>：稳定性是抵抗外界干扰保持平衡的能力，而平衡是当前状态。稳定性≠平衡状态！</p>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 稳定性判断准则</h3>
+      <table class="kv-table">
+        <thead><tr><th>情况</th><th>重心垂线位置</th><th>稳定性状态</th></tr></thead>
+        <tbody>
+          <tr><td>情况1</td><td>落在支撑面<b>内部</b></td><td>✅ 稳定</td></tr>
+          <tr><td>情况2</td><td>落在支撑面<b>边界上</b></td><td>⚠️ 临界状态</td></tr>
+          <tr><td>情况3</td><td>落在支撑面<b>外部</b></td><td>❌ 不稳定（会倾倒）</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box">
+        <strong>🟢 重要概念辨析：支撑面 ≠ 底面积！</strong>
+        <p><b>支撑面</b>：结构与地面<b>接触点连线构成的多边形面积</b>（如三脚架三个脚连线形成的三角形）</p>
+        <p><b>底面积</b>：结构底部投影的面积（可能与支撑面不同）</p>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">📌 影响稳定性的三大因素</h3>
+      
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin: 20px 0;">
+        <div class="example-item" style="background:#dbeafe; border-left-color:#3b82f6;">
+          <div class="text">
+            <strong>📍 因素一：重心位置</strong><br>
+            重心越低，稳定性越好<br>
+            <em>例：不倒翁底部加重、货车重物放下层</em>
+          </div>
+        </div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;">
+          <div class="text">
+            <strong>📍 因素二：支撑面大小</strong><br>
+            支撑面越大，稳定性越好<br>
+            <em>例：三脚架比单脚稳定、双脚分开站立</em>
+          </div>
+        </div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;">
+          <div class="text">
+            <strong>📍 因素三：几何形状</strong><br>
+            <span class="highlight-tag">三角形最稳定</span><br>
+            <em>例：自行车车架、塔吊桁架</em>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: #1a365d;">为什么三角形最稳定？</h3>
+      <p style="margin: 15px 0; line-height: 1.8;">三角形三边长度确定后，根据<b>SSS全等判定</b>，三角形形状唯一确定；而四边形四边长度确定后，形状仍可改变（如平行四边形可变形为菱形）。</p>
+
+      <div id="stability-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  appreciation: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">五、结构的欣赏</h1>
+        <p class="section-subtitle">经典结构与美学价值</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 结构的美学价值</h4>
+        <p>优秀的结构设计不仅满足功能需求，还体现了<b>技术美</b>与<b>艺术美</b>的完美结合。结构的形态美、力流美、材料美共同构成了结构艺术的独特魅力。</p>
+      </div>
+
+      <h3 style="color: #1a365d; margin-top: 25px;">🌉 经典结构赏析</h3>
+
+      <div style="margin: 25px 0;">
+        <!-- 埃菲尔铁塔 -->
+        <div style="background: linear-gradient(135deg, #fff7ed, #fef3c7); border: 2px solid #f59e0b; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🗼</div>
+            </div>
+            <div>
+              <h3 style="color: #92400e; font-size: 1.5em; margin-bottom: 15px;">巴黎埃菲尔铁塔（1889）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>框架结构（钢铁桁架）</td></tr>
+                <tr><td><strong>高度</strong></td><td>原高300米，现324米（含天线）</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>7300吨锻铁</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>空气动力学流线型+三角形稳定单元</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #78350f; line-height: 1.7;">
+                <b>美学特色：</b>镂空框架形成轻盈感，曲线造型符合力学传递路径，展现工业时代技术美。最初曾被艺术家们抨击为"无用而怪诞的铁柱子"，后成为法国象征。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 赵州桥 -->
+        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 2px solid #3b82f6; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🌉</div>
+            </div>
+            <div>
+              <h3 style="color: #1e40af; font-size: 1.5em; margin-bottom: 15px;">河北赵州桥（公元605年）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>敞肩石拱桥（壳体与实体结合）</td></tr>
+                <tr><td><strong>跨度</strong></td><td>主拱37.02米，首创敞肩式</td></tr>
+                <tr><td><strong>建造者</strong></td><td>李春</td></tr>
+                <tr><td><strong>历史地位</strong></td><td>世界现存最古老的大跨度石拱桥</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #1e3a8a; line-height: 1.7;">
+                <b>力学智慧：</b>大拱加小拱的设计既减轻了自重，又增加了泄洪能力。圆弧弧形使荷载沿拱圈传递，历经1400年洪水、地震仍稳固如初。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 悉尼歌剧院 -->
+        <div style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #22c55e; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏛️</div>
+            </div>
+            <div>
+              <h3 style="color: #166534; font-size: 1.5em; margin-bottom: 15px;">悉尼歌剧院（1973）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>壳体结构（预制混凝土壳体）</td></tr>
+                <tr><td><strong>设计者</strong></td><td>约恩·乌松（丹麦）</td></tr>
+                <tr><td><strong>屋顶特点</strong></td><td>由球面切割而成的薄壳结构</td></tr>
+                <tr><td><strong>建筑成就</strong></td><td>20世纪最具标志性建筑之一，世界遗产</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #166534; line-height: 1.7;">
+                <b>结构创新：</b>帆形屋顶采用预制肋拱拼装，每个壳片来自同一球面，既满足声学要求又具雕塑美感。结构形式与功能完美统一。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 鸟巢体育场 -->
+        <div style="background: linear-gradient(135deg, #fefce8, #fef9c3); border: 2px solid #eab308; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏟️</div>
+            </div>
+            <div>
+              <h3 style="color: #854d0e; font-size: 1.5em; margin-bottom: 15px;">北京国家体育场"鸟巢"（2008）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>空间网格框架结构</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>4.2万吨（世界最大钢结构建筑）</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>仿生学+中国传统纹样</td></tr>
+                <tr><td><strong>技术突破</strong></td><td>双向扭曲网格，无柱大跨度空间</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #854d0e; line-height: 1.7;">
+                <b>现代成就：</b>看似杂乱的钢筋网络实则是经过精确计算的空间结构，将荷载均匀传递到基础。"无序中的有序"体现东方哲学思想。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: #1a365d;">✨ 结构美的四大维度</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#f0f9ff; border-left-color:#0ea5e9;">
+          <div class="text"><strong>📐 形态美</strong><br>简洁、对称、韵律感，如拱桥弧线</div>
+        </div>
+        <div class="example-item" style="background:#ecfdf5; border-left-color:#10b981;">
+          <div class="text"><strong>⚡ 力流美</strong><br>结构形态反映力的传递路径，如悬索曲线</div>
+        </div>
+        <div class="example-item" style="background:#fffbeb; border-left-color:#f59e0b;">
+          <div class="text"><strong>🧱 材料美</strong><br>展现材料特性，如木构榫卯、石材厚重</div>
+        </div>
+        <div class="example-item" style="background:#faf5ff; border-left-color:#a855f7;">
+          <div class="text"><strong>🎨 文化美</strong><br>融合地域文化与时代精神</div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <button class="btn-secondary" onclick="loadAppreciationQuiz()">💭 思考：你最喜欢哪个结构？为什么？</button>
+      </div>
+    </div>
+  `,
+
+  design: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">六、简单结构的设计</h1>
+        <p class="section-subtitle">从理论到实践的跨越</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📋 结构设计的一般过程</h4>
+        <ol style="margin: 15px 0 15px 25px; line-height: 2;">
+          <li><strong>明确设计要求</strong>：确定功能、荷载、环境等基本条件</li>
+          <li><strong>方案构思</strong>：选择结构类型、初步确定形状和尺寸</li>
+          <li><strong>强度稳定性分析</strong>：计算验算或模型试验</li>
+          <li><strong>优化调整</strong>：根据分析结果改进设计</li>
+          <li><strong>绘制图样</strong>：制作施工图纸或三维模型</li>
+          <li><strong>制作原型</strong>：按比例制作模型验证</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 结构设计的基本原则</h3>
+      <table class="kv-table">
+        <thead><tr><th>原则</th><th>含义</th><th>实例说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>安全性</strong></td><td>保证结构不破坏、不倒</td><td>桥梁安全系数取2-3倍，考虑超载可能</td></tr>
+          <tr><td><strong>可靠性</strong></td><td>长期稳定使用</td><td>考虑腐蚀、疲劳、老化等因素</td></tr>
+          <tr><td><strong>经济性</strong></td><td>成本合理，材料省</td><td>合理选型避免浪费</td></tr>
+          <tr><td><strong>美观性</strong></td><td>与环境协调</td><td>地标建筑需考虑城市景观</td></tr>
+          <tr><td><strong>实用性</strong></td><td>满足使用需求</td><td>室内空间、采光通风等</td></tr>
+          <tr><td><strong>环保性</strong></td><td>绿色可持续</td><td>选用可再生材料，减少污染</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box" style="margin-top: 25px;">
+        <strong>🟢 优先级排序</strong>
+        <p>在实际工程中：<b>安全性 > 可靠性 > 实用性 > 经济性 > 美观性</b>。不能为了美观牺牲安全！</p>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🔨 课堂实践活动：制作纸桥</h3>
+
+      <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px; margin: 25px 0;">
+        <h4 style="color: #1e40af; margin-bottom: 20px;">🎯 任务目标</h4>
+        <p style="line-height: 1.8; color: #374151;">
+          用一张A4纸设计并制作一座跨距至少20cm的小桥，要求承受尽可能大的重量。
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 25px;">
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+            <h5 style="color: #1e40af; margin-bottom: 10px;">📋 设计要求</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li>只用一张A4普通打印纸</li>
+              <li>允许折叠、裁剪，不使用胶水</li>
+              <li>桥跨≥20cm，桥宽≥8cm</li>
+              <li>两端支撑在桌面上</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #10b981;">
+            <h5 style="color: #065f46; margin-bottom: 10px;">💡 设计思路参考</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>增强抗弯能力</strong>：折成波浪形、W形、U形槽</li>
+              <li><strong>利用三角形</strong>：制作三角桁架支撑</li>
+              <li><strong>增加厚度</strong>：多层折叠加厚</li>
+              <li><strong>合理分布荷载</strong>：设置承重梁分散压力</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <h5 style="color: #92400e; margin-bottom: 10px;">📊 评估标准</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>承载力</strong>：能承受的最大重量（主指标）</li>
+              <li><strong>结构效率</strong>：承载力÷用纸量</li>
+              <li><strong>创新性</strong>：结构形式的创意</li>
+              <li><strong>美观度</strong>：整体造型与细节</li>
+            </ul>
+          </div>
+        </div>
+
+        <h5 style="color: #1e40af; margin-top: 25px; margin-bottom: 15px;">🔄 迭代优化建议</h5>
+        <ol style="margin-left: 20px; line-height: 2; color: #374151;">
+          <li>先做简易测试版，加载重物观察变形</li>
+          <li>找出薄弱部位（哪里先变形/破裂）</li>
+          <li>针对性加强（局部加厚、增加支撑）</li>
+          <li>再次测试，重复优化直到满意</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📐 其他实践项目推荐</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#eef2ff; border-left-color:#6366f1;">
+          <div class="text"><strong>纸塔挑战</strong><br>用纸卷制作最高塔，顶部能放橡皮</div>
+        </div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;">
+          <div class="text"><strong>筷子桥</strong><br>用一次性筷子和胶枪搭桥，考验节点设计</div>
+        </div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;">
+          <div class="text"><strong>吸管结构</strong><br>用吸管制作立方体框架，测试刚度</div>
+        </div>
+        <div class="example-item" style="background:#fee2e2; border-left-color="#ef4444;">
+          <div class="text"><strong>鸡蛋保护器</strong><br>设计装置让鸡蛋从高处落下不碎</div>
+        </div>
+      </div>
+
+      <div id="design-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  strength: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">四、结构的强度</h1>
+        <p class="section-subtitle">抵抗被外力破坏的能力</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 强度的定义（与稳定性的区别）</h4>
+        <table class="kv-table" style="margin: 15px 0;">
+          <tr><th>概念</th><th>定义</th><th>关注点</th><th>失效形式</th></tr>
+          <tr><td><strong>强度</strong></td><td>抵抗被外力破坏的能力</td><td>材料是否会被破坏</td><td>断裂、变形、破损</td></tr>
+          <tr><td><strong>稳定性</strong></td><td>维持原有平衡状态的能力</td><td>结构是否会倾倒</td><td>倾倒、翻倒</td></tr>
+        </table>
+        <p><b>实例区分</b>：木梁过重而<b>断裂</b>是强度问题；高脚杯被碰倒而<b>翻倒</b>（杯子没坏）是稳定性问题。</p>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 材料性能指标</h3>
+      <table class="kv-table">
+        <thead><tr><th>指标</th><th>含义</th><th>应用说明</th></tr></thead>
+        <tbody>
+          <tr><td>抗拉强度</td><td>抵抗拉伸破坏的能力</td><td>钢丝绳、拉索需要高抗拉强度</td></tr>
+          <tr><td>抗压强度</td><td>抵抗压缩破坏的能力</td><td>柱子、桥墩需要高抗压强度</td></tr>
+          <tr><td>抗剪强度</td><td>抵抗剪切破坏的能力</td><td>铆钉、螺栓需要高抗剪强度</td></tr>
+          <tr><td>弹性模量</td><td>抵抗弹性变形的能力</td><td>反映材料的刚度</td></tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">📌 结构形状对强度的影响</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin: 20px 0;">
+        <div class="example-item" style="background:#f3e8ff; border-left-color:#a855f7;"><div class="text"><strong>工字梁</strong>：抗弯能力强，材料利用率高</div></div>
+        <div class="example-item" style="background:#e0e7ff; border-left-color:#6366f1;"><div class="text"><strong>拱形结构</strong>：将竖向荷载转化为水平推力</div></div>
+        <div class="example-item" style="background:#d1fae5; border-left-color:#10b981;"><div class="text"><strong>空心管</strong>：比实心杆抗弯能力强且轻</div></div>
+        <div class="example-item" style="background:#fee2e2; border-left-color:#ef4444;"><div class="text"><strong>三角形</strong>：稳定性好，强度高</div></div>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 连接方式</h3>
+      <table class="kv-table">
+        <thead><tr><th>连接类型</th><th>特点</th><th>实例</th></tr></thead>
+        <tbody>
+          <tr><td><strong>刚连接</strong></td><td>不能相对移动也不能转动，整体性强</td><td>焊接、胶接、榫接、铆接</td></tr>
+          <tr><td><strong>铰连接</strong></td><td>不能移动但可相对转动，灵活可调</td><td>合页、轴承、螺栓（部分）</td></tr>
+        </tbody>
+      </table>
+
+      <div id="strength-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  appreciation: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">五、结构的欣赏</h1>
+        <p class="section-subtitle">经典结构与美学价值</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 结构的美学价值</h4>
+        <p>优秀的结构设计不仅满足功能需求，还体现了<b>技术美</b>与<b>艺术美</b>的完美结合。结构的形态美、力流美、材料美共同构成了结构艺术的独特魅力。</p>
+      </div>
+
+      <h3 style="color: #1a365d; margin-top: 25px;">🌉 经典结构赏析</h3>
+
+      <div style="margin: 25px 0;">
+        <!-- 埃菲尔铁塔 -->
+        <div style="background: linear-gradient(135deg, #fff7ed, #fef3c7); border: 2px solid #f59e0b; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🗼</div>
+            </div>
+            <div>
+              <h3 style="color: #92400e; font-size: 1.5em; margin-bottom: 15px;">巴黎埃菲尔铁塔（1889）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>框架结构（钢铁桁架）</td></tr>
+                <tr><td><strong>高度</strong></td><td>原高300米，现324米（含天线）</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>7300吨锻铁</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>空气动力学流线型+三角形稳定单元</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #78350f; line-height: 1.7;">
+                <b>美学特色：</b>镂空框架形成轻盈感，曲线造型符合力学传递路径，展现工业时代技术美。最初曾被艺术家们抨击为"无用而怪诞的铁柱子"，后成为法国象征。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 赵州桥 -->
+        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 2px solid #3b82f6; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🌉</div>
+            </div>
+            <div>
+              <h3 style="color: #1e40af; font-size: 1.5em; margin-bottom: 15px;">河北赵州桥（公元605年）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>敞肩石拱桥（壳体与实体结合）</td></tr>
+                <tr><td><strong>跨度</strong></td><td>主拱37.02米，首创敞肩式</td></tr>
+                <tr><td><strong>建造者</strong></td><td>李春</td></tr>
+                <tr><td><strong>历史地位</strong></td><td>世界现存最古老的大跨度石拱桥</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #1e3a8a; line-height: 1.7;">
+                <b>力学智慧：</b>大拱加小拱的设计既减轻了自重，又增加了泄洪能力。圆弧弧形使荷载沿拱圈传递，历经1400年洪水、地震仍稳固如初。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 悉尼歌剧院 -->
+        <div style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #22c55e; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏛️</div>
+            </div>
+            <div>
+              <h3 style="color: #166534; font-size: 1.5em; margin-bottom: 15px;">悉尼歌剧院（1973）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>壳体结构（预制混凝土壳体）</td></tr>
+                <tr><td><strong>设计者</strong></td><td>约恩·乌松（丹麦）</td></tr>
+                <tr><td><strong>屋顶特点</strong></td><td>由球面切割而成的薄壳结构</td></tr>
+                <tr><td><strong>建筑成就</strong></td><td>20世纪最具标志性建筑之一，世界遗产</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #166534; line-height: 1.7;">
+                <b>结构创新：</b>帆形屋顶采用预制肋拱拼装，每个壳片来自同一球面，既满足声学要求又具雕塑美感。结构形式与功能完美统一。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 鸟巢体育场 -->
+        <div style="background: linear-gradient(135deg, #fefce8, #fef9c3); border: 2px solid #eab308; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏟️</div>
+            </div>
+            <div>
+              <h3 style="color: #854d0e; font-size: 1.5em; margin-bottom: 15px;">北京国家体育场"鸟巢"（2008）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>空间网格框架结构</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>4.2万吨（世界最大钢结构建筑）</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>仿生学+中国传统纹样</td></tr>
+                <tr><td><strong>技术突破</strong></td><td>双向扭曲网格，无柱大跨度空间</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #854d0e; line-height: 1.7;">
+                <b>现代成就：</b>看似杂乱的钢筋网络实则是经过精确计算的空间结构，将荷载均匀传递到基础。"无序中的有序"体现东方哲学思想。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: #1a365d;">✨ 结构美的四大维度</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#f0f9ff; border-left-color:#0ea5e9;">
+          <div class="text"><strong>📐 形态美</strong><br>简洁、对称、韵律感，如拱桥弧线</div>
+        </div>
+        <div class="example-item" style="background:#ecfdf5; border-left-color:#10b981;">
+          <div class="text"><strong>⚡ 力流美</strong><br>结构形态反映力的传递路径，如悬索曲线</div>
+        </div>
+        <div class="example-item" style="background:#fffbeb; border-left-color:#f59e0b;">
+          <div class="text"><strong>🧱 材料美</strong><br>展现材料特性，如木构榫卯、石材厚重</div>
+        </div>
+        <div class="example-item" style="background:#faf5ff; border-left-color:#a855f7;">
+          <div class="text"><strong>🎨 文化美</strong><br>融合地域文化与时代精神</div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <button class="btn-secondary" onclick="loadAppreciationQuiz()">💭 思考：你最喜欢哪个结构？为什么？</button>
+      </div>
+    </div>
+  `,
+
+  design: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">六、简单结构的设计</h1>
+        <p class="section-subtitle">从理论到实践的跨越</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📋 结构设计的一般过程</h4>
+        <ol style="margin: 15px 0 15px 25px; line-height: 2;">
+          <li><strong>明确设计要求</strong>：确定功能、荷载、环境等基本条件</li>
+          <li><strong>方案构思</strong>：选择结构类型、初步确定形状和尺寸</li>
+          <li><strong>强度稳定性分析</strong>：计算验算或模型试验</li>
+          <li><strong>优化调整</strong>：根据分析结果改进设计</li>
+          <li><strong>绘制图样</strong>：制作施工图纸或三维模型</li>
+          <li><strong>制作原型</strong>：按比例制作模型验证</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 结构设计的基本原则</h3>
+      <table class="kv-table">
+        <thead><tr><th>原则</th><th>含义</th><th>实例说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>安全性</strong></td><td>保证结构不破坏、不倒</td><td>桥梁安全系数取2-3倍，考虑超载可能</td></tr>
+          <tr><td><strong>可靠性</strong></td><td>长期稳定使用</td><td>考虑腐蚀、疲劳、老化等因素</td></tr>
+          <tr><td><strong>经济性</strong></td><td>成本合理，材料省</td><td>合理选型避免浪费</td></tr>
+          <tr><td><strong>美观性</strong></td><td>与环境协调</td><td>地标建筑需考虑城市景观</td></tr>
+          <tr><td><strong>实用性</strong></td><td>满足使用需求</td><td>室内空间、采光通风等</td></tr>
+          <tr><td><strong>环保性</strong></td><td>绿色可持续</td><td>选用可再生材料，减少污染</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box" style="margin-top: 25px;">
+        <strong>🟢 优先级排序</strong>
+        <p>在实际工程中：<b>安全性 > 可靠性 > 实用性 > 经济性 > 美观性</b>。不能为了美观牺牲安全！</p>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🔨 课堂实践活动：制作纸桥</h3>
+
+      <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px; margin: 25px 0;">
+        <h4 style="color: #1e40af; margin-bottom: 20px;">🎯 任务目标</h4>
+        <p style="line-height: 1.8; color: #374151;">
+          用一张A4纸设计并制作一座跨距至少20cm的小桥，要求承受尽可能大的重量。
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 25px;">
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+            <h5 style="color: #1e40af; margin-bottom: 10px;">📋 设计要求</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li>只用一张A4普通打印纸</li>
+              <li>允许折叠、裁剪，不使用胶水</li>
+              <li>桥跨≥20cm，桥宽≥8cm</li>
+              <li>两端支撑在桌面上</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #10b981;">
+            <h5 style="color: #065f46; margin-bottom: 10px;">💡 设计思路参考</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>增强抗弯能力</strong>：折成波浪形、W形、U形槽</li>
+              <li><strong>利用三角形</strong>：制作三角桁架支撑</li>
+              <li><strong>增加厚度</strong>：多层折叠加厚</li>
+              <li><strong>合理分布荷载</strong>：设置承重梁分散压力</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <h5 style="color: #92400e; margin-bottom: 10px;">📊 评估标准</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>承载力</strong>：能承受的最大重量（主指标）</li>
+              <li><strong>结构效率</strong>：承载力÷用纸量</li>
+              <li><strong>创新性</strong>：结构形式的创意</li>
+              <li><strong>美观度</strong>：整体造型与细节</li>
+            </ul>
+          </div>
+        </div>
+
+        <h5 style="color: #1e40af; margin-top: 25px; margin-bottom: 15px;">🔄 迭代优化建议</h5>
+        <ol style="margin-left: 20px; line-height: 2; color: #374151;">
+          <li>先做简易测试版，加载重物观察变形</li>
+          <li>找出薄弱部位（哪里先变形/破裂）</li>
+          <li>针对性加强（局部加厚、增加支撑）</li>
+          <li>再次测试，重复优化直到满意</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📐 其他实践项目推荐</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#eef2ff; border-left-color:#6366f1;">
+          <div class="text"><strong>纸塔挑战</strong><br>用纸卷制作最高塔，顶部能放橡皮</div>
+        </div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;">
+          <div class="text"><strong>筷子桥</strong><br>用一次性筷子和胶枪搭桥，考验节点设计</div>
+        </div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;">
+          <div class="text"><strong>吸管结构</strong><br>用吸管制作立方体框架，测试刚度</div>
+        </div>
+        <div class="example-item" style="background:#fee2e2; border-left-color="#ef4444;">
+          <div class="text"><strong>鸡蛋保护器</strong><br>设计装置让鸡蛋从高处落下不碎</div>
+        </div>
+      </div>
+
+      <div id="design-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  cases: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">五、案例研究</h1>
+        <p class="section-subtitle">经典工程结构的深度分析</p>
+      </div>
+
+      <div class="case-study">
+        <h3>🌉 案例1：埃菲尔铁塔</h3>
+        <div class="case-info-grid">
+          <div class="case-info-card">
+            <h4>结构类型</h4>
+            <p>主体：框架结构<br>整体：组合结构（框架+局部实体连接）</p>
+          </div>
+          <div class="case-info-card">
+            <h4>稳定性设计</h4>
+            <p>• 底部宽大，重心低<br>• 大量使用三角形单元增强稳定<br>• 镂空结构减少风阻</p>
+          </div>
+          <div class="case-info-card">
+            <h4>强度设计</h4>
+            <p>• 钢材连接，刚连接为主<br>• 拱形基础分散荷载<br>• 流线型外形抗风</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="case-study">
+        <h3>🌉 案例2：赵州桥</h3>
+        <div class="case-info-grid">
+          <div class="case-info-card">
+            <h4>结构类型</h4>
+            <p>拱形结构（壳体与实体结合）</p>
+          </div>
+          <div class="case-info-card">
+            <h4>力学原理</h4>
+            <p>将竖向荷载转化为水平推力，传递到两岸桥台</p>
+          </div>
+          <div class="case-info-card">
+            <h4>历史意义</h4>
+            <p>世界现存最古老的敞肩石拱桥，历经千年仍稳固</p>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">✍️ 综合分析题</h3>
+      <div id="case-quiz"></div>
+    </div>
+  `,
+
+  appreciation: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">五、结构的欣赏</h1>
+        <p class="section-subtitle">经典结构与美学价值</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📖 结构的美学价值</h4>
+        <p>优秀的结构设计不仅满足功能需求，还体现了<b>技术美</b>与<b>艺术美</b>的完美结合。结构的形态美、力流美、材料美共同构成了结构艺术的独特魅力。</p>
+      </div>
+
+      <h3 style="color: #1a365d; margin-top: 25px;">🌉 经典结构赏析</h3>
+
+      <div style="margin: 25px 0;">
+        <!-- 埃菲尔铁塔 -->
+        <div style="background: linear-gradient(135deg, #fff7ed, #fef3c7); border: 2px solid #f59e0b; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🗼</div>
+            </div>
+            <div>
+              <h3 style="color: #92400e; font-size: 1.5em; margin-bottom: 15px;">巴黎埃菲尔铁塔（1889）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>框架结构（钢铁桁架）</td></tr>
+                <tr><td><strong>高度</strong></td><td>原高300米，现324米（含天线）</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>7300吨锻铁</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>空气动力学流线型+三角形稳定单元</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #78350f; line-height: 1.7;">
+                <b>美学特色：</b>镂空框架形成轻盈感，曲线造型符合力学传递路径，展现工业时代技术美。最初曾被艺术家们抨击为"无用而怪诞的铁柱子"，后成为法国象征。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 赵州桥 -->
+        <div style="background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 2px solid #3b82f6; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🌉</div>
+            </div>
+            <div>
+              <h3 style="color: #1e40af; font-size: 1.5em; margin-bottom: 15px;">河北赵州桥（公元605年）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>敞肩石拱桥（壳体与实体结合）</td></tr>
+                <tr><td><strong>跨度</strong></td><td>主拱37.02米，首创敞肩式</td></tr>
+                <tr><td><strong>建造者</strong></td><td>李春</td></tr>
+                <tr><td><strong>历史地位</strong></td><td>世界现存最古老的大跨度石拱桥</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #1e3a8a; line-height: 1.7;">
+                <b>力学智慧：</b>大拱加小拱的设计既减轻了自重，又增加了泄洪能力。圆弧弧形使荷载沿拱圈传递，历经1400年洪水、地震仍稳固如初。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 悉尼歌剧院 -->
+        <div style="background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #22c55e; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏛️</div>
+            </div>
+            <div>
+              <h3 style="color: #166534; font-size: 1.5em; margin-bottom: 15px;">悉尼歌剧院（1973）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>壳体结构（预制混凝土壳体）</td></tr>
+                <tr><td><strong>设计者</strong></td><td>约恩·乌松（丹麦）</td></tr>
+                <tr><td><strong>屋顶特点</strong></td><td>由球面切割而成的薄壳结构</td></tr>
+                <tr><td><strong>建筑成就</strong></td><td>20世纪最具标志性建筑之一，世界遗产</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #166534; line-height: 1.7;">
+                <b>结构创新：</b>帆形屋顶采用预制肋拱拼装，每个壳片来自同一球面，既满足声学要求又具雕塑美感。结构形式与功能完美统一。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 鸟巢体育场 -->
+        <div style="background: linear-gradient(135deg, #fefce8, #fef9c3); border: 2px solid #eab308; border-radius: 12px; padding: 25px; margin-bottom: 25px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 25px; align-items: center;">
+            <div>
+              <div style="font-size: 8em; text-align: center; line-height: 1.2;">🏟️</div>
+            </div>
+            <div>
+              <h3 style="color: #854d0e; font-size: 1.5em; margin-bottom: 15px;">北京国家体育场"鸟巢"（2008）</h3>
+              <table class="kv-table" style="font-size: 0.95em;">
+                <tr><td width="30%"><strong>结构类型</strong></td><td>空间网格框架结构</td></tr>
+                <tr><td><strong>用钢量</strong></td><td>4.2万吨（世界最大钢结构建筑）</td></tr>
+                <tr><td><strong>设计理念</strong></td><td>仿生学+中国传统纹样</td></tr>
+                <tr><td><strong>技术突破</strong></td><td>双向扭曲网格，无柱大跨度空间</td></tr>
+              </table>
+              <p style="margin-top: 15px; color: #854d0e; line-height: 1.7;">
+                <b>现代成就：</b>看似杂乱的钢筋网络实则是经过精确计算的空间结构，将荷载均匀传递到基础。"无序中的有序"体现东方哲学思想。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="color: #1a365d;">✨ 结构美的四大维度</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#f0f9ff; border-left-color:#0ea5e9;">
+          <div class="text"><strong>📐 形态美</strong><br>简洁、对称、韵律感，如拱桥弧线</div>
+        </div>
+        <div class="example-item" style="background:#ecfdf5; border-left-color:#10b981;">
+          <div class="text"><strong>⚡ 力流美</strong><br>结构形态反映力的传递路径，如悬索曲线</div>
+        </div>
+        <div class="example-item" style="background:#fffbeb; border-left-color:#f59e0b;">
+          <div class="text"><strong>🧱 材料美</strong><br>展现材料特性，如木构榫卯、石材厚重</div>
+        </div>
+        <div class="example-item" style="background:#faf5ff; border-left-color:#a855f7;">
+          <div class="text"><strong>🎨 文化美</strong><br>融合地域文化与时代精神</div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <button class="btn-secondary" onclick="loadAppreciationQuiz()">💭 思考：你最喜欢哪个结构？为什么？</button>
+      </div>
+    </div>
+  `,
+
+  design: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">六、简单结构的设计</h1>
+        <p class="section-subtitle">从理论到实践的跨越</p>
+      </div>
+
+      <div class="definition-box">
+        <h4>📋 结构设计的一般过程</h4>
+        <ol style="margin: 15px 0 15px 25px; line-height: 2;">
+          <li><strong>明确设计要求</strong>：确定功能、荷载、环境等基本条件</li>
+          <li><strong>方案构思</strong>：选择结构类型、初步确定形状和尺寸</li>
+          <li><strong>强度稳定性分析</strong>：计算验算或模型试验</li>
+          <li><strong>优化调整</strong>：根据分析结果改进设计</li>
+          <li><strong>绘制图样</strong>：制作施工图纸或三维模型</li>
+          <li><strong>制作原型</strong>：按比例制作模型验证</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📌 结构设计的基本原则</h3>
+      <table class="kv-table">
+        <thead><tr><th>原则</th><th>含义</th><th>实例说明</th></tr></thead>
+        <tbody>
+          <tr><td><strong>安全性</strong></td><td>保证结构不破坏、不倒</td><td>桥梁安全系数取2-3倍，考虑超载可能</td></tr>
+          <tr><td><strong>可靠性</strong></td><td>长期稳定使用</td><td>考虑腐蚀、疲劳、老化等因素</td></tr>
+          <tr><td><strong>经济性</strong></td><td>成本合理，材料省</td><td>合理选型避免浪费</td></tr>
+          <tr><td><strong>美观性</strong></td><td>与环境协调</td><td>地标建筑需考虑城市景观</td></tr>
+          <tr><td><strong>实用性</strong></td><td>满足使用需求</td><td>室内空间、采光通风等</td></tr>
+          <tr><td><strong>环保性</strong></td><td>绿色可持续</td><td>选用可再生材料，减少污染</td></tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box" style="margin-top: 25px;">
+        <strong>🟢 优先级排序</strong>
+        <p>在实际工程中：<b>安全性 > 可靠性 > 实用性 > 经济性 > 美观性</b>。不能为了美观牺牲安全！</p>
+      </div>
+
+      <h3 style="margin-top: 30px; color: #1a365d;">🔨 课堂实践活动：制作纸桥</h3>
+
+      <div style="background: #f8fafc; border: 2px dashed #cbd5e1; border-radius: 12px; padding: 30px; margin: 25px 0;">
+        <h4 style="color: #1e40af; margin-bottom: 20px;">🎯 任务目标</h4>
+        <p style="line-height: 1.8; color: #374151;">
+          用一张A4纸设计并制作一座跨距至少20cm的小桥，要求承受尽可能大的重量。
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 25px;">
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+            <h5 style="color: #1e40af; margin-bottom: 10px;">📋 设计要求</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li>只用一张A4普通打印纸</li>
+              <li>允许折叠、裁剪，不使用胶水</li>
+              <li>桥跨≥20cm，桥宽≥8cm</li>
+              <li>两端支撑在桌面上</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #10b981;">
+            <h5 style="color: #065f46; margin-bottom: 10px;">💡 设计思路参考</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>增强抗弯能力</strong>：折成波浪形、W形、U形槽</li>
+              <li><strong>利用三角形</strong>：制作三角桁架支撑</li>
+              <li><strong>增加厚度</strong>：多层折叠加厚</li>
+              <li><strong>合理分布荷载</strong>：设置承重梁分散压力</li>
+            </ul>
+          </div>
+
+          <div style="background: #fff; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <h5 style="color: #92400e; margin-bottom: 10px;">📊 评估标准</h5>
+            <ul style="margin-left: 20px; line-height: 1.8;">
+              <li><strong>承载力</strong>：能承受的最大重量（主指标）</li>
+              <li><strong>结构效率</strong>：承载力÷用纸量</li>
+              <li><strong>创新性</strong>：结构形式的创意</li>
+              <li><strong>美观度</strong>：整体造型与细节</li>
+            </ul>
+          </div>
+        </div>
+
+        <h5 style="color: #1e40af; margin-top: 25px; margin-bottom: 15px;">🔄 迭代优化建议</h5>
+        <ol style="margin-left: 20px; line-height: 2; color: #374151;">
+          <li>先做简易测试版，加载重物观察变形</li>
+          <li>找出薄弱部位（哪里先变形/破裂）</li>
+          <li>针对性加强（局部加厚、增加支撑）</li>
+          <li>再次测试，重复优化直到满意</li>
+        </ol>
+      </div>
+
+      <h3 style="color: #1a365d;">📐 其他实践项目推荐</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+        <div class="example-item" style="background:#eef2ff; border-left-color:#6366f1;">
+          <div class="text"><strong>纸塔挑战</strong><br>用纸卷制作最高塔，顶部能放橡皮</div>
+        </div>
+        <div class="example-item" style="background:#fef3c7; border-left-color:#f59e0b;">
+          <div class="text"><strong>筷子桥</strong><br>用一次性筷子和胶枪搭桥，考验节点设计</div>
+        </div>
+        <div class="example-item" style="background:#dcfce7; border-left-color:#22c55e;">
+          <div class="text"><strong>吸管结构</strong><br>用吸管制作立方体框架，测试刚度</div>
+        </div>
+        <div class="example-item" style="background:#fee2e2; border-left-color="#ef4444;">
+          <div class="text"><strong>鸡蛋保护器</strong><br>设计装置让鸡蛋从高处落下不碎</div>
+        </div>
+      </div>
+
+      <div id="design-quiz" style="margin-top: 30px;"></div>
+    </div>
+  `,
+
+  practice: `
+    <div class="section-card">
+      <div class="section-header">
+        <h1 class="section-title">六、巩固练习</h1>
+        <p class="section-subtitle">分层训练，查漏补缺</p>
+      </div>
+
+      <div style="background: #f0f7ff; padding: 20px; border-radius: 10px; margin-bottom: 25px;">
+        <h3 style="color: #1a365d; margin-bottom: 15px;">📊 练习概况</h3>
+        <div style="display: flex; gap: 30px; flex-wrap: wrap;">
+          <div><span style="color: #64748b;">总题数：</span><strong>35 题</strong></div>
+          <div><span style="color: #64748b;">已答题：</span><strong id="answered-count">0</strong></div>
+          <div><span style="color: #64748b;">正确率：</span><strong id="final-accuracy">-</strong></div>
+          <div><span style="color: #64748b;">当前得分：</span><strong id="total-score">0</strong></div>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <button class="btn-secondary" onclick="filterQuiz('all')">全部题目</button>
+        <button class="btn-secondary" onclick="filterQuiz('basic')">基础题 (14)</button>
+        <button class="btn-secondary" onclick="filterQuiz('advance')">提高题 (14)</button>
+        <button class="btn-secondary" onclick="filterQuiz('challenge')">挑战题 (7)</button>
+      </div>
+
+      <div id="comprehensive-quiz"></div>
+    </div>
+  `
+};
+
+// ========================================
+// 题库（35题：基础14 + 提高14 + 挑战7）
+// ========================================
+const QUESTION_BANK = [
+  // =================== 第一关：受力分析（7题）===================
+  { q: "构件两端承受沿轴线方向的拉拽力，有伸长趋势，这种受力形式是", options: ["A. 受压", "B. 受拉", "C. 受剪切", "D. 受弯曲"], answer: 1, type: "basic", explain: "受拉的定义：构件两端承受沿轴线方向的拉拽力，有伸长的形变趋势。" },
+  { q: "用剪刀剪纸时，纸张主要承受的力是", options: ["A. 拉力", "B. 压力", "C. 剪切力", "D. 扭转力"], answer: 2, type: "basic", explain: "剪刀剪纸时，两片刀刃施加两个作用线接近、方向相反的平行力，属于典型的剪切力。" },
+  { q: "汽车传动轴工作时主要承受的力是", options: ["A. 弯曲力", "B. 压力", "C. 扭转力", "D. 拉力"], answer: 2, type: "basic", explain: "传动轴两端受到反向力偶作用，使轴产生扭转变形，属于受扭转。" },
+  { q: "钓鱼时鱼竿受到的主要作用是", options: ["A. 受拉", "B. 受压", "C. 受弯曲", "D. 受剪切"], answer: 2, type: "basic", explain: "鱼竿受到垂直于轴线的鱼的拉力，使鱼竿发生弯曲变形，属于受弯曲。" },
+  { q: "同一构件可能同时承受多种力，桥梁横梁主要承受哪两种力？", options: ["A. 拉力和压力", "B. 弯曲力和剪切力", "C. 压力和扭转力", "D. 拉力和剪切力"], answer: 1, type: "advance", explain: "桥梁横梁既要承受垂直荷载产生的弯曲力，也要承受由于支座反力产生的剪切力。" },
+  { q: "下列哪个不是受剪切的实例？", options: ["A. 铆钉连接处", "B. 地震时墙体水平错动", "C. 绳子提水桶", "D. 螺栓连接处"], answer: 2, type: "advance", explain: "绳子提水桶是受拉，不是受剪切。其他三项都是典型的剪切力实例。" },
+  { q: "门的合页连接属于哪种连接方式？", options: ["A. 刚连接", "B. 铰连接", "C. 两者都是", "D. 两者都不是"], answer: 1, type: "challenge", explain: "合页允许门绕轴转动但不能相对移动，是典型的铰连接。刚连接不允许任何相对运动。" },
+
+  // =================== 第二关：结构类型（7题）===================
+  { q: "下列属于实体结构的是", options: ["A. 埃菲尔铁塔", "B. 大坝", "C. 安全帽", "D. 脚手架"], answer: 1, type: "basic", explain: "大坝是典型的实体结构，依靠自身材料承受荷载。埃菲尔铁塔和脚手架是框架结构，安全帽是壳体结构。" },
+  { q: "蛋壳属于哪种结构类型？", options: ["A. 实体结构", "B. 框架结构", "C. 壳体结构", "D. 组合结构"], answer: 2, type: "basic", explain: "蛋壳是层状薄壳结构，外力作用在表面，通过曲面分散受力，是典型的壳体结构。" },
+  { q: "教学楼的主体结构通常是", options: ["A. 纯实体结构", "B. 纯框架结构", "C. 组合结构", "D. 纯壳体结构"], answer: 2, type: "basic", explain: "教学楼通常采用框架（梁柱）+ 实体（墙体）+ 壳体（屋顶）的组合结构。" },
+  { q: "下列不属于框架结构特点的是", options: ["A. 支撑空间但不充满空间", "B. 材料利用率高", "C. 整体性强不易变形", "D. 能承受水平和竖向荷载"], answer: 2, type: "advance", explain: "框架结构节点连接复杂，相比实体结构更容易变形，需要精心设计节点保证稳定性。" },
+  { q: "飞机外壳的主要结构类型是", options: ["A. 实体结构", "B. 框架结构", "C. 壳体结构", "D. 混合结构"], answer: 2, type: "advance", explain: "飞机外壳（机身蒙皮）是典型的壳体结构，利用曲面分散气动载荷。" },
+  { q: "为什么很多建筑使用框架结构而不是实体结构？", options: ["A. 更加美观", "B. 建造更快", "C. 材料利用率高且能提供开放空间", "D. 隔音效果更好"], answer: 2, type: "challenge", explain: "框架结构用较少的材料就能支撑较大空间，且内部可以形成开放空间便于使用，这是其最大优势。" },
+  { q: "下列关于组合结构的说法错误的是", options: ["A. 实际中很多物体是组合结构", "B. 组合结构综合了多种结构的优势", "C. 组合结构一定比单一结构强", "D. 分析时应具体到某一部分"], answer: 2, type: "challenge", explain: "组合结构不一定比单一结构强，要看具体设计和应用场景。关键是要具体分析各部分的受力情况。" },
+
+  // =================== 第三关：稳定性（7题）===================
+  { q: "结构稳定性的精确定义是", options: ["A. 结构不会倒塌", "B. 结构维持原有平衡状态的能力", "C. 结构能承受多大的力", "D. 结构不变形的能力"], answer: 1, type: "basic", explain: "稳定性的精确定义：结构在荷载作用下维持其原有平衡状态的能力。重点是'维持平衡状态'而非'不倒塌'。" },
+  { q: "提高结构稳定性的方法不包括", options: ["A. 降低重心", "B. 增大支撑面", "C. 增加结构高度", "D. 采用三角形支撑"], answer: 2, type: "basic", explain: "增加高度会使重心上移，反而降低稳定性。其他三项都能有效提高稳定性。" },
+  { q: "支撑面的正确定义是", options: ["A. 结构底部的总面积", "B. 结构与地面接触点连线构成的多边形面积", "C. 结构的最大投影面积", "D. 结构重量分布的面积"], answer: 1, type: "basic", explain: "支撑面不是底面积！而是接触点连线构成的多边形面积。如三脚架的支撑面是三个脚连线形成的三角形。" },
+  { q: "比萨斜塔不倒的原因是", options: ["A. 建筑材料非常好", "B. 地基很深", "C. 重心垂线仍在基底范围内", "D. 塔身很粗"], answer: 2, type: "advance", explain: "比萨斜塔虽然倾斜，但其重心垂线仍然落在基底范围内，因此保持稳定。这是稳定性原理的经典案例。" },
+  { q: "下列哪个物体的支撑面最小？", options: ["A. 三脚架", "B. 四条腿的桌子", "C. 独脚凳", "D. 人双脚站立"], answer: 2, type: "advance", explain: "独脚凳只有一个支撑点，支撑面几乎为零，因此最不稳定。" },
+  { q: "赛车设计成底盘很低的主要目的是", options: ["A. 看起来酷炫", "B. 降低风阻", "C. 降低重心提高稳定性", "D. 节省材料"], answer: 2, type: "challenge", explain: "赛车高速行驶时要避免侧翻，必须降低重心。底盘低可以有效降低整车的重心高度。" },
+  { q: "为什么塔吊要使用大量的三角形支撑？", options: ["A. 为了节省钢材", "B. 三角形是最稳定的几何形状", "C. 便于运输安装", "D. 方便维修"], answer: 1, type: "challenge", explain: "三角形具有几何稳定性——三边长度确定后形状唯一，不会像四边形那样可变。这是塔吊广泛使用三角形的原因。" },
+
+  // =================== 第四关：强度（7题）===================
+  { q: "结构强度的定义是", options: ["A. 结构不会倒塌", "B. 结构抵抗被外力破坏的能力", "C. 结构保持平衡的能力", "D. 结构不变形的能力"], answer: 1, type: "basic", explain: "强度的定义：结构具有的抵抗被外力破坏的能力。注意与稳定性（维持平衡）区分。" },
+  { q: "混凝土主要用于承受哪种力？", options: ["A. 拉力", "B. 压力", "C. 剪切力", "D. 扭转力"], answer: 1, type: "basic", explain: "混凝土抗压强度高但抗拉强度低，所以主要用于承受压力的场合（如柱子、基础），常与钢筋配合使用。" },
+  { q: "工字梁比普通矩形梁更好的原因是", options: ["A. 更便宜", "B. 更容易加工", "C. 抗弯能力强且材料利用率高", "D. 更美观"], answer: 2, type: "basic", explain: "工字梁将材料分布在受力最大的上下翼缘，中性轴附近材料少，在相同材料用量下抗弯能力更强。" },
+  { q: "下列哪种连接属于刚连接？", options: ["A. 门与门框的连接", "B. 轴承连接", "C. 焊接", "D. 铰链连接"], answer: 2, type: "advance", explain: "焊接是典型的刚连接，连接处不能相对移动也不能转动。其他选项都是铰连接。" },
+  { q: "钢结构中使用铆钉连接主要是利用它的什么强度？", options: ["A. 抗拉强度", "B. 抗压强度", "C. 抗剪强度", "D. 抗弯强度"], answer: 2, type: "advance", explain: "铆钉在连接处主要承受剪切力，所以需要高抗剪强度。" },
+  { q: "空心钢管比实心圆棒抗弯能力强的原因是", options: ["A. 空心管更轻", "B. 材料分布在外围，惯性矩更大", "C. 空心管更好看", "D. 实心管容易生锈"], answer: 1, type: "challenge", explain: "抗弯能力与截面惯性矩有关，材料离中性轴越远惯性矩越大。空心管把材料分布在外围，所以在相同材料用量下抗弯能力更强。" },
+  { q: "拱形桥能将荷载很好地分散，主要是因为", options: ["A. 拱形材料更坚固", "B. 拱形将竖向力转化为沿拱面的压力传导到桥墩", "C. 拱形更美观", "D. 拱形施工方便"], answer: 1, type: "challenge", explain: "拱形结构的巧妙之处在于将竖向荷载转化为沿拱圈的压力，最终传导到两端的桥墩或地基上。" },
+
+  // =================== 第五关：综合应用（7题）===================
+  { q: "评价结构设计是否优秀的标准，优先级最高的是", options: ["A. 美观性", "B. 经济性", "C. 安全性", "D. 实用性"], answer: 2, type: "basic", explain: "安全性和可靠性永远是第一位的，不能为了美观或经济牺牲安全。其次才是实用性和经济性。" },
+  { q: "桥梁伸缩缝的设计主要是为了应对什么因素？", options: ["A. 车辆荷载", "B. 温度变化引起的热胀冷缩", "C. 地震影响", "D. 风荷载"], answer: 1, type: "advance", explain: "温度变化会引起材料的热胀冷缩，伸缩缝允许桥身在温度变化时自由伸缩，避免产生过大应力导致破坏。" },
+  { q: "高层建筑设置阻尼器的主要目的是", options: ["A. 装饰美观", "B. 减少风振影响，提高舒适性", "C. 节省建材", "D. 加快施工速度"], answer: 1, type: "advance", explain: "高层建筑在风中会产生振动，阻尼器可以吸收能量减小振幅，提高居住舒适度和安全性。" },
+  { q: "用一张A4纸折成波浪形后承重力大大增强，体现了什么原理？", options: ["A. 材料强度提高了", "B. 改变形状增强了抗弯能力", "C. 纸张变厚了", "D. 增加了摩擦力"], answer: 1, type: "challenge", explain: "通过折叠改变截面形状，可以显著增强抗弯能力（类似工字梁原理），而不需要增加材料。" },
+  { q: "人体工程学在结构设计中的应用主要体现在", options: ["A. 降低成本", "B. 结构更加坚固", "C. 尺寸适配和操作便利", "D. 外观更美观"], answer: 2, type: "challenge", explain: "人体工程学关注人的需求和体验，体现在尺寸适配（如课桌椅高度）、操作便利（如门把手位置）、舒适安全等方面。" },
+  { q: "装配式建筑采用标准化模块化的设计理念，主要优势是", options: ["A. 成本更低", "B. 便于生产、组装和质量控制", "C. 建筑更高", "D. 更环保"], answer: 1, type: "challenge", explain: "标准化和模块化可以大规模预制构件，现场快速组装，便于质量控制，缩短工期，这是装配式建筑的核心理念。" },
+  { q: "下列关于钢结构安全系数的说法正确的是", options: ["A. 安全系数越高越好", "B. 安全系数一般在1.5-3倍之间", "C. 安全系数不需要考虑", "D. 所有结构的安全系数都一样"], answer: 1, type: "challenge", explain: "安全系数是设计强度与实际工作应力的比值，一般取1.5-3倍。过高的安全系数会造成材料浪费，过低则不安全。"}
+];
+
+// ========================================
+// 工具函数
+// ========================================
+function enterSystem() {
+  document.getElementById('splash').classList.add('hidden');
+  setTimeout(() => {
+    document.getElementById('splash').style.display = 'none';
+    document.getElementById('app-container').style.display = 'block';
+    loadSection('intro');
+  }, 800);
+}
+
+function switchSection(sectionId) {
+  STATE.currentSection = sectionId;
+  loadSection(sectionId);
+  
+  // Update nav
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.classList.remove('active');
+    if (item.textContent.toLowerCase().includes(getSectionName(sectionId))) {
+      item.classList.add('active');
+    }
+  });
+}
+
+function getSectionName(id) {
+  const names = { 
+    intro: '导学', forces: '受力', types: '结构类型', stability: '稳定性', 
+    strength: '强度', appreciation: '欣赏', design: '设计', cases: '案例', practice: '练习' 
+  };
+  return names[id] || '';
+}
+
+function loadSection(sectionId) {
+  const container = document.getElementById('content-area');
+  container.innerHTML = KNOWLEDGE[sectionId] || '';
+  
+  if (sectionId === 'forces') loadForceQuiz();
+  else if (sectionId === 'types') loadTypeQuiz();
+  else if (sectionId === 'stability') loadStabilityQuiz();
+  else if (sectionId === 'strength') loadStrengthQuiz();
+  else if (sectionId === 'cases') loadCaseQuiz();
+  else if (sectionId === 'practice') loadComprehensiveQuiz();
+  
+  STATE.completedSections.add(sectionId);
+  updateProgress();
+}
+
+function updateProgress() {
+  const total = 9;
+  const completed = STATE.completedSections.size;
+  const pct = Math.round((completed / total) * 100);
+  document.getElementById('progress-text').textContent = pct + '%';
+  document.getElementById('score-text').textContent = STATE.score;
+  
+  if (STATE.totalQuestions > 0) {
+    const accuracy = Math.round((STATE.correctAnswers / STATE.totalQuestions) * 100);
+    document.getElementById('accuracy-text').textContent = accuracy + '%';
+  }
+}
+
+// ========================================
+// 问答系统
+// ========================================
+function createQuizElement(questions, containerId, shuffle = false) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  
+  let quizQuestions = shuffle ? [...questions].sort(() => Math.random() - 0.5) : questions;
+  
+  quizQuestions.forEach((q, idx) => {
+    const card = document.createElement('div');
+    card.className = 'quiz-card';
+    card.innerHTML = `
+      <div class="quiz-header">
+        <span class="quiz-tag tag-${q.type === 'basic' ? 'basic' : q.type === 'advance' ? 'advance' : 'challenge'}">
+          ${q.type === 'basic' ? '基础' : q.type === 'advance' ? '提高' : '挑战'}
+        </span>
+        <span class="quiz-timer">第${idx + 1}题</span>
+      </div>
+      <p class="question-text">${q.q}</p>
+      <div id="options-${containerId}-${idx}"></div>
+      <div id="explain-${containerId}-${idx}" class="explanation-box">
+        <strong>📝 解析：</strong>
+        <p>${q.explain}</p>
+      </div>
+    `;
+    container.appendChild(card);
+    
+    const optsContainer = card.querySelector(`#options-${containerId}-${idx}`);
+    q.options.forEach((opt, optIdx) => {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn';
+      btn.textContent = opt;
+      btn.onclick = () => checkAnswer(btn, optIdx, q.answer, `explain-${containerId}-${idx}`, `options-${containerId}-${idx}`);
+      optsContainer.appendChild(btn);
+    });
+  });
+}
+
+function checkAnswer(btn, selected, correct, explainId, optsContainerId) {
+  const opts = document.getElementById(optsContainerId).querySelectorAll('.option-btn');
+  opts.forEach(b => b.classList.add('disabled'));
+  btn.classList.add(selected === correct ? 'correct' : 'wrong');
+  opts[correct].classList.add('correct');
+  
+  STATE.totalQuestions++;
+  if (selected === correct) {
+    STATE.correctAnswers++;
+    STATE.score += 20;
+  }
+  
+  document.getElementById(explainId).classList.add('show');
+  updateProgress();
+}
+
+// Quiz loading functions
+function loadForceQuiz() {
+  const q = QUESTION_BANK.filter(q => q.type !== 'challenge').slice(0, 3);
+  createQuizElement(q, 'force-quiz', true);
+}
+
+function loadTypeQuiz() {
+  const q = QUESTION_BANK.filter(q => ['basic','advance'].includes(q.type)).slice(3, 6);
+  createQuizElement(q, 'type-quiz', true);
+}
+
+function loadStabilityQuiz() {
+  const q = QUESTION_BANK.filter(q => q.type === 'basic' || q.type === 'advance').slice(7, 10);
+  createQuizElement(q, 'stability-quiz', true);
+}
+
+function loadStrengthQuiz() {
+  const q = QUESTION_BANK.filter(q => q.type === 'basic' || q.type === 'advance').slice(14, 17);
+  createQuizElement(q, 'strength-quiz', true);
+}
+
+function loadCaseQuiz() {
+  const q = QUESTION_BANK.slice(-3);
+  createQuizElement(q, 'case-quiz', false);
+}
+
+let filteredQuestions = [];
+function loadComprehensiveQuiz() {
+  filteredQuestions = [...QUESTION_BANK];
+  renderFilteredQuiz(filteredQuestions);
+}
+
+function filterQuiz(type) {
+  if (type === 'all') filteredQuestions = [...QUESTION_BANK];
+  else filteredQuestions = QUESTION_BANK.filter(q => q.type === type);
+  renderFilteredQuiz(filteredQuestions);
+}
+
+function renderFilteredQuiz(questions) {
+  let container = document.getElementById('comprehensive-quiz');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'comprehensive-quiz';
+    document.getElementById('practice').match(/<div id="practice-quiz"/) || 
+      document.getElementById('content-area').appendChild(container);
+  }
+  
+  container.innerHTML = '<div id="comprehensive-quiz-inner"></div>';
+  createQuizElement(questions, 'comprehensive-quiz-inner');
+}
+
+// Initialize on page load
+window.onload = function() {
+  // Preload any needed resources
+};
+</script>
+</body>
+</html>
