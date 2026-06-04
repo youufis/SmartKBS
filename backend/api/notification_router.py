@@ -309,9 +309,14 @@ async def list_announcements(
     user_grade = user_info[0][0] if user_info else ""
     user_class = user_info[0][1] if user_info else ""
 
-    # 根据不同角色，用不同的 SQL 查询可见公告（避免 LIMIT 在过滤前截断）
+    # 根据不同角色，用不同的 SQL 查询可见公告
+    # 先获取 total 总数
+    total = 0
+
     if role == 0:
         # 管理员：全部可见
+        count_result = execute_query("SELECT COUNT(*) FROM announcements")
+        total = count_result[0][0] if count_result else 0
         rows = execute_query(
             """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
                       priority, is_pinned, created_at, updated_at
@@ -325,6 +330,12 @@ async def list_announcements(
         admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
         if admin_names:
             placeholders = ",".join("?" for _ in admin_names)
+            count_result = execute_query(
+                f"""SELECT COUNT(*) FROM announcements
+                   WHERE creator_username=? OR creator_username IN ({placeholders})""",
+                (user["username"], *admin_names),
+            )
+            total = count_result[0][0] if count_result else 0
             rows = execute_query(
                 f"""SELECT id, creator_username, title, content, target_role, target_grade, target_class,
                           priority, is_pinned, created_at, updated_at
@@ -335,6 +346,10 @@ async def list_announcements(
                 (user["username"], *admin_names, page_size, (page - 1) * page_size),
             )
         else:
+            count_result = execute_query(
+                "SELECT COUNT(*) FROM announcements WHERE creator_username=?", (user["username"],)
+            )
+            total = count_result[0][0] if count_result else 0
             rows = execute_query(
                 """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
                           priority, is_pinned, created_at, updated_at
@@ -361,6 +376,12 @@ async def list_announcements(
         all_creator_names = admin_names + teacher_names
         if all_creator_names:
             placeholders = ",".join("?" for _ in all_creator_names)
+            count_result = execute_query(
+                f"""SELECT COUNT(*) FROM announcements
+                   WHERE creator_username IN ({placeholders})""",
+                tuple(all_creator_names),
+            )
+            total = count_result[0][0] if count_result else 0
             rows = execute_query(
                 f"""SELECT id, creator_username, title, content, target_role, target_grade, target_class,
                           priority, is_pinned, created_at, updated_at
@@ -371,13 +392,14 @@ async def list_announcements(
                 (*all_creator_names, page_size, (page - 1) * page_size),
             )
         else:
+            total = 0
             rows = []
 
     announcements = []
     for r in rows:
-        # 查询创建者姓名
+        # 查询创建者姓名（name 为空时显示 username）
         creator_name_row = execute_query(
-            "SELECT name FROM users WHERE username = ?", (r[1],)
+            "SELECT COALESCE(NULLIF(name, ''), username) FROM users WHERE username = ?", (r[1],)
         )
         creator_name = creator_name_row[0][0] if creator_name_row else r[1]
 
@@ -398,7 +420,7 @@ async def list_announcements(
 
     return {
         "announcements": announcements,
-        "total": len(announcements),
+        "total": total,
         "page": page,
         "page_size": page_size,
     }

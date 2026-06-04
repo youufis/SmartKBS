@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select } from 'antd'
+import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select, Pagination } from 'antd'
 import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -42,6 +42,10 @@ const WrongBookPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<{ total_wrong: number; exams: ExamWrongGroup[]; student_username?: string } | null>(null)
+
+  // 考试列表分页
+  const [examPage, setExamPage] = useState(1)
+  const [examPageSize, setExamPageSize] = useState(10)
 
   // 年级/班级/学生三级联动
   const [grades, setGrades] = useState<string[]>([])
@@ -135,6 +139,9 @@ const WrongBookPage: React.FC = () => {
     if (username) loadData(username)
   }
 
+  // 错题考试列表分页
+  const pagedExams = data ? data.exams.slice((examPage - 1) * examPageSize, examPage * examPageSize) : []
+
   const loadReviewPlan = async () => {
     setPlanLoading(true)
     setPlanData(null)
@@ -160,7 +167,15 @@ const WrongBookPage: React.FC = () => {
     setPlanLoading(false)
   }
 
-  useEffect(() => { if (isStudent) loadData(); else loadGrades() }, [isStudent])
+  useEffect(() => {
+    if (isStudent) {
+      loadData()
+    } else {
+      const init = async () => { await loadGrades() }
+      init()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStudent])
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
@@ -216,77 +231,80 @@ const WrongBookPage: React.FC = () => {
             </Space>
           </Card>
         ) : (
-          <Collapse
-            items={data.exams.map((exam) => ({
-              key: String(exam.exam_id),
-              label: (
-                <Space>
-                  <Text strong>{exam.exam_title}</Text>
-                  <Tag>{exam.exam_subject}</Tag>
-                  <Tag color="red">{exam.wrong_count} 道错题</Tag>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    得分 {exam.score}/{exam.total_score} | {exam.submitted_at?.slice(0, 10)}
-                  </Text>
-                </Space>
-              ),
-              children: (
-                <Table dataSource={exam.wrong_questions} rowKey="question_id" size="small" pagination={false}
-                  columns={[
-                    { title: '题型', dataIndex: 'question_type', width: 70,
-                      render: (t: string) => <Tag>{typeLabel[t] || t}</Tag> },
-                    { title: '题目', dataIndex: 'question_text', ellipsis: true },
-                    { title: '选项', key: 'options', width: 200,
-                      render: (_: any, r: WrongQuestion) => {
-                        const opts = r.options || {}
-                        return (
-                          <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                            {Object.entries(opts).map(([k, v]) => {
-                              const isStudent = r.student_answer === k
-                              const isCorrect = r.correct_answer === k
-                              let color = '#333'
-                              if (isStudent && isCorrect) color = '#52c41a'
-                              else if (isStudent) color = '#ff4d4f'
-                              else if (isCorrect) color = '#52c41a'
-                              return (
-                                <div key={k} style={{
-                                  color, fontSize: 12, lineHeight: 1.6,
-                                  background: isStudent ? '#fff2f0' : 'transparent',
-                                  padding: '1px 4px', borderRadius: 3,
-                                  border: isCorrect ? '1px solid #b7eb8f' : 'none',
-                                }}>
-                                  <Text style={{ fontWeight: isStudent || isCorrect ? 600 : 400, color, fontSize: 12 }}>
-                                    {k}. {v}
-                                  </Text>
-                                  {isStudent && <Text style={{ fontSize: 10, color: '#ff4d4f', marginLeft: 4 }}>你的选择</Text>}
-                                  {isCorrect && <Text style={{ fontSize: 10, color: '#52c41a', marginLeft: 4 }}>✓</Text>}
-                                </div>
-                              )
-                            })}
-                          </Space>
-                        )
-                      }},
-                    { title: '你的答案', dataIndex: 'student_answer', width: 100,
-                      render: (t: string, r: WrongQuestion) => {
-                        const opts = r.options || {}
-                        const display = opts[t] ? `${t}. ${opts[t]}` : (t || '未作答')
-                        return <Text type="danger" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
-                      }},
-                    { title: '正确答案', dataIndex: 'correct_answer', width: 100,
-                      render: (t: string, r: WrongQuestion) => {
-                        const opts = r.options || {}
-                        const display = opts[t] ? `${t}. ${opts[t]}` : t
-                        return <Text type="success" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
-                      }},
-                    { title: '知识点', dataIndex: 'knowledge_points', width: 150, ellipsis: true },
-                    { title: '得分', key: 'score', width: 80,
-                      render: (_: any, r: WrongQuestion) => (
-                        <Text type="danger">{r.score} / {r.max_score}</Text>
-                      )},
-                  ]}
-                />
-              ),
-            }))}
-          />
+          <div>
+            <div style={{ marginBottom: 12, textAlign: 'right' }}>
+              <Text type="secondary">共 {data.exams.length} 场考试，{data.total_wrong} 道错题</Text>
+            </div>
+            {pagedExams.map((exam) => (
+              <Collapse key={exam.exam_id} size="small" style={{ marginBottom: 12 }}
+                items={[{
+                  key: String(exam.exam_id),
+                  label: (
+                    <Space>
+                      <Text strong>{exam.exam_title}</Text>
+                      <Tag>{exam.exam_subject}</Tag>
+                      <Tag color="red">{exam.wrong_count} 道错题</Tag>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        得分 {exam.score}/{exam.total_score} | {exam.submitted_at ? exam.submitted_at.slice(0, 10) : ''}
+                      </Text>
+                    </Space>
+                  ),
+                  children: (
+                    <Table dataSource={exam.wrong_questions} rowKey="question_id" size="small"
+                      pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => '共 ' + t + ' 道错题', pageSizeOptions: ['5', '10', '20'] }}
+                      columns={[
+                        { title: '题型', dataIndex: 'question_type', width: 70, render: (t: string) => <Tag>{typeLabel[t] || t}</Tag> },
+                        { title: '题目', dataIndex: 'question_text', ellipsis: true },
+                        { title: '选项', key: 'options', width: 200, render: (_: any, r: WrongQuestion) => {
+                          const opts = r.options || {}
+                          return (
+                            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                              {Object.entries(opts).map(([k, v]) => {
+                                const isStudent = r.student_answer === k
+                                const isCorrect = r.correct_answer === k
+                                let color = '#333'
+                                if (isStudent && isCorrect) color = '#52c41a'
+                                else if (isStudent) color = '#ff4d4f'
+                                else if (isCorrect) color = '#52c41a'
+                                return (
+                                  <div key={k} style={{ color, fontSize: 12, lineHeight: 1.6, background: isStudent ? '#fff2f0' : 'transparent', padding: '1px 4px', borderRadius: 3, border: isCorrect ? '1px solid #b7eb8f' : 'none' }}>
+                                    <Text style={{ fontWeight: isStudent || isCorrect ? 600 : 400, color, fontSize: 12 }}>{k}. {v}</Text>
+                                    {isStudent && <Text style={{ fontSize: 10, color: '#ff4d4f', marginLeft: 4 }}>你的选择</Text>}
+                                    {isCorrect && <Text style={{ fontSize: 10, color: '#52c41a', marginLeft: 4 }}>✓</Text>}
+                                  </div>
+                                )
+                              })}
+                            </Space>
+                          )
+                        }},
+                        { title: '你的答案', dataIndex: 'student_answer', width: 100, render: (t: string, r: WrongQuestion) => {
+                          const opts = r.options || {}
+                          const display = opts[t] ? t + '. ' + opts[t] : (t || '未作答')
+                          return <Text type="danger" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
+                        }},
+                        { title: '正确答案', dataIndex: 'correct_answer', width: 100, render: (t: string, r: WrongQuestion) => {
+                          const opts = r.options || {}
+                          const display = opts[t] ? t + '. ' + opts[t] : t
+                          return <Text type="success" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
+                        }},
+                        { title: '知识点', dataIndex: 'knowledge_points', width: 150, ellipsis: true },
+                        { title: '得分', key: 'score', width: 80, render: (_: any, r: WrongQuestion) => <Text type="danger">{r.score} / {r.max_score}</Text> },
+                      ]}
+                    />
+                  ),
+                }]}
+              />
+            ))}
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <Pagination
+                current={examPage} pageSize={examPageSize} total={data.exams.length}
+                showSizeChanger showTotal={(t) => '共 ' + t + ' 场考试'}
+                pageSizeOptions={['5', '10', '20', '50']}
+                onChange={(p, ps) => { setExamPage(p); setExamPageSize(ps) }}
+                size="small"
+              />
+            </div>
+          </div>
         )}
       </Space>
 

@@ -276,7 +276,7 @@ const PortfolioPage: React.FC = () => {
                 dataSource={exams.results}
                 rowKey="id"
                 size="small"
-                pagination={false}
+                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 场考试`, pageSizeOptions: ['5', '10', '20'] }}
                 columns={[
                   { title: '考试', dataIndex: 'title', ellipsis: true },
                   {
@@ -339,7 +339,7 @@ const PortfolioPage: React.FC = () => {
                 dataSource={scores.records}
                 rowKey={(_, i) => String(i)}
                 size="small"
-                pagination={false}
+                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条记录`, pageSizeOptions: ['5', '10', '20'] }}
                 columns={[
                   { title: '教师', dataIndex: 'teacher', width: 80 },
                   { title: '年级', dataIndex: 'grade', width: 60 },
