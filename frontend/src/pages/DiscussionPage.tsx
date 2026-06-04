@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Card, Tabs, Button, Space, Typography, Tag, Modal,
+  Card, Table, Tabs, Button, Space, Typography, Tag, Modal,
   Form, Input, Select, InputNumber, message, Empty, Spin,
   Tooltip, Popconfirm,
 } from 'antd'
@@ -8,7 +8,7 @@ import {
   TeamOutlined, PlusOutlined, PlayCircleOutlined,
   StopOutlined, MessageOutlined, UserOutlined,
   FieldTimeOutlined, RobotOutlined, BulbOutlined,
-  ReloadOutlined, DeleteOutlined,
+  ReloadOutlined, DeleteOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -360,7 +360,92 @@ const DiscussionPage: React.FC = () => {
           {filtered.length === 0 ? (
             <Empty description="暂无讨论" />
           ) : (
-            filtered.map(renderDiscussionCard)
+            <Table
+              dataSource={filtered}
+              rowKey="id"
+              size="small"
+              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 个讨论`, pageSizeOptions: ['5', '10', '20', '50'] }}
+              columns={[
+                {
+                  title: '讨论主题', dataIndex: 'title', key: 'title', ellipsis: true,
+                  render: (title: string, disc: any) => {
+                    const statusInfo = STATUS_MAP[disc.status] || { label: '未知', color: 'default' }
+                    return (
+                      <Space>
+                        <Text strong style={{ cursor: 'pointer' }} onClick={() => handleDetail(disc.id)}>{title}</Text>
+                        <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
+                        {disc.subject && <Tag>{disc.subject}</Tag>}
+                      </Space>
+                    )
+                  },
+                },
+                {
+                  title: '参与', key: 'members', width: 100,
+                  render: (_: any, disc: any) => (
+                    <Text type="secondary">
+                      <TeamOutlined /> {disc.total_members || 0}人 | <MessageOutlined /> {disc.total_messages || 0}
+                    </Text>
+                  ),
+                },
+                {
+                  title: 'AI角色', dataIndex: 'ai_role', key: 'ai_role', width: 80,
+                  render: (role: string) => <Text type="secondary">{AI_ROLE_MAP[role] || role}</Text>,
+                },
+                {
+                  title: '时长', key: 'duration', width: 80,
+                  render: (_: any, disc: any) => disc.duration_minutes > 0 ? <Text type="secondary">{disc.duration_minutes}分钟</Text> : null,
+                },
+                {
+                  title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
+                  render: (desc: string) => desc ? <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text> : null,
+                },
+                {
+                  title: '操作', key: 'actions', width: 200,
+                  render: (_: any, disc: any) => (
+                    <Space size="small">
+                      <Tooltip title="查看详情">
+                        <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleDetail(disc.id)} />
+                      </Tooltip>
+                      {isTeacherOrAdmin ? (
+                        <>
+                          {disc.status === 'pending' && (
+                            <Button type="link" size="small" icon={<PlayCircleOutlined />}
+                              onClick={() => handleStart(disc.id)} style={{ color: '#52c41a' }}>开始</Button>
+                          )}
+                          {disc.status === 'active' && (
+                            <Popconfirm title="确定结束讨论？" onConfirm={() => handleEnd(disc.id)}>
+                              <Button type="link" size="small" icon={<StopOutlined />} danger>结束</Button>
+                            </Popconfirm>
+                          )}
+                          {disc.status === 'ended' && (
+                            <>
+                              <Button type="link" size="small" icon={<ReloadOutlined />}
+                                onClick={() => handleRestart(disc.id)} style={{ color: '#52c41a' }}>重启</Button>
+                              <Popconfirm title="确定删除此讨论？" onConfirm={() => handleDelete(disc.id)}>
+                                <Button type="link" size="small" icon={<DeleteOutlined />} danger>删除</Button>
+                              </Popconfirm>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {disc.has_joined && disc.status === 'active' && (
+                            <Button type="link" size="small" icon={<TeamOutlined />}
+                              onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)}>
+                              进入小组{disc.my_group ? `(${disc.my_group.name || `第${disc.my_group.group_index}组`})` : ''}
+                            </Button>
+                          )}
+                          {disc.status === 'active' && !disc.has_joined && (
+                            <Button type="link" size="small" icon={<MessageOutlined />}
+                              onClick={() => handleJoin(disc.id)}>加入讨论</Button>
+                          )}
+                        </>
+                      )}
+                    </Space>
+                  ),
+                },
+              ]}
+            />
           )}
         </Spin>
       </Card>

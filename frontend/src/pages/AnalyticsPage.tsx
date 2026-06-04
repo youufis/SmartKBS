@@ -402,7 +402,14 @@ const AnalyticsPage: React.FC = () => {
                     <>
                       <Space style={{ marginBottom: 12, justifyContent: 'space-between', width: '100%' }}>
                         <span />
-                        <Button icon={<DownloadOutlined />} onClick={exportReportAsMarkdown}>导出报告(.md)</Button>
+                        <Space>
+                          <Button icon={<DownloadOutlined />} onClick={() => {
+                            if (!cls) return
+                            const token = localStorage.getItem('smartkb_token')
+                            window.open(`/api/analytics/class-overview/export?grade=${grade}&cls=${cls}&teacher=${user?.username}&token=${token}`, '_blank')
+                          }}>导出 Word</Button>
+                          <Button icon={<DownloadOutlined />} onClick={exportReportAsMarkdown}>导出报告(.md)</Button>
+                        </Space>
                       </Space>
                       <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
                         <div className="markdown-report">
@@ -424,6 +431,13 @@ const AnalyticsPage: React.FC = () => {
                           <Col span={6}><Statistic title="任务参与率" value={suggestionsData.data.task_rate} suffix="%" /></Col>
                         </Row>
                       )}
+                      <Space style={{ marginBottom: 12, justifyContent: 'flex-end', width: '100%' }}>
+                        <Button icon={<DownloadOutlined />} onClick={() => {
+                          if (!cls) return
+                          const token = localStorage.getItem('smartkb_token')
+                          window.open(`/api/analytics/teaching-suggestions/export?grade=${grade}&cls=${cls}&teacher_username=${user?.username}&token=${token}`, '_blank')
+                        }}>导出 Word</Button>
+                      </Space>
                       <Card style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
                         <div className="markdown-report">
                           <ReactMarkdown>{suggestionsData.suggestions}</ReactMarkdown>
@@ -490,7 +504,14 @@ const AnalyticsPage: React.FC = () => {
 
                       <Space style={{ marginBottom: 12, justifyContent: 'space-between', width: '100%' }}>
                         <span />
-                        <Button icon={<DownloadOutlined />} onClick={exportExamExcel}>导出Excel</Button>
+                        <Space>
+                          <Button icon={<DownloadOutlined />} onClick={() => {
+                            if (!selectedExam) return
+                            const token = localStorage.getItem('smartkb_token')
+                            window.open(`/api/analytics/exam/${selectedExam}/report/export?token=${token}`, '_blank')
+                          }}>导出 Word</Button>
+                          <Button icon={<DownloadOutlined />} onClick={exportExamExcel}>导出Excel</Button>
+                        </Space>
                       </Space>
                       <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
                         <div className="markdown-report">

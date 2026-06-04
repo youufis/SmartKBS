@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react'
 import {
-  Card, List, Typography, Button, Space, Modal, Form, Input,
+  Card, Table, Typography, Button, Space, Modal, Form, Input,
   Select, message, Empty, Spin, Tag, Switch, Popconfirm,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, PushpinOutlined,
-  ReloadOutlined, BulbOutlined,
+  ReloadOutlined, BulbOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
@@ -35,20 +35,25 @@ const AnnouncementsPage: React.FC = () => {
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
   const [loading, setLoading] = useState(false)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [createModal, setCreateModal] = useState(false)
   const [aiModal, setAiModal] = useState(false)
   const [aiLoading, setAiLoading] = useState(false)
   const [editModal, setEditModal] = useState<AnnouncementItem | null>(null)
+  const [detailModal, setDetailModal] = useState<AnnouncementItem | null>(null)
   const [form] = Form.useForm()
   const [editForm] = Form.useForm()
   const [aiForm] = Form.useForm()
   const [submitting, setSubmitting] = useState(false)
 
-  const fetchAnnouncements = async () => {
+  const fetchAnnouncements = async (p = page, ps = pageSize) => {
     setLoading(true)
     try {
-      const data = await notificationsApi.getAnnouncements(1, 50)
+      const data = await notificationsApi.getAnnouncements(p, ps)
       setAnnouncements(data.announcements || [])
+      setTotal(data.total || 0)
     } catch {
       message.error('加载公告失败')
     }
@@ -56,15 +61,8 @@ const AnnouncementsPage: React.FC = () => {
   }
 
   useEffect(() => {
-    (async () => {
-      try {
-        const data = await notificationsApi.getAnnouncements(1, 50)
-        setAnnouncements(data.announcements || [])
-      } catch {
-        message.error('加载公告失败')
-      }
-      setLoading(false)
-    })()
+    fetchAnnouncements(1, pageSize)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // AI 生成公告
@@ -119,7 +117,8 @@ const AnnouncementsPage: React.FC = () => {
       message.success('公告发布成功')
       setCreateModal(false)
       form.resetFields()
-      fetchAnnouncements()
+      fetchAnnouncements(1, pageSize)
+      setPage(1)
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return
       message.error('发布失败')
@@ -134,7 +133,7 @@ const AnnouncementsPage: React.FC = () => {
       await notificationsApi.updateAnnouncement(editModal.id, values)
       message.success('公告已更新')
       setEditModal(null)
-      fetchAnnouncements()
+      fetchAnnouncements(page, pageSize)
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return
       message.error('更新失败')
@@ -145,11 +144,88 @@ const AnnouncementsPage: React.FC = () => {
     try {
       await notificationsApi.deleteAnnouncement(id)
       message.success('公告已删除')
-      fetchAnnouncements()
+      fetchAnnouncements(page, pageSize)
     } catch {
       message.error('删除失败')
     }
   }
+
+  const handleTableChange = (pagination: any) => {
+    setPage(pagination.current)
+    setPageSize(pagination.pageSize)
+    fetchAnnouncements(pagination.current, pagination.pageSize)
+  }
+
+  const columns = [
+    {
+      title: '置顶',
+      dataIndex: 'is_pinned',
+      key: 'is_pinned',
+      width: 50,
+      render: (pinned: boolean) => pinned ? <PushpinOutlined style={{ color: '#fa8c16' }} /> : null,
+    },
+    {
+      title: '公告标题',
+      dataIndex: 'title',
+      key: 'title',
+      ellipsis: true,
+      render: (title: string, record: AnnouncementItem) => (
+        <Space>
+          <Text strong style={{ cursor: 'pointer' }} onClick={() => setDetailModal(record)}>{title}</Text>
+          <Tag color={PRIORITY_COLORS[record.priority] || 'default'}>
+            {PRIORITY_LABELS[record.priority] || record.priority}
+          </Tag>
+        </Space>
+      ),
+    },
+    {
+      title: '发布者',
+      dataIndex: 'creator_name',
+      key: 'creator_name',
+      width: 100,
+      render: (name: string) => name || '-',
+    },
+    {
+      title: '范围',
+      key: 'target',
+      width: 120,
+      render: (_: any, record: AnnouncementItem) => (
+        <Space size={4}>
+          {record.target_role !== 'all' && (
+            <Tag>{record.target_role === 'teacher' ? '教师' : record.target_role === 'student' ? '学生' : record.target_role}</Tag>
+          )}
+          {record.target_grade && <Tag>{record.target_grade}</Tag>}
+          {record.target_class && <Tag>{record.target_class}班</Tag>}
+        </Space>
+      ),
+    },
+    {
+      title: '发布时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 160,
+      render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-',
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 120,
+      render: (_: any, record: AnnouncementItem) => (
+        <Space>
+          <Button type="text" icon={<EyeOutlined />} size="small" onClick={() => setDetailModal(record)} />
+          {isAdminOrTeacher && (
+            <>
+              <Button type="text" icon={<EditOutlined />} size="small"
+                onClick={() => { setEditModal(record); editForm.setFieldsValue(record) }} />
+              <Popconfirm title="确定删除此公告？" onConfirm={() => handleDelete(record.id)}>
+                <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+              </Popconfirm>
+            </>
+          )}
+        </Space>
+      ),
+    },
+  ]
 
   return (
     <div>
@@ -167,74 +243,61 @@ const AnnouncementsPage: React.FC = () => {
                 </Button>
               </>
             )}
-            <Button icon={<ReloadOutlined />} onClick={fetchAnnouncements}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => fetchAnnouncements(page, pageSize)}>刷新</Button>
           </Space>
         }
       >
-        <Spin spinning={loading}>
-          {announcements.length === 0 ? (
-            <Empty description="暂无公告" />
-          ) : (
-            <List
-              dataSource={announcements}
-              renderItem={(item) => (
-                <Card
-                  size="small"
-                  style={{
-                    marginBottom: 12,
-                    borderLeft: `4px solid ${
-                      item.priority === 'urgent' ? '#ff4d4f' :
-                      item.priority === 'important' ? '#fa8c16' :
-                      item.priority === 'normal' ? '#1677ff' : '#d9d9d9'
-                    }`,
-                  }}
-                  extra={
-                    isAdminOrTeacher && (
-                      <Space>
-                        <Button type="text" icon={<EditOutlined />} size="small" onClick={() => { setEditModal(item); editForm.setFieldsValue(item); }} />
-                        <Popconfirm title="确定删除此公告？" onConfirm={() => handleDelete(item.id)}>
-                          <Button type="text" danger icon={<DeleteOutlined />} size="small" />
-                        </Popconfirm>
-                      </Space>
-                    )
-                  }
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1 }}>
-                      <Space>
-                        {item.is_pinned && <PushpinOutlined style={{ color: '#fa8c16' }} />}
-                        <Text strong style={{ fontSize: 15 }}>{item.title}</Text>
-                        <Tag color={PRIORITY_COLORS[item.priority] || 'default'}>
-                          {PRIORITY_LABELS[item.priority] || item.priority}
-                        </Tag>
-                      </Space>
-                      <Paragraph
-                        style={{ marginTop: 8, marginBottom: 4, whiteSpace: 'pre-wrap' }}
-                        type="secondary"
-                      >
-                        {item.content}
-                      </Paragraph>
-                      <Space size={12}>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          发布者：{item.creator_name || item.creator_username}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
-                        </Text>
-                        {item.target_role !== 'all' && (
-                          <Tag>{item.target_role === 'teacher' ? '教师' : item.target_role === 'student' ? '学生' : item.target_role}</Tag>
-                        )}
-                        {item.target_grade && <Tag>{item.target_grade}</Tag>}
-                        {item.target_class && <Tag>{item.target_class}班</Tag>}
-                      </Space>
-                    </div>
-                  </div>
-                </Card>
-              )}
-            />
-          )}
-        </Spin>
+        <Table
+          dataSource={announcements}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          size="small"
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条公告`,
+            pageSizeOptions: ['10', '20', '50'],
+          }}
+          onChange={handleTableChange}
+          locale={{ emptyText: <Empty description="暂无公告" /> }}
+        />
       </Card>
+
+      {/* ── 查看公告详情弹窗 ── */}
+      <Modal
+        title={<Space><BellOutlined />{detailModal?.title}</Space>}
+        open={!!detailModal}
+        onCancel={() => setDetailModal(null)}
+        footer={<Button onClick={() => setDetailModal(null)}>关闭</Button>}
+        width={640}
+      >
+        {detailModal && (
+          <div>
+            <Space style={{ marginBottom: 12 }}>
+              {detailModal.is_pinned && <PushpinOutlined style={{ color: '#fa8c16' }} />}
+              <Tag color={PRIORITY_COLORS[detailModal.priority] || 'default'}>
+                {PRIORITY_LABELS[detailModal.priority] || detailModal.priority}
+              </Tag>
+              {detailModal.target_role !== 'all' && (
+                <Tag>{detailModal.target_role === 'teacher' ? '教师' : detailModal.target_role === 'student' ? '学生' : detailModal.target_role}</Tag>
+              )}
+              {detailModal.target_grade && <Tag>{detailModal.target_grade}</Tag>}
+              {detailModal.target_class && <Tag>{detailModal.target_class}班</Tag>}
+            </Space>
+            <div style={{ color: '#999', fontSize: 12, marginBottom: 16 }}>
+              发布者：{detailModal.creator_name || detailModal.creator_username}
+              &nbsp;|&nbsp;
+              {detailModal.created_at ? new Date(detailModal.created_at).toLocaleString('zh-CN') : ''}
+            </div>
+            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>
+              {detailModal.content}
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* ── AI 生成公告弹窗 ── */}
       <Modal

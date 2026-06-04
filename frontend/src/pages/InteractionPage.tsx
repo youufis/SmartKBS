@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Card, Tabs, Button, Space, Typography, List, Tag, Modal,
   Form, Input, Select, message, Empty, Spin, Radio, Result,
-  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Divider,
+  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Divider, Pagination,
 } from 'antd'
 import {
   ThunderboltOutlined, BarChartOutlined, QuestionCircleOutlined,
@@ -40,6 +40,14 @@ const InteractionPage: React.FC = () => {
   const [aiQuizResult, setAiQuizResult] = useState<any>(null)
   const [aiQuizForm] = Form.useForm()
   const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
+
+  // 列表分页
+  const [quizPage, setQuizPage] = useState(1)
+  const [quizPageSize, setQuizPageSize] = useState(10)
+  const [pollPage, setPollPage] = useState(1)
+  const [pollPageSize, setPollPageSize] = useState(10)
+  const [questionPage, setQuestionPage] = useState(1)
+  const [questionPageSize, setQuestionPageSize] = useState(10)
 
   // 从系统配置加载课程列表
   useEffect(() => {
@@ -159,6 +167,7 @@ const InteractionPage: React.FC = () => {
     loadQuizzes()
     loadPolls()
     loadQuestions()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── AI 生成测验 ──
@@ -310,29 +319,23 @@ const InteractionPage: React.FC = () => {
   }
 
   // ── AI 课堂总结 ──
-  const [classSummaryModal, setClassSummaryModal] = useState(false)
   const [classSummaryLoading, setClassSummaryLoading] = useState(false)
   const [classSummaryData, setClassSummaryData] = useState<{ summary: string; data?: any } | null>(null)
   const handleClassSummary = async () => {
     setClassSummaryLoading(true)
     setClassSummaryData(null)
-    setClassSummaryModal(true)
     try {
       const { data } = await apiClient.get('/api/interaction/class-summary', {
         params: { grade: user?.grade || '', cls: user?.class || '', subject: '信息科技', teacher_username: user?.username },
       })
       if (data.task_id) {
-        // 异步任务，轮询结果
         const result = await pollAiTask(data.task_id)
         if (result) setClassSummaryData(result)
-        else setClassSummaryModal(false)
       } else {
-        // 兼容旧版同步返回
         setClassSummaryData(data)
       }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || '生成课堂总结失败')
-      setClassSummaryModal(false)
     }
     setClassSummaryLoading(false)
   }
@@ -456,9 +459,10 @@ const InteractionPage: React.FC = () => {
           />
           <Spin spinning={quizLoading}>
             {quizzes.length === 0 ? <Empty description="暂无测验" /> : (
-              <List
-                dataSource={quizzes}
-                renderItem={(quiz: any) => (
+              <>
+                <List
+                  dataSource={quizzes.slice((quizPage - 1) * quizPageSize, quizPage * quizPageSize)}
+                  renderItem={(quiz: any) => (
                   <Card size="small" style={{ marginBottom: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1 }}>
@@ -502,6 +506,16 @@ const InteractionPage: React.FC = () => {
                   </Card>
                 )}
               />
+              <div style={{ marginTop: 12, textAlign: 'center' }}>
+                <Pagination
+                  current={quizPage} pageSize={quizPageSize} total={quizzes.length}
+                  showSizeChanger showTotal={(t) => `共 ${t} 个测验`}
+                  pageSizeOptions={['5', '10', '20', '50']}
+                  onChange={(p, ps) => { setQuizPage(p); setQuizPageSize(ps) }}
+                  size="small"
+                />
+              </div>
+            </>
             )}
           </Spin>
         </div>
@@ -524,8 +538,9 @@ const InteractionPage: React.FC = () => {
           )}
           <Spin spinning={pollLoading}>
             {polls.length === 0 ? <Empty description="暂无活跃投票" /> : (
+              <>
               <List
-                dataSource={polls}
+                dataSource={polls.slice((pollPage - 1) * pollPageSize, pollPage * pollPageSize)}
                 renderItem={(poll: any) => {
                   const isMultiple = poll.poll_type === 'multiple'
                   const hasVoted = poll.voted ?? votedPolls[poll.id]
@@ -580,6 +595,16 @@ const InteractionPage: React.FC = () => {
                   )
                 }}
               />
+              <div style={{ marginTop: 12, textAlign: 'center' }}>
+                <Pagination
+                  current={pollPage} pageSize={pollPageSize} total={polls.length}
+                  showSizeChanger showTotal={(t) => `共 ${t} 个投票`}
+                  pageSizeOptions={['5', '10', '20', '50']}
+                  onChange={(p, ps) => { setPollPage(p); setPollPageSize(ps) }}
+                  size="small"
+                />
+              </div>
+            </>
             )}
           </Spin>
         </div>
@@ -598,8 +623,9 @@ const InteractionPage: React.FC = () => {
           )}
           <Spin spinning={questionLoading}>
             {questions.length === 0 ? <Empty description="暂无提问" /> : (
+              <>
               <List
-                dataSource={questions}
+                dataSource={questions.slice((questionPage - 1) * questionPageSize, questionPage * questionPageSize)}
                 renderItem={(q: any) => {
                   const qContent = q.content?.length > 50 ? q.content.slice(0, 50) + '...' : q.content
                   return (
@@ -643,6 +669,16 @@ const InteractionPage: React.FC = () => {
                   )
                 }}
               />
+              <div style={{ marginTop: 12, textAlign: 'center' }}>
+                <Pagination
+                  current={questionPage} pageSize={questionPageSize} total={questions.length}
+                  showSizeChanger showTotal={(t) => `共 ${t} 个提问`}
+                  pageSizeOptions={['5', '10', '20', '50']}
+                  onChange={(p, ps) => { setQuestionPage(p); setQuestionPageSize(ps) }}
+                  size="small"
+                />
+              </div>
+            </>
             )}
           </Spin>
         </div>
@@ -829,7 +865,8 @@ const InteractionPage: React.FC = () => {
                 AI 分析
               </Button>
             </div>
-            <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small" pagination={false}
+            <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small"
+              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 题`, pageSizeOptions: ['5', '10', '20'] }}
               columns={[
                 { title: '题号', dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
                 { title: '题目', dataIndex: 'question', ellipsis: true },

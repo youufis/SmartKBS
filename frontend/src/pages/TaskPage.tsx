@@ -278,7 +278,7 @@ const TaskPage: React.FC = () => {
             dataSource={tasks}
             columns={columns}
             rowKey="id"
-            pagination={false}
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 个任务`, pageSizeOptions: ['10', '20', '50'] }}
             size="small"
             locale={{ emptyText: '暂无活动任务' }}
           />

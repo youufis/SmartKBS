@@ -674,7 +674,7 @@ const SessionsManager: React.FC = () => {
             columns={columns}
             rowKey={(r) => `${r.teacher}|${r.grade}|${r.class}`}
             loading={loading}
-            pagination={false}
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 个会话`, pageSizeOptions: ['10', '20', '50'] }}
             size="middle"
           />
         )}
