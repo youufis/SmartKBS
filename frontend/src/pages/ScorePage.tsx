@@ -554,7 +554,7 @@ const ScorePage: React.FC = () => {
                 dataSource={students}
                 columns={scoreColumns}
                 rowKey={(r) => r.name}
-                pagination={false}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生`, pageSizeOptions: ['10', '20', '50'] }}
                 size="small"
                 locale={{ emptyText: <Empty description="暂无学生数据" /> }}
               />
@@ -619,7 +619,7 @@ const ScorePage: React.FC = () => {
                 },
               ]}
               rowKey={(r) => r.name}
-              pagination={false}
+              pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生`, pageSizeOptions: ['10', '20', '50'] }}
               size="small"
             />
           )
