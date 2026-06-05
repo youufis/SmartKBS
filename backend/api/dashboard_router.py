@@ -242,6 +242,27 @@ async def dashboard_summary(request: Request):
             (username,),
         )
 
+        # ── 智能练习数据 ──
+        pending_practice_count = _q_count(
+            """SELECT COUNT(*) FROM practice_sessions ps
+               WHERE ps.status='active'
+                 AND ps.id NOT IN (
+                   SELECT session_id FROM practice_attempts WHERE student_username=?
+                 )""",
+            (username,),
+        )
+        completed_practice_count = _q_count(
+            "SELECT COUNT(*) FROM practice_attempts WHERE student_username=?",
+            (username,),
+        )
+
+        # ── 错题本数据 ──
+        wrong_exam_count = _q_count(
+            """SELECT COUNT(*) FROM exam_attempts
+               WHERE student_username=? AND status='submitted'""",
+            (username,),
+        )
+
         result.update({
             "pending_exam_count": pending_count,
             "completed_exam_count": completed_count,
@@ -259,6 +280,11 @@ async def dashboard_summary(request: Request):
             # 分组讨论
             "active_discussion_count": active_discussion_count,
             "my_discussion_count": my_discussion_count,
+            # 智能练习
+            "pending_practice_count": pending_practice_count,
+            "completed_practice_count": completed_practice_count,
+            # 错题本
+            "wrong_exam_count": wrong_exam_count,
             # 共享资源
             "shared_files_count": _db_count(
                 """SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'
@@ -409,6 +435,26 @@ async def dashboard_summary(request: Request):
                 (username,),
             )
 
+        # ── 智能练习统计（教师） ──
+        if role == 0:
+            practice_published = _q_count(
+                "SELECT COUNT(*) FROM practice_sessions WHERE status='active'",
+            )
+            practice_submitted = _q_count(
+                "SELECT COUNT(*) FROM practice_attempts",
+            )
+        else:
+            practice_published = _q_count(
+                "SELECT COUNT(*) FROM practice_sessions WHERE status='active' AND creator_username=?",
+                (username,),
+            )
+            practice_submitted = _q_count(
+                """SELECT COUNT(*) FROM practice_attempts pa
+                   JOIN practice_sessions ps ON pa.session_id=ps.id
+                   WHERE ps.creator_username=?""",
+                (username,),
+            )
+
         result.update({
             "exam_stats": {
                 "total": exam_total,
@@ -432,6 +478,9 @@ async def dashboard_summary(request: Request):
             "discussion_total": discussion_total,
             "discussion_active": discussion_active,
             "discussion_member_count": discussion_member_count,
+            # 智能练习
+            "practice_published": practice_published,
+            "practice_submitted": practice_submitted,
             "online_count": get_online_count(),
             "shared_resources_count": _db_count(
                 "SELECT COUNT(*) FROM shared_resources"
