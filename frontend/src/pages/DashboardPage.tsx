@@ -77,6 +77,14 @@ interface DashboardSummary {
   // 学生 - 分组讨论
   active_discussion_count?: number
   my_discussion_count?: number
+  // 智能练习
+  pending_practice_count?: number
+  completed_practice_count?: number
+  // 错题本
+  wrong_exam_count?: number
+  // 教师 - 智能练习
+  practice_published?: number
+  practice_submitted?: number
   // 共享资源
   shared_files_count?: number
   shared_resources_count?: number
@@ -237,21 +245,21 @@ const DashboardPage: React.FC = () => {
             <Card hoverable onClick={() => navigate('/interaction')} size="small">
               <Statistic
                 title="互动"
-                value={summary.active_quiz_count ?? 0}
+                value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>待答 · {summary.student_poll_vote_count ?? 0}票</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0}</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
           </Col>
           <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/discussion')} size="small">
+            <Card hoverable onClick={() => navigate('/wrong-book')} size="small">
               <Statistic
-                title="讨论"
-                value={summary.my_discussion_count ?? 0}
-                prefix={<TeamOutlined style={{ color: '#1677ff' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>/ {summary.active_discussion_count ?? 0} 进行中</Text>}
-                valueStyle={{ color: '#1677ff', fontSize: 22 }}
+                title="错题"
+                value={summary.wrong_exam_count ?? 0}
+                prefix={<BookOutlined style={{ color: '#ff4d4f' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>场考试有错题</Text>}
+                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
           </Col>
@@ -325,9 +333,9 @@ const DashboardPage: React.FC = () => {
             <Card hoverable onClick={() => navigate('/interaction')} size="small">
               <Statistic
                 title="互动"
-                value={summary.teacher_quiz_count ?? 0}
+                value={(summary.teacher_quiz_count ?? 0) + (summary.practice_published ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验 · {summary.teacher_poll_count ?? 0}投票</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.teacher_quiz_count ?? 0} · 练习{summary.practice_published ?? 0}</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
