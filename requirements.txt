@@ -10,3 +10,9 @@ python-dotenv>=1.0.0     # .env 文件加载
 httpx>=0.25.0            # 异步 HTTP 客户端
 requests>=2.31.0         # 同步 HTTP 客户端
 python-multipart>=0.0.6  # FastAPI 文件上传支持
+
+# ── 测试 ──
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
+httpx>=0.25.0             # FastAPI TestClient 需要
