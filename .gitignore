@@ -19,6 +19,7 @@ temp_uploads/
 
 # ── 数据库 ──
 backend/smartkb.db
+backend/questions.db
 *.db
 
 # ── 运行时数据 ──
