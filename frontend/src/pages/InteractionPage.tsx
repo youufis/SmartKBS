@@ -15,6 +15,7 @@ import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
+import { StudentView as PracticeStudentView, TeacherView as PracticeTeacherView } from '../pages/PracticePage'
 import type { Question } from '../components/QuizEditor'
 
 const { Title, Text } = Typography
@@ -291,7 +292,10 @@ const InteractionPage: React.FC = () => {
 
   const handleViewQuizResults = async (quizId: number) => {
     try {
-      const { data } = await apiClient.get(`/api/interaction/quizzes/${quizId}/results`)
+      const url = isStudent
+        ? `/api/interaction/quizzes/${quizId}/my-result`
+        : `/api/interaction/quizzes/${quizId}/results`
+      const { data } = await apiClient.get(url)
       setQuizResultsView(data)
       setQuizAiAnalysis(null)
     } catch { message.error('加载结果失败') }
@@ -436,6 +440,11 @@ const InteractionPage: React.FC = () => {
   }
 
   const tabItems = [
+    {
+      key: 'practice',
+      label: <span><RobotOutlined /> 智能练习</span>,
+      children: isTeacherOrAdmin ? <PracticeTeacherView /> : <PracticeStudentView />,
+    },
     {
       key: 'quizzes',
       label: <span><ThunderboltOutlined /> 随堂测验</span>,
@@ -727,7 +736,7 @@ const InteractionPage: React.FC = () => {
             <ThunderboltOutlined style={{ fontSize: 28 }} />
             <Title level={3} style={{ color: '#fff', margin: 0 }}>课堂互动</Title>
             <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              随堂测验 · 快速投票 · 课堂提问
+              随堂测验 · 快速投票 · 课堂提问 · 智能练习
             </Text>
           </Space>
         </div>
@@ -850,38 +859,72 @@ const InteractionPage: React.FC = () => {
       </Modal>
 
       {/* ── 测验结果统计弹窗 ── */}
-      <Modal title="测验结果" open={!!quizResultsView} onCancel={() => setQuizResultsView(null)}
+      <Modal title={quizResultsView?.quiz_title ? `我的成绩 - ${quizResultsView.quiz_title}` : "测验结果"}
+        open={!!quizResultsView} onCancel={() => setQuizResultsView(null)}
         footer={null} width={700}>
         {quizResultsView && (
           <>
-            <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={8}><Statistic title="题目数" value={quizResultsView.quiz?.question_count} /></Col>
-              <Col span={8}><Statistic title="参与人数" value={quizResultsView.total_answers} /></Col>
-            </Row>
-            <div style={{ textAlign: 'right', marginBottom: 8 }}>
-              <Button icon={<RobotOutlined />} size="small"
-                loading={quizAiAnalysisLoading}
-                onClick={() => handleQuizAiAnalysis(quizResultsView.quiz?.id)}>
-                AI 分析
-              </Button>
-            </div>
-            <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small"
-              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 题`, pageSizeOptions: ['5', '10', '20'] }}
-              columns={[
-                { title: '题号', dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
-                { title: '题目', dataIndex: 'question', ellipsis: true },
-                { title: '正确率', dataIndex: 'correct_rate', width: 100,
-                  render: (r: number) => (
-                    <Text strong style={{ color: r >= 60 ? '#52c41a' : '#ff4d4f' }}>{r}%</Text>
-                  ),
-                },
-              ]} />
-            {quizAiAnalysis && (
-              <Card size="small" style={{ marginTop: 12, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
-                <div className="markdown-content">
-                  <ReactMarkdown>{quizAiAnalysis}</ReactMarkdown>
+            {/* 学生端：个人答题结果 */}
+            {quizResultsView.quiz_title && (
+              <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                <Progress type="circle" percent={quizResultsView.percentage}
+                  format={p => `${p}%`}
+                  strokeColor={quizResultsView.percentage >= 80 ? '#52c41a' : quizResultsView.percentage >= 60 ? '#faad14' : '#ff4d4f'} />
+                <div style={{ marginTop: 8 }}>
+                  <Text>得分：{quizResultsView.score}/{quizResultsView.total_score}</Text>
                 </div>
-              </Card>
+                <Table dataSource={quizResultsView.details} rowKey="index" size="small" style={{ marginTop: 16 }}
+                  pagination={false}
+                  columns={[
+                    { title: '#', dataIndex: 'index', render: (i: number) => i + 1, width: 50 },
+                    { title: '题目', dataIndex: 'question', ellipsis: true },
+                    { title: '你的答案', dataIndex: 'user_answer', width: 120,
+                      render: (v: string, r: any) => (
+                        <Text type={r.is_correct ? 'success' : 'danger'}>{v || '（未答）'}</Text>
+                      ),
+                    },
+                    { title: '正确答案', dataIndex: 'correct_answer', width: 120 },
+                    { title: '状态', width: 60,
+                      render: (_: any, r: any) => r.is_correct
+                        ? <Tag color="success">正确</Tag>
+                        : <Tag color="error">错误</Tag>,
+                    },
+                  ]} />
+              </div>
+            )}
+            {/* 教师端：全班统计 */}
+            {!quizResultsView.quiz_title && (
+              <>
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col span={8}><Statistic title="题目数" value={quizResultsView.quiz?.question_count} /></Col>
+                  <Col span={8}><Statistic title="参与人数" value={quizResultsView.total_answers} /></Col>
+                </Row>
+                <div style={{ textAlign: 'right', marginBottom: 8 }}>
+                  <Button icon={<RobotOutlined />} size="small"
+                    loading={quizAiAnalysisLoading}
+                    onClick={() => handleQuizAiAnalysis(quizResultsView.quiz?.id)}>
+                    AI 分析
+                  </Button>
+                </div>
+                <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small"
+                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 题`, pageSizeOptions: ['5', '10', '20'] }}
+                  columns={[
+                    { title: '题号', dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
+                    { title: '题目', dataIndex: 'question', ellipsis: true },
+                    { title: '正确率', dataIndex: 'correct_rate', width: 100,
+                      render: (r: number) => (
+                        <Text strong style={{ color: r >= 60 ? '#52c41a' : '#ff4d4f' }}>{r}%</Text>
+                      ),
+                    },
+                  ]} />
+                {quizAiAnalysis && (
+                  <Card size="small" style={{ marginTop: 12, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                    <div className="markdown-content">
+                      <ReactMarkdown>{quizAiAnalysis}</ReactMarkdown>
+                    </div>
+                  </Card>
+                )}
+              </>
             )}
           </>
         )}

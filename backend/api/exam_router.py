@@ -4,6 +4,7 @@
 """
 import asyncio
 import json
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -1010,21 +1011,19 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     earned_score = 0.0
     graded_answers = {}
 
-    for q in questions:
+    # 分离简答题和其他题
+    short_qs = [q for q in questions if q["type"] == "short"]
+    other_qs = [q for q in questions if q["type"] != "short"]
+
+    # 非简答题：精确匹配
+    for q in other_qs:
         qid = str(q["id"])
         student_answer = req.answers.get(qid, "")
         correct_answer = q["correct_answer"]
         q_score = q["score"] or (total_score / max(len(questions), 1))
-
-        is_correct = False
-        if q["type"] == "short":
-            is_correct = _check_short_answer(student_answer, correct_answer)
-        else:
-            is_correct = _check_choice_answer(student_answer, correct_answer, q["type"])
-
+        is_correct = _check_choice_answer(student_answer, correct_answer, q["type"])
         if is_correct:
             earned_score += q_score
-
         graded_answers[qid] = {
             "student_answer": student_answer,
             "correct_answer": correct_answer,
@@ -1032,6 +1031,83 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
             "max_score": q_score,
             "is_correct": is_correct,
         }
+
+    # 简答题：AI 语义批改（并发）
+    if short_qs:
+        try:
+            from backend.api.chat_router import get_api_keys
+            from backend.api.ai_service import call_ai_async
+            api_key, _ = get_api_keys(username)
+        except Exception:
+            api_key = ""
+
+        if api_key and api_key.strip():
+            sem = asyncio.Semaphore(3)
+
+            async def _grade_short(q):
+                qid = str(q["id"])
+                student_answer = req.answers.get(qid, "")
+                correct_answer = q["correct_answer"]
+                q_score = q["score"] or (total_score / max(len(questions), 1))
+                async with sem:
+                    try:
+                        from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
+                        prompt = SHORT_ANSWER_GRADING_PROMPT.format(
+                            question_text=str(q.get("question_text", "")).replace('{', '{{').replace('}', '}}') if q.get("question_text") else "",
+                            correct_answer=str(correct_answer).replace('{', '{{').replace('}', '}}'),
+                            max_score=str(q_score),
+                            half_score=str(q_score * 0.5),
+                            near_full=str(q_score * 0.8),
+                            half_minus=str(q_score * 0.4),
+                            student_answer=str(student_answer).replace('{', '{{').replace('}', '}}'),
+                        )
+                        ai_resp = await call_ai_async(prompt, api_key)
+                        jm = re.search(r'\{[^}]+\}', ai_resp)
+                        if jm:
+                            result = json.loads(jm.group())
+                            ai_score = float(result.get("score", 0))
+                            ai_score = max(0, min(ai_score, q_score))
+                            return qid, {
+                                "student_answer": student_answer,
+                                "correct_answer": correct_answer,
+                                "score": ai_score,
+                                "max_score": q_score,
+                                "is_correct": ai_score >= q_score * 0.6,
+                            }
+                    except Exception:
+                        pass
+                # AI 失败回退
+                is_correct = _check_short_answer(student_answer, correct_answer)
+                return qid, {
+                    "student_answer": student_answer,
+                    "correct_answer": correct_answer,
+                    "score": q_score if is_correct else 0,
+                    "max_score": q_score,
+                    "is_correct": is_correct,
+                }
+
+            results = await asyncio.gather(*[_grade_short(q) for q in short_qs])
+            for qid, result in results:
+                graded_answers[qid] = result
+                if result["is_correct"]:
+                    earned_score += result["score"]
+        else:
+            # 无 API Key：关键词匹配
+            for q in short_qs:
+                qid = str(q["id"])
+                student_answer = req.answers.get(qid, "")
+                correct_answer = q["correct_answer"]
+                q_score = q["score"] or (total_score / max(len(questions), 1))
+                is_correct = _check_short_answer(student_answer, correct_answer)
+                if is_correct:
+                    earned_score += q_score
+                graded_answers[qid] = {
+                    "student_answer": student_answer,
+                    "correct_answer": correct_answer,
+                    "score": q_score if is_correct else 0,
+                    "max_score": q_score,
+                    "is_correct": is_correct,
+                }
 
     earned_score = round(earned_score, 1)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1452,163 +1528,6 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
 
     task_id = await task_manager.create_task(description="AI 错题讲解", coro_factory=_do_explain)
     return {"task_id": task_id, "message": "AI 讲解已提交，请稍后查询结果"}
-
-
-@router.post("/{exam_id}/ai-grade-short")
-async def ai_grade_short_answers(exam_id: int, request: Request):
-    """AI 批改简答题：对考试中所有简答题进行 AI 评分"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-
-    if role == 2:
-        raise HTTPException(status_code=403, detail="仅教师和管理员可进行 AI 批改")
-
-    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
-    if not exam:
-        raise HTTPException(status_code=404, detail="考试不存在")
-
-    if not _can_manage_exam(username, exam):
-        raise HTTPException(status_code=403, detail="无权操作此考试")
-
-    # 获取所有简答题
-    short_questions = execute_query(
-        """SELECT q.id, q.question_text, q.correct_answer, eq.score
-           FROM exam_questions eq
-           JOIN question_bank q ON q.id = eq.question_id
-           WHERE eq.exam_id = ? AND q.type = 'short' AND q.status = 'active'""",
-        (exam_id,),
-    )
-
-    if not short_questions:
-        raise HTTPException(status_code=400, detail="该考试没有简答题")
-
-    # 获取所有已提交的答题记录
-    attempts = execute_query(
-        """SELECT * FROM exam_attempts
-           WHERE exam_id = ? AND status = 'submitted'""",
-        (exam_id,),
-    )
-
-    from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
-    from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_async
-
-    keys = get_api_keys(username)
-    api_key = keys[0] if keys and keys[0] else ""
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 API Key")
-
-    graded_count = 0
-    errors = []
-
-    # 收集所有需要 AI 批改的任务
-    grading_tasks = []
-
-    for attempt in attempts:
-        answers_data = attempt.get("answers")
-        if isinstance(answers_data, str):
-            answers_data = json.loads(answers_data)
-        if not answers_data:
-            continue
-
-        for q in short_questions:
-            qid = str(q["id"])
-            if qid not in answers_data:
-                continue
-
-            ans = answers_data[qid]
-            if ans.get("ai_graded") or ans.get("reviewed"):
-                continue
-
-            grading_tasks.append((attempt, answers_data, q, qid, ans))
-
-    # 并发异步调用 AI 批改（最多5个并发）
-    sem = asyncio.Semaphore(5)
-
-    async def _grade_one(attempt, answers_data, q, qid, ans):
-        max_score = q["score"] or 5
-        half_score = max_score * 0.5
-        near_full = max_score * 0.8
-        half_minus = max_score * 0.4
-
-        def _safe(s):
-            return str(s).replace('{', '{{').replace('}', '}}')
-
-        prompt = SHORT_ANSWER_GRADING_PROMPT.format(
-            question_text=_safe(q["question_text"]),
-            correct_answer=_safe(q["correct_answer"] or ""),
-            max_score=_safe(max_score),
-            half_score=_safe(half_score),
-            near_full=_safe(near_full),
-            half_minus=_safe(half_minus),
-            student_answer=_safe(ans.get("student_answer", "")),
-        )
-
-        async with sem:
-            try:
-                ai_response = await call_ai_async(prompt, api_key)
-                import re
-                json_match = re.search(r'\{[^}]+\}', ai_response)
-                if json_match:
-                    result = json.loads(json_match.group())
-                    ai_score = float(result.get("score", 0))
-                    ai_score = max(0, min(ai_score, max_score))
-
-                    ans["score"] = ai_score
-                    ans["is_correct"] = ai_score >= max_score * 0.6
-                    ans["ai_graded"] = True
-                    ans["ai_comment"] = result.get("comment", "")
-                    ans["ai_feedback"] = result.get("feedback", "")
-                    return attempt, True
-                else:
-                    errors.append(f"学生 {attempt['student_username']} 题目 {qid}: AI 返回格式异常")
-            except Exception as e:
-                errors.append(f"学生 {attempt['student_username']} 题目 {qid}: {str(e)}")
-        return attempt, False
-
-    if grading_tasks:
-        results = await asyncio.gather(*[_grade_one(*t) for t in grading_tasks], return_exceptions=True)
-        # 按 attempt 分组更新
-        attempt_updates = {}
-        for r in results:
-            if isinstance(r, Exception):
-                continue
-            attempt_obj, changed = r
-            if changed:
-                attempt_updates[attempt_obj["id"]] = attempt_obj
-                graded_count += 1
-
-        for att_id, att in attempt_updates.items():
-            total_earned = sum(
-                v.get("score", 0) for v in att["answers"].values() if isinstance(v, dict)
-            )
-            execute_update(
-                """UPDATE exam_attempts
-                   SET answers = ?, score = ?
-                   WHERE id = ?""",
-                (json.dumps(att["answers"], ensure_ascii=False),
-                 round(total_earned, 1), att_id),
-            )
-
-        if need_update:
-            # 重新计算总分
-            total_earned = sum(
-                v.get("score", 0) for v in answers_data.values()
-            )
-            execute_update(
-                """UPDATE exam_attempts
-                   SET answers = ?, score = ?
-                   WHERE id = ?""",
-                (json.dumps(answers_data, ensure_ascii=False),
-                 round(total_earned, 1), attempt["id"]),
-            )
-
-    return {
-        "message": f"AI 批改完成，共评分 {graded_count} 道简答题",
-        "graded_count": graded_count,
-        "errors": errors[:10],
-    }
 
 
 # ═══════════════════════════════════════════════════════════

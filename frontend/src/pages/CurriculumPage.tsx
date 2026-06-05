@@ -6,7 +6,7 @@ import {
 import type { DataNode } from 'antd/es/tree'
 import {
   BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
-  FileOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
+  FileOutlined, FileTextOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
   TeamOutlined, CheckCircleOutlined, ClockCircleOutlined,
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
 } from '@ant-design/icons'
@@ -90,6 +90,17 @@ const CurriculumPage: React.FC = () => {
   const [courseForm] = Form.useForm()
   const [savingCourse, setSavingCourse] = useState(false)
 
+  // ── AI 资源推荐 ──
+  const [recModal, setRecModal] = useState(false)
+  const [recLoading, setRecLoading] = useState(false)
+  const [recResults, setRecResults] = useState<any[]>([])
+  const [recBindLoading, setRecBindLoading] = useState<Record<number, boolean>>({})
+
+  // ── AI 课件生成 ──
+  const [cwModal, setCwModal] = useState(false)
+  const [cwLoading, setCwLoading] = useState(false)
+  const [cwUrl, setCwUrl] = useState('')
+
   // ── 章节/知识点管理 ──
   const [chapterModal, setChapterModal] = useState(false)
   const [kpModal, setKpModal] = useState(false)
@@ -131,6 +142,72 @@ const CurriculumPage: React.FC = () => {
       setLessonPlanModal(false)
     } finally {
       setLessonPlanLoading(false)
+    }
+  }
+
+  // ── AI 资源推荐 ──
+  const handleAiRecommend = async (kpId: number) => {
+    setRecLoading(true)
+    setRecResults([])
+    setRecModal(true)
+    try {
+      const { data } = await apiClient.post(`/api/recommend/knowledge-point/${kpId}`)
+      setRecResults(data.recommendations || [])
+      if (!data.recommendations?.length) {
+        message.info(data.message || '暂无可推荐的资源')
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'AI 推荐失败')
+      setRecModal(false)
+    } finally {
+      setRecLoading(false)
+    }
+  }
+
+  const handleBindRecommended = async (resourceType: string, resourceId: number) => {
+    if (!selectedKp) return
+    setRecBindLoading(prev => ({ ...prev, [resourceId]: true }))
+    try {
+      await curriculumApi.bindResource({
+        knowledge_point_id: selectedKp.id,
+        resource_type: resourceType,
+        resource_id: resourceId,
+      })
+      message.success('资源已绑定')
+      // 刷新资源列表
+      try {
+        const res = await curriculumApi.getKpResources(selectedKp.id)
+        setKpResources(res.resources)
+      } catch { /* ignore */ }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '绑定失败')
+    } finally {
+      setRecBindLoading(prev => ({ ...prev, [resourceId]: false }))
+    }
+  }
+
+  // ── AI 课件生成 ──
+  const handleAiCourseware = async (kpId: number) => {
+    setCwLoading(true)
+    setCwUrl('')
+    setCwModal(true)
+    try {
+      const { data } = await apiClient.post(`/api/curriculum/ai-courseware/${kpId}`)
+      const result = await pollAiTask(data.task_id, 120000)
+      if (result && result.file_url) {
+        setCwUrl(result.file_url)
+      } else if (result && result.error) {
+        message.error(result.error)
+        setCwModal(false)
+      } else {
+        message.error('AI 课件生成失败（超时或未知错误）')
+        setCwModal(false)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'AI 课件生成失败')
+      setCwModal(false)
+    } finally {
+      setCwLoading(false)
     }
   }
 
@@ -819,6 +896,22 @@ const CurriculumPage: React.FC = () => {
                         </Button>
                       </Tooltip>
                     )}
+                    {isTeacherOrAdmin && (
+                      <Tooltip title="AI 推荐教学资源">
+                        <Button type="link" size="small" icon={<RobotOutlined />}
+                          onClick={() => handleAiRecommend(selectedKp.id)}>
+                          AI 推荐
+                        </Button>
+                      </Tooltip>
+                    )}
+                    {isTeacherOrAdmin && (
+                      <Tooltip title="AI 生成 HTML 课件">
+                        <Button type="link" size="small" icon={<FileOutlined />}
+                          onClick={() => handleAiCourseware(selectedKp.id)}>
+                          AI 课件
+                        </Button>
+                      </Tooltip>
+                    )}
                     {isStudent && (
                       <>
                         {selectedKp.progress_status !== 'completed' && (
@@ -1107,6 +1200,95 @@ const CurriculumPage: React.FC = () => {
             <div className="markdown-content">
               <ReactMarkdown>{lessonPlanData.lesson_plan}</ReactMarkdown>
             </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ── AI 资源推荐弹窗 ── */}
+      <Modal
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 推荐教学资源</>}
+        open={recModal}
+        onCancel={() => { if (recLoading) return; setRecModal(false) }}
+        width={700}
+        footer={recLoading ? null : <Button onClick={() => setRecModal(false)}>关闭</Button>}
+      >
+        {recLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>AI 正在分析知识点并推荐资源，请稍候...</div>
+          </div>
+        ) : recResults.length === 0 ? (
+          <Empty description="暂无可推荐的资源" />
+        ) : (
+          <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
+            <Space style={{ marginBottom: 16 }} wrap>
+              <Tag icon={<RobotOutlined />} color="blue">共 {recResults.length} 个推荐</Tag>
+              {recResults.filter(r => r.relevance === 'high').length > 0 && (
+                <Tag color="green">高相关 {recResults.filter(r => r.relevance === 'high').length}</Tag>
+              )}
+            </Space>
+            {recResults.map((r, i) => {
+              const relevanceColor = r.relevance === 'high' ? '#52c41a' : r.relevance === 'medium' ? '#faad14' : '#d9d9d9'
+              const relevanceLabel = r.relevance === 'high' ? '高度相关' : r.relevance === 'medium' ? '中度相关' : '低度相关'
+              return (
+                <Card key={i} size="small" style={{ marginBottom: 8 }}>
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Space>
+                      <span style={{ fontSize: 18 }}>{r.resource_icon}</span>
+                      <Typography.Text strong>{r.title}</Typography.Text>
+                      <Tag>{r.resource_type_label}</Tag>
+                      <Tag color={relevanceColor}>{relevanceLabel}</Tag>
+                    </Space>
+                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>{r.reason}</Typography.Text>
+                    <Button
+                      size="small"
+                      type="primary"
+                      ghost
+                      icon={<PlusOutlined />}
+                      loading={recBindLoading[r.resource_id]}
+                      onClick={() => handleBindRecommended(r.resource_type, r.resource_id)}
+                    >
+                      绑定到知识点
+                    </Button>
+                  </Space>
+                </Card>
+              )
+            })}
+          </div>
+        )}
+      </Modal>
+
+      {/* ── AI 课件生成弹窗 ── */}
+      <Modal
+        title={<><FileOutlined style={{ color: '#1677ff' }} /> AI 课件预览</>}
+        open={cwModal}
+        onCancel={() => { if (cwLoading) return; setCwModal(false) }}
+        width={900}
+        footer={
+          cwLoading ? null : (
+            <Space>
+              <a href={cwUrl} download style={{ textDecoration: 'none' }}>
+                <Button type="primary" icon={<DownloadOutlined />} disabled={!cwUrl}>
+                  下载课件 (.html)
+                </Button>
+              </a>
+              <Button icon={<FileTextOutlined />} disabled={!cwUrl}
+                onClick={() => { if (cwUrl) window.open(cwUrl, '_blank') }}>
+                新标签页打开
+              </Button>
+              <Button onClick={() => setCwModal(false)}>关闭</Button>
+            </Space>
+          )
+        }
+      >
+        {cwLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>AI 正在生成 HTML 课件，请稍候...</div>
+          </div>
+        ) : cwUrl ? (
+          <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
+            <iframe src={cwUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="课件预览" />
           </div>
         ) : null}
       </Modal>

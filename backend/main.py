@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="高中信息科技与通用技术课程 AI 智慧教学管理平台",
-    version="3.5.0",
+    version="4.0.0",
     docs_url="/docs",
     lifespan=lifespan,
 )
@@ -93,6 +93,8 @@ from backend.api.interaction_router import router as interaction_router
 from backend.api.discussion_router import router as discussion_router
 from backend.api.curriculum_router import router as curriculum_router
 from backend.api.wrong_book_router import router as wrong_book_router
+from backend.api.practice_router import router as practice_router
+from backend.api.recommend_router import router as recommend_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
@@ -115,6 +117,8 @@ app.include_router(interaction_router, prefix="/api/interaction", tags=["课堂�
 app.include_router(discussion_router, prefix="/api/interaction", tags=["分组讨论"])
 app.include_router(curriculum_router, prefix="/api/curriculum", tags=["课程大纲"])
 app.include_router(wrong_book_router, prefix="/api/wrong-book", tags=["错题本"])
+app.include_router(practice_router, prefix="/api/practice", tags=["自适应出题"])
+app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源推荐"])
 
 
 @app.get("/api/health")
