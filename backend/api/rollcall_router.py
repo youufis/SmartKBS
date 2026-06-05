@@ -551,7 +551,7 @@ async def admin_list_sessions(request: Request):
         rows = execute_query(
             """SELECT rw.teacher_username, rw.grade, rw.class_name,
                       COUNT(DISTINCT rw.student_name) as student_count,
-                      COUNT( rh.id) as history_count
+                      COUNT(DISTINCT rh.id) as history_count
                FROM rollcall_weights rw
                LEFT JOIN rollcall_history rh ON rh.teacher_username=rw.teacher_username
                    AND rh.grade=rw.grade AND rh.class_name=rw.class_name
@@ -562,7 +562,7 @@ async def admin_list_sessions(request: Request):
         rows = execute_query(
             """SELECT rw.teacher_username, rw.grade, rw.class_name,
                       COUNT(DISTINCT rw.student_name) as student_count,
-                      COUNT(rh.id) as history_count
+                      COUNT(DISTINCT rh.id) as history_count
                FROM rollcall_weights rw
                LEFT JOIN rollcall_history rh ON rh.teacher_username=rw.teacher_username
                    AND rh.grade=rw.grade AND rh.class_name=rw.class_name
