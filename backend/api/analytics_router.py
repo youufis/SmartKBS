@@ -12,6 +12,8 @@ from backend.api.dependencies import get_current_user
 from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
+from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
+from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 
 router = APIRouter()
 
@@ -207,36 +209,23 @@ async def class_overview(
         "submitted_students": _safe_int(task_submissions[0][0] if task_submissions else 0),
     }
 
-    prompt = f"""你是一位经验丰富的高中信息科技/通用技术教师。请根据以下班级数据，生成一份专业的学情分析报告。
-
-班级：{grade}{cls}班
-学生人数：{total_students}
-
-【课堂积分】
-有积分记录的学生数：{data_summary['score_count']}
-总积分：{data_summary['score_total']}
-平均积分：{data_summary['score_avg']}
-最高积分：{data_summary['score_max']}
-
-【点名情况】
-总点名次数：{data_summary['rollcall_total']}
-回答正确次数：{data_summary['rollcall_correct']}
-回答错误次数：{data_summary['rollcall_wrong']}
-
-【考试情况】
-{chr(10).join(f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}" for e in data_summary['exams'])}
-
-【任务完成】
-活跃任务数：{data_summary['active_tasks']}
-已提交学生数：{data_summary['submitted_students']}
-
-请生成包含以下内容的分析报告（以 Markdown 格式输出）：
-1. 📊 **班级整体情况**：对该班级的学习状态进行总体评价
-2. 📈 **学习亮点**：指出表现突出的方面
-3. ⚠️ **需要关注的问题**：指出薄弱环节
-4. 💡 **教学建议**：给出具体的改进建议
-
-请使用自然、亲切的语气，直接以分析内容开头，不要出现"根据提供的数据"等冗余表述。"""
+    exam_lines = chr(10).join(
+        f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}"
+        for e in data_summary['exams']
+    )
+    prompt = CLASS_ANALYSIS_PROMPT.format(
+        grade=grade, cls=cls, total_students=total_students,
+        score_count=data_summary['score_count'],
+        score_total=data_summary['score_total'],
+        score_avg=data_summary['score_avg'],
+        score_max=data_summary['score_max'],
+        rollcall_total=data_summary['rollcall_total'],
+        rollcall_correct=data_summary['rollcall_correct'],
+        rollcall_wrong=data_summary['rollcall_wrong'],
+        exam_lines=exam_lines,
+        active_tasks=data_summary['active_tasks'],
+        submitted_students=data_summary['submitted_students'],
+    )
 
     task_id = await _call_ai_task("班级学情分析", prompt)
 
@@ -722,36 +711,23 @@ async def export_class_overview_docx(
         "submitted_students": _safe_int(task_submissions[0][0] if task_submissions else 0),
     }
 
-    prompt = f"""你是一位经验丰富的高中信息科技/通用技术教师。请根据以下班级数据，生成一份专业的学情分析报告。
-
-班级：{grade}{cls}班
-学生人数：{total_students}
-
-【课堂积分】
-有积分记录的学生数：{data_summary['score_count']}
-总积分：{data_summary['score_total']}
-平均积分：{data_summary['score_avg']}
-最高积分：{data_summary['score_max']}
-
-【点名情况】
-总点名次数：{data_summary['rollcall_total']}
-回答正确次数：{data_summary['rollcall_correct']}
-回答错误次数：{data_summary['rollcall_wrong']}
-
-【考试情况】
-{chr(10).join(f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}" for e in data_summary['exams'])}
-
-【任务完成】
-活跃任务数：{data_summary['active_tasks']}
-已提交学生数：{data_summary['submitted_students']}
-
-请生成包含以下内容的分析报告（以 Markdown 格式输出）：
-1. 📊 **班级整体情况**：对该班级的学习状态进行总体评价
-2. 📈 **学习亮点**：指出表现突出的方面
-3. ⚠️ **需要关注的问题**：指出薄弱环节
-4. 💡 **教学建议**：给出具体的改进建议
-
-请使用自然、亲切的语气，直接以分析内容开头，不要出现"根据提供的数据"等冗余表述。"""
+    exam_lines = chr(10).join(
+        f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}"
+        for e in data_summary['exams']
+    )
+    prompt = CLASS_ANALYSIS_PROMPT.format(
+        grade=grade, cls=cls, total_students=total_students,
+        score_count=data_summary['score_count'],
+        score_total=data_summary['score_total'],
+        score_avg=data_summary['score_avg'],
+        score_max=data_summary['score_max'],
+        rollcall_total=data_summary['rollcall_total'],
+        rollcall_correct=data_summary['rollcall_correct'],
+        rollcall_wrong=data_summary['rollcall_wrong'],
+        exam_lines=exam_lines,
+        active_tasks=data_summary['active_tasks'],
+        submitted_students=data_summary['submitted_students'],
+    )
 
     api_key = _get_dashscope_api_key()
     if not api_key:

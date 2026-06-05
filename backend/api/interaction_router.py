@@ -3,7 +3,9 @@
 课堂互动 API 路由
 随堂测验、快速投票、课堂提问
 """
+import asyncio
 import json
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -105,31 +107,13 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
         "mixed": "混合（单选+判断）",
     }.get(req.question_type, "单选题")
 
-    prompt = f"""你是一位高中{req.subject}教师。请根据以下要求生成随堂测验题目。
-
-主题：{req.topic}
-题型：{type_desc}
-题目数量：{req.count} 题
-
-要求：
-1. 每道题必须包含完整选项（选择题4个选项，判断题["对","错"]）
-2. 必须给出正确答案
-3. 必须提供详细解析，帮助学生理解知识点
-
-请严格按照以下 JSON 格式输出，不要包含任何其他文字：
-[
-  {{
-    "type": "single" 或 "true_false",
-    "question": "题目内容",
-    "options": ["A. 选项A", "B. 选项B", "C. 选项C", "D. 选项D"],
-    "answer": "A",
-    "explanation": "解析：...",
-    "score": 1
-  }}
-]
-
-注意：判断题 type 为 "true_false"，options 为 ["对", "错"]，answer 为 "对" 或 "错"。
-"""
+    from backend.prompts.quiz import QUIZ_GENERATE_PROMPT
+    prompt = QUIZ_GENERATE_PROMPT.format(
+        subject=req.subject,
+        topic=req.topic,
+        type_desc=type_desc,
+        count=req.count,
+    )
 
     result = _call_ai(prompt)
     # 尝试从返回中提取 JSON
@@ -579,21 +563,69 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
 
     total_score = 0
     q_score = sum(q.get("score", 1) for q in questions)
-    for ua in user_answers:
-        idx = ua.get("question_index")
-        if idx is not None and idx < len(questions):
-            q_type = questions[idx].get("type", "single")
-            user_ans = str(ua.get("answer", "")).strip()
-            correct_ans = str(questions[idx].get("answer", "")).strip()
-            if q_type == "multiple":
-                # 多选题：比较排序后的逗号分隔字符串
-                user_set = sorted([a.strip().upper() for a in user_ans.split(",") if a.strip()])
-                correct_set = sorted([a.strip().upper() for a in correct_ans.split(",") if a.strip()])
-                if user_set == correct_set:
-                    total_score += questions[idx].get("score", 1)
-            else:
-                if user_ans.upper() == correct_ans.upper():
-                    total_score += questions[idx].get("score", 1)
+
+    # 分离简答题和其他题
+    short_indices = [i for i, q in enumerate(questions) if q.get("type") == "short"]
+    other_indices = [i for i, q in enumerate(questions) if q.get("type") != "short"]
+
+    # 非简答题：精确匹配
+    for idx in other_indices:
+        q_type = questions[idx].get("type", "single")
+        user_ans = str(next((ua.get("answer", "") for ua in user_answers if ua.get("question_index") == idx), "")).strip()
+        correct_ans = str(questions[idx].get("answer", "")).strip()
+        if q_type == "multiple":
+            user_set = sorted([a.strip().upper() for a in user_ans.split(",") if a.strip()])
+            correct_set = sorted([a.strip().upper() for a in correct_ans.split(",") if a.strip()])
+            if user_set == correct_set:
+                total_score += questions[idx].get("score", 1)
+        else:
+            if user_ans.upper() == correct_ans.upper():
+                total_score += questions[idx].get("score", 1)
+
+    # 简答题：AI 语义批改
+    if short_indices:
+        try:
+            from backend.api.chat_router import get_api_keys
+            from backend.api.ai_service import call_ai_async
+            api_key, _ = get_api_keys(username)
+        except Exception:
+            api_key = ""
+
+        if api_key and api_key.strip():
+            sem = asyncio.Semaphore(3)
+
+            async def _grade_short(idx):
+                q = questions[idx]
+                user_ans = str(next((ua.get("answer", "") for ua in user_answers if ua.get("question_index") == idx), "")).strip()
+                correct_ans = str(q.get("answer", "")).strip()
+                q_score_val = q.get("score", 1)
+                async with sem:
+                    try:
+                        from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
+                        prompt = SHORT_ANSWER_GRADING_PROMPT.format(
+                            question_text=str(q.get("question", "")).replace('{', '{{').replace('}', '}}'),
+                            correct_answer=correct_ans.replace('{', '{{').replace('}', '}}'),
+                            max_score=str(q_score_val),
+                            half_score=str(q_score_val * 0.5),
+                            near_full=str(q_score_val * 0.8),
+                            half_minus=str(q_score_val * 0.4),
+                            student_answer=user_ans.replace('{', '{{').replace('}', '}}'),
+                        )
+                        ai_resp = await call_ai_async(prompt, api_key)
+                        jm = re.search(r'\{[^}]+\}', ai_resp)
+                        if jm:
+                            result = json.loads(jm.group())
+                            ai_score = float(result.get("score", 0))
+                            ai_score = max(0, min(ai_score, q_score_val))
+                            return ai_score if ai_score >= q_score_val * 0.6 else 0.0
+                    except Exception:
+                        pass
+                # AI 失败回退：关键词匹配
+                keywords = [k.strip().lower() for k in correct_ans.replace("，", ",").split(",") if k.strip()]
+                return q_score_val if keywords and any(kw in user_ans.lower() for kw in keywords) else 0.0
+
+            results = await asyncio.gather(*[_grade_short(idx) for idx in short_indices])
+            total_score += sum(results)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_insert_update(
@@ -610,7 +642,75 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
     }
 
 
-@router.get("/quizzes/{quiz_id}/results", summary="查看测验结果")
+@router.get("/quizzes/{quiz_id}/my-result", summary="学生查看自己的答题结果")
+async def get_my_quiz_result(quiz_id: int, request: Request):
+    """学生查看自己的随堂测验答题详情"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role != 2:
+        raise HTTPException(status_code=403, detail="仅学生可查看")
+
+    quiz = execute_query(
+        "SELECT * FROM interaction_quizzes WHERE id = ?",
+        (quiz_id,),
+    )
+    if not quiz:
+        raise HTTPException(status_code=404, detail="测验不存在")
+
+    # 查询该学生的答题记录
+    answers = execute_query(
+        "SELECT answers, score, submitted_at FROM interaction_quiz_answers WHERE quiz_id = ? AND student_username = ?",
+        (quiz_id, username),
+    )
+    if not answers:
+        raise HTTPException(status_code=404, detail="未找到答题记录")
+
+    questions = json.loads(quiz[0][4]) if isinstance(quiz[0][4], str) else quiz[0][4]
+    user_answers = json.loads(answers[0][0]) if isinstance(answers[0][0], str) else answers[0][0]
+    total_score = answers[0][1]
+    q_score = sum(q.get("score", 1) for q in questions)
+
+    # 每题批改详情
+    details = []
+    for i, q in enumerate(questions):
+        user_ans = ""
+        for ua in user_answers:
+            if ua.get("question_index") == i:
+                user_ans = str(ua.get("answer", "")).strip()
+                break
+        correct_ans = str(q.get("answer", "")).strip()
+        q_type = q.get("type", "single")
+        is_correct = False
+        if q_type == "multiple":
+            user_set = sorted([a.strip().upper() for a in user_ans.split(",") if a.strip()])
+            correct_set = sorted([a.strip().upper() for a in correct_ans.split(",") if a.strip()])
+            is_correct = user_set == correct_set
+        else:
+            is_correct = user_ans.upper() == correct_ans.upper()
+        details.append({
+            "index": i,
+            "question": q.get("question", q.get("question_text", "")),
+            "options": q.get("options", None),
+            "type": q_type,
+            "user_answer": user_ans,
+            "correct_answer": correct_ans,
+            "is_correct": is_correct,
+            "score": q.get("score", 1) if is_correct else 0,
+            "max_score": q.get("score", 1),
+            "explanation": q.get("explanation", ""),
+        })
+
+    return {
+        "quiz_title": quiz[0][2],
+        "score": total_score,
+        "total_score": q_score,
+        "percentage": round(total_score / max(q_score, 1) * 100, 1),
+        "details": details,
+    }
+
+
+@router.get("/quizzes/{quiz_id}/results", summary="教师查看测验结果统计")
 async def get_quiz_results(quiz_id: int, request: Request):
     """教师查看随堂测验结果统计"""
     user = get_current_user(request)

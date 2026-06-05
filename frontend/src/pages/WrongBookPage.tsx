@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select, Pagination } from 'antd'
+import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select, Pagination, Divider, Input } from 'antd'
 import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -54,10 +54,21 @@ const WrongBookPage: React.FC = () => {
   const [selectedGrade, setSelectedGrade] = useState<string>('')
   const [selectedClass, setSelectedClass] = useState<string>('')
   const [selectedStudent, setSelectedStudent] = useState<string>('')
+  const [selectedStudentName, setSelectedStudentName] = useState<string>('')
 
   const [planModal, setPlanModal] = useState(false)
   const [planLoading, setPlanLoading] = useState(false)
   const [planData, setPlanData] = useState<{ plan: string; total_wrong: number; knowledge_points: string[]; weak_types: string[] } | null>(null)
+
+  // ── 生成练习 ──
+  const [practiceModal, setPracticeModal] = useState(false)
+  const [genLoading, setGenLoading] = useState(false)
+  const [generatedQuestions, setGeneratedQuestions] = useState<any[]>([])
+  const [genKp, setGenKp] = useState('')
+  const [pubTitle, setPubTitle] = useState('')
+  const [pubGrade, setPubGrade] = useState('')
+  const [pubClass, setPubClass] = useState('')
+  const [pubLoading, setPubLoading] = useState(false)
 
   const loadGrades = async () => {
     if (isStudent) return
@@ -136,6 +147,8 @@ const WrongBookPage: React.FC = () => {
 
   const handleStudentChange = (username: string) => {
     setSelectedStudent(username)
+    const student = students.find(s => s.username === username)
+    setSelectedStudentName(student?.name || username)
     if (username) loadData(username)
   }
 
@@ -165,6 +178,54 @@ const WrongBookPage: React.FC = () => {
       setPlanModal(false)
     }
     setPlanLoading(false)
+  }
+
+  const generatePracticeFromWrong = async () => {
+    if (!data || data.exams.length === 0) { message.warning('没有错题数据'); return }
+    // 收集所有错题的知识点（去重）
+    const kpSet = new Set<string>()
+    data.exams.forEach(exam => exam.wrong_questions.forEach(q => {
+      if (q.knowledge_points) q.knowledge_points.split(/[,，、]/).forEach(kp => { if (kp.trim()) kpSet.add(kp.trim()) })
+    }))
+    const kps = Array.from(kpSet)
+    if (kps.length === 0) { message.warning('错题中未提取到知识点'); return }
+
+    // 教师/管理员 → 生成并弹窗预览，可直接布置
+    if (!isStudent) {
+      // 立即弹窗显示 loading
+      setGeneratedQuestions([])
+      setGenLoading(true)
+      setPracticeModal(true)
+      try {
+        const { data: gen } = await apiClient.post('/api/practice/generate-async', {
+          knowledge_points: kps.join('，'),
+          count: Math.min(kps.length * 2, 10),
+          difficulty: 'medium',
+        })
+        const result = await pollAiTask(gen.task_id, 120000)
+        if (!result) {
+          message.error('AI 出题超时或失败，请重试')
+          setGenLoading(false)
+          setPracticeModal(false)
+          return
+        }
+        // 存入 state 供弹窗使用
+        const studentName = students.find(s => s.username === selectedStudent)?.name || selectedStudent
+        setGeneratedQuestions(result.questions || [])
+        setGenKp(kps.join('，'))
+        setGenLoading(false)
+        setPubGrade('')
+        setPubClass('')
+        setPubTitle(`${studentName} 的错题巩固练习`)
+      } catch (e: any) {
+        message.error(e.response?.data?.detail || '生成失败')
+        setGenLoading(false)
+        setPracticeModal(false)
+      }
+    } else {
+      // 学生 → 提示去查看智能练习
+      message.info('已通知教师针对你的薄弱知识点布置练习')
+    }
   }
 
   useEffect(() => {
@@ -213,10 +274,18 @@ const WrongBookPage: React.FC = () => {
               />
             </Space>
           )}
-            <Button icon={<RobotOutlined />} onClick={loadReviewPlan} loading={planLoading}
-              disabled={!data || data.total_wrong === 0}>
-              AI 复习计划
-            </Button>
+            {!isStudent && (
+              <Button icon={<RobotOutlined />} onClick={loadReviewPlan} loading={planLoading}
+                disabled={!data || data.total_wrong === 0}>
+                AI 复习计划
+              </Button>
+            )}
+            {!isStudent && (
+              <Button icon={<RobotOutlined />} onClick={generatePracticeFromWrong}
+                disabled={!data || data.total_wrong === 0}>
+                生成练习
+              </Button>
+            )}
             <Button icon={<ReloadOutlined />} onClick={() => isStudent ? loadData() : loadData(selectedStudent)} loading={loading}>刷新</Button>
           </Space>
         </div>
@@ -347,6 +416,63 @@ const WrongBookPage: React.FC = () => {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      {/* ── 生成练习弹窗 ── */}
+      <Modal title={<><RobotOutlined style={{ color: '#1677ff' }} /> {genLoading ? 'AI 正在出题...' : '已生成练习'}</>}
+        open={practiceModal} onCancel={() => { if (genLoading) return; setPracticeModal(false) }}
+        width={700} footer={null} closable={!genLoading}>
+        {genLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>AI 正在根据错题知识点生成练习题，请稍候...</div>
+          </div>
+        ) : generatedQuestions.length > 0 && (
+          <>
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary">共 {generatedQuestions.length} 道题，知识点：{genKp}</Text>
+            </div>
+            {generatedQuestions.map((q: any, i: number) => (
+              <Card key={i} size="small" title={`第 ${i+1} 题 [${typeLabel[q.type] || q.type}]`}
+                style={{ marginBottom: 8, overflowX: 'auto' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{q.question || q.question_text}</ReactMarkdown>
+                </div>
+                {q.options && Object.entries(q.options).map(([k, v]) => (
+                  <div key={k}><Text type="secondary">{k}. {v as string}</Text></div>
+                ))}
+                <div style={{ marginTop: 4 }}><Tag color="blue">答案：{q.answer}</Tag></div>
+              </Card>
+            ))}
+            <Divider />
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Input placeholder="练习标题（如：错题巩固练习）" value={pubTitle} onChange={e => setPubTitle(e.target.value)} />
+              <Card size="small" style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                <Space>
+                  <Tag color="green">定向推送</Tag>
+                  <Text strong>{selectedStudentName}</Text>
+                  <Text type="secondary">({selectedStudent})</Text>
+                </Space>
+              </Card>
+              <Space style={{ marginTop: 8 }}>
+                <Button type="primary" loading={pubLoading} onClick={async () => {
+                  if (!pubTitle.trim()) { message.warning('请输入标题'); return }
+                  setPubLoading(true)
+                  try {
+                    await apiClient.post('/api/practice/sessions', {
+                      title: pubTitle.trim(), knowledge_points: genKp,
+                      question_ids: generatedQuestions.map((q: any) => q.id),
+                      target_students: [selectedStudent],
+                    })
+                    message.success('练习已定向推送给学生')
+                    setPracticeModal(false)
+                  } catch (e: any) { message.error(e.response?.data?.detail || '布置失败') }
+                  finally { setPubLoading(false) }
+                }}>定向布置练习</Button>
+              </Space>
+            </Space>
+          </>
+        )}
       </Modal>
     </Layout>
   )

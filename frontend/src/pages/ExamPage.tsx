@@ -95,7 +95,6 @@ const ExamPage: React.FC = () => {
   const [resultExam, setResultExam] = useState<ExamInfo | null>(null)
   const [resultData, setResultData] = useState<any>(null)
   const [resultLoading, setResultLoading] = useState(false)
-  const [aiGrading, setAiGrading] = useState(false)
 
   // ── 学生：我的成绩 ──
   const [myResults, setMyResults] = useState<ExamAttempt[]>([])
@@ -123,21 +122,6 @@ const ExamPage: React.FC = () => {
       setExplainModal(false)
     } finally {
       setExplainLoading(false)
-    }
-  }
-
-  // ── AI 简答题批改 ──
-  const handleAiGradeShort = async (examId: number) => {
-    setAiGrading(true)
-    try {
-      const { data } = await apiClient.post(`/api/exams/${examId}/ai-grade-short`)
-      message.success(data.message || 'AI 批改完成')
-      // 刷新成绩数据
-      if (resultExam?.id) handleViewResults(resultExam)
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 批改失败')
-    } finally {
-      setAiGrading(false)
     }
   }
 
@@ -1292,12 +1276,6 @@ const ExamPage: React.FC = () => {
         onCancel={() => setResultModal(false)}
         width={900}
         footer={[
-          <Button key="ai-grade" type="primary" ghost icon={<BulbOutlined />}
-            disabled={!resultExam?.id}
-            loading={aiGrading}
-            onClick={() => handleAiGradeShort(resultExam!.id)}>
-            AI 批改简答题
-          </Button>,
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!resultExam?.id}
             onClick={() => {

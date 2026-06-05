@@ -162,34 +162,16 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
 
 def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, count: int, difficulty: str) -> str:
-    """构建 AI 生成试题的 Prompt（直接传给百炼智能体）"""
+    """构建 AI 生成试题的 Prompt（使用集中化模板）"""
+    from backend.prompts.chat import QUESTION_GENERATE_PROMPT
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
-    return f"""请根据以下要求生成试题。
-
-科目：{subject}
-知识点范围：{knowledge_points}
-题型：{type_desc}
-数量：{count}道
-难度：{difficulty_desc}
-
-请严格按照 JSON 格式输出，只返回一个 JSON 数组，不要包含其他内容：
-
-[
-  {{
-    "type": "题型标识(single/multiple/true_false/short)",
-    "question": "题目内容",
-    "options": {{"A":"选项A", "B":"选项B", "C":"选项C", "D":"选项D"}},
-    "answer": "正确答案",
-    "explanation": "解析内容",
-    "knowledge_point": "所属知识点",
-    "difficulty": "easy/medium/hard"
-  }}
-]
-
-注意：
-- 如果是判断题，options 设为 {{"对":"对", "错":"错"}}，answer 为"对"或"错"
-- 如果是简答题，options 设为 null，answer 为参考答案
-- 题目和选项要与高中{subject}课程内容紧密相关"""
+    return QUESTION_GENERATE_PROMPT.format(
+        subject=subject,
+        knowledge_points=knowledge_points,
+        type_desc=type_desc,
+        count=count,
+        difficulty_desc=difficulty_desc,
+    )
 
 
 async def _call_dashscope_agent(prompt: str, api_key: str) -> str:

@@ -4,6 +4,7 @@
 支持资源绑定、学习进度追踪
 """
 import json
+import os
 from datetime import datetime
 from typing import Any, Optional
 
@@ -1820,3 +1821,126 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# AI 课件生成
+# ═══════════════════════════════════════════════════════════
+
+@router.post("/ai-courseware/{kp_id}")
+async def ai_generate_courseware(kp_id: int, request: Request):
+    """[教师] AI 根据知识点生成 HTML 课件"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+
+    keys = get_api_keys(username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    # 获取知识点信息
+    kp_rows = execute_query(
+        """SELECT kp.id, kp.name, kp.description, kp.learning_objectives,
+                  c.name as chapter_name, co.name as course_name
+           FROM knowledge_points kp
+           JOIN chapters c ON c.id = kp.chapter_id
+           JOIN courses co ON co.id = c.course_id
+           WHERE kp.id = ?""",
+        (kp_id,),
+    )
+    if not kp_rows:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    kp = kp_rows[0]
+
+    from backend.prompts.teaching import COURSEWARE_GENERATE_PROMPT
+    from backend.api.ai_service import call_ai_async
+    from backend.utils import get_account_html_dir
+
+    subject = kp["course_name"] or "信息科技"
+
+    def _safe(s):
+        return str(s or "").replace('{', '{{').replace('}', '}}')
+
+    prompt = COURSEWARE_GENERATE_PROMPT.format(
+        subject=_safe(subject),
+        course_name=_safe(kp["course_name"]),
+        chapter_name=_safe(kp["chapter_name"]),
+        kp_name=_safe(kp["name"]),
+        kp_description=_safe(kp.get("description", "")),
+        learning_objectives=_safe(kp.get("learning_objectives", "")),
+    )
+
+    from backend.ai_task_manager import task_manager
+
+    async def _generate() -> dict:
+        try:
+            logger.info(f"AI 课件开始生成: kp_id={kp_id}, kp_name={kp['name']}")
+            result = await call_ai_async(prompt, api_key)
+            logger.info(f"AI 响应已收到，长度={len(result)}")
+
+            # 清理 AI 可能添加的 markdown 代码块标记
+            html_content = result.strip()
+            if html_content.startswith("```html"):
+                html_content = html_content[7:]
+            elif html_content.startswith("```"):
+                html_content = html_content[3:]
+            if html_content.endswith("```"):
+                html_content = html_content[:-3]
+            html_content = html_content.strip()
+
+            if not html_content:
+                logger.error("AI 返回的 HTML 内容为空")
+                return {"error": "AI 返回的 HTML 内容为空"}
+
+            # 保存到用户的 html 目录
+            html_dir = get_account_html_dir(username)
+            os.makedirs(html_dir, exist_ok=True)
+            safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
+            filename = f"{kp_id}_{safe_name}_课件.html"
+            filepath = os.path.join(html_dir, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            # 生成访问 URL
+            from backend.config import BASE_DIR
+            rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+            file_url = f"/api/files/{rel_path}"
+
+            logger.info(f"AI 课件已保存: {filepath}")
+            return {
+                "kp_name": kp["name"],
+                "file_url": file_url,
+                "filename": filename,
+                "filepath": filepath,
+            }
+        except Exception as e:
+            logger.error(f"AI 课件生成失败: {e}", exc_info=True)
+            return {"error": f"课件生成失败: {str(e)}"}
+
+    task_id = await task_manager.create_task(description="AI 课件生成", coro_factory=_generate)
+    return {"task_id": task_id, "message": "AI 课件生成已开始，请稍候..."}
+
+
+@router.get("/ai-courseware/{kp_id}/preview")
+async def preview_courseware(kp_id: int, request: Request):
+    """预览已生成的 AI 课件 HTML 内容"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    from backend.utils import get_account_html_dir
+    html_dir = get_account_html_dir(username)
+    import glob
+    pattern = os.path.join(html_dir, f"{kp_id}_*_课件.html")
+    files = glob.glob(pattern)
+    if not files:
+        raise HTTPException(status_code=404, detail="尚未生成课件，请先使用 AI 生成")
+    # 取最新的文件
+    latest = max(files, key=os.path.getmtime)
+    with open(latest, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=content)

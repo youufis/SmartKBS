@@ -57,3 +57,82 @@ TEACHING_SUGGESTIONS_PROMPT = """你是一位经验丰富的高中信息科技�
 3. 语气专业、务实
 4. 直接以内容开头，不要出现"根据提供的数据"等冗余表述
 """
+
+# ── 班级学情分析报告 ──
+CLASS_ANALYSIS_PROMPT = """你是一位经验丰富的高中信息科技/通用技术教师。请根据以下班级数据，生成一份专业的学情分析报告。
+
+班级：{grade}{cls}班
+学生人数：{total_students}
+
+【课堂积分】
+有积分记录的学生数：{score_count}
+总积分：{score_total}
+平均积分：{score_avg}
+最高积分：{score_max}
+
+【点名情况】
+总点名次数：{rollcall_total}
+回答正确次数：{rollcall_correct}
+回答错误次数：{rollcall_wrong}
+
+【考试情况】
+{exam_lines}
+
+【任务完成】
+活跃任务数：{active_tasks}
+已提交学生数：{submitted_students}
+
+请生成包含以下内容的分析报告（以 Markdown 格式输出）：
+1. 📊 **班级整体情况**：对该班级的学习状态进行总体评价
+2. 📈 **学习亮点**：指出表现突出的方面
+3. ⚠️ **待改进之处**：指出需要加强的方面
+4. 💡 **教学建议**：给出具体的教学改进建议
+"""
+
+# ── 学生个人学情分析 ──
+STUDENT_ANALYSIS_PROMPT = """你是一位高中信息科技教师。请根据以下学生数据，生成一份个性化的学情分析报告。
+
+学生：{student_name}
+班级：{student_grade}{student_class}
+
+【考试成绩】
+{exam_text}
+
+【课堂积分】累计 {total_score} 分
+【点名情况】共被点名 {rc_total} 次，回答正确 {rc_correct} 次
+【任务完成】已提交 {task_count} 个任务
+【AI 对话】共 {chat_count} 次
+
+请生成（Markdown 格式）：
+1. 📊 **学习概况**
+2. 💪 **优势与进步**
+3. ⚠️ **需要加强的方面**
+4. 🎯 **下阶段学习建议**
+"""
+
+# ── 教学建议（简化版，用于教师端建议表格） ──
+TEACHING_ADVICE_PROMPT = """你是一位高中信息科技教师。请根据以下教学数据，为{grade}{class_num}班生成具体的教学建议。
+
+【班级概况】
+年级：{grade}
+班级：{class_num}班
+学生人数：{total_students}
+
+【课堂积分】
+有积分记录学生数：{score_count}
+总积分：{score_total}
+平均积分：{score_avg}
+
+【点名情况】
+总点名次数：{rc_total}
+回答正确：{rc_correct}
+正确率：{rc_rate}%
+
+【考试情况】
+{exam_text}
+
+【任务情况】
+活跃任务数：{active_tasks}
+已提交学生数：{submitted}
+
+请生成3-5条具体的教学建议，每行一条，以"1. "开头。"""
