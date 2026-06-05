@@ -105,6 +105,60 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 智能练习：练习任务表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS practice_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                knowledge_points TEXT NOT NULL,
+                creator_username TEXT NOT NULL,
+                subject TEXT DEFAULT '信息科技',
+                question_count INTEGER DEFAULT 0,
+                total_score INTEGER DEFAULT 0,
+                target_grade TEXT DEFAULT '',
+                target_class TEXT DEFAULT '',
+                target_students TEXT DEFAULT '',
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ps_creator ON practice_sessions(creator_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ps_target ON practice_sessions(target_grade, target_class)")
+                c.execute("ALTER TABLE practice_sessions ADD COLUMN target_students TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 智能练习：练习题目关联表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS practice_session_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                question_id INTEGER NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                score INTEGER DEFAULT 10
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_psq_session ON practice_session_questions(session_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 智能练习：学生答题记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS practice_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                answers TEXT NOT NULL,
+                score INTEGER DEFAULT 0,
+                total_score INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'submitted',
+                submitted_at TEXT NOT NULL,
+                UNIQUE(session_id, student_username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_pa_student ON practice_attempts(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_pa_session ON practice_attempts(session_id)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("试题库数据库初始化完成")
     except Exception as e:

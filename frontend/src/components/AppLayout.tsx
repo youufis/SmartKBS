@@ -21,6 +21,7 @@ import {
   BarChartOutlined,
   ThunderboltOutlined,
   BookOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'

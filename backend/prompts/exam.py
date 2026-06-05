@@ -36,3 +36,28 @@ AI_EXAM_COMPOSE_PROMPT = """你是一位经验丰富的高中信息科技与通�
 - 确保选中题目不重复
 - 直接输出 JSON，不要包含 Markdown 代码块标记
 """
+
+# ── 考试 AI 分析报告 ──
+EXAM_ANALYSIS_PROMPT = """你是一位高中{subject}教师。请根据以下考试数据，生成专业的考试分析报告。
+
+考试名称：{title}
+科目：{subject}
+参考人数：{total_count}
+平均分：{avg_score}/{exam_total}
+最高分：{max_score}
+最低分：{min_score}
+及格人数：{pass_count}/{total_count}（及格线{pass_score}分）
+
+各题正确率（正确率 < 60% 的为薄弱题）：
+{accuracy_lines}
+
+薄弱知识点：
+{weak_points}
+
+请生成（Markdown 格式）：
+1. 📊 **考试概况**
+2. 📈 **成绩分布分析**
+3. 🎯 **各题正确率分析**
+4. ⚠️ **薄弱知识点与建议**
+5. 💡 **教学改进建议**
+"""

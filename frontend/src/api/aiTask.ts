@@ -18,7 +18,7 @@ export async function pollAiTask(taskId: string, maxWait = 120000): Promise<any>
       if (data.status === 'completed') return data.result
       if (data.status === 'failed') {
         console.error('AI 任务执行失败:', data.error)
-        return null
+        return { error: data.error || 'AI 任务执行失败' }
       }
     } catch {
       // 任务还未就绪，继续等待

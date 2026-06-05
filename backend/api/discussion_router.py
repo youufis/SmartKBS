@@ -117,31 +117,13 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
         "judge": "辩论裁判，分析各方论点",
     }.get(req.ai_role, "引导者")
 
-    prompt = f"""你是一位高中{req.subject}教师。请根据以下要求设计一个课堂分组讨论方案。
-
-主题：{req.topic}
-AI 助教角色：{ai_role_desc}
-预计时长：{req.duration_minutes} 分钟
-
-请输出一个完整的讨论方案，包含以下内容（用 JSON 格式）：
-
-1. title: 讨论标题（简洁明了）
-2. description: 讨论详细说明，包含讨论背景、目标、具体讨论要点/问题（至少3个引导性问题）
-3. group_mode: 建议的分组方式（"auto" 表示按每组人数自动分组）
-4. members_per_group: 建议每组人数（4-6人）
-5. duration_minutes: 建议时长（分钟）
-6. subject: 学科
-
-请严格按照以下 JSON 格式输出，不要包含任何其他文字：
-{{
-  "title": "讨论标题",
-  "description": "讨论说明",
-  "group_mode": "auto",
-  "members_per_group": 4,
-  "duration_minutes": 30,
-  "subject": "{req.subject}"
-}}
-"""
+    from backend.prompts.discussion import DISCUSSION_PLAN_PROMPT
+    prompt = DISCUSSION_PLAN_PROMPT.format(
+        subject=req.subject,
+        topic=req.topic,
+        ai_role_desc=ai_role_desc,
+        duration_minutes=req.duration_minutes,
+    )
 
     import os
     import json
