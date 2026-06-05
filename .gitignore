@@ -4,6 +4,7 @@ backend/system_config.json
 **/.env
 
 # ── Python ──
+.venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -21,6 +22,21 @@ temp_uploads/
 backend/smartkb.db
 backend/questions.db
 *.db
+
+# ── 测试（不提交/同步） ──
+tests/
+pytest.ini
+.pytest_cache/
+*.pytest_cache
+**/__pycache__/
+
+# ── 覆盖率报告 ──
+htmlcov/
+.coverage
+coverage.xml
+.coverage.*
+*.cov
+*.lcov
 
 # ── 运行时数据 ──
 **/ChatHistory/
