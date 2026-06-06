@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Card, Button, Space, Typography, Tag, message, Spin,
-  Row, Col, Statistic, Progress,
+  Row, Col, Statistic, Progress, Modal, Rate,
 } from 'antd'
 import {
   TeamOutlined, MessageOutlined, FieldTimeOutlined,
-  ArrowLeftOutlined, WarningOutlined,
+  ArrowLeftOutlined, WarningOutlined, BulbOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -42,6 +43,13 @@ const DiscussionMonitorPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // AI 总结相关
+  const [summaryModal, setSummaryModal] = useState(false)
+  const [summaryData, setSummaryData] = useState<any>(null)
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [generatingSummary, setGeneratingSummary] = useState(false)
+  const [activeGroupId, setActiveGroupId] = useState<number | null>(null)
+
   const loadMonitor = async () => {
     if (!discId) return
     try {
@@ -51,6 +59,52 @@ const DiscussionMonitorPage: React.FC = () => {
       message.error('加载监控数据失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // AI 生成小组总结
+  const handleGenerateSummary = async (groupId: number) => {
+    setActiveGroupId(groupId)
+    setGeneratingSummary(true)
+    setSummaryModal(true)
+    setSummaryData(null)
+    try {
+      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`)
+      if (data.status === 'ok') {
+        message.success('AI 总结生成成功')
+        setSummaryData(data)
+      } else {
+        message.error(data.content || 'AI 总结生成失败')
+        setSummaryData(null)
+      }
+    } catch (err: any) {
+      message.error('AI 总结失败: ' + (err?.response?.data?.detail || err?.message))
+      setSummaryData(null)
+    } finally {
+      setGeneratingSummary(false)
+    }
+  }
+
+  // 查看已有总结
+  const handleViewSummary = async (groupId: number) => {
+    setActiveGroupId(groupId)
+    setSummaryLoading(true)
+    setSummaryModal(true)
+    setSummaryData(null)
+    try {
+      const { data } = await apiClient.get(`/api/interaction/groups/${groupId}/summary`)
+      if (data.has_summary) {
+        setSummaryData(data)
+      } else {
+        // 没有总结，自动生成
+        setSummaryLoading(false)
+        await handleGenerateSummary(groupId)
+        return
+      }
+    } catch {
+      setSummaryData(null)
+    } finally {
+      setSummaryLoading(false)
     }
   }
 
@@ -136,14 +190,23 @@ const DiscussionMonitorPage: React.FC = () => {
                   </Space>
                 }
                 extra={
-                  data.status === 'active' && (
+                  <Space size="small">
+                    {data.status === 'active' && (
+                      <Button
+                        size="small"
+                        onClick={() => navigate(`/discussion-room/${g.id}?discussion_id=${discId}`)}
+                      >
+                        进入
+                      </Button>
+                    )}
                     <Button
                       size="small"
-                      onClick={() => navigate(`/discussion-room/${g.id}?discussion_id=${discId}`)}
+                      icon={<BulbOutlined />}
+                      onClick={() => handleViewSummary(g.id)}
                     >
-                      进入
+                      AI 总结
                     </Button>
-                  )
+                  </Space>
                 }
               >
                 <div style={{ fontSize: 13 }}>
@@ -175,6 +238,123 @@ const DiscussionMonitorPage: React.FC = () => {
           ))}
         </Row>
       </Card>
+
+      {/* AI 总结弹窗 */}
+      <Modal
+        title={
+          <Space>
+            <BulbOutlined style={{ color: '#faad14' }} />
+            <span>AI 讨论归纳总结 - {data?.groups.find(g => g.id === activeGroupId)?.name || ''}</span>
+          </Space>
+        }
+        open={summaryModal}
+        onCancel={() => setSummaryModal(false)}
+        footer={[
+          <Button key="close" onClick={() => setSummaryModal(false)}>关闭</Button>,
+          activeGroupId && (
+            <Button key="regenerate" type="primary" icon={<ThunderboltOutlined />}
+              loading={generatingSummary}
+              onClick={() => handleGenerateSummary(activeGroupId)}>
+              重新生成
+            </Button>
+          ),
+        ]}
+        width={700}
+      >
+        <Spin spinning={summaryLoading || generatingSummary}>
+          {summaryData?.content?.parsed ? (
+            <div style={{ padding: '8px 0' }}>
+              <div style={{ marginBottom: 20 }}>
+                <Text strong style={{ fontSize: 16, color: '#1677ff' }}>📝 总体归纳</Text>
+                <div style={{
+                  marginTop: 8, padding: 12, background: '#f6ffed',
+                  borderRadius: 8, border: '1px solid #b7eb8f', lineHeight: 1.8,
+                  fontSize: 14, color: '#333',
+                }}>
+                  {summaryData.content.parsed.summary || '（暂无内容）'}
+                </div>
+              </div>
+
+              {summaryData.content.parsed.key_points?.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>💡 关键观点</Text>
+                  <div style={{ marginTop: 8 }}>
+                    {summaryData.content.parsed.key_points.map((point: string, i: number) => (
+                      <div key={i} style={{
+                        padding: '8px 12px', marginBottom: 6,
+                        background: '#fff7e6', borderRadius: 6,
+                        border: '1px solid #ffd591', fontSize: 14,
+                      }}>
+                        <Text strong style={{ color: '#fa8c16' }}>观点{i + 1}：</Text>
+                        {point}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {summaryData.content.parsed.ai_comment && (
+                <div style={{ marginBottom: 20 }}>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>🤖 AI 评价与建议</Text>
+                  <div style={{
+                    marginTop: 8, padding: 12, background: '#e6f7ff',
+                    borderRadius: 8, border: '1px solid #91d5ff',
+                    fontSize: 14, lineHeight: 1.8,
+                  }}>
+                    {summaryData.content.parsed.ai_comment}
+                  </div>
+                </div>
+              )}
+
+              {summaryData.content.parsed.score && (
+                <div style={{ marginBottom: 12 }}>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>⭐ 综合评分</Text>
+                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <Rate
+                      disabled
+                      value={Math.round(parseInt(summaryData.content.parsed.score) / 2)}
+                      count={5}
+                      style={{ fontSize: 20 }}
+                    />
+                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#fa8c16' }}>
+                      {summaryData.content.parsed.score}/10
+                    </Text>
+                  </div>
+                </div>
+              )}
+
+              <details style={{ marginTop: 16 }}>
+                <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>
+                  查看原始 AI 回复
+                </summary>
+                <pre style={{
+                  marginTop: 8, padding: 12, background: '#f5f5f5',
+                  borderRadius: 6, fontSize: 12, color: '#666',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  maxHeight: 300, overflow: 'auto',
+                }}>
+                  {summaryData.content.raw_content || summaryData.content}
+                </pre>
+              </details>
+            </div>
+          ) : summaryData?.content?.raw_content ? (
+            <div style={{ padding: '8px 0' }}>
+              <div style={{
+                padding: 16, background: '#f6ffed',
+                borderRadius: 8, border: '1px solid #b7eb8f',
+                lineHeight: 1.8, fontSize: 14,
+                whiteSpace: 'pre-wrap',
+              }}>
+                {summaryData.content.raw_content}
+              </div>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <Text type="secondary">正在生成总结...</Text>
+            </div>
+          )}
+        </Spin>
+      </Modal>
     </div>
   )
 }
