@@ -43,7 +43,7 @@ def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
     return f"{owner}/{dir_name}/{file_path}"
 
 
-def _cleanup_empty_dir_shares(owner_username: str = None):
+def cleanup_empty_dir_shares(owner_username: str = None):
     """清理不存在的空目录的共享记录
 
     目录共享是指共享目录下的所有文件。如果目录不存在或为空，
@@ -148,7 +148,7 @@ async def share_resource(request: Request, body: ShareRequest):
         logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
 
         # 共享后清理空目录共享记录（如果共享的是空目录，会自动删除）
-        _cleanup_empty_dir_shares(username)
+        cleanup_empty_dir_shares(username)
 
         # ── 后台批量发送通知（不阻塞共享操作） ──
         def _send_notifications_sync():
@@ -247,7 +247,7 @@ async def unshare_resource(request: Request, id: int = Query(...)):
         logger.info(f"共享已取消: id={id}, by={username}")
 
         # 取消共享后清理空目录共享
-        _cleanup_empty_dir_shares(owner)
+        cleanup_empty_dir_shares(owner)
 
         # ── 后台发送取消通知（不阻塞取消操作） ──
         loop = asyncio.get_event_loop()
