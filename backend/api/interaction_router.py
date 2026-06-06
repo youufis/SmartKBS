@@ -531,21 +531,26 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
     if not quiz:
         raise HTTPException(status_code=404, detail="测验不存在或已结束")
 
-    # 学生只能回答自己班级教师的测验
+    # 学生只能回答自己班级教师或管理员创建的测验
     if role == 2:
         grade, cls = _get_user_grade_class(username)
         creator = quiz[0][1]
-        if cls:
+        # 管理员创建的测验，所有学生都可参与
+        creator_role = execute_query("SELECT role FROM users WHERE username=?", (creator,))
+        is_admin_creator = creator_role and creator_role[0][0] == 0
+        if not is_admin_creator and cls:
             cls_param = f",{cls},"
             teacher_ok = execute_query(
                 "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ? AND INSTR(',' || class || ',', ?) > 0",
                 (creator, grade, cls_param),
             )
-        else:
+        elif not is_admin_creator:
             teacher_ok = execute_query(
                 "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ?",
                 (creator, grade),
             )
+        else:
+            teacher_ok = [creator]  # 管理员创建，直接通过
         if not teacher_ok:
             raise HTTPException(status_code=403, detail="无权回答非本班教师的测验")
 
@@ -956,22 +961,27 @@ async def submit_vote(
     if not poll:
         raise HTTPException(status_code=404, detail="投票不存在或已结束")
 
-    # 学生只能参与自己班级教师的投票
+    # 学生只能参与自己班级教师或管理员创建的投票
     role = user.get("role", 2)
     if role == 2:
         grade, cls = _get_user_grade_class(username)
         creator = poll[0][1]
-        if cls:
+        # 管理员创建的投票，所有学生都可参与
+        creator_role = execute_query("SELECT role FROM users WHERE username=?", (creator,))
+        is_admin_creator = creator_role and creator_role[0][0] == 0
+        if not is_admin_creator and cls:
             cls_param = f",{cls},"
             teacher_ok = execute_query(
                 "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ? AND INSTR(',' || class || ',', ?) > 0",
                 (creator, grade, cls_param),
             )
-        else:
+        elif not is_admin_creator:
             teacher_ok = execute_query(
                 "SELECT username FROM users WHERE username = ? AND role IN (0, 1) AND grade = ?",
                 (creator, grade),
             )
+        else:
+            teacher_ok = [creator]  # 管理员创建，直接通过
         if not teacher_ok:
             raise HTTPException(status_code=403, detail="无权参与非本班教师的投票")
 
