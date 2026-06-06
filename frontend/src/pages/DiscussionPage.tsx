@@ -399,6 +399,26 @@ const DiscussionPage: React.FC = () => {
                   title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
                   render: (desc: string) => desc ? <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text> : null,
                 },
+                ...(isTeacherOrAdmin ? [{
+                  title: 'AI 总结', key: 'summary', width: 90,
+                  render: (_: any, disc: any) => {
+                    if (disc.status !== 'ended') return null
+                    const hasSummary = disc.has_summary
+                    return (
+                      <Tooltip title={hasSummary ? '查看 AI 归纳总结' : '暂无 AI 总结'}>
+                        <Tag
+                          color={hasSummary ? 'success' : 'default'}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => {
+                            navigate(`/discussion-monitor/${disc.id}`)
+                          }}
+                        >
+                          {hasSummary ? '✅ 已总结' : '⏳ 待总结'}
+                        </Tag>
+                      </Tooltip>
+                    )
+                  },
+                }] : []),
                 {
                   title: '操作', key: 'actions', width: 200,
                   render: (_: any, disc: any) => (
