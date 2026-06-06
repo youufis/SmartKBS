@@ -629,6 +629,15 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         (session_id, username, json.dumps(graded, ensure_ascii=False), earned, total, now),
     )
 
+    # ── 积分奖励 ──
+    try:
+        from backend.reward_engine import award_participation, award_grade
+        sess_title = sess.get("title", "") or f"练习#{session_id}"
+        award_participation(username, "practice", str(session_id), sess_title)
+        award_grade(username, "practice", str(session_id), earned, total, sess_title)
+    except Exception:
+        pass
+
     logger.info(f"学生 {username} 提交练习 {session_id}: {earned}/{total}")
     return {
         "score": earned, "total_score": total,

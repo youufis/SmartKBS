@@ -691,6 +691,15 @@ async def join_discussion(disc_id: int, request: Request):
         (group_id, username, now),
     )
 
+    # ── 积分奖励 ──
+    try:
+        from backend.reward_engine import award_participation
+        disc_title = execute_query("SELECT title FROM discussions WHERE id=?", (disc_id,))
+        title = disc_title[0][0] if disc_title else f"讨论#{disc_id}"
+        award_participation(username, "discussion", str(disc_id), title)
+    except Exception:
+        pass
+
     return {"status": "joined", "group_id": group_id}
 
 

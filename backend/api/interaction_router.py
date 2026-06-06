@@ -634,6 +634,15 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         (quiz_id, username, json.dumps(user_answers, ensure_ascii=False), total_score, now),
     )
 
+    # ── 积分奖励 ──
+    try:
+        from backend.reward_engine import award_participation, award_grade
+        quiz_title = quiz[0][2] if len(quiz[0]) > 2 else f"测验#{quiz_id}"
+        award_participation(username, "quiz", str(quiz_id), quiz_title)
+        award_grade(username, "quiz", str(quiz_id), total_score, q_score, quiz_title)
+    except Exception:
+        pass
+
     return {
         "message": "提交成功",
         "score": total_score,
@@ -1019,6 +1028,14 @@ async def submit_vote(
             (poll_id, username, selected_indices[0], now),
         )
 
+    # ── 积分奖励 ──
+    try:
+        from backend.reward_engine import award_participation
+        poll_title = poll[0][2] if len(poll[0]) > 2 else f"投票#{poll_id}"
+        award_participation(username, "poll", str(poll_id), poll_title)
+    except Exception:
+        pass
+
     return {"message": "投票成功", "selected_count": len(selected_indices)}
 
 
@@ -1077,6 +1094,13 @@ async def ask_question(req: QuestionCreate, request: Request):
            VALUES (?, ?, ?, 'pending', ?)""",
         (user["username"], req.content, 1 if req.is_anonymous else 0, now),
     )
+
+    # ── 积分奖励 ──
+    try:
+        from backend.reward_engine import award_participation
+        award_participation(user["username"], "question", str(qid), req.content[:30])
+    except Exception:
+        pass
 
     return {"message": "提问成功", "question_id": qid}
 
