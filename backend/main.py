@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="高中信息科技与通用技术课程 AI 智慧教学管理平台",
-    version="4.2.0",
+    version="4.3.0",
     docs_url="/docs",
     lifespan=lifespan,
 )
@@ -125,7 +125,7 @@ app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    return {"status": "ok", "version": "4.2.0"}
+    return {"status": "ok", "version": "4.3.0"}
 
 
 # ── 静态文件服务（前端构建产物） ──
