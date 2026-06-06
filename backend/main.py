@@ -25,7 +25,6 @@ from backend.middleware import register_middleware
 async def lifespan(app: FastAPI):
     """应用生命周期管理（替代已弃用的 on_event）"""
     # ── 启动 ──
-    os.environ.setdefault("MPLCONFIGDIR", str(BASE_DIR / "matplotlib"))
     init_db()
     init_question_db()
     # 启动时清理残留的空目录共享记录
