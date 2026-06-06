@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, HTTPException
 from backend.config import BASE_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
-from backend.database import get_connection, execute_query
+from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
 
 router = APIRouter()
@@ -657,3 +657,193 @@ async def admin_reset_session(request: Request):
     _save_history(teacher, grade, cls, state)
 
     return {"success": True, "total": len(names), "teacher": teacher}
+
+
+# ═══════════════════════════════════════════════════════════
+# 考勤统计 API（v4.3）
+# ═══════════════════════════════════════════════════════════
+
+
+@router.get("/attendance/grades", summary="获取考勤年级列表")
+async def attendance_grades(request: Request):
+    """获取年级列表（考勤统计用）- 管理员全部，教师只看到自己的"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 0:
+        rows = execute_query(
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+        )
+        return [row[0] for row in rows]
+    else:
+        t_rows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
+        if not t_rows or not t_rows[0][0]:
+            return []
+        return [g.strip() for g in t_rows[0][0].split("|") if g.strip()]
+
+
+@router.get("/attendance/classes", summary="获取考勤班级列表")
+async def attendance_classes(request: Request):
+    """获取班级列表（考勤统计用）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    grade = request.query_params.get("grade", "")
+
+    if not grade:
+        return []
+
+    if role == 0:
+        students = _load_students(grade)
+        return sorted(set(s.get("class", "") for s in students if s.get("class")))
+    else:
+        if not _is_teacher_allowed(username, grade, ""):
+            return []
+        t_rows = execute_query("SELECT grade, class FROM users WHERE username=?", (username,))
+        if not t_rows:
+            students = _load_students(grade)
+            return sorted(set(s.get("class", "") for s in students if s.get("class")))
+        t_grade = (t_rows[0][0] or "").strip()
+        t_class = str(t_rows[0][1] or "").strip()
+        grade_parts = [g.strip() for g in t_grade.split("|")]
+        class_parts = [c.strip() for c in t_class.split("|")] if t_class else []
+        for i, g in enumerate(grade_parts):
+            if g == grade:
+                if i < len(class_parts) and class_parts[i]:
+                    allowed = [c.strip() for c in class_parts[i].split(",") if c.strip()]
+                    return [f"{grade}{c}班" for c in allowed]
+                break
+        students = _load_students(grade)
+        return sorted(set(s.get("class", "") for s in students if s.get("class")))
+
+
+@router.get("/attendance/summary", summary="考勤统计概览（按班级）")
+async def attendance_summary(request: Request):
+    """获取考勤统计概览：总人数、已登录人数、登录率"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    grade = request.query_params.get("grade", "")
+    cls = request.query_params.get("class", "")
+
+    if not grade or not cls:
+        raise HTTPException(status_code=400, detail="缺少 grade/class 参数")
+
+    # 权限检查
+    if role != 0 and not _is_teacher_allowed(username, grade, cls):
+        raise HTTPException(status_code=403, detail="无权查看该班级考勤")
+
+    # 获取该班级所有学生
+    students = _load_students(grade)
+    class_students = [s for s in students if s.get("class") == cls]
+    total_count = len(class_students)
+
+    # 从格式化班级名 "高一1班" 中提取班级数字 "1"
+    import re
+    cls_match = re.search(r'(\d+)', cls)
+    cls_num = cls_match.group(1) if cls_match else cls
+
+    # 直接查数据库获取该年级+班级所有学生的用户名
+    student_rows = execute_query(
+        "SELECT username, name FROM users WHERE role=2 AND grade=? AND class=?",
+        (grade, cls_num),
+    )
+    # 建立 name -> username 映射
+    name_to_username = {row[1]: row[0] for row in student_rows}
+
+    # 建立 student_name -> username 关联
+    student_usernames = []
+    for s in class_students:
+        uname = name_to_username.get(s["name"], "")
+        if uname:
+            student_usernames.append(uname)
+
+    # 统计已登录的学生
+    logged_in_count = 0
+    if student_usernames:
+        placeholders = ",".join(["?"] * len(student_usernames))
+        logged_rows = execute_query_dict(
+            f"""SELECT DISTINCT username FROM login_logs
+                WHERE username IN ({placeholders})""",
+            tuple(student_usernames),
+        )
+        logged_in_count = len(logged_rows)
+
+    # 获取每个学生的最新登录时间和 IP
+    latest_logins = {}
+    if student_usernames:
+        placeholders = ",".join(["?"] * len(student_usernames))
+        latest_rows = execute_query_dict(
+            f"""SELECT username, login_time, login_ip FROM login_logs
+                WHERE username IN ({placeholders})
+                AND login_time = (
+                    SELECT MAX(login_time) FROM login_logs sub
+                    WHERE sub.username = login_logs.username
+                )
+                ORDER BY login_time DESC""",
+            tuple(student_usernames),
+        )
+        for row in latest_rows:
+            latest_logins[row["username"]] = {
+                "login_time": row["login_time"],
+                "login_ip": row["login_ip"],
+            }
+
+    # 组装学生考勤明细
+    student_list = []
+    for s in class_students:
+        uname = name_to_username.get(s["name"], "")
+        login_info = latest_logins.get(uname, {})
+        student_list.append({
+            "name": s["name"],
+            "username": uname,
+            "gender": s.get("gender", ""),
+            "has_logged_in": uname in latest_logins,
+            "last_login_time": login_info.get("login_time", ""),
+            "last_login_ip": login_info.get("login_ip", ""),
+        })
+
+    login_rate = round((logged_in_count / total_count * 100), 1) if total_count > 0 else 0
+
+    return {
+        "grade": grade,
+        "class": cls,
+        "total_count": total_count,
+        "logged_in_count": logged_in_count,
+        "not_logged_in_count": total_count - logged_in_count,
+        "login_rate": login_rate,
+        "students": student_list,
+    }
+
+
+@router.get("/attendance/logs", summary="获取考勤登录明细")
+async def attendance_logs(request: Request):
+    """获取某个学生的详细登录记录"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    target_username = request.query_params.get("username", "")
+
+    if not target_username:
+        raise HTTPException(status_code=400, detail="缺少 username 参数")
+
+    # 权限：管理员可查看任何学生，教师需要确认同班级
+    if role != 0:
+        # 查询目标学生的年级班级
+        stu_rows = execute_query(
+            "SELECT grade, class FROM users WHERE username=?", (target_username,)
+        )
+        if stu_rows:
+            s_grade, s_class = stu_rows[0]
+            if not _is_teacher_allowed(username, s_grade or "", s_class or ""):
+                raise HTTPException(status_code=403, detail="无权查看该学生考勤记录")
+
+    logs = execute_query_dict(
+        """SELECT id, username, student_name, login_time, login_ip, user_agent, logout_time
+           FROM login_logs WHERE username=?
+           ORDER BY login_time DESC""",
+        (target_username,),
+    )
+
+    return {"logs": logs, "total": len(logs)}

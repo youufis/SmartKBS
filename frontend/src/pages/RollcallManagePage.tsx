@@ -9,7 +9,8 @@ import {
   TeamOutlined, BarChartOutlined, EyeOutlined,
   DownloadOutlined, AimOutlined, CheckOutlined,
   CloseOutlined, ForwardOutlined, RollbackOutlined,
-  TrophyOutlined,
+  TrophyOutlined, UserOutlined, ClockCircleOutlined,
+  LoginOutlined, StopOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -791,6 +792,277 @@ const SessionsManager: React.FC = () => {
 }
 
 // ============================================================
+// 考勤统计组件（v4.3）
+// ============================================================
+
+interface AttendanceStudent {
+  name: string
+  username: string
+  gender: string
+  has_logged_in: boolean
+  last_login_time: string
+  last_login_ip: string
+}
+
+interface AttendanceSummary {
+  grade: string
+  class: string
+  total_count: number
+  logged_in_count: number
+  not_logged_in_count: number
+  login_rate: number
+  students: AttendanceStudent[]
+}
+
+const AttendanceStats: React.FC = () => {
+  const user = useAuthStore((s) => s.user)
+
+  const [grades, setGrades] = useState<string[]>([])
+  const [classes, setClasses] = useState<string[]>([])
+  const [grade, setGrade] = useState<string>('')
+  const [cls, setCls] = useState<string>('')
+  const [loading, setLoading] = useState(false)
+  const [summary, setSummary] = useState<AttendanceSummary | null>(null)
+  const [viewLogs, setViewLogs] = useState<AttendanceStudent | null>(null)
+  const [logRecords, setLogRecords] = useState<any[]>([])
+  const [logLoading, setLogLoading] = useState(false)
+  const [logModalVisible, setLogModalVisible] = useState(false)
+
+  // 加载年级
+  useEffect(() => {
+    apiClient.get('/api/rollcall/attendance/grades')
+      .then(({ data }) => setGrades(Array.isArray(data) ? data : []))
+      .catch(() => setGrades([]))
+  }, [])
+
+  const handleGradeChange = async (val: string) => {
+    setGrade(val)
+    setCls('')
+    setClasses([])
+    setSummary(null)
+    if (!val) return
+    try {
+      const { data } = await apiClient.get('/api/rollcall/attendance/classes', {
+        params: { grade: val },
+      })
+      setClasses(Array.isArray(data) ? data : [])
+    } catch {
+      setClasses([])
+    }
+  }
+
+  const handleClassChange = async (val: string) => {
+    setCls(val)
+    setSummary(null)
+    if (!grade || !val) return
+    setLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/rollcall/attendance/summary', {
+        params: { grade, class: val },
+      })
+      setSummary(data)
+    } catch {
+      message.error('加载考勤数据失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const viewStudentLogs = async (student: AttendanceStudent) => {
+    if (!student.username) {
+      message.info('该学生暂无用户名记录')
+      return
+    }
+    setViewLogs(student)
+    setLogLoading(true)
+    setLogModalVisible(true)
+    try {
+      const { data } = await apiClient.get('/api/rollcall/attendance/logs', {
+        params: { username: student.username },
+      })
+      setLogRecords(data.logs || [])
+    } catch {
+      message.error('加载登录明细失败')
+      setLogRecords([])
+    } finally {
+      setLogLoading(false)
+    }
+  }
+
+  const columns = [
+    {
+      title: '序号', key: 'index', width: 60,
+      render: (_: unknown, __: unknown, i: number) => i + 1,
+    },
+    {
+      title: '姓名', dataIndex: 'name', key: 'name',
+      render: (name: string, record: AttendanceStudent) => (
+        <Space>
+          <span>{name}</span>
+          {record.gender === '男' ? '♂' : record.gender === '女' ? '♀' : ''}
+        </Space>
+      ),
+    },
+    {
+      title: '用户名', dataIndex: 'username', key: 'username',
+      render: (u: string) => u ? <Text copyable={{ text: u }} style={{ fontSize: 12 }}>{u}</Text> : <Text type="secondary">-</Text>,
+    },
+    {
+      title: '登录状态', dataIndex: 'has_logged_in', key: 'has_logged_in',
+      render: (logged: boolean) => logged
+        ? <Tag icon={<LoginOutlined />} color="success">已登录</Tag>
+        : <Tag icon={<StopOutlined />} color="default">未登录</Tag>,
+    },
+    {
+      title: '最近登录时间', dataIndex: 'last_login_time', key: 'last_login_time',
+      render: (t: string) => t || <Text type="secondary">-</Text>,
+    },
+    {
+      title: '登录 IP', dataIndex: 'last_login_ip', key: 'last_login_ip',
+      render: (ip: string) => ip || <Text type="secondary">-</Text>,
+    },
+    {
+      title: '操作', key: 'actions', width: 100,
+      render: (_: unknown, record: AttendanceStudent) => (
+        <Button type="link" size="small" icon={<ClockCircleOutlined />}
+          disabled={!record.has_logged_in}
+          onClick={() => viewStudentLogs(record)}>
+          明细
+        </Button>
+      ),
+    },
+  ]
+
+  return (
+    <>
+      <Card
+        title={
+          <Space>
+            <UserOutlined style={{ color: '#52c41a', fontSize: 20 }} />
+            <span>📋 考勤统计</span>
+          </Space>
+        }
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={() => handleClassChange(cls)} loading={loading}>
+            刷新数据
+          </Button>
+        }
+        style={{ marginBottom: 16 }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          {/* 选择器 */}
+          <Space wrap>
+            <Select
+              placeholder="— 选择年级 —"
+              value={grade || undefined}
+              onChange={handleGradeChange}
+              options={grades.map(g => ({ label: g, value: g }))}
+              style={{ width: 160 }}
+              size="large"
+            />
+            <Select
+              placeholder="— 选择班级 —"
+              value={cls || undefined}
+              onChange={handleClassChange}
+              options={classes.map(c => ({ label: c, value: c }))}
+              style={{ width: 180 }}
+              size="large"
+              disabled={!grade}
+            />
+          </Space>
+
+          {/* 统计概览 */}
+          {summary && (
+            <>
+              <Row gutter={24}>
+                <Col span={6}>
+                  <Card size="small" style={{ textAlign: 'center', background: '#f6ffed' }}>
+                    <Statistic title="班级总人数" value={summary.total_count}
+                      prefix={<TeamOutlined />} valueStyle={{ color: '#52c41a' }} />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ textAlign: 'center', background: '#e6f7ff' }}>
+                    <Statistic title="已登录" value={summary.logged_in_count}
+                      prefix={<LoginOutlined />} valueStyle={{ color: '#1890ff' }} />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ textAlign: 'center', background: '#fff7e6' }}>
+                    <Statistic title="未登录" value={summary.not_logged_in_count}
+                      prefix={<StopOutlined />} valueStyle={{ color: '#faad14' }} />
+                  </Card>
+                </Col>
+                <Col span={6}>
+                  <Card size="small" style={{ textAlign: 'center', background: '#f0f5ff' }}>
+                    <Statistic title="登录率" value={summary.login_rate} suffix="%"
+                      prefix={<BarChartOutlined />} valueStyle={{ color: '#722ed1' }} />
+                  </Card>
+                </Col>
+              </Row>
+
+              <Divider>📋 学生考勤明细</Divider>
+
+              <Table
+                dataSource={summary.students}
+                columns={columns}
+                rowKey={(r) => r.username || r.name}
+                loading={loading}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生` }}
+                size="middle"
+              />
+            </>
+          )}
+
+          {!summary && !loading && (
+            <Empty description="请选择年级和班级查看考勤统计" />
+          )}
+
+          {loading && (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <Spin tip="加载考勤数据..." />
+            </div>
+          )}
+        </Space>
+      </Card>
+
+      {/* 登录明细弹窗 */}
+      <Modal
+        title={viewLogs ? `${viewLogs.name} 的登录记录` : '登录明细'}
+        open={logModalVisible}
+        onCancel={() => setLogModalVisible(false)}
+        footer={<Button onClick={() => setLogModalVisible(false)}>关闭</Button>}
+        width={700}
+      >
+        {logLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+        ) : logRecords.length === 0 ? (
+          <Empty description="暂无登录记录" />
+        ) : (
+          <Table
+            dataSource={logRecords}
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条记录` }}
+            columns={[
+              { title: '序号', key: 'idx', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
+              { title: '登录时间', dataIndex: 'login_time', key: 'login_time' },
+              { title: '登录 IP', dataIndex: 'login_ip', key: 'login_ip' },
+              { title: '浏览器', dataIndex: 'user_agent', key: 'user_agent', ellipsis: true },
+              {
+                title: '登出时间', dataIndex: 'logout_time', key: 'logout_time',
+                render: (t: string) => t || <Tag color="processing">在线</Tag>,
+              },
+            ]}
+          />
+        )}
+      </Modal>
+    </>
+  )
+}
+
+
+// ============================================================
 // 页面主组件
 // ============================================================
 
@@ -809,6 +1081,11 @@ const RollcallManagePage: React.FC = () => {
             key: 'manage',
             label: <span><HistoryOutlined /> 📊 数据管理</span>,
             children: <SessionsManager />,
+          },
+          {
+            key: 'attendance',
+            label: <span><UserOutlined /> 📋 考勤统计</span>,
+            children: <AttendanceStats />,
           },
         ]}
       />

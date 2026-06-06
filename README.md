@@ -5,7 +5,7 @@
 > 课程大纲、课堂互动、分组讨论、积分奖励、课堂积分、智能点名、
 > 学情分析、成长档案等功能。基于 FastAPI + React 构建。
 
-![版本](https://img.shields.io/badge/版本-4.2.0-blue)
+![版本](https://img.shields.io/badge/版本-4.3.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope-orange)
@@ -219,6 +219,12 @@ AI 智能试题库系统，支持一键生成（按科目/题型/知识点/难�
 
 智能点名系统，支持公平加权随机抽取、权重自然衰减、轮次管理、历史记录追踪。
 管理员可查看所有班级点名数据，教师仅查看自己班级。
+
+### 📋 考勤统计（V4.3 新增）
+
+学生登录时自动记录登录时间、登录 IP、浏览器信息，教师/管理员可按班级查看
+学生登录状况：总人数、已登录/未登录人数、登录率、每位学生的详细登录记录。
+教师仅查看本班，管理员可查看全部。支持通过会话自动恢复记录考勤。
 
 ---
 
