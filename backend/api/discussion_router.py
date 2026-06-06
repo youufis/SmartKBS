@@ -265,6 +265,12 @@ async def list_discussions(
         item["total_messages"] = total_messages
         item["total_members"] = sum(g["member_count"] for g in group_list)
         item["require_summary"] = bool(item["require_summary"])
+        # 检查是否有 AI 总结报告
+        summary_count = execute_query(
+            "SELECT COUNT(*) FROM discussion_reports WHERE discussion_id=? AND group_id IS NOT NULL",
+            (item["id"],),
+        )[0][0]
+        item["has_summary"] = summary_count > 0
         # 学生标记是否已加入
         if role == 2:
             joined = execute_query(
@@ -498,38 +504,60 @@ async def _auto_generate_report(disc_id: int):
         if ai_texts:
             overall_parts.append(f"- AI 介入次数：{len(ai_texts)}")
 
-        # 生成小组 AI 分析摘要
+        # 生成小组 AI 分析摘要（使用新版归纳总结提示词）
         if msgs:
-            api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-            if not api_key:
-                cfg = load_config()
-                api_key = cfg.get("dashscope_api_key", "")
+            api_key = _get_api_key()
             if api_key:
+                # 组装消息文本
                 messages_text = "\n".join(
-                    [f"{m[0] or 'AI助教'}: {m[1][:200]}" for m in msgs[-20:]]
+                    [f"{m[0] or 'AI助教'}: {m[1]}" for m in msgs[-50:]]
                 )
-                prompt = f"""请对以下课堂讨论内容进行简要分析（50字以内），总结该小组的关键观点和讨论质量：
 
-讨论主题：{disc['title']}
-讨论内容：
-{messages_text}
-
-简要分析："""
+                from backend.prompts.discussion import DISCUSSION_AI_SUMMARY_PROMPT
+                group_name = g[2] or f"第{g[1]}组"
+                prompt = DISCUSSION_AI_SUMMARY_PROMPT.format(
+                    subject=disc.get("subject") or "信息科技",
+                    title=disc["title"],
+                    group_name=group_name,
+                    description=disc.get("description") or "",
+                    messages_text=messages_text,
+                )
 
                 try:
                     from backend.api.ai_service import call_ai_async
                     summary = await call_ai_async(prompt, api_key)
                     if summary:
-                        overall_parts.append(f"\n**AI 分析**：{summary}")
+                        # 尝试解析 JSON
+                        import json as _json, re as _re
+                        json_match = _re.search(r'\{[\s\S]*\}', summary)
+                        parsed = None
+                        if json_match:
+                            try:
+                                parsed = _json.loads(json_match.group())
+                            except _json.JSONDecodeError:
+                                pass
 
-                        # 保存小组报告
-                        report_content = f"# 小组报告：{g[2] or f'第{g[1]}组'}\n\n"
-                        report_content += f"## 基本信息\n- 成员：{', '.join(member_names) if member_names else '（空）'}\n- 消息数：{len(msgs)}\n\n"
-                        report_content += f"## AI 分析\n{summary}\n\n"
-                        report_content += f"## 讨论内容\n```\n{messages_text}\n```"
+                        if parsed:
+                            s = parsed.get("summary", "")
+                            kp = parsed.get("key_points", [])
+                            ac = parsed.get("ai_comment", "")
+                            sc = parsed.get("score", "")
+                            overall_parts.append(f"\n**AI 分析**：{s}")
+                            if kp:
+                                overall_parts.append(f"- 关键观点：{'；'.join(kp)}")
+                            if ac:
+                                overall_parts.append(f"- AI 评价：{ac}")
+                            if sc:
+                                overall_parts.append(f"- 综合评分：{sc}/10")
+                        else:
+                            overall_parts.append(f"\n**AI 分析**：{summary[:200]}")
+
+                        # 保存结构化报告
+                        report_data = {"raw_content": summary, "parsed": parsed, "generated_at": now}
+                        report_json = _json.dumps(report_data, ensure_ascii=False)
                         execute_insert_update(
                             "INSERT INTO discussion_reports (discussion_id, group_id, report_content, generated_at) VALUES (?, ?, ?, ?)",
-                            (disc_id, g[0], report_content, now),
+                            (disc_id, g[0], report_json, now),
                         )
                 except Exception:
                     pass
@@ -903,6 +931,182 @@ async def ai_suggest(group_id: int, request: Request):
     except Exception as e:
         logger.warning(f"AI 助教调用失败: {e}")
         return {"status": "error", "content": f"AI 调用出错: {str(e)}"}
+
+
+# ── AI 归纳总结（互动讨论后的 AI 总结功能）──
+
+def _get_api_key() -> str:
+    """获取 API Key 的辅助函数"""
+    import os
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not api_key:
+        try:
+            from backend.api.config_router import load_config
+            cfg = load_config()
+            api_key = cfg.get("dashscope_api_key", "")
+        except Exception:
+            pass
+    return api_key
+
+
+@router.post("/groups/{group_id}/ai-summary", summary="AI 生成小组讨论归纳总结")
+async def generate_group_ai_summary(group_id: int, request: Request):
+    """为指定小组生成 AI 讨论归纳总结，包含核心观点、评价与评分（仅教师和管理员可用）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    # 仅教师和管理员可用
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用 AI 总结功能")
+
+    # 获取讨论信息
+    disc_row = execute_query(
+        """SELECT d.id, d.title, d.description, d.subject, d.status, dg.name
+           FROM discussions d
+           JOIN discussion_groups dg ON dg.discussion_id = d.id
+           WHERE dg.id=?""",
+        (group_id,),
+    )
+    if not disc_row:
+        raise HTTPException(status_code=404, detail="小组不存在")
+
+    disc_id = disc_row[0][0]
+    title = disc_row[0][1]
+    description = disc_row[0][2] or ""
+    subject = disc_row[0][3] or "信息科技"
+    group_name = disc_row[0][5] or f"第{disc_row[0][4]}组"
+
+    # 获取该小组所有消息
+    msgs = execute_query(
+        """SELECT username, content, msg_type, created_at
+           FROM discussion_messages
+           WHERE group_id=? ORDER BY id ASC""",
+        (group_id,),
+    )
+    if not msgs:
+        return {"status": "error", "content": "该小组暂无讨论消息，无法生成总结"}
+
+    # 组装消息文本
+    messages_text = "\n".join(
+        [f"{m[0] or 'AI助教'} ({m[3] if m[3] else ''}): {m[1]}"
+         for m in msgs]
+    )
+
+    # 如果消息太多，只取最近的 80 条（防止 token 超限）
+    msg_lines = messages_text.split("\n")
+    if len(msg_lines) > 80:
+        msg_lines = msg_lines[-80:]
+        msg_lines.insert(0, "（以下为最近的部分讨论内容）")
+    messages_text = "\n".join(msg_lines)
+
+    api_key = _get_api_key()
+    if not api_key:
+        return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
+
+    from backend.prompts.discussion import DISCUSSION_AI_SUMMARY_PROMPT
+    prompt = DISCUSSION_AI_SUMMARY_PROMPT.format(
+        subject=subject,
+        title=title,
+        group_name=group_name,
+        description=description,
+        messages_text=messages_text,
+    )
+
+    from backend.api.ai_service import call_ai_async
+
+    try:
+        content = await call_ai_async(prompt, api_key)
+        if not content:
+            return {"status": "error", "content": "AI 未返回有效结果"}
+
+        # 尝试解析 JSON
+        import re as _re
+        import json as _json
+        json_match = _re.search(r'\{[\s\S]*\}', content)
+        parsed = None
+        if json_match:
+            try:
+                parsed = _json.loads(json_match.group())
+            except _json.JSONDecodeError:
+                pass
+
+        # 构建结构化报告内容
+        now_str = _now()
+        summary_data = {
+            "raw_content": content,
+            "parsed": parsed,
+            "generated_at": now_str,
+        }
+        report_json = _json.dumps(summary_data, ensure_ascii=False)
+
+        # 保存到 discussion_reports 表（覆盖已有的同组总结）
+        existing = execute_query(
+            "SELECT id FROM discussion_reports WHERE discussion_id=? AND group_id=?",
+            (disc_id, group_id),
+        )
+        if existing:
+            execute_insert_update(
+                "UPDATE discussion_reports SET report_content=?, generated_at=? WHERE id=?",
+                (report_json, now_str, existing[0][0]),
+            )
+        else:
+            execute_insert_update(
+                "INSERT INTO discussion_reports (discussion_id, group_id, report_content, generated_at) VALUES (?, ?, ?, ?)",
+                (disc_id, group_id, report_json, now_str),
+            )
+
+        return {
+            "status": "ok",
+            "content": content,
+            "parsed": parsed,
+            "generated_at": now_str,
+        }
+    except Exception as e:
+        logger.warning(f"AI 归纳总结生成失败: {e}")
+        return {"status": "error", "content": f"AI 调用出错: {str(e)}"}
+
+
+@router.get("/groups/{group_id}/summary", summary="获取小组讨论归纳总结")
+async def get_group_summary(group_id: int, request: Request):
+    """获取指定小组已生成的 AI 归纳总结（仅教师和管理员可用）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    # 仅教师和管理员可用
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看 AI 总结")
+
+    # 获取讨论 ID
+    disc_row = execute_query(
+        "SELECT discussion_id FROM discussion_groups WHERE id=?",
+        (group_id,),
+    )
+    if not disc_row:
+        raise HTTPException(status_code=404, detail="小组不存在")
+    disc_id = disc_row[0][0]
+
+    rows = execute_query(
+        "SELECT id, report_content, generated_at FROM discussion_reports WHERE discussion_id=? AND group_id=? ORDER BY id DESC LIMIT 1",
+        (disc_id, group_id),
+    )
+    if not rows:
+        return {"status": "ok", "has_summary": False, "content": None}
+
+    import json as _json
+    content = rows[0][1]
+    try:
+        parsed = _json.loads(content)
+    except _json.JSONDecodeError:
+        parsed = {"raw_content": content}
+
+    return {
+        "status": "ok",
+        "has_summary": True,
+        "content": parsed,
+        "generated_at": rows[0][2],
+    }
 
 
 # ── AI 自动生成报告 ──
