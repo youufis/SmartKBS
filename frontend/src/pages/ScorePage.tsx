@@ -99,14 +99,19 @@ const ScorePage: React.FC = () => {
   const [editClass, setEditClass] = useState('')
   const [editGender, setEditGender] = useState('')
 
-  // ── 加载班级列表 ──
-  const loadClasses = useCallback(async () => {
-    try {
-      const { data } = await apiClient.get('/api/scores/classes', { params: { grade, teacher: currentTeacher } })
-      setClasses(Array.isArray(data) ? data : [])
-    } catch {
-      setClasses([])
-    }
+  // ── 加载班级列表（当年级或教师变化时自动加载） ──
+  useEffect(() => {
+    if (!grade) return
+    apiClient.get('/api/scores/classes', { params: { grade, teacher: currentTeacher } })
+      .then(({ data }) => {
+        setClasses(Array.isArray(data) ? data : [])
+        // 如果当前选中的班级不在新列表中，重置
+        setCls((prev) => {
+          if (!prev || !Array.isArray(data) || !data.includes(prev)) return ''
+          return prev
+        })
+      })
+      .catch(() => setClasses([]))
   }, [grade, currentTeacher])
 
   // ── 加载学生及积分 ──
@@ -222,7 +227,6 @@ const ScorePage: React.FC = () => {
     }
   }, [grade, cls, currentTeacher])
 
-  useEffect(() => { loadClasses() }, [loadClasses])
   useEffect(() => { loadStudents(); loadStats() }, [loadStudents, loadStats])
   useEffect(() => {
     if (activeTab === 'ranking') loadRanking()
