@@ -1155,6 +1155,14 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     except Exception as notify_err:
         logger.warning(f"发送教师通知失败: {notify_err}")
 
+    # ── 积分奖励 ──
+    try:
+        from backend.reward_engine import award_participation, award_grade
+        award_participation(username, "exam", str(exam_id), exam["title"])
+        award_grade(username, "exam", str(exam_id), earned_score, total_score, exam["title"])
+    except Exception:
+        pass
+
     result = {
         "message": "提交成功",
         "attempt_id": attempt["id"],

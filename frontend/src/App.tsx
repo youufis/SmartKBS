@@ -33,6 +33,7 @@ import WrongBookPage from './pages/WrongBookPage'
 import CurriculumProgressPage from './pages/CurriculumProgressPage'
 import SharedCenterPage from './pages/SharedCenterPage'
 import StudentExamTaskPage from './pages/StudentExamTaskPage'
+import RewardPage from './pages/RewardPage'
 
 function App() {
   const navigate = useNavigate()
@@ -97,6 +98,7 @@ function App() {
             <Route path="curriculum" element={<CurriculumPage />} />
             <Route path="curriculum/progress" element={user?.role === 'admin' || user?.role === 'teacher' ? <CurriculumProgressPage /> : <Navigate to="/curriculum" />} />
             <Route path="wrong-book" element={<WrongBookPage />} />
+            <Route path="rewards" element={<RewardPage />} />
             <Route path="about" element={<AboutPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/login" />} />
