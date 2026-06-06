@@ -22,6 +22,7 @@ import {
   ThunderboltOutlined,
   BookOutlined,
   RobotOutlined,
+  StarOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -45,6 +46,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
     { key: '/student-exam-task', icon: <FileAddOutlined />, label: '考试任务' },
     { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
     { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
+    { key: '/rewards', icon: <StarOutlined />, label: '积分奖励' },
     { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
   ]},
   { icon: <SettingOutlined />, label: '系统', key: 'sys', children: [
@@ -80,6 +82,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
       { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
+      { key: '/rewards', icon: <StarOutlined />, label: '积分奖励' },
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
     ]},

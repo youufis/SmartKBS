@@ -597,6 +597,41 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 积分奖励模块（v4.1）
+            # ═══════════════════════════════════════════════
+
+            # ── 活动积分记录表（每次活动的奖励流水） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS activity_rewards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                activity_type TEXT NOT NULL,
+                activity_id TEXT NOT NULL,
+                activity_title TEXT DEFAULT '',
+                reward_type TEXT NOT NULL,
+                points INTEGER NOT NULL,
+                reason TEXT DEFAULT '',
+                teacher_username TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ar_student ON activity_rewards(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ar_activity ON activity_rewards(activity_type, activity_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ar_created ON activity_rewards(created_at)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 学生积分汇总表（缓存，避免每次都 SUM） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS student_total_points (
+                student_username TEXT PRIMARY KEY,
+                total_points INTEGER DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_stp_points ON student_total_points(total_points DESC)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 

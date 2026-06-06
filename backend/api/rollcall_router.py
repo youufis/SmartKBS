@@ -403,6 +403,19 @@ async def api_mark(request: Request):
             _save_scores(scores, teacher)
             points_added = add_pts
 
+    # ── 积分奖励（参与点名） ──
+    try:
+        if result in ("correct", "incorrect"):
+            from backend.reward_engine import award_participation
+            student_user = execute_query(
+                "SELECT username FROM users WHERE role=2 AND name=? AND grade=? AND class=?",
+                (student, grade, cls),
+            )
+            if student_user:
+                award_participation(student_user[0][0], "rollcall", f"{grade}_{cls}_{student}", f"点名-{student}")
+    except Exception:
+        pass
+
     state.setdefault("history", []).append({
         "student": student,
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
