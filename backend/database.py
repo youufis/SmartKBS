@@ -632,6 +632,30 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 考勤统计模块（v4.3）
+            # ═══════════════════════════════════════════════
+
+            # ── 登录日志表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS login_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                student_name TEXT DEFAULT '',
+                grade TEXT DEFAULT '',
+                class_name TEXT DEFAULT '',
+                login_time TEXT NOT NULL,
+                login_ip TEXT DEFAULT '',
+                user_agent TEXT DEFAULT '',
+                logout_time TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ll_username ON login_logs(username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ll_class ON login_logs(grade, class_name)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ll_time ON login_logs(login_time)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 
