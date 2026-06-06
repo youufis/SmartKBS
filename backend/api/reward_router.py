@@ -69,8 +69,9 @@ async def ranking(
         t = teacher or user["username"]
         from backend.api.score_router import _get_teacher_allowed_classes
         allowed = _get_teacher_allowed_classes(t, grade)
+        # _get_teacher_allowed_classes 返回班级数字（如 ["1","2"]），与 u.class 格式一致
         if allowed:
-            allowed_classes = [f"{grade}{a}班" for a in allowed]
+            allowed_classes = allowed
 
     ranking_list = get_class_ranking(grade, class_name, allowed_classes)
 
