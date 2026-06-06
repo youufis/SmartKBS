@@ -53,15 +53,26 @@ async def ranking(
     request: Request,
     grade: str = Query(..., description="年级"),
     class_name: str = Query("", description="班级，空表示全年级"),
+    teacher: str = Query("", description="教师用户名，用于权限过滤"),
 ):
-    """获取班级或年级的积分排名"""
+    """获取班级或年级的积分排名（教师只能看自己任教班级）"""
     user = get_current_user(request)
     role = user.get("role", 2)
 
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看排名")
 
-    ranking_list = get_class_ranking(grade, class_name)
+    # 教师权限过滤
+    allowed_classes = None
+    if role == 1:
+        # 教师只能看自己任教的班级
+        t = teacher or user["username"]
+        from backend.api.score_router import _get_teacher_allowed_classes
+        allowed = _get_teacher_allowed_classes(t, grade)
+        if allowed:
+            allowed_classes = [f"{grade}{a}班" for a in allowed]
+
+    ranking_list = get_class_ranking(grade, class_name, allowed_classes)
 
     # 补充排名序号
     for i, r in enumerate(ranking_list):
