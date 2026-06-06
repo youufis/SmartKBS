@@ -254,8 +254,15 @@ def get_student_total(student_username: str) -> int:
     return _update_student_total(student_username)
 
 
-def get_class_ranking(grade: str, class_name: str = "") -> list[dict]:
-    """获取班级积分排名"""
+def get_class_ranking(grade: str, class_name: str = "",
+                      allowed_classes: list[str] | None = None) -> list[dict]:
+    """获取班级积分排名，支持按教师任教的班级列表过滤
+
+    Args:
+        grade: 年级
+        class_name: 班级名，为空表示全年级
+        allowed_classes: 教师有权限的班级列表，None 表示不过滤（管理员）
+    """
     if class_name:
         rows = execute_query(
             """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
@@ -264,6 +271,17 @@ def get_class_ranking(grade: str, class_name: str = "") -> list[dict]:
                WHERE u.role=2 AND u.grade=? AND u.class=?
                ORDER BY points DESC""",
             (grade, class_name),
+        )
+    elif allowed_classes:
+        # 按教师任教班级过滤
+        placeholders = ",".join(["?" for _ in allowed_classes])
+        rows = execute_query(
+            f"""SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
+               FROM users u
+               LEFT JOIN student_total_points stp ON u.username = stp.student_username
+               WHERE u.role=2 AND u.grade=? AND u.class IN ({placeholders})
+               ORDER BY points DESC""",
+            (grade, *allowed_classes),
         )
     else:
         rows = execute_query(
