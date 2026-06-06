@@ -29,8 +29,8 @@ async def lifespan(app: FastAPI):
     init_question_db()
     # 启动时清理残留的空目录共享记录
     try:
-        from backend.api.sharing_router import _cleanup_empty_dir_shares
-        _cleanup_empty_dir_shares()
+        from backend.api.sharing_router import cleanup_empty_dir_shares
+        cleanup_empty_dir_shares()
     except Exception:
         pass
     logger.info("SmartKB 后端启动完成")
