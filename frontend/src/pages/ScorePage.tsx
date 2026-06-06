@@ -208,10 +208,11 @@ const ScorePage: React.FC = () => {
     setRewardRankingLoading(true)
     try {
       const params: Record<string, any> = { grade, teacher: currentTeacher }
-      if (cls) params.class_name = cls.replace(/^\d+班$/, m => m.replace('班', ''))
-      // 班级名格式转换：如 "高一1班" → class_name="1"
-      const clsMatch = cls ? cls.match(/(\d+)班/) : null
-      if (clsMatch) params.class_name = clsMatch[1]
+      // 班级名格式转换：如 "高一1班" → class_name="1" (u.class 存的是纯数字)
+      if (cls) {
+        const clsMatch = cls.match(/(\d+)班/)
+        if (clsMatch) params.class_name = clsMatch[1]
+      }
       const { data } = await apiClient.get('/api/rewards/ranking', { params })
       setRewardRanking(Array.isArray(data) ? data : [])
     } catch {
@@ -556,13 +557,23 @@ const ScorePage: React.FC = () => {
                   </Row>
                   <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', marginTop: 10, paddingTop: 8 }}>
                     <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
-                      参与活动 {rewardHistory.length} 次 ·
-                      获得奖励 {rewardHistory.filter(h => h.reward_type !== 'participation').length} 次
+                        参与活动 {rewardHistory.length} 次 ·
+                        获得奖励 {rewardHistory.filter(h => h.reward_type !== 'participation').length} 次
+                      </div>
+                      <div style={{ marginTop: 6 }}>
+                        {(() => {
+                          const p = rewardPoints
+                          if (p >= 200) return <Tag color="red">⭐ 学神</Tag>
+                          if (p >= 100) return <Tag color="orange">🌟 学霸</Tag>
+                          if (p >= 50) return <Tag color="blue">📈 进阶</Tag>
+                          if (p >= 20) return <Tag color="green">🌱 新秀</Tag>
+                          return <Tag>⚡ 起步</Tag>
+                        })()}
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>
-                    🤖 参与活动自动获得的积分
-                  </div>
+                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>
+                      🤖 参与活动自动获得的积分
+                    </div>
                 </Spin>
               </Card>
             </Col>
@@ -582,7 +593,7 @@ const ScorePage: React.FC = () => {
                   dataSource={rewardHistory}
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }}
+                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条`, pageSizeOptions: ['5', '10', '20', '50'] }}
                   columns={[
                     { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 130,
                       render: (t: string) => t?.slice(0, 16) || '' },
@@ -721,7 +732,7 @@ const ScorePage: React.FC = () => {
                     dataSource={rewardRanking}
                     rowKey="username"
                     size="small"
-                    pagination={{ pageSize: 30, showTotal: (t) => `共 ${t} 名学生` }}
+                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生`, pageSizeOptions: ['10', '20', '50'] }}
                     columns={[
                       { title: '排名', dataIndex: 'rank', key: 'rank', width: 60,
                         render: (rank: number) => {
