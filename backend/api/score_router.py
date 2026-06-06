@@ -118,6 +118,25 @@ async def api_teacher_info(request: Request):
     return {"username": teacher, "teaching": " | ".join(parts)}
 
 
+def _enrich_with_reward_points(students: list[dict], grade: str) -> list[dict]:
+    """为每个学生补充 reward_points（通过 users 表关联）"""
+    if not students:
+        return students
+    # 批量查询该年级所有学生的积分，一次 DB 调用
+    reward_rows = execute_query(
+        """SELECT u.name, COALESCE(stp.total_points, 0)
+           FROM users u
+           LEFT JOIN student_total_points stp ON u.username = stp.student_username
+           WHERE u.role=2 AND u.grade=?""",
+        (grade,),
+    )
+    name_to_reward = {row[0]: row[1] for row in reward_rows if row[0]}
+    for s in students:
+        s["reward_points"] = name_to_reward.get(s["name"], 0)
+        s["total_points"] = (s.get("score") or 0) + s["reward_points"]
+    return students
+
+
 async def api_students(request: Request):
     teacher = _get_teacher(request)
     grade = request.query_params.get("grade", "")
@@ -127,6 +146,7 @@ async def api_students(request: Request):
     scores = load_teacher_scores(teacher)
     for s in filtered:
         s["score"] = scores.get(teacher_score_key(teacher, grade, s["class"], s["name"]), 0)
+    _enrich_with_reward_points(filtered, grade)
     return filtered
 
 
@@ -142,7 +162,9 @@ async def api_ranking(request: Request):
     scores = load_teacher_scores(teacher)
     for s in filtered:
         s["score"] = scores.get(teacher_score_key(teacher, grade, s["class"], s["name"]), 0)
-    filtered.sort(key=lambda x: x["score"], reverse=True)
+    _enrich_with_reward_points(filtered, grade)
+    # 默认按综合积分排序（total_points = manual + reward）
+    filtered.sort(key=lambda x: x["total_points"], reverse=True)
     return filtered
 
 
