@@ -90,7 +90,7 @@ const ScorePage: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'scores' | 'ranking' | 'manage' | 'rewards'>('scores')
+  const [activeTab, setActiveTab] = useState<'scores' | 'ranking' | 'manage'>('scores')
 
   // ── 学生管理 ──
   const [editModal, setEditModal] = useState(false)
@@ -170,8 +170,6 @@ const ScorePage: React.FC = () => {
   const [rewardPoints, setRewardPoints] = useState<number>(0)
   const [rewardHistory, setRewardHistory] = useState<any[]>([])
   const [rewardLoading, setRewardLoading] = useState(false)
-  const [rewardRanking, setRewardRanking] = useState<any[]>([])
-  const [rewardRankingLoading, setRewardRankingLoading] = useState(false)
 
   useEffect(() => {
     if (isStudent && user?.name) {
@@ -207,30 +205,9 @@ const ScorePage: React.FC = () => {
     }
   }, [isStudent])
 
-  // 加载教师端奖励排名
-  const loadRewardRanking = useCallback(async () => {
-    if (!grade) return
-    setRewardRankingLoading(true)
-    try {
-      const params: Record<string, any> = { grade, teacher: currentTeacher }
-      // 班级名格式转换：如 "高一1班" → class_name="1" (u.class 存的是纯数字)
-      if (cls) {
-        const clsMatch = cls.match(/(\d+)班/)
-        if (clsMatch) params.class_name = clsMatch[1]
-      }
-      const { data } = await apiClient.get('/api/rewards/ranking', { params })
-      setRewardRanking(Array.isArray(data) ? data : [])
-    } catch {
-      setRewardRanking([])
-    } finally {
-      setRewardRankingLoading(false)
-    }
-  }, [grade, cls, currentTeacher])
-
   useEffect(() => { loadStudents(); loadStats() }, [loadStudents, loadStats])
   useEffect(() => {
     if (activeTab === 'ranking') loadRanking()
-    if (activeTab === 'rewards') loadRewardRanking()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
   useEffect(() => {
@@ -403,20 +380,31 @@ const ScorePage: React.FC = () => {
     </Space>
   )
 
-  // ── 表格列 ──
+  // ── 表格列（统一显示手动积分 + 奖励积分 + 综合积分）──
   const scoreColumns = [
-    { title: '姓名', dataIndex: 'name', key: 'name', width: 100 },
+    { title: '姓名', dataIndex: 'name', key: 'name', width: 80 },
     {
-      title: '性别', dataIndex: 'gender', key: 'gender', width: 60,
-      render: (v: string) => v || '-',
-    },
-    {
-      title: '积分', dataIndex: 'score', key: 'score', width: 80,
-      sorter: (a: Student, b: Student) => (b.score || 0) - (a.score || 0),
+      title: '手动积分', dataIndex: 'score', key: 'score', width: 80,
+      sorter: (a: any, b: any) => (b.score || 0) - (a.score || 0),
       render: (score: number) => (
         <Text strong style={{ color: score > 0 ? '#52c41a' : score < 0 ? '#ff4d4f' : undefined }}>
           {score ?? 0}
         </Text>
+      ),
+    },
+    {
+      title: '奖励积分', dataIndex: 'reward_points', key: 'reward_points', width: 80,
+      sorter: (a: any, b: any) => (b.reward_points || 0) - (a.reward_points || 0),
+      render: (points: number) => (
+        <Text strong style={{ color: '#fa8c16' }}>{points ?? 0}</Text>
+      ),
+    },
+    {
+      title: '综合积分', dataIndex: 'total_points', key: 'total_points', width: 80,
+      sorter: (a: any, b: any) => (b.total_points || 0) - (a.total_points || 0),
+      defaultSortOrder: 'descend' as const,
+      render: (points: number) => (
+        <Text strong style={{ color: '#722ed1', fontSize: 15 }}>{points ?? 0}</Text>
       ),
     },
     {
@@ -426,7 +414,7 @@ const ScorePage: React.FC = () => {
     },
   ]
 
-  // 班级列仅在年级排行时显示（cls 为空时）
+  // 排行榜（按综合积分排序）
   const rankingColumns = [
     { title: '排名', key: 'rank', width: 60,
       render: (_: any, __: any, idx: number) => {
@@ -434,15 +422,34 @@ const ScorePage: React.FC = () => {
         return <span style={{ fontSize: 16 }}>{medals[idx] || `#${idx + 1}`}</span>
       },
     },
-    { title: '姓名', dataIndex: 'name', key: 'name', width: 120 },
+    { title: '姓名', dataIndex: 'name', key: 'name', width: 100 },
     ...(!cls ? [{ title: '班级', dataIndex: 'class', key: 'class', width: 100 }] : []),
     {
-      title: '积分', dataIndex: 'score', key: 'score', width: 80,
-      render: (score: number) => (
+      title: '手动', dataIndex: 'score', key: 'score', width: 60,
+      render: (score: number) => <Text type="secondary">{score ?? 0}</Text>,
+    },
+    {
+      title: '奖励', dataIndex: 'reward_points', key: 'reward_points', width: 60,
+      render: (points: number) => <Text type="secondary" style={{ color: '#fa8c16' }}>{points ?? 0}</Text>,
+    },
+    {
+      title: '综合积分', dataIndex: 'total_points', key: 'total_points', width: 80,
+      render: (points: number) => (
         <Text strong style={{ color: '#faad14', fontSize: 16 }}>
-          {score ?? 0}
+          {points ?? 0}
         </Text>
       ),
+    },
+    {
+      title: '等级', key: 'level', width: 70,
+      render: (_: any, record: any) => {
+        const p = record.total_points || record.score || 0
+        if (p >= 200) return <Tag color="red">⭐ 学神</Tag>
+        if (p >= 100) return <Tag color="orange">🌟 学霸</Tag>
+        if (p >= 50) return <Tag color="blue">📈 进阶</Tag>
+        if (p >= 20) return <Tag color="green">🌱 新秀</Tag>
+        return <Tag>⚡ 起步</Tag>
+      },
     },
   ]
 
@@ -509,76 +516,61 @@ const ScorePage: React.FC = () => {
       </Card>
       )}
 
-      {/* ── 学生个人积分 ── */}
+      {/* ── 学生个人积分（统一视图） ── */}
       {isStudent && (
         <>
           <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={12}>
+            <Col span={8}>
               <Card style={{ background: 'linear-gradient(135deg,#667eea,#764ba2)', color: '#fff', border: 'none' }}>
                 {myScoreLoading ? (
                   <div style={{ textAlign: 'center', padding: 10, color: 'rgba(255,255,255,0.8)' }}>加载中...</div>
                 ) : myScore ? (
-                  <div>
-                    <Row gutter={16} align="middle">
-                      <Col>
-                        <TrophyOutlined style={{ fontSize: 36, color: '#ffd700' }} />
-                      </Col>
-                      <Col>
-                        <div style={{ fontSize: 13, opacity: 0.8, color: '#fff' }}>{user?.name} · {myScore.class}</div>
-                        <div style={{ fontSize: 28, fontWeight: 700, color: '#ffd700' }}>{myScore.score ?? 0} 分</div>
-                      </Col>
-                    </Row>
-                    <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', marginTop: 10, paddingTop: 8 }}>
-                      {myScore.teacher_scores && Object.entries(myScore.teacher_scores).map(([t, sc]) => (
-                        <Row key={t} justify="space-between" style={{ padding: '2px 0', fontSize: 13 }}>
-                          <span style={{ color: 'rgba(255,255,255,0.8)' }}>{t}</span>
-                          <span style={{ color: '#fff', fontWeight: 600 }}>{sc as number} 分</span>
-                        </Row>
-                      ))}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>
-                      📋 教师评定的课堂积分
+                  <div style={{ textAlign: 'center' }}>
+                    <TrophyOutlined style={{ fontSize: 32, color: '#ffd700' }} />
+                    <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>手动积分</div>
+                    <div style={{ fontSize: 26, fontWeight: 700, color: '#ffd700' }}>{myScore.score ?? 0}</div>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
+                      {user?.name} · {myScore.class}
                     </div>
                   </div>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: 10, color: 'rgba(255,255,255,0.8)' }}>
-                    暂无积分记录
-                  </div>
+                  <div style={{ textAlign: 'center', padding: 10, color: 'rgba(255,255,255,0.8)' }}>暂无数据</div>
                 )}
               </Card>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
               <Card style={{ background: 'linear-gradient(135deg,#fa8c16,#faad14)', color: '#fff', border: 'none' }}>
                 <Spin spinning={rewardLoading}>
-                  <Row gutter={16} align="middle">
-                    <Col>
-                      <StarOutlined style={{ fontSize: 36, color: '#fff' }} />
-                    </Col>
-                    <Col>
-                      <div style={{ fontSize: 13, opacity: 0.8, color: '#fff' }}>活动奖励积分</div>
-                      <div style={{ fontSize: 28, fontWeight: 700, color: '#fff' }}>{rewardPoints} 分</div>
-                    </Col>
-                  </Row>
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', marginTop: 10, paddingTop: 8 }}>
-                    <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
-                        参与活动 {rewardHistory.length} 次 ·
-                        获得奖励 {rewardHistory.filter(h => h.reward_type !== 'participation').length} 次
-                      </div>
-                      <div style={{ marginTop: 6 }}>
-                        {(() => {
-                          const p = rewardPoints
-                          if (p >= 200) return <Tag color="red">⭐ 学神</Tag>
-                          if (p >= 100) return <Tag color="orange">🌟 学霸</Tag>
-                          if (p >= 50) return <Tag color="blue">📈 进阶</Tag>
-                          if (p >= 20) return <Tag color="green">🌱 新秀</Tag>
-                          return <Tag>⚡ 起步</Tag>
-                        })()}
-                      </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <StarOutlined style={{ fontSize: 32, color: '#fff' }} />
+                    <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>奖励积分</div>
+                    <div style={{ fontSize: 26, fontWeight: 700, color: '#fff' }}>{rewardPoints}</div>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
+                      {(() => {
+                        const p = rewardPoints
+                        if (p >= 200) return '⭐ 学神'
+                        if (p >= 100) return '🌟 学霸'
+                        if (p >= 50) return '📈 进阶'
+                        if (p >= 20) return '🌱 新秀'
+                        return '⚡ 起步'
+                      })()}
                     </div>
-                    <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>
-                      🤖 参与活动自动获得的积分
-                    </div>
+                  </div>
                 </Spin>
+              </Card>
+            </Col>
+            <Col span={8}>
+              <Card style={{ background: 'linear-gradient(135deg,#722ed1,#9c27b0)', color: '#fff', border: 'none' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <TrophyOutlined style={{ fontSize: 32, color: '#ffd700' }} />
+                  <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>综合积分</div>
+                  <div style={{ fontSize: 32, fontWeight: 700, color: '#ffd700' }}>
+                    {myScoreLoading || rewardLoading ? '...' : (myScore?.score || 0) + rewardPoints}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
+                    手动 + 奖励
+                  </div>
+                </div>
               </Card>
             </Col>
           </Row>
@@ -637,11 +629,7 @@ const ScorePage: React.FC = () => {
                 icon={<BarChartOutlined />}
                 onClick={() => setActiveTab('ranking')}
               >排行榜</Button>
-              <Button
-                type={activeTab === 'rewards' ? 'primary' : 'default'}
-                icon={<StarOutlined />}
-                onClick={() => setActiveTab('rewards' as any)}
-              >活动奖励</Button>
+
               {isAdminOrTeacher && (
                 <Button
                   type={activeTab === 'manage' ? 'primary' : 'default'}
@@ -672,6 +660,13 @@ const ScorePage: React.FC = () => {
             )}
           </Col>
         </Row>
+
+        {/* ── 积分规则提示 ── */}
+        {activeTab === 'scores' && (
+          <Card size="small" style={{ marginBottom: 12, background: '#fffbe6', fontSize: 13 }}>
+            📋 手动积分由教师评定 · 奖励积分在参与活动（测验/投票/练习/考试/讨论等）时自动获得：<Tag color="blue">参与+2</Tag> <Tag color="success">优秀+15</Tag> <Tag color="processing">良好+10</Tag> <Tag color="warning">及格+5</Tag>
+          </Card>
+        )}
 
         {/* ── 积分管理 Tab ── */}
         {activeTab === 'scores' && (
@@ -712,64 +707,6 @@ const ScorePage: React.FC = () => {
               .score-my-row { background-color: #e6f4ff !important; }
               .score-my-row td:first-child::after { content: ' 👈'; }
             `}</style>
-          </Spin>
-        )}
-
-        {/* ── 活动奖励 Tab ── */}
-        {activeTab === 'rewards' && (
-          <Spin spinning={rewardRankingLoading}>
-            {!grade ? (
-              <Empty description="请先选择年级" />
-            ) : (
-              <div>
-                <Card size="small" style={{ marginBottom: 16, background: '#fffbe6' }}>
-                  <Space direction="vertical" size={2}>
-                    <Text type="secondary">📋 积分规则：</Text>
-                    <Text style={{ fontSize: 13 }}>• 参与活动 <Tag color="blue">+2 分</Tag> 基础参与分</Text>
-                    <Text style={{ fontSize: 13 }}>• 优秀(≥90%) <Tag color="success">+15 分</Tag> · 良好(≥75%) <Tag color="processing">+10 分</Tag> · 及格(≥60%) <Tag color="warning">+5 分</Tag></Text>
-                  </Space>
-                </Card>
-                {rewardRanking.length === 0 ? (
-                  <Empty description="暂无活动奖励数据" />
-                ) : (
-                  <Table
-                    dataSource={rewardRanking}
-                    rowKey="username"
-                    size="small"
-                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生`, pageSizeOptions: ['10', '20', '50'] }}
-                    columns={[
-                      { title: '排名', dataIndex: 'rank', key: 'rank', width: 60,
-                        render: (rank: number) => {
-                          if (rank === 1) return <Tag color="gold">🥇 1</Tag>
-                          if (rank === 2) return <Tag color="silver">🥈 2</Tag>
-                          if (rank === 3) return <Tag color="bronze">🥉 3</Tag>
-                          return <Text type="secondary">{rank}</Text>
-                        },
-                      },
-                      { title: '姓名', dataIndex: 'name', key: 'name', width: 100 },
-                      { title: '用户名', dataIndex: 'username', key: 'username', width: 100 },
-                      {
-                        title: '奖励积分', dataIndex: 'total_points', key: 'total_points', width: 100,
-                        render: (p: number) => <Text strong style={{ color: '#fa8c16', fontSize: 16 }}>{p}</Text>,
-                        sorter: (a: any, b: any) => a.total_points - b.total_points,
-                        defaultSortOrder: 'descend' as const,
-                      },
-                      {
-                        title: '等级', key: 'level', width: 80,
-                        render: (_: any, record: any) => {
-                          const p = record.total_points
-                          if (p >= 200) return <Tag color="red">⭐ 学神</Tag>
-                          if (p >= 100) return <Tag color="orange">🌟 学霸</Tag>
-                          if (p >= 50) return <Tag color="blue">📈 进阶</Tag>
-                          if (p >= 20) return <Tag color="green">🌱 新秀</Tag>
-                          return <Tag>⚡ 起步</Tag>
-                        },
-                      },
-                    ]}
-                  />
-                )}
-              </div>
-            )}
           </Spin>
         )}
 
