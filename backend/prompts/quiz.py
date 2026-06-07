@@ -18,6 +18,7 @@ QUIZ_GENERATE_PROMPT = """你是一位高中{subject}教师。请根据以下要
    - 【media_placeholders】适用于硬件外观、实验装置、场景照片等真实图片
    - 知识点含「实物」「外观」「照片」等词时，必须用 media_placeholders
    - svg_code 和 media_placeholders 可以同时存在
+   - **⚠️ 安全约束**：`media_placeholders[].description` 仅描述图片视觉内容（主体、颜色、环境），**严禁**包含题目答案、解析或任何会泄露正确答案的文字
 
 请严格按照以下 JSON 格式输出，不要包含任何其他文字：
 [
