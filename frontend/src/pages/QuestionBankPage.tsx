@@ -10,7 +10,7 @@ import {
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import type { QuestionInfo, MediaPlaceholder } from '../types'
+import type { QuestionInfo } from '../types'
 import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -80,7 +80,7 @@ const QuestionBankPage: React.FC = () => {
   // ── 题库列表 ──
   const [questions, setQuestions] = useState<QuestionInfo[]>([])
   const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [filters, setFilters] = useState<{
@@ -116,7 +116,13 @@ const QuestionBankPage: React.FC = () => {
     }
   }, [filters, page, pageSize])
 
-  useEffect(() => { loadQuestions() }, [loadQuestions])
+  useEffect(() => {
+    const params: any = { page: 1, page_size: 50 }
+    questionsApi.listQuestions(params)
+      .then(res => { setQuestions(res.questions); setTotal(res.total) })
+      .catch(err => message.error(err?.response?.data?.detail || '加载题库失败'))
+      .finally(() => setLoading(false))
+  }, [])
 
   // ── 生成试题 ──
   const [genError, setGenError] = useState<string | null>(null)
@@ -710,6 +716,43 @@ const QuestionBankPage: React.FC = () => {
                           </div>
                         </Col>
                       </Row>
+                      <div style={{ marginTop: 12 }}>
+                        <Typography.Text strong style={{ fontSize: 13 }}>📷 从图片提取（截图/扫描件，使用视觉模型识别）</Typography.Text>
+                        <div style={{ marginTop: 4 }}>
+                          <Upload
+                            accept=".jpg,.jpeg,.png,.gif,.webp,.bmp"
+                            maxCount={1}
+                            showUploadList={true}
+                            beforeUpload={async (file) => {
+                              const fd = new FormData()
+                              fd.append('file', file)
+                              fd.append('subject', extractSubject || subjectOptions[0] || '信息科技')
+                              fd.append('difficulty', extractDifficulty)
+                              setExtracting(true)
+                              setExtractError(null)
+                              setExtractElapsed(0)
+                              const startTime = Date.now()
+                              const timer = setInterval(() => setExtractElapsed(Math.round((Date.now() - startTime) / 1000)), 1000)
+                              try {
+                                const { data } = await apiClient.post('/api/questions/extract-from-image', fd, {
+                                  headers: { 'Content-Type': 'multipart/form-data' },
+                                  timeout: 120000,
+                                })
+                                setExtractedQuestions(data.questions || [])
+                                message.success(data.message || `成功提取 ${data.total || 0} 道试题`)
+                              } catch (err: any) {
+                                setExtractError(err.response?.data?.detail || err.message || '提取失败，请检查图片是否清晰或联系管理员')
+                              } finally {
+                                clearInterval(timer)
+                                setExtracting(false)
+                              }
+                              return false
+                            }}
+                          >
+                            <Button icon={<UploadOutlined />}>选择图片</Button>
+                          </Upload>
+                        </div>
+                      </div>
                       <div style={{ marginTop: 16 }}>
                         <Typography.Text strong style={{ fontSize: 13 }}>或粘贴文本内容</Typography.Text>
                         <TextArea

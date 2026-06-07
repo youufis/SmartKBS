@@ -563,12 +563,17 @@ async def extract_questions_from_text(
     for q_data in questions:
         q_type = q_data.get("type", "single")
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
+        svg_code = q_data.get("svg_code") or ""
+        has_svg = 1 if svg_code.strip() else 0
+        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
         qid = execute_insert(
             """INSERT INTO question_bank
                (type, question_text, options, correct_answer, explanation,
                 knowledge_points, subject, difficulty, creator_username, creator_name,
-                source, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+                source, status, created_at, updated_at,
+                svg_content, has_svg, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?,
+                       ?, ?, ?)""",
             (
                 q_type,
                 q_data.get("question", ""),
@@ -583,6 +588,7 @@ async def extract_questions_from_text(
                 source_label,
                 now,
                 now,
+                svg_code, has_svg, media_placeholders,
             ),
         )
         saved_questions.append({
@@ -594,12 +600,175 @@ async def extract_questions_from_text(
             "explanation": q_data.get("explanation", ""),
             "knowledge_points": q_data.get("knowledge_point", ""),
             "difficulty": q_data.get("difficulty", difficulty),
+            "has_svg": has_svg,
+            "svg_content": svg_code if has_svg else None,
+            "media_placeholders": q_data.get("media_placeholders") or [],
+            "media_files": [],
         })
 
     source_display = {"docx": "Word文档", "txt": "文本文件", "md": "Markdown文件", "pdf": "PDF文件", "json": "JSON文件", "json_import": "JSON文件", "paste": "粘贴文本"}
     logger.info(f"用户 {username} 从{source_display.get(source_label, '文件')}提取并入库 {len(saved_questions)} 道试题")
     return {
         "message": f"成功提取 {len(saved_questions)} 道试题",
+        "questions": saved_questions,
+        "total": len(saved_questions),
+    }
+
+
+@router.post("/extract-from-image", summary="从图片中智能提取试题（使用视觉模型）")
+async def extract_questions_from_image(
+    request: Request,
+    subject: str = Form(""),
+    difficulty: str = Form("medium"),
+    file: UploadFile = File(...),
+):
+    """从图片（截图/扫描件）中提取试题，使用视觉模型识别"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+
+    # 验证图片格式
+    ext = os.path.splitext(file.filename.lower())[1]
+    supported_images = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+    if ext not in supported_images:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}，支持 jpg/png/gif/webp/bmp")
+
+    # 读取图片（直接在内存处理，不落盘）
+    import httpx
+    import base64
+
+    file_bytes = await file.read()
+    if len(file_bytes) < 100:
+        raise HTTPException(status_code=400, detail="图片内容过小，请上传清晰的试卷截图")
+
+    # 根据扩展名确定 MIME 类型
+    mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
+    mime_type = mime_map.get(ext, 'image/jpeg')
+    encoded = base64.b64encode(file_bytes).decode("utf-8")
+
+    # 获取 API Key
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    # 调用视觉模型提取试题
+    model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-flash")
+    api_base = get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+
+    difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
+    prompt_text = f"""你是一个试题提取助手。请从图片中识别并提取出所有试题。
+按照 JSON 格式输出。
+
+科目：{subject}
+难度：{difficulty_desc}
+
+要求：
+1. 仔细查看图片，提取其中的试题（题干、选项、答案）
+2. 涉及公式用 $...$ LaTeX 语法标记
+3. 可根据题目内容生成 svg_code 和 media_placeholders
+
+只返回 JSON 数组：
+[
+  {{
+    "type": "single/multiple/true_false/short",
+    "question": "题目内容（含 $...$ 公式）",
+    "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
+    "answer": "正确答案",
+    "explanation": "解析",
+    "knowledge_point": "知识点",
+    "difficulty": "easy/medium/hard",
+    "svg_code": "<svg>...</svg>",
+    "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图"}}]
+  }}
+]"""
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            f"{api_base}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": model_name,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
+                        {"type": "text", "text": prompt_text},
+                    ]
+                }],
+                "stream": False,
+            },
+        )
+
+    if resp.status_code != 200:
+        err_msg = resp.text[:500]
+        logger.error(f"视觉模型调用失败: status={resp.status_code}, {err_msg}")
+        raise HTTPException(status_code=502, detail=f"视觉模型调用失败: {err_msg}")
+
+    result_text = resp.json()["choices"][0]["message"]["content"]
+    logger.info(f"图片提取 AI 返回: {result_text[:200]}")
+
+    # 解析 JSON
+    json_match = re.search(r'\[[\s\S]*\]', result_text)
+    if not json_match:
+        raise HTTPException(status_code=502, detail="AI 返回格式异常，未能提取出试题")
+
+    questions = json.loads(json_match.group())
+    if not questions:
+        raise HTTPException(status_code=502, detail="未提取到任何试题")
+
+    # 入库（复用文本提取的入库逻辑）
+    from backend.database import execute_query as user_query
+    user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
+    creator_name = user_row[0][0] if user_row and user_row[0][0] else username
+
+    saved_questions = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for q_data in questions:
+        q_type = q_data.get("type", "single")
+        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
+        svg_code = q_data.get("svg_code") or ""
+        has_svg = 1 if svg_code.strip() else 0
+        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
+        qid = execute_insert(
+            """INSERT INTO question_bank
+               (type, question_text, options, correct_answer, explanation,
+                knowledge_points, subject, difficulty, creator_username, creator_name,
+                source, status, created_at, updated_at,
+                svg_content, has_svg, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'image_extract', 'active', ?, ?,
+                       ?, ?, ?)""",
+            (
+                q_type,
+                q_data.get("question", ""),
+                options_str,
+                q_data.get("answer", ""),
+                q_data.get("explanation", ""),
+                q_data.get("knowledge_point", ""),
+                subject,
+                q_data.get("difficulty", difficulty),
+                username, creator_name,
+                now, now,
+                svg_code, has_svg, media_placeholders,
+            ),
+        )
+        saved_questions.append({
+            "id": qid, "type": q_type,
+            "question_text": q_data.get("question", ""),
+            "options": q_data.get("options", {}),
+            "correct_answer": q_data.get("answer", ""),
+            "explanation": q_data.get("explanation", ""),
+            "knowledge_points": q_data.get("knowledge_point", ""),
+            "difficulty": q_data.get("difficulty", difficulty),
+            "has_svg": has_svg, "svg_content": svg_code if has_svg else None,
+            "media_placeholders": q_data.get("media_placeholders") or [],
+            "media_files": [],
+        })
+
+    return {
+        "message": f"成功从图片提取 {len(saved_questions)} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
     }
@@ -690,6 +859,8 @@ def _normalize_question_json(q: dict[str, Any]) -> dict[str, Any]:
         "explanation": explanation,
         "knowledge_point": kp,
         "difficulty": difficulty,
+        "svg_code": q.get("svg_code") or q.get("svg_content", ""),
+        "media_placeholders": q.get("media_placeholders") or q.get("media_files", []),
     }
 
 
@@ -725,7 +896,7 @@ def _extract_text_from_file(file_bytes: bytes, ext: str) -> str:
 
 
 def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
-    """构建 AI 提取试题的 Prompt"""
+    """构建 AI 提取试题的 Prompt（含公式和配图支持）"""
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     return f"""你是一个试题提取助手。下面是一些文本内容，可能包含试题和答案。
 请从文本中识别并提取出所有试题，按照 JSON 格式输出。
@@ -739,18 +910,22 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 3. 每个试题必须包含：题目、正确答案、题型
 4. 选择题必须有选项（最少4个选项）
 5. 判断题的选项为 {{"对":"对","错":"错"}}
+6. 涉及数学、物理、化学公式时，用 $...$ LaTeX 语法标记
+7. 可根据题目内容生成 svg_code（技术图示）和 media_placeholders（实物图描述）
 
 请严格按照 JSON 格式输出，只返回一个 JSON 数组，不要包含其他内容：
 
 [
   {{
     "type": "题型标识(single/multiple/true_false/short)",
-    "question": "题目内容",
-    "options": {{"A":"选项A", "B":"选项B", "C":"选项C", "D":"选项D"}},
+    "question": "题目内容（含 $...$ LaTeX 公式）",
+    "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
-    "explanation": "解析内容",
+    "explanation": "解析内容（含公式）",
     "knowledge_point": "所属知识点",
-    "difficulty": "easy/medium/hard"
+    "difficulty": "easy/medium/hard",
+    "svg_code": "<svg>...</svg>",
+    "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图/实物图"}}]
   }}
 ]
 
