@@ -32,3 +32,86 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题。
 - 如果是简答题，options 设为 null，answer 为参考答案
 - 题目和选项要与高中{subject}课程内容紧密相关
 """
+
+# ── 含多媒体/公式支持的增强版试题生成 Prompt ──
+
+QUESTION_GENERATE_WITH_MEDIA_PROMPT = """请根据以下要求生成试题，并**自动为试题配图**以及**使用 LaTeX 公式标记**。
+
+科目：{subject}
+知识点范围：{knowledge_points}
+题型：{type_desc}
+数量：{count}道
+难度：{difficulty_desc}
+
+━━━━ 公式标记规则（必须遵守） ━━━━
+涉及数学、物理、化学公式时，使用 LaTeX 语法：
+
+- 行内公式用 $...$，如 $E=mc^2$、$f(x)=ax^2+b$
+- 独立公式用 $$...$$ 显示，如 $$\\int_a^b f(x)dx$$
+- 化学式用 \\ce{{}} 宏包，如 \\ce{{H2O}} 表示水分子
+- 普通文字内容不要使用 $ 符号
+
+━━━━ 配图规则（AI 自动判断，非常重要！） ━━━━
+每道题必须输出 svg_code 和 media_placeholders 字段（都可以为 null）：
+
+【svg_code】— 技术图示（优先使用）
+适用于：电路图、流程图、协议栈、网络拓扑、框图、数据结构、函数图像、光路图、受力分析图等
+生成要求：viewBox="0 0 600 400"，中文标注，配色协调（主色 #1976D2），纯 SVG 代码
+*对于包含物理过程、数学图形、技术原理的题目，必须生成 svg_code*
+
+【media_placeholders】— 真实图片占位符（调用 AI 生图）
+**知识点含「实物」「外观」「实物图」「场景」「照片」「实际产品」「显微镜下」等词时，必须使用 media_placeholders！**
+适用于：硬件设备外观（CPU、主板、路由器、传感器、机器人、工具等）、电子元器件实物、生物显微图、化学实验装置、场景照片、人物操作示意图等
+purpose 为 "实物图" / "微观图" / "场景图"，description 写 50-100 字详细描述
+
+【svg_code 和 media_placeholders 可以同时存在】
+- SVG 画原理示意图 + media_placeholders 生成实物照片，两者互补
+- 如果知识点明确要求「实物图」，必须包含 media_placeholders
+
+【两者同时为 null】— 仅限纯概念/记忆性文字题
+
+⚠️ 重要：超过 60% 的试题应包含至少一种配图（svg_code 或 media_placeholders），丰富教学体验！
+
+━━━━ 输出格式 ━━━━
+[
+  {{
+    "type": "single/multiple/true_false/short",
+    "question": "题目内容（含 $...$ LaTeX 公式）",
+    "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
+    "answer": "正确答案",
+    "explanation": "解析（含公式）",
+    "knowledge_point": "知识点",
+    "difficulty": "easy/medium/hard",
+    "svg_code": "<svg>...</svg>",
+    "media_placeholders": [
+      {{"key":"p1","description":"详细图片描述（50-100字）","purpose":"示意图/实物图/微观图/场景图"}}
+    ]
+  }}
+]
+
+注意：svg_code 和 media_placeholders 可以同时存在（比如SVG画原理图+真实图片展示实物），互不冲突！
+"""
+
+
+# ── SVG 补图专用 Prompt ──
+
+SVG_GENERATE_PROMPT = """你是一位 SVG 绘图专家。请根据以下描述生成教学用 SVG 配图。
+
+描述：{description}
+科目：{subject}
+尺寸：600×400（viewBox="0 0 600 400"）
+要求：
+- 中文标注
+- 配色协调，主色 #1976D2
+- 适合高中课堂教学
+- 只输出 SVG 代码，不要 ```svg 标记
+- 如果是电路图，使用标准电路元件符号
+"""
+
+
+# ── 图片生成 Prompt（透传给通义万相） ──
+
+IMAGE_GEN_PROMPT_TEMPLATE = """为高中{subject}教学绘制一张{purpose}。
+要求：{description}
+风格：清晰准确，适合课堂教学使用，标注关键部分。
+"""

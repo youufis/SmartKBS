@@ -33,6 +33,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/scores/",
             "/api/rollcall/",
             "/api/downloads/",
+            "/api/files/question_media/",
             "/static/",
             "/docs",
             "/openapi.json",

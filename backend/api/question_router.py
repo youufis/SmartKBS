@@ -267,15 +267,20 @@ async def list_questions(
         tuple(params) + (page_size, offset),
     )
 
-    # 解析 options 字段
+    # 解析 options、media_placeholders、media_files JSON 字段
     for row in rows:
-        if row.get("options"):
-            try:
-                row["options"] = json.loads(row["options"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-        else:
-            row["options"] = None
+        for field in ["options", "media_placeholders", "media_files"]:
+            val = row.get(field)
+            if val:
+                try:
+                    parsed = json.loads(val)
+                    row[field] = parsed if isinstance(parsed, (dict, list)) else val
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            elif field == "options":
+                row[field] = None
+            else:
+                row[field] = [] if field != "options" else None
 
     return {
         "questions": rows,
@@ -294,13 +299,18 @@ async def get_question(question_id: int, request: Request):
     if not row:
         raise HTTPException(status_code=404, detail="试题不存在")
 
-    if row.get("options"):
-        try:
-            row["options"] = json.loads(row["options"])
-        except (json.JSONDecodeError, TypeError):
-            pass
-    else:
-        row["options"] = None
+    for field in ["options", "media_placeholders", "media_files"]:
+        val = row.get(field)
+        if val:
+            try:
+                parsed = json.loads(val)
+                row[field] = parsed if isinstance(parsed, (dict, list)) else val
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif field == "options":
+            row[field] = None
+        else:
+            row[field] = []
 
     return row
 
@@ -746,3 +756,421 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 
 文本内容：
 {content}"""
+
+
+# ════════════════════════════════════════════
+# 新接口：含多媒体/公式的试题生成
+# ════════════════════════════════════════════
+
+class GenerateWithMediaRequest(BaseModel):
+    """AI 生成试题请求（含多媒体配图和公式支持）"""
+    subject: str = ""
+    knowledge_points: str = ""
+    question_type: str = "single"
+    count: int = 5
+    difficulty: str = "medium"
+
+
+@router.post("/generate-with-media", summary="AI 生成试题（含SVG配图+占位符+公式）")
+async def generate_questions_with_media(req: GenerateWithMediaRequest, request: Request):
+    """AI 生成试题，自动配 SVG 图 / 占位符，支持 LaTeX 公式"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    if not req.knowledge_points.strip():
+        raise HTTPException(status_code=400, detail="请输入知识点")
+    if req.count < 1 or req.count > 50:
+        raise HTTPException(status_code=400, detail="生成数量范围为 1-50")
+
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key，请先在系统配置中设置")
+
+    # 使用增强 Prompt
+    from backend.prompts.chat import QUESTION_GENERATE_WITH_MEDIA_PROMPT
+    type_desc = {"single": "单选题（4个选项）", "multiple": "多选题（4-5个选项）",
+                 "true_false": "判断题", "short": "简答题"}.get(req.question_type, "单选题")
+    difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
+    prompt = QUESTION_GENERATE_WITH_MEDIA_PROMPT.format(
+        subject=req.subject,
+        knowledge_points=req.knowledge_points,
+        type_desc=type_desc,
+        count=req.count,
+        difficulty_desc=difficulty_desc,
+    )
+
+    logger.info(f"开始调用AI生成多媒体试题: subject={req.subject}, type={req.question_type}")
+
+    try:
+        result_text = await _call_dashscope_agent(prompt, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
+
+    questions = _parse_ai_response_with_media(result_text)
+    if not questions:
+        raise HTTPException(status_code=502, detail="AI 返回格式异常，未能解析出试题，请重试")
+
+    # 获取创建者姓名
+    from backend.database import execute_query as user_query
+    user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
+    creator_name = user_row[0][0] if user_row and user_row[0][0] else username
+
+    # 入库（含多媒体字段）
+    from backend.config import BASE_DIR
+    saved_questions = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for q_data in questions[:req.count]:
+        q_type = q_data.get("type", req.question_type)
+        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
+        svg_code = q_data.get("svg_code") or ""
+        has_svg = 1 if svg_code.strip() else 0
+        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
+
+        qid = execute_insert(
+            """INSERT INTO question_bank
+               (type, question_text, options, correct_answer, explanation,
+                knowledge_points, subject, difficulty, creator_username, creator_name,
+                source, status, created_at, updated_at,
+                svg_content, has_svg, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai', 'active', ?, ?, ?, ?, ?)""",
+            (
+                q_type,
+                q_data.get("question", ""),
+                options_str,
+                q_data.get("answer", ""),
+                q_data.get("explanation", ""),
+                q_data.get("knowledge_point", req.knowledge_points),
+                req.subject,
+                q_data.get("difficulty", req.difficulty),
+                username,
+                creator_name,
+                now,
+                now,
+                svg_code,
+                has_svg,
+                media_placeholders,
+            ),
+        )
+
+        # ── 自动配图（通义万相） ──
+        placeholders = q_data.get("media_placeholders") or []
+        media_files = []
+        if get_config_value("IMAGE_GEN_ENABLED", True):
+            from backend.api.image_gen_service import generate_and_save_image
+            from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+
+            media_dir = BASE_DIR / "question_media" / str(qid)
+
+            if placeholders:
+                # 策略 A：AI 指定了占位符 → 按描述逐一生图
+                for ph in placeholders:
+                    ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+                        subject=req.subject,
+                        purpose=ph.get("purpose", "示意图"),
+                        description=ph["description"],
+                    )
+                    local_path = await generate_and_save_image(ph_prompt, media_dir)
+
+                    if local_path:
+                        from pathlib import Path as PPath
+                        ph["status"] = "generated"
+                        media_files.append({
+                            "key": ph["key"],
+                            "type": "image",
+                            "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
+                            "alt": ph["description"],
+                            "created_at": now,
+                        })
+                    else:
+                        ph["status"] = "failed"
+                        logger.warning(f"试题 {qid} 占位符 {ph['key']} 生图失败")
+
+            elif not svg_code.strip():
+                # 策略 B：既无 SVG 又无占位符 → 根据题目内容自动补一张插图
+                q_text = (q_data.get("question", "") or "")[:300]
+                if len(q_text) > 20:
+                    fallback_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+                        subject=req.subject,
+                        purpose="示意图",
+                        description=f"与「{q_text}」相关的教学插图，适合高中{req.subject}课堂展示",
+                    )
+                    local_path = await generate_and_save_image(fallback_prompt, media_dir)
+                    if local_path:
+                        from pathlib import Path as PPath
+                        media_files.append({
+                            "key": "auto",
+                            "type": "image",
+                            "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
+                            "alt": q_text[:100],
+                            "created_at": now,
+                        })
+
+            # 更新 media_files 到数据库
+            if media_files:
+                execute_update(
+                    "UPDATE question_bank SET media_files=? WHERE id=?",
+                    (json.dumps(media_files, ensure_ascii=False), qid)
+                )
+
+        saved_questions.append({
+            "id": qid,
+            "type": q_type,
+            "question_text": q_data.get("question", ""),
+            "options": q_data.get("options", {}),
+            "correct_answer": q_data.get("answer", ""),
+            "explanation": q_data.get("explanation", ""),
+            "knowledge_points": q_data.get("knowledge_point", req.knowledge_points),
+            "difficulty": q_data.get("difficulty", req.difficulty),
+            "has_svg": has_svg,
+            "svg_content": svg_code if has_svg else None,
+            "media_placeholders": placeholders,
+            "media_files": media_files,
+        })
+
+    return {
+        "message": f"成功生成 {len(saved_questions)} 道试题",
+        "questions": saved_questions,
+        "total": len(saved_questions),
+    }
+
+
+def _parse_ai_response_with_media(text: str) -> list[dict[str, Any]]:
+    """解析 AI 返回的 JSON 试题列表（含 svg_code / media_placeholders）"""
+    questions = _parse_ai_response(text)
+    # svg_code 和 media_placeholders 已在 JSON 中，原样保留
+    return questions
+
+
+@router.post("/{question_id}/generate-svg", summary="为指定试题生成/重新生成SVG配图")
+async def generate_svg_for_question(question_id: int, request: Request):
+    """为已有试题单独生成或重新生成SVG配图"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置")
+
+    from backend.prompts.chat import SVG_GENERATE_PROMPT
+    prompt = SVG_GENERATE_PROMPT.format(
+        description=row["question_text"],
+        subject=row["subject"],
+    )
+
+    try:
+        result = await _call_dashscope_agent(prompt, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 生成 SVG 失败: {str(e)}")
+
+    svg_code = _extract_svg_code(result)
+    if not svg_code:
+        raise HTTPException(status_code=502, detail="AI 未能生成有效的 SVG 代码")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update(
+        "UPDATE question_bank SET svg_content=?, has_svg=1, updated_at=? WHERE id=?",
+        (svg_code, now, question_id),
+    )
+
+    return {"message": "SVG 配图已生成", "svg_code": svg_code}
+
+
+def _extract_svg_code(text: str) -> str:
+    """从 AI 返回文本中提取标准 SVG 代码，并进行安全检查"""
+    import re
+    # 提取 <svg>...</svg>
+    match = re.search(r'<svg[\s\S]*?</svg>', text, re.IGNORECASE)
+    if match:
+        svg = match.group()
+        # 安全过滤
+        svg = re.sub(r'<script[\s\S]*?</script>', '', svg, flags=re.IGNORECASE)
+        svg = re.sub(r'\bon\w+\s*=\s*["\'][\s\S]*?["\']', '', svg)
+        svg = re.sub(r'href\s*=\s*["\']\s*javascript:[\s\S]*?["\']', '', svg, flags=re.IGNORECASE)
+        return svg
+    return ""
+
+
+@router.post("/{question_id}/generate-media/{placeholder_key}", summary="为占位符调用AI生图")
+async def generate_media_for_placeholder(
+    question_id: int,
+    placeholder_key: str,
+    request: Request,
+):
+    """为指定占位符调用通义万相生成图片"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+
+    # 查找占位符
+    placeholders = json.loads(row["media_placeholders"] or "[]")
+    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="占位符不存在")
+
+    # 构建生图 prompt
+    from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+    prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+        subject=row["subject"],
+        purpose=target.get("purpose", "示意图"),
+        description=target["description"],
+    )
+
+    # 调用生图
+    from backend.api.image_gen_service import generate_and_save_image
+    from backend.config import BASE_DIR
+    from pathlib import Path
+
+    media_dir = BASE_DIR / "question_media" / str(question_id)
+    local_path = await generate_and_save_image(prompt, media_dir)
+
+    if not local_path:
+        raise HTTPException(status_code=502, detail="AI 生图失败，请检查 API Key 或稍后重试")
+
+    # 更新占位符状态和 media_files
+    target["status"] = "generated"
+    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
+
+    media_files = json.loads(row["media_files"] or "[]")
+    file_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
+    if file_entry:
+        file_entry["url"] = relative_url
+        file_entry["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        media_files.append({
+            "key": placeholder_key,
+            "type": "image",
+            "url": relative_url,
+            "alt": target["description"],
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update(
+        "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
+        (json.dumps(placeholders, ensure_ascii=False),
+         json.dumps(media_files, ensure_ascii=False),
+         now, question_id)
+    )
+
+    return {"message": "图片已生成", "url": relative_url, "placeholder_key": placeholder_key}
+
+
+@router.post("/{question_id}/upload-media/{placeholder_key}", summary="上传图片替换占位符")
+async def upload_media_for_placeholder(
+    question_id: int,
+    placeholder_key: str,
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """上传图片替换指定占位符"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+
+    # 校验文件类型
+    import os
+    _, ext = os.path.splitext((file.filename or "").lower())
+    allowed = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
+
+    content = await file.read()
+    max_size = 5 * 1024 * 1024
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="图片大小超过 5MB 限制")
+
+    # 保存文件
+    from backend.config import BASE_DIR
+    from pathlib import Path
+    import uuid
+
+    media_dir = BASE_DIR / "question_media" / str(question_id)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    file_id = uuid.uuid4().hex
+    save_path = media_dir / f"{file_id}{ext}"
+    save_path.write_bytes(content)
+
+    # 查找占位符
+    placeholders = json.loads(row["media_placeholders"] or "[]")
+    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    if target:
+        target["status"] = "uploaded"
+
+    relative_url = f"/api/files/question_media/{question_id}/{file_id}{ext}"
+    media_files = json.loads(row["media_files"] or "[]")
+    file_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
+    if file_entry:
+        file_entry["url"] = relative_url
+        file_entry["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        media_files.append({
+            "key": placeholder_key,
+            "type": "image",
+            "url": relative_url,
+            "alt": target["description"] if target else file.filename,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update(
+        "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
+        (json.dumps(placeholders, ensure_ascii=False),
+         json.dumps(media_files, ensure_ascii=False),
+         now, question_id)
+    )
+
+    return {"message": "图片上传成功", "url": relative_url, "placeholder_key": placeholder_key}
+
+
+@router.delete("/{question_id}/media/{placeholder_key}", summary="删除配图/重置占位符")
+async def delete_media_for_placeholder(
+    question_id: int,
+    placeholder_key: str,
+    request: Request,
+):
+    """删除指定占位符的配图，重置为未配图状态"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+
+    placeholders = json.loads(row["media_placeholders"] or "[]")
+    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    if target:
+        target["status"] = "pending"
+
+    media_files = json.loads(row["media_files"] or "[]")
+    media_files = [f for f in media_files if f["key"] != placeholder_key]
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update(
+        "UPDATE question_bank SET media_placeholders=?, media_files=?, updated_at=? WHERE id=?",
+        (json.dumps(placeholders, ensure_ascii=False),
+         json.dumps(media_files, ensure_ascii=False),
+         now, question_id)
+    )
+
+    return {"message": "配图已删除", "placeholder_key": placeholder_key}

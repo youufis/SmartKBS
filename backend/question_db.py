@@ -46,6 +46,16 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 多媒体/公式配图字段迁移 ──
+            for col in ['svg_content', 'has_svg', 'media_placeholders', 'media_files']:
+                try:
+                    if col == 'has_svg':
+                        c.execute(f"ALTER TABLE question_bank ADD COLUMN {col} INTEGER DEFAULT 0")
+                    else:
+                        c.execute(f"ALTER TABLE question_bank ADD COLUMN {col} TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+
             # ── 考试表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS exams (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

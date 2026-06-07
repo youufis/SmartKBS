@@ -8,6 +8,8 @@ import {
   CloseCircleOutlined, ClockCircleOutlined, SendOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 import * as examsApi from '../api/exams'
 import type { ExamInfo, ExamQuestion } from '../types'
 
@@ -182,16 +184,18 @@ const ExamTakePage: React.FC = () => {
         style={{ marginBottom: 16 }}
       >
         <div style={{ fontSize: 15, lineHeight: 1.8, marginBottom: 16 }}>
-          {q.question_text}
+          <FormulaRenderer content={q.question_text} />
         </div>
+
+        <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
 
         {q.type === 'single' && q.options && (
           <Radio.Group value={answer} onChange={(e) => setAnswer(qId, e.target.value)}>
             <Space direction="vertical" style={{ width: '100%' }}>
               {Object.entries(q.options).map(([key, val]) => (
                 <Radio key={key} value={key}
-                  style={{ padding: '8px 12px', borderRadius: 6, border: answer === key ? '1px solid #1677ff' : '1px solid #eee', width: '100%', margin: 0 }}>
-                  <strong>{key}.</strong> {val as string}
+                  style={{ padding: '8px 12px', borderRadius: 6, border: answer === key ? '1px solid #1677ff' : '1px solid #eee', width: '100%', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  <strong>{key}.</strong> <FormulaRenderer content={val as string} inline />
                 </Radio>
               ))}
             </Space>
@@ -204,8 +208,8 @@ const ExamTakePage: React.FC = () => {
               {Object.entries(q.options).map(([key, val]) => (
                 <Checkbox key={key} value={key}
                   onChange={(e) => handleMultipleChange(qId, key, e.target.checked)}
-                  style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #eee', width: '100%', margin: 0 }}>
-                  <strong>{key}.</strong> {val as string}
+                  style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #eee', width: '100%', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  <strong>{key}.</strong> <FormulaRenderer content={val as string} inline />
                 </Checkbox>
               ))}
             </Space>

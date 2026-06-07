@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 import {
   Card, Tabs, Button, Space, Typography, List, Tag, Modal,
-  Form, Input, Select, message, Empty, Spin, Radio, Result,
+  Form, Input, InputNumber, Select, message, Empty, Spin, Radio, Result,
   Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Divider, Pagination,
 } from 'antd'
 import {
@@ -176,6 +178,7 @@ const InteractionPage: React.FC = () => {
     setAiQuizLoading(true)
     setAiQuizResult(null)
     try {
+      console.log('生成测验参数:', values)
       const { data } = await apiClient.post('/api/interaction/quizzes/ai-generate', values)
       setAiQuizResult(data)
       if (data.questions?.length > 0) {
@@ -455,7 +458,7 @@ const InteractionPage: React.FC = () => {
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setQuizEditorOpen(true)}>
                 创建测验
               </Button>
-              <Button icon={<RobotOutlined />} onClick={() => setAiQuizModal(true)}>
+              <Button icon={<RobotOutlined />} onClick={() => { setAiQuizModal(true); setAiQuizResult(null); aiQuizForm.resetFields(); }}>
                 AI 生成
               </Button>
             </Space>
@@ -557,7 +560,7 @@ const InteractionPage: React.FC = () => {
                     <Card size="small" style={{ marginBottom: 8 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div style={{ flex: 1 }}>
-                          <Text strong>{poll.question}</Text>
+                          <Text strong><FormulaRenderer content={poll.question} /></Text>
                           <div style={{ marginTop: 4 }}>
                             <Tag color={isMultiple ? 'purple' : 'blue'}>
                               {isMultiple ? '多选' : '单选'}
@@ -755,18 +758,20 @@ const InteractionPage: React.FC = () => {
         width={640}>
         {takingQuiz?.questions?.map((q: any, i: number) => (
           <div key={i} style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
-            <Space style={{ marginBottom: 8 }}>
-              <Text strong>{i + 1}. {q.question || q.question_text}</Text>
-              {q.type === 'single' && <Tag color="blue" style={{ fontSize: 11 }}>单选题</Tag>}
-              {q.type === 'multiple' && <Tag color="purple" style={{ fontSize: 11 }}>多选题</Tag>}
-              {q.type === 'true_false' && <Tag color="orange" style={{ fontSize: 11 }}>判断题</Tag>}
-            </Space>
+            <div style={{ marginBottom: 8 }}>
+              <Text strong>{i + 1}. </Text>
+              <FormulaRenderer content={q.question || q.question_text} />
+              {q.type === 'single' && <Tag color="blue" style={{ fontSize: 11, marginLeft: 8 }}>单选题</Tag>}
+              {q.type === 'multiple' && <Tag color="purple" style={{ fontSize: 11, marginLeft: 8 }}>多选题</Tag>}
+              {q.type === 'true_false' && <Tag color="orange" style={{ fontSize: 11, marginLeft: 8 }}>判断题</Tag>}
+            </div>
+            <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="normal" />
             <div style={{ marginTop: 8, paddingLeft: 8 }}>
               {q.type === 'single' && q.options ? (
                 <Radio.Group onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}>
                   <Space direction="vertical">
                     {q.options.map((opt: string, j: number) => (
-                      <Radio key={j} value={opt.charAt(0)} style={{ lineHeight: 2 }}>{opt}</Radio>
+                      <Radio key={j} value={opt.charAt(0)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><FormulaRenderer content={opt} inline /></Radio>
                     ))}
                   </Space>
                 </Radio.Group>
@@ -774,7 +779,7 @@ const InteractionPage: React.FC = () => {
                 <Checkbox.Group onChange={(vals) => setQuizAnswers({ ...quizAnswers, [i]: (vals as string[]).sort().join(',') })}>
                   <Space direction="vertical">
                     {q.options.map((opt: string, j: number) => (
-                      <Checkbox key={j} value={opt.charAt(0)} style={{ lineHeight: 2 }}>{opt}</Checkbox>
+                      <Checkbox key={j} value={opt.charAt(0)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><FormulaRenderer content={opt} inline /></Checkbox>
                     ))}
                   </Space>
                 </Checkbox.Group>
@@ -877,7 +882,13 @@ const InteractionPage: React.FC = () => {
                   pagination={false}
                   columns={[
                     { title: '#', dataIndex: 'index', render: (i: number) => i + 1, width: 50 },
-                    { title: '题目', dataIndex: 'question', ellipsis: true },
+                    { title: '题目', dataIndex: 'question', ellipsis: true,
+                      render: (t: string, r: any) => (
+                        <div>
+                          <FormulaRenderer content={t} />
+                          <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={r.media_files} size="compact" />
+                        </div>
+                      ) },
                     { title: '你的答案', dataIndex: 'user_answer', width: 120,
                       render: (v: string, r: any) => (
                         <Text type={r.is_correct ? 'success' : 'danger'}>{v || '（未答）'}</Text>
@@ -910,7 +921,24 @@ const InteractionPage: React.FC = () => {
                   pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 题`, pageSizeOptions: ['5', '10', '20'] }}
                   columns={[
                     { title: '题号', dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
-                    { title: '题目', dataIndex: 'question', ellipsis: true },
+                    { title: '题目', key: 'question', width: 400,
+                      render: (_: any, r: any) => (
+                        <div>
+                          <FormulaRenderer content={r.question} />
+                          <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={(r as any).media_files} size="normal" />
+                          {r.options?.length > 0 && (
+                            <div style={{ marginTop: 4, paddingLeft: 8 }}>
+                              {r.options.map((opt: string, j: number) => (
+                                <div key={j} style={{ fontSize: 12, color: '#555', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                  <FormulaRenderer content={opt} inline />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <Tag color="blue" style={{ marginTop: 4 }}>答案：{r.correct_answer}</Tag>
+                        </div>
+                      ),
+                    },
                     { title: '正确率', dataIndex: 'correct_rate', width: 100,
                       render: (r: number) => (
                         <Text strong style={{ color: r >= 60 ? '#52c41a' : '#ff4d4f' }}>{r}%</Text>
@@ -953,10 +981,8 @@ const InteractionPage: React.FC = () => {
               <Select.Option value="mixed">混合</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="count" label="题目数量" initialValue={5}>
-            <Select>
-              {[3, 5, 10].map(n => <Select.Option key={n} value={n}>{n} 题</Select.Option>)}
-            </Select>
+          <Form.Item name="count" label="题目数量" initialValue={1}>
+            <InputNumber min={1} max={50} style={{ width: 120 }} /> 题
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={aiQuizLoading} icon={<RobotOutlined />} block>
             AI 生成
@@ -970,7 +996,8 @@ const InteractionPage: React.FC = () => {
                 padding: 10, marginTop: 8, borderRadius: 6,
                 background: '#fafafa', border: '1px solid #f0f0f0',
               }}>
-                <Text strong>{i + 1}. {q.question}</Text>
+                <Text strong>{i + 1}. </Text><FormulaRenderer content={q.question} />
+                <MediaDisplay svgContent={q.svg_content || q.svg_code} hasSvg={q.has_svg || (q.svg_code ? 1 : 0)} mediaFiles={(q as any).media_files} size="normal" />
                 {q.options && (
                   <div style={{ marginTop: 4, paddingLeft: 16 }}>
                     {q.options.map((opt: string, j: number) => (
@@ -983,7 +1010,7 @@ const InteractionPage: React.FC = () => {
                 </div>
                 {q.explanation && (
                   <div style={{ marginTop: 2, fontSize: 12, color: '#888', paddingLeft: 4 }}>
-                    💡 {q.explanation}
+                    💡 <FormulaRenderer content={q.explanation} />
                   </div>
                 )}
               </div>

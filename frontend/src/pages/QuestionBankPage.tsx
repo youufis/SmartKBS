@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
-  InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload,
+  InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Divider, Empty, Tabs, Upload, Image,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
@@ -10,7 +10,11 @@ import {
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import type { QuestionInfo } from '../types'
+import type { QuestionInfo, MediaPlaceholder } from '../types'
+import FormulaRenderer from '../components/FormulaRenderer'
+import SVGViewer from '../components/SVGViewer'
+import MediaDisplay from '../components/MediaDisplay'
+import PlaceholderManager from '../components/PlaceholderManager'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -88,6 +92,8 @@ const QuestionBankPage: React.FC = () => {
 
   // ── 编辑弹窗 ──
   const [editModal, setEditModal] = useState(false)
+  const [mediaModal, setMediaModal] = useState(false)
+  const [mediaQuestion, setMediaQuestion] = useState<QuestionInfo | null>(null)
   const [editingQuestion, setEditingQuestion] = useState<QuestionInfo | null>(null)
   const [editForm] = Form.useForm()
   const [saving, setSaving] = useState(false)
@@ -128,7 +134,7 @@ const QuestionBankPage: React.FC = () => {
       await new Promise(r => setTimeout(r, 100))
       setGenProgress({ step: 2, text: `AI 正在生成 ${totalCount} 道试题...`, count: 0, total: totalCount })
 
-      const res = await questionsApi.generateQuestions({
+      const res = await questionsApi.generateQuestionsWithMedia({
         subject: values.subject,
         knowledge_points: values.knowledge_points,
         question_type: values.question_type,
@@ -215,6 +221,74 @@ const QuestionBankPage: React.FC = () => {
         }
       },
     })
+  }
+
+  // ── 配图管理 ──
+  const [mediaGenerating, setMediaGenerating] = useState(false)
+
+  const handleManageMedia = (q: QuestionInfo) => {
+    setMediaQuestion(q)
+    setMediaModal(true)
+  }
+
+  const handleRegenerateSVG = async () => {
+    if (!mediaQuestion) return
+    setMediaGenerating(true)
+    try {
+      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-svg`)
+      message.success('SVG 已重新生成')
+      loadQuestions()
+      // 更新弹窗中的 mediaQuestion
+      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'SVG 生成失败')
+    } finally {
+      setMediaGenerating(false)
+    }
+  }
+
+  const handleGenerateMedia = async (key: string) => {
+    if (!mediaQuestion) return
+    setMediaGenerating(true)
+    try {
+      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-media/${key}`)
+      message.success('图片已生成')
+      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '图片生成失败')
+    } finally {
+      setMediaGenerating(false)
+    }
+  }
+
+  const handleUploadMedia = async (key: string, file: File) => {
+    if (!mediaQuestion) return
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      await apiClient.post(`/api/questions/${mediaQuestion.id}/upload-media/${key}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      message.success('图片已上传')
+      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '上传失败')
+    }
+  }
+
+  const handleDeleteMedia = async (key: string) => {
+    if (!mediaQuestion) return
+    try {
+      await apiClient.delete(`/api/questions/${mediaQuestion.id}/media/${key}`)
+      message.success('配图已删除')
+      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '删除失败')
+    }
   }
 
   // ── 编辑题目 ──
@@ -334,6 +408,43 @@ const QuestionBankPage: React.FC = () => {
       ),
     },
     {
+      title: '配图',
+      dataIndex: 'has_svg',
+      key: 'has_svg',
+      width: 80,
+      render: (has_svg: number, record: QuestionInfo) => {
+        // 解析 media_files（可能是 JSON 字符串或数组）
+        let mf: any[] = []
+        if (Array.isArray(record.media_files)) {
+          mf = record.media_files
+        } else if (typeof record.media_files === 'string') {
+          try { mf = JSON.parse(record.media_files) } catch { /* ignore */ }
+        }
+        // 有 SVG 配图 → 显示 SVG 缩略图
+        if (has_svg && record.svg_content) {
+          return <SVGViewer svgCode={record.svg_content} description="预览" thumbHeight={50} />
+        }
+        // 有万相/上传的图片 → 显示第一张缩略图
+        if (mf.length > 0 && mf[0].url) {
+          return (
+            <div style={{ width: 60, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              <Image src={mf[0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                preview={{ mask: null }} />
+            </div>
+          )
+        }
+        // 有占位符未生成 → 显示数量标记
+        if ((record.media_placeholders?.length || 0) > 0) {
+          return (
+            <Tooltip title={`${record.media_placeholders?.length} 个占位符`}>
+              <Tag color="orange">📷 {record.media_placeholders?.length}</Tag>
+            </Tooltip>
+          )
+        }
+        return <span style={{ color: '#ddd' }}>—</span>
+      },
+    },
+    {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
@@ -353,6 +464,10 @@ const QuestionBankPage: React.FC = () => {
             <Tooltip title="编辑">
               <Button type="link" size="small" icon={<EditOutlined />}
                 onClick={() => handleEdit(record)} />
+            </Tooltip>
+            <Tooltip title="配图管理">
+              <Button type="link" size="small" icon={<span>🎨</span>}
+                onClick={() => handleManageMedia(record)} />
             </Tooltip>
             <Popconfirm
               title="确认删除？"
@@ -512,20 +627,24 @@ const QuestionBankPage: React.FC = () => {
                               style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
                               title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
                             >
-                              <Typography.Text style={{ fontSize: 14, fontWeight: 500 }}>
-                                {q.question_text}
-                              </Typography.Text>
+                              <FormulaRenderer content={q.question_text} />
                               {q.options && Object.entries(q.options).map(([k, v]) => (
                                 <div key={k} style={{ margin: '4px 0 0 16px', fontSize: 13 }}>
-                                  <Tag>{k}</Tag> {v as string}
+                                  <Tag>{k}</Tag> <FormulaRenderer content={v as string} inline />
                                 </div>
                               ))}
+                              {q.has_svg === 1 && q.svg_content && (
+                                <div style={{ margin: '8px 0' }}>
+                                  <SVGViewer svgCode={q.svg_content} description="试题配图" expandable={false} />
+                                </div>
+                              )}
+                              <MediaDisplay svgContent={null} hasSvg={0} mediaFiles={(q as any).media_files} />
                               <div style={{ marginTop: 8, fontSize: 13 }}>
                                 <Tag color="green">答案：{q.correct_answer}</Tag>
                                 {q.explanation && (
-                                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                                    📖 {q.explanation}
-                                  </Typography.Text>
+                                  <div style={{ marginTop: 4 }}>
+                                    <FormulaRenderer content={q.explanation} />
+                                  </div>
                                 )}
                               </div>
                             </Card>
@@ -640,20 +759,18 @@ const QuestionBankPage: React.FC = () => {
                               style={{ marginBottom: 8, background: '#f6ffed', border: '1px solid #b7eb8f' }}
                               title={<span style={{ fontSize: 14 }}>#{idx + 1} {TYPE_LABELS[q.type] || q.type}</span>}
                             >
-                              <Typography.Text style={{ fontSize: 14, fontWeight: 500 }}>
-                                {q.question_text}
-                              </Typography.Text>
+                              <FormulaRenderer content={q.question_text} />
                               {q.options && Object.entries(q.options).map(([k, v]) => (
                                 <div key={k} style={{ margin: '4px 0 0 16px', fontSize: 13 }}>
-                                  <Tag>{k}</Tag> {v as string}
+                                  <Tag>{k}</Tag> <FormulaRenderer content={v as string} inline />
                                 </div>
                               ))}
                               <div style={{ marginTop: 8, fontSize: 13 }}>
                                 <Tag color="green">答案：{q.correct_answer}</Tag>
                                 {q.explanation && (
-                                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                                    📖 {q.explanation}
-                                  </Typography.Text>
+                                  <div style={{ marginTop: 4 }}>
+                                    <FormulaRenderer content={q.explanation} />
+                                  </div>
                                 )}
                               </div>
                             </Card>
@@ -744,10 +861,13 @@ const QuestionBankPage: React.FC = () => {
           expandable={{
             expandedRowRender: (record) => (
               <div style={{ padding: '8px 0', maxWidth: 800 }}>
-                <Typography.Text strong style={{ fontSize: 14 }}>{record.question_text}</Typography.Text>
+                <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>
+                  <FormulaRenderer content={record.question_text} />
+                </div>
+                <MediaDisplay svgContent={record.svg_content} hasSvg={record.has_svg} mediaFiles={record.media_files} size="normal" />
                 {record.type !== 'short' && record.options && Object.entries(record.options).map(([k, v]) => (
                   <div key={k} style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
-                    <Tag>{k}</Tag> {v as string}
+                    <Tag>{k}</Tag> <FormulaRenderer content={v as string} inline />
                   </div>
                 ))}
                 {record.type === 'short' && (
@@ -758,9 +878,9 @@ const QuestionBankPage: React.FC = () => {
                 <div style={{ marginTop: 8 }}>
                   <Tag color="green">正确答案：{record.correct_answer}</Tag>
                   {record.explanation && (
-                    <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                      📖 解析：{record.explanation}
-                    </Typography.Text>
+                    <div style={{ marginTop: 4 }}>
+                      <FormulaRenderer content={record.explanation} />
+                    </div>
                   )}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#aaa' }}>
@@ -835,6 +955,30 @@ const QuestionBankPage: React.FC = () => {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* ── 配图管理弹窗 ── */}
+      <Modal
+        title={`配图管理 #${mediaQuestion?.id}`}
+        open={mediaModal}
+        onCancel={() => setMediaModal(false)}
+        footer={<Button onClick={() => setMediaModal(false)}>关闭</Button>}
+        width={700}
+      >
+        {mediaQuestion && (
+          <PlaceholderManager
+            questionId={mediaQuestion.id}
+            svgContent={mediaQuestion.svg_content}
+            hasSvg={mediaQuestion.has_svg}
+            placeholders={mediaQuestion.media_placeholders}
+            mediaFiles={mediaQuestion.media_files}
+            generating={mediaGenerating}
+            onRegenerateSVG={handleRegenerateSVG}
+            onGenerateMedia={handleGenerateMedia}
+            onUploadMedia={handleUploadMedia}
+            onDeleteMedia={handleDeleteMedia}
+          />
+        )}
       </Modal>
 
       {/* ── 生成进度弹窗（已改为内联显示） ── */}

@@ -10,7 +10,15 @@ import type {
 
 export async function generateQuestions(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
   const { data } = await apiClient.post('/api/questions/generate', req, {
-    timeout: 600000, // AI 生成较慢，设置 10 分钟超时
+    timeout: 600000,
+  });
+  return data;
+}
+
+/** AI 生成试题（含SVG配图+公式+自动生图） */
+export async function generateQuestionsWithMedia(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
+  const { data } = await apiClient.post('/api/questions/generate-with-media', req, {
+    timeout: 600000,
   });
   return data;
 }

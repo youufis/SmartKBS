@@ -1,3 +1,6 @@
+/* KaTeX 公式渲染样式 */
+@import "katex/dist/katex.min.css";
+
 /* SmartKB 全局样式 */
 * {
   margin: 0;
