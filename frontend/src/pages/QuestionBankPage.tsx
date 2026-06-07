@@ -254,6 +254,19 @@ const QuestionBankPage: React.FC = () => {
     }
   }
 
+  const handleDeleteSVG = async () => {
+    if (!mediaQuestion) return
+    try {
+      await apiClient.delete(`/api/questions/${mediaQuestion.id}/svg`)
+      message.success('SVG 配图已删除')
+      loadQuestions()
+      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '删除失败')
+    }
+  }
+
   const handleGenerateMedia = async (key: string) => {
     if (!mediaQuestion) return
     setMediaGenerating(true)
@@ -1017,6 +1030,7 @@ const QuestionBankPage: React.FC = () => {
             mediaFiles={mediaQuestion.media_files}
             generating={mediaGenerating}
             onRegenerateSVG={handleRegenerateSVG}
+            onDeleteSVG={handleDeleteSVG}
             onGenerateMedia={handleGenerateMedia}
             onUploadMedia={handleUploadMedia}
             onDeleteMedia={handleDeleteMedia}
