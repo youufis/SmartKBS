@@ -1318,6 +1318,27 @@ async def upload_media_for_placeholder(
     return {"message": "图片上传成功", "url": relative_url, "placeholder_key": placeholder_key}
 
 
+@router.delete("/{question_id}/svg", summary="删除 SVG 配图")
+async def delete_svg_for_question(question_id: int, request: Request):
+    """删除指定试题的 SVG 配图"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update(
+        "UPDATE question_bank SET svg_content='', has_svg=0, updated_at=? WHERE id=?",
+        (now, question_id),
+    )
+
+    return {"message": "SVG 配图已删除", "question_id": question_id}
+
+
 @router.delete("/{question_id}/media/{placeholder_key}", summary="删除配图/重置占位符")
 async def delete_media_for_placeholder(
     question_id: int,

@@ -25,6 +25,8 @@ interface PlaceholderManagerProps {
   generating?: boolean
   /** 重新生成 SVG 回调 */
   onRegenerateSVG?: () => Promise<void>
+  /** 删除 SVG 配图 */
+  onDeleteSVG?: () => Promise<void>
   /** 为某个占位符生成图片 */
   onGenerateMedia?: (key: string) => Promise<void>
   /** 上传图片替换占位符 */
@@ -41,6 +43,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
   mediaFiles = [],
   generating = false,
   onRegenerateSVG,
+  onDeleteSVG,
   onGenerateMedia,
   onUploadMedia,
   onDeleteMedia,
@@ -72,11 +75,18 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
           size="small"
           title="🖼️ SVG 配图"
           extra={
-            onRegenerateSVG && (
-              <Button size="small" icon={<ReloadOutlined />} loading={generating} onClick={onRegenerateSVG}>
-                重新生成
-              </Button>
-            )
+            <Space>
+              {onDeleteSVG && (
+                <Button size="small" danger icon={<DeleteOutlined />} onClick={onDeleteSVG}>
+                  删除
+                </Button>
+              )}
+              {onRegenerateSVG && (
+                <Button size="small" icon={<ReloadOutlined />} loading={generating} onClick={onRegenerateSVG}>
+                  重新生成
+                </Button>
+              )}
+            </Space>
           }
           style={{ marginBottom: 12 }}
         >
