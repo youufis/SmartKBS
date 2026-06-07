@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "4.3.0",
+  "version": "4.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,11 +13,14 @@
     "@ant-design/icons": "^6.2.3",
     "antd": "^6.4.3",
     "axios": "^1.16.1",
+    "katex": "^0.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.15.1",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

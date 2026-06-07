@@ -18,6 +18,8 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { ExamInfo, ExamAttempt } from '../types'
 import { useNavigate } from 'react-router-dom'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -1363,12 +1365,12 @@ const ExamPage: React.FC = () => {
             )}
             {explainData.explanations.map((exp: any, idx: number) => (
               <Card key={idx} size="small" style={{ marginBottom: 12 }}
-                title={<Space><Tag color="error">错题 {idx + 1}</Tag>{exp.question_text}</Space>}>
+                title={<Space><Tag color="error">错题 {idx + 1}</Tag><FormulaRenderer content={exp.question_text} /></Space>}>
                 {exp.error ? (
                   <Typography.Text type="danger">{exp.error}</Typography.Text>
                 ) : (
                   <div className="markdown-content">
-                    <div dangerouslySetInnerHTML={{ __html: exp.explanation.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
+                    <FormulaRenderer content={exp.explanation} />
                   </div>
                 )}
               </Card>
@@ -1407,7 +1409,8 @@ const ExamPage: React.FC = () => {
                   <Card key={q.id} size="small" style={{ marginBottom: 8 }}
                     title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
                       {q.type === 'single' ? '单选' : q.type === 'multiple' ? '多选' : q.type === 'true_false' ? '判断' : '简答'} | 第{idx + 1}题</Space>}>
-                    <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8 }}>{q.question_text}</Typography.Paragraph>
+                    <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8 }}><FormulaRenderer content={q.question_text} /></Typography.Paragraph>
+                    <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
                     {/* 选项展示 */}
                     {optionLabels.length > 0 && (
                       <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
@@ -1419,9 +1422,10 @@ const ExamPage: React.FC = () => {
                               padding: '4px 8px', marginBottom: 2, borderRadius: 4,
                               background: isSelected && isCorrectOpt ? '#f6ffed' : isSelected ? '#fff2f0' : isCorrectOpt ? '#e6f7ff' : 'transparent',
                               border: isSelected ? '1px solid ' + (isCorrectOpt ? '#b7eb8f' : '#ffccc7') : isCorrectOpt ? '1px solid #91d5ff' : '1px solid transparent',
+                              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                             }}>
                               <Typography.Text style={{ fontSize: 13 }}>
-                                <strong>{key}.</strong> {options[key]}
+                                <strong>{key}.</strong> <FormulaRenderer content={options[key]} inline />
                                 {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 你的答案' : '✗ 你的答案'}</Tag>}
                                 {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>正确答案</Tag>}
                               </Typography.Text>
@@ -1437,7 +1441,7 @@ const ExamPage: React.FC = () => {
                         <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
                       </Typography.Text>
                       {q.explanation && (
-                        <Typography.Text><strong>解析：</strong>{q.explanation}</Typography.Text>
+                        <Typography.Text><strong>解析：</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
                       )}
                       {isAiGraded && ans.ai_comment && (
                         <Card size="small" style={{ background: '#f6ffed', marginTop: 4 }}>
@@ -1505,7 +1509,8 @@ const StudentExamDetail: React.FC<{ examId: number; attemptId: number; studentNa
           <Card key={q.id} size="small" style={{ marginBottom: 6 }}
             title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
               {q.type === 'single' ? '单选' : q.type === 'multiple' ? '多选' : q.type === 'true_false' ? '判断' : '简答'} | 第{idx + 1}题</Space>}>
-            <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>{q.question_text}</Typography.Paragraph>
+            <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}><FormulaRenderer content={q.question_text} /></Typography.Paragraph>
+            <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
             {/* 选项展示 */}
             {optionLabels.length > 0 && (
               <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
@@ -1517,9 +1522,10 @@ const StudentExamDetail: React.FC<{ examId: number; attemptId: number; studentNa
                       padding: '3px 8px', marginBottom: 2, borderRadius: 4, fontSize: 13,
                       background: isSelected && isCorrectOpt ? '#f6ffed' : isSelected ? '#fff2f0' : isCorrectOpt ? '#e6f7ff' : 'transparent',
                       border: isSelected ? '1px solid ' + (isCorrectOpt ? '#b7eb8f' : '#ffccc7') : isCorrectOpt ? '1px solid #91d5ff' : '1px solid transparent',
+                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                     }}>
                       <Typography.Text style={{ fontSize: 13 }}>
-                        <strong>{key}.</strong> {options[key]}
+                        <strong>{key}.</strong> <FormulaRenderer content={options[key]} inline />
                         {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 你的答案' : '✗ 你的答案'}</Tag>}
                         {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>正确答案</Tag>}
                       </Typography.Text>
@@ -1535,7 +1541,7 @@ const StudentExamDetail: React.FC<{ examId: number; attemptId: number; studentNa
                 <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
               </Typography.Text>
               {q.explanation && (
-                <Typography.Text style={{ fontSize: 13 }}><strong>解析：</strong>{q.explanation}</Typography.Text>
+                <Typography.Text style={{ fontSize: 13 }}><strong>解析：</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
               )}
               {isAiGraded && ans.ai_comment && (
                 <Typography.Text style={{ fontSize: 13 }}><strong>AI 评语：</strong>{ans.ai_comment}</Typography.Text>

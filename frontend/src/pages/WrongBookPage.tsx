@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select, Pagination, Divider, Input } from 'antd'
 import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -19,6 +19,11 @@ interface WrongQuestion {
   score: number
   max_score: number
   knowledge_points: string
+  /** SVG 配图 */
+  svg_content?: string
+  has_svg?: number
+  /** 万相/上传的图片 */
+  media_files?: any
 }
 
 interface ExamWrongGroup {
@@ -323,8 +328,15 @@ const WrongBookPage: React.FC = () => {
                       pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => '共 ' + t + ' 道错题', pageSizeOptions: ['5', '10', '20'] }}
                       columns={[
                         { title: '题型', dataIndex: 'question_type', width: 70, render: (t: string) => <Tag>{typeLabel[t] || t}</Tag> },
-                        { title: '题目', dataIndex: 'question_text', ellipsis: true },
-                        { title: '选项', key: 'options', width: 200, render: (_: any, r: WrongQuestion) => {
+                        { title: '题目', dataIndex: 'question_text', width: 300,
+                          render: (t: string) => <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><FormulaRenderer content={t} /></div> },
+                        { title: '配图', key: 'media', width: 100,
+                          render: (_: any, r: WrongQuestion) => (
+                            <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={r.media_files} size="compact" />
+                          ),
+                        },
+                        { title: '选项', key: 'options', width: 300,
+                          render: (_: any, r: WrongQuestion) => {
                           const opts = r.options || {}
                           return (
                             <Space direction="vertical" size={2} style={{ width: '100%' }}>
@@ -336,8 +348,8 @@ const WrongBookPage: React.FC = () => {
                                 else if (isStudent) color = '#ff4d4f'
                                 else if (isCorrect) color = '#52c41a'
                                 return (
-                                  <div key={k} style={{ color, fontSize: 12, lineHeight: 1.6, background: isStudent ? '#fff2f0' : 'transparent', padding: '1px 4px', borderRadius: 3, border: isCorrect ? '1px solid #b7eb8f' : 'none' }}>
-                                    <Text style={{ fontWeight: isStudent || isCorrect ? 600 : 400, color, fontSize: 12 }}>{k}. {v}</Text>
+                                  <div key={k} style={{ color, fontSize: 12, lineHeight: 1.8, background: isStudent ? '#fff2f0' : 'transparent', padding: '2px 6px', borderRadius: 3, border: isCorrect ? '1px solid #b7eb8f' : 'none', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                    <Text style={{ fontWeight: isStudent || isCorrect ? 600 : 400, color, fontSize: 12 }}>{k}. <FormulaRenderer content={v} inline /></Text>
                                     {isStudent && <Text style={{ fontSize: 10, color: '#ff4d4f', marginLeft: 4 }}>你的选择</Text>}
                                     {isCorrect && <Text style={{ fontSize: 10, color: '#52c41a', marginLeft: 4 }}>✓</Text>}
                                   </div>
@@ -345,16 +357,6 @@ const WrongBookPage: React.FC = () => {
                               })}
                             </Space>
                           )
-                        }},
-                        { title: '你的答案', dataIndex: 'student_answer', width: 100, render: (t: string, r: WrongQuestion) => {
-                          const opts = r.options || {}
-                          const display = opts[t] ? t + '. ' + opts[t] : (t || '未作答')
-                          return <Text type="danger" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
-                        }},
-                        { title: '正确答案', dataIndex: 'correct_answer', width: 100, render: (t: string, r: WrongQuestion) => {
-                          const opts = r.options || {}
-                          const display = opts[t] ? t + '. ' + opts[t] : t
-                          return <Text type="success" style={{ wordBreak: 'break-all', whiteSpace: 'normal', fontSize: 12 }}>{display}</Text>
                         }},
                         { title: '知识点', dataIndex: 'knowledge_points', width: 150, ellipsis: true },
                         { title: '得分', key: 'score', width: 80, render: (_: any, r: WrongQuestion) => <Text type="danger">{r.score} / {r.max_score}</Text> },
@@ -412,7 +414,7 @@ const WrongBookPage: React.FC = () => {
               </Space>
             )}
             <div className="markdown-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{planData.plan}</ReactMarkdown>
+              <FormulaRenderer content={planData.plan} />
             </div>
           </div>
         ) : null}
@@ -436,10 +438,11 @@ const WrongBookPage: React.FC = () => {
               <Card key={i} size="small" title={`第 ${i+1} 题 [${typeLabel[q.type] || q.type}]`}
                 style={{ marginBottom: 8, overflowX: 'auto' }}>
                 <div style={{ overflowX: 'auto' }}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{q.question || q.question_text}</ReactMarkdown>
+                  <FormulaRenderer content={q.question || q.question_text} />
                 </div>
+                <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} />
                 {q.options && Object.entries(q.options).map(([k, v]) => (
-                  <div key={k}><Text type="secondary">{k}. {v as string}</Text></div>
+                  <div key={k}><Text type="secondary">{k}. <FormulaRenderer content={v as string} inline /></Text></div>
                 ))}
                 <div style={{ marginTop: 4 }}><Tag color="blue">答案：{q.answer}</Tag></div>
               </Card>

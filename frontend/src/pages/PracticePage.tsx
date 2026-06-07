@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Layout, Card, Button, Input, Select, Tag, message, Spin,
+  Card, Button, Input, InputNumber, Select, Tag, message, Spin,
   Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination,
 } from 'antd'
 import {
-  RobotOutlined, ReloadOutlined, CheckCircleOutlined, CloseCircleOutlined,
+  RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, StopOutlined, DeleteOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -24,8 +24,8 @@ const typeLabel: Record<string, string> = {
 // 学生端
 // ════════════════════════════════════════
 const StudentView: React.FC = () => {
+  const [loading, setLoading] = useState(true)
   const [sessions, setSessions] = useState<any[]>([])
-  const [loading, setLoading] = useState(false)
   const [activeSession, setActiveSession] = useState<any>(null)
   const [questions, setQuestions] = useState<any[]>([])
   const [answers, setAnswers] = useState<Record<string, string>>({})
@@ -44,7 +44,13 @@ const StudentView: React.FC = () => {
     finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { loadSessions() }, [loadSessions])
+  // 初始加载：不在 effect 中同步调用 setLoading，直接从 true→false
+  useEffect(() => {
+    apiClient.get('/api/practice/my-sessions')
+      .then(({ data }) => setSessions(data.sessions || []))
+      .catch(() => message.error('加载练习列表失败'))
+      .finally(() => setLoading(false))
+  }, [])
 
   const startPractice = async (sid: number) => {
     try {
@@ -93,14 +99,15 @@ const StudentView: React.FC = () => {
             title={`第 ${i+1} 题`}
             extra={r.is_correct ? <Tag color="success">正确</Tag> : <Tag color="error">错误</Tag>}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.question_text}</ReactMarkdown>
+            <FormulaRenderer content={r.question_text} />
+            <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={(r as any).media_files} />
             <div style={{ marginTop: 8 }}>
               <Text>你的答案：<Text type={r.is_correct ? 'success' : 'danger'}>{r.student_answer || '（未作答）'}</Text></Text>
               {!r.is_correct && <div><Text type="secondary">正确答案：{r.correct_answer}</Text></div>}
             </div>
             {r.explanation && (
               <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
-                <Text type="secondary"><ReactMarkdown remarkPlugins={[remarkGfm]}>{r.explanation}</ReactMarkdown></Text>
+                <Text type="secondary"><FormulaRenderer content={r.explanation} /></Text>
               </div>
             )}
           </Card>
@@ -120,12 +127,13 @@ const StudentView: React.FC = () => {
         {questions.map((q, i) => (
           <Card key={q.id} size="small" title={`第 ${i+1} 题 [${typeLabel[q.type] || q.type}]`}
             style={{ marginBottom: 12 }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{q.question_text}</ReactMarkdown>
+            <FormulaRenderer content={q.question_text} />
+            <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} />
             {q.type === 'single' && q.options && (
               <Radio.Group value={answers[String(q.id)]} onChange={e => setAnswers(p => ({...p, [String(q.id)]: e.target.value}))}>
                 <Space direction="vertical">
                   {Object.entries(q.options).map(([k, v]) => (
-                    <Radio key={k} value={k}>{k}. {v as string}</Radio>
+                    <Radio key={k} value={k} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{k}. <FormulaRenderer content={v as string} inline /></Radio>
                   ))}
                 </Space>
               </Radio.Group>
@@ -205,6 +213,7 @@ const TeacherView: React.FC = () => {
   const [tab, setTab] = useState<'generate' | 'sessions'>('generate')
   const [kpInput, setKpInput] = useState('')
   const [subject, setSubject] = useState('信息科技')
+  const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
   const [difficulty, setDifficulty] = useState('medium')
   const [qType, setQType] = useState('mixed')
   const [count, setCount] = useState(5)
@@ -227,6 +236,13 @@ const TeacherView: React.FC = () => {
       const grades = Array.isArray(data) ? data : []
       setGradeOptions(grades)
       if (grades.length > 0) setTargetGrade(grades[0])
+    }).catch(() => {})
+    // 加载学科列表
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) {
+        setSubjectOptions(data.subjects)
+        setSubject(data.subjects[0])
+      }
     }).catch(() => {})
   }, [])
 
@@ -300,17 +316,28 @@ const TeacherView: React.FC = () => {
       const { data } = await apiClient.get(`/api/practice/sessions/${sid}`)
       Modal.info({
         title: data.session?.title,
-        width: 700,
+        width: 800,
         content: (
-          <div>
+          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
             <p>知识点：{data.session?.knowledge_points}</p>
-            <p>
-              {data.session?.target_students?.length > 0
-                ? `定向学生：${data.session?.target_students?.join('、')}`
-                : `目标：${data.session?.target_grade || ''} ${data.session?.target_class ? data.session?.target_class+'班' : ''}`
-              }
-            </p>
             <p>题目数：{data.session?.question_count} · 总分：{data.session?.total_score}</p>
+            <Divider />
+            <Text strong>题目列表：</Text>
+            {data.questions?.map((q: any, i: number) => (
+              <Card key={q.id || i} size="small" style={{ marginBottom: 8, marginTop: 8 }}
+                title={`第 ${i + 1} 题`}>
+                <FormulaRenderer content={q.question_text} />
+                <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="normal" />
+                {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
+                  <div key={k} style={{ margin: '2px 0' }}>
+                    <Text>{k}. <FormulaRenderer content={v as string} inline /></Text>
+                  </div>
+                ))}
+                <div style={{ marginTop: 4 }}>
+                  <Tag color="blue">答案：{q.correct_answer}</Tag>
+                </div>
+              </Card>
+            ))}
             <Divider />
             <Text strong>提交情况 ({data.attempts?.length || 0} 人)</Text>
             {data.attempts?.map((a: any, i: number) => (
@@ -356,8 +383,7 @@ const TeacherView: React.FC = () => {
                 value={kpInput} onChange={e => setKpInput(e.target.value)} />
               <Space wrap>
                 <Select value={subject} onChange={setSubject} style={{ width: 130 }}>
-                  <Select.Option value="信息科技">信息科技</Select.Option>
-                  <Select.Option value="通用技术">通用技术</Select.Option>
+                  {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
                 </Select>
                 <Select value={qType} onChange={setQType} style={{ width: 120 }}>
                   <Select.Option value="mixed">混合题型</Select.Option>
@@ -370,9 +396,8 @@ const TeacherView: React.FC = () => {
                   <Select.Option value="medium">中等</Select.Option>
                   <Select.Option value="hard">困难</Select.Option>
                 </Select>
-                <Select value={count} onChange={setCount} style={{ width: 80 }}>
-                  {[3,5,10,15,20].map(n => <Select.Option key={n} value={n}>{n}题</Select.Option>)}
-                </Select>
+                <InputNumber min={1} max={50} value={count} onChange={v => setCount(v || 5)}
+                  style={{ width: 80 }} /> 题
                 <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={generateQuestions}>
                   AI 出题
                 </Button>
@@ -387,10 +412,11 @@ const TeacherView: React.FC = () => {
               extra={<Tag>{q.difficulty === 'easy' ? '简单' : q.difficulty === 'hard' ? '困难' : '中等'}</Tag>}
               style={{ marginBottom: 8, overflowX: 'auto' }}>
               <div style={{ overflowX: 'auto' }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{q.question}</ReactMarkdown>
+                <FormulaRenderer content={q.question} />
               </div>
+              <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} />
               {q.options && Object.entries(q.options).map(([k, v]) => (
-                <div key={k}><Text type="secondary">{k}. {v as string}</Text></div>
+                <div key={k} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><Text type="secondary">{k}. <FormulaRenderer content={v as string} inline /></Text></div>
               ))}
               <div style={{ marginTop: 8 }}><Tag color="blue">答案：{q.answer}</Tag></div>
             </Card>

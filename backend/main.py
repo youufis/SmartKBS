@@ -128,6 +128,13 @@ async def health_check():
     return {"status": "ok", "version": "4.3.0"}
 
 
+# ── 试题多媒体静态文件服务 ──
+_question_media_dir = BASE_DIR / "question_media"
+if _question_media_dir.exists():
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/api/files/question_media", StaticFiles(directory=str(_question_media_dir)), name="question_media")
+    logger.info(f"试题媒体文件服务已挂载: {_question_media_dir}")
+
 # ── 静态文件服务（前端构建产物） ──
 # 使用 catch-all 路由代替 mount，避免挂载点优先级高于 API 路由
 # 必须放在所有 API 路由之后，否则会拦截 API 请求

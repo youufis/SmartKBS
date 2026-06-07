@@ -58,6 +58,13 @@ const GLOBAL_CONFIG_FIELDS = [
     desc: '允许上传的图片格式，多个用逗号分隔，如 .jpg,.jpeg,.png' },
   { key: 'DOCUMENT_EXTENSIONS', label: '文档文件扩展名', type: 'tags', group: 'filetype',
     desc: '允许上传的文档格式，多个用逗号分隔，如 .txt,.md,.pdf' },
+  // 图片生成
+  { key: 'IMAGE_GEN_ENABLED', label: '启用AI生图功能', type: 'boolean', group: 'imagegen',
+    desc: '关闭后试题的图片占位符不会自动调用生图模型，仅保留占位符描述' },
+  { key: 'IMAGE_GEN_MODEL', label: '生图模型', type: 'text', group: 'imagegen',
+    desc: '通义万相：wanx2.1-t2i-turbo(快速,0.02元/张) / wanx2.1-t2i-plus(高清,0.08元/张)' },
+  { key: 'IMAGE_GEN_SIZE', label: '生图尺寸', type: 'text', group: 'imagegen',
+    desc: 'DashScope格式：1024*1024(方形) / 720*1280(竖屏) / 1280*720(横屏)' },
 ]
 
 const GROUP_LABELS: Record<string, string> = {
@@ -69,6 +76,7 @@ const GROUP_LABELS: Record<string, string> = {
   limit: '⚙️ 系统限制',
   notify: '🔔 消息通知',
   filetype: '📁 文件类型白名单',
+  imagegen: '🎨 图片生成',
 }
 
 const SystemConfigPage: React.FC = () => {
@@ -371,7 +379,7 @@ const SystemConfigPage: React.FC = () => {
                 initialValues={config}
                 style={{ maxWidth: 900 }}
               >
-                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype'].map(renderGroup)}
+                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen'].map(renderGroup)}
 
                 <Divider />
                 <Space>
