@@ -669,7 +669,7 @@ async def extract_questions_from_image(
 1. 仔细查看图片，提取其中的试题（题干、选项、答案）
 2. 涉及公式用 $...$ LaTeX 语法标记
 3. 可根据题目内容生成 svg_code 和 media_placeholders
-4. **⚠️ 安全约束**：svg_code 和 media_placeholders 生成的配图中**严禁**出现题目答案、解析或任何会泄露正确选项的文字内容
+4. **⚠️ 安全约束**：svg_code 和 media_placeholders 生成的配图中**严禁**出现题目答案、解析、解题过程或任何会泄露正确选项的文字内容
 
 只返回 JSON 数组：
 [
@@ -913,7 +913,7 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 5. 判断题的选项为 {{"对":"对","错":"错"}}
 6. 涉及数学、物理、化学公式时，用 $...$ LaTeX 语法标记
 7. 可根据题目内容生成 svg_code（技术图示）和 media_placeholders（实物图描述）
-8. **⚠️ 安全约束**：svg_code 和 media_placeholders 生成的配图中**严禁**出现题目答案、解析或任何会泄露正确选项的文字内容
+8. **⚠️ 安全约束**：svg_code 和 media_placeholders 生成的配图中**严禁**出现题目答案、解析、解题过程或任何会泄露正确选项的文字内容
 
 请严格按照 JSON 格式输出，只返回一个 JSON 数组，不要包含其他内容：
 
