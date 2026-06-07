@@ -5,7 +5,7 @@
 > 课程大纲、课堂互动、分组讨论、积分奖励、课堂积分、智能点名、
 > 学情分析、成长档案等功能。基于 FastAPI + React 构建。
 
-![版本](https://img.shields.io/badge/版本-4.3.0-blue)
+![版本](https://img.shields.io/badge/版本-4.5.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope-orange)
