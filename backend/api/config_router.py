@@ -56,6 +56,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "SUBJECTS": ["信息科技", "通用技术"],
     # 消息通知类型（默认只启用考试通知，管理员可在系统配置中调整）
     "enabled_notification_types": ["exam"],
+    # 图片生成（通义万相，与对话模型共享 API Key）
+    "IMAGE_GEN_ENABLED": True,
+    "IMAGE_GEN_MODEL": "wanx2.1-t2i-turbo",
+    "IMAGE_GEN_SIZE": "1024*1024",
 }
 
 

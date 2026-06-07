@@ -333,7 +333,8 @@ async def get_exam(exam_id: int, request: Request):
     questions = execute_query(
         """SELECT eq.id as eq_id, eq.sort_order, eq.score as question_score,
                   q.id, q.type, q.question_text, q.options, q.correct_answer,
-                  q.explanation, q.difficulty, q.knowledge_points
+                  q.explanation, q.difficulty, q.knowledge_points,
+                  q.svg_content, q.has_svg, q.media_files
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'
@@ -1237,7 +1238,8 @@ async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request)
     # 获取题目信息
     questions = execute_query(
         """SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
-                  q.explanation, q.knowledge_points, eq.score as question_score
+                  q.explanation, q.knowledge_points, eq.score as question_score,
+                  q.svg_content, q.has_svg, q.media_files
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'
@@ -1392,10 +1394,11 @@ async def get_student_attempt_detail(exam_id: int, attempt_id: int, request: Req
         except (json.JSONDecodeError, TypeError):
             answers = {}
 
-    # 获取题目信息（含选项和解析）
+    # 获取题目信息（含选项和解析、配图）
     questions = execute_query(
         """SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
-                  q.explanation, q.knowledge_points, eq.score as question_score
+                  q.explanation, q.knowledge_points, eq.score as question_score,
+                  q.svg_content, q.has_svg, q.media_files
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'
@@ -1459,7 +1462,8 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
     # 获取所有题目
     questions = execute_query(
         """SELECT q.id, q.type, q.question_text, q.correct_answer,
-                  q.knowledge_points, q.options, q.explanation
+                  q.knowledge_points, q.options, q.explanation,
+                  q.svg_content, q.has_svg, q.media_files
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'""",

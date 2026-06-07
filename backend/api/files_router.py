@@ -171,7 +171,11 @@ async def serve_static_file(path: str, request: Request):
     public_files = {"about_help.md"}
     if basename in public_files:
         return FileResponse(requested_path)
-    
+
+    # question_media 目录：试题配图，未登录可访问
+    if "/question_media/" in request.url.path:
+        return FileResponse(requested_path)
+
     # 必须登录
     if user is None:
         raise HTTPException(status_code=401, detail="需要登录才能访问资源文件")

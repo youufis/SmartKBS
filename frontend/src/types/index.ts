@@ -81,6 +81,25 @@ export interface TaskInfo {
 
 // ── 试题库类型 ──
 
+/** 图片占位符 */
+export interface MediaPlaceholder {
+  key: string;
+  description: string;
+  purpose?: string;
+  status: 'pending' | 'generated' | 'uploaded' | 'failed';
+}
+
+/** 媒体文件记录 */
+export interface MediaFile {
+  key: string;
+  type: 'image' | 'video' | 'audio';
+  url: string;
+  alt?: string;
+  original_name?: string;
+  size?: number;
+  created_at?: string;
+}
+
 export interface QuestionInfo {
   id: number;
   type: 'single' | 'multiple' | 'true_false' | 'short';
@@ -97,6 +116,14 @@ export interface QuestionInfo {
   status: string;
   created_at: string;
   updated_at: string;
+  /** SVG 配图代码 */
+  svg_content?: string;
+  /** 是否有 SVG 配图 */
+  has_svg?: number;
+  /** 图片占位符列表（AI 生成） */
+  media_placeholders?: MediaPlaceholder[];
+  /** 已上传/生成的媒体文件 */
+  media_files?: MediaFile[];
 }
 
 export interface QuestionGenerateRequest {
@@ -165,6 +192,11 @@ export interface ExamQuestion {
   explanation?: string;
   difficulty: string;
   knowledge_points: string;
+  /** SVG 配图 */
+  svg_content?: string;
+  has_svg?: number;
+  /** 万相生图 / 上传的媒体文件 */
+  media_files?: MediaFile[] | string | null;
 }
 
 export interface ExamAttempt {

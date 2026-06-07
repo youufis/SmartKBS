@@ -17,6 +17,7 @@ from backend.question_db import execute_insert, execute_query, execute_query_one
 from backend.database import execute_query as db_execute_query
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
+from backend.api.config_router import get_config_value
 from backend.logger import logger
 
 router = APIRouter()
@@ -37,7 +38,7 @@ class PracticeGenerateRequest(BaseModel):
     knowledge_points: str
     subject: str = "信息科技"
     question_type: str = "mixed"
-    count: int = 5
+    count: int = 1
     difficulty: str = "medium"
 
 
@@ -102,17 +103,62 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for q in questions:
         opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
+        svg_code = q.get("svg_code") or ""
+        has_svg = 1 if svg_code.strip() else 0
+        media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
         qid = execute_insert(
             """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
-                knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?)""",
+                knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
+                svg_content,has_svg,media_placeholders)
+               VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
             (q.get("type", "single"), q.get("question", ""), opts,
              q.get("answer", ""), q.get("explanation", ""),
              q.get("knowledge_point", req.knowledge_points), req.subject,
-             q.get("difficulty", req.difficulty), username, now, now),
+             q.get("difficulty", req.difficulty), username, now, now,
+             svg_code, has_svg, media_placeholders),
         )
         q["id"] = qid
         q["index"] = qid
+        # 统一字段名：AI 返回 svg_code → 前端用 svg_content
+        if "svg_code" in q and "svg_content" not in q:
+            q["svg_content"] = q["svg_code"]
+        if "has_svg" not in q:
+            q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+
+        # 自动调用通义万相生图（有占位符时）
+        placeholders = q.get("media_placeholders") or []
+        media_files = []
+        if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
+            from backend.api.image_gen_service import generate_and_save_image
+            from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+            from backend.config import BASE_DIR
+            from pathlib import Path as PPath
+            media_dir = BASE_DIR / "question_media" / str(qid)
+            for ph in placeholders:
+                ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+                    subject=req.subject,
+                    purpose=ph.get("purpose", "示意图"),
+                    description=ph["description"],
+                )
+                local_path = await generate_and_save_image(ph_prompt, media_dir)
+                if local_path:
+                    ph["status"] = "generated"
+                    media_files.append({
+                        "key": ph["key"],
+                        "type": "image",
+                        "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
+                        "alt": ph["description"],
+                        "created_at": now,
+                    })
+                else:
+                    ph["status"] = "failed"
+            # 更新占位符状态和 media_files
+            execute_update(
+                "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                (json.dumps(placeholders, ensure_ascii=False),
+                 json.dumps(media_files, ensure_ascii=False), qid)
+            )
+        q["media_files"] = media_files
 
     return {"questions": questions, "total": len(questions), "message": f"已生成 {len(questions)} 道题"}
 
@@ -154,17 +200,62 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for q in questions:
             opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
+            svg_code = q.get("svg_code") or ""
+            has_svg = 1 if svg_code.strip() else 0
+            media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
             qid = execute_insert(
                 """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
-                    knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?)""",
+                    knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
+                    svg_content,has_svg,media_placeholders)
+                   VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
                 (q.get("type", "single"), q.get("question", ""), opts,
                  q.get("answer", ""), q.get("explanation", ""),
                  q.get("knowledge_point", req.knowledge_points), req.subject,
-                 q.get("difficulty", req.difficulty), username, now, now),
+                 q.get("difficulty", req.difficulty), username, now, now,
+                 svg_code, has_svg, media_placeholders),
             )
             q["id"] = qid
             q["index"] = qid
+            # 统一字段名
+            if "svg_code" in q and "svg_content" not in q:
+                q["svg_content"] = q["svg_code"]
+            if "has_svg" not in q:
+                q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+
+            # 自动调用通义万相生图（有占位符时）
+            placeholders = q.get("media_placeholders") or []
+            media_files = []
+            if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
+                from backend.api.image_gen_service import generate_and_save_image
+                from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+                from backend.config import BASE_DIR
+                from pathlib import Path as PPath
+                media_dir = BASE_DIR / "question_media" / str(qid)
+                for ph in placeholders:
+                    ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+                        subject=req.subject,
+                        purpose=ph.get("purpose", "示意图"),
+                        description=ph["description"],
+                    )
+                    local_path = await generate_and_save_image(ph_prompt, media_dir)
+                    if local_path:
+                        ph["status"] = "generated"
+                        media_files.append({
+                            "key": ph["key"],
+                            "type": "image",
+                            "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
+                            "alt": ph["description"],
+                            "created_at": now,
+                        })
+                    else:
+                        ph["status"] = "failed"
+                execute_update(
+                    "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                    (json.dumps(placeholders, ensure_ascii=False),
+                     json.dumps(media_files, ensure_ascii=False), qid)
+                )
+            q["media_files"] = media_files
+
         return {"questions": questions, "total": len(questions)}
 
     task_id = await task_manager.create_task(
@@ -291,7 +382,8 @@ async def get_session_detail(session_id: int, request: Request):
     # 题目列表
     questions = execute_query(
         """SELECT psq.*, qb.question_text, qb.type, qb.options, qb.correct_answer,
-                  qb.explanation, qb.knowledge_points
+                  qb.explanation, qb.knowledge_points,
+                  qb.svg_content, qb.has_svg, qb.media_files, qb.media_placeholders
            FROM practice_session_questions psq
            JOIN question_bank qb ON qb.id = psq.question_id
            WHERE psq.session_id=? ORDER BY psq.sort_order""",
@@ -481,7 +573,8 @@ async def get_my_practice(session_id: int, request: Request):
     # 获取题目（不带答案）
     questions = execute_query(
         """SELECT psq.id as eq_id, psq.sort_order, psq.score,
-                  qb.id, qb.type, qb.question_text, qb.options, qb.difficulty
+                  qb.id, qb.type, qb.question_text, qb.options, qb.difficulty,
+                  qb.svg_content, qb.has_svg, qb.media_files
            FROM practice_session_questions psq
            JOIN question_bank qb ON qb.id = psq.question_id
            WHERE psq.session_id=? ORDER BY psq.sort_order""",
@@ -662,7 +755,8 @@ async def _get_practice_result(session_id: int, username: str) -> dict[str, Any]
 
     # 补全题目信息
     questions = execute_query(
-        """SELECT qb.id, qb.question_text, qb.type, qb.explanation, psq.score
+        """SELECT qb.id, qb.question_text, qb.type, qb.explanation, psq.score,
+                  qb.svg_content, qb.has_svg, qb.media_files
            FROM practice_session_questions psq
            JOIN question_bank qb ON qb.id = psq.question_id
            WHERE psq.session_id=? ORDER BY psq.sort_order""",
@@ -678,6 +772,9 @@ async def _get_practice_result(session_id: int, username: str) -> dict[str, Any]
             "question_text": q["question_text"],
             "type": q["type"],
             "explanation": q.get("explanation", ""),
+            "svg_content": q.get("svg_content", ""),
+            "has_svg": q.get("has_svg", 0),
+            "media_files": q.get("media_files", ""),
             **ans,
         })
 

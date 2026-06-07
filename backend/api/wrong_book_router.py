@@ -152,7 +152,8 @@ async def get_wrong_questions(request: Request):
         # 获取该考试的题目信息
         questions = execute_query(
             """SELECT q.id, q.type, q.question_text, q.correct_answer,
-                      q.knowledge_points, q.options, eq.score as question_score
+                      q.knowledge_points, q.options, eq.score as question_score,
+                      q.svg_content, q.has_svg, q.media_files, q.media_placeholders
                FROM exam_questions eq
                JOIN question_bank q ON q.id = eq.question_id
                WHERE eq.exam_id = ? AND q.status = 'active'""",
@@ -184,6 +185,10 @@ async def get_wrong_questions(request: Request):
                     "score": ans.get("score", 0),
                     "max_score": ans.get("max_score", 0),
                     "knowledge_points": q_info.get("knowledge_points", ""),
+                    "svg_content": q_info.get("svg_content", ""),
+                    "has_svg": q_info.get("has_svg", 0),
+                    "media_files": q_info.get("media_files", ""),
+                    "media_placeholders": q_info.get("media_placeholders", ""),
                 })
                 total_wrong += 1
 
@@ -584,7 +589,8 @@ async def export_review_plan_docx(
             continue
 
         questions = execute_query(
-            """SELECT q.id, q.type, q.question_text, q.correct_answer, q.knowledge_points
+            """SELECT q.id, q.type, q.question_text, q.correct_answer, q.knowledge_points,
+                      q.svg_content, q.has_svg, q.media_files, q.media_placeholders
                FROM exam_questions eq
                JOIN question_bank q ON q.id = eq.question_id
                WHERE eq.exam_id = ? AND q.status = 'active'""",

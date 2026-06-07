@@ -59,7 +59,7 @@ class QuestionAnswer(BaseModel):
 class AiGenerateQuiz(BaseModel):
     topic: str
     subject: str = ""  # 由前端传递
-    count: int = 5
+    count: int = 1
     question_type: str = "single"  # single / true_false / mixed
 
 
@@ -122,6 +122,13 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
     if json_match:
         try:
             questions = json.loads(json_match.group())
+            # 按请求数量截取，并统一字段名
+            questions = questions[:req.count]
+            for q in questions:
+                if "svg_code" in q and "svg_content" not in q:
+                    q["svg_content"] = q["svg_code"]
+                if "has_svg" not in q:
+                    q["has_svg"] = 1 if q.get("svg_code") else 0
             return {"questions": questions, "raw": result}
         except json.JSONDecodeError:
             pass
@@ -498,6 +505,12 @@ async def list_quizzes(
             "updated_at": r[7],
             "creator_name": r[8] if len(r) > 8 else r[1],
         }
+        # 统一字段名：svg_code → svg_content
+        questions = q.get("questions", [])
+        if isinstance(questions, list):
+            for qs in questions:
+                if isinstance(qs, dict) and "svg_code" in qs and "svg_content" not in qs:
+                    qs["svg_content"] = qs["svg_code"]
         # 计算答题人数
         count_rows = execute_query(
             "SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = ?",
@@ -717,6 +730,9 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
             "score": q.get("score", 1) if is_correct else 0,
             "max_score": q.get("score", 1),
             "explanation": q.get("explanation", ""),
+            "svg_content": q.get("svg_content") or q.get("svg_code", ""),
+            "has_svg": q.get("has_svg", 1 if q.get("svg_code") or q.get("svg_content") else 0),
+            "media_files": q.get("media_files", ""),
         })
 
     return {
@@ -772,6 +788,12 @@ async def get_quiz_results(quiz_id: int, request: Request):
         question_stats.append({
             "index": i,
             "question": q.get("question", q.get("question_text", "")),
+            "options": q.get("options", []),
+            "correct_answer": q.get("answer", ""),
+            "type": q.get("type", "single"),
+            "svg_content": q.get("svg_content") or q.get("svg_code", ""),
+            "has_svg": q.get("has_svg", 1 if q.get("svg_code") or q.get("svg_content") else 0),
+            "media_placeholders": q.get("media_placeholders", []),
             "correct_count": correct_count,
             "total_count": len(answers),
             "correct_rate": round(correct_count / max(len(answers), 1) * 100, 1),
