@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="高中信息科技与通用技术课程 AI 智慧教学管理平台",
-    version="4.3.0",
+    version="4.7.0",
     docs_url="/docs",
     lifespan=lifespan,
 )
@@ -82,6 +82,7 @@ from backend.api.files_router import router as files_router
 from backend.api.config_router import router as config_router
 from backend.api.question_router import router as question_router
 from backend.api.exam_router import router as exam_router
+from backend.api.paper_router import router as paper_router
 from backend.api.sharing_router import router as sharing_router
 from backend.api.dashboard_router import router as dashboard_router
 from backend.api.notification_router import router as notification_router
@@ -107,6 +108,7 @@ app.include_router(files_router, prefix="/api/files", tags=["文件服务"])
 app.include_router(config_router, prefix="/api/config", tags=["系统配置"])
 app.include_router(question_router, prefix="/api/questions", tags=["试题库"])
 app.include_router(exam_router, prefix="/api/exams", tags=["考试发布"])
+app.include_router(paper_router, prefix="/api/exams", tags=["智能组卷"])
 app.include_router(sharing_router, prefix="/api/sharing", tags=["资源共享"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["仪表盘"])
 app.include_router(notification_router, prefix="/api/notifications", tags=["通知公告"])
@@ -125,7 +127,7 @@ app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    return {"status": "ok", "version": "4.3.0"}
+    return {"status": "ok", "version": "4.7.0"}
 
 
 # ── 试题多媒体静态文件服务 ──
