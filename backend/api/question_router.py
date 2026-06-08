@@ -1246,6 +1246,62 @@ async def generate_media_for_placeholder(
     return {"message": "图片已生成", "url": relative_url, "placeholder_key": placeholder_key}
 
 
+@router.post("/{question_id}/generate-image", summary="万相生图（直接为试题生成配图）")
+async def generate_image_for_question(question_id: int, request: Request):
+    """直接用通义万相为试题生成配图（不依赖占位符），作为 SVG 的补充/替换方案"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+
+    # 用题干前 200 字作为生图描述
+    q_text = (row["question_text"] or "")[:200]
+    if len(q_text) < 10:
+        raise HTTPException(status_code=400, detail="题干过短，无法生成配图")
+
+    from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+    prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+        subject=row["subject"],
+        purpose="示意图",
+        description=f"与「{q_text}」相关的教学插图，适合高中{row['subject']}课堂展示",
+    )
+
+    from backend.api.image_gen_service import generate_and_save_image
+    from backend.config import BASE_DIR
+    from pathlib import Path
+
+    media_dir = BASE_DIR / "question_media" / str(question_id)
+    local_path = await generate_and_save_image(prompt, media_dir)
+
+    if not local_path:
+        raise HTTPException(status_code=502, detail="AI 生图失败，请检查 API Key 或稍后重试")
+
+    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 追加到 media_files
+    media_files = json.loads(row["media_files"] or "[]")
+    key = f"gen_{len(media_files) + 1}"
+    media_files.append({
+        "key": key,
+        "type": "image",
+        "url": relative_url,
+        "alt": q_text[:100],
+        "created_at": now,
+    })
+
+    execute_update(
+        "UPDATE question_bank SET media_files=?, updated_at=? WHERE id=?",
+        (json.dumps(media_files, ensure_ascii=False), now, question_id)
+    )
+
+    return {"message": "配图已生成", "url": relative_url, "key": key}
+
+
 @router.post("/{question_id}/upload-media/{placeholder_key}", summary="上传图片替换占位符")
 async def upload_media_for_placeholder(
     question_id: int,
