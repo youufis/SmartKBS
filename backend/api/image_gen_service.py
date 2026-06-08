@@ -1,10 +1,14 @@
 """
 AI 图片生成服务
-从系统配置读取生图参数，调用通义万相（OpenAI 兼容接口）
+从系统配置读取生图参数，调用通义万相（OpenAI 兼容接口 / DashScope SDK）
 
 API Key 复用现有的 dashscope_api_key（环境变量 > 系统配置）。
-支持模型：wanx2.1-t2i-turbo（快速）, wanx2.1-t2i-plus（高清）
+支持模型：
+  - wanx2.1-t2i-turbo（快速）
+  - wanx2.1-t2i-plus（高清）
+  - wan2.2-t2i-flash（默认推荐，最新万相生图模型）
 """
+import asyncio
 import os
 import uuid
 from pathlib import Path
@@ -14,10 +18,11 @@ import dashscope
 from backend.api.config_router import get_config_value
 from backend.logger import logger
 
-# 支持的模型列表（仅供展示参考）
+# 支持的模型列表（仅供展示参考，实际以系统配置为准）
 SUPPORTED_MODELS = {
     "wanx2.1-t2i-turbo": "通义万相-快速",
     "wanx2.1-t2i-plus": "通义万相-高质量",
+    "wan2.2-t2i-flash": "万相生图-最新（默认）",
 }
 
 
@@ -84,12 +89,14 @@ async def generate_and_save_image(
     filename = filename or uuid.uuid4().hex
 
     try:
-        # 调用 DashScope ImageSynthesis API（同步调用，在 FastAPI 异步中通过线程池运行）
-        response = dashscope.ImageSynthesis.call(
+        # 调用 DashScope ImageSynthesis API（通过线程池运行，避免阻塞事件循环）
+        response = await asyncio.to_thread(
+            dashscope.ImageSynthesis.call,
             model=cfg["model"],
             prompt=prompt,
             n=1,
             size=cfg["size"],
+            timeout=120,  # 设置生图超时 120 秒
         )
 
         if response.status_code != 200:
@@ -102,7 +109,7 @@ async def generate_and_save_image(
         # 下载图片到本地
         import httpx
         file_path = save_path / f"{filename}.png"
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             img_resp = await client.get(image_url)
             if img_resp.status_code == 200:
                 file_path.write_bytes(img_resp.content)
@@ -112,6 +119,9 @@ async def generate_and_save_image(
                 logger.error(f"图片下载失败: {img_resp.status_code}")
                 return None
 
+    except asyncio.TimeoutError:
+        logger.error(f"生图超时: prompt={prompt[:50]}")
+        return None
     except Exception as e:
         logger.error(f"生图异常: {e}")
         return None
