@@ -1283,16 +1283,22 @@ async def generate_image_for_question(question_id: int, request: Request):
     relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 追加到 media_files
+    # 追加/替换到 media_files（固定 key="wanxiang"，重复点击替换旧图）
     media_files = json.loads(row["media_files"] or "[]")
-    key = f"gen_{len(media_files) + 1}"
-    media_files.append({
-        "key": key,
-        "type": "image",
-        "url": relative_url,
-        "alt": q_text[:100],
-        "created_at": now,
-    })
+    key = "wanxiang"
+    existing = next((f for f in media_files if f["key"] == key), None)
+    if existing:
+        existing["url"] = relative_url
+        existing["alt"] = q_text[:100]
+        existing["created_at"] = now
+    else:
+        media_files.append({
+            "key": key,
+            "type": "image",
+            "url": relative_url,
+            "alt": q_text[:100],
+            "created_at": now,
+        })
 
     execute_update(
         "UPDATE question_bank SET media_files=?, updated_at=? WHERE id=?",

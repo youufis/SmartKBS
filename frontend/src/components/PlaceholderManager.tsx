@@ -5,7 +5,7 @@
  * 支持：上传替换、AI重新生成、删除配图。
  */
 import React, { useState } from 'react'
-import { Card, Button, Upload, Space, Tag, Tooltip, message, Spin, Image, Empty } from 'antd'
+import { Card, Button, Upload, Space, Tag, Spin, Image, Empty } from 'antd'
 import { UploadOutlined, ReloadOutlined, DeleteOutlined, PictureOutlined } from '@ant-design/icons'
 import SVGViewer from './SVGViewer'
 import type { MediaPlaceholder, MediaFile } from '../types'
@@ -38,7 +38,6 @@ interface PlaceholderManagerProps {
 }
 
 const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
-  questionId,
   svgContent,
   hasSvg,
   placeholders = [],
@@ -56,12 +55,6 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
   // 查找占位符对应的媒体文件 URL
   const getMediaUrl = (key: string): string | undefined => {
     return mediaFiles.find(f => f.key === key)?.url
-  }
-
-  // 获取占位符状态
-  const getPlaceholderStatus = (key: string): string => {
-    const ph = placeholders.find(p => p.key === key)
-    return ph?.status || 'pending'
   }
 
   if (!hasSvg && placeholders.length === 0 && !onRegenerateSVG) {
@@ -232,60 +225,40 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
         </Card>
       )}
 
-      {/* 万相生图 / 独立配图区域（不在占位符列表中的 media_files） */}
-      {(() => {
-        const placeholderKeys = placeholders.map(p => p.key)
-        const orphanFiles = mediaFiles.filter(f => !placeholderKeys.includes(f.key))
-        if (orphanFiles.length === 0) return null
-        return (
-          <Card
-            size="small"
-            title={`🖼️ 万分配图（${orphanFiles.length} 个）`}
-            style={{ marginTop: 12 }}
-          >
-            <Space direction="vertical" style={{ width: '100%' }}>
-              {orphanFiles.map((f) => (
-                <div
-                  key={f.key}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 12,
-                    padding: 8,
-                    border: '1px solid #f0f0f0',
-                    borderRadius: 6,
-                  }}
-                >
-                  <div style={{ width: 120, height: 90, overflow: 'hidden', borderRadius: 4, flexShrink: 0 }}>
-                    <Image
-                      src={f.url}
-                      alt={f.alt || '配图'}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      preview={{ mask: '预览' }}
-                    />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 500, marginBottom: 4 }}>
-                      {f.alt?.slice(0, 60) || '配图'}
-                      {f.alt?.length > 60 ? '...' : ''}
-                    </div>
-                    <Space size={4} style={{ marginBottom: 4 }}>
-                      <Tag color="success">已配图</Tag>
-                    </Space>
-                    <Space size={4} style={{ marginTop: 4 }}>
-                      {onDeleteMedia && (
-                        <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteMedia(f.key)}>
-                          删除
-                        </Button>
-                      )}
-                    </Space>
-                  </div>
+      {/* 万相生图配图（独立展示，可删除，重新点击万相生图更新） */}
+      {mediaFiles.some(f => f.key === 'wanxiang') && (
+        <Card size="small" title="🖼️ 图片配图" style={{ marginTop: 12 }}>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {mediaFiles.filter(f => f.key === 'wanxiang').map((f) => (
+              <div key={f.key} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 12, padding: 8,
+                border: '1px solid #f0f0f0', borderRadius: 6,
+              }}>
+                <div style={{ width: 120, height: 90, overflow: 'hidden', borderRadius: 4, flexShrink: 0 }}>
+                  <Image src={f.url} alt={f.alt || '配图'}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    preview={{ mask: '预览' }} />
                 </div>
-              ))}
-            </Space>
-          </Card>
-        )
-      })()}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                    {(f.alt || '配图').slice(0, 60)}{(f.alt || '').length > 60 ? '...' : ''}
+                  </div>
+                  <Space size={4} style={{ marginBottom: 4 }}>
+                    <Tag color="success">已配图</Tag>
+                  </Space>
+                  <Space size={4} style={{ marginTop: 4 }}>
+                    {onDeleteMedia && (
+                      <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteMedia(f.key)}>
+                        删除
+                      </Button>
+                    )}
+                  </Space>
+                </div>
+              </div>
+            ))}
+          </Space>
+        </Card>
+      )}
     </div>
   )
 }
