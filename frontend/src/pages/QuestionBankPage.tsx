@@ -97,6 +97,8 @@ const QuestionBankPage: React.FC = () => {
   const [editingQuestion, setEditingQuestion] = useState<QuestionInfo | null>(null)
   const [editForm] = Form.useForm()
   const [saving, setSaving] = useState(false)
+  const [optionEntries, setOptionEntries] = useState<{ key: string; value: string }[]>([])
+  const [showFormulaHelp, setShowFormulaHelp] = useState(false)
 
   // ── 加载题库列表 ──
   const loadQuestions = useCallback(async () => {
@@ -328,15 +330,35 @@ const QuestionBankPage: React.FC = () => {
   // ── 编辑题目 ──
   const handleEdit = (q: QuestionInfo) => {
     setEditingQuestion(q)
+    // 解析选项为逐个输入框
+    let entries: { key: string; value: string }[] = []
+    if (q.options && typeof q.options === 'object') {
+      entries = Object.entries(q.options).map(([k, v]) => ({ key: k, value: String(v) }))
+    }
+    setOptionEntries(entries)
     editForm.setFieldsValue({
       question_text: q.question_text,
       correct_answer: q.correct_answer,
       explanation: q.explanation,
       knowledge_points: q.knowledge_points,
       difficulty: q.difficulty,
-      options: q.options ? JSON.stringify(q.options, null, 2) : '',
     })
     setEditModal(true)
+  }
+
+  // ── 选项值变更 ──
+  const handleOptionKeyChange = (index: number, newKey: string) => {
+    setOptionEntries(prev => prev.map((e, i) => i === index ? { ...e, key: newKey.toUpperCase() } : e))
+  }
+  const handleOptionValueChange = (index: number, newValue: string) => {
+    setOptionEntries(prev => prev.map((e, i) => i === index ? { ...e, value: newValue } : e))
+  }
+  const handleAddOption = () => {
+    const nextKey = String.fromCharCode(65 + optionEntries.length)
+    setOptionEntries([...optionEntries, { key: nextKey, value: '' }])
+  }
+  const handleRemoveOption = (index: number) => {
+    setOptionEntries(prev => prev.filter((_, i) => i !== index))
   }
 
   const handleSaveEdit = async () => {
@@ -344,6 +366,18 @@ const QuestionBankPage: React.FC = () => {
     try {
       const values = await editForm.validateFields()
       setSaving(true)
+
+      // 从 optionEntries 构建 options JSON
+      let optionsStr = ''
+      if (editingQuestion.type !== 'short' && optionEntries.length > 0) {
+        const optObj: Record<string, string> = {}
+        for (const e of optionEntries) {
+          if (e.key && e.value) optObj[e.key] = e.value
+        }
+        if (Object.keys(optObj).length > 0) {
+          optionsStr = JSON.stringify(optObj)
+        }
+      }
 
       const updates: any = {
         question_text: values.question_text,
@@ -353,14 +387,8 @@ const QuestionBankPage: React.FC = () => {
         difficulty: values.difficulty,
       }
 
-      // 如果有 options（非简答题），解析 JSON 后提交
-      if (values.options && editingQuestion.type !== 'short') {
-        try {
-          JSON.parse(values.options)
-          updates.options = values.options
-        } catch {
-          message.warning('选项格式不是合法 JSON，将保持原值')
-        }
+      if (optionsStr) {
+        updates.options = optionsStr
       }
 
       await questionsApi.updateQuestion(editingQuestion.id, updates)
@@ -404,9 +432,16 @@ const QuestionBankPage: React.FC = () => {
       key: 'question_text',
       ellipsis: true,
       render: (text: string) => (
-        <Tooltip title={text}>
+        <Tooltip
+          title={<div style={{ maxWidth: 400 }}><FormulaRenderer content={text} /></div>}
+          overlayStyle={{ maxWidth: 500 }}
+        >
           <span style={{ cursor: 'pointer' }}>
-            {text.length > 60 ? text.slice(0, 60) + '...' : text}
+            {text.length > 80 ? (
+              <FormulaRenderer content={text.slice(0, 80) + '...'} inline />
+            ) : (
+              <FormulaRenderer content={text} inline />
+            )}
           </span>
         </Tooltip>
       ),
@@ -943,11 +978,12 @@ const QuestionBankPage: React.FC = () => {
                 ))}
                 {record.type === 'short' && (
                   <div style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
-                    参考答案：{record.correct_answer}
+                    参考答案：<FormulaRenderer content={record.correct_answer} inline />
                   </div>
                 )}
                 <div style={{ marginTop: 8 }}>
-                  <Tag color="green">正确答案：{record.correct_answer}</Tag>
+                  <Tag color="green">正确答案：</Tag>
+                  <FormulaRenderer content={record.correct_answer} inline />
                   {record.explanation && (
                     <div style={{ marginTop: 4 }}>
                       <FormulaRenderer content={record.explanation} />
@@ -970,9 +1006,10 @@ const QuestionBankPage: React.FC = () => {
         onOk={handleSaveEdit}
         onCancel={() => setEditModal(false)}
         confirmLoading={saving}
-        width={700}
+        width={760}
         okText="保存"
         cancelText="取消"
+        destroyOnClose
       >
         <Form form={editForm} layout="vertical">
           <Form.Item label="题型">
@@ -982,33 +1019,141 @@ const QuestionBankPage: React.FC = () => {
               </Tag>
             </Typography.Text>
           </Form.Item>
+
+          {/* ── 题目内容（含公式预览） ── */}
           <Form.Item
             label="题目内容"
             name="question_text"
             rules={[{ required: true, message: '请输入题目内容' }]}
+            extra="支持 Markdown 和 LaTeX 公式：行内 $E=mc^2$、独立 $$\sum_{i=1}^n i$$"
           >
             <TextArea rows={3} />
           </Form.Item>
+          {/* 公式预览 */}
+          <Form.Item shouldUpdate={(prev, cur) => prev.question_text !== cur.question_text} noStyle>
+            {({ getFieldValue }) => {
+              const qt = getFieldValue('question_text')
+              if (!qt) return null
+              return (
+                <div style={{
+                  marginTop: -16, marginBottom: 16, padding: '8px 12px',
+                  background: '#f9f9f9', borderRadius: 6, border: '1px solid #e8e8e8',
+                }}>
+                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>📐 实时预览：</div>
+                  <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+                    <FormulaRenderer content={qt} />
+                  </div>
+                </div>
+              )
+            }}
+          </Form.Item>
+
+          {/* ── 选项编辑（非简答题） ── */}
           {editingQuestion?.type !== 'short' && (
-            <Form.Item
-              label="选项（JSON 格式）"
-              name="options"
-              rules={[{ required: true, message: '请输入选项 JSON' }]}
-              extra='格式：{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}'
-            >
-              <TextArea rows={4} placeholder='{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}' />
+            <Form.Item label="选项" required>
+              <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: 12, background: '#fafafa' }}>
+                {optionEntries.length === 0 && (
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                    暂无选项，请添加
+                  </Typography.Text>
+                )}
+                {optionEntries.map((entry, idx) => (
+                  <div key={idx} style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <Input
+                      style={{ width: 56, textAlign: 'center', fontWeight: 'bold' }}
+                      value={entry.key}
+                      onChange={(e) => handleOptionKeyChange(idx, e.target.value)}
+                      placeholder="键"
+                    />
+                    <div style={{ flex: 1 }}>
+                      <TextArea
+                        rows={1}
+                        value={entry.value}
+                        onChange={(e) => handleOptionValueChange(idx, e.target.value)}
+                        placeholder="选项内容（支持公式 $...$）"
+                        style={{ minHeight: 32 }}
+                      />
+                      {/* 选项预览 */}
+                      {entry.value && (
+                        <div style={{
+                          marginTop: 2, padding: '2px 8px',
+                          background: '#fff', borderRadius: 4,
+                          fontSize: 13, color: '#666',
+                          border: '1px dashed #e8e8e8',
+                        }}>
+                          <FormulaRenderer content={entry.value} inline />
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      size="small"
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleRemoveOption(idx)}
+                      disabled={optionEntries.length <= 2}
+                    />
+                  </div>
+                ))}
+                <Button
+                  size="small"
+                  type="dashed"
+                  icon={<PlusOutlined />}
+                  onClick={handleAddOption}
+                  style={{ marginTop: 4 }}
+                >
+                  添加选项
+                </Button>
+              </div>
             </Form.Item>
           )}
+
+          {/* ── 正确答案（含公式预览） ── */}
           <Form.Item
             label={editingQuestion?.type === 'short' ? '参考答案' : '正确答案'}
             name="correct_answer"
             rules={[{ required: true, message: '请输入正确答案' }]}
           >
-            <Input />
+            <Input placeholder={editingQuestion?.type === 'short' ? '输入参考答案（支持 LaTeX 公式）' : '输入正确答案（如 A 或 A,B,C 或 对）'} />
           </Form.Item>
-          <Form.Item label="解析" name="explanation">
+          {/* 答案预览 */}
+          <Form.Item shouldUpdate={(prev, cur) => prev.correct_answer !== cur.correct_answer} noStyle>
+            {({ getFieldValue }) => {
+              const ca = getFieldValue('correct_answer')
+              if (!ca) return null
+              return (
+                <div style={{
+                  marginTop: -16, marginBottom: 16, padding: '4px 12px',
+                  background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f',
+                }}>
+                  <span style={{ fontSize: 12, color: '#52c41a' }}>✅ 预览：</span>
+                  <FormulaRenderer content={ca} inline />
+                </div>
+              )
+            }}
+          </Form.Item>
+
+          {/* ── 解析（含公式预览） ── */}
+          <Form.Item label="解析" name="explanation" extra="选填，支持 Markdown 和 LaTeX 公式">
             <TextArea rows={2} placeholder="选填，题目的解析说明" />
           </Form.Item>
+          {/* 解析预览 */}
+          <Form.Item shouldUpdate={(prev, cur) => prev.explanation !== cur.explanation} noStyle>
+            {({ getFieldValue }) => {
+              const exp = getFieldValue('explanation')
+              if (!exp) return null
+              return (
+                <div style={{
+                  marginTop: -16, marginBottom: 16, padding: '6px 12px',
+                  background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff',
+                  fontSize: 13,
+                }}>
+                  <span style={{ fontSize: 12, color: '#1677ff' }}>📖 解析预览：</span>
+                  <FormulaRenderer content={exp} />
+                </div>
+              )
+            }}
+          </Form.Item>
+
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item label="知识点" name="knowledge_points">
@@ -1025,6 +1170,72 @@ const QuestionBankPage: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
+
+          {/* ── 配图管理入口 ── */}
+          {editingQuestion && editingQuestion.id > 0 && (
+            <div style={{
+              padding: '8px 12px', background: '#fffbe6', borderRadius: 6,
+              border: '1px solid #ffe58f', marginBottom: 12,
+            }}>
+              <Space>
+                <span>🖼️ 配图管理</span>
+                <Button size="small" onClick={() => {
+                  handleManageMedia(editingQuestion)
+                }}>
+                  打开配图管理
+                </Button>
+                {editingQuestion.has_svg === 1 && (
+                  <Tag color="blue">有 SVG</Tag>
+                )}
+                {editingQuestion.media_files && Array.isArray(editingQuestion.media_files) && editingQuestion.media_files.length > 0 && (
+                  <Tag color="green">{editingQuestion.media_files.length} 张配图</Tag>
+                )}
+                {(editingQuestion.media_placeholders?.length || 0) > 0 && (
+                  <Tag color="orange">{editingQuestion.media_placeholders?.length} 个占位符</Tag>
+                )}
+              </Space>
+            </div>
+          )}
+
+          {/* ── 公式语法帮助 ── */}
+          <div style={{ textAlign: 'right' }}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => setShowFormulaHelp(!showFormulaHelp)}
+              style={{ fontSize: 12 }}
+            >
+              {showFormulaHelp ? '收起' : '展开'} LaTeX 公式帮助 📐
+            </Button>
+          </div>
+          {showFormulaHelp && (
+            <div style={{
+              padding: '8px 12px', background: '#f6f8fa', borderRadius: 6,
+              border: '1px solid #e8e8e8', fontSize: 12, lineHeight: 2, marginBottom: 8,
+            }}>
+              <Typography.Text strong style={{ fontSize: 13 }}>LaTeX 公式语法示例：</Typography.Text>
+              <table style={{ width: '100%', marginTop: 4, borderCollapse: 'collapse' }}>
+                <tbody>
+                  {[
+                    ['行内公式', '$E=mc^2$', '$E=mc^2$'],
+                    ['独立公式', '$$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$$', '$$\sum_{i=1}^n i$$'],
+                    ['分数', '$\\frac{a}{b}$', '$\\frac{a}{b}$'],
+                    ['上标/下标', '$x^{2}_{i}$', '$x^{2}_{i}$'],
+                    ['平方根', '$\\sqrt{x}$ / $\\sqrt[3]{x}$', '$\\sqrt{x}$'],
+                    ['希腊字母', '$\\alpha \\beta \\gamma \\pi$', '$\\alpha \\beta \\gamma \\pi$'],
+                    ['化学式', '$\\ce{H2O}$ / $\\ce{CO2}$', '$\\ce{H2O}$'],
+                    ['矢量', '$\\vec{v}$ / $\\overrightarrow{AB}$', '$\\vec{v}$'],
+                  ].map(([desc, syntax, preview], i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                      <td style={{ padding: '2px 8px', color: '#666', width: 80 }}>{desc}</td>
+                      <td style={{ padding: '2px 8px', fontFamily: 'monospace', fontSize: 11 }}>{syntax}</td>
+                      <td style={{ padding: '2px 8px' }}><FormulaRenderer content={preview} inline /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Form>
       </Modal>
 
