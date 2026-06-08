@@ -5,11 +5,24 @@
 > 课程大纲、课堂互动、分组讨论、积分奖励、课堂积分、智能点名、
 > 学情分析、成长档案等功能。基于 FastAPI + React 构建。
 
-![版本](https://img.shields.io/badge/版本-4.5.0-blue)
+![版本](https://img.shields.io/badge/版本-4.6.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope-orange)
 ![许可证](https://img.shields.io/badge/许可证-AGPL--3.0-red)
+
+---
+
+## 🆕 V4.6.0 更新亮点
+
+- **🐛 配图管理 bug 修复**：修复配图生成后关闭弹窗预览丢失、删除配图后图表不刷新问题
+- **⚡ 并发生图优化**：多占位符图片改为 `asyncio.gather` 并发生成，速度提升数倍
+- **🔄 异步安全改造**：通义万相生图 API 改为 `asyncio.to_thread` 调用，不再阻塞事件循环
+- **🧹 旧文件自动清理**：重新生成配图时自动删除旧物理文件，避免磁盘浪费
+- **🔐 权限校验去重**：6 个配图管理端点抽取公共 `_verify_question_owner` 函数
+- **🎯 试题表格增加 ID 列**：方便定位查看题目
+- **📄 分页 bug 修复**：修复切换分页后数据不刷新的问题
+- **🚀 默认模型升级**：万相生图默认模型更新为 `wan2.2-t2i-flash`
 
 ---
 
