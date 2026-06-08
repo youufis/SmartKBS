@@ -198,8 +198,8 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
                         </Upload>
                       )}
 
-                      {/* 删除按钮（已配图时） */}
-                      {isDone && onDeleteMedia && (
+                      {/* 删除按钮（所有状态下都显示） */}
+                      {onDeleteMedia && (
                         <Button
                           size="small"
                           danger
