@@ -246,7 +246,7 @@ const QuestionBankPage: React.FC = () => {
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-svg`)
       message.success('SVG 已重新生成')
-      loadQuestions()
+      await loadQuestions()
       // 更新弹窗中的 mediaQuestion
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
@@ -263,6 +263,7 @@ const QuestionBankPage: React.FC = () => {
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-image`)
       message.success('配图已生成')
+      await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
@@ -277,7 +278,7 @@ const QuestionBankPage: React.FC = () => {
     try {
       await apiClient.delete(`/api/questions/${mediaQuestion.id}/svg`)
       message.success('SVG 配图已删除')
-      loadQuestions()
+      await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
@@ -291,6 +292,7 @@ const QuestionBankPage: React.FC = () => {
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-media/${key}`)
       message.success('图片已生成')
+      await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
@@ -307,6 +309,7 @@ const QuestionBankPage: React.FC = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       message.success('图片已上传')
+      await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
@@ -319,6 +322,7 @@ const QuestionBankPage: React.FC = () => {
     try {
       await apiClient.delete(`/api/questions/${mediaQuestion.id}/media/${key}`)
       message.success('配图已删除')
+      await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
@@ -416,6 +420,15 @@ const QuestionBankPage: React.FC = () => {
 
   // ── 表格列定义 ──
   const columns = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 72,
+      render: (id: number) => (
+        <span style={{ fontSize: 12, color: '#999', fontFamily: 'monospace' }}>#{id}</span>
+      ),
+    },
     {
       title: '题型',
       dataIndex: 'type',
