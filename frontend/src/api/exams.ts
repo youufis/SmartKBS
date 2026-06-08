@@ -154,3 +154,101 @@ export async function getMyResults(): Promise<{ results: ExamAttempt[] }> {
   const { data } = await apiClient.get('/api/exams/student/results');
   return data;
 }
+
+// ── 智能组卷相关 ──
+
+/** 题型配置项 */
+export interface TypeConfigItem {
+  type: 'single' | 'multiple' | 'true_false' | 'short';
+  count: number;
+  score_per_question: number;
+}
+
+/** 智能组卷请求 */
+export interface ComposeRequest {
+  school_name?: string;
+  semester?: string;
+  target_grade?: string;
+  type_configs: TypeConfigItem[];
+  difficulty_easy_ratio?: number;
+  difficulty_medium_ratio?: number;
+  difficulty_hard_ratio?: number;
+  knowledge_points?: string[];
+  total_score?: number;
+  replace_existing?: boolean;
+  use_ai?: boolean;
+}
+
+/** 智能组卷响应 */
+export interface ComposeResponse {
+  message: string;
+  added: number;
+  total_questions: number;
+  type_stats: Record<string, number>;
+  difficulty_stats: Record<string, number>;
+  total_score: number;
+  reason: string;
+}
+
+/** 智能组卷：按配置从题库选题 */
+export async function composeExam(
+  examId: number,
+  req: ComposeRequest
+): Promise<ComposeResponse> {
+  const { data } = await apiClient.post(`/api/exams/${examId}/compose`, req);
+  return data;
+}
+
+/** 获取默认组卷配置 */
+export async function getDefaultComposeConfig(
+  examId: number
+): Promise<{
+  subject: string;
+  question_stats: any[];
+  available_knowledge_points: string[];
+  default_config: {
+    type_configs: TypeConfigItem[];
+    difficulty_easy_ratio: number;
+    difficulty_medium_ratio: number;
+    difficulty_hard_ratio: number;
+  };
+}> {
+  const { data } = await apiClient.get(`/api/exams/compose-config/defaults`, {
+    params: { exam_id: examId },
+  });
+  return data;
+}
+
+/** 获取知识点列表 */
+export async function getKnowledgePoints(): Promise<{
+  knowledge_points: string[];
+  total: number;
+}> {
+  const { data } = await apiClient.get('/api/exams/knowledge-points/list');
+  return data;
+}
+
+/** 导出 Word 试卷（学生用） */
+export function getExportPaperUrl(examId: number, schoolName?: string, semester?: string): string {
+  const token = localStorage.getItem('smartkb_token');
+  const params = new URLSearchParams({ token: token || '' });
+  if (schoolName) params.set('school_name', schoolName);
+  if (semester) params.set('semester', semester);
+  return `/api/exams/${examId}/export-paper?${params.toString()}`;
+}
+
+/** 导出 Word 答案卷（教师用） */
+export function getExportAnswerKeyUrl(examId: number, schoolName?: string, semester?: string): string {
+  const token = localStorage.getItem('smartkb_token');
+  const params = new URLSearchParams({ token: token || '' });
+  if (schoolName) params.set('school_name', schoolName);
+  if (semester) params.set('semester', semester);
+  return `/api/exams/${examId}/export-answer-key?${params.toString()}`;
+}
+
+/** 导出 Word 答题卡 */
+export function getExportAnswerSheetUrl(examId: number): string {
+  const token = localStorage.getItem('smartkb_token');
+  const params = new URLSearchParams({ token: token || '' });
+  return `/api/exams/${examId}/export-answer-sheet?${params.toString()}`;
+}

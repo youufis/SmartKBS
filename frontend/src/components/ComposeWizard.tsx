@@ -1,0 +1,423 @@
+import React, { useState } from 'react'
+import { Steps, Button, Space, message, Form, Spin, Typography, Card } from 'antd'
+import {
+  SettingOutlined,
+  RobotOutlined,
+  FileTextOutlined,
+  DownloadOutlined,
+} from '@ant-design/icons'
+import PaperConfigForm from './PaperConfigForm'
+import QuestionPreview from './QuestionPreview'
+import type { SelectedQuestion } from './QuestionPreview'
+import * as examsApi from '../api/exams'
+import type { ComposeResponse, TypeConfigItem } from '../api/exams'
+
+interface ComposeWizardProps {
+  examId: number
+  examTitle: string
+  subjects: string[]
+  onClose: () => void
+}
+
+const ComposeWizard: React.FC<ComposeWizardProps> = ({
+  examId,
+  examTitle,
+  subjects,
+  onClose,
+}) => {
+  const [currentStep, setCurrentStep] = useState(0)
+  const [form] = Form.useForm()
+  const [composing, setComposing] = useState(false)
+  const [selectedQuestions, setSelectedQuestions] = useState<SelectedQuestion[]>([])
+  const [composeResult, setComposeResult] = useState<ComposeResponse | null>(null)
+  const [knowledgePoints, setKnowledgePoints] = useState<string[]>([])
+
+  // 总分实时计算
+  const [totalScore, setTotalScore] = useState(100)
+
+  // 加载知识点
+  React.useEffect(() => {
+    examsApi.getKnowledgePoints().then((res) => {
+      setKnowledgePoints(res.knowledge_points)
+    }).catch(() => {})
+  }, [])
+
+  // 初始默认值
+  React.useEffect(() => {
+    form.setFieldsValue({
+      school_name: '',
+      semester: '',
+      subject: subjects[0] || '信息科技',
+      target_grade: [],
+      duration: 45,
+      type_configs: [
+        { type: 'single', count: 10, score_per_question: 3 },
+        { type: 'multiple', count: 5, score_per_question: 4 },
+        { type: 'true_false', count: 5, score_per_question: 2 },
+        { type: 'short', count: 3, score_per_question: 10 },
+      ],
+      difficulty_easy_ratio: 20,
+      difficulty_medium_ratio: 50,
+      difficulty_hard_ratio: 30,
+      knowledge_points: [],
+      total_score: 100,
+      replace_existing: true,
+      use_ai: true,
+    })
+    _calcTotalScore()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 计算总分
+  const _calcTotalScore = () => {
+    const configs: TypeConfigItem[] = form.getFieldValue('type_configs') || []
+    let total = 0
+    configs.forEach((tc) => {
+      total += (tc.count || 0) * (tc.score_per_question || 0)
+    })
+    setTotalScore(total || 100)
+  }
+
+  // 监听表单变化以更新总分
+  const handleValuesChange = (changedValues: any) => {
+    if (changedValues.type_configs || changedValues.total_score !== undefined) {
+      _calcTotalScore()
+    }
+  }
+
+  // ── 步骤定义 ──
+  const steps = [
+    {
+      title: '试卷信息',
+      icon: <SettingOutlined />,
+      content: (
+        <div style={{ padding: '16px 0' }}>
+          <Typography.Title level={5} style={{ marginBottom: 16 }}>
+            配置试卷基本信息
+          </Typography.Title>
+          <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+            考试：<strong>{examTitle}</strong>（ID: {examId}）
+          </Typography.Text>
+          <PaperConfigForm
+            subjects={subjects}
+            knowledgePoints={knowledgePoints}
+            totalScore={totalScore}
+            onTotalScoreChange={setTotalScore}
+          />
+        </div>
+      ),
+    },
+    {
+      title: 'AI 组卷',
+      icon: <RobotOutlined />,
+      content: (
+        <div style={{ padding: '16px 0' }}>
+          <Typography.Title level={5} style={{ marginBottom: 16 }}>
+            AI 正在智能组卷...
+          </Typography.Title>
+          <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
+            系统将根据您的配置，从题库中智能选取最合适的题目组合
+          </Typography.Text>
+          {composing ? (
+            <div style={{ textAlign: 'center', padding: '60px 0' }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16, color: '#666' }}>
+                AI 正在分析题库并组卷，请稍候...
+              </div>
+            </div>
+          ) : composeResult ? (
+            <div>
+              <Card
+                style={{
+                  marginBottom: 16,
+                  background: '#f6ffed',
+                  borderColor: '#b7eb8f',
+                }}
+              >
+                <Space direction="vertical">
+                  <Typography.Text style={{ fontSize: 16 }}>
+                    ✅ <strong>组卷完成！</strong>
+                  </Typography.Text>
+                  <Typography.Text>{composeResult.message}</Typography.Text>
+                  <Typography.Text type="secondary">
+                    {composeResult.reason}
+                  </Typography.Text>
+                </Space>
+              </Card>
+              <QuestionPreview
+                questions={selectedQuestions}
+                typeStats={composeResult.type_stats}
+                difficultyStats={composeResult.difficulty_stats}
+                totalScore={composeResult.total_score}
+                onRemoveQuestion={handleRemoveQuestion}
+                onRegenerate={handleCompose}
+                loading={composing}
+              />
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <Typography.Text type="secondary">
+                请点击下方「开始组卷」按钮
+              </Typography.Text>
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      title: '导出文档',
+      icon: <DownloadOutlined />,
+      content: (
+        <div style={{ padding: '16px 0' }}>
+          <Typography.Title level={5} style={{ marginBottom: 16 }}>
+            导出试卷文档
+          </Typography.Title>
+          <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
+            请选择要导出的文档类型
+          </Typography.Text>
+
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            <ExportCard
+              icon={<FileTextOutlined style={{ fontSize: 32, color: '#1677ff' }} />}
+              title="学生试卷"
+              description="排版规范的试卷，含考生信息栏、题目、作答区，可直接打印"
+              onClick={() => handleExport('paper')}
+            />
+            <ExportCard
+              icon={<FileTextOutlined style={{ fontSize: 32, color: '#52c41a' }} />}
+              title="教师答案卷"
+              description="含答案和解析，红色标注正确答案，蓝色标注解析内容"
+              onClick={() => handleExport('answer-key')}
+            />
+            <ExportCard
+              icon={<FileTextOutlined style={{ fontSize: 32, color: '#fa8c16' }} />}
+              title="答题卡"
+              description="含选择题填涂区域和简答题作答区，方便统一收取批改"
+              onClick={() => handleExport('answer-sheet')}
+            />
+          </Space>
+        </div>
+      ),
+    },
+  ]
+
+  // ── 处理组卷 ──
+  async function handleCompose() {
+    try {
+      const values = await form.validateFields()
+      setComposing(true)
+      setComposeResult(null)
+      setSelectedQuestions([])
+
+      const req: examsApi.ComposeRequest = {
+        school_name: values.school_name || '',
+        semester: values.semester || '',
+        target_grade: values.target_grade?.join('、') || '',
+        type_configs: values.type_configs.map((tc: any) => ({
+          type: tc.type,
+          count: tc.count || 0,
+          score_per_question: tc.score_per_question || 5,
+        })),
+        difficulty_easy_ratio: values.difficulty_easy_ratio || 20,
+        difficulty_medium_ratio: values.difficulty_medium_ratio || 50,
+        difficulty_hard_ratio: values.difficulty_hard_ratio || 30,
+        knowledge_points: values.knowledge_points || [],
+        total_score: values.total_score || totalScore,
+        replace_existing: values.replace_existing !== false,
+        use_ai: values.use_ai !== false,
+      }
+
+      const result = await examsApi.composeExam(examId, req)
+      setComposeResult(result)
+
+      // 加载组卷后的题目
+      await loadExamQuestions()
+      setCurrentStep(1)
+    } catch (err: any) {
+      if (err?.response?.data?.detail) {
+        message.error(err.response.data.detail)
+      } else if (err?.errorFields) {
+        message.warning('请完善配置信息')
+      } else {
+        message.error('组卷失败，请重试')
+      }
+    } finally {
+      setComposing(false)
+    }
+  }
+
+  // ── 加载考试题目 ──
+  async function loadExamQuestions() {
+    try {
+      const detail = await examsApi.getExam(examId)
+      const questions = (detail.questions || []).map((q: any) => ({
+        id: q.id,
+        type: q.type,
+        question_text: q.question_text,
+        options: q.options,
+        correct_answer: q.correct_answer,
+        difficulty: q.difficulty,
+        knowledge_points: q.knowledge_points,
+        score: q.question_score,
+      }))
+      setSelectedQuestions(questions)
+    } catch {
+      // ignore
+    }
+  }
+
+  // ── 移除题目 ──
+  async function handleRemoveQuestion(questionId: number) {
+    try {
+      await examsApi.removeQuestionsFromExam(examId, [questionId])
+      message.success('已移除该题')
+      await loadExamQuestions()
+
+      // 更新统计
+      if (composeResult) {
+        const updatedStats = { ...composeResult.type_stats }
+        const removedQ = selectedQuestions.find((q) => q.id === questionId)
+        if (removedQ) {
+          updatedStats[removedQ.type] = (updatedStats[removedQ.type] || 1) - 1
+        }
+        setComposeResult({
+          ...composeResult,
+          added: composeResult.added - 1,
+          type_stats: updatedStats,
+        })
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '移除失败')
+    }
+  }
+
+  // ── 导出 ──
+  function handleExport(type: 'paper' | 'answer-key' | 'answer-sheet') {
+    const schoolName = form.getFieldValue('school_name') || ''
+    const semester = form.getFieldValue('semester') || ''
+
+    let url = ''
+    switch (type) {
+      case 'paper':
+        url = examsApi.getExportPaperUrl(examId, schoolName, semester)
+        break
+      case 'answer-key':
+        url = examsApi.getExportAnswerKeyUrl(examId, schoolName, semester)
+        break
+      case 'answer-sheet':
+        url = examsApi.getExportAnswerSheetUrl(examId)
+        break
+    }
+
+    if (url) {
+      window.open(url, '_blank')
+      message.success('正在下载文档...')
+    }
+  }
+
+  // ── 步骤控制 ──
+  async function handleNext() {
+    if (currentStep === 0) {
+      // 步骤0 → 步骤1：执行组卷
+      await handleCompose()
+      // 不自动跳转，让用户在步骤1看到结果
+    } else if (currentStep === 1) {
+      // 步骤1 → 步骤2
+      setCurrentStep(2)
+    }
+  }
+
+  function handlePrev() {
+    if (currentStep === 1) {
+      setCurrentStep(0)
+    } else if (currentStep === 2) {
+      setCurrentStep(1)
+    }
+  }
+
+  return (
+    <div>
+      {/* 步骤条 */}
+      <Steps
+        current={currentStep}
+        style={{ marginBottom: 24 }}
+        items={steps.map((s) => ({
+          title: s.title,
+          icon: s.icon,
+        }))}
+      />
+
+      {/* 步骤内容 */}
+      <Form
+        form={form}
+        layout="vertical"
+        onValuesChange={handleValuesChange}
+        style={{ minHeight: 400 }}
+      >
+        {currentStep < steps.length && steps[currentStep].content}
+      </Form>
+
+      {/* 底部操作按钮 */}
+      <div
+        style={{
+          marginTop: 24,
+          paddingTop: 16,
+          borderTop: '1px solid #f0f0f0',
+          display: 'flex',
+          justifyContent: 'space-between',
+        }}
+      >
+        <div>
+          {currentStep > 0 && (
+            <Button onClick={handlePrev}>上一步</Button>
+          )}
+        </div>
+        <Space>
+          <Button onClick={onClose}>取消</Button>
+          {currentStep < steps.length - 1 && (
+            <Button
+              type="primary"
+              onClick={handleNext}
+              loading={currentStep === 0 && composing}
+              disabled={currentStep === 0 && composeResult === null && !composing}
+            >
+              {currentStep === 0 ? '开始组卷' : currentStep === 1 ? '下一步：导出文档' : ''}
+            </Button>
+          )}
+        </Space>
+      </div>
+    </div>
+  )
+}
+
+/** 导出卡片 */
+const ExportCard: React.FC<{
+  icon: React.ReactNode
+  title: string
+  description: string
+  onClick: () => void
+}> = ({ icon, title, description, onClick }) => (
+  <Card
+    hoverable
+    style={{
+      border: '1px solid #e8e8e8',
+      cursor: 'pointer',
+    }}
+    onClick={onClick}
+  >
+    <Space align="start" size={16}>
+      {icon}
+      <div>
+        <Typography.Text strong style={{ fontSize: 15 }}>
+          {title}
+        </Typography.Text>
+        <br />
+        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+          {description}
+        </Typography.Text>
+      </div>
+    </Space>
+  </Card>
+)
+
+export default ComposeWizard

@@ -19,6 +19,7 @@ import QuestionBankPage from './pages/QuestionBankPage'
 import ExamPage from './pages/ExamPage'
 import QuestionExamPage from './pages/QuestionExamPage'
 import ExamTakePage from './pages/ExamTakePage'
+import ExamComposePage from './pages/ExamComposePage'
 import NotificationsPage from './pages/NotificationsPage'
 import AnnouncementsPage from './pages/AnnouncementsPage'
 import PortfolioPage from './pages/PortfolioPage'
@@ -83,6 +84,7 @@ function App() {
             <Route path="question-exam" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionExamPage /> : <Navigate to="/chat" />} />
             <Route path="question-bank" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankPage /> : <Navigate to="/chat" />} />
             <Route path="exam" element={<ExamPage />} />
+            <Route path="exam-compose/:examId" element={user?.role === 'admin' || user?.role === 'teacher' ? <ExamComposePage /> : <Navigate to="/exam" />} />
             <Route path="score" element={<ScorePage />} />
             <Route path="rollcall" element={<RollcallManagePage />} />
             <Route path="notifications" element={<NotificationsPage />} />
