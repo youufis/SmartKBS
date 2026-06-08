@@ -182,3 +182,12 @@ async def get_subjects():
         "subjects": get_subjects(),
         "default": get_default_subject(),
     }
+
+
+@router.get("/grades", summary="获取年级列表")
+async def get_grades():
+    """从数据库 users 表动态获取年级列表"""
+    from backend.subject_config import get_grades
+    return {
+        "grades": get_grades(),
+    }

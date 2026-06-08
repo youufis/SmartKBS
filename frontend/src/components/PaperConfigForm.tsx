@@ -1,8 +1,6 @@
 import React, { useMemo } from 'react'
-import { Form, Input, Select, InputNumber, Row, Col, Button, Space, Tag, Divider, Typography } from 'antd'
+import { Form, Input, Select, InputNumber, Row, Col, Button, Space, Divider, Typography } from 'antd'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
-import type { TypeConfigItem } from '../api/exams'
-
 const { Option } = Select
 
 const TYPE_OPTIONS = [
@@ -14,6 +12,7 @@ const TYPE_OPTIONS = [
 
 interface PaperConfigFormProps {
   subjects: string[]
+  grades: string[]
   knowledgePoints: string[]
   totalScore: number
   onTotalScoreChange: (score: number) => void
@@ -33,9 +32,9 @@ const TypeSubtotal: React.FC<{ name: number }> = ({ name }) => {
 
 const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
   subjects,
+  grades,
   knowledgePoints,
   totalScore,
-  onTotalScoreChange,
 }) => {
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={16}>
@@ -73,9 +72,9 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
                 mode="multiple"
                 maxTagCount={2}
               >
-                <Option value="高一">高一</Option>
-                <Option value="高二">高二</Option>
-                <Option value="高三">高三</Option>
+                {grades.map((g) => (
+                  <Option key={g} value={g}>{g}</Option>
+                ))}
               </Select>
             </Form.Item>
           </Col>
@@ -92,11 +91,11 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
         <Form.List name="type_configs">
           {(fields, { add, remove }) => (
             <>
-              {fields.map(({ key, name, ...restField }, index) => (
+              {fields.map(({ key, name, ...restField }) => (
                 <Row key={key} gutter={12} align="middle" style={{ marginBottom: 8 }}>
                   <Col span={5}>
                     <Form.Item {...restField} name={[name, 'type']} rules={[{ required: true, message: '请选择题型' }]}>
-                      <Select placeholder="选择题型" disabled={index < fields.length}>
+                      <Select placeholder="选择题型">
                         {TYPE_OPTIONS.map((opt) => (
                           <Option key={opt.value} value={opt.value}>
                             {opt.label}

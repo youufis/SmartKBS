@@ -1,7 +1,8 @@
 import React from 'react'
-import { Table, Tag, Typography, Space, Button, Popconfirm, Empty, Card, Row, Col, Statistic } from 'antd'
-import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Table, Tag, Typography, Space, Button, Popconfirm, Empty, Card, Row, Col, Statistic, Image } from 'antd'
+import { DeleteOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons'
 import FormulaRenderer from './FormulaRenderer'
+import SVGViewer from './SVGViewer'
 
 const TYPE_LABELS: Record<string, string> = {
   single: '单选题',
@@ -38,6 +39,11 @@ export interface SelectedQuestion {
   difficulty: string
   knowledge_points?: string
   score?: number
+  /** SVG 配图 */
+  svg_content?: string
+  has_svg?: number
+  /** 媒体文件 */
+  media_files?: any[] | string | null
 }
 
 interface QuestionPreviewProps {
@@ -71,9 +77,9 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
     {
       title: '题型',
       dataIndex: 'type',
-      width: 80,
+      width: 70,
       render: (t: string) => (
-        <Tag color={TYPE_COLORS[t] || 'default'}>
+        <Tag color={TYPE_COLORS[t] || 'default'} style={{ fontSize: 11 }}>
           {TYPE_LABELS[t] || t}
         </Tag>
       ),
@@ -82,18 +88,24 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
       title: '题目',
       dataIndex: 'question_text',
       ellipsis: true,
-      render: (text: string) => (
-        <Typography.Text style={{ fontSize: 13 }}>
-          <FormulaRenderer content={text} />
-        </Typography.Text>
+      render: (text: string, record: SelectedQuestion) => (
+        <Space size={4}>
+          <Typography.Text style={{ fontSize: 13 }} ellipsis={{ tooltip: text }}>
+            <FormulaRenderer content={text} />
+          </Typography.Text>
+          {/* 配图标记 */}
+          {(record.svg_content || record.has_svg) && (
+            <EyeOutlined style={{ color: '#1677ff', fontSize: 12 }} title="含配图" />
+          )}
+        </Space>
       ),
     },
     {
       title: '难度',
       dataIndex: 'difficulty',
-      width: 70,
+      width: 65,
       render: (d: string) => (
-        <Tag color={DIFFICULTY_COLORS[d]}>
+        <Tag color={DIFFICULTY_COLORS[d]} style={{ fontSize: 11 }}>
           {DIFFICULTY_LABELS[d] || d}
         </Tag>
       ),
@@ -101,14 +113,14 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
     {
       title: '知识点',
       dataIndex: 'knowledge_points',
-      width: 120,
+      width: 110,
       ellipsis: true,
       render: (text: string) => text || '-',
     },
     {
       title: '分值',
       dataIndex: 'score',
-      width: 60,
+      width: 55,
       render: (s: number) => (
         <Typography.Text strong>{s?.toFixed?.(1) || s}</Typography.Text>
       ),
@@ -117,7 +129,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
       ? [
           {
             title: '操作',
-            width: 60,
+            width: 55,
             key: 'action',
             render: (_: any, record: SelectedQuestion) => (
               <Popconfirm
@@ -220,6 +232,61 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
         loading={loading}
         pagination={false}
         locale={{ emptyText: <Empty description="暂无题目" /> }}
+        expandable={{
+          expandedRowRender: (record: SelectedQuestion) => (
+            <div style={{ padding: '8px 16px', maxWidth: 800 }}>
+              {/* 题目完整文本 */}
+              <Typography.Paragraph style={{ marginBottom: 8 }}>
+                <FormulaRenderer content={record.question_text} />
+              </Typography.Paragraph>
+
+              {/* 选项展示 */}
+              {record.options && Object.keys(record.options).length > 0 && (
+                <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                  {Object.entries(record.options).map(([key, val]) => (
+                    <div key={key} style={{ padding: '2px 0', fontSize: 13 }}>
+                      <strong>{key}.</strong> <FormulaRenderer content={val} inline />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* SVG 配图 */}
+              {(record.svg_content && record.has_svg) ? (
+                <div style={{ marginTop: 8 }}>
+                  <SVGViewer svgCode={record.svg_content || ''} />
+                </div>
+              ) : null}
+
+              {/* 媒体文件 */}
+              {record.media_files && Array.isArray(record.media_files) && record.media_files.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <Image.PreviewGroup>
+                    <Space wrap>
+                      {record.media_files.map((mf: any, idx: number) => (
+                        mf?.url ? (
+                          <Image
+                            key={idx}
+                            src={mf.url}
+                            alt={mf.alt || ''}
+                            width={120}
+                            style={{ borderRadius: 4, border: '1px solid #f0f0f0' }}
+                            preview={{ mask: '预览' }}
+                          />
+                        ) : null
+                      ))}
+                    </Space>
+                  </Image.PreviewGroup>
+                </div>
+              )}
+            </div>
+          ),
+          rowExpandable: (record: SelectedQuestion) => !!(
+            (record.options && Object.keys(record.options).length > 0) ||
+            (record.svg_content && record.has_svg) ||
+            (record.media_files && Array.isArray(record.media_files) && record.media_files.length > 0)
+          ),
+        }}
       />
     </Space>
   )

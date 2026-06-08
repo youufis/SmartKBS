@@ -26,6 +26,7 @@ const ExamComposePage: React.FC = () => {
   const [exam, setExam] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [subjects, setSubjects] = useState<string[]>(['信息科技', '通用技术'])
+  const [grades, setGrades] = useState<string[]>(['高一', '高二', '高三'])
   const [wizardVisible, setWizardVisible] = useState(false)
 
   useEffect(() => {
@@ -35,6 +36,7 @@ const ExamComposePage: React.FC = () => {
     }
     loadExam()
     loadSubjects()
+    loadGrades()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examId])
 
@@ -56,6 +58,15 @@ const ExamComposePage: React.FC = () => {
       const { data } = await apiClient.get('/api/config/subjects')
       if (data?.subjects?.length > 0) {
         setSubjects(data.subjects)
+      }
+    } catch { /* ignore */ }
+  }
+
+  async function loadGrades() {
+    try {
+      const { data } = await apiClient.get('/api/config/grades')
+      if (data?.grades?.length > 0) {
+        setGrades(data.grades)
       }
     } catch { /* ignore */ }
   }
@@ -195,6 +206,7 @@ const ExamComposePage: React.FC = () => {
           examId={Number(examId)}
           examTitle={exam.title}
           subjects={subjects}
+          grades={grades}
           onClose={() => {
             setWizardVisible(false)
             loadExam() // 刷新

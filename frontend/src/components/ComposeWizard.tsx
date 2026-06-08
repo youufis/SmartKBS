@@ -16,6 +16,7 @@ interface ComposeWizardProps {
   examId: number
   examTitle: string
   subjects: string[]
+  grades: string[]
   onClose: () => void
 }
 
@@ -23,6 +24,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   examId,
   examTitle,
   subjects,
+  grades,
   onClose,
 }) => {
   const [currentStep, setCurrentStep] = useState(0)
@@ -42,31 +44,27 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
     }).catch(() => {})
   }, [])
 
-  // 初始默认值
-  React.useEffect(() => {
-    form.setFieldsValue({
-      school_name: '',
-      semester: '',
-      subject: subjects[0] || '信息科技',
-      target_grade: [],
-      duration: 45,
-      type_configs: [
-        { type: 'single', count: 10, score_per_question: 3 },
-        { type: 'multiple', count: 5, score_per_question: 4 },
-        { type: 'true_false', count: 5, score_per_question: 2 },
-        { type: 'short', count: 3, score_per_question: 10 },
-      ],
-      difficulty_easy_ratio: 20,
-      difficulty_medium_ratio: 50,
-      difficulty_hard_ratio: 30,
-      knowledge_points: [],
-      total_score: 100,
-      replace_existing: true,
-      use_ai: true,
-    })
-    _calcTotalScore()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // 表单初始值
+  const formInitialValues = {
+    school_name: '',
+    semester: '',
+    subject: subjects[0] || '信息科技',
+    target_grade: [],
+    duration: 45,
+    type_configs: [
+      { type: 'single', count: 10, score_per_question: 3 },
+      { type: 'multiple', count: 5, score_per_question: 4 },
+      { type: 'true_false', count: 5, score_per_question: 2 },
+      { type: 'short', count: 3, score_per_question: 10 },
+    ],
+    difficulty_easy_ratio: 20,
+    difficulty_medium_ratio: 50,
+    difficulty_hard_ratio: 30,
+    knowledge_points: [],
+    total_score: 100,
+    replace_existing: true,
+    use_ai: true,
+  }
 
   // 计算总分
   const _calcTotalScore = () => {
@@ -100,6 +98,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
           </Typography.Text>
           <PaperConfigForm
             subjects={subjects}
+            grades={grades}
             knowledgePoints={knowledgePoints}
             totalScore={totalScore}
             onTotalScoreChange={setTotalScore}
@@ -234,10 +233,13 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
       await loadExamQuestions()
       setCurrentStep(1)
     } catch (err: any) {
+      console.error('组卷错误:', err)
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail)
       } else if (err?.errorFields) {
-        message.warning('请完善配置信息')
+        message.warning('请完善配置信息: ' + err.errorFields.map((f: any) => f.name?.join('.')).join(', '))
+      } else if (err?.message) {
+        message.error('组卷失败: ' + err.message)
       } else {
         message.error('组卷失败，请重试')
       }
@@ -259,6 +261,9 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
         difficulty: q.difficulty,
         knowledge_points: q.knowledge_points,
         score: q.question_score,
+        svg_content: q.svg_content,
+        has_svg: q.has_svg,
+        media_files: q.media_files,
       }))
       setSelectedQuestions(questions)
     } catch {
@@ -351,6 +356,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
       <Form
         form={form}
         layout="vertical"
+        initialValues={formInitialValues}
         onValuesChange={handleValuesChange}
         style={{ minHeight: 400 }}
       >
@@ -379,7 +385,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
               type="primary"
               onClick={handleNext}
               loading={currentStep === 0 && composing}
-              disabled={currentStep === 0 && composeResult === null && !composing}
+              disabled={false} // 由 loading 控制防连点，不需要额外禁用
             >
               {currentStep === 0 ? '开始组卷' : currentStep === 1 ? '下一步：导出文档' : ''}
             </Button>
