@@ -10,6 +10,7 @@ import {
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
   DownloadOutlined, BulbOutlined, FileOutlined, RobotOutlined,
+  FileTextOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -510,6 +511,29 @@ const ExamPage: React.FC = () => {
     navigate(`/exam-take/${examId}`)
   }
 
+  // ── 智能组卷导航 ──
+  const handleComposeExam = (examId: number) => {
+    navigate(`/exam-compose/${examId}`)
+  }
+
+  // ── 导出 Word 试卷 ──
+  const handleExportPaper = (examId: number) => {
+    const url = examsApi.getExportPaperUrl(examId)
+    window.open(url, '_blank')
+  }
+
+  // ── 导出 Word 答案卷 ──
+  const handleExportAnswerKey = (examId: number) => {
+    const url = examsApi.getExportAnswerKeyUrl(examId)
+    window.open(url, '_blank')
+  }
+
+  // ── 导出 Word 答题卡 ──
+  const handleExportAnswerSheet = (examId: number) => {
+    const url = examsApi.getExportAnswerSheetUrl(examId)
+    window.open(url, '_blank')
+  }
+
   // ── 表格列（教师/管理员视图） ──
   const teacherColumns = [
     {
@@ -581,6 +605,11 @@ const ExamPage: React.FC = () => {
                   <Button type="link" size="small" icon={<OrderedListOutlined />}
                     onClick={() => handleManageQuestions(record)} />
                 </Tooltip>
+                <Tooltip title="智能组卷">
+                  <Button type="link" size="small" icon={<RobotOutlined />}
+                    style={{ color: '#722ed1' }}
+                    onClick={() => handleComposeExam(record.id)} />
+                </Tooltip>
                 <Popconfirm title="确认发布？" description="发布后学生即可参加考试"
                   onConfirm={() => handlePublish(record.id)} okText="发布" cancelText="取消">
                   <Tooltip title="发布考试">
@@ -602,6 +631,11 @@ const ExamPage: React.FC = () => {
                   <Button type="link" size="small" icon={<OrderedListOutlined />}
                     onClick={() => handleManageQuestions(record)} />
                 </Tooltip>
+                <Tooltip title="导出试卷">
+                  <Button type="link" size="small" icon={<FileTextOutlined />}
+                    style={{ color: '#1677ff' }}
+                    onClick={() => handleExportPaper(record.id)} />
+                </Tooltip>
                 <Tooltip title="查看成绩">
                   <Button type="link" size="small" icon={<BarChartOutlined />}
                     onClick={() => handleViewResults(record)} />
@@ -616,18 +650,23 @@ const ExamPage: React.FC = () => {
               </>
             )}
             {record.status === 'ended' && canEdit && (
-              <Tooltip title="查看成绩">
-                <Button type="link" size="small" icon={<BarChartOutlined />}
-                  onClick={() => handleViewResults(record)} />
-              </Tooltip>
-            )}
-            {record.status === 'ended' && canEdit && (
-              <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}
-                okText="确认" cancelText="取消">
-                <Tooltip title="删除">
-                  <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+              <>
+                <Tooltip title="导出试卷">
+                  <Button type="link" size="small" icon={<FileTextOutlined />}
+                    style={{ color: '#1677ff' }}
+                    onClick={() => handleExportPaper(record.id)} />
                 </Tooltip>
-              </Popconfirm>
+                <Tooltip title="查看成绩">
+                  <Button type="link" size="small" icon={<BarChartOutlined />}
+                    onClick={() => handleViewResults(record)} />
+                </Tooltip>
+                <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}
+                  okText="确认" cancelText="取消">
+                  <Tooltip title="删除">
+                    <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                  </Tooltip>
+                </Popconfirm>
+              </>
             )}
           </Space>
         )
