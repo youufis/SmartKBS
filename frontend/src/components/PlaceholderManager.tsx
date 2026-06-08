@@ -231,6 +231,61 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
           </Space>
         </Card>
       )}
+
+      {/* 万相生图 / 独立配图区域（不在占位符列表中的 media_files） */}
+      {(() => {
+        const placeholderKeys = placeholders.map(p => p.key)
+        const orphanFiles = mediaFiles.filter(f => !placeholderKeys.includes(f.key))
+        if (orphanFiles.length === 0) return null
+        return (
+          <Card
+            size="small"
+            title={`🖼️ 万分配图（${orphanFiles.length} 个）`}
+            style={{ marginTop: 12 }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {orphanFiles.map((f) => (
+                <div
+                  key={f.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                    padding: 8,
+                    border: '1px solid #f0f0f0',
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ width: 120, height: 90, overflow: 'hidden', borderRadius: 4, flexShrink: 0 }}>
+                    <Image
+                      src={f.url}
+                      alt={f.alt || '配图'}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      preview={{ mask: '预览' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500, marginBottom: 4 }}>
+                      {f.alt?.slice(0, 60) || '配图'}
+                      {f.alt?.length > 60 ? '...' : ''}
+                    </div>
+                    <Space size={4} style={{ marginBottom: 4 }}>
+                      <Tag color="success">已配图</Tag>
+                    </Space>
+                    <Space size={4} style={{ marginTop: 4 }}>
+                      {onDeleteMedia && (
+                        <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onDeleteMedia(f.key)}>
+                          删除
+                        </Button>
+                      )}
+                    </Space>
+                  </div>
+                </div>
+              ))}
+            </Space>
+          </Card>
+        )
+      })()}
     </div>
   )
 }
