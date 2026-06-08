@@ -119,12 +119,8 @@ const QuestionBankPage: React.FC = () => {
   }, [filters, page, pageSize])
 
   useEffect(() => {
-    const params: any = { page: 1, page_size: 50 }
-    questionsApi.listQuestions(params)
-      .then(res => { setQuestions(res.questions); setTotal(res.total) })
-      .catch(err => message.error(err?.response?.data?.detail || '加载题库失败'))
-      .finally(() => setLoading(false))
-  }, [])
+    loadQuestions()
+  }, [loadQuestions])
 
   // ── 生成试题 ──
   const [genError, setGenError] = useState<string | null>(null)
