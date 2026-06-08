@@ -1288,6 +1288,13 @@ async def generate_image_for_question(question_id: int, request: Request):
     key = "wanxiang"
     existing = next((f for f in media_files if f["key"] == key), None)
     if existing:
+        # 删除旧图片文件
+        old_url = existing.get("url", "")
+        if old_url:
+            old_filename = old_url.rstrip("/").split("/")[-1]
+            old_path = media_dir / old_filename
+            if old_path.exists():
+                old_path.unlink()
         existing["url"] = relative_url
         existing["alt"] = q_text[:100]
         existing["created_at"] = now
@@ -1423,6 +1430,17 @@ async def delete_media_for_placeholder(
         target["status"] = "pending"
 
     media_files = json.loads(row["media_files"] or "[]")
+    # 删除物理文件
+    deleted_file = next((f for f in media_files if f["key"] == placeholder_key), None)
+    if deleted_file:
+        old_url = deleted_file.get("url", "")
+        if old_url:
+            from backend.config import BASE_DIR
+            from pathlib import Path
+            old_filename = old_url.rstrip("/").split("/")[-1]
+            old_path = BASE_DIR / "question_media" / str(question_id) / old_filename
+            if old_path.exists():
+                old_path.unlink()
     media_files = [f for f in media_files if f["key"] != placeholder_key]
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
