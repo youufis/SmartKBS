@@ -5,7 +5,7 @@ AI 对话相关 Prompt
 """
 AI_CHAT_SYSTEM_ROLE = "你是一位高中信息科技与通用技术教师。请用你的学科知识回答用户的问题。"
 
-QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题。
+QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为试题配图**以及**使用 LaTeX 公式标记**。
 
 科目：{subject}
 知识点范围：{knowledge_points}
@@ -13,17 +13,30 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题。
 数量：{count}道
 难度：{difficulty_desc}
 
-请严格按照 JSON 格式输出，只返回一个 JSON 数组，不要包含其他内容：
+━━━━ 公式标记规则 ━━━━
+涉及数学、物理、化学公式时，使用 LaTeX 语法：$...$ 行内公式，$$...$$ 独立公式。
+
+━━━━ 配图规则（AI 自动判断） ━━━━
+每道题输出 svg_code（技术图示）和 media_placeholders（实物图占位符）字段，都可以为 null：
+- 【svg_code】适用于电路图、流程图、函数图像等纯 SVG 技术图示（viewBox="0 0 600 400"，中文标注，主色 #1976D2）
+- 【media_placeholders】适用于硬件外观、实物照片等真实图片，description 写 50-100 字详细描述
+- 两者可同时存在（SVG 画原理 + 占位符生成实物照片），互不冲突
+- 超过 60% 的试题应包含至少一种配图
+**⚠️ 安全约束**：配图中严禁出现题目答案、解析、解题过程或任何会泄露正确选项的文字内容。
+
+请严格按照 JSON 格式输出，只返回一个 JSON 数组：
 
 [
   {{
-    "type": "题型标识(single/multiple/true_false/short)",
-    "question": "题目内容",
-    "options": {{"A":"选项A", "B":"选项B", "C":"选项C", "D":"选项D"}},
+    "type": "single/multiple/true_false/short",
+    "question": "题目内容（含 $...$ LaTeX 公式）",
+    "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
-    "explanation": "解析内容",
-    "knowledge_point": "所属知识点",
-    "difficulty": "easy/medium/hard"
+    "explanation": "解析",
+    "knowledge_point": "知识点",
+    "difficulty": "easy/medium/hard",
+    "svg_code": "<svg>...</svg>",
+    "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图"}}]
   }}
 ]
 

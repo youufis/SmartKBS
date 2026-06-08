@@ -2,6 +2,7 @@
 试题库 API 路由
 AI 生成试题 + 题库 CRUD
 """
+import asyncio
 import json
 import os
 import io
@@ -66,6 +67,34 @@ TYPE_DESC = {
     "true_false": "判断题",
     "short": "简答题",
 }
+
+
+# ── 公共辅助函数 ──
+
+async def _verify_question_owner(
+    question_id: int, username: str, role: int,
+) -> dict[str, Any]:
+    """校验试题存在性 + 操作权限，返回题目行数据"""
+    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="试题不存在")
+    if row["creator_username"] != username and role != 0:
+        raise HTTPException(status_code=403, detail="无权操作")
+    return row
+
+
+def _delete_physical_media(
+    question_id: int, url: str | None,
+):
+    """删除指定 URL 对应的物理图片文件（静默忽略不存在的情况）"""
+    if not url:
+        return
+    from backend.config import BASE_DIR
+    from pathlib import Path
+    filename = url.rstrip("/").split("/")[-1]
+    file_path = BASE_DIR / "question_media" / str(question_id) / filename
+    if file_path.exists():
+        file_path.unlink()
 
 
 # ── AI 生成试题 ──
@@ -1042,28 +1071,31 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
             media_dir = BASE_DIR / "question_media" / str(qid)
 
             if placeholders:
-                # 策略 A：AI 指定了占位符 → 按描述逐一生图
-                for ph in placeholders:
+                # 策略 A：AI 指定了占位符 → 按描述**并发**生图
+                async def _gen_one(ph: dict) -> dict | None:
                     ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
                         subject=req.subject,
                         purpose=ph.get("purpose", "示意图"),
                         description=ph["description"],
                     )
                     local_path = await generate_and_save_image(ph_prompt, media_dir)
-
                     if local_path:
                         from pathlib import Path as PPath
                         ph["status"] = "generated"
-                        media_files.append({
+                        return {
                             "key": ph["key"],
                             "type": "image",
                             "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
                             "alt": ph["description"],
                             "created_at": now,
-                        })
+                        }
                     else:
                         ph["status"] = "failed"
                         logger.warning(f"试题 {qid} 占位符 {ph['key']} 生图失败")
+                        return None
+
+                results = await asyncio.gather(*[_gen_one(ph) for ph in placeholders])
+                media_files = [r for r in results if r is not None]
 
             elif not svg_code.strip():
                 # 策略 B：既无 SVG 又无占位符 → 根据题目内容自动补一张插图
@@ -1127,11 +1159,7 @@ async def generate_svg_for_question(question_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="试题不存在")
-    if row["creator_username"] != username and user.get("role", 2) != 0:
-        raise HTTPException(status_code=403, detail="无权操作")
+    row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
     api_key, _ = get_api_keys(username)
     if not api_key:
@@ -1140,7 +1168,7 @@ async def generate_svg_for_question(question_id: int, request: Request):
     from backend.prompts.chat import SVG_GENERATE_PROMPT
     prompt = SVG_GENERATE_PROMPT.format(
         description=row["question_text"],
-        subject=row["subject"],
+        subject=row["subject"]
     )
 
     try:
@@ -1186,11 +1214,7 @@ async def generate_media_for_placeholder(
     user = get_current_user(request)
     username = user["username"]
 
-    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="试题不存在")
-    if row["creator_username"] != username and user.get("role", 2) != 0:
-        raise HTTPException(status_code=403, detail="无权操作")
+    row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
     # 查找占位符
     placeholders = json.loads(row["media_placeholders"] or "[]")
@@ -1212,6 +1236,12 @@ async def generate_media_for_placeholder(
     from pathlib import Path
 
     media_dir = BASE_DIR / "question_media" / str(question_id)
+
+    # 重新生成前先清理旧的物理文件
+    media_files = json.loads(row["media_files"] or "[]")
+    old_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
+    _delete_physical_media(question_id, old_entry.get("url", "") if old_entry else None)
+
     local_path = await generate_and_save_image(prompt, media_dir)
 
     if not local_path:
@@ -1221,7 +1251,6 @@ async def generate_media_for_placeholder(
     target["status"] = "generated"
     relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
 
-    media_files = json.loads(row["media_files"] or "[]")
     file_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
     if file_entry:
         file_entry["url"] = relative_url
@@ -1252,11 +1281,7 @@ async def generate_image_for_question(question_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="试题不存在")
-    if row["creator_username"] != username and user.get("role", 2) != 0:
-        raise HTTPException(status_code=403, detail="无权操作")
+    row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
     # 用题干前 200 字作为生图描述
     q_text = (row["question_text"] or "")[:200]
@@ -1326,11 +1351,7 @@ async def upload_media_for_placeholder(
     user = get_current_user(request)
     username = user["username"]
 
-    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="试题不存在")
-    if row["creator_username"] != username and user.get("role", 2) != 0:
-        raise HTTPException(status_code=403, detail="无权操作")
+    row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
     # 校验文件类型
     import os
@@ -1393,11 +1414,7 @@ async def delete_svg_for_question(question_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="试题不存在")
-    if row["creator_username"] != username and user.get("role", 2) != 0:
-        raise HTTPException(status_code=403, detail="无权操作")
+    await _verify_question_owner(question_id, username, user.get("role", 2))
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update(
@@ -1418,11 +1435,7 @@ async def delete_media_for_placeholder(
     user = get_current_user(request)
     username = user["username"]
 
-    row = execute_query_one("SELECT * FROM question_bank WHERE id=?", (question_id,))
-    if not row:
-        raise HTTPException(status_code=404, detail="试题不存在")
-    if row["creator_username"] != username and user.get("role", 2) != 0:
-        raise HTTPException(status_code=403, detail="无权操作")
+    row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
     placeholders = json.loads(row["media_placeholders"] or "[]")
     target = next((p for p in placeholders if p["key"] == placeholder_key), None)
@@ -1432,15 +1445,7 @@ async def delete_media_for_placeholder(
     media_files = json.loads(row["media_files"] or "[]")
     # 删除物理文件
     deleted_file = next((f for f in media_files if f["key"] == placeholder_key), None)
-    if deleted_file:
-        old_url = deleted_file.get("url", "")
-        if old_url:
-            from backend.config import BASE_DIR
-            from pathlib import Path
-            old_filename = old_url.rstrip("/").split("/")[-1]
-            old_path = BASE_DIR / "question_media" / str(question_id) / old_filename
-            if old_path.exists():
-                old_path.unlink()
+    _delete_physical_media(question_id, deleted_file.get("url", "") if deleted_file else None)
     media_files = [f for f in media_files if f["key"] != placeholder_key]
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

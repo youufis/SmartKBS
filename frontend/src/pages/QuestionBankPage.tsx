@@ -231,8 +231,9 @@ const QuestionBankPage: React.FC = () => {
     })
   }
 
-  // ── 配图管理 ──
-  const [mediaGenerating, setMediaGenerating] = useState(false)
+  // ── 配图管理（粒度 loading 状态） ──
+  const [svgLoading, setSvgLoading] = useState(false)
+  const [wanxiangLoading, setWanxiangLoading] = useState(false)
 
   const handleManageMedia = (q: QuestionInfo) => {
     setMediaQuestion(q)
@@ -241,7 +242,7 @@ const QuestionBankPage: React.FC = () => {
 
   const handleRegenerateSVG = async () => {
     if (!mediaQuestion) return
-    setMediaGenerating(true)
+    setSvgLoading(true)
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-svg`)
       message.success('SVG 已重新生成')
@@ -252,13 +253,13 @@ const QuestionBankPage: React.FC = () => {
     } catch (e: any) {
       message.error(e?.response?.data?.detail || 'SVG 生成失败')
     } finally {
-      setMediaGenerating(false)
+      setSvgLoading(false)
     }
   }
 
   const handleGenerateImage = async () => {
     if (!mediaQuestion) return
-    setMediaGenerating(true)
+    setWanxiangLoading(true)
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-image`)
       message.success('配图已生成')
@@ -267,7 +268,7 @@ const QuestionBankPage: React.FC = () => {
     } catch (e: any) {
       message.error(e?.response?.data?.detail || '生图失败')
     } finally {
-      setMediaGenerating(false)
+      setWanxiangLoading(false)
     }
   }
 
@@ -286,7 +287,7 @@ const QuestionBankPage: React.FC = () => {
 
   const handleGenerateMedia = async (key: string) => {
     if (!mediaQuestion) return
-    setMediaGenerating(true)
+    // PlaceholderManager 内部管理 per-key loading，父组件仅调用接口
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-media/${key}`)
       message.success('图片已生成')
@@ -294,8 +295,6 @@ const QuestionBankPage: React.FC = () => {
       setMediaQuestion(data)
     } catch (e: any) {
       message.error(e?.response?.data?.detail || '图片生成失败')
-    } finally {
-      setMediaGenerating(false)
     }
   }
 
@@ -1218,7 +1217,7 @@ const QuestionBankPage: React.FC = () => {
                 <tbody>
                   {[
                     ['行内公式', '$E=mc^2$', '$E=mc^2$'],
-                    ['独立公式', '$$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$$', '$$\sum_{i=1}^n i$$'],
+                    ['独立公式', '$$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$$', '$$\\sum_{i=1}^n i$$'],
                     ['分数', '$\\frac{a}{b}$', '$\\frac{a}{b}$'],
                     ['上标/下标', '$x^{2}_{i}$', '$x^{2}_{i}$'],
                     ['平方根', '$\\sqrt{x}$ / $\\sqrt[3]{x}$', '$\\sqrt{x}$'],
@@ -1254,7 +1253,8 @@ const QuestionBankPage: React.FC = () => {
             hasSvg={mediaQuestion.has_svg}
             placeholders={mediaQuestion.media_placeholders}
             mediaFiles={mediaQuestion.media_files}
-            generating={mediaGenerating}
+            svgLoading={svgLoading}
+            wanxiangLoading={wanxiangLoading}
             onRegenerateSVG={handleRegenerateSVG}
             onDeleteSVG={handleDeleteSVG}
             onGenerateImage={handleGenerateImage}
