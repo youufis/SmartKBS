@@ -248,7 +248,7 @@ def _select_questions_by_rules(
     return selected, reason
 
 
-def _select_questions_by_ai(
+async def _select_questions_by_ai(
     pool: list[dict],
     type_configs: list[TypeConfigItem],
     easy_ratio: int,
@@ -267,7 +267,7 @@ def _select_questions_by_ai(
     api_key = keys[0] if keys and keys[0] else ""
     if not api_key:
         logger.warning("AI 组卷：未配置 API Key，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio)
+        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
 
     # 构建题型配置文本
     type_config_lines = []
@@ -314,38 +314,44 @@ def _select_questions_by_ai(
     )
 
     try:
-        ai_response = call_ai_async(prompt, api_key)
-        # 由于 call_ai_async 可能是同步或异步，这里处理兼容
-        if hasattr(ai_response, '__await__'):
-            import asyncio
-            ai_response = asyncio.run(ai_response) if hasattr(asyncio, 'run') else ai_response
-
+        ai_response = await call_ai_async(prompt, api_key)
         logger.info(f"AI 组卷返回: {str(ai_response)[:300]}")
     except Exception as e:
         logger.error(f"AI 组卷调用失败: {e}")
-        # 回退到规则选题
         logger.warning("AI 组卷失败，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio)
+        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
 
-    # 解析 AI 返回的 JSON
+    # 解析 AI 返回的 JSON（支持嵌套对象）
     import re
     text = str(ai_response).strip()
-    json_match = re.search(r'\{[^}]+\}', text)
-    if not json_match:
-        logger.warning("AI 组卷返回格式异常，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio)
+
+    # 1) 先尝试提取 ```json ... ``` 中的内容
+    json_str = None
+    code_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+    if code_match:
+        json_str = code_match.group(1).strip()
+    else:
+        # 2) 从第一个 { 到最后一个 } 截取
+        start = text.find('{')
+        end = text.rfind('}')
+        if start >= 0 and end > start:
+            json_str = text[start:end + 1]
+
+    if not json_str:
+        logger.warning("AI 组卷返回中未找到 JSON，回退到规则选题")
+        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
 
     try:
-        result = json.loads(json_match.group())
+        result = json.loads(json_str)
         selected_ids = result.get("selected_ids", [])
         reason = result.get("reason", "AI 智能组卷")
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("AI 组卷 JSON 解析失败，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio)
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"AI 组卷 JSON 解析失败: {e}，回退到规则选题")
+        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
 
     if not selected_ids:
         logger.warning("AI 未选择任何题目，回退到规则选题")
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio)
+        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
 
     # 匹配选中的题目
     pool_map = {q["id"]: q for q in pool}
@@ -355,7 +361,7 @@ def _select_questions_by_ai(
             selected.append(pool_map[sid])
 
     if not selected:
-        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio)
+        return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
 
     return selected, reason
 
@@ -412,7 +418,7 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
 
     # ── 选题 ──
     if req.use_ai and pool:
-        selected_questions, reason = _select_questions_by_ai(
+        selected_questions, reason = await _select_questions_by_ai(
             pool=pool,
             type_configs=req.type_configs,
             easy_ratio=req.difficulty_easy_ratio,
