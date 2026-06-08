@@ -6,7 +6,7 @@
  */
 import React, { useState } from 'react'
 import { Card, Button, Upload, Space, Tag, Tooltip, message, Spin, Image, Empty } from 'antd'
-import { UploadOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons'
+import { UploadOutlined, ReloadOutlined, DeleteOutlined, PictureOutlined } from '@ant-design/icons'
 import SVGViewer from './SVGViewer'
 import type { MediaPlaceholder, MediaFile } from '../types'
 
@@ -33,6 +33,8 @@ interface PlaceholderManagerProps {
   onUploadMedia?: (key: string, file: File) => Promise<void>
   /** 删除占位符配图 */
   onDeleteMedia?: (key: string) => Promise<void>
+  /** 万相生图（直接为试题生成配图） */
+  onGenerateImage?: () => Promise<void>
 }
 
 const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
@@ -47,6 +49,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
   onGenerateMedia,
   onUploadMedia,
   onDeleteMedia,
+  onGenerateImage,
 }) => {
   const [uploadingKey, setUploadingKey] = useState<string | null>(null)
 
@@ -79,6 +82,11 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
               {onDeleteSVG && hasSvg === 1 && (
                 <Button size="small" danger icon={<DeleteOutlined />} onClick={onDeleteSVG}>
                   删除
+                </Button>
+              )}
+              {onGenerateImage && (
+                <Button size="small" icon={<PictureOutlined />} loading={generating} onClick={onGenerateImage}>
+                  万相生图
                 </Button>
               )}
               {onRegenerateSVG && (

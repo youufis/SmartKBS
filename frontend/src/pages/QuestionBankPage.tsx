@@ -254,6 +254,21 @@ const QuestionBankPage: React.FC = () => {
     }
   }
 
+  const handleGenerateImage = async () => {
+    if (!mediaQuestion) return
+    setMediaGenerating(true)
+    try {
+      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-image`)
+      message.success('配图已生成')
+      const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '生图失败')
+    } finally {
+      setMediaGenerating(false)
+    }
+  }
+
   const handleDeleteSVG = async () => {
     if (!mediaQuestion) return
     try {
@@ -1031,6 +1046,7 @@ const QuestionBankPage: React.FC = () => {
             generating={mediaGenerating}
             onRegenerateSVG={handleRegenerateSVG}
             onDeleteSVG={handleDeleteSVG}
+            onGenerateImage={handleGenerateImage}
             onGenerateMedia={handleGenerateMedia}
             onUploadMedia={handleUploadMedia}
             onDeleteMedia={handleDeleteMedia}
