@@ -61,7 +61,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
     return ph?.status || 'pending'
   }
 
-  if (!hasSvg && placeholders.length === 0) {
+  if (!hasSvg && placeholders.length === 0 && !onRegenerateSVG) {
     return (
       <Empty description="暂无配图" />
     )
@@ -69,28 +69,34 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
 
   return (
     <div>
-      {/* SVG 配图区域 */}
-      {hasSvg === 1 && svgContent && (
+      {/* SVG 配图区域（有图时展示卡片+删除，无图时保留生成入口） */}
+      {(hasSvg === 1 || onRegenerateSVG) && (
         <Card
           size="small"
           title="🖼️ SVG 配图"
           extra={
             <Space>
-              {onDeleteSVG && (
+              {onDeleteSVG && hasSvg === 1 && (
                 <Button size="small" danger icon={<DeleteOutlined />} onClick={onDeleteSVG}>
                   删除
                 </Button>
               )}
               {onRegenerateSVG && (
                 <Button size="small" icon={<ReloadOutlined />} loading={generating} onClick={onRegenerateSVG}>
-                  重新生成
+                  {hasSvg === 1 ? '重新生成' : '生成 SVG'}
                 </Button>
               )}
             </Space>
           }
           style={{ marginBottom: 12 }}
         >
-          <SVGViewer svgCode={svgContent} expandable={true} />
+          {hasSvg === 1 && svgContent ? (
+            <SVGViewer svgCode={svgContent} expandable={true} />
+          ) : (
+            <div style={{ padding: '20px 0', textAlign: 'center', color: '#999' }}>
+              暂无 SVG 配图，点击「生成 SVG」自动创建
+            </div>
+          )}
         </Card>
       )}
 
