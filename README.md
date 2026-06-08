@@ -26,6 +26,22 @@
 
 ---
 
+## 🎮 演示环境
+
+> **🌐 演示地址：** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086)
+>
+> **⏰ 开放时间：** 日间开放（晚间关机）
+>
+> **👤 测试账号：**
+>
+> | 角色 | 用户名              | 密码          |
+> |------|---------------------|---------------|
+> | 教师 | youufis             | ultraultra    |
+> | 学生 | s11001 ~ s11009     | 123456        |
+> | 学生 | s18001 ~ s19009     | 123456        |
+
+---
+
 ## ✨ 功能总览
 
 ### 📊 首页仪表盘
@@ -433,6 +449,8 @@ SmartKBS/
 
 ## 📬 关于
 
-SmartKBS — 教育智能体-高中信通版
+**SmartKBS** — 教育智能体 · 高中信通版
 
-详细使用指南请参阅 [`about_help.md`](about_help.md)。
+- 详细使用指南请参阅 [`about_help.md`](about_help.md)
+- **作者：** UNET
+- **联系：** [youufis@sina.com](mailto:youufis@sina.com)
