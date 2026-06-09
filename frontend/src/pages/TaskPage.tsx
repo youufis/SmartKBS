@@ -503,19 +503,53 @@ const TaskPage: React.FC = () => {
                     return 0
                   })
                 })()}
+                expandable={{
+                  expandedRowRender: (r: any) => {
+                    if (!r.grade) return <Typography.Text type="secondary">暂无批改数据</Typography.Text>
+                    return (
+                      <div style={{ padding: '8px 0 4px 0' }}>
+                        <Typography.Paragraph style={{ fontSize: 13, margin: '0 0 8px 0', color: '#595959' }}>
+                          💬 {r.grade.comment}
+                        </Typography.Paragraph>
+                        {r.grade.strengths?.length > 0 && (
+                          <div style={{ marginBottom: 6 }}>
+                            <Typography.Text style={{ fontSize: 12, color: '#52c41a' }}>
+                              ✅ 优点：{r.grade.strengths.join('、')}
+                            </Typography.Text>
+                          </div>
+                        )}
+                        {r.grade.weaknesses?.length > 0 && (
+                          <div style={{ marginBottom: 6 }}>
+                            <Typography.Text style={{ fontSize: 12, color: '#ff4d4f' }}>
+                              ❌ 不足：{r.grade.weaknesses.join('、')}
+                            </Typography.Text>
+                          </div>
+                        )}
+                        {r.grade.feedback && (
+                          <div style={{ padding: '6px 8px', background: '#f0f5ff', borderRadius: 4, marginTop: 4 }}>
+                            <Typography.Text style={{ fontSize: 12, color: '#1d39c4' }}>
+                              📝 建议：{r.grade.feedback}
+                            </Typography.Text>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  },
+                  rowExpandable: (r: any) => !!r.grade,
+                }}
                 columns={[
                   {
                     title: '#', key: 'index', width: 36,
                     render: (_: any, __: any, i: number) => i + 1,
                   },
                   {
-                    title: '学生', key: 'student', width: 90,
+                    title: '学生', key: 'student', width: 80,
                     render: (_: any, r: any) => (
                       <Typography.Text strong style={{ fontSize: 12 }}>{r.name}</Typography.Text>
                     ),
                   },
                   {
-                    title: '分数/等级', key: 'score', width: 120,
+                    title: '分数/等级', key: 'score', width: 110,
                     render: (_: any, r: any) => r.grade ? (
                       <Space align="center" size={2}>
                         <Typography.Text strong style={{ fontSize: 14, color: '#52c41a', minWidth: 24 }}>
@@ -524,32 +558,6 @@ const TaskPage: React.FC = () => {
                         <Tag color={r.level.color} style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}>{r.level.label}</Tag>
                       </Space>
                     ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>待批改</Typography.Text>,
-                  },
-                  {
-                    title: '评语', key: 'comment',
-                    render: (_: any, r: any) => r.grade ? (
-                      <Tooltip title={r.grade.comment}>
-                        <Typography.Paragraph
-                          ellipsis={{ rows: 1 }}
-                          style={{ margin: 0, fontSize: 12, color: '#595959', wordBreak: 'break-word' }}
-                        >
-                          {r.grade.comment}
-                        </Typography.Paragraph>
-                      </Tooltip>
-                    ) : null,
-                  },
-                  {
-                    title: '建议', key: 'feedback', width: 100,
-                    render: (_: any, r: any) => r.grade ? (
-                      <Tooltip title={r.grade.feedback}>
-                        <Typography.Paragraph
-                          ellipsis={{ rows: 1 }}
-                          style={{ margin: 0, fontSize: 12, color: '#1890ff', wordBreak: 'break-word' }}
-                        >
-                          {r.grade.feedback}
-                        </Typography.Paragraph>
-                      </Tooltip>
-                    ) : null,
                   },
                   {
                     title: '操作', key: 'action', width: 66,
@@ -578,7 +586,6 @@ const TaskPage: React.FC = () => {
                 size="small"
                 pagination={false}
                 locale={{ emptyText: '暂无数据' }}
-                style={{ wordBreak: 'break-word' }}
               />
             </>
           )}
