@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Layout, Card, Tree, Tabs, Button, message, Modal, Form, Input, Select, InputNumber,
-  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
+  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress, Radio,
 } from 'antd'
 import type { DataNode } from 'antd/es/tree'
 import {
   BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   FileOutlined, FileTextOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
   TeamOutlined, CheckCircleOutlined, ClockCircleOutlined,
-  MenuOutlined, NodeIndexOutlined, RobotOutlined,
+  MenuOutlined, NodeIndexOutlined, RobotOutlined, ApartmentOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import * as curriculumApi from '../api/curriculum'
@@ -17,6 +17,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
+import KnowledgeGraph from '../components/KnowledgeGraph'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 
 const { TextArea } = Input
@@ -95,6 +96,9 @@ const CurriculumPage: React.FC = () => {
   const [recLoading, setRecLoading] = useState(false)
   const [recResults, setRecResults] = useState<any[]>([])
   const [recBindLoading, setRecBindLoading] = useState<Record<number, boolean>>({})
+
+  // ── 视图模式：tree | graph ──
+  const [viewMode, setViewMode] = useState<'tree' | 'graph'>('tree')
 
   // ── AI 课件生成 ──
   const [cwModal, setCwModal] = useState(false)
@@ -801,6 +805,21 @@ const CurriculumPage: React.FC = () => {
               <Tabs
                 activeKey={String(activeCourseId)}
                 onChange={(key) => setActiveCourseId(Number(key))}
+                tabBarExtraContent={
+                  <Radio.Group
+                    value={viewMode}
+                    onChange={(e) => setViewMode(e.target.value)}
+                    size="small"
+                    buttonStyle="solid"
+                  >
+                    <Radio.Button value="tree">
+                      <MenuOutlined /> 大纲
+                    </Radio.Button>
+                    <Radio.Button value="graph">
+                      <ApartmentOutlined /> 图谱
+                    </Radio.Button>
+                  </Radio.Group>
+                }
                 items={courses.map((course) => ({
                   key: String(course.id),
                   label: (
@@ -814,7 +833,28 @@ const CurriculumPage: React.FC = () => {
                       )}
                     </Space>
                   ),
-                  children: (
+                  children: viewMode === 'graph' ? (
+                    <KnowledgeGraph
+                      course={course}
+                      isStudent={isStudent}
+                      isTeacherOrAdmin={isTeacherOrAdmin}
+                      onKpSelect={(kp) => {
+                        // 选中知识点 → 调用原有的 handleTreeSelect 逻辑
+                        setKpLoading(true)
+                        setSelectedKp(kp)
+                        ;(async () => {
+                          try {
+                            const res = await curriculumApi.getKpResources(kp.id)
+                            setKpResources(res.resources)
+                          } catch {
+                            setKpResources([])
+                          } finally {
+                            setKpLoading(false)
+                          }
+                        })()
+                      }}
+                    />
+                  ) : (
                     <div>
                       {/* 课程进度条（学生视图） */}
                       {isStudent && course.progress && course.progress.total > 0 && (
@@ -845,16 +885,20 @@ const CurriculumPage: React.FC = () => {
                           <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(course.id)}>
                             添加章/节
                           </Button>
-                          <Tooltip title={showActions ? '隐藏节点操作按钮' : '显示节点操作按钮'}>
-                            <Button
-                              size="small"
-                              icon={showActions ? <EditOutlined /> : <EditOutlined />}
-                              type={showActions ? 'primary' : 'default'}
-                              onClick={() => setShowActions(!showActions)}
-                            >
-                              {showActions ? '隐藏操作' : '节点操作'}
-                            </Button>
-                          </Tooltip>
+                          {viewMode === 'tree' && (
+                            <>
+                              <Tooltip title={showActions ? '隐藏节点操作按钮' : '显示节点操作按钮'}>
+                                <Button
+                                  size="small"
+                                  icon={showActions ? <EditOutlined /> : <EditOutlined />}
+                                  type={showActions ? 'primary' : 'default'}
+                                  onClick={() => setShowActions(!showActions)}
+                                >
+                                  {showActions ? '隐藏操作' : '节点操作'}
+                                </Button>
+                              </Tooltip>
+                            </>
+                          )}
                         </Space>
                       )}
                       {/* 课程树 */}
