@@ -348,3 +348,55 @@ export interface ProgressStats {
   completed: number;
   rate: number;
 }
+
+// ── 知识图谱类型 ──
+
+/** 图谱节点 */
+export interface GraphNode {
+  id: string;
+  type: 'chapter' | 'section' | 'kp';
+  label: string;
+  description?: string;
+  difficulty?: string;
+  estimated_minutes?: number;
+  resource_count?: number;
+  progress_status?: string;
+  progress_score?: number;
+  learning_objectives?: string;
+  parent_id?: string | null;
+}
+
+/** 图谱边 */
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: 'belongs_to' | 'prerequisite' | 'related';
+}
+
+/** 知识图谱响应 */
+export interface KnowledgeGraphData {
+  course: Course;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  total_nodes: number;
+  total_edges: number;
+}
+
+/** 前置关系 */
+export interface PrerequisiteRelation {
+  id?: number;
+  knowledge_point_id: number;
+  prerequisite_id: number;
+  prerequisite_name?: string;
+  prerequisite_difficulty?: string;
+  relation_type: 'prerequisite' | 'related';
+  created_at?: string;
+}
+
+/** AI 推断前置关系响应 */
+export interface AiInferPrerequisitesResponse {
+  message: string;
+  added: number;
+  skipped: number;
+  total_relations: number;
+}

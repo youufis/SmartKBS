@@ -171,3 +171,63 @@ export async function reorderNodes(items: ReorderItem[]): Promise<{ message: str
   const { data } = await apiClient.put('/api/curriculum/reorder', { items });
   return data;
 }
+
+// ── 知识图谱 API ──
+
+import type { KnowledgeGraphData, PrerequisiteRelation, AiInferPrerequisitesResponse } from '../types';
+
+/** 获取课程知识图谱数据 */
+export async function getKnowledgeGraph(courseId: number): Promise<KnowledgeGraphData> {
+  const { data } = await apiClient.get(`/api/curriculum/knowledge-graph/${courseId}`);
+  return data;
+}
+
+/** 获取知识点的前置关系 */
+export async function getPrerequisites(kpId: number): Promise<{
+  prerequisites: PrerequisiteRelation[];
+  depended_by: PrerequisiteRelation[];
+  total_prerequisites: number;
+  total_depended_by: number;
+}> {
+  const { data } = await apiClient.get(`/api/curriculum/knowledge-points/${kpId}/prerequisites`);
+  return data;
+}
+
+/** 添加前置关系 */
+export async function createPrerequisite(req: {
+  knowledge_point_id: number;
+  prerequisite_id: number;
+  relation_type?: string;
+}): Promise<{ message: string; id: number }> {
+  const { data } = await apiClient.post(
+    `/api/curriculum/knowledge-points/${req.knowledge_point_id}/prerequisites`,
+    req,
+  );
+  return data;
+}
+
+/** 删除前置关系 */
+export async function deletePrerequisite(kpId: number, preId: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete(
+    `/api/curriculum/knowledge-points/${kpId}/prerequisites/${preId}`,
+  );
+  return data;
+}
+
+/** 批量设置前置关系（先删后增） */
+export async function batchSetPrerequisites(
+  kpId: number,
+  relations: { knowledge_point_id: number; prerequisite_id: number; relation_type?: string }[],
+): Promise<{ message: string }> {
+  const { data } = await apiClient.post(
+    `/api/curriculum/knowledge-points/${kpId}/prerequisites/batch`,
+    { relations },
+  );
+  return data;
+}
+
+/** AI 自动推断知识前置关系 */
+export async function aiInferPrerequisites(courseId: number): Promise<AiInferPrerequisitesResponse> {
+  const { data } = await apiClient.post(`/api/curriculum/ai-infer-prerequisites/${courseId}`);
+  return data;
+}

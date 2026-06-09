@@ -1944,3 +1944,347 @@ async def preview_courseware(kp_id: int, request: Request):
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=content)
+
+
+# ═══════════════════════════════════════════════════════════
+# 知识图谱模块（V4.8）
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/knowledge-graph/{course_id}", summary="获取课程知识图谱数据")
+async def get_knowledge_graph(course_id: int, request: Request):
+    """返回指定课程的知识图谱数据（nodes + edges），含前置关系和学生进度"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    # 1) 获取课程信息
+    course = execute_query_one("SELECT * FROM courses WHERE id=?", (course_id,))
+    if not course:
+        raise HTTPException(status_code=404, detail="课程不存在")
+
+    # 2) 获取章节树（复用已有函数）
+    chapters = _build_course_tree(course_id)
+    if not chapters:
+        return {"course": dict(course), "nodes": [], "edges": []}
+
+    # 3) 展平为扁平节点列表，同时生成归属边
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+
+    def _flatten(ch_list: list[dict[str, Any]], parent_id: str | None = None):
+        for ch in ch_list:
+            node_id = f"ch_{ch['id']}"
+            # 判断是章（parent_id为None）还是节
+            is_section = parent_id is not None
+            nodes.append({
+                "id": node_id,
+                "type": "section" if is_section else "chapter",
+                "label": ch["name"],
+                "description": ch.get("description", ""),
+                "parent_id": parent_id,
+            })
+            if parent_id:
+                edges.append({"source": parent_id, "target": node_id, "type": "belongs_to"})
+
+            # 知识点
+            for kp in ch.get("knowledge_points", []):
+                kp_id = f"kp_{kp['id']}"
+                nodes.append({
+                    "id": kp_id,
+                    "type": "kp",
+                    "label": kp["name"],
+                    "description": kp.get("description", ""),
+                    "difficulty": kp.get("difficulty", "medium"),
+                    "estimated_minutes": kp.get("estimated_minutes", 0),
+                    "resource_count": kp.get("resource_count", 0),
+                    "progress_status": kp.get("progress_status", "not_started" if role == 2 else None),
+                    "learning_objectives": kp.get("learning_objectives", ""),
+                    "parent_id": node_id,
+                })
+                edges.append({"source": node_id, "target": kp_id, "type": "belongs_to"})
+
+            # 递归子章节
+            _flatten(ch.get("children", []), node_id)
+
+    _flatten(chapters)
+
+    # 4) 查询前置关系
+    if nodes:
+        numeric_ids = [int(n["id"].split("_")[1]) for n in nodes if n["type"] == "kp"]
+        if numeric_ids:
+            prereqs = execute_query(
+                f"""SELECT kp.knowledge_point_id, kp.prerequisite_id, kp.relation_type
+                    FROM knowledge_prerequisites kp
+                    JOIN knowledge_points kp1 ON kp1.id = kp.knowledge_point_id
+                    JOIN chapters ch1 ON ch1.id = kp1.chapter_id
+                    WHERE ch1.course_id=? AND kp.prerequisite_id IN ({','.join('?' for _ in numeric_ids)})
+                    ORDER BY kp.id""",
+                tuple([course_id] + numeric_ids),
+            )
+            for pr in prereqs:
+                edges.append({
+                    "source": f"kp_{pr['prerequisite_id']}",
+                    "target": f"kp_{pr['knowledge_point_id']}",
+                    "type": pr["relation_type"],
+                })
+
+    # 5) 学生注入进度信息
+    if role == 2:
+        kp_numeric = [int(n["id"].split("_")[1]) for n in nodes if n["type"] == "kp"]
+        if kp_numeric:
+            ph = ",".join("?" for _ in kp_numeric)
+            progress_rows = execute_query(
+                f"SELECT knowledge_point_id, status, score FROM learning_progress WHERE student_username=? AND knowledge_point_id IN ({ph})",
+                (username, *kp_numeric),
+            )
+            p_map = {r["knowledge_point_id"]: r for r in progress_rows}
+            for node in nodes:
+                if node["type"] == "kp":
+                    kp_num = int(node["id"].split("_")[1])
+                    p = p_map.get(kp_num)
+                    if p:
+                        node["progress_status"] = p["status"]
+                        node["progress_score"] = p["score"]
+                    else:
+                        node["progress_status"] = "not_started"
+
+    return {"course": dict(course), "nodes": nodes, "edges": edges, "total_nodes": len(nodes), "total_edges": len(edges)}
+
+
+# ── 前置关系 CRUD ──
+
+class PrerequisiteCreate(BaseModel):
+    knowledge_point_id: int
+    prerequisite_id: int
+    relation_type: str = "prerequisite"
+
+class PrerequisitesBatchCreate(BaseModel):
+    relations: list[PrerequisiteCreate]
+
+@router.get("/knowledge-points/{kp_id}/prerequisites", summary="获取知识点前置关系")
+async def get_prerequisites(kp_id: int, request: Request):
+    """获取指定知识点的所有前置/关联知识点"""
+    get_current_user(request)
+    kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (kp_id,))
+    if not kp:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+
+    prereqs = execute_query(
+        """SELECT kp.*, p.name as prerequisite_name, p.difficulty as prerequisite_difficulty
+           FROM knowledge_prerequisites kp
+           JOIN knowledge_points p ON p.id = kp.prerequisite_id
+           WHERE kp.knowledge_point_id=?
+           ORDER BY kp.id""",
+        (kp_id,),
+    )
+    depended_by = execute_query(
+        """SELECT kp.*, k.name as knowledge_point_name
+           FROM knowledge_prerequisites kp
+           JOIN knowledge_points k ON k.id = kp.knowledge_point_id
+           WHERE kp.prerequisite_id=?
+           ORDER BY kp.id""",
+        (kp_id,),
+    )
+    return {
+        "prerequisites": prereqs,
+        "depended_by": depended_by,
+        "total_prerequisites": len(prereqs),
+        "total_depended_by": len(depended_by),
+    }
+
+
+@router.post("/knowledge-points/{kp_id}/prerequisites", summary="添加前置关系")
+async def create_prerequisite(kp_id: int, req: PrerequisiteCreate, request: Request):
+    """为知识点添加前置/关联关系（教师/管理员）"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    kp1 = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (kp_id,))
+    if not kp1:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    kp2 = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (req.prerequisite_id,))
+    if not kp2:
+        raise HTTPException(status_code=404, detail="前置知识点不存在")
+
+    if kp_id == req.prerequisite_id:
+        raise HTTPException(status_code=400, detail="知识点不能依赖自身")
+
+    if req.relation_type not in ("prerequisite", "related"):
+        raise HTTPException(status_code=400, detail="关系类型必须是 prerequisite 或 related")
+
+    existing = execute_query_one(
+        "SELECT id FROM knowledge_prerequisites WHERE knowledge_point_id=? AND prerequisite_id=?",
+        (kp_id, req.prerequisite_id),
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="该前置关系已存在")
+
+    now = _now()
+    rid = execute_insert_update(
+        """INSERT INTO knowledge_prerequisites (knowledge_point_id, prerequisite_id, relation_type, created_at)
+           VALUES (?, ?, ?, ?)""",
+        (kp_id, req.prerequisite_id, req.relation_type, now),
+    )
+    logger.info(f"用户 {user['username']} 添加前置关系: {kp_id} <- {req.prerequisite_id} ({req.relation_type})")
+    return {"message": "前置关系添加成功", "id": rid}
+
+
+@router.delete("/knowledge-points/{kp_id}/prerequisites/{pre_id}", summary="删除前置关系")
+async def delete_prerequisite(kp_id: int, pre_id: int, request: Request):
+    """删除前置关系（教师/管理员）"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    existing = execute_query_one(
+        "SELECT id FROM knowledge_prerequisites WHERE knowledge_point_id=? AND prerequisite_id=?",
+        (kp_id, pre_id),
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="前置关系不存在")
+
+    execute_insert_update(
+        "DELETE FROM knowledge_prerequisites WHERE knowledge_point_id=? AND prerequisite_id=?",
+        (kp_id, pre_id),
+    )
+    logger.info(f"用户 {user['username']} 删除前置关系: {kp_id} <- {pre_id}")
+    return {"message": "前置关系已删除"}
+
+
+@router.post("/knowledge-points/{kp_id}/prerequisites/batch", summary="批量设置前置关系")
+async def batch_set_prerequisites(kp_id: int, req: PrerequisitesBatchCreate, request: Request):
+    """批量设置知识点的前置关系（先删后增，教师/管理员）"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (kp_id,))
+    if not kp:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+
+    execute_insert_update(
+        "DELETE FROM knowledge_prerequisites WHERE knowledge_point_id=?",
+        (kp_id,),
+    )
+
+    now = _now()
+    count = 0
+    for rel in req.relations:
+        if rel.knowledge_point_id != kp_id or rel.prerequisite_id == kp_id:
+            continue
+        kp_check = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (rel.prerequisite_id,))
+        if not kp_check:
+            continue
+        if rel.relation_type not in ("prerequisite", "related"):
+            continue
+        try:
+            execute_insert_update(
+                """INSERT INTO knowledge_prerequisites (knowledge_point_id, prerequisite_id, relation_type, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (kp_id, rel.prerequisite_id, rel.relation_type, now),
+            )
+            count += 1
+        except Exception:
+            pass
+
+    logger.info(f"用户 {user['username']} 批量设置前置关系: kp_id={kp_id}, 新增={count}")
+    return {"message": f"批量设置完成，共处理 {count} 条关系"}
+
+
+# ── AI 推断前置关系 ──
+
+@router.post("/ai-infer-prerequisites/{course_id}", summary="AI 自动推断知识前置关系")
+async def ai_infer_prerequisites(course_id: int, request: Request):
+    """AI 根据课程知识点的名称和描述，自动推断前置依赖关系"""
+    user = get_current_user(request)
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    course = execute_query_one("SELECT * FROM courses WHERE id=?", (course_id,))
+    if not course:
+        raise HTTPException(status_code=404, detail="课程不存在")
+
+    kps = execute_query(
+        """SELECT kp.id, kp.name, kp.description, ch.name as chapter_name
+           FROM knowledge_points kp
+           JOIN chapters ch ON ch.id = kp.chapter_id
+           WHERE ch.course_id=? AND kp.status='active'
+           ORDER BY ch.sort_order, ch.id, kp.sort_order, kp.id""",
+        (course_id,),
+    )
+    if len(kps) < 2:
+        raise HTTPException(status_code=400, detail="知识点数量不足，至少需要 2 个知识点")
+
+    from backend.api.chat_router import get_api_keys
+    from backend.api.ai_service import call_ai_async
+
+    api_key, _ = get_api_keys(user["username"])
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    kp_list_str = "\n".join([
+        f'  {{"id": {kp["id"]}, "name": "{kp["name"]}", "chapter": "{kp["chapter_name"]}", "description": "{kp.get("description", "")[:100]}"}}'
+        for kp in kps
+    ])
+
+    prompt = f"""你是一名课程设计师。请分析以下课程《{course['name']}》的所有知识点之间的前置依赖关系。
+
+规则：
+1. "前置依赖"表示学习知识点 A 之前必须先掌握知识点 B（B → A）
+2. 同一章节内的知识点可能存在先后顺序
+3. 不同章节之间也可能存在跨章节的前置依赖
+4. 只返回明确存在依赖关系的内容
+5. 每个关系只输出一次
+
+知识点列表：
+[{kp_list_str}]
+
+输出格式（严格 JSON）：
+{{"prerequisites": [
+  {{"knowledge_point_id": A的id, "prerequisite_id": B的id, "relation_type": "prerequisite"}}
+]}}
+
+如果没有任何前置依赖，返回 {{"prerequisites": []}}"""
+
+    try:
+        ai_response = await call_ai_async(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 推断前置关系失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 调用失败: {str(e)}")
+
+    result = _parse_ai_json(ai_response)
+    if not result or "prerequisites" not in result:
+        raise HTTPException(status_code=500, detail="AI 返回格式异常")
+
+    relations = result["prerequisites"]
+    now = _now()
+    added = 0
+    skipped = 0
+
+    for rel in relations:
+        kp_id = rel.get("knowledge_point_id")
+        pre_id = rel.get("prerequisite_id")
+        rtype = rel.get("relation_type", "prerequisite")
+        if not kp_id or not pre_id or kp_id == pre_id:
+            skipped += 1
+            continue
+        if rtype not in ("prerequisite", "related"):
+            rtype = "prerequisite"
+        try:
+            execute_insert_update(
+                """INSERT OR IGNORE INTO knowledge_prerequisites (knowledge_point_id, prerequisite_id, relation_type, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (kp_id, pre_id, rtype, now),
+            )
+            added += 1
+        except Exception:
+            skipped += 1
+
+    logger.info(f"AI 推断前置关系完成: course_id={course_id}, 新增={added}, 跳过={skipped}")
+    return {
+        "message": f"AI 推断完成，新增 {added} 条前置关系，跳过 {skipped} 条",
+        "added": added,
+        "skipped": skipped,
+        "total_relations": added,
+    }

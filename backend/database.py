@@ -527,6 +527,21 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 知识图谱：知识点前置/关联关系表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS knowledge_prerequisites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                knowledge_point_id INTEGER NOT NULL REFERENCES knowledge_points(id),
+                prerequisite_id INTEGER NOT NULL REFERENCES knowledge_points(id),
+                relation_type TEXT DEFAULT 'prerequisite' CHECK(relation_type IN ('prerequisite', 'related')),
+                created_at TEXT NOT NULL,
+                UNIQUE(knowledge_point_id, prerequisite_id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_kp_req_kp ON knowledge_prerequisites(knowledge_point_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_kp_req_pre ON knowledge_prerequisites(prerequisite_id)")
+            except sqlite3.OperationalError:
+                pass
+
             # ═══════════════════════════════════════════════
             # 资源分组模块（v2.7）
             # ═══════════════════════════════════════════════
