@@ -5,6 +5,7 @@
 from datetime import datetime
 from backend.database import execute_query, execute_insert_update
 from backend.logger import logger
+from backend.title_system import check_main_title_upgrade, check_and_unlock_badges
 
 # ── 奖励配置 ──
 
@@ -20,6 +21,7 @@ REWARD_CONFIG = {
     "chat":       {"participation": 2,  "has_grade": False},
     "task":       {"participation": 2,  "has_grade": True},
     "learning":   {"participation": 2,  "has_grade": False},
+    "login":      {"participation": 1,  "has_grade": False},  # 每日登录（一天一次）
 }
 
 GRADE_POINTS = {
@@ -39,6 +41,7 @@ ACTIVITY_TYPE_NAMES = {
     "chat":       "AI 对话",
     "task":       "任务",
     "learning":   "学习进度",
+    "login":      "每日登录",
 }
 
 REWARD_TYPE_NAMES = {
@@ -53,18 +56,45 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _update_student_total(student_username: str):
-    """重新计算并更新学生的积分汇总"""
+def _update_student_total(student_username: str, check_upgrade: bool = True):
+    """重新计算并更新学生的积分汇总，同时检测称号升级
+
+    Args:
+        student_username: 学生用户名
+        check_upgrade: 是否检测称号升级（默认开启）
+
+    Returns:
+        更新后的总积分
+    """
+    # 获取旧积分
+    old_row = execute_query(
+        "SELECT total_points FROM student_total_points WHERE student_username=?",
+        (student_username,),
+    )
+    old_total = old_row[0][0] if old_row else 0
+
     row = execute_query(
         "SELECT COALESCE(SUM(points), 0) FROM activity_rewards WHERE student_username=?",
         (student_username,),
     )
-    total = row[0][0] if row else 0
+    new_total = row[0][0] if row else 0
+
     execute_insert_update(
         "INSERT OR REPLACE INTO student_total_points (student_username, total_points, updated_at) VALUES (?, ?, ?)",
-        (student_username, total, _now()),
+        (student_username, new_total, _now()),
     )
-    return total
+
+    # 称号升级检测
+    if check_upgrade and new_total != old_total:
+        upgrade = check_main_title_upgrade(student_username, old_total, new_total)
+        if upgrade:
+            logger.info(f"学生 {student_username} 称号升级: {upgrade['old_title']['name']} → {upgrade['new_title']['name']}")
+        # 同时检测徽章
+        new_badges = check_and_unlock_badges(student_username)
+        if new_badges:
+            logger.info(f"学生 {student_username} 解锁 {len(new_badges)} 个新徽章")
+
+    return new_total
 
 
 def award_participation(student_username: str, activity_type: str, activity_id: str,
@@ -169,6 +199,37 @@ def award_grade(student_username: str, activity_type: str, activity_id: str,
     _update_student_total(student_username)
     logger.info(f"积分奖励: {student_username} +{points} ({activity_type}/{activity_id}) {grade_name}")
     return points
+
+
+def award_daily_login(student_username: str) -> int:
+    """发放每日登录奖励（1分），一天只计一次
+
+    Args:
+        student_username: 学生用户名
+
+    Returns:
+        发放的积分，0 表示今日已领取
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    # 检查今日是否已发放过登录奖励
+    existing = execute_query(
+        "SELECT id FROM activity_rewards WHERE student_username=? AND activity_type='login' AND activity_id=?",
+        (student_username, today),
+    )
+    if existing:
+        return 0
+
+    execute_insert_update(
+        """INSERT INTO activity_rewards
+           (student_username, activity_type, activity_id, activity_title, reward_type, points, reason, created_at)
+           VALUES (?, 'login', ?, '每日登录', 'participation', 1, ?, ?)""",
+        (student_username, today,
+         f"每日登录奖励（{today}）",
+         _now()),
+    )
+    _update_student_total(student_username)
+    logger.info(f"积分奖励: {student_username} +1 (login/{today}) 每日登录")
+    return 1
 
 
 def batch_award(records: list[dict]) -> list[int]:

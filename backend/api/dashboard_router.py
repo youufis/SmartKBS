@@ -12,6 +12,14 @@ from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.auth import get_online_count
 from backend.logger import logger
+from backend.title_system import (
+    get_main_title,
+    get_main_title_progress,
+    get_student_subject_titles,
+    get_student_badges,
+    get_or_init_student_title,
+)
+from backend.reward_engine import get_student_total as get_reward_total
 
 router = APIRouter()
 
@@ -293,6 +301,16 @@ async def dashboard_summary(request: Request):
                 (grade, grade, cls, cls, username) if grade else ("", "", "", "", username),
             ) if grade else _db_count("SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'"),
         })
+        # 称号系统（使用 reward_engine 的活动积分）
+        _reward_points = get_reward_total(username)
+        _main_t = get_main_title(_reward_points)
+        _progress = get_main_title_progress(_reward_points)
+        result["title_name"] = _main_t["name"]
+        result["title_level"] = _main_t["level"]
+        result["title_emoji"] = _main_t.get("emoji", "")
+        result["title_color"] = _main_t.get("color", "default")
+        result["next_title_name"] = _progress["next"]["name"] if _progress["next"] else None
+        result["title_progress"] = _progress["progress_percent"]
 
     else:  # ── 教师/管理员 ──
         exam_where = ""
