@@ -86,6 +86,15 @@ async def login(req: LoginRequest, fastapi_request: Request):
     logger.info(f"登录日志检查 - username={username}, role_val={role_val}, name_val={name_val}")
     if role_val == 2:
         try:
+            import datetime
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # 先关闭上一次未登出的会话（将 logout_time 为 NULL 的记录更新）
+            execute_insert_update(
+                "UPDATE login_logs SET logout_time=? WHERE username=? AND logout_time IS NULL",
+                (now_str, username),
+            )
+
             # 获取客户端 IP（用 fastapi_request 而非 req，因为 req 是 Pydantic 模型）
             client_ip = fastapi_request.headers.get("x-forwarded-for", "")
             if client_ip:
@@ -93,8 +102,6 @@ async def login(req: LoginRequest, fastapi_request: Request):
             else:
                 client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
             user_agent = fastapi_request.headers.get("user-agent", "")[:200]
-            import datetime
-            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             execute_insert_update(
                 """INSERT INTO login_logs (username, student_name, grade, class_name, login_time, login_ip, user_agent)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
