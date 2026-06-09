@@ -100,9 +100,11 @@ export interface MediaFile {
   created_at?: string;
 }
 
+export type QuestionType = 'single' | 'multiple' | 'true_false' | 'short' | 'fill' | 'essay' | 'subjective';
+
 export interface QuestionInfo {
   id: number;
-  type: 'single' | 'multiple' | 'true_false' | 'short';
+  type: QuestionType;
   question_text: string;
   options: Record<string, string> | null;
   correct_answer: string;
@@ -124,6 +126,77 @@ export interface QuestionInfo {
   media_placeholders?: MediaPlaceholder[];
   /** 已上传/生成的媒体文件 */
   media_files?: MediaFile[];
+}
+
+// ── AI 智能批改类型 ──
+
+/** 维度评分（主观题/作文使用） */
+export interface DimensionScore {
+  score: number;
+  comment: string;
+  strengths: string[];
+  weaknesses: string[];
+}
+
+/** 多维评分详情（主观题/作文） */
+export interface EssayDimensions {
+  content: DimensionScore;
+  structure: DimensionScore;
+  language: DimensionScore;
+}
+
+/** 单题批改结果（含 AI 评语） */
+export interface GradedAnswerDetail {
+  student_answer: string;
+  correct_answer: string;
+  score: number;
+  max_score: number;
+  is_correct: boolean;
+  /** 简答题 AI 评语 */
+  comment?: string;
+  /** 简答题 AI 学习建议 */
+  feedback?: string;
+  /** 主观题/作文多维评分 */
+  dimensions?: EssayDimensions;
+  /** 主观题总评 */
+  overall_comment?: string;
+  /** 改进建议 */
+  improvement_suggestions?: string[];
+  /** 答对的关键点 */
+  key_points_hit?: string[];
+  /** 遗漏的关键点 */
+  key_points_missed?: string[];
+  /** 教师评语 */
+  teacher_comment?: string;
+  /** 教师是否手动调整 */
+  teacher_adjusted?: boolean;
+}
+
+/** 教师复核请求 */
+export interface TeacherReviewRequest {
+  attempt_id: number;
+  teacher_score?: number | null;
+  teacher_comment?: string | null;
+  question_scores?: Record<string, number> | null;
+  question_comments?: Record<string, string> | null;
+}
+
+/** AI 批改复核详情 */
+export interface GradingReviewDetail {
+  exam: { id: number; title: string; subject: string };
+  student: { username: string; name: string };
+  attempt: {
+    id: number;
+    score: number;
+    total_score: number;
+    teacher_score: number;
+    teacher_comment: string;
+    teacher_reviewed: number;
+    graded_by: string;
+    submitted_at: string;
+    auto_graded: number;
+  };
+  questions: Array<ExamQuestion & GradedAnswerDetail>;
 }
 
 export interface QuestionGenerateRequest {

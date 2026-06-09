@@ -301,7 +301,8 @@ async def export_exam_result(exam_id: int, request: Request):
             ws2.cell(3, i, h)
         _style_header(ws2, 3, len(headers2))
 
-        type_map = {"single": "单选", "multiple": "多选", "true_false": "判断", "short": "简答"}
+        type_map = {"single": "单选", "multiple": "多选", "true_false": "判断", "short": "简答",
+                     "fill": "填空", "essay": "作文", "subjective": "主观题"}
 
         for idx, q in enumerate(questions):
             row = 4 + idx

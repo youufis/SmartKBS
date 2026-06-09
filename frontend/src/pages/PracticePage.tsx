@@ -12,13 +12,10 @@ import MediaDisplay from '../components/MediaDisplay'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
+import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTypes'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
-
-const typeLabel: Record<string, string> = {
-  single: '单选题', multiple: '多选题', true_false: '判断题', short: '简答题',
-}
 
 // ════════════════════════════════════════
 // 学生端
@@ -385,11 +382,11 @@ const TeacherView: React.FC = () => {
                 <Select value={subject} onChange={setSubject} style={{ width: 130 }}>
                   {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
                 </Select>
-                <Select value={qType} onChange={setQType} style={{ width: 120 }}>
-                  <Select.Option value="mixed">混合题型</Select.Option>
-                  <Select.Option value="single">单选题</Select.Option>
-                  <Select.Option value="true_false">判断题</Select.Option>
-                  <Select.Option value="short">简答题</Select.Option>
+                <Select value={qType} onChange={setQType} style={{ width: 130 }}>
+                  <Select.Option value="mixed">🔄 混合出题</Select.Option>
+                  {TYPE_OPTIONS.map(opt => (
+                    <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
+                  ))}
                 </Select>
                 <Select value={difficulty} onChange={setDifficulty} style={{ width: 100 }}>
                   <Select.Option value="easy">简单</Select.Option>

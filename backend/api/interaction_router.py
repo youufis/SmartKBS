@@ -587,8 +587,8 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
     q_score = sum(q.get("score", 1) for q in questions)
 
     # 分离简答题和其他题
-    short_indices = [i for i, q in enumerate(questions) if q.get("type") == "short"]
-    other_indices = [i for i, q in enumerate(questions) if q.get("type") != "short"]
+    short_indices = [i for i, q in enumerate(questions) if q.get("type") in ("short", "fill")]
+    other_indices = [i for i, q in enumerate(questions) if q.get("type") not in ("short", "fill")]
 
     # 非简答题：精确匹配
     for idx in other_indices:

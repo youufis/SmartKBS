@@ -54,6 +54,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     ],
     # 课程名称列表
     "SUBJECTS": ["信息科技", "通用技术"],
+    # 启用的试题题型（可在此增删，前端自动同步）
+    "QUESTION_TYPES": [
+        {"key": "single", "label": "单选题"},
+        {"key": "multiple", "label": "多选题"},
+        {"key": "true_false", "label": "判断题"},
+        {"key": "short", "label": "简答题"},
+        {"key": "fill", "label": "填空题"},
+        {"key": "essay", "label": "作文"},
+        {"key": "subjective", "label": "主观题"},
+    ],
     # 消息通知类型（默认只启用考试通知，管理员可在系统配置中调整）
     "enabled_notification_types": ["exam"],
     # 图片生成（通义万相，与对话模型共享 API Key）
@@ -217,6 +227,15 @@ async def get_subjects():
         "default": get_default_subject(),
     }
 
+@router.get("/question-types", summary="获取启用的题型列表")
+async def get_question_types():
+    """从系统配置返回题型列表（管理员可在系统配置页面修改）"""
+    cfg = load_config()
+    types = cfg.get("QUESTION_TYPES", [])
+    return {
+        "types": types,
+        "default": types[0] if types else {"key": "single", "label": "单选题"},
+    }
 
 @router.get("/grades", summary="获取年级列表")
 async def get_grades():

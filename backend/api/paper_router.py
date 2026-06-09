@@ -72,6 +72,9 @@ TYPE_LABELS = {
     "multiple": "多选题",
     "true_false": "判断题",
     "short": "简答题",
+    "fill": "填空题",
+    "essay": "作文",
+    "subjective": "主观题",
 }
 
 
@@ -278,7 +281,8 @@ async def _select_questions_by_ai(
     type_config_text = "\n".join(type_config_lines)
 
     # 构建候选题目文本
-    type_map = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题"}
+    type_map = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
+                 "fill": "填空题", "essay": "作文", "subjective": "主观题"}
     diff_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
 
     candidate_lines = []

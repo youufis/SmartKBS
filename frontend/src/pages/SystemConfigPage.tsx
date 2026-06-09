@@ -50,6 +50,9 @@ const GLOBAL_CONFIG_FIELDS = [
   // 课程设置
   { key: 'SUBJECTS', label: '课程名称列表', type: 'tags', group: 'subjects',
     desc: '系统中使用的课程名称，多个用逗号分隔，如 信息科技,通用技术。修改后需重启服务生效' },
+  // 题型设置
+  { key: 'QUESTION_TYPES', label: '试题题型列表', type: 'question_types', group: 'subjects',
+    desc: '每行一个题型，格式为 "key:标签"，如 single:单选题。增删改后刷新页面即可生效，无需重启' },
   // 消息通知
   { key: 'enabled_notification_types', label: '启用的通知类型', type: 'notifications', group: 'notify',
     desc: '关闭的通知类型将不会推送给任何用户' },
@@ -112,6 +115,12 @@ const SystemConfigPage: React.FC = () => {
           formValues[key] = formValues[key].join(',')
         }
       }
+      // 题型数组 [{key,label}] → 多行文本 key:label
+      if (Array.isArray(formValues['QUESTION_TYPES'])) {
+        formValues['QUESTION_TYPES'] = formValues['QUESTION_TYPES']
+          .map((t: { key: string; label: string }) => `${t.key}:${t.label}`)
+          .join('\n')
+      }
       form.setFieldsValue(formValues)
       // 同时刷新 API Key 状态
       loadApikeyStatus()
@@ -134,6 +143,17 @@ const SystemConfigPage: React.FC = () => {
         if (typeof allValues[key] === 'string') {
           allValues[key] = allValues[key].split(',').map((s: string) => s.trim()).filter(Boolean)
         }
+      }
+      // 题型多行文本 key:label → [{key,label}]
+      if (typeof allValues['QUESTION_TYPES'] === 'string') {
+        allValues['QUESTION_TYPES'] = allValues['QUESTION_TYPES']
+          .split('\n')
+          .map((line: string) => line.trim())
+          .filter(Boolean)
+          .map((line: string) => {
+            const [k, ...rest] = line.split(':')
+            return { key: k.trim(), label: rest.join(':').trim() || k.trim() }
+          })
       }
       await apiClient.put('/api/config', { config: allValues })
       message.success('系统配置已保存（部分配置需重启服务生效）')
@@ -160,6 +180,11 @@ const SystemConfigPage: React.FC = () => {
           if (Array.isArray(formValues[key])) {
             formValues[key] = formValues[key].join(',')
           }
+        }
+        if (Array.isArray(formValues['QUESTION_TYPES'])) {
+          formValues['QUESTION_TYPES'] = formValues['QUESTION_TYPES']
+            .map((t: { key: string; label: string }) => `${t.key}:${t.label}`)
+            .join('\n')
         }
         if (!formValues['enabled_notification_types']) {
           formValues['enabled_notification_types'] = ['exam']
@@ -242,6 +267,16 @@ const SystemConfigPage: React.FC = () => {
                   getValueFromEvent={(e) => e.target.value}
                 >
                   <Input placeholder="多个扩展名用逗号分隔，如 .jpg,.png" />
+                </Form.Item>
+              ) : field.type === 'question_types' ? (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  rules={[{ required: true, message: `请输入${field.label}` }]}
+                  extra={field.desc}
+                  getValueFromEvent={(e) => e.target.value}
+                >
+                  <Input.TextArea rows={7} placeholder={'格式：每行一个 "key:标签"\nsingle:单选题\nmultiple:多选题\ntrue_false:判断题\nshort:简答题\nfill:填空题\nessay:作文\nsubjective:主观题'} />
                 </Form.Item>
               ) : field.type === 'roles' ? (
                 <Form.Item

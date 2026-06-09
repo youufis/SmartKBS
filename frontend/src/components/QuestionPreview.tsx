@@ -9,6 +9,9 @@ const TYPE_LABELS: Record<string, string> = {
   multiple: '多选题',
   true_false: '判断题',
   short: '简答题',
+  fill: '填空题',
+  essay: '作文',
+  subjective: '主观题',
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -16,6 +19,9 @@ const TYPE_COLORS: Record<string, string> = {
   multiple: 'purple',
   true_false: 'orange',
   short: 'green',
+  fill: 'cyan',
+  essay: 'magenta',
+  subjective: 'volcano',
 }
 
 const DIFFICULTY_LABELS: Record<string, string> = {

@@ -19,7 +19,6 @@ import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
 import { StudentView as PracticeStudentView, TeacherView as PracticeTeacherView } from '../pages/PracticePage'
 import type { Question } from '../components/QuizEditor'
-
 const { Title, Text } = Typography
 const { TextArea } = Input
 
@@ -974,11 +973,11 @@ const InteractionPage: React.FC = () => {
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="question_type" label="题型" initialValue="single">
+          <Form.Item name="question_type" label="出题模式" initialValue="single">
             <Select>
-              <Select.Option value="single">单选题</Select.Option>
-              <Select.Option value="true_false">判断题</Select.Option>
-              <Select.Option value="mixed">混合</Select.Option>
+              <Select.Option value="single">仅单选题</Select.Option>
+              <Select.Option value="true_false">仅判断题</Select.Option>
+              <Select.Option value="mixed">混合出题（单选+判断）</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item name="count" label="题目数量" initialValue={1}>

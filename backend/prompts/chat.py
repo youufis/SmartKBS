@@ -28,7 +28,7 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为
 
 [
   {{
-    "type": "single/multiple/true_false/short",
+    "type": "single/multiple/true_false/short/fill/essay/subjective",
     "question": "题目内容（含 $...$ LaTeX 公式）",
     "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
@@ -42,7 +42,8 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为
 
 注意：
 - 如果是判断题，options 设为 {{"对":"对", "错":"错"}}，answer 为"对"或"错"
-- 如果是简答题，options 设为 null，answer 为参考答案
+- 如果是简答题或填空题，options 设为 null，answer 为参考答案
+- 如果是作文或主观题，options 设为 null，answer 为评分要点/参考标准
 - 题目和选项要与高中{subject}课程内容紧密相关
 """
 
@@ -91,7 +92,7 @@ purpose 为 "实物图" / "微观图" / "场景图"，description 写 50-100 字
 ━━━━ 输出格式 ━━━━
 [
   {{
-    "type": "single/multiple/true_false/short",
+    "type": "single/multiple/true_false/short/fill/essay/subjective",
     "question": "题目内容（含 $...$ LaTeX 公式）",
     "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
