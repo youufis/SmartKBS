@@ -282,6 +282,14 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
     # 保存到汇总文件
     _save_to_summary(creator, task_info["name"], username, req.conversation_content)
 
+    # ── 任务提交积分奖励（仅学生） ──
+    if user.get("role") == 2:
+        try:
+            from backend.reward_engine import award_participation
+            award_participation(username, "task", str(task_info["id"]), task_info["name"])
+        except Exception:
+            pass
+
     logger.info(f"任务已提交: {task_info['name']}, student={username}")
     return {"message": f"已提交到任务 '{task_info['name']}'"}
 

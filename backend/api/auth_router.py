@@ -107,6 +107,15 @@ async def login(req: LoginRequest, fastapi_request: Request):
             import traceback
             logger.warning(traceback.format_exc())
 
+        # ── 每日登录积分奖励（仅学生，一天一次） ──
+        try:
+            from backend.reward_engine import award_daily_login
+            awarded = award_daily_login(username)
+            if awarded:
+                logger.info(f"每日登录奖励: {username} +1 分")
+        except Exception as e:
+            logger.warning(f"每日登录奖励发放失败: {e}")
+
     logger.info(f"用户登录成功: {username}")
 
     # 设置 Cookie，使浏览器直接导航到 /api/files/ 资源时能携带身份信息

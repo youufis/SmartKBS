@@ -278,6 +278,16 @@ async def chat_stream(req: ChatRequest, request: Request):
         return StreamingResponse(_error_stream(f"今日请求次数已达上限 ({max_req}次)"), media_type="text/event-stream")
 
     dashscope_api_key, _ = get_api_keys(username)
+
+    # ── AI 对话积分奖励（仅学生，每次对话） ──
+    if role_val == 2:
+        try:
+            from backend.reward_engine import award_participation
+            import datetime
+            award_participation(username, "chat", f"{username}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}", "AI 对话")
+        except Exception:
+            pass
+
     if not dashscope_api_key:
         return StreamingResponse(
             _error_stream("API Key 未配置 | 请管理员在「系统配置」中填写 DashScope API Key，或设置环境变量 DASHSCOPE_API_KEY"),

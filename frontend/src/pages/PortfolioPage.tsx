@@ -85,6 +85,7 @@ const PortfolioPage: React.FC = () => {
   const [timeline, setTimeline] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [titleInfo, setTitleInfo] = useState<any>(null)
 
   useEffect(() => {
     if (!targetUsername) return
@@ -93,10 +94,12 @@ const PortfolioPage: React.FC = () => {
     Promise.all([
       apiClient.get(`/api/portfolio/${targetUsername}`),
       apiClient.get(`/api/portfolio/${targetUsername}/timeline`),
+      apiClient.get(`/api/rewards/my-title`).catch(() => ({ data: null })),
     ])
-      .then(([portfolioRes, timelineRes]) => {
+      .then(([portfolioRes, timelineRes, titleRes]) => {
         setData(portfolioRes.data)
         setTimeline(timelineRes.data || [])
+        if (titleRes?.data) setTitleInfo(titleRes.data)
       })
       .catch((err) => {
         setError(err.response?.data?.detail || '加载失败')
@@ -175,6 +178,12 @@ const PortfolioPage: React.FC = () => {
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.grade}</Tag>
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.class}班</Tag>
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.username}</Tag>
+              {titleInfo?.main_title && (
+                <Tag color={titleInfo.main_title.color !== 'default' ? titleInfo.main_title.color : undefined}
+                  style={{ fontSize: 13, padding: '0 10px', borderRadius: 10 }}>
+                  {titleInfo.main_title.emoji} Lv.{titleInfo.main_title.level} {titleInfo.main_title.name}
+                </Tag>
+              )}
             </Space>
           </div>
           {isTeacherOrAdmin && (
