@@ -28,6 +28,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import apiClient from '../api/client'
 import NotificationBell from './NotificationBell'
+import TitleCelebration from './TitleCelebration'
 
 const { Header, Sider, Content } = Layout
 
@@ -190,6 +191,8 @@ const AppLayout: React.FC = () => {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
+      {/* 称号升级/徽章解锁庆祝弹窗 */}
+      <TitleCelebration />
       <Header
         style={{
           background: '#fff',

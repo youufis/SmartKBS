@@ -60,6 +60,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
     "IMAGE_GEN_SIZE": "1024*1024",
+    # 称号系统配置
+    "ENABLE_BADGES": True,
+    "ENABLE_SUBJECT_TITLES": True,
 }
 
 
@@ -113,9 +116,10 @@ async def update_config(req: ConfigUpdate, request: Request):
     user = get_current_user(request)
     require_admin(user)
     current = load_config()
-    # 只允许更新已知的 key
+    # 允许更新已知的 key + 称号配置相关 key
+    _title_keys = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG", "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES"}
     for key, value in req.config.items():
-        if key in DEFAULT_CONFIG:
+        if key in DEFAULT_CONFIG or key in _title_keys:
             current[key] = value
     save_config(current)
     logger.info(f"管理员 {user['username']} 更新了系统配置 ({len(req.config)} 项)")
@@ -172,6 +176,36 @@ async def get_apikey_status(request: Request):
         "hint": hint,
         "configured": status != "missing",
     }
+
+
+@router.get("/titles", summary="获取称号配置（管理员）")
+async def get_title_config_api(request: Request):
+    """获取称号系统全部配置"""
+    user = get_current_user(request)
+    require_admin(user)
+    cfg = load_config()
+    from backend.title_system import get_title_config, get_subject_title_config, get_badge_config
+    return {
+        "TITLE_CONFIG": cfg.get("TITLE_CONFIG", get_title_config()),
+        "SUBJECT_TITLE_CONFIG": cfg.get("SUBJECT_TITLE_CONFIG", get_subject_title_config()),
+        "BADGE_CONFIG": cfg.get("BADGE_CONFIG", get_badge_config()),
+        "ENABLE_BADGES": cfg.get("ENABLE_BADGES", True),
+        "ENABLE_SUBJECT_TITLES": cfg.get("ENABLE_SUBJECT_TITLES", True),
+    }
+
+
+@router.put("/titles", summary="更新称号配置（管理员）")
+async def update_title_config_api(req: ConfigUpdate, request: Request):
+    """更新称号系统配置"""
+    user = get_current_user(request)
+    require_admin(user)
+    current = load_config()
+    for key, value in req.config.items():
+        if key in ("TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG", "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES"):
+            current[key] = value
+    save_config(current)
+    logger.info(f"管理员 {user['username']} 更新了称号配置")
+    return {"status": "ok"}
 
 
 @router.get("/subjects", summary="获取启用的课程列表")

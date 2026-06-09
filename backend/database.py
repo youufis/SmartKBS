@@ -643,6 +643,60 @@ def init_db():
                 pass
 
             # ═══════════════════════════════════════════════
+            # 称号系统模块（v4.5）
+            # ═══════════════════════════════════════════════
+
+            # ── 学生主称号表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS student_titles (
+                student_username TEXT PRIMARY KEY,
+                title_level INTEGER DEFAULT 1,
+                title_name TEXT DEFAULT '初窥门径',
+                unlocked_at TEXT,
+                updated_at TEXT
+            )""")
+
+            # ── 称号升级历史表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS title_upgrade_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                old_title TEXT DEFAULT '',
+                new_title TEXT NOT NULL,
+                title_type TEXT DEFAULT 'main',
+                subject TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tuh_student ON title_upgrade_history(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tuh_created ON title_upgrade_history(created_at)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 学生学科称号表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS student_subject_titles (
+                student_username TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                question_count INTEGER DEFAULT 0,
+                title_level INTEGER DEFAULT 1,
+                title_name TEXT DEFAULT '入门',
+                updated_at TEXT,
+                PRIMARY KEY (student_username, subject)
+            )""")
+
+            # ── 学生成就徽章表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS student_badges (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                badge_id TEXT NOT NULL,
+                badge_name TEXT NOT NULL,
+                unlocked_at TEXT NOT NULL,
+                UNIQUE(student_username, badge_id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_sb_student ON student_badges(student_username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ═══════════════════════════════════════════════
             # 考勤统计模块（v4.3）
             # ═══════════════════════════════════════════════
 

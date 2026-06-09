@@ -2,12 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card, Table, Tabs, Button, Space, Typography, Tag, message,
   Spin, Empty, Statistic, Row, Col, Select, Tooltip, Progress,
+  Collapse,
 } from 'antd'
 import {
   TrophyOutlined, HistoryOutlined, TeamOutlined,
   StarOutlined, ThunderboltOutlined, RiseOutlined,
   FireOutlined, BookOutlined, MessageOutlined,
-  RobotOutlined, AuditOutlined,
+  RobotOutlined, AuditOutlined, CheckCircleFilled,
+  LockFilled, ReloadOutlined, CrownOutlined, GiftOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -27,17 +29,280 @@ const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   learning: <RiseOutlined style={{ color: '#52c41a' }} />,
 }
 
-const ACTIVITY_COLORS: Record<string, string> = {
-  quiz: '#e6f4ff',
-  poll: '#f9f0ff',
-  question: '#e6fffb',
-  exam: '#f6ffed',
-  practice: '#fff7e6',
-  discussion: '#fff0f6',
-  rollcall: '#fffbe6',
-  chat: '#e6f4ff',
-  task: '#fff2f0',
-  learning: '#f6ffed',
+// 学科 emoji 映射（可扩展，不在列表中的科目按名称 hash 分配）
+const SUBJECT_EMOJI_MAP: Record<string, string> = {
+  '信息科技': '💻',
+  '通用技术': '🔧',
+  '人工智能': '🤖',
+  '信息技术': '💻',
+  '通用': '🔧',
+  '数学': '📐',
+  '语文': '📖',
+  '英语': '🌍',
+  '物理': '⚛️',
+  '化学': '🧪',
+  '生物': '🧬',
+  '历史': '📜',
+  '地理': '🌏',
+  '政治': '⚖️',
+}
+
+const FALLBACK_EMOJIS = ['📚', '🔬', '🎨', '🎵', '🏛️', '🧮', '🗺️', '🔭', '⚗️', '🖥️']
+
+function getSubjectEmoji(subject: string): string {
+  if (SUBJECT_EMOJI_MAP[subject]) return SUBJECT_EMOJI_MAP[subject]
+  // 按名称 hash 分配 fallback emoji
+  const hash = subject.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+  return FALLBACK_EMOJIS[hash % FALLBACK_EMOJIS.length]
+}
+
+const COLOR_MAP: Record<string, string> = {
+  lime: '#a0d911', green: '#52c41a', cyan: '#13c2c2',
+  blue: '#1677ff', geekblue: '#2f54eb', purple: '#722ed1',
+  magenta: '#eb2f96', gold: '#faad14', orange: '#fa8c16',
+  volcano: '#fa541c', red: '#f5222d', default: '#d9d9d9',
+}
+
+interface MainTitle { level: number; name: string; emoji: string; color: string; desc: string; min_points?: number }
+interface TitleProgress { current: MainTitle; next: MainTitle | null; progress_percent: number; points_needed: number }
+interface SubjectTitle { subject: string; question_count: number; level: number; name: string; emoji: string; color: string }
+interface BadgeItem { badge_id: string; name: string; icon: string; desc: string; unlocked: boolean; unlocked_at?: string }
+interface TitleInfo {
+  main_title: MainTitle; progress: TitleProgress
+  subject_titles: SubjectTitle[]; badges: BadgeItem[]
+  recent_upgrades: Array<{ old_title: string; new_title: string; title_type: string; subject: string; created_at: string }>
+}
+
+// ── 主称号卡片 ──
+const TitleCard: React.FC<{ info: TitleInfo }> = ({ info }) => {
+  const { main_title, progress } = info
+  const color = COLOR_MAP[main_title.color] || '#d9d9d9'
+  const bgColor = main_title.color === 'default' ? '#f5f5f5' : `${color}15`
+  return (
+    <Card style={{
+      background: `linear-gradient(135deg, ${bgColor} 0%, #fff 100%)`,
+      border: `1px solid ${color}40`, borderRadius: 12, marginBottom: 16,
+    }}>
+      <Row align="middle" gutter={[24, 16]}>
+        <Col xs={24} sm={6} style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 56, lineHeight: 1 }}>{main_title.emoji}</div>
+          <Tag color={main_title.color !== 'default' ? main_title.color : undefined}
+            style={{ fontSize: 16, padding: '2px 16px', marginTop: 8, borderRadius: 12 }}>
+            Lv.{main_title.level} {main_title.name}
+          </Tag>
+        </Col>
+        <Col xs={24} sm={18}>
+          <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>{main_title.desc}</Text>
+          {progress.next ? (
+            <>
+              <Row align="middle" gutter={12}>
+                <Col flex="auto">
+                  <Progress percent={progress.progress_percent} strokeColor={color}
+                    trailColor={`${color}20`} format={(pct) => `${pct}%`} size="small" />
+                </Col>
+                <Col>
+                  <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                    还需 <Text strong style={{ color, fontSize: 16 }}>{progress.points_needed}</Text> 分升级
+                  </Text>
+                </Col>
+              </Row>
+              <Text type="secondary" style={{ fontSize: 12 }}>下一级：{progress.next.emoji} {progress.next.name}</Text>
+            </>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 13 }}>✨ 已达到最高等级！你是至高无上的学习传奇！</Text>
+          )}
+        </Col>
+      </Row>
+    </Card>
+  )
+}
+
+// ── 称号一览 ──
+const TitleDirectory: React.FC<{ titleConfig: MainTitle[]; currentLevel: number }> = ({ titleConfig, currentLevel }) => (
+  <Collapse ghost items={[{
+    key: 'titles',
+    label: <Text strong><CrownOutlined /> 全部称号一览（共 {titleConfig.length} 级）</Text>,
+    children: (
+      <Row gutter={[8, 8]}>
+        {titleConfig.map((t) => {
+          const unlocked = currentLevel >= t.level
+          const color = COLOR_MAP[t.color] || '#d9d9d9'
+          return (
+            <Col xs={12} sm={8} md={6} key={t.level}>
+              <Card size="small" style={{
+                opacity: unlocked ? 1 : 0.5,
+                border: unlocked ? `1px solid ${color}40` : '1px dashed #d9d9d9',
+                background: unlocked ? `${color}08` : '#fafafa', textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 28, marginBottom: 4 }}>{t.emoji}</div>
+                <Tag color={unlocked && t.color !== 'default' ? t.color : undefined} style={{ fontSize: 11, margin: 0 }}>Lv.{t.level}</Tag>
+                <div style={{ fontSize: 13, fontWeight: unlocked ? 600 : 400, marginTop: 2 }}>{t.name}</div>
+                {unlocked
+                  ? <CheckCircleFilled style={{ color: '#52c41a', fontSize: 14, marginTop: 2 }} />
+                  : <LockFilled style={{ color: '#d9d9d9', fontSize: 14, marginTop: 2 }} />}
+                <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                  {unlocked ? '已解锁' : `${t.min_points || '?'}分解锁`}
+                </div>
+              </Card>
+            </Col>
+          )
+        })}
+      </Row>
+    ),
+  }]} />
+)
+
+// ── 学科称号卡片 ──
+const SubjectTitleCards: React.FC<{ titles: SubjectTitle[] }> = ({ titles }) => (
+  <Row gutter={[12, 12]}>
+    {titles.map((st) => {
+      const color = COLOR_MAP[st.color] || '#d9d9d9'
+      const emoji = st.emoji || getSubjectEmoji(st.subject)
+      return (
+        <Col xs={24} sm={8} key={st.subject}>
+          <Card size="small" style={{ borderLeft: `4px solid ${color}`, borderRadius: 8 }}>
+            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+              <Space><span style={{ fontSize: 20 }}>{emoji}</span><Text strong>{st.subject}</Text></Space>
+              <Tag color={st.color !== 'default' ? st.color : undefined} style={{ alignSelf: 'flex-start' }}>
+                {emoji} Lv.{st.level} {st.name}
+              </Tag>
+              <Text type="secondary" style={{ fontSize: 12 }}>已答 {st.question_count} 题</Text>
+            </Space>
+          </Card>
+        </Col>
+      )
+    })}
+  </Row>
+)
+
+// ── 成就徽章墙 ──
+const BadgeWall: React.FC<{ badges: BadgeItem[] }> = ({ badges }) => {
+  const unlockedCount = badges.filter((b) => b.unlocked).length
+  return (
+    <div>
+      <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+        已解锁 <Text strong>{unlockedCount}</Text> / {badges.length} 枚徽章
+      </Text>
+      <Row gutter={[12, 12]}>
+        {badges.map((badge) => (
+          <Col xs={12} sm={8} md={6} lg={4} key={badge.badge_id}>
+            <Tooltip title={badge.desc}>
+              <Card size="small" hoverable style={{
+                textAlign: 'center', opacity: badge.unlocked ? 1 : 0.5,
+                background: badge.unlocked ? '#fff' : '#fafafa',
+                border: badge.unlocked ? '1px solid #e8e8e8' : '1px dashed #e8e8e8',
+                cursor: 'default', borderRadius: 12,
+              }}>
+                <div style={{ fontSize: 36, marginBottom: 4, filter: badge.unlocked ? 'none' : 'grayscale(100%)' }}>{badge.icon}</div>
+                <Text strong style={{ fontSize: 12 }}>{badge.name}</Text><br />
+                {badge.unlocked
+                  ? <Text style={{ fontSize: 10, color: '#52c41a' }}>✅ 已解锁</Text>
+                  : <Text style={{ fontSize: 10, color: '#999' }}>🔒 未解锁</Text>}
+              </Card>
+            </Tooltip>
+          </Col>
+        ))}
+      </Row>
+    </div>
+  )
+}
+
+// ── 升级历程 ──
+const UpgradeTimeline: React.FC<{ upgrades: TitleInfo['recent_upgrades'] }> = ({ upgrades }) => {
+  if (upgrades.length === 0) return <Empty description="暂无升级记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+  return (
+    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+      {upgrades.map((u, i) => {
+        const isBadge = u.title_type === 'badge'
+        const isSubject = u.title_type === 'subject'
+        const isMain = u.title_type === 'main'
+        return (
+          <div key={i} style={{
+            display: 'flex', gap: 12, padding: '8px 0',
+            borderBottom: i < upgrades.length - 1 ? '1px solid #f0f0f0' : 'none',
+          }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: 4,
+              background: isBadge ? '#faad14' : isSubject ? '#1677ff' : '#52c41a',
+              marginTop: 6, flexShrink: 0,
+            }} />
+            <div>
+              {isMain && <Text style={{ fontSize: 13 }}>🏆 <Text strong>{u.old_title}</Text> → <Text strong>{u.new_title}</Text></Text>}
+              {isSubject && <Text style={{ fontSize: 13 }}>📚 <Text strong>{u.subject}</Text>：{u.old_title} → <Text strong>{u.new_title}</Text></Text>}
+              {isBadge && <Text style={{ fontSize: 13 }}>🏅 解锁徽章：<Text strong>{u.new_title}</Text></Text>}
+              <br /><Text type="secondary" style={{ fontSize: 11 }}>{u.created_at?.slice(0, 16) || ''}</Text>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── 积分转称号（前端 fallback） ──
+const pointsToTitle = (points: number, config: MainTitle[]): MainTitle => {
+  if (config.length > 0) {
+    let result = config[0]
+    for (const t of config) {
+      if (points >= (t.min_points || 0)) result = t
+    }
+    return result
+  }
+  // 无配置时 fallback
+  if (points >= 800) return { level: 12, name: '至高贤者', emoji: '✨', color: 'red', desc: '' }
+  if (points >= 640) return { level: 11, name: '传奇大师', emoji: '👑', color: 'volcano', desc: '' }
+  if (points >= 520) return { level: 10, name: '全能学神', emoji: '🏆', color: 'orange', desc: '' }
+  if (points >= 420) return { level: 9, name: '创新领袖', emoji: '🧠', color: 'gold', desc: '' }
+  if (points >= 330) return { level: 8, name: '班级学霸', emoji: '🌟', color: 'magenta', desc: '' }
+  if (points >= 250) return { level: 7, name: '学业先锋', emoji: '🚀', color: 'purple', desc: '' }
+  if (points >= 180) return { level: 6, name: '逻辑新星', emoji: '⚡', color: 'geekblue', desc: '' }
+  if (points >= 120) return { level: 5, name: '解题能手', emoji: '💡', color: 'blue', desc: '' }
+  if (points >= 75) return { level: 4, name: '知识猎人', emoji: '🔍', color: 'cyan', desc: '' }
+  if (points >= 40) return { level: 3, name: '勤学新人', emoji: '📖', color: 'green', desc: '' }
+  if (points >= 15) return { level: 2, name: '筑基学徒', emoji: '🌱', color: 'lime', desc: '' }
+  return { level: 1, name: '初窥门径', emoji: '🥚', color: 'default', desc: '' }
+}
+
+// ── 教师个人积分面板（独立组件避免 IIFE 中调用 hooks） ──
+const TeacherMyPoints: React.FC = () => {
+  const [tMyPoints, setTMyPoints] = useState(0)
+  const [tMyHistory, setTMyHistory] = useState<any[]>([])
+  const [tLoading, setTLoading] = useState(false)
+  useEffect(() => {
+    let ignore = false
+    setTLoading(true)
+    Promise.all([
+      apiClient.get('/api/rewards/my-points'),
+      apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
+    ]).then(([p, h]) => {
+      if (!ignore) {
+        setTMyPoints(p.data.total_points || 0)
+        setTMyHistory(Array.isArray(h.data) ? h.data : [])
+      }
+    }).catch(() => {}).finally(() => { if (!ignore) setTLoading(false) })
+    return () => { ignore = true }
+  }, [])
+  return (
+    <Spin spinning={tLoading}>
+      <Row gutter={16} style={{ marginBottom: 24 }}>
+        <Col span={8}>
+          <Card>
+            <Statistic title="我的总积分" value={tMyPoints} prefix={<TrophyOutlined style={{ color: '#faad14' }} />} />
+          </Card>
+        </Col>
+      </Row>
+      <Table dataSource={tMyHistory} rowKey="id" size="small" pagination={{ pageSize: 15 }}
+        columns={[
+          { title: '时间', dataIndex: 'created_at', render: (t: string) => t?.slice(0, 16) || '', width: 140 },
+          { title: '活动', dataIndex: 'activity_type_name', width: 80 },
+          { title: '活动名称', dataIndex: 'activity_title', ellipsis: true },
+          { title: '奖励类型', dataIndex: 'reward_type_name', width: 100 },
+          { title: '积分', dataIndex: 'points', width: 70, render: (p: number) => <Text strong style={{ color: '#52c41a' }}>+{p}</Text> },
+          { title: '说明', dataIndex: 'reason', ellipsis: true },
+        ]}
+      />
+    </Spin>
+  )
 }
 
 const RewardPage: React.FC = () => {
@@ -47,6 +312,8 @@ const RewardPage: React.FC = () => {
 
   const [myPoints, setMyPoints] = useState<number>(0)
   const [myHistory, setMyHistory] = useState<any[]>([])
+  const [titleInfo, setTitleInfo] = useState<TitleInfo | null>(null)
+  const [titleConfig, setTitleConfig] = useState<MainTitle[]>([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('my')
 
@@ -58,23 +325,6 @@ const RewardPage: React.FC = () => {
   const [ranking, setRanking] = useState<any[]>([])
   const [stats, setStats] = useState<any>(null)
   const [rankingLoading, setRankingLoading] = useState(false)
-
-  // 加载我的积分
-  const loadMyPoints = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [pointsRes, historyRes] = await Promise.all([
-        apiClient.get('/api/rewards/my-points'),
-        apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
-      ])
-      setMyPoints(pointsRes.data.total_points || 0)
-      setMyHistory(Array.isArray(historyRes.data) ? historyRes.data : [])
-    } catch {
-      // 忽略
-    } finally {
-      setLoading(false)
-    }
-  }, [])
 
   // 加载年级列表
   useEffect(() => {
@@ -123,106 +373,197 @@ const RewardPage: React.FC = () => {
   }, [selectedGrade, selectedClass])
 
   useEffect(() => {
-    if (isTeacherOrAdmin && selectedGrade) {
-      loadRanking()
+    if (!isTeacherOrAdmin || !selectedGrade) return
+    let ignore = false
+    const fetchData = async () => {
+      setRankingLoading(true)
+      try {
+        const params: any = { grade: selectedGrade }
+        if (selectedClass) params.class_name = selectedClass
+        const [rankRes, statsRes] = await Promise.all([
+          apiClient.get('/api/rewards/ranking', { params }),
+          apiClient.get('/api/rewards/statistics', { params }),
+        ])
+        if (!ignore) {
+          setRanking(Array.isArray(rankRes.data) ? rankRes.data : [])
+          setStats(statsRes.data || null)
+        }
+      } catch { /* 忽略 */ }
+      if (!ignore) setRankingLoading(false)
     }
-  }, [isTeacherOrAdmin, selectedGrade, selectedClass, loadRanking])
+    fetchData()
+    return () => { ignore = true }
+  }, [isTeacherOrAdmin, selectedGrade, selectedClass])
 
   useEffect(() => {
-    if (isStudent) {
-      loadMyPoints()
+    if (!isStudent) return
+    let ignore = false
+    const fetchData = async () => {
+      setLoading(true)
+      try {
+        const [pointsRes, historyRes] = await Promise.all([
+          apiClient.get('/api/rewards/my-points'),
+          apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
+        ])
+        if (!ignore) {
+          setMyPoints(pointsRes.data.total_points || 0)
+          setMyHistory(Array.isArray(historyRes.data) ? historyRes.data : [])
+        }
+      } catch { /* 忽略 */ }
+      if (!ignore) setLoading(false)
     }
-  }, [isStudent, loadMyPoints])
+    fetchData()
+    return () => { ignore = true }
+  }, [isStudent])
+  // 称号信息加载函数（供初始化和按钮刷新使用）
+  const fetchTitleInfo = useCallback(async (ignoreRef?: { current: boolean }) => {
+    try {
+      const [titleRes, configRes] = await Promise.all([
+        apiClient.get('/api/rewards/my-title'),
+        apiClient.get('/api/rewards/title-config'),
+      ])
+      if (!ignoreRef?.current) {
+        setTitleInfo(titleRes.data)
+        if (configRes.data?.main_titles) setTitleConfig(configRes.data.main_titles)
+      }
+    } catch { /* 忽略 */ }
+  }, [])
 
-  // 学生视图：我的积分
+  useEffect(() => {
+    if (!isStudent) return
+    const ignore = { current: false }
+    fetchTitleInfo(ignore)
+    return () => { ignore.current = true }
+  }, [isStudent, fetchTitleInfo])
+
+  // 学生视图：称号 + 积分
   const renderStudentView = () => (
     <Spin spinning={loading}>
-      {/* 积分总览 */}
-      <Row gutter={16} style={{ marginBottom: 24 }}>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="我的总积分"
-              value={myPoints}
-              prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-              valueStyle={{ color: '#faad14', fontSize: 32, fontWeight: 'bold' }}
-              suffix="分"
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="参与活动"
-              value={myHistory.length}
-              prefix={<ThunderboltOutlined style={{ color: '#1677ff' }} />}
-              valueStyle={{ color: '#1677ff' }}
-            />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <Statistic
-              title="获得奖励"
-              value={myHistory.filter(h => h.reward_type !== 'participation').length}
-              prefix={<StarOutlined style={{ color: '#52c41a' }} />}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-      </Row>
+      {/* 主称号卡片 */}
+      {titleInfo && <TitleCard info={titleInfo} />}
+
+      {/* 三维成长 Tabs */}
+      <Card style={{ marginBottom: 16 }} size="small">
+        <Tabs defaultActiveKey="main" size="small"
+          items={[
+            {
+              key: 'main',
+              label: <span><CrownOutlined /> 主称号</span>,
+              children: (
+                <div>
+                  <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+                    <Col xs={12} sm={6}>
+                      <Card size="small">
+                        <Statistic title="总积分" value={myPoints}
+                          prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
+                          valueStyle={{ color: '#faad14', fontSize: 24, fontWeight: 'bold' }} suffix="分" />
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6}>
+                      <Card size="small">
+                        <Statistic title="参与活动" value={myHistory.length}
+                          prefix={<ThunderboltOutlined style={{ color: '#1677ff' }} />}
+                          valueStyle={{ color: '#1677ff' }} />
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6}>
+                      <Card size="small">
+                        <Statistic title="获得奖励" value={myHistory.filter(h => h.reward_type !== 'participation').length}
+                          prefix={<StarOutlined style={{ color: '#52c41a' }} />}
+                          valueStyle={{ color: '#52c41a' }} />
+                      </Card>
+                    </Col>
+                    <Col xs={12} sm={6}>
+                      <Card size="small">
+                        <Statistic title="已获徽章" value={titleInfo?.badges?.filter((b: BadgeItem) => b.unlocked).length || 0}
+                          prefix={<GiftOutlined style={{ color: '#faad14' }} />}
+                          valueStyle={{ color: '#faad14' }} suffix={`/ ${titleInfo?.badges?.length || 0}`} />
+                      </Card>
+                    </Col>
+                  </Row>
+                  {titleConfig.length > 0 && (
+                    <TitleDirectory titleConfig={titleConfig} currentLevel={titleInfo?.main_title?.level || 1} />
+                  )}
+                  {titleInfo?.recent_upgrades && titleInfo.recent_upgrades.length > 0 && (
+                    <Card size="small" title={<Space><HistoryOutlined /> 升级历程</Space>} style={{ marginTop: 12 }}>
+                      <UpgradeTimeline upgrades={titleInfo.recent_upgrades} />
+                    </Card>
+                  )}
+                </div>
+              ),
+            },
+            {
+              key: 'subject',
+              label: <span><BookOutlined /> 学科称号</span>,
+              children: (
+                <div>
+                  {titleInfo?.subject_titles ? (
+                    <>
+                      <SubjectTitleCards titles={titleInfo.subject_titles} />
+                      <Button type="link" icon={<ReloadOutlined />} size="small" style={{ marginTop: 8 }}
+                        onClick={async () => {
+                          try {
+                            const { data } = await apiClient.post('/api/rewards/update-subject-counts')
+                            if (data?.upgrades?.length > 0) message.success(`🎉 ${data.upgrades.length} 个学科称号升级！`)
+                            await fetchTitleInfo()
+                          } catch { message.error('更新失败') }
+                        }}>
+                        刷新学科数据
+                      </Button>
+                    </>
+                  ) : <Empty description="暂无学科称号数据" />}
+                </div>
+              ),
+            },
+            {
+              key: 'badges',
+              label: <span><GiftOutlined /> 成就徽章</span>,
+              children: (
+                <div>
+                  {titleInfo?.badges ? (
+                    <>
+                      <BadgeWall badges={titleInfo.badges} />
+                      <Button type="link" icon={<ReloadOutlined />} size="small" style={{ marginTop: 8 }}
+                        onClick={async () => {
+                          try {
+                            const { data } = await apiClient.post('/api/rewards/check-badges')
+                            if (data?.newly_unlocked?.length > 0) message.success(`🎉 解锁 ${data.newly_unlocked.length} 枚新徽章！`)
+                            else message.info('没有新徽章可解锁')
+                            await fetchTitleInfo()
+                          } catch { message.error('检测失败') }
+                        }}>
+                        重新检测徽章
+                      </Button>
+                    </>
+                  ) : <Empty description="暂无徽章数据" />}
+                </div>
+              ),
+            },
+          ]} />
+      </Card>
 
       {/* 积分流水 */}
-      <Card title={
-        <Space><HistoryOutlined /> 积分明细</Space>
-      }>
+      <Card title={<Space><HistoryOutlined /> 积分明细</Space>}>
         {myHistory.length === 0 ? (
           <Empty description="暂无积分记录，快参与活动获取积分吧！" />
         ) : (
-          <Table
-            dataSource={myHistory}
-            rowKey="id"
-            size="small"
+          <Table dataSource={myHistory} rowKey="id" size="small"
             pagination={{ pageSize: 15, showTotal: (t) => `共 ${t} 条记录` }}
             columns={[
-              {
-                title: '时间', dataIndex: 'created_at', key: 'created_at', width: 140,
-                render: (t: string) => t ? t.slice(0, 16) : '',
-              },
-              {
-                title: '活动', dataIndex: 'activity_type', key: 'activity_type', width: 80,
-                render: (type: string) => (
-                  <Tag icon={ACTIVITY_ICONS[type]}>{type ? (type.charAt(0).toUpperCase() + type.slice(1)) : ''}</Tag>
-                ),
-              },
-              {
-                title: '活动名称', dataIndex: 'activity_title', key: 'activity_title', ellipsis: true,
-              },
-              {
-                title: '奖励类型', dataIndex: 'reward_type_name', key: 'reward_type', width: 100,
+              { title: '时间', dataIndex: 'created_at', width: 140, render: (t: string) => t ? t.slice(0, 16) : '' },
+              { title: '活动', dataIndex: 'activity_type', width: 80,
+                render: (type: string) => <Tag icon={ACTIVITY_ICONS[type]}>{type ? (type.charAt(0).toUpperCase() + type.slice(1)) : ''}</Tag> },
+              { title: '活动名称', dataIndex: 'activity_title', ellipsis: true },
+              { title: '奖励类型', dataIndex: 'reward_type_name', width: 100,
                 render: (name: string, record: any) => {
-                  const colors: Record<string, string> = {
-                    participation: 'default',
-                    excellent: 'success',
-                    good: 'processing',
-                    pass: 'warning',
-                  }
+                  const colors: Record<string, string> = { participation: 'default', excellent: 'success', good: 'processing', pass: 'warning' }
                   return <Tag color={colors[record.reward_type] || 'default'}>{name}</Tag>
                 },
               },
-              {
-                title: '积分', dataIndex: 'points', key: 'points', width: 70,
-                render: (points: number) => (
-                  <Text strong style={{ color: points > 2 ? '#52c41a' : '#1677ff', fontSize: 15 }}>
-                    +{points}
-                  </Text>
-                ),
-              },
-              {
-                title: '说明', dataIndex: 'reason', key: 'reason', ellipsis: true,
-              },
-            ]}
-          />
+              { title: '积分', dataIndex: 'points', width: 70,
+                render: (points: number) => <Text strong style={{ color: points > 2 ? '#52c41a' : '#1677ff', fontSize: 15 }}>+{points}</Text> },
+              { title: '说明', dataIndex: 'reason', ellipsis: true },
+            ]} />
         )}
       </Card>
     </Spin>
@@ -325,14 +666,21 @@ const RewardPage: React.FC = () => {
                   defaultSortOrder: 'descend' as const,
                 },
                 {
-                  title: '等级', key: 'level', width: 80,
+                  title: '称号等级', key: 'level', width: 140,
                   render: (_: any, record: any) => {
-                    const p = record.total_points
-                    if (p >= 200) return <Tag color="red">⭐ 学神</Tag>
-                    if (p >= 100) return <Tag color="orange">🌟 学霸</Tag>
-                    if (p >= 50) return <Tag color="blue">📈 进阶</Tag>
-                    if (p >= 20) return <Tag color="green">🌱 新秀</Tag>
-                    return <Tag>⚡ 起步</Tag>
+                    const t = pointsToTitle(record.total_points, titleConfig)
+                    return <Tooltip title={`Lv.${t.level} ${t.name}`}>
+                      <Tag color={t.color !== 'default' ? t.color : undefined}>{t.emoji} Lv.{t.level} {t.name}</Tag>
+                    </Tooltip>
+                  },
+                },
+                {
+                  title: '下一级', key: 'next', width: 100,
+                  render: (_: any, record: any) => {
+                    const t = pointsToTitle(record.total_points, titleConfig)
+                    const next = titleConfig.find(c => c.level === t.level + 1)
+                    if (!next) return <Text type="secondary">已满级</Text>
+                    return <Text type="secondary" style={{ fontSize: 12 }}>还需 {next.min_points! - record.total_points} 分</Text>
                   },
                 },
               ]}
@@ -366,8 +714,9 @@ const RewardPage: React.FC = () => {
             </Text>
             <Text type="secondary" style={{ fontSize: 13 }}>
               • 成绩及格（得分率≥60%）可获得 <Tag color="warning">+5 分</Tag> 及格奖励
-            </Text>
-          </Space>
+            </Text>            <Text type="secondary" style={{ fontSize: 13 }}>
+              • 每日首次登录可获得 <Tag color="cyan">+1 分</Tag> 登录奖励（一天一次）
+            </Text>          </Space>
         </Card>
 
         {isStudent ? renderStudentView() : (
@@ -376,44 +725,7 @@ const RewardPage: React.FC = () => {
               {renderTeacherView()}
             </Tabs.TabPane>
             <Tabs.TabPane tab={<span><HistoryOutlined /> 我的积分</span>} key="history">
-              {(() => {
-                // 教师也可以看自己的积分信息，直接复用学生视图
-                const [tMyPoints, setTMyPoints] = useState(0)
-                const [tMyHistory, setTMyHistory] = useState<any[]>([])
-                const [tLoading, setTLoading] = useState(false)
-                useEffect(() => {
-                  setTLoading(true)
-                  Promise.all([
-                    apiClient.get('/api/rewards/my-points'),
-                    apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
-                  ]).then(([p, h]) => {
-                    setTMyPoints(p.data.total_points || 0)
-                    setTMyHistory(Array.isArray(h.data) ? h.data : [])
-                  }).catch(() => {}).finally(() => setTLoading(false))
-                }, [])
-                return (
-                  <Spin spinning={tLoading}>
-                    <Row gutter={16} style={{ marginBottom: 24 }}>
-                      <Col span={8}>
-                        <Card>
-                          <Statistic title="我的总积分" value={tMyPoints} prefix={<TrophyOutlined style={{ color: '#faad14' }} />} />
-                        </Card>
-                      </Col>
-                    </Row>
-                    <Table dataSource={tMyHistory} rowKey="id" size="small"
-                      pagination={{ pageSize: 15 }}
-                      columns={[
-                        { title: '时间', dataIndex: 'created_at', render: (t: string) => t?.slice(0, 16) || '', width: 140 },
-                        { title: '活动', dataIndex: 'activity_type_name', width: 80 },
-                        { title: '活动名称', dataIndex: 'activity_title', ellipsis: true },
-                        { title: '奖励类型', dataIndex: 'reward_type_name', width: 100 },
-                        { title: '积分', dataIndex: 'points', width: 70, render: (p: number) => <Text strong style={{ color: '#52c41a' }}>+{p}</Text> },
-                        { title: '说明', dataIndex: 'reason', ellipsis: true },
-                      ]}
-                    />
-                  </Spin>
-                )
-              })()}
+              <TeacherMyPoints />
             </Tabs.TabPane>
           </Tabs>
         )}
@@ -423,3 +735,4 @@ const RewardPage: React.FC = () => {
 }
 
 export default RewardPage
+

@@ -29,7 +29,6 @@ import DiscussionPage from './pages/DiscussionPage'
 import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 import CurriculumPage from './pages/CurriculumPage'
-// @ts-ignore - 语言服务缓存问题，实际编译正常
 import WrongBookPage from './pages/WrongBookPage'
 import CurriculumProgressPage from './pages/CurriculumProgressPage'
 import SharedCenterPage from './pages/SharedCenterPage'
@@ -85,7 +84,7 @@ function App() {
             <Route path="question-bank" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestionBankPage /> : <Navigate to="/chat" />} />
             <Route path="exam" element={<ExamPage />} />
             <Route path="exam-compose/:examId" element={user?.role === 'admin' || user?.role === 'teacher' ? <ExamComposePage /> : <Navigate to="/exam" />} />
-            <Route path="score" element={<ScorePage />} />
+            <Route path="score" element={user?.role === 'student' ? <RewardPage /> : <ScorePage />} />
             <Route path="rollcall" element={<RollcallManagePage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="announcements" element={<AnnouncementsPage />} />

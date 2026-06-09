@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Row, Col, Statistic, Typography, Spin, List, Tag, Space,
-  Timeline, Button, Empty,
+  Timeline, Button, Empty, Progress,
 } from 'antd'
 import {
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
@@ -28,6 +28,13 @@ interface DashboardSummary {
   total_score?: number
   rank?: number
   active_task_count?: number
+  // 称号系统
+  title_name?: string
+  title_level?: number
+  title_emoji?: string
+  title_color?: string
+  next_title_name?: string | null
+  title_progress?: number
   submission_count?: number
   recent_chat_count?: number
   exam_results?: Array<{
@@ -190,10 +197,16 @@ const DashboardPage: React.FC = () => {
         }}
         bodyStyle={{ padding: '10px 20px' }}
       >
-        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap' }}>
             {timeOfDay}好，{summary.user_name}{roleLabel}！👋
           </span>
+          {isStudent && summary.title_name && (
+            <Tag style={{ fontSize: 13, padding: '0 10px', borderRadius: 10, margin: 0 }}
+              color={summary.title_color !== 'default' ? summary.title_color : undefined}>
+              {summary.title_emoji} {summary.title_name}
+            </Tag>
+          )}
           <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, whiteSpace: 'nowrap' }}>
             {isStudent ? '继续你的学习之旅吧' : '欢迎使用 SmartKBS 智慧教学平台'}
           </span>
@@ -228,6 +241,24 @@ const DashboardPage: React.FC = () => {
                 suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名 {summary.rank ?? '-'}</Text>}
                 valueStyle={{ color: '#faad14', fontSize: 22 }}
               />
+              {isStudent && summary.title_name && (
+                <div style={{ marginTop: 6 }}>
+                  <Tag style={{ fontSize: 11, margin: 0 }}
+                    color={summary.title_color !== 'default' ? summary.title_color : undefined}>
+                    {summary.title_emoji} {summary.title_name}
+                  </Tag>
+                  {summary.next_title_name && (
+                    <Progress
+                      percent={summary.title_progress ?? 0}
+                      size="small"
+                      strokeColor="#faad14"
+                      trailColor="#fff7e6"
+                      format={() => ''}
+                      style={{ marginTop: 2, lineHeight: 1 }}
+                    />
+                  )}
+                </div>
+              )}
             </Card>
           </Col>
           <Col xs={12} sm={6} md={4}>

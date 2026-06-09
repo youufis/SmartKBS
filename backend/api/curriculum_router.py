@@ -1421,6 +1421,22 @@ async def update_progress(kp_id: int, req: ProgressUpdate, request: Request):
             (user["username"], kp_id, req.status, score, completed_at, now),
         )
 
+    # ── 完成知识点积分奖励（仅学生，仅首次完成） ──
+    if req.status == "completed" and user.get("role") == 2:
+        try:
+            # 检查是否之前已完成过（幂等判断：仅首次完成给奖励）
+            old_row = execute_query_one(
+                "SELECT status FROM learning_progress WHERE student_username=? AND knowledge_point_id=?",
+                (user["username"], kp_id),
+            )
+            if not old_row or old_row["status"] != "completed":
+                from backend.reward_engine import award_participation
+                kp_name = execute_query_one("SELECT name FROM knowledge_points WHERE id=?", (kp_id,))
+                title = kp_name["name"] if kp_name else f"知识点#{kp_id}"
+                award_participation(user["username"], "learning", str(kp_id), title)
+        except Exception:
+            pass
+
     return {"message": "学习进度已更新"}
 
 
