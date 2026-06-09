@@ -89,9 +89,9 @@ async def login(req: LoginRequest, fastapi_request: Request):
             import datetime
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # 先关闭上一次未登出的会话（将 logout_time 为 NULL 的记录更新）
+            # 先关闭上一次未登出的会话（logout_time 默认是空字符串，需同时匹配 NULL 和 ''）
             execute_insert_update(
-                "UPDATE login_logs SET logout_time=? WHERE username=? AND logout_time IS NULL",
+                "UPDATE login_logs SET logout_time=? WHERE username=? AND (logout_time IS NULL OR logout_time = '')",
                 (now_str, username),
             )
 
@@ -160,7 +160,7 @@ async def logout(request: Request):
                 import datetime
                 now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 execute_insert_update(
-                    "UPDATE login_logs SET logout_time=? WHERE username=? AND logout_time IS NULL",
+                    "UPDATE login_logs SET logout_time=? WHERE username=? AND (logout_time IS NULL OR logout_time = '')",
                     (now_str, username),
                 )
             except Exception as e:
