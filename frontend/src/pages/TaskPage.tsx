@@ -6,7 +6,7 @@ import {
 import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
   CheckCircleOutlined, EyeOutlined, UndoOutlined,
-  RobotOutlined, StarOutlined,
+  RobotOutlined, StarOutlined, BarChartOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
 import { useAuthStore } from '../stores/authStore'
@@ -57,6 +57,12 @@ const TaskPage: React.FC = () => {
   const [gradesMap, setGradesMap] = useState<Record<string, tasksApi.AIGradeResult>>({})
   const [classSummary, setClassSummary] = useState<tasksApi.AIClassSummary | null>(null)
   const [gradesLoading, setGradesLoading] = useState(false)
+
+  // 学生查看自己的批改
+  const [myGradeModal, setMyGradeModal] = useState(false)
+  const [myGrade, setMyGrade] = useState<tasksApi.AIGradeResult | null>(null)
+  const [myGradeTaskName, setMyGradeTaskName] = useState('')
+  const [myGradeLoading, setMyGradeLoading] = useState(false)
 
   const loadTasks = useCallback(async () => {
     setLoading(true)
@@ -222,6 +228,25 @@ const TaskPage: React.FC = () => {
     }
   }
 
+  // ── 学生查看自己的批改结果 ──
+  const handleViewMyGrade = async (task: TaskInfo) => {
+    setMyGradeTaskName(task.name)
+    setMyGradeModal(true)
+    setMyGradeLoading(true)
+    try {
+      const res = await tasksApi.getTaskGrades(task.id)
+      if (res.grades && res.grades.length > 0) {
+        setMyGrade(res.grades[0])
+      } else {
+        setMyGrade(null)
+      }
+    } catch {
+      setMyGrade(null)
+    } finally {
+      setMyGradeLoading(false)
+    }
+  }
+
   // ── 列定义 ──
   const studentStatusColumn = {
     title: '我的状态', key: 'myStatus', width: 100,
@@ -287,6 +312,11 @@ const TaskPage: React.FC = () => {
             <Button size="small" type="primary" icon={<SendOutlined />}
               onClick={() => { setSelectedTask(record); setSubmitModal(true) }}
             >提交</Button>
+          )}
+          {isStudent && record.submissions?.includes(username) && (
+            <Button size="small" icon={<BarChartOutlined />}
+              onClick={() => handleViewMyGrade(record)}
+            >成绩</Button>
           )}
           {isAdminOrTeacher && (
             <Button size="small" icon={<EyeOutlined />}
@@ -579,6 +609,78 @@ const TaskPage: React.FC = () => {
         .markdown-content pre { background: #f5f5f5; padding: 8px; border-radius: 4px; overflow-x: auto; }
         .markdown-content code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
       `}</style>
+
+      {/* 学生查看自己的批改结果 */}
+      <Modal
+        title={`📊 批改结果 - ${myGradeTaskName}`}
+        open={myGradeModal}
+        onCancel={() => setMyGradeModal(false)}
+        footer={<Button onClick={() => setMyGradeModal(false)}>关闭</Button>}
+        width={520}
+      >
+        <Spin spinning={myGradeLoading}>
+          {myGrade ? (
+            <Space direction="vertical" style={{ width: '100%' }} size={12}>
+              <Card size="small" style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                <Space align="center" size={16}>
+                  <div style={{ textAlign: 'center' }}>
+                    <Typography.Title level={2} style={{ color: '#52c41a', margin: 0 }}>
+                      {myGrade.score}
+                    </Typography.Title>
+                    <Tag color={getGradeLevel(myGrade.score).color} style={{ margin: 0 }}>
+                      {getGradeLevel(myGrade.score).label}
+                    </Tag>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Typography.Text style={{ fontSize: 13, color: '#595959' }}>
+                      {myGrade.comment}
+                    </Typography.Text>
+                  </div>
+                </Space>
+              </Card>
+
+              {myGrade.strengths && myGrade.strengths.length > 0 && (
+                <div>
+                  <Typography.Text strong style={{ color: '#52c41a' }}>✅ 优点</Typography.Text>
+                  <ul style={{ margin: '4px 0 0 0', paddingLeft: 20 }}>
+                    {myGrade.strengths.map((s, i) => (
+                      <li key={i}><Typography.Text style={{ fontSize: 13 }}>{s}</Typography.Text></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {myGrade.weaknesses && myGrade.weaknesses.length > 0 && (
+                <div>
+                  <Typography.Text strong style={{ color: '#ff4d4f' }}>❌ 不足</Typography.Text>
+                  <ul style={{ margin: '4px 0 0 0', paddingLeft: 20 }}>
+                    {myGrade.weaknesses.map((w, i) => (
+                      <li key={i}><Typography.Text style={{ fontSize: 13 }}>{w}</Typography.Text></li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {myGrade.feedback && (
+                <Card size="small" style={{ background: '#f0f5ff', border: '1px solid #adc6ff' }}>
+                  <Typography.Text strong style={{ color: '#1d39c4' }}>📝 改进建议</Typography.Text>
+                  <Typography.Paragraph style={{ margin: '4px 0 0 0', fontSize: 13 }}>
+                    {myGrade.feedback}
+                  </Typography.Paragraph>
+                </Card>
+              )}
+
+              {myGrade.graded_at && (
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                  批改时间：{myGrade.graded_at}
+                </Typography.Text>
+              )}
+            </Space>
+          ) : (
+            <Typography.Text type="secondary">暂无批改结果，请等待教师批改</Typography.Text>
+          )}
+        </Spin>
+      </Modal>
     </div>
   )
 }
