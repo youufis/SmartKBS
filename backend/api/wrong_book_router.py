@@ -487,7 +487,8 @@ async def get_review_plan(request: Request):
         wrong_text += f"   你的答案：{w['your_answer']} | 正确答案：{w['correct']}\n"
         wrong_text += f"   知识点：{w['knowledge']}\n\n"
 
-    type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题"}
+    type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
+                   "fill": "填空题", "essay": "作文", "subjective": "主观题"}
     weak_types = "、".join(type_labels.get(t, t) for t in type_set)
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
@@ -622,7 +623,8 @@ async def export_review_plan_docx(
         wrong_text += f"   你的答案：{w['your_answer']} | 正确答案：{w['correct']}\n"
         wrong_text += f"   知识点：{w['knowledge']}\n\n"
 
-    type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题"}
+    type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
+                   "fill": "填空题", "essay": "作文", "subjective": "主观题"}
     weak_types = "、".join(type_labels.get(t, t) for t in type_set)
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT

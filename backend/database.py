@@ -192,8 +192,13 @@ def init_db():
                 description TEXT DEFAULT '',
                 status TEXT DEFAULT 'active',
                 created_at TEXT,
-                updated_at TEXT
+                updated_at TEXT,
+                ai_summary TEXT DEFAULT ''
             )""")
+            try:
+                c.execute("ALTER TABLE tasks ADD COLUMN ai_summary TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_username)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
@@ -246,6 +251,24 @@ def init_db():
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_notif_recipient ON notifications(recipient_username, is_read)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_notif_time ON notifications(recipient_username, created_at)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── AI 批改结果表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS task_grades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                student_username TEXT NOT NULL,
+                ai_score REAL,
+                ai_comment TEXT DEFAULT '',
+                ai_feedback TEXT DEFAULT '',
+                ai_strengths TEXT DEFAULT '',
+                ai_weaknesses TEXT DEFAULT '',
+                ai_graded_at TEXT,
+                UNIQUE(task_id, student_username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tg_task ON task_grades(task_id)")
             except sqlite3.OperationalError:
                 pass
 

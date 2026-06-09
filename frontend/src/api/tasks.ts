@@ -54,3 +54,43 @@ export async function revertSubmission(task_id: string, student: string): Promis
   const { data } = await apiClient.post('/api/tasks/revert-submission', { task_id, student });
   return data.message;
 }
+
+// ── AI 批改 ──
+
+export interface AIClassSummary {
+  class_average?: number;
+  highest_score?: number;
+  lowest_score?: number;
+  total_students?: number;
+  overall_comment?: string;
+  teaching_suggestions?: string;
+}
+
+export interface AIGradeResult {
+  student: string;
+  score: number;
+  comment: string;
+  feedback: string;
+  strengths: string[];
+  weaknesses: string[];
+  graded_at?: string;
+}
+
+export async function aiGradeTask(task_id: string): Promise<{
+  summary?: AIClassSummary;
+  grades: AIGradeResult[];
+  graded_count: number;
+  message: string;
+}> {
+  const { data } = await apiClient.post(`/api/tasks/ai-grade/${encodeURIComponent(task_id)}`);
+  return data;
+}
+
+export async function getTaskGrades(task_id: string): Promise<{
+  summary?: AIClassSummary;
+  grades: AIGradeResult[];
+  graded_count: number;
+}> {
+  const { data } = await apiClient.get(`/api/tasks/grades/${encodeURIComponent(task_id)}`);
+  return data;
+}

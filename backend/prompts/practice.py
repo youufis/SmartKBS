@@ -46,7 +46,7 @@ description 写 50-100 字详细描述（主体、颜色、环境、用途），
 
 [
   {{
-    "type": "single/multiple/true_false/short",
+    "type": "single/multiple/true_false/short/fill/essay/subjective",
     "question": "题目内容（含 $...$ LaTeX 公式）",
     "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
@@ -60,7 +60,8 @@ description 写 50-100 字详细描述（主体、颜色、环境、用途），
 
 注意：
 - 判断题 options 为 {{"对":"对", "错":"错"}}，answer 为"对"或"错"
-- 简答题 options 为 null，answer 为参考答案
+- 简答题/填空题 options 为 null，answer 为参考答案
+- 作文/主观题 options 为 null，answer 为评分要点或参考标准
 - svg_code 和 media_placeholders 可以同时存在
 - 超过 50% 的题目应包含至少一种配图
 """

@@ -21,6 +21,9 @@ const TYPE_LABELS: Record<string, string> = {
   multiple: '多选题',
   true_false: '判断题',
   short: '简答题',
+  fill: '填空题',
+  essay: '作文',
+  subjective: '主观题',
 }
 
 const ExamTakePage: React.FC = () => {
@@ -225,10 +228,14 @@ const ExamTakePage: React.FC = () => {
           </Radio.Group>
         )}
 
-        {q.type === 'short' && (
-          <TextArea rows={4} value={answer}
+        {(q.type === 'short' || q.type === 'fill' || q.type === 'essay' || q.type === 'subjective') && (
+          <TextArea rows={q.type === 'essay' ? 10 : q.type === 'subjective' ? 8 : q.type === 'short' ? 4 : 3}
+            value={answer}
             onChange={(e) => setAnswer(qId, e.target.value)}
-            placeholder="请输入你的答案..." />
+            placeholder={q.type === 'essay' ? '请在此撰写作文...' : q.type === 'subjective' ? '请输入你的答案...' : q.type === 'fill' ? '请填写答案...' : '请输入你的答案...'}
+            showCount={q.type === 'essay'}
+            maxLength={q.type === 'essay' ? 2000 : q.type === 'fill' ? 200 : undefined}
+          />
         )}
       </Card>
     )
@@ -271,23 +278,91 @@ const ExamTakePage: React.FC = () => {
                   status={result.passed ? 'success' : 'exception'}
                   format={() => `${correctCount}/${Object.keys(result.details || {}).length} 题正确`}
                 />
-                {Object.entries(result.details).map(([qId, detail]: [string, any]) => (
-                  <Card key={qId} size="small"
-                    style={{ marginTop: 8, background: detail.is_correct ? '#f6ffed' : '#fff2f0' }}>
-                    <Space>
-                      {detail.is_correct
-                        ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />
-                        : <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />}
-                      <span>你的答案：{detail.student_answer || '未作答'}</span>
-                      {!detail.is_correct && (
-                        <span style={{ color: '#888' }}>正确答案：{detail.correct_answer}</span>
-                      )}
-                      <Tag color={detail.is_correct ? 'green' : 'red'}>
-                        {detail.score}/{detail.max_score} 分
-                      </Tag>
-                    </Space>
-                  </Card>
-                ))}
+                {Object.entries(result.details).map(([qId, detail]: [string, any]) => {
+                  const isEssay = detail.grading_type === 'essay' || detail.dimensions?.content
+                  return (
+                    <Card key={qId} size="small"
+                      style={{ marginTop: 8, background: detail.is_correct ? '#f6ffed' : '#fff2f0' }}>
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        <Space>
+                          {detail.is_correct
+                            ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />
+                            : <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />}
+                          <span>你的答案：{detail.student_answer || '未作答'}</span>
+                          {!detail.is_correct && (
+                            <span style={{ color: '#888' }}>正确答案：{detail.correct_answer}</span>
+                          )}
+                          <Tag color={detail.is_correct ? 'green' : 'red'}>
+                            {detail.score}/{detail.max_score} 分
+                          </Tag>
+                        </Space>
+
+                        {/* AI 简答题评语 */}
+                        {detail.comment && (
+                          <div style={{ color: '#1677ff', fontSize: 13 }}>
+                            <strong>AI 评语：</strong>{detail.comment}
+                          </div>
+                        )}
+                        {detail.feedback && (
+                          <div style={{ color: '#52c41a', fontSize: 13 }}>
+                            <strong>学习建议：</strong>{detail.feedback}
+                          </div>
+                        )}
+
+                        {/* AI 主观题/作文 多维评分 */}
+                        {isEssay && detail.dimensions && (
+                          <div style={{ background: '#fafafa', padding: 12, borderRadius: 6, width: '100%' }}>
+                            <div style={{ fontWeight: 'bold', marginBottom: 8 }}>📊 多维评分</div>
+                            <Row gutter={16}>
+                              {detail.dimensions.content && (
+                                <Col span={8}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#1677ff' }}>{detail.dimensions.content.score}</div>
+                                    <div style={{ fontSize: 12, color: '#666' }}>内容/10</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.content.comment}</div>
+                                  </div>
+                                </Col>
+                              )}
+                              {detail.dimensions.structure && (
+                                <Col span={8}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#52c41a' }}>{detail.dimensions.structure.score}</div>
+                                    <div style={{ fontSize: 12, color: '#666' }}>结构/10</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.structure.comment}</div>
+                                  </div>
+                                </Col>
+                              )}
+                              {detail.dimensions.language && (
+                                <Col span={8}>
+                                  <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#faad14' }}>{detail.dimensions.language.score}</div>
+                                    <div style={{ fontSize: 12, color: '#666' }}>语言/10</div>
+                                    <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.language.comment}</div>
+                                  </div>
+                                </Col>
+                              )}
+                            </Row>
+                            {detail.overall_comment && (
+                              <div style={{ marginTop: 8, fontSize: 13, color: '#333' }}>
+                                <strong>总评：</strong>{detail.overall_comment}
+                              </div>
+                            )}
+                            {detail.improvement_suggestions?.length > 0 && (
+                              <div style={{ marginTop: 6, fontSize: 13 }}>
+                                <strong>改进建议：</strong>
+                                <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                                  {detail.improvement_suggestions.map((s: string, i: number) => (
+                                    <li key={i} style={{ color: '#666' }}>{s}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </Space>
+                    </Card>
+                  )
+                })}
               </div>
             )}
           </Result>

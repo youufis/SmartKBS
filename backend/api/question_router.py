@@ -59,6 +59,9 @@ QUESTION_TYPE_MAP = {
     "multiple": "多选题（4-5个选项，至少2个正确答案）",
     "true_false": "判断题（回答「对」或「错」）",
     "short": "简答题（写出参考答案）",
+    "fill": "填空题（填写正确内容）",
+    "essay": "作文题（完整文章）",
+    "subjective": "主观题（开放性问题）",
 }
 
 TYPE_DESC = {
@@ -66,6 +69,9 @@ TYPE_DESC = {
     "multiple": "多选题",
     "true_false": "判断题",
     "short": "简答题",
+    "fill": "填空题",
+    "essay": "作文",
+    "subjective": "主观题",
 }
 
 
@@ -478,6 +484,9 @@ async def list_question_types():
             {"key": "multiple", "label": "多选题"},
             {"key": "true_false", "label": "判断题"},
             {"key": "short", "label": "简答题"},
+            {"key": "fill", "label": "填空题"},
+            {"key": "essay", "label": "作文"},
+            {"key": "subjective", "label": "主观题"},
         ]
     }
 
@@ -703,7 +712,7 @@ async def extract_questions_from_image(
 只返回 JSON 数组：
 [
   {{
-    "type": "single/multiple/true_false/short",
+    "type": "single/multiple/true_false/short/fill/essay/subjective",
     "question": "题目内容（含 $...$ 公式）",
     "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
@@ -713,7 +722,12 @@ async def extract_questions_from_image(
     "svg_code": "<svg>...</svg>",
     "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图"}}]
   }}
-]"""
+]
+
+注意：
+- 判断题 options 为 {{"对":"对", "错":"错"}}，answer 为"对"或"错"
+- 简答题/填空题 options 为 null，answer 为参考答案
+- 作文/主观题 options 为 null，answer 为评分要点"""
 
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
@@ -829,7 +843,10 @@ def _normalize_question_json(q: dict[str, Any]) -> dict[str, Any]:
         "single": "single", "单选": "single", "单选题": "single",
         "multiple": "multiple", "多选": "multiple", "多选题": "multiple",
         "true_false": "true_false", "judge": "true_false", "判断": "true_false", "判断题": "true_false",
-        "short": "short", "简答": "short", "简答题": "short", "填空": "short", "fill": "short",
+        "short": "short", "简答": "short", "简答题": "short",
+        "fill": "fill", "填空": "fill", "填空题": "fill",
+        "essay": "essay", "作文": "essay", "作文题": "essay",
+        "subjective": "subjective", "主观": "subjective", "主观题": "subjective",
     }
     q_type = type_map.get(raw_type, "single")
 
@@ -948,7 +965,7 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 
 [
   {{
-    "type": "题型标识(single/multiple/true_false/short)",
+    "type": "题型标识(single/multiple/true_false/short/fill/essay/subjective)",
     "question": "题目内容（含 $...$ LaTeX 公式）",
     "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
@@ -998,7 +1015,8 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     # 使用增强 Prompt
     from backend.prompts.chat import QUESTION_GENERATE_WITH_MEDIA_PROMPT
     type_desc = {"single": "单选题（4个选项）", "multiple": "多选题（4-5个选项）",
-                 "true_false": "判断题", "short": "简答题"}.get(req.question_type, "单选题")
+                 "true_false": "判断题", "short": "简答题", "fill": "填空题",
+                 "essay": "作文", "subjective": "主观题"}.get(req.question_type, "单选题")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     prompt = QUESTION_GENERATE_WITH_MEDIA_PROMPT.format(
         subject=req.subject,

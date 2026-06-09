@@ -250,7 +250,7 @@ const ExamQuestionsSummary: React.FC<{ examId: number }> = ({ examId }) => {
       <Typography.Text strong>已有题目：</Typography.Text>
       {Object.entries(typeCount).map(([type, count]) => (
         <Tag key={type}>
-          {type === 'single' ? '单选' : type === 'multiple' ? '多选' : type === 'true_false' ? '判断' : '简答'}: {count}题
+          {({single:'单选',multiple:'多选',true_false:'判断',short:'简答',fill:'填空',essay:'作文',subjective:'主观题'} as Record<string,string>)[type] || type}: {count}题
         </Tag>
       ))}
       <Tag color="blue">共 {questions.length} 题</Tag>

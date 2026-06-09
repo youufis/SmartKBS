@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card, Table, Button, message, Modal, Input, Tag, Space,
-  Typography, Spin, Popconfirm, Popover, Drawer,
+  Typography, Spin, Popconfirm, Popover, Drawer, Tooltip,
 } from 'antd'
 import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
-  CheckCircleOutlined, EyeOutlined, UndoOutlined, UserOutlined,
+  CheckCircleOutlined, EyeOutlined, UndoOutlined,
+  RobotOutlined, StarOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
 import { useAuthStore } from '../stores/authStore'
@@ -20,6 +21,15 @@ const TaskPage: React.FC = () => {
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const username = user?.username || ''
   const isStudent = user?.role === 'student'
+
+  // ── 等级辅助函数 ──
+  const getGradeLevel = (score: number): { label: string; color: string } => {
+    if (score >= 90) return { label: '优秀', color: 'green' }
+    if (score >= 75) return { label: '良好', color: 'blue' }
+    if (score >= 60) return { label: '及格', color: 'orange' }
+    if (score >= 40) return { label: '较差', color: 'red' }
+    return { label: '未达标', color: 'default' }
+  }
 
   const [tasks, setTasks] = useState<TaskInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -41,6 +51,12 @@ const TaskPage: React.FC = () => {
   const [contentDrawer, setContentDrawer] = useState(false)
   const [studentContent, setStudentContent] = useState('')
   const [contentLoading, setContentLoading] = useState(false)
+
+  // AI 批改
+  const [aiGradingTaskId, setAiGradingTaskId] = useState<string | null>(null)
+  const [gradesMap, setGradesMap] = useState<Record<string, tasksApi.AIGradeResult>>({})
+  const [classSummary, setClassSummary] = useState<tasksApi.AIClassSummary | null>(null)
+  const [gradesLoading, setGradesLoading] = useState(false)
 
   const loadTasks = useCallback(async () => {
     setLoading(true)
@@ -115,27 +131,6 @@ const TaskPage: React.FC = () => {
     }
   }
 
-  // ── 查看提交详情 ──
-  const handleViewSubmissions = async (task: TaskInfo) => {
-    setViewTask(task)
-    setSubmissionsDrawer(true)
-    setSubmissionsLoading(true)
-    try {
-      const data = await tasksApi.getTaskSubmissions(task.id)
-      setSubmissionsData({
-        task_name: data.task_name,
-        task_status: data.task_status,
-        submissions: data.submissions,
-        count: data.submission_count,
-      })
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载提交详情失败')
-      setSubmissionsData({ task_name: '', task_status: '', submissions: [], count: 0 })
-    } finally {
-      setSubmissionsLoading(false)
-    }
-  }
-
   // ── 查看单个学生提交内容 ──
   const handleViewContent = async (studentUsername: string) => {
     if (!viewTask) return
@@ -162,6 +157,68 @@ const TaskPage: React.FC = () => {
       loadTasks()
     } catch (err: any) {
       message.error(err?.response?.data?.detail || '回退失败')
+    }
+  }
+
+  // ── AI 批改 ──
+  const handleAiGrade = async (taskId: string) => {
+    setAiGradingTaskId(taskId)
+    try {
+      const res = await tasksApi.aiGradeTask(taskId)
+      message.success(res.message)
+      const map: Record<string, tasksApi.AIGradeResult> = {}
+      if (res.grades && res.grades.length > 0) {
+        res.grades.forEach(g => { map[g.student] = g })
+        setGradesMap(map)
+      } else {
+        message.warning('AI 未返回有效的批改结果，请检查任务说明或重试')
+      }
+      if (res.summary) setClassSummary(res.summary)
+    } catch (err: any) {
+      message.error(`AI 批改失败: ${err?.response?.data?.detail || err.message || '未知错误'}`)
+    } finally {
+      setAiGradingTaskId(null)
+    }
+  }
+
+  // ── 加载批改结果 ──
+  const loadGrades = async (taskId: string) => {
+    setGradesLoading(true)
+    try {
+      const res = await tasksApi.getTaskGrades(taskId)
+      const map: Record<string, tasksApi.AIGradeResult> = {}
+      if (res.grades && res.grades.length > 0) {
+        res.grades.forEach(g => { map[g.student] = g })
+        setGradesMap(map)
+      }
+      if (res.summary) setClassSummary(res.summary)
+    } catch {
+      // 忽略，可能还没有批改结果
+    } finally {
+      setGradesLoading(false)
+    }
+  }
+
+  // ── 查看提交详情（同时加载批改结果） ──
+  const handleViewSubmissions = async (task: TaskInfo) => {
+    setViewTask(task)
+    setSubmissionsDrawer(true)
+    setSubmissionsLoading(true)
+    try {
+      const data = await tasksApi.getTaskSubmissions(task.id)
+      setSubmissionsData({
+        task_name: data.task_name,
+        task_status: data.task_status,
+        submissions: data.submissions,
+        count: data.submission_count,
+      })
+      // 同时加载批改结果
+      loadGrades(task.id)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '加载提交详情失败')
+      setSubmissionsData({ task_name: '', task_status: '', submissions: [], count: 0 })
+    } finally {
+      setSubmissionsLoading(false)
     }
   }
 
@@ -235,6 +292,14 @@ const TaskPage: React.FC = () => {
             <Button size="small" icon={<EyeOutlined />}
               onClick={() => handleViewSubmissions(record)}
             >详情</Button>
+          )}
+          {isAdminOrTeacher && record.submissions && record.submissions.length > 0 && (
+            <Tooltip title="使用 AI 分析所有学生的对话记录并评分">
+              <Button size="small" icon={<RobotOutlined />}
+                loading={aiGradingTaskId === record.id}
+                onClick={() => handleAiGrade(record.id)}
+              >AI 批改</Button>
+            </Tooltip>
           )}
           {isAdminOrTeacher && record.status === 'active' && (
             <Popconfirm
@@ -334,44 +399,158 @@ const TaskPage: React.FC = () => {
       <Drawer
         title={`📋 ${submissionsData.task_name || '加载中...'}`}
         placement="right"
-        width={480}
+        width={760}
         open={submissionsDrawer}
         onClose={() => { setSubmissionsDrawer(false); setContentDrawer(false) }}
       >
-        <Spin spinning={submissionsLoading}>
-          <Tag color={submissionsData.task_status === 'active' ? 'green' : 'default'} style={{ marginBottom: 16 }}>
-            {submissionsData.task_status === 'active' ? '进行中' : '已结束'}
-          </Tag>
+        <Spin spinning={submissionsLoading || gradesLoading}>
+          <Space style={{ marginBottom: 16 }} wrap>
+            <Tag color={submissionsData.task_status === 'active' ? 'green' : 'default'}>
+              {submissionsData.task_status === 'active' ? '进行中' : '已结束'}
+            </Tag>
+            {Object.keys(gradesMap).length > 0 && (
+              <Tag color="blue" icon={<RobotOutlined />}>
+                🤖 已批改 {Object.keys(gradesMap).length}/{submissionsData.count} 人
+              </Tag>
+            )}
+            {viewTask && submissionsData.submissions.length > 0 && (
+              <Button size="small" icon={<RobotOutlined />}
+                loading={aiGradingTaskId === viewTask.id}
+                onClick={() => handleAiGrade(viewTask.id)}
+              >{Object.keys(gradesMap).length > 0 ? '重新批改' : 'AI 批改'}</Button>
+            )}
+          </Space>
+
+          {classSummary && (
+            <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
+              <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                <Typography.Text strong style={{ color: '#1d39c4' }}>
+                  <RobotOutlined /> 全班批改总结
+                </Typography.Text>
+                {(classSummary.class_average != null) && (
+                  <Space wrap>
+                    <Tag color="blue">平均分：{classSummary.class_average?.toFixed?.(1) ?? classSummary.class_average}</Tag>
+                    <Tag color="green">最高分：{classSummary.highest_score}</Tag>
+                    <Tag color="orange">最低分：{classSummary.lowest_score}</Tag>
+                    <Tag>人数：{classSummary.total_students}</Tag>
+                  </Space>
+                )}
+                <Typography.Paragraph style={{ fontSize: 13, margin: '4px 0', color: '#595959' }}>
+                  💡 {classSummary.overall_comment}
+                </Typography.Paragraph>
+                {classSummary.teaching_suggestions && (
+                  <Typography.Paragraph style={{ fontSize: 13, margin: 0, color: '#1d39c4', background: '#f0f5ff', padding: '4px 8px', borderRadius: 4 }}>
+                    📌 教学建议：{classSummary.teaching_suggestions}
+                  </Typography.Paragraph>
+                )}
+              </Space>
+            </Card>
+          )}
+
           {submissionsData.submissions.length === 0 ? (
             <Typography.Text type="secondary">暂无学生提交</Typography.Text>
           ) : (
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <Typography.Text strong>已提交学生（{submissionsData.count} 人）：</Typography.Text>
-              {submissionsData.submissions.map((s) => (
-                <Card key={s.username} size="small" style={{ width: '100%' }}>
-                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                    <Space>
-                      <UserOutlined />
-                      <Typography.Text strong>{s.name}</Typography.Text>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>({s.username})</Typography.Text>
-                    </Space>
-                    <Space>
-                      <Button size="small" icon={<EyeOutlined />}
-                        onClick={() => handleViewContent(s.username)}
-                      >查看</Button>
-                      <Popconfirm
-                        title={`回退 ${s.name} 的提交？`}
-                        description="回退后该学生可重新提交"
-                        onConfirm={() => handleRevert(viewTask?.id || '', s.username)}
-                        okText="确认回退" cancelText="取消"
-                      >
-                        <Button size="small" icon={<UndoOutlined />}>回退</Button>
-                      </Popconfirm>
-                    </Space>
-                  </Space>
-                </Card>
-              ))}
-            </Space>
+            <>
+              <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                已提交学生（{submissionsData.count} 人）
+                {Object.keys(gradesMap).length > 0 && (
+                  <Typography.Text style={{ fontSize: 12, marginLeft: 8 }} type="secondary">
+                    （按分数降序排列）
+                  </Typography.Text>
+                )}
+              </Typography.Text>
+              <Table
+                dataSource={(() => {
+                  const list = submissionsData.submissions.map(s => {
+                    const g = gradesMap[s.username]
+                    const level = g ? getGradeLevel(g.score) : null
+                    return { ...s, grade: g, level, key: s.username }
+                  })
+                  return list.sort((a, b) => {
+                    if (a.grade && b.grade) return b.grade.score - a.grade.score
+                    if (a.grade) return -1
+                    if (b.grade) return 1
+                    return 0
+                  })
+                })()}
+                columns={[
+                  {
+                    title: '#', key: 'index', width: 36,
+                    render: (_: any, __: any, i: number) => i + 1,
+                  },
+                  {
+                    title: '学生', key: 'student', width: 90,
+                    render: (_: any, r: any) => (
+                      <Typography.Text strong style={{ fontSize: 12 }}>{r.name}</Typography.Text>
+                    ),
+                  },
+                  {
+                    title: '分数/等级', key: 'score', width: 120,
+                    render: (_: any, r: any) => r.grade ? (
+                      <Space align="center" size={2}>
+                        <Typography.Text strong style={{ fontSize: 14, color: '#52c41a', minWidth: 24 }}>
+                          {r.grade.score}
+                        </Typography.Text>
+                        <Tag color={r.level.color} style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}>{r.level.label}</Tag>
+                      </Space>
+                    ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>待批改</Typography.Text>,
+                  },
+                  {
+                    title: '评语', key: 'comment',
+                    render: (_: any, r: any) => r.grade ? (
+                      <Tooltip title={r.grade.comment}>
+                        <Typography.Paragraph
+                          ellipsis={{ rows: 1 }}
+                          style={{ margin: 0, fontSize: 12, color: '#595959', wordBreak: 'break-word' }}
+                        >
+                          {r.grade.comment}
+                        </Typography.Paragraph>
+                      </Tooltip>
+                    ) : null,
+                  },
+                  {
+                    title: '建议', key: 'feedback', width: 100,
+                    render: (_: any, r: any) => r.grade ? (
+                      <Tooltip title={r.grade.feedback}>
+                        <Typography.Paragraph
+                          ellipsis={{ rows: 1 }}
+                          style={{ margin: 0, fontSize: 12, color: '#1890ff', wordBreak: 'break-word' }}
+                        >
+                          {r.grade.feedback}
+                        </Typography.Paragraph>
+                      </Tooltip>
+                    ) : null,
+                  },
+                  {
+                    title: '操作', key: 'action', width: 66,
+                    render: (_: any, r: any) => (
+                      <Space size={2}>
+                        <Tooltip title="查看提交内容">
+                          <Button size="small" type="text" icon={<EyeOutlined />}
+                            onClick={() => handleViewContent(r.username)}
+                          />
+                        </Tooltip>
+                        <Popconfirm
+                          title={`回退 ${r.name}？`}
+                          description="回退后可重新提交"
+                          onConfirm={() => handleRevert(viewTask?.id || '', r.username)}
+                          okText="确认" cancelText="取消"
+                        >
+                          <Tooltip title="回退提交">
+                            <Button size="small" type="text" icon={<UndoOutlined />} />
+                          </Tooltip>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                  },
+                ]}
+                rowKey="key"
+                size="small"
+                pagination={false}
+                locale={{ emptyText: '暂无数据' }}
+                style={{ wordBreak: 'break-word' }}
+              />
+            </>
           )}
         </Spin>
 

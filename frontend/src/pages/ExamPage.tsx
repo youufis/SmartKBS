@@ -10,7 +10,7 @@ import {
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
   DownloadOutlined, BulbOutlined, FileOutlined, RobotOutlined,
-  FileTextOutlined, SettingOutlined,
+  FileTextOutlined, SettingOutlined, AuditOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -21,6 +21,7 @@ import type { ExamInfo, ExamAttempt } from '../types'
 import { useNavigate } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import { TYPE_LABELS, TYPE_OPTIONS } from '../constants/questionTypes'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -1193,10 +1194,9 @@ const ExamPage: React.FC = () => {
               </Form.Item>
               <Form.Item name="question_types" style={{ minWidth: 160 }}>
                 <Select allowClear mode="multiple" placeholder="题型（不限）" maxTagCount={2}>
-                  <Option value="single">单选题</Option>
-                  <Option value="multiple">多选题</Option>
-                  <Option value="true_false">判断题</Option>
-                  <Option value="short">简答题</Option>
+                  {TYPE_OPTIONS.map(opt => (
+                    <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                  ))}
                 </Select>
               </Form.Item>
               <Form.Item name="difficulty" style={{ minWidth: 100 }}>
@@ -1255,10 +1255,9 @@ const ExamPage: React.FC = () => {
             </Select>
             <Select allowClear placeholder="题型" style={{ width: 110 }}
               value={qType} onChange={(v) => { setQType(v); setQPage(1) }}>
-              <Option value="single">单选题</Option>
-              <Option value="multiple">多选题</Option>
-              <Option value="true_false">判断题</Option>
-              <Option value="short">简答题</Option>
+              {TYPE_OPTIONS.map(opt => (
+                <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+              ))}
             </Select>
             <Select allowClear placeholder="难度" style={{ width: 100 }}
               value={qDifficulty} onChange={(v) => { setQDifficulty(v); setQPage(1) }}>
@@ -1370,6 +1369,7 @@ const ExamPage: React.FC = () => {
                     examId={resultExam?.id ?? 0}
                     attemptId={record.id}
                     studentName={record.student_name}
+                    showReview={true}
                   />,
                   rowExpandable: () => true,
                 }}
@@ -1441,16 +1441,19 @@ const ExamPage: React.FC = () => {
                 const answers = detailData.attempt.answers || {}
                 const ans = answers[String(q.id)] || {}
                 const isCorrect = ans.is_correct
-                const isAiGraded = ans.ai_graded
+                const isEssay = q.type === 'essay' || q.type === 'subjective' || ans.grading_type === 'essay'
                 const options = q.options || {}
                 const optionLabels = Object.keys(options)
+                const TYPE_MAP2: Record<string, string> = {
+                  single: '单选', multiple: '多选', true_false: '判断', short: '简答',
+                  fill: '填空', essay: '作文', subjective: '主观题',
+                }
                 return (
                   <Card key={q.id} size="small" style={{ marginBottom: 8 }}
                     title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
-                      {q.type === 'single' ? '单选' : q.type === 'multiple' ? '多选' : q.type === 'true_false' ? '判断' : '简答'} | 第{idx + 1}题</Space>}>
+                      {TYPE_MAP2[q.type] || q.type} | 第{idx + 1}题</Space>}>
                     <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8 }}><FormulaRenderer content={q.question_text} /></Typography.Paragraph>
                     <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
-                    {/* 选项展示 */}
                     {optionLabels.length > 0 && (
                       <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
                         {optionLabels.map((key: string) => {
@@ -1482,11 +1485,51 @@ const ExamPage: React.FC = () => {
                       {q.explanation && (
                         <Typography.Text><strong>解析：</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
                       )}
-                      {isAiGraded && ans.ai_comment && (
-                        <Card size="small" style={{ background: '#f6ffed', marginTop: 4 }}>
-                          <Typography.Text><strong>AI 评语：</strong>{ans.ai_comment}</Typography.Text>
-                          {ans.ai_feedback && <div style={{ marginTop: 4 }}><Typography.Text><strong>学习建议：</strong>{ans.ai_feedback}</Typography.Text></div>}
-                        </Card>
+
+                      {/* AI 简答评语 */}
+                      {ans.comment && (
+                        <div style={{ background: '#f6ffed', padding: 8, borderRadius: 4, marginTop: 4 }}>
+                          <Typography.Text style={{ color: '#1677ff' }}><strong>AI 评语：</strong>{ans.comment}</Typography.Text>
+                          {ans.feedback && <div style={{ marginTop: 4 }}><Typography.Text style={{ color: '#52c41a' }}><strong>学习建议：</strong>{ans.feedback}</Typography.Text></div>}
+                        </div>
+                      )}
+
+                      {/* AI 主观题/作文 多维评分 */}
+                      {isEssay && (ans.dimensions || q.dimensions) && (
+                        <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 6, marginTop: 4 }}>
+                          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>📊 AI 多维评分</div>
+                          <Row gutter={8}>
+                            {['content', 'structure', 'language'].map((dim) => {
+                              const dimData = ans.dimensions?.[dim] || q.dimensions?.[dim]
+                              if (!dimData) return null
+                              const labels2: Record<string, string> = { content: '内容', structure: '结构', language: '语言' }
+                              return (
+                                <Col span={8} key={dim}>
+                                  <div style={{ textAlign: 'center', background: '#fff', borderRadius: 4, padding: 4 }}>
+                                    <div style={{ fontSize: 18, fontWeight: 'bold', color: '#1677ff' }}>{dimData.score}</div>
+                                    <div style={{ fontSize: 11, color: '#666' }}>{labels2[dim]}/10</div>
+                                    <div style={{ fontSize: 11, color: '#888' }}>{dimData.comment}</div>
+                                  </div>
+                                </Col>
+                              )
+                            })}
+                          </Row>
+                          {(ans.overall_comment || q.overall_comment) && (
+                            <div style={{ marginTop: 6, fontSize: 12, color: '#333' }}>
+                              <strong>总评：</strong>{ans.overall_comment || q.overall_comment}
+                            </div>
+                          )}
+                          {(ans.improvement_suggestions || q.improvement_suggestments)?.length > 0 && (
+                            <div style={{ marginTop: 6, fontSize: 12 }}>
+                              <strong>改进建议：</strong>
+                              <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                                {(ans.improvement_suggestions || q.improvement_suggestions || []).map((s: string, i: number) => (
+                                  <li key={i} style={{ color: '#666' }}>{s}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </Space>
                   </Card>
@@ -1507,50 +1550,105 @@ const ExamPage: React.FC = () => {
 }
 
 /** 学生答题详情子组件（教师端展开时按需加载） */
-const StudentExamDetail: React.FC<{ examId: number; attemptId: number; studentName: string }> = ({ examId, attemptId, studentName }) => {
+const StudentExamDetail: React.FC<{
+  examId: number; attemptId: number; studentName: string;
+  showReview?: boolean;
+}> = ({ examId, attemptId, studentName, showReview = false }) => {
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<any>(null)
+  const user = useAuthStore((s) => s.user)
+  const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
-  useEffect(() => {
-    let cancelled = false
+  // 教师复核状态
+  const [reviewModal, setReviewModal] = useState(false)
+  const [reviewScore, setReviewScore] = useState<number | null>(null)
+  const [reviewComment, setReviewComment] = useState('')
+  const [reviewing, setReviewing] = useState(false)
+
+  const loadDetail = useCallback(async () => {
     setLoading(true)
-    apiClient.get(`/api/exams/${examId}/attempt/${attemptId}/detail`).then(({ data }) => {
-      if (!cancelled) setDetail(data)
-    }).catch(() => {
-      if (!cancelled) message.error('加载学生答题详情失败')
-    }).finally(() => {
-      if (!cancelled) setLoading(false)
-    })
-    return () => { cancelled = true }
+    try {
+      const { data } = await apiClient.get(`/api/exams/${examId}/attempt/${attemptId}/detail`)
+      setDetail(data)
+      if (data.attempt?.teacher_score > 0) setReviewScore(data.attempt.teacher_score)
+      if (data.attempt?.teacher_comment) setReviewComment(data.attempt.teacher_comment)
+    } catch {
+      message.error('加载学生答题详情失败')
+    } finally {
+      setLoading(false)
+    }
   }, [examId, attemptId])
+
+  useEffect(() => { loadDetail() }, [loadDetail])
+
+  // 教师提交复核
+  const handleReviewSubmit = async () => {
+    setReviewing(true)
+    try {
+      await examsApi.teacherReviewGrading({
+        attempt_id: attemptId,
+        teacher_score: reviewScore,
+        teacher_comment: reviewComment || null,
+      })
+      message.success('复核完成')
+      setReviewModal(false)
+      loadDetail()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '复核提交失败')
+    } finally {
+      setReviewing(false)
+    }
+  }
 
   if (loading) return <Spin size="small" style={{ display: 'block', textAlign: 'center', padding: 24 }} />
   if (!detail) return <Typography.Text type="danger">加载失败</Typography.Text>
 
   const answers = detail.attempt?.answers || {}
   const questions = detail.questions || []
+  const isReviewed = detail.attempt?.teacher_reviewed
+
+  const TYPE_MAP: Record<string, string> = {
+    single: '单选', multiple: '多选', true_false: '判断', short: '简答',
+    fill: '填空', essay: '作文', subjective: '主观题',
+  }
 
   return (
-    <div style={{ maxHeight: 400, overflow: 'auto' }}>
-      <div style={{ marginBottom: 8 }}>
-        <Typography.Text strong>{studentName}</Typography.Text>
-        <Tag style={{ marginLeft: 8 }}>{detail.attempt.score} / {detail.attempt.total_score} 分</Tag>
+    <div style={{ maxHeight: 500, overflow: 'auto' }}>
+      <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Space>
+          <Typography.Text strong>{studentName}</Typography.Text>
+          <Tag>{detail.attempt.score} / {detail.attempt.total_score} 分</Tag>
+          {isReviewed ? <Tag color="blue">已复核</Tag> : <Tag color="orange">AI 批改</Tag>}
+        </Space>
+        {isTeacherOrAdmin && showReview && (
+          <Button size="small" icon={<EditOutlined />} onClick={() => setReviewModal(true)}>
+            {isReviewed ? '修改复核' : '复核批改'}
+          </Button>
+        )}
       </div>
+
       {questions.length === 0 ? (
         <Typography.Text type="secondary">暂无题目数据</Typography.Text>
       ) : questions.map((q: any, idx: number) => {
         const ans = answers[String(q.id)] || {}
         const isCorrect = ans.is_correct
-        const isAiGraded = ans.ai_graded
+        const isEssay = q.type === 'essay' || q.type === 'subjective'
         const options = q.options || {}
         const optionLabels = Object.keys(options)
+
         return (
           <Card key={q.id} size="small" style={{ marginBottom: 6 }}
-            title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
-              {q.type === 'single' ? '单选' : q.type === 'multiple' ? '多选' : q.type === 'true_false' ? '判断' : '简答'} | 第{idx + 1}题</Space>}>
-            <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}><FormulaRenderer content={q.question_text} /></Typography.Paragraph>
+            title={<Space>
+              <Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
+              {TYPE_MAP[q.type] || q.type} | 第{idx + 1}题
+              {ans.teacher_adjusted && <Tag color="purple">已调整</Tag>}
+            </Space>}>
+            <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>
+              <FormulaRenderer content={q.question_text} />
+            </Typography.Paragraph>
             <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
-            {/* 选项展示 */}
+
+            {/* 选择题选项 */}
             {optionLabels.length > 0 && (
               <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
                 {optionLabels.map((key: string) => {
@@ -1565,7 +1663,7 @@ const StudentExamDetail: React.FC<{ examId: number; attemptId: number; studentNa
                     }}>
                       <Typography.Text style={{ fontSize: 13 }}>
                         <strong>{key}.</strong> <FormulaRenderer content={options[key]} inline />
-                        {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 你的答案' : '✗ 你的答案'}</Tag>}
+                        {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 学生答案' : '✗ 学生答案'}</Tag>}
                         {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>正确答案</Tag>}
                       </Typography.Text>
                     </div>
@@ -1573,25 +1671,97 @@ const StudentExamDetail: React.FC<{ examId: number; attemptId: number; studentNa
                 })}
               </div>
             )}
-            <Space direction="vertical" size={2} style={{ fontSize: 13 }}>
+
+            <Space direction="vertical" size={2} style={{ fontSize: 13, width: '100%' }}>
               <Typography.Text style={{ fontSize: 13 }}><strong>学生答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
               <Typography.Text style={{ fontSize: 13 }}><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
               <Typography.Text style={{ fontSize: 13 }}><strong>得分：</strong>
                 <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
               </Typography.Text>
+
+              {/* AI 简答评语 */}
+              {ans.comment && (
+                <Typography.Text style={{ fontSize: 13, color: '#1677ff' }}>
+                  <strong>AI 评语：</strong>{ans.comment}
+                </Typography.Text>
+              )}
+              {ans.feedback && (
+                <Typography.Text style={{ fontSize: 13, color: '#52c41a' }}>
+                  <strong>学习建议：</strong>{ans.feedback}
+                </Typography.Text>
+              )}
+
+              {/* AI 主观题/作文 多维评分 */}
+              {isEssay && (ans.dimensions?.content || q.dimensions?.content) && (
+                <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 6, marginTop: 4 }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>📊 AI 多维评分</div>
+                  <Row gutter={8}>
+                    {['content', 'structure', 'language'].map((dim) => {
+                      const dimData = ans.dimensions?.[dim] || q.dimensions?.[dim]
+                      if (!dimData) return null
+                      const labels: Record<string, string> = { content: '内容', structure: '结构', language: '语言' }
+                      return (
+                        <Col span={8} key={dim}>
+                          <div style={{ textAlign: 'center', background: '#fff', borderRadius: 4, padding: 4 }}>
+                            <div style={{ fontSize: 18, fontWeight: 'bold', color: '#1677ff' }}>{dimData.score}</div>
+                            <div style={{ fontSize: 11, color: '#666' }}>{labels[dim]}/10</div>
+                            <div style={{ fontSize: 11, color: '#888' }}>{dimData.comment}</div>
+                          </div>
+                        </Col>
+                      )
+                    })}
+                  </Row>
+                  {(ans.overall_comment || q.overall_comment) && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#333' }}>
+                      <strong>总评：</strong>{ans.overall_comment || q.overall_comment}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {q.explanation && (
                 <Typography.Text style={{ fontSize: 13 }}><strong>解析：</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
               )}
-              {isAiGraded && ans.ai_comment && (
-                <Typography.Text style={{ fontSize: 13 }}><strong>AI 评语：</strong>{ans.ai_comment}</Typography.Text>
-              )}
-              {isAiGraded && ans.ai_feedback && (
-                <Typography.Text style={{ fontSize: 13 }}><strong>学习建议：</strong>{ans.ai_feedback}</Typography.Text>
+
+              {/* 教师评语 */}
+              {ans.teacher_comment && (
+                <Typography.Text style={{ fontSize: 13, color: '#722ed1' }}>
+                  <strong>教师评语：</strong>{ans.teacher_comment}
+                </Typography.Text>
               )}
             </Space>
           </Card>
         )
       })}
+
+      {/* ── 教师复核弹窗 ── */}
+      <Modal title="复核 AI 批改" open={reviewModal} onCancel={() => setReviewModal(false)}
+        onOk={handleReviewSubmit} confirmLoading={reviewing}
+        okText="确认复核" cancelText="取消">
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <div>
+            <Typography.Text>当前 AI 评分：</Typography.Text>
+            <Tag color="blue">{detail.attempt.score} / {detail.attempt.total_score}</Tag>
+          </div>
+          <div>
+            <Typography.Text>调整总分：</Typography.Text>
+            <InputNumber
+              min={0} max={detail.attempt.total_score}
+              value={reviewScore}
+              onChange={(v) => setReviewScore(v)}
+              style={{ width: 120 }}
+              placeholder="留空则不调整"
+            />
+            <Typography.Text type="secondary" style={{ marginLeft: 8 }}> / {detail.attempt.total_score}</Typography.Text>
+          </div>
+          <div style={{ width: '100%' }}>
+            <Typography.Text>教师评语：</Typography.Text>
+            <TextArea rows={3} value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              placeholder="可选：添加教师评语" style={{ width: '100%' }} />
+          </div>
+        </Space>
+      </Modal>
     </div>
   )
 }
