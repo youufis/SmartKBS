@@ -865,41 +865,55 @@ const InteractionPage: React.FC = () => {
       {/* ── 测验结果统计弹窗 ── */}
       <Modal title={quizResultsView?.quiz_title ? `我的成绩 - ${quizResultsView.quiz_title}` : "测验结果"}
         open={!!quizResultsView} onCancel={() => setQuizResultsView(null)}
-        footer={null} width={700}>
+        footer={null} width={720}>
         {quizResultsView && (
           <>
             {/* 学生端：个人答题结果 */}
             {quizResultsView.quiz_title && (
-              <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                <Progress type="circle" percent={quizResultsView.percentage}
-                  format={p => `${p}%`}
-                  strokeColor={quizResultsView.percentage >= 80 ? '#52c41a' : quizResultsView.percentage >= 60 ? '#faad14' : '#ff4d4f'} />
-                <div style={{ marginTop: 8 }}>
-                  <Text>得分：{quizResultsView.score}/{quizResultsView.total_score}</Text>
-                </div>
-                <Table dataSource={quizResultsView.details} rowKey="index" size="small" style={{ marginTop: 16 }}
-                  pagination={false}
-                  columns={[
-                    { title: '#', dataIndex: 'index', render: (i: number) => i + 1, width: 50 },
-                    { title: '题目', dataIndex: 'question', ellipsis: true,
-                      render: (t: string, r: any) => (
-                        <div>
-                          <FormulaRenderer content={t} />
-                          <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={r.media_files} size="compact" />
-                        </div>
-                      ) },
-                    { title: '你的答案', dataIndex: 'user_answer', width: 120,
-                      render: (v: string, r: any) => (
-                        <Text type={r.is_correct ? 'success' : 'danger'}>{v || '（未答）'}</Text>
-                      ),
-                    },
-                    { title: '正确答案', dataIndex: 'correct_answer', width: 120 },
-                    { title: '状态', width: 60,
-                      render: (_: any, r: any) => r.is_correct
-                        ? <Tag color="success">正确</Tag>
-                        : <Tag color="error">错误</Tag>,
-                    },
-                  ]} />
+              <div>
+                <Card style={{ textAlign: 'center', marginBottom: 16 }}>
+                  <Progress type="circle" percent={quizResultsView.percentage}
+                    format={p => `${p}%`}
+                    strokeColor={quizResultsView.percentage >= 80 ? '#52c41a' : quizResultsView.percentage >= 60 ? '#faad14' : '#ff4d4f'} />
+                  <div style={{ marginTop: 8 }}>
+                    <Text>得分：{quizResultsView.score}/{quizResultsView.total_score}</Text>
+                  </div>
+                </Card>
+                {quizResultsView.details?.map((r: any, i: number) => (
+                  <Card key={i} size="small" style={{ marginBottom: 8 }}
+                    title={`第 ${i+1} 题`}
+                    extra={r.is_correct ? <Tag color="success">正确</Tag> : <Tag color="error">错误</Tag>}>
+                    <FormulaRenderer content={r.question} />
+                    <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={r.media_files} size="compact" />
+                    {r.options && typeof r.options === 'object' && !Array.isArray(r.options) && (
+                      <div style={{ marginTop: 4, paddingLeft: 8 }}>
+                        {Object.entries(r.options).map(([k, v]) => (
+                          <div key={k} style={{ fontSize: 12, color: '#555', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {k}. <FormulaRenderer content={v as string} inline />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {r.options && Array.isArray(r.options) && (
+                      <div style={{ marginTop: 4, paddingLeft: 8 }}>
+                        {r.options.map((opt: string, j: number) => (
+                          <div key={j} style={{ fontSize: 12, color: '#555', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            <FormulaRenderer content={opt} inline />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ marginTop: 8 }}>
+                      <Text>你的答案：<Text type={r.is_correct ? 'success' : 'danger'}>{r.user_answer || '（未作答）'}</Text></Text>
+                      {!r.is_correct && <div><Text type="secondary">正确答案：{r.correct_answer}</Text></div>}
+                    </div>
+                    {r.explanation && (
+                      <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                        <Text type="secondary"><FormulaRenderer content={r.explanation} /></Text>
+                      </div>
+                    )}
+                  </Card>
+                ))}
               </div>
             )}
             {/* 教师端：全班统计 */}
