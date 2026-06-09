@@ -6,6 +6,8 @@ import type {
   ExamListResponse,
   ExamResultResponse,
   ExamAttempt,
+  TeacherReviewRequest,
+  GradingReviewDetail,
 } from '../types';
 
 /** 创建考试 */
@@ -251,4 +253,24 @@ export function getExportAnswerSheetUrl(examId: number): string {
   const token = localStorage.getItem('smartkb_token');
   const params = new URLSearchParams({ token: token || '' });
   return `/api/exams/${examId}/export-answer-sheet?${params.toString()}`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// AI 智能批改 & 教师复核
+// ═══════════════════════════════════════════════════════════
+
+/** 教师复核 AI 批改 */
+export async function teacherReviewGrading(
+  req: TeacherReviewRequest
+): Promise<{ message: string; attempt_id: number; score: number; total_score: number }> {
+  const { data } = await apiClient.post('/api/exams/review', req);
+  return data;
+}
+
+/** 获取 AI 批改复核详情（含多维评分明细） */
+export async function getGradingReviewDetail(
+  attemptId: number
+): Promise<GradingReviewDetail> {
+  const { data } = await apiClient.get(`/api/exams/review/${attemptId}`);
+  return data;
 }

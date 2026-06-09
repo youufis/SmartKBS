@@ -21,7 +21,7 @@ def init_question_db():
             # ── 试题库表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS question_bank (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                type TEXT NOT NULL,              -- single | multiple | true_false | short
+                type TEXT NOT NULL,              -- single|multiple|true_false|short|fill|essay|subjective
                 question_text TEXT NOT NULL,
                 options TEXT,                    -- JSON，选择题: {"A":"选项","B":"选项",...}
                 correct_answer TEXT NOT NULL,    -- 单选:"A"; 多选:"A,B,C"; 判断:"对"/"错"; 简答:参考答案
@@ -102,6 +102,11 @@ def init_question_db():
                 total_score REAL DEFAULT 0,
                 answers TEXT,
                 auto_graded INTEGER DEFAULT 0,
+                graded_by TEXT DEFAULT '',          -- 批改人: 'ai' | 教师用户名
+                grading_details TEXT DEFAULT '',    -- AI 详细批改结果 JSON（含多维评分、评语等）
+                teacher_reviewed INTEGER DEFAULT 0, -- 教师是否已复核
+                teacher_score REAL DEFAULT -1,      -- 教师手动调整后的分数（-1 表示未调整）
+                teacher_comment TEXT DEFAULT '',    -- 教师评语
                 FOREIGN KEY (exam_id) REFERENCES exams(id)
             )""")
 
@@ -114,6 +119,19 @@ def init_question_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ea_student ON exam_attempts(student_username)")
             except sqlite3.OperationalError:
                 pass
+
+            # ── 字段迁移：exam_attempts 新增字段 ──
+            for col_def in [
+                ("graded_by", "TEXT DEFAULT ''"),
+                ("grading_details", "TEXT DEFAULT ''"),
+                ("teacher_reviewed", "INTEGER DEFAULT 0"),
+                ("teacher_score", "REAL DEFAULT -1"),
+                ("teacher_comment", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE exam_attempts ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
 
             # ── 智能练习：练习任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS practice_sessions (

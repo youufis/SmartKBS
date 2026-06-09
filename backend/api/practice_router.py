@@ -27,7 +27,10 @@ TYPE_DESC_MAP = {
     "multiple": "多选题（多个正确选项）",
     "true_false": "判断题",
     "short": "简答题",
-    "mixed": "混合题型（单选+判断+简答）",
+    "fill": "填空题",
+    "essay": "作文",
+    "subjective": "主观题",
+    "mixed": "混合出题（AI 自动搭配单选/多选/判断/简答/填空等）",
 }
 
 
@@ -626,9 +629,9 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
     earned = 0
     graded = {}
 
-    # 分离简答题和其他题，简答题走 AI 批改
-    short_questions = [q for q in questions if q["type"] == "short"]
-    other_questions = [q for q in questions if q["type"] != "short"]
+    # 分离简答题/填空题和其他题，简答+填空走 AI 批改
+    short_questions = [q for q in questions if q["type"] in ("short", "fill")]
+    other_questions = [q for q in questions if q["type"] not in ("short", "fill", "essay", "subjective")]
 
     # 非简答题：关键词/精确匹配
     for q in other_questions:

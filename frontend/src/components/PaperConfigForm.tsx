@@ -8,6 +8,9 @@ const TYPE_OPTIONS = [
   { value: 'multiple', label: '多选题' },
   { value: 'true_false', label: '判断题' },
   { value: 'short', label: '简答题' },
+  { value: 'fill', label: '填空题' },
+  { value: 'essay', label: '作文' },
+  { value: 'subjective', label: '主观题' },
 ]
 
 interface PaperConfigFormProps {

@@ -20,6 +20,7 @@ from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.database import execute_query as user_query
 from backend.logger import logger
+from backend.api.ai_service import call_ai_async
 
 router = APIRouter()
 
@@ -972,9 +973,170 @@ async def start_exam(exam_id: int, request: Request):
     }
 
 
+# ── AI 批改辅助函数 ──
+
+def _extract_json_from_ai_response(text: str) -> dict | None:
+    """从 AI 响应中提取 JSON 对象（支持嵌套 {}）"""
+    if not text:
+        return None
+    text = text.strip()
+    # 尝试直接解析整段文本
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # 尝试提取被 ```json ... ``` 包裹的代码块
+    code_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', text)
+    if code_match:
+        try:
+            return json.loads(code_match.group(1).strip())
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # 用栈匹配法提取最外层的完整 JSON 对象（支持嵌套）
+    i = text.find('{')
+    if i < 0:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for j in range(i, len(text)):
+        ch = text[j]
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_str:
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[i:j + 1])
+                except (json.JSONDecodeError, TypeError):
+                    return None
+    return None
+
+
+async def _grade_short_with_ai(q: dict, student_answer: str, api_key: str, sem: asyncio.Semaphore) -> dict:
+    """AI 批改简答题，返回含评语的详细批改结果"""
+    qid = str(q["id"])
+    correct_answer = q["correct_answer"]
+    q_score = q["score"] or 10
+    async with sem:
+        try:
+            from backend.prompts.exam import SHORT_ANSWER_GRADING_PROMPT
+            question_text = str(q.get("question_text", "") or "")
+            prompt = SHORT_ANSWER_GRADING_PROMPT.format(
+                question_text=question_text.replace('{', '{{').replace('}', '}}'),
+                correct_answer=str(correct_answer or "").replace('{', '{{').replace('}', '}}'),
+                max_score=str(q_score),
+                half_score=str(q_score * 0.5),
+                near_full=str(q_score * 0.8),
+                half_minus=str(q_score * 0.4),
+                student_answer=str(student_answer or "").replace('{', '{{').replace('}', '}}'),
+            )
+            ai_resp = await call_ai_async(prompt, api_key)
+            result = _extract_json_from_ai_response(ai_resp)
+            if result:
+                ai_score = float(result.get("score", 0))
+                ai_score = max(0, min(ai_score, q_score))
+                return {
+                    "student_answer": student_answer,
+                    "correct_answer": correct_answer,
+                    "score": ai_score,
+                    "max_score": q_score,
+                    "is_correct": ai_score >= q_score * 0.6,
+                    "comment": result.get("comment", ""),
+                    "feedback": result.get("feedback", ""),
+                    "key_points_hit": result.get("key_points_hit", []),
+                    "key_points_missed": result.get("key_points_missed", []),
+                }
+        except Exception as e:
+            logger.warning(f"AI 批改简答题 {qid} 失败: {e}")
+    # AI 失败回退到关键词匹配
+    is_correct = _check_short_answer(student_answer, correct_answer)
+    return {
+        "student_answer": student_answer,
+        "correct_answer": correct_answer,
+        "score": q_score if is_correct else 0,
+        "max_score": q_score,
+        "is_correct": is_correct,
+        "comment": "",
+        "feedback": "",
+        "key_points_hit": [],
+        "key_points_missed": [],
+    }
+
+
+async def _grade_essay_with_ai(q: dict, student_answer: str, api_key: str, sem: asyncio.Semaphore,
+                                 subject: str = "信息科技") -> dict:
+    """AI 多维批改主观题/作文，返回含维度评分的详细批改结果"""
+    qid = str(q["id"])
+    correct_answer = q["correct_answer"]
+    q_score = q["score"] or 20
+    async with sem:
+        try:
+            from backend.prompts.exam import ESSAY_GRADING_PROMPT
+            question_text = str(q.get("question_text", "") or "")
+            prompt = ESSAY_GRADING_PROMPT.format(
+                subject=subject.replace('{', '{{').replace('}', '}}'),
+                question_text=question_text.replace('{', '{{').replace('}', '}}'),
+                correct_answer=str(correct_answer or "").replace('{', '{{').replace('}', '}}'),
+                max_score=str(q_score),
+                student_answer=str(student_answer or "").replace('{', '{{').replace('}', '}}'),
+            )
+            ai_resp = await call_ai_async(prompt, api_key)
+            result = _extract_json_from_ai_response(ai_resp)
+            if result:
+                ai_score = float(result.get("score", 0))
+                ai_score = max(0, min(ai_score, q_score))
+                dims = result.get("dimensions", {})
+                return {
+                    "student_answer": student_answer,
+                    "correct_answer": correct_answer,
+                    "score": ai_score,
+                    "max_score": q_score,
+                    "is_correct": ai_score >= q_score * 0.6,
+                    "grading_type": "essay",
+                    "dimensions": {
+                        "content": dims.get("content", {}),
+                        "structure": dims.get("structure", {}),
+                        "language": dims.get("language", {}),
+                    },
+                    "overall_comment": result.get("overall_comment", ""),
+                    "improvement_suggestions": result.get("improvement_suggestions", []),
+                    "key_points_hit": result.get("key_points_hit", []),
+                    "key_points_missed": result.get("key_points_missed", []),
+                }
+        except Exception as e:
+            logger.warning(f"AI 批改主观题 {qid} 失败: {e}")
+    # AI 失败回退到关键词匹配
+    is_correct = _check_short_answer(student_answer, correct_answer)
+    return {
+        "student_answer": student_answer,
+        "correct_answer": correct_answer,
+        "score": q_score if is_correct else 0,
+        "max_score": q_score,
+        "is_correct": is_correct,
+        "grading_type": "essay",
+        "dimensions": {},
+        "overall_comment": "AI 批改失败，使用关键词匹配评分",
+        "improvement_suggestions": [],
+        "key_points_hit": [],
+        "key_points_missed": [],
+    }
+
+
 @router.post("/{exam_id}/submit")
 async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
-    """学生提交答案并自动批改"""
+    """学生提交答案并自动批改（支持简答题 AI 语义批改 + 主观题/作文 AI 多维评分）"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -986,7 +1148,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
 
-    # 获取进行中的答题记录（先查 attempt_id）
+    # 获取进行中的答题记录
     attempt = execute_query_one(
         """SELECT id FROM exam_attempts
            WHERE exam_id = ? AND student_username = ? AND status = 'in_progress'
@@ -998,26 +1160,27 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     attempt_id = attempt["id"]
 
-    # 获取所有题目信息（用于批改）
+    # 获取所有题目信息（含 question_text 用于 AI 批改）
     questions = execute_query(
-        """SELECT q.id, q.type, q.correct_answer, eq.score
+        """SELECT q.id, q.type, q.question_text, q.correct_answer, eq.score
            FROM exam_questions eq
            JOIN question_bank q ON q.id = eq.question_id
            WHERE eq.exam_id = ? AND q.status = 'active'""",
         (exam_id,),
     )
 
-    # 自动批改
     total_score = exam["total_score"]
     earned_score = 0.0
-    graded_answers = {}
+    graded_answers = {}       # 批改结果（含评语）
+    grading_details = {}      # AI 详细批改数据（多维评分等，仅主观题/作文）
 
-    # 分离简答题和其他题
-    short_qs = [q for q in questions if q["type"] == "short"]
-    other_qs = [q for q in questions if q["type"] != "short"]
+    # 按题型分组
+    objective_qs = [q for q in questions if q["type"] in ("single", "multiple", "true_false")]
+    short_qs = [q for q in questions if q["type"] in ("short", "fill")]  # 简答+填空：AI语义批改
+    essay_qs = [q for q in questions if q["type"] in ("essay", "subjective")]
 
-    # 非简答题：精确匹配
-    for q in other_qs:
+    # ── 客观题（单选/多选/判断）：精确匹配 ──
+    for q in objective_qs:
         qid = str(q["id"])
         student_answer = req.answers.get(qid, "")
         correct_answer = q["correct_answer"]
@@ -1033,93 +1196,101 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
             "is_correct": is_correct,
         }
 
-    # 简答题：AI 语义批改（并发）
-    if short_qs:
-        try:
-            from backend.api.chat_router import get_api_keys
-            from backend.api.ai_service import call_ai_async
-            api_key, _ = get_api_keys(username)
-        except Exception:
-            api_key = ""
+    # ── 获取 API Key（所有 AI 批改共享） ──
+    try:
+        from backend.api.chat_router import get_api_keys
+        api_key, _ = get_api_keys(username)
+    except Exception:
+        api_key = ""
+    if not api_key or not api_key.strip():
+        api_key = ""  # 统一处理
 
-        if api_key and api_key.strip():
-            sem = asyncio.Semaphore(3)
+    # ── 简答题：AI 语义批改（含评语），支持部分得分 ──
+    if short_qs and api_key:
+        sem = asyncio.Semaphore(3)
+        results = await asyncio.gather(*[
+            _grade_short_with_ai(q, req.answers.get(str(q["id"]), ""), api_key, sem)
+            for q in short_qs
+        ])
+        for q, result in zip(short_qs, results):
+            qid = str(q["id"])
+            graded_answers[qid] = result
+            earned_score += result["score"]  # 直接累加 AI 评分（含部分得分）
+    elif short_qs:
+        # 无 API Key：关键词匹配兜底
+        for q in short_qs:
+            qid = str(q["id"])
+            student_answer = req.answers.get(qid, "")
+            correct_answer = q["correct_answer"]
+            q_score = q["score"] or (total_score / max(len(questions), 1))
+            is_correct = _check_short_answer(student_answer, correct_answer)
+            if is_correct:
+                earned_score += q_score
+            graded_answers[qid] = {
+                "student_answer": student_answer,
+                "correct_answer": correct_answer,
+                "score": q_score if is_correct else 0,
+                "max_score": q_score,
+                "is_correct": is_correct,
+                "comment": "",
+                "feedback": "",
+            }
 
-            async def _grade_short(q):
-                qid = str(q["id"])
-                student_answer = req.answers.get(qid, "")
-                correct_answer = q["correct_answer"]
-                q_score = q["score"] or (total_score / max(len(questions), 1))
-                async with sem:
-                    try:
-                        from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
-                        prompt = SHORT_ANSWER_GRADING_PROMPT.format(
-                            question_text=str(q.get("question_text", "")).replace('{', '{{').replace('}', '}}') if q.get("question_text") else "",
-                            correct_answer=str(correct_answer).replace('{', '{{').replace('}', '}}'),
-                            max_score=str(q_score),
-                            half_score=str(q_score * 0.5),
-                            near_full=str(q_score * 0.8),
-                            half_minus=str(q_score * 0.4),
-                            student_answer=str(student_answer).replace('{', '{{').replace('}', '}}'),
-                        )
-                        ai_resp = await call_ai_async(prompt, api_key)
-                        jm = re.search(r'\{[^}]+\}', ai_resp)
-                        if jm:
-                            result = json.loads(jm.group())
-                            ai_score = float(result.get("score", 0))
-                            ai_score = max(0, min(ai_score, q_score))
-                            return qid, {
-                                "student_answer": student_answer,
-                                "correct_answer": correct_answer,
-                                "score": ai_score,
-                                "max_score": q_score,
-                                "is_correct": ai_score >= q_score * 0.6,
-                            }
-                    except Exception:
-                        pass
-                # AI 失败回退
-                is_correct = _check_short_answer(student_answer, correct_answer)
-                return qid, {
-                    "student_answer": student_answer,
-                    "correct_answer": correct_answer,
-                    "score": q_score if is_correct else 0,
-                    "max_score": q_score,
-                    "is_correct": is_correct,
+    # ── 主观题/作文：AI 多维评分（内容、结构、语言） ──
+    if essay_qs and api_key:
+        sem = asyncio.Semaphore(2)  # 主观题较消耗资源，并发数设小
+        subject = exam.get("subject", "信息科技")
+        results = await asyncio.gather(*[
+            _grade_essay_with_ai(q, req.answers.get(str(q["id"]), ""), api_key, sem, subject)
+            for q in essay_qs
+        ])
+        for q, result in zip(essay_qs, results):
+            qid = str(q["id"])
+            graded_answers[qid] = result
+            earned_score += result["score"]
+            # 保存详细的多维评分数据
+            if result.get("grading_type") == "essay":
+                grading_details[qid] = {
+                    "dimensions": result.get("dimensions", {}),
+                    "overall_comment": result.get("overall_comment", ""),
+                    "improvement_suggestions": result.get("improvement_suggestions", []),
                 }
-
-            results = await asyncio.gather(*[_grade_short(q) for q in short_qs])
-            for qid, result in results:
-                graded_answers[qid] = result
-                if result["is_correct"]:
-                    earned_score += result["score"]
-        else:
-            # 无 API Key：关键词匹配
-            for q in short_qs:
-                qid = str(q["id"])
-                student_answer = req.answers.get(qid, "")
-                correct_answer = q["correct_answer"]
-                q_score = q["score"] or (total_score / max(len(questions), 1))
-                is_correct = _check_short_answer(student_answer, correct_answer)
-                if is_correct:
-                    earned_score += q_score
-                graded_answers[qid] = {
-                    "student_answer": student_answer,
-                    "correct_answer": correct_answer,
-                    "score": q_score if is_correct else 0,
-                    "max_score": q_score,
-                    "is_correct": is_correct,
-                }
+    elif essay_qs:
+        # 无 API Key：关键词匹配兜底
+        for q in essay_qs:
+            qid = str(q["id"])
+            student_answer = req.answers.get(qid, "")
+            correct_answer = q["correct_answer"]
+            q_score = q["score"] or (total_score / max(len(questions), 1))
+            is_correct = _check_short_answer(student_answer, correct_answer)
+            if is_correct:
+                earned_score += q_score
+            graded_answers[qid] = {
+                "student_answer": student_answer,
+                "correct_answer": correct_answer,
+                "score": q_score if is_correct else 0,
+                "max_score": q_score,
+                "is_correct": is_correct,
+                "grading_type": "essay",
+                "dimensions": {},
+                "overall_comment": "当前为关键词匹配评分，建议配置 API Key 开启 AI 多维评分",
+                "improvement_suggestions": [],
+            }
 
     earned_score = round(earned_score, 1)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 原子更新：带上 status='in_progress' 条件防止重复提交
-    # 如果已提交过（status 已变更），rowcount 为 0，不会重复处理
+    # 原子更新
     rows = execute_update(
         """UPDATE exam_attempts
-           SET status = 'submitted', submitted_at = ?, score = ?, answers = ?, auto_graded = 1
+           SET status = 'submitted', submitted_at = ?, score = ?, answers = ?,
+               auto_graded = 1, graded_by = 'ai',
+               grading_details = ?
            WHERE id = ? AND status = 'in_progress'""",
-        (now, earned_score, json.dumps(graded_answers, ensure_ascii=False), attempt_id),
+        (now, earned_score,
+         json.dumps(graded_answers, ensure_ascii=False),
+         json.dumps(grading_details, ensure_ascii=False) if grading_details else '',
+         attempt_id),
     )
     if rows == 0:
         logger.warning(f"学生 {username} 重复提交考试 {exam_id}，已忽略")
@@ -1127,7 +1298,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     logger.info(f"学生 {username} 提交考试 {exam_id}，得分 {earned_score}/{total_score}")
 
-    # ── 发送考试结果通知（给学生） ──
+    # ── 发送考试结果通知 ──
     try:
         from backend.api.notification_router import _create_notification
         passed_str = "通过" if earned_score >= exam["pass_score"] else "未通过"
@@ -1140,7 +1311,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     except Exception as notify_err:
         logger.warning(f"发送考试结果通知失败: {notify_err}")
 
-    # ── 通知考试创建者（教师/管理员）有学生提交 ──
+    # ── 通知教师 ──
     try:
         from backend.api.notification_router import _create_notification
         teacher_username = exam["creator_username"]
@@ -1179,6 +1350,206 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     return result
 
 
+# ═══════════════════════════════════════════════════════════
+# 教师复核 AI 批改
+# ═══════════════════════════════════════════════════════════
+
+class TeacherReviewRequest(BaseModel):
+    """教师复核/手动批改请求"""
+    attempt_id: int
+    teacher_score: float | None = None          # 手工调整的总分（null 表示不改动总分）
+    teacher_comment: str | None = None           # 教师评语
+    question_scores: dict[str, float] | None = None  # {question_id: 调整后的分数}
+    question_comments: dict[str, str] | None = None  # {question_id: 教师针对该题的评语}
+
+
+@router.post("/review", summary="教师复核/手动批改 AI 评分")
+async def teacher_review_grading(req: TeacherReviewRequest, request: Request):
+    """教师复核 AI 批改结果，可手动调整分数和添加评语"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可复核批改")
+
+    attempt = execute_query_one("SELECT * FROM exam_attempts WHERE id = ?", (req.attempt_id,))
+    if not attempt:
+        raise HTTPException(status_code=404, detail="答题记录不存在")
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (attempt["exam_id"],))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+
+    if not _can_manage_exam(username, exam):
+        raise HTTPException(status_code=403, detail="无权复核此考试的成绩")
+
+    updates = ["teacher_reviewed = 1", "graded_by = ?"]
+    params = [username]
+
+    # 更新总分
+    final_score = attempt["score"]
+    if req.teacher_score is not None:
+        final_score = round(max(float(req.teacher_score), 0), 1)
+        updates.append("teacher_score = ?")
+        params.append(final_score)
+        updates.append("score = ?")
+        params.append(final_score)
+
+    # 更新教师评语
+    if req.teacher_comment is not None:
+        updates.append("teacher_comment = ?")
+        params.append(req.teacher_comment)
+
+    # 更新单题分数/评语（需要解析现有的 answers JSON）
+    if req.question_scores or req.question_comments:
+        answers_data = attempt.get("answers")
+        if isinstance(answers_data, str):
+            try:
+                answers_data = json.loads(answers_data)
+            except (json.JSONDecodeError, TypeError):
+                answers_data = {}
+        if not isinstance(answers_data, dict):
+            answers_data = {}
+
+        modified = False
+        for qid, new_score in (req.question_scores or {}).items():
+            if qid in answers_data:
+                answers_data[qid]["score"] = round(max(float(new_score), 0), 1)
+                answers_data[qid]["is_correct"] = answers_data[qid]["score"] >= (answers_data[qid].get("max_score", 1) * 0.6)
+                answers_data[qid]["teacher_adjusted"] = True
+                modified = True
+
+        for qid, comment in (req.question_comments or {}).items():
+            if qid in answers_data:
+                answers_data[qid]["teacher_comment"] = comment
+                modified = True
+
+        if modified:
+            updates.append("answers = ?")
+            params.append(json.dumps(answers_data, ensure_ascii=False))
+
+    params.append(attempt["id"])
+    execute_update(
+        f"UPDATE exam_attempts SET {', '.join(updates)} WHERE id = ?",
+        tuple(params),
+    )
+
+    logger.info(f"教师 {username} 复核批改 attempt_id={req.attempt_id}, score={final_score}")
+    return {
+        "message": "复核完成",
+        "attempt_id": req.attempt_id,
+        "score": final_score,
+        "total_score": attempt["total_score"],
+    }
+
+
+@router.get("/review/{attempt_id}", summary="获取 AI 批改详情与复核信息")
+async def get_grading_review_detail(attempt_id: int, request: Request):
+    """获取 AI 批改详情（含多维评分明细），供教师复核参考"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看批改详情")
+
+    attempt = execute_query_one("SELECT * FROM exam_attempts WHERE id = ?", (attempt_id,))
+    if not attempt:
+        raise HTTPException(status_code=404, detail="答题记录不存在")
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (attempt["exam_id"],))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+
+    if not _can_manage_exam(username, exam):
+        raise HTTPException(status_code=403, detail="无权查看")
+
+    # 解析 answers
+    answers_data = attempt.get("answers")
+    if isinstance(answers_data, str):
+        try:
+            answers_data = json.loads(answers_data)
+        except (json.JSONDecodeError, TypeError):
+            answers_data = {}
+
+    # 解析 grading_details（多维评分明细）
+    grading_details = attempt.get("grading_details")
+    if isinstance(grading_details, str):
+        try:
+            grading_details = json.loads(grading_details)
+        except (json.JSONDecodeError, TypeError):
+            grading_details = {}
+    if not grading_details:
+        grading_details = {}
+
+    # 获取题目信息
+    questions = execute_query(
+        """SELECT q.id, q.type, q.question_text, q.correct_answer, q.options,
+                  q.explanation, q.knowledge_points, eq.score as question_score,
+                  q.svg_content, q.has_svg, q.media_files
+           FROM exam_questions eq
+           JOIN question_bank q ON q.id = eq.question_id
+           WHERE eq.exam_id = ? AND q.status = 'active'
+           ORDER BY eq.sort_order""",
+        (attempt["exam_id"],),
+    )
+    for q in questions:
+        if q.get("options"):
+            try:
+                q["options"] = json.loads(q["options"])
+            except (json.JSONDecodeError, TypeError):
+                q["options"] = None
+        else:
+            q["options"] = None
+
+    # 为每个题目补充批改信息
+    question_results = []
+    for q in questions:
+        qid = str(q["id"])
+        ans_info = answers_data.get(qid, {})
+        grading_info = grading_details.get(qid, {})
+        question_results.append({
+            **q,
+            "student_answer": ans_info.get("student_answer", ""),
+            "score": ans_info.get("score", 0),
+            "max_score": ans_info.get("max_score", q.get("question_score", 0)),
+            "is_correct": ans_info.get("is_correct", False),
+            "comment": ans_info.get("comment", ""),
+            "feedback": ans_info.get("feedback", ""),
+            "teacher_comment": ans_info.get("teacher_comment", ""),
+            "teacher_adjusted": ans_info.get("teacher_adjusted", False),
+            "key_points_hit": ans_info.get("key_points_hit", []),
+            "key_points_missed": ans_info.get("key_points_missed", []),
+            # 多维评分明细（主观题/作文）
+            "dimensions": grading_info.get("dimensions", ans_info.get("dimensions", {})),
+            "overall_comment": grading_info.get("overall_comment", ans_info.get("overall_comment", "")),
+            "improvement_suggestions": grading_info.get("improvement_suggestions", ans_info.get("improvement_suggestions", [])),
+        })
+
+    return {
+        "exam": {
+            "id": exam["id"],
+            "title": exam["title"],
+            "subject": exam["subject"],
+        },
+        "student": {
+            "username": attempt["student_username"],
+            "name": attempt["student_name"] or attempt["student_username"],
+        },
+        "attempt": {
+            "id": attempt["id"],
+            "score": attempt["score"],
+            "total_score": attempt["total_score"],
+            "teacher_score": attempt.get("teacher_score", -1),
+            "teacher_comment": attempt.get("teacher_comment", ""),
+            "teacher_reviewed": attempt.get("teacher_reviewed", 0),
+            "graded_by": attempt.get("graded_by", "ai"),
+            "submitted_at": attempt["submitted_at"],
+            "auto_graded": attempt["auto_graded"],
+        },
+        "questions": question_results,
+    }
+
+
 def _check_choice_answer(student: str, correct: str, q_type: str) -> bool:
     """检查选择题/判断题答案"""
     if not student or not correct:
@@ -1209,7 +1580,7 @@ def _check_short_answer(student: str, correct: str) -> bool:
     return False
 
 
-# ── 学生查看自己的答题详情 ──
+# ── 学生查看自己的答题详情（增强版：含 AI 评语和多维评分） ──
 
 @router.get("/attempt/{attempt_id}/exam/{exam_id}")
 async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request):
@@ -1235,6 +1606,16 @@ async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request)
         except (json.JSONDecodeError, TypeError):
             answers = {}
 
+    # 解析 AI 详细批改数据
+    grading_details = attempt.get("grading_details")
+    if isinstance(grading_details, str):
+        try:
+            grading_details = json.loads(grading_details)
+        except (json.JSONDecodeError, TypeError):
+            grading_details = {}
+    if not grading_details:
+        grading_details = {}
+
     # 获取题目信息
     questions = execute_query(
         """SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
@@ -1257,15 +1638,44 @@ async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request)
         else:
             q["options"] = None
 
+    # 为每题补充 AI 批改详情
+    enriched_questions = []
+    for q in questions:
+        qid = str(q["id"])
+        ans = answers.get(qid, {})
+        gd = grading_details.get(qid, {})
+        enriched_questions.append({
+            **q,
+            "student_answer": ans.get("student_answer", ""),
+            "student_score": ans.get("score", 0),
+            "max_score": ans.get("max_score", q.get("question_score", 0)),
+            "is_correct": ans.get("is_correct", False),
+            # AI 简答评语
+            "comment": ans.get("comment", ""),
+            "feedback": ans.get("feedback", ""),
+            # AI 主观题多维评分
+            "dimensions": gd.get("dimensions", ans.get("dimensions", {})),
+            "overall_comment": gd.get("overall_comment", ans.get("overall_comment", "")),
+            "improvement_suggestions": gd.get("improvement_suggestions", ans.get("improvement_suggestions", [])),
+            "key_points_hit": ans.get("key_points_hit", []),
+            "key_points_missed": ans.get("key_points_missed", []),
+            # 教师复核
+            "teacher_comment": ans.get("teacher_comment", ""),
+            "teacher_adjusted": ans.get("teacher_adjusted", False),
+        })
+
     return {
         "attempt": {
             "id": attempt["id"],
             "score": attempt["score"],
             "total_score": attempt["total_score"],
             "submitted_at": attempt["submitted_at"],
+            "teacher_score": attempt.get("teacher_score", -1),
+            "teacher_comment": attempt.get("teacher_comment", ""),
+            "teacher_reviewed": attempt.get("teacher_reviewed", 0),
             "answers": answers,
         },
-        "questions": questions,
+        "questions": enriched_questions,
     }
 
 
@@ -1587,7 +1997,8 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
         raise HTTPException(status_code=400, detail="题库中没有可选的题目，请先导入试题")
 
     # 构建候选题目文本
-    type_map = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题"}
+    type_map = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
+                 "fill": "填空题", "essay": "作文", "subjective": "主观题"}
     diff_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
 
     candidate_text = ""

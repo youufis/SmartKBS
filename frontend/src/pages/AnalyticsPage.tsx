@@ -325,7 +325,7 @@ const AnalyticsPage: React.FC = () => {
   }
 
   const typeLabel: Record<string, string> = {
-    single: '单选', multiple: '多选', true_false: '判断', short: '简答',
+    single: '单选', multiple: '多选', true_false: '判断', short: '简答', fill: '填空', essay: '作文', subjective: '主观题',
   }
   const diffColor: Record<string, string> = {
     easy: 'green', medium: 'orange', hard: 'red',

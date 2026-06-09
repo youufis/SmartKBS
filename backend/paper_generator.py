@@ -77,7 +77,7 @@ TYPE_LABELS = {
     "short": "四、简答题",
 }
 
-TYPE_ORDER = ["single", "multiple", "true_false", "short"]
+TYPE_ORDER = ["single", "multiple", "true_false", "fill", "short", "essay", "subjective"]
 
 
 # ═══════════════════════════════════════════════════════════════

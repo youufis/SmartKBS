@@ -15,23 +15,10 @@ import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import MediaDisplay from '../components/MediaDisplay'
 import PlaceholderManager from '../components/PlaceholderManager'
+import { TYPE_LABELS, TYPE_COLORS, TYPE_OPTIONS } from '../constants/questionTypes'
 
 const { TextArea } = Input
 const { Option } = Select
-
-const TYPE_COLORS: Record<string, string> = {
-  single: 'blue',
-  multiple: 'purple',
-  true_false: 'orange',
-  short: 'green',
-}
-
-const TYPE_LABELS: Record<string, string> = {
-  single: '单选题',
-  multiple: '多选题',
-  true_false: '判断题',
-  short: '简答题',
-}
 
 const DIFFICULTY_COLORS: Record<string, string> = {
   easy: 'green',
@@ -630,10 +617,9 @@ const QuestionBankPage: React.FC = () => {
                           <Col span={8}>
                             <Form.Item label="题型" name="question_type" rules={[{ required: true }]}>
                               <Select>
-                                <Option value="single">单选题</Option>
-                                <Option value="multiple">多选题</Option>
-                                <Option value="true_false">判断题</Option>
-                                <Option value="short">简答题</Option>
+                                {TYPE_OPTIONS.map(opt => (
+                                  <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+                                ))}
                               </Select>
                             </Form.Item>
                           </Col>
@@ -912,10 +898,9 @@ const QuestionBankPage: React.FC = () => {
               value={filters.type}
               onChange={(val) => { setFilters(f => ({ ...f, type: val })); setPage(1) }}
             >
-              <Option value="single">单选题</Option>
-              <Option value="multiple">多选题</Option>
-              <Option value="true_false">判断题</Option>
-              <Option value="short">简答题</Option>
+              {TYPE_OPTIONS.map(opt => (
+                <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+              ))}
             </Select>
           </Col>
           <Col span={3}>

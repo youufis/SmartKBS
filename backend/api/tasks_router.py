@@ -1,19 +1,24 @@
 """
 任务管理 API 路由
-创建/激活/提交/汇总
+创建/激活/提交/汇总/AI 批改
 """
+import json
 import os
 import time
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.auth import can_create_task, is_teacher, is_admin
+from backend.api.chat_router import get_api_keys, upload_file_to_dashscope
+from backend.api.config_router import get_config_value
 from backend.config import (
     SUMMARY_DIR_NAME,
     TEACHERS_SUMMARY_DIR,
     ADMIN_SUMMARY_DIR,
+    BASE_DIR,
 )
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
 from backend.database import execute_query, execute_insert_update, get_connection, execute_insert_update, get_connection
@@ -543,3 +548,239 @@ def _remove_student_from_summary(creator: str, task_name: str, student: str):
         new_content = re.sub(r"\n\n---\n\n---\n\n", "\n\n---\n\n", new_content)
         with open(path, "w", encoding="utf-8") as f:
             f.write(new_content.strip() + "\n")
+
+
+# ═══════════════════════════════════════════════════════════
+# AI 批改功能
+# ═══════════════════════════════════════════════════════════
+
+def _find_summary_file(creator: str, task_name: str) -> str | None:
+    """查找任务的 summary 汇总文件路径"""
+    admin_chat_dir = get_admin_chat_history_dir()
+    paths = [
+        os.path.join(str(BASE_DIR), admin_chat_dir, SUMMARY_DIR_NAME, TEACHERS_SUMMARY_DIR, creator, f"summary_{task_name}.md"),
+        os.path.join(str(BASE_DIR), get_account_chat_history_dir(creator), SUMMARY_DIR_NAME, f"summary_{task_name}.md"),
+        os.path.join(str(BASE_DIR), admin_chat_dir, SUMMARY_DIR_NAME, ADMIN_SUMMARY_DIR, f"summary_{creator}_{task_name}.md"),
+    ]
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+@router.post("/ai-grade/{task_id}")
+async def ai_grade_task(task_id: str, request: Request):
+    """🤖 AI 批改任务：读取 summary 汇总文件，调用 qwen-long 分析每位学生的对话并评分"""
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_create_task(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    # 1. 查找任务信息
+    rows = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE id=?",
+        (task_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="任务未找到")
+    task = rows[0]
+    task_name = task[2]
+    task_desc = task[3] or task_name
+    creator = task[1]
+
+    # 权限：教师只能批改自己的任务
+    if not is_admin(username) and creator != username:
+        raise HTTPException(status_code=403, detail="无权限批改此任务")
+
+    # 2. 查找 summary 文件
+    summary_path = _find_summary_file(creator, task_name)
+    if not summary_path:
+        raise HTTPException(status_code=404, detail="汇总文件未找到，暂无学生提交")
+
+    # 3. 获取 API Key 和配置
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
+
+    api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    model = get_config_value("MODEL_LONG_NAME", "qwen-long")
+
+    # 4. 上传 summary 文件到 DashScope
+    try:
+        file_id = await upload_file_to_dashscope(summary_path, api_key)
+    except Exception as e:
+        logger.error(f"文件上传失败: {e}")
+        raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
+
+    # 5. 构建批改 prompt
+    from backend.prompts.homework_grade import TASK_GRADING_PROMPT
+    prompt = TASK_GRADING_PROMPT.format(
+        subject="信息科技",
+        task_name=task_name,
+        task_description=task_desc,
+    )
+
+    # 6. 调用 qwen-long
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{api_base}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": "你是一位严谨的高中教师，正在批改学生提交的作业对话记录。"},
+                        {"role": "system", "content": f"fileid://{file_id}"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": False,
+                },
+                timeout=180,
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"AI 模型调用失败: {resp.text[:200]}")
+
+            data = resp.json()
+            ai_text = data["choices"][0]["message"]["content"]
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="AI 模型调用超时，请稍后重试")
+    except Exception as e:
+        logger.error(f"AI 调用失败: {e}")
+        raise HTTPException(status_code=502, detail=f"AI 调用失败: {str(e)}")
+
+    # 7. 解析 AI 返回的 JSON
+    try:
+        # 清理可能的 Markdown 代码块标记
+        cleaned = ai_text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+            if "```" in cleaned:
+                cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+
+        logger.info(f"AI 批改结果: {len(grades_list)} 位学生, summary={bool(class_summary)}")
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.error(f"AI 返回解析失败: {e}, raw={ai_text[:500]}")
+        raise HTTPException(status_code=502, detail=f"AI 返回格式异常: {str(e)}")
+
+    # 8. 写入 task_grades 表
+    saved = []
+    for g in grades_list:
+        student = g.get("student", "")
+        # AI 可能从 "## 学生 xxx" 中提取出 "学生 xxx"，需要清洗前缀
+        if student.startswith("学生 "):
+            student = student[3:]
+        score = g.get("score")
+        comment = g.get("comment", "")
+        feedback = g.get("feedback", "")
+        strengths = g.get("strengths", [])
+        weaknesses = g.get("weaknesses", [])
+        if not student or score is None:
+            continue
+
+        execute_insert_update(
+            """INSERT OR REPLACE INTO task_grades
+               (task_id, student_username, ai_score, ai_comment, ai_feedback,
+                ai_strengths, ai_weaknesses, ai_graded_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+            (task_id, student, score, comment, feedback,
+             json.dumps(strengths, ensure_ascii=False),
+             json.dumps(weaknesses, ensure_ascii=False)),
+        )
+        saved.append({
+            "student": student,
+            "score": score,
+            "comment": comment,
+            "feedback": feedback,
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+        })
+
+    # 9. 保存全班总结到 tasks 表
+    summary_json = json.dumps(class_summary, ensure_ascii=False)
+    execute_insert_update(
+        "UPDATE tasks SET ai_summary=?, updated_at=datetime('now') WHERE id=?",
+        (summary_json, task_id),
+    )
+
+    logger.info(f"AI 批改完成: task={task_name}, 批改人数={len(saved)}, by={username}")
+    return {
+        "summary": class_summary,
+        "grades": saved,
+        "graded_count": len(saved),
+        "message": f"AI 批改完成，共批改 {len(saved)} 位学生",
+    }
+
+
+@router.get("/grades/{task_id}")
+async def get_task_grades(task_id: str, request: Request):
+    """获取任务的 AI 批改结果"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    # 查找任务
+    rows = execute_query(
+        "SELECT id, creator_username, name, ai_summary FROM tasks WHERE id=?",
+        (task_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="任务未找到")
+
+    creator = rows[0][1]
+    ai_summary_raw = rows[0][3] or ""
+
+    # 解析全班总结
+    class_summary = None
+    if ai_summary_raw:
+        try:
+            class_summary = json.loads(ai_summary_raw)
+        except json.JSONDecodeError:
+            pass
+
+    # 权限验证
+    if not is_admin(username) and creator != username:
+        # 学生可以看自己的批改
+        if not is_teacher(username) and not is_admin(username):
+            rows = execute_query(
+                "SELECT ai_score, ai_comment, ai_feedback, ai_strengths, ai_weaknesses, ai_graded_at "
+                "FROM task_grades WHERE task_id=? AND student_username=?",
+                (task_id, username),
+            )
+            if rows:
+                r = rows[0]
+                return {
+                    "summary": class_summary,
+                    "grades": [{
+                        "student": username,
+                        "score": r[0],
+                        "comment": r[1],
+                        "feedback": r[2],
+                        "strengths": json.loads(r[3]) if r[3] else [],
+                        "weaknesses": json.loads(r[4]) if r[4] else [],
+                        "graded_at": r[5],
+                    }],
+                    "graded_count": 1,
+                }
+            return {"summary": class_summary, "grades": [], "graded_count": 0}
+        raise HTTPException(status_code=403, detail="无权限查看")
+
+    # 教师/管理员查看所有
+    rows = execute_query(
+        "SELECT student_username, ai_score, ai_comment, ai_feedback, ai_strengths, ai_weaknesses, ai_graded_at "
+        "FROM task_grades WHERE task_id=? ORDER BY ai_score DESC",
+        (task_id,),
+    )
+    grades = []
+    for r in rows:
+        grades.append({
+            "student": r[0],
+            "score": r[1],
+            "comment": r[2],
+            "feedback": r[3],
+            "strengths": json.loads(r[4]) if r[4] else [],
+            "weaknesses": json.loads(r[5]) if r[5] else [],
+            "graded_at": r[6],
+        })
+
+    return {"summary": class_summary, "grades": grades, "graded_count": len(grades)}
