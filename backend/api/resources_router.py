@@ -218,6 +218,23 @@ async def delete_resource(path: str = Query(...), request: Request = None):
                 raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
 
             logger.info(f"资源已删除: {target_path}")
+
+            # 同步清理资源分组中的引用
+            rel_path = path if not os.path.isabs(path) else os.path.relpath(target_path, html_dir)
+            try:
+                from backend.database import execute_insert_update
+                execute_insert_update(
+                    "DELETE FROM resource_group_items WHERE file_path=?",
+                    (rel_path,),
+                )
+                # 也尝试清理绝对路径格式的引用
+                execute_insert_update(
+                    "DELETE FROM resource_group_items WHERE file_path=?",
+                    (target_path,),
+                )
+            except Exception as cleanup_err:
+                logger.warning(f"清理资源分组引用失败: {cleanup_err}")
+
             return {"message": msg}
         except Exception as e:
             logger.error(f"删除资源失败: {e}")
