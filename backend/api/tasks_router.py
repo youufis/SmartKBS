@@ -359,6 +359,7 @@ async def delete_task(request: Request):
     with get_connection() as conn:
         c = conn.cursor()
         c.execute("DELETE FROM task_submissions WHERE task_id=?", (task_id,))
+        c.execute("DELETE FROM task_grades WHERE task_id=?", (task_id,))
         c.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         conn.commit()
 

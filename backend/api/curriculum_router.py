@@ -830,36 +830,61 @@ async def update_course(course_id: int, req: CourseUpdate, request: Request):
     return {"message": "课程更新成功"}
 
 
-@router.delete("/courses/{course_id}", summary="删除课程（软删除）")
+@router.delete("/courses/{course_id}", summary="删除课程（硬删除）")
 async def delete_course(course_id: int, request: Request):
-    """删除课程（管理员）—— 将课程及所有子节点设为 inactive"""
+    """删除课程（管理员）—— 硬删除课程及所有关联数据"""
     user = get_current_user(request)
     if not is_admin(user.get("username", "")):
         raise HTTPException(status_code=403, detail="权限不足：需要管理员权限")
 
-    course = execute_query_one("SELECT * FROM courses WHERE id=?", (course_id,))
+    course = execute_query("SELECT * FROM courses WHERE id=?", (course_id,))
     if not course:
         raise HTTPException(status_code=404, detail="课程不存在")
 
-    now = _now()
-    execute_insert_update(
-        "UPDATE courses SET status='inactive', updated_at=? WHERE id=?", (now, course_id),
-    )
-    # 级联下线所有关联的章节和知识点
-    chapter_ids = execute_query(
+    # 获取所有级联的章节ID和知识点ID
+    chapter_rows = execute_query(
         "SELECT id FROM chapters WHERE course_id=?", (course_id,),
     )
-    for ch in chapter_ids:
+    all_chapter_ids = [ch["id"] for ch in chapter_rows]
+    # 也获取子章节
+    if all_chapter_ids:
+        placeholders = ",".join("?" for _ in all_chapter_ids)
+        child_rows = execute_query(
+            f"SELECT id FROM chapters WHERE parent_id IN ({placeholders})",
+            tuple(all_chapter_ids),
+        )
+        all_chapter_ids.extend(ch["id"] for ch in child_rows if ch["id"] not in all_chapter_ids)
+
+    if all_chapter_ids:
+        placeholders = ",".join("?" for _ in all_chapter_ids)
+        kp_rows = execute_query(
+            f"SELECT id FROM knowledge_points WHERE chapter_id IN ({placeholders})",
+            tuple(all_chapter_ids),
+        )
+        kp_ids = [kp["id"] for kp in kp_rows]
+        if kp_ids:
+            kp_placeholders = ",".join("?" for _ in kp_ids)
+            kp_tuple = tuple(kp_ids)
+            execute_insert_update(
+                f"DELETE FROM learning_progress WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
+            )
+            execute_insert_update(
+                f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
+            )
         execute_insert_update(
-            "UPDATE chapters SET status='inactive', updated_at=? WHERE id=?", (now, ch["id"]),
+            f"DELETE FROM knowledge_points WHERE chapter_id IN ({placeholders})", tuple(all_chapter_ids),
         )
         execute_insert_update(
-            "UPDATE knowledge_points SET status='inactive', updated_at=? WHERE chapter_id=?",
-            (now, ch["id"]),
+            f"DELETE FROM chapters WHERE id IN ({placeholders})", tuple(all_chapter_ids),
+        )
+        execute_insert_update(
+            f"DELETE FROM chapters WHERE parent_id IN ({placeholders})", tuple(all_chapter_ids),
         )
 
-    logger.info(f"管理员 {user['username']} 删除课程 id={course_id}")
-    return {"message": f"课程「{course['name']}」已删除"}
+    execute_insert_update("DELETE FROM courses WHERE id=?", (course_id,))
+
+    logger.info(f"管理员 {user['username']} 硬删除课程 id={course_id}")
+    return {"message": f"课程「{course['name']}」已永久删除"}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -955,41 +980,52 @@ async def update_chapter(chapter_id: int, req: ChapterUpdate, request: Request):
     return {"message": "章节更新成功"}
 
 
-@router.delete("/chapters/{chapter_id}", summary="删除章节（软删除）")
+@router.delete("/chapters/{chapter_id}", summary="删除章节（硬删除）")
 async def delete_chapter(chapter_id: int, request: Request):
-    """删除章节（教师/管理员）—— 级联下线子章节和知识点"""
+    """删除章节（教师/管理员）—— 硬删除章节及所有关联数据"""
     user = get_current_user(request)
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    ch = execute_query_one("SELECT * FROM chapters WHERE id=?", (chapter_id,))
+    ch = execute_query("SELECT * FROM chapters WHERE id=?", (chapter_id,))
     if not ch:
         raise HTTPException(status_code=404, detail="章节不存在")
 
-    now = _now()
-    # 级联下线所有子章节
+    # 收集所有子章节ID
     children = execute_query(
         "SELECT id FROM chapters WHERE parent_id=?", (chapter_id,),
     )
-    for child in children:
+    all_chapter_ids = [chapter_id] + [c["id"] for c in children]
+
+    placeholders = ",".join("?" for _ in all_chapter_ids)
+    ch_tuple = tuple(all_chapter_ids)
+
+    # 获取所有知识点ID
+    kp_rows = execute_query(
+        f"SELECT id FROM knowledge_points WHERE chapter_id IN ({placeholders})", ch_tuple,
+    )
+    kp_ids = [kp["id"] for kp in kp_rows]
+    if kp_ids:
+        kp_placeholders = ",".join("?" for _ in kp_ids)
+        kp_tuple = tuple(kp_ids)
         execute_insert_update(
-            "UPDATE chapters SET status='inactive', updated_at=? WHERE id=?", (now, child["id"]),
+            f"DELETE FROM learning_progress WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
         )
         execute_insert_update(
-            "UPDATE knowledge_points SET status='inactive', updated_at=? WHERE chapter_id=?",
-            (now, child["id"]),
+            f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
         )
-    # 下线当前章节的知识点
     execute_insert_update(
-        "UPDATE knowledge_points SET status='inactive', updated_at=? WHERE chapter_id=?",
-        (now, chapter_id),
+        f"DELETE FROM knowledge_points WHERE chapter_id IN ({placeholders})", ch_tuple,
     )
-    # 下线当前章节
     execute_insert_update(
-        "UPDATE chapters SET status='inactive', updated_at=? WHERE id=?", (now, chapter_id),
+        f"DELETE FROM chapters WHERE parent_id IN ({placeholders})", ch_tuple,
     )
-    logger.info(f"用户 {user['username']} 删除章节 id={chapter_id}")
-    return {"message": "章节已删除"}
+    execute_insert_update(
+        f"DELETE FROM chapters WHERE id IN ({placeholders})", ch_tuple,
+    )
+
+    logger.info(f"用户 {user['username']} 硬删除章节 id={chapter_id}")
+    return {"message": "章节已永久删除"}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1098,23 +1134,23 @@ async def update_knowledge_point(kp_id: int, req: KnowledgePointUpdate, request:
     return {"message": "知识点更新成功"}
 
 
-@router.delete("/knowledge-points/{kp_id}", summary="删除知识点（软删除）")
+@router.delete("/knowledge-points/{kp_id}", summary="删除知识点（硬删除）")
 async def delete_knowledge_point(kp_id: int, request: Request):
-    """删除知识点（教师/管理员）"""
+    """删除知识点（教师/管理员）—— 硬删除并清理关联数据"""
     user = get_current_user(request)
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    kp = execute_query_one("SELECT * FROM knowledge_points WHERE id=?", (kp_id,))
+    kp = execute_query("SELECT * FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
 
-    now = _now()
-    execute_insert_update(
-        "UPDATE knowledge_points SET status='inactive', updated_at=? WHERE id=?", (now, kp_id),
-    )
-    logger.info(f"用户 {user['username']} 删除知识点 id={kp_id}")
-    return {"message": "知识点已删除"}
+    execute_insert_update("DELETE FROM learning_progress WHERE knowledge_point_id=?", (kp_id,))
+    execute_insert_update("DELETE FROM curriculum_bindings WHERE knowledge_point_id=?", (kp_id,))
+    execute_insert_update("DELETE FROM knowledge_points WHERE id=?", (kp_id,))
+
+    logger.info(f"用户 {user['username']} 硬删除知识点 id={kp_id}")
+    return {"message": "知识点已永久删除"}
 
 
 # ═══════════════════════════════════════════════════════════

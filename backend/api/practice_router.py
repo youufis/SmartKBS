@@ -443,6 +443,8 @@ async def delete_session(session_id: int, request: Request):
 
     execute_update("DELETE FROM practice_attempts WHERE session_id=?", (session_id,))
     execute_update("DELETE FROM practice_session_questions WHERE session_id=?", (session_id,))
+    # 清理关联的积分奖励
+    db_execute_query("DELETE FROM activity_rewards WHERE activity_type='practice' AND activity_id=?", (str(session_id),))
     execute_update("DELETE FROM practice_sessions WHERE id=?", (session_id,))
     return {"message": "已删除"}
 

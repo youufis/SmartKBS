@@ -104,7 +104,13 @@ def _delete_user_completely(username: str):
             except Exception as e:
                 logger.warning(f"删除用户目录失败 {d}: {e}")
 
-    # 2. 删除数据库中所有与该用户相关的记录（使用事务）
+    # 2. 先获取资源分组ID（用于级联删除分组项）
+    group_ids = execute_query(
+        "SELECT id FROM resource_groups WHERE username=?", (username,)
+    )
+    group_id_list = [g[0] for g in group_ids] if group_ids else []
+
+    # 3. 删除数据库中所有与该用户相关的记录（使用事务）
     delete_ops = [
         # 以 username 为直接标识的表
         ("DELETE FROM daily_usage WHERE username=?", (username,)),
@@ -112,14 +118,25 @@ def _delete_user_completely(username: str):
         ("DELETE FROM notifications WHERE recipient_username=?", (username,)),
         ("DELETE FROM discussion_members WHERE username=?", (username,)),
         ("DELETE FROM discussion_messages WHERE username=?", (username,)),
+        ("DELETE FROM discussion_reports WHERE creator_username=? OR student_username=?", (username, username)),
         ("DELETE FROM interaction_quiz_answers WHERE student_username=?", (username,)),
         ("DELETE FROM interaction_poll_votes WHERE student_username=?", (username,)),
         ("DELETE FROM interaction_questions WHERE student_username=?", (username,)),
         ("DELETE FROM learning_progress WHERE student_username=?", (username,)),
         ("DELETE FROM task_submissions WHERE student_username=?", (username,)),
+        ("DELETE FROM task_grades WHERE student_username=?", (username,)),
+        ("DELETE FROM practice_attempts WHERE student_username=?", (username,)),
+        ("DELETE FROM activity_rewards WHERE student_username=?", (username,)),
+        ("DELETE FROM student_total_points WHERE student_username=?", (username,)),
+        ("DELETE FROM student_titles WHERE student_username=?", (username,)),
+        ("DELETE FROM title_upgrade_history WHERE student_username=?", (username,)),
+        ("DELETE FROM student_subject_titles WHERE student_username=?", (username,)),
+        ("DELETE FROM student_badges WHERE student_username=?", (username,)),
+        ("DELETE FROM login_logs WHERE username=?", (username,)),
         # 以 username 为创建者/拥有者的表
         ("DELETE FROM shared_resources WHERE owner_username=?", (username,)),
         ("DELETE FROM tasks WHERE creator_username=?", (username,)),
+        ("DELETE FROM task_grades WHERE task_id IN (SELECT id FROM tasks WHERE creator_username=?)", (username,)),
         ("DELETE FROM announcements WHERE creator_username=?", (username,)),
         ("DELETE FROM interaction_quizzes WHERE creator_username=?", (username,)),
         ("DELETE FROM interaction_polls WHERE creator_username=?", (username,)),
@@ -129,10 +146,25 @@ def _delete_user_completely(username: str):
         ("DELETE FROM rollcall_weights WHERE teacher_username=?", (username,)),
         ("DELETE FROM rollcall_meta WHERE teacher_username=?", (username,)),
         ("DELETE FROM rollcall_history WHERE teacher_username=?", (username,)),
-        # 最后删除用户本身
-        ("DELETE FROM users WHERE username=?", (username,)),
     ]
+    # 删除资源分组项
+    for gid in group_id_list:
+        delete_ops.append(("DELETE FROM resource_group_items WHERE group_id=?", (gid,)))
+    delete_ops.append(("DELETE FROM resource_groups WHERE username=?", (username,)))
+    # 最后删除用户本身
+    delete_ops.append(("DELETE FROM users WHERE username=?", (username,)))
+
     execute_batch(delete_ops)
+
+    # 4. 删除 questions.db 中的考试答题记录
+    try:
+        from backend.question_db import execute_update as q_execute_update
+        q_execute_update(
+            "DELETE FROM exam_attempts WHERE student_username=?", (username,)
+        )
+    except Exception as e:
+        logger.warning(f"删除考试答题记录失败: {e}")
+
     logger.info(f"用户 '{username}' 的所有数据库记录已清除")
 
 
