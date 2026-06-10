@@ -380,6 +380,12 @@ const DiscussionPage: React.FC = () => {
                   },
                 },
                 {
+                  title: '创建者', key: 'creator', width: 80,
+                  render: (_: any, disc: any) => (
+                    <Text type="secondary">{disc.creator_name || disc.creator_username || '-'}</Text>
+                  ),
+                },
+                {
                   title: '参与', key: 'members', width: 100,
                   render: (_: any, disc: any) => (
                     <Text type="secondary">
