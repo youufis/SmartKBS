@@ -803,7 +803,7 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
     # 构建查询条件
-    conditions = ["q.status = 'active'"]
+    conditions = ["q.status = 'active'", "q.type != 'code'"]
     params = []
 
     if req.subject:

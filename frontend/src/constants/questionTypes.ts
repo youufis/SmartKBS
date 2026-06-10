@@ -24,6 +24,7 @@ const DEFAULT_TYPES = [
   { key: 'fill', label: '填空题' },
   { key: 'essay', label: '作文' },
   { key: 'subjective', label: '主观题' },
+  { key: 'code', label: '编程题' },
 ]
 
 // ── 导出的可变对象（外部 import 后能实时反映更新） ──

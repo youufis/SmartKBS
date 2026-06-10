@@ -270,6 +270,11 @@ export interface ExamQuestion {
   has_svg?: number;
   /** 万相生图 / 上传的媒体文件 */
   media_files?: MediaFile[] | string | null;
+  /** 代码题字段 */
+  problem_id?: number;
+  code_language?: string;
+  template_code?: string;
+  starter_code?: string;
 }
 
 export interface ExamAttempt {

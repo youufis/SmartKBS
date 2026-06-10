@@ -102,7 +102,7 @@ def _get_question_pool(
     Returns:
         候选题目列表
     """
-    conditions = ["q.status = 'active'", "q.subject = ?"]
+    conditions = ["q.status = 'active'", "q.subject = ?", "q.type != 'code'"]
     params: list[Any] = [subject]
 
     if knowledge_points:
