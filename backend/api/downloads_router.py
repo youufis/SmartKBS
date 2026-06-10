@@ -280,6 +280,16 @@ async def api_delete(request: Request):
             _cleanup_empty_dir_shares(username)
         except Exception:
             pass
+        # 清理该文件的共享记录
+        try:
+            from backend.database import execute_insert_update
+            # 尝试匹配相对路径和绝对路径两种格式
+            execute_insert_update(
+                "DELETE FROM shared_resources WHERE owner_username=? AND (file_path=? OR file_path LIKE ?)",
+                (username, rel, f"%/{rel}"),
+            )
+        except Exception:
+            pass
         return {"success": True, "filename": rel}
     except Exception as e:
         return {"success": False, "error": str(e)}
