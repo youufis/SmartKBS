@@ -96,6 +96,7 @@ from backend.api.wrong_book_router import router as wrong_book_router
 from backend.api.practice_router import router as practice_router
 from backend.api.recommend_router import router as recommend_router
 from backend.api.reward_router import router as reward_router
+from backend.api.code_router import router as code_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
@@ -122,6 +123,7 @@ app.include_router(wrong_book_router, prefix="/api/wrong-book", tags=["错题本
 app.include_router(practice_router, prefix="/api/practice", tags=["自适应出题"])
 app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源推荐"])
 app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
+app.include_router(code_router, prefix="/api", tags=["代码练习"])
 
 
 @app.get("/api/health")

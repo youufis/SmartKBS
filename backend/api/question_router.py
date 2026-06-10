@@ -62,12 +62,14 @@ QUESTION_TYPE_MAP = {
     "fill": "填空题（填写正确内容）",
     "essay": "作文题（完整文章）",
     "subjective": "主观题（开放性问题）",
+    "code": "编程题（Python 代码实现，需提供测试用例）",
 }
 
 TYPE_DESC = {
     "single": "单选题",
     "multiple": "多选题",
     "true_false": "判断题",
+    "code": "编程题",
     "short": "简答题",
     "fill": "填空题",
     "essay": "作文",
@@ -177,6 +179,11 @@ async def generate_questions(req: GenerateRequest, request: Request):
                 now,
             ),
         )
+
+        # 如果是代码题，额外创建 code_problems + code_test_cases
+        if q_type == 'code':
+            _save_code_problem(qid, q_data, username, now)
+
         saved_questions.append({
             "id": qid,
             "type": q_type,
@@ -243,6 +250,41 @@ def _parse_ai_response(text: str) -> list[dict[str, Any]]:
     return []
 
 
+def _save_code_problem(question_id: int, q_data: dict, username: str, now: str):
+    """保存代码题的 code_problems 和 code_test_cases 记录"""
+    try:
+        language = q_data.get("language", "python")
+        template_code = q_data.get("template_code", "")
+        starter_code = q_data.get("starter_code", "")
+        test_cases = q_data.get("test_cases", []) or []
+
+        pid = execute_insert(
+            """INSERT INTO code_problems
+               (question_id, template_code, starter_code, language, time_limit, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 5, ?, ?)""",
+            (question_id, template_code, starter_code, language, now, now),
+        )
+
+        for i, tc in enumerate(test_cases):
+            execute_insert(
+                """INSERT INTO code_test_cases
+                   (problem_id, input, expected_output, is_sample, score, sort_order, description, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (pid,
+                 tc.get("input", ""),
+                 tc.get("expected_output", ""),
+                 1 if tc.get("is_sample") else 0,
+                 tc.get("score", 1),
+                 i,
+                 tc.get("description", ""),
+                 now),
+            )
+
+        logger.info(f"代码题已保存: question_id={question_id}, problem_id={pid}, test_cases={len(test_cases)}")
+    except Exception as e:
+        logger.error(f"保存代码题失败 (question_id={question_id}): {e}")
+
+
 # ── 题库 CRUD ──
 
 @router.get("")
@@ -266,7 +308,7 @@ async def list_questions(
     if role == 2:  # student
         raise HTTPException(status_code=403, detail="学生无权访问题库")
 
-    conditions = ["q.status = 'active'"]
+    conditions = ["q.status = 'active'", "q.type != 'code'"]
     params = []
 
     if type:
@@ -965,7 +1007,7 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 
 [
   {{
-    "type": "题型标识(single/multiple/true_false/short/fill/essay/subjective)",
+    "type": "题型标识(single/multiple/true_false/short/fill/essay/subjective/code)",
     "question": "题目内容（含 $...$ LaTeX 公式）",
     "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
@@ -1016,7 +1058,8 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     from backend.prompts.chat import QUESTION_GENERATE_WITH_MEDIA_PROMPT
     type_desc = {"single": "单选题（4个选项）", "multiple": "多选题（4-5个选项）",
                  "true_false": "判断题", "short": "简答题", "fill": "填空题",
-                 "essay": "作文", "subjective": "主观题"}.get(req.question_type, "单选题")
+                 "essay": "作文", "subjective": "主观题",
+                 "code": "编程题（Python 代码+测试用例）"}.get(req.question_type, "单选题")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     prompt = QUESTION_GENERATE_WITH_MEDIA_PROMPT.format(
         subject=req.subject,
@@ -1078,6 +1121,10 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
                 media_placeholders,
             ),
         )
+
+        # ── 代码题额外保存 code_problems 和测试用例 ──
+        if q_type == 'code':
+            _save_code_problem(qid, q_data, username, now)
 
         # ── 自动配图（通义万相） ──
         placeholders = q_data.get("media_placeholders") or []

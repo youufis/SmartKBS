@@ -28,7 +28,7 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为
 
 [
   {{
-    "type": "single/multiple/true_false/short/fill/essay/subjective",
+    "type": "single/multiple/true_false/short/fill/essay/subjective/code",
     "question": "题目内容（含 $...$ LaTeX 公式）",
     "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
@@ -36,14 +36,21 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为
     "knowledge_point": "知识点",
     "difficulty": "easy/medium/hard",
     "svg_code": "<svg>...</svg>",
-    "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图"}}]
+    "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图"}}],
+    // 仅当 type="code" 时需要以下字段：
+    "template_code": "代码模板（函数签名+注释，学生填写核心逻辑）",
+    "starter_code": "初始代码框架",
+    "language": "python",
+    "test_cases": [{{"input":"样例输入", "expected_output":"期望输出", "description":"用例说明", "score":1, "is_sample":true}}]
   }}
 ]
 
 注意：
-- 如果是判断题，options 设为 {{"对":"对", "错":"错"}}，answer 为"对"或"错"
-- 如果是简答题或填空题，options 设为 null，answer 为参考答案
-- 如果是作文或主观题，options 设为 null，answer 为评分要点/参考标准
+- 选择题（single/multiple）：options 设选项字典，answer 设正确答案字母
+- 判断题（true_false）：options 设为 {{"对":"对", "错":"错"}}，answer 为"对"或"错"
+- 简答题/填空题（short/fill）：options 设为 null，answer 为参考答案
+- 作文/主观题（essay/subjective）：options 设为 null，answer 为评分要点
+- **编程题（code）**：options 设为 null，answer 为参考解答代码，必须提供 template_code + test_cases（至少3个）
 - 题目和选项要与高中{subject}课程内容紧密相关
 """
 
@@ -92,7 +99,7 @@ purpose 为 "实物图" / "微观图" / "场景图"，description 写 50-100 字
 ━━━━ 输出格式 ━━━━
 [
   {{
-    "type": "single/multiple/true_false/short/fill/essay/subjective",
+    "type": "single/multiple/true_false/short/fill/essay/subjective/code",
     "question": "题目内容（含 $...$ LaTeX 公式）",
     "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",

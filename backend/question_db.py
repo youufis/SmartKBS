@@ -187,6 +187,99 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════════════════
+            # 代码练习：独立表（不再依赖 question_bank）
+            # ═══════════════════════════════════════════════════════════
+
+            # ── 代码题主表（独立，不再关联 question_bank）──
+            # 先检查旧表结构，如有 question_id 列则迁移
+            try:
+                c.execute("SELECT question_id FROM code_problems LIMIT 1")
+                # 旧表存在，删除重建（新功能尚无生产数据）
+                c.execute("DROP TABLE IF EXISTS code_problems")
+                c.execute("DROP TABLE IF EXISTS code_test_cases")
+                c.execute("DROP TABLE IF EXISTS code_submissions")
+                c.execute("DROP TABLE IF EXISTS code_runs")
+            except sqlite3.OperationalError:
+                pass  # 新表或不存在
+
+            c.execute("""CREATE TABLE IF NOT EXISTS code_problems (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                subject TEXT DEFAULT '信息科技',
+                knowledge_points TEXT DEFAULT '',
+                difficulty TEXT DEFAULT 'medium',
+                creator_username TEXT NOT NULL,
+                creator_name TEXT DEFAULT '',
+                language TEXT NOT NULL DEFAULT 'python',
+                template_code TEXT DEFAULT '',
+                starter_code TEXT DEFAULT '',
+                time_limit INTEGER DEFAULT 5,
+                status TEXT DEFAULT 'active',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+
+            # ── 测试用例表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS code_test_cases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                problem_id INTEGER NOT NULL,
+                input TEXT DEFAULT '',
+                expected_output TEXT NOT NULL,
+                is_sample INTEGER DEFAULT 0,
+                score REAL DEFAULT 1.0,
+                sort_order INTEGER DEFAULT 0,
+                description TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (problem_id) REFERENCES code_problems(id)
+            )""")
+
+            # ── 学生提交记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS code_submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                problem_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                language TEXT NOT NULL DEFAULT 'python',
+                source_code TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                passed_cases INTEGER DEFAULT 0,
+                total_cases INTEGER DEFAULT 0,
+                score REAL DEFAULT 0,
+                execution_time REAL,
+                error_message TEXT DEFAULT '',
+                ai_review TEXT DEFAULT '',
+                ai_review_status TEXT DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                is_best INTEGER DEFAULT 0,
+                FOREIGN KEY (problem_id) REFERENCES code_problems(id)
+            )""")
+
+            # ── 运行记录表（非评分的「运行一下」功能）──
+            c.execute("""CREATE TABLE IF NOT EXISTS code_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                problem_id INTEGER,
+                student_username TEXT NOT NULL,
+                language TEXT NOT NULL DEFAULT 'python',
+                source_code TEXT NOT NULL,
+                input_data TEXT DEFAULT '',
+                output_data TEXT DEFAULT '',
+                execution_time REAL,
+                error_message TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )""")
+
+            # 索引
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cp_creator ON code_problems(creator_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cp_status ON code_problems(status)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ctc_problem ON code_test_cases(problem_id, sort_order)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cs_student ON code_submissions(student_username, problem_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cs_best ON code_submissions(problem_id, is_best)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cr_student ON code_runs(student_username)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("试题库数据库初始化完成")
     except Exception as e:
