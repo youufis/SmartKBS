@@ -188,20 +188,18 @@ async def list_discussions(
                 "SELECT * FROM discussions ORDER BY created_at DESC"
             )
     elif role == 1:
-        # 教师：查看自己创建的 + 管理员创建的讨论
+        # 教师：只查看自己创建的讨论
         if status:
             rows = execute_query(
                 """SELECT * FROM discussions
-                   WHERE status=? AND (creator_username=? OR creator_username IN
-                     (SELECT username FROM users WHERE role=0))
+                   WHERE status=? AND creator_username=?
                    ORDER BY created_at DESC""",
                 (status, username),
             )
         else:
             rows = execute_query(
                 """SELECT * FROM discussions
-                   WHERE creator_username=? OR creator_username IN
-                     (SELECT username FROM users WHERE role=0)
+                   WHERE creator_username=?
                    ORDER BY created_at DESC""",
                 (username,),
             )
@@ -305,9 +303,14 @@ async def list_discussions(
 @router.get("/discussions/{disc_id}", summary="获取讨论详情")
 async def get_discussion(disc_id: int, request: Request):
     user = get_current_user(request)
+    role = user.get("role", 2)
     rows = execute_query("SELECT * FROM discussions WHERE id=?", (disc_id,))
     if not rows:
         raise HTTPException(status_code=404, detail="讨论不存在")
+
+    # 教师只能查看自己的讨论，管理员可以全部
+    if role == 1 and rows[0][1] != user["username"]:
+        raise HTTPException(status_code=403, detail="只能查看自己创建的讨论详情")
 
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
