@@ -365,6 +365,54 @@ const DiscussionPage: React.FC = () => {
               rowKey="id"
               size="small"
               pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 个讨论`, pageSizeOptions: ['5', '10', '20', '50'] }}
+              expandable={{
+                expandedRowRender: (disc: any) => (
+                  <div style={{ padding: '8px 0 4px 32px' }}>
+                    {disc.description && (
+                      <div style={{ marginBottom: 10 }}>
+                        <Text style={{ fontSize: 13, color: '#555' }}>{disc.description}</Text>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 24, fontSize: 13, color: '#888', flexWrap: 'wrap' }}>
+                      <span><TeamOutlined /> 参与人数：{disc.total_members || 0}</span>
+                      <span><MessageOutlined /> 消息数：{disc.total_messages || 0}</span>
+                      <span><RobotOutlined /> AI角色：{AI_ROLE_MAP[disc.ai_role] || disc.ai_role || '-'}</span>
+                      {disc.duration_minutes > 0 && (
+                        <span><FieldTimeOutlined /> 时长：{disc.duration_minutes} 分钟</span>
+                      )}
+                      <span><UserOutlined /> 创建者：{disc.creator_name || disc.creator_username || '-'}</span>
+                      {disc.grade && <span>适用年级：{disc.grade}</span>}
+                      {disc.classes && <span>适用班级：{disc.classes}</span>}
+                      {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (
+                        <Tag color="blue" style={{ margin: 0 }}>你的小组: {disc.my_group.name || `第${disc.my_group.group_index}组`}</Tag>
+                      )}
+                    </div>
+                    {isTeacherOrAdmin && (
+                      <div style={{ marginTop: 10, borderTop: '1px solid #f0f0f0', paddingTop: 10 }}>
+                        <Space>
+                          <span style={{ fontSize: 13, color: '#888' }}>📋 AI 总结：</span>
+                          {disc.status === 'pending' && <Tag style={{ margin: 0 }}>未开始</Tag>}
+                          {disc.status === 'active' && <Tag color="processing" style={{ margin: 0 }}>进行中</Tag>}
+                          {disc.status === 'ended' && disc.has_summary && (
+                            <>
+                              <Tag color="success" style={{ margin: 0 }}>✅ 已总结</Tag>
+                              <Button type="link" size="small" icon={<EyeOutlined />}
+                                onClick={() => navigate(`/discussion-monitor/${disc.id}`)}
+                                style={{ padding: 0 }}>
+                                查看总结
+                              </Button>
+                            </>
+                          )}
+                          {disc.status === 'ended' && !disc.has_summary && (
+                            <Tag color="default" style={{ margin: 0 }}>⏳ 待总结</Tag>
+                          )}
+                        </Space>
+                      </div>
+                    )}
+                  </div>
+                ),
+                rowExpandable: () => true,
+              }}
               columns={[
                 {
                   title: '讨论主题', dataIndex: 'title', key: 'title', ellipsis: true,
@@ -380,51 +428,13 @@ const DiscussionPage: React.FC = () => {
                   },
                 },
                 {
-                  title: '创建者', key: 'creator', width: 80,
-                  render: (_: any, disc: any) => (
-                    <Text type="secondary">{disc.creator_name || disc.creator_username || '-'}</Text>
-                  ),
-                },
-                {
-                  title: '参与', key: 'members', width: 100,
+                  title: '参与', key: 'members', width: 110,
                   render: (_: any, disc: any) => (
                     <Text type="secondary">
                       <TeamOutlined /> {disc.total_members || 0}人 | <MessageOutlined /> {disc.total_messages || 0}
                     </Text>
                   ),
                 },
-                {
-                  title: 'AI角色', dataIndex: 'ai_role', key: 'ai_role', width: 80,
-                  render: (role: string) => <Text type="secondary">{AI_ROLE_MAP[role] || role}</Text>,
-                },
-                {
-                  title: '时长', key: 'duration', width: 80,
-                  render: (_: any, disc: any) => disc.duration_minutes > 0 ? <Text type="secondary">{disc.duration_minutes}分钟</Text> : null,
-                },
-                {
-                  title: '描述', dataIndex: 'description', key: 'description', ellipsis: true,
-                  render: (desc: string) => desc ? <Text type="secondary" style={{ fontSize: 12 }}>{desc}</Text> : null,
-                },
-                ...(isTeacherOrAdmin ? [{
-                  title: 'AI 总结', key: 'summary', width: 90,
-                  render: (_: any, disc: any) => {
-                    if (disc.status !== 'ended') return null
-                    const hasSummary = disc.has_summary
-                    return (
-                      <Tooltip title={hasSummary ? '查看 AI 归纳总结' : '暂无 AI 总结'}>
-                        <Tag
-                          color={hasSummary ? 'success' : 'default'}
-                          style={{ cursor: 'pointer' }}
-                          onClick={() => {
-                            navigate(`/discussion-monitor/${disc.id}`)
-                          }}
-                        >
-                          {hasSummary ? '✅ 已总结' : '⏳ 待总结'}
-                        </Tag>
-                      </Tooltip>
-                    )
-                  },
-                }] : []),
                 {
                   title: '操作', key: 'actions', width: 200,
                   render: (_: any, disc: any) => (
