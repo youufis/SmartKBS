@@ -265,6 +265,12 @@ async def list_discussions(
         item["total_messages"] = total_messages
         item["total_members"] = sum(g["member_count"] for g in group_list)
         item["require_summary"] = bool(item["require_summary"])
+        # 查询创建者姓名
+        creator_info = execute_query(
+            "SELECT name FROM users WHERE username=?",
+            (item["creator_username"],),
+        )
+        item["creator_name"] = creator_info[0][0] if creator_info and creator_info[0] and creator_info[0][0] else item["creator_username"]
         # 检查是否有 AI 总结报告
         summary_count = execute_query(
             "SELECT COUNT(*) FROM discussion_reports WHERE discussion_id=? AND group_id IS NOT NULL",
@@ -332,6 +338,12 @@ async def get_discussion(disc_id: int, request: Request):
 
     disc["groups"] = group_list
     disc["require_summary"] = bool(disc["require_summary"])
+    # 查询创建者姓名
+    creator_info = execute_query(
+        "SELECT name FROM users WHERE username=?",
+        (disc["creator_username"],),
+    )
+    disc["creator_name"] = creator_info[0][0] if creator_info and creator_info[0] and creator_info[0][0] else disc["creator_username"]
     return disc
 
 
