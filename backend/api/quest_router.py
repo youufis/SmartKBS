@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_query_dict, execute_insert_update, execute_query_one
-from backend.api.score_router import _get_teacher_allowed_classes, _parse_teacher_grade_class
+from backend.api.score_router import _get_teacher_allowed_classes, _get_teacher_allowed_grades, _parse_teacher_grade_class
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_sync_direct
 from backend.prompts.quest import (
@@ -928,17 +928,9 @@ async def get_bank_stats(request: Request):
 
 @router.get("/quest/admin/grades", summary="[教师] 可查看的年级列表")
 async def get_admin_quest_grades(request: Request):
-    """返回当前教师可查看的年级列表"""
+    """返回当前教师可查看的年级列表（复用 score_router 统一函数）"""
     user = get_current_user(request)
-    username = user["username"]
-    from backend.subject_config import get_grade_list
-    all_grades = get_grade_list()
-    if username == "root":
-        return all_grades
-    rows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
-    if rows and rows[0][0]:
-        return [g.strip() for g in rows[0][0].split("|") if g.strip()]
-    return all_grades
+    return _get_teacher_allowed_grades(user["username"])
 
 
 @router.get("/quest/admin/classes", summary="[教师] 可查看的班级列表")
@@ -946,24 +938,23 @@ async def get_admin_quest_classes(
     request: Request,
     grade: str = Query("", description="年级"),
 ):
-    """返回当前教师在某个年级可查看的班级列表"""
+    """返回当前教师在某个年级可查看的班级列表（复用 score_router 统一函数）"""
     user = get_current_user(request)
     username = user["username"]
 
-    # 全部学生中的班级列表
-    from backend.database import execute_query as db_q
-    students = db_q(
+    rows = execute_query(
         "SELECT DISTINCT class FROM users WHERE role=2 AND grade=? ORDER BY class",
         (grade,),
     )
-    all_classes = [r[0] for r in students] if students else []
+    all_classes = [r[0] for r in rows] if rows else []
 
     if username == "root":
         return all_classes
 
     allowed = _get_teacher_allowed_classes(username, grade)
     if allowed:
-        return [c for c in all_classes if c in allowed]
+        allowed_set = {int(a) for a in allowed if a.isdigit()}
+        return [c for c in all_classes if c in allowed_set]
     return all_classes
 
 

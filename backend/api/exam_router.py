@@ -17,6 +17,7 @@ from backend.question_db import (
     execute_update,
 )
 from backend.api.dependencies import get_current_user
+from backend.api.score_router import _parse_teacher_grade_class
 from backend.auth import is_admin
 from backend.database import execute_query as user_query
 from backend.logger import logger
@@ -95,32 +96,6 @@ def _get_teacher_name(username: str) -> str:
     """获取用户姓名"""
     rows = user_query("SELECT name FROM users WHERE username=?", (username,))
     return rows[0][0] if rows and rows[0][0] else username
-
-
-def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:
-    """解析教师的年级和班级字段，返回 {年级: [班级列表]} 的映射
-
-    格式说明:
-    - grade: "高一|高二" 表示教两个年级
-    - class: "1,2,3,4|1,2,7,8" 表示高一教1,2,3,4班，高二教1,2,7,8班
-    - 如果只有单个年级/班级列表，不加 | 分隔
-    """
-    result = {}
-    if not grade or not grade.strip():
-        return result
-
-    grade_parts = [g.strip() for g in grade.split("|")]
-    class_parts = [c.strip() for c in class_str.split("|")] if class_str else []
-
-    for i, g in enumerate(grade_parts):
-        if not g:
-            continue
-        if i < len(class_parts) and class_parts[i]:
-            classes = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-            result[g] = classes
-        else:
-            result[g] = []
-    return result
 
 
 # ── 考试 CRUD ──
