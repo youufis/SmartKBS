@@ -55,6 +55,14 @@ DEFAULT_BADGE_CONFIG = [
     {"id": "punctual_3",      "name": "准时达人", "icon": "⏱️", "desc": "连续 3 次按时提交考试", "condition_type": "punctual_3"},
     {"id": "rollcall_ace",    "name": "点名达人", "icon": "🎯", "desc": "点名正确率≥90%（累计≥10次）", "condition_type": "rollcall_accuracy", "condition_value": 90},
     {"id": "perfect_attendance", "name": "全勤标兵", "icon": "📅", "desc": "当月全部签到", "condition_type": "monthly_full_attendance"},
+    # ── 一站到底·闯关徽章（由 quest_router 独立管理，此处仅作展示配置） ──
+    {"id": "quest_first",    "name": "初出茅庐", "icon": "🥉", "desc": "首次闯关成功", "condition_type": "quest_milestone", "condition_value": 1},
+    {"id": "quest_novice",   "name": "闯关新秀", "icon": "🥈", "desc": "累计 5 次闯关成功", "condition_type": "quest_milestone", "condition_value": 5},
+    {"id": "quest_expert",   "name": "闯关达人", "icon": "🥇", "desc": "累计 10 次闯关成功", "condition_type": "quest_milestone", "condition_value": 10},
+    {"id": "quest_master",   "name": "闯关大师", "icon": "💎", "desc": "累计 20 次闯关成功", "condition_type": "quest_milestone", "condition_value": 20},
+    {"id": "quest_legend",   "name": "闯关传奇", "icon": "👑", "desc": "累计 50 次闯关成功", "condition_type": "quest_milestone", "condition_value": 50},
+    {"id": "quest_all_15",   "name": "一站到底", "icon": "💯", "desc": "单轮 15 题全对", "condition_type": "quest_honor"},
+    {"id": "quest_10_plus",  "name": "十连斩", "icon": "🔟", "desc": "单轮答对 10 题以上", "condition_type": "quest_honor"},
 ]
 
 # ── 主题科目列表（动态加载） ──

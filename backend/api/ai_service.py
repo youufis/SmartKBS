@@ -117,6 +117,18 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> st
         raise
 
 
+def call_ai_sync_direct(prompt: str, api_key: str) -> str:
+    """强制直接调用大模型（绕过智能体），用于知识闯关等不需要 APPID 的场景"""
+    if not api_key or not api_key.strip():
+        raise ValueError("API Key 为空，请在系统配置中设置 API Key")
+
+    from backend.api.config_router import get_config_value
+    model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+    api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                 "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    return _call_model_sync(prompt, api_key, model, api_base)
+
+
 # ── 流式调用（返回事件生成器） ──
 
 def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None):
