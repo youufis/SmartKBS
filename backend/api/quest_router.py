@@ -196,20 +196,19 @@ async def _generate_question_async(api_key: str, used_categories: list[str],
 async def _batch_generate(api_key: str, count: int,
                            used_categories: list[str],
                            start_index: int, use_bank: int = 0) -> list[dict]:
-    """批量生成 count 道题（并行 AI 调用 + 智能题库兜底）"""
-    tasks = []
+    """批量生成 count 道题（逐个生成，确保领域随机分布）"""
+    questions = []
     for i in range(count):
         idx = start_index + i
-        # 每道题模拟不同的已用领域——每道题保证不同类别
-        cat_snapshot = list(used_categories)
-        tasks.append(_generate_question_async(api_key, cat_snapshot, idx, use_bank))
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    questions = []
-    for r in results:
-        if isinstance(r, Exception):
-            logger.error(f"批量生成中某题失败: {r}")
+        q = await _generate_question_async(api_key, list(used_categories), idx, use_bank)
+        if isinstance(q, Exception):
+            logger.error(f"批量生成中某题失败: {q}")
             continue
-        questions.append(r)
+        # 将新领域加入已用列表，确保后续题目选择不同领域
+        cat = q.get("category", "综合")
+        if cat not in used_categories:
+            used_categories.append(cat)
+        questions.append(q)
     return questions
 
 
@@ -862,12 +861,12 @@ async def get_quest_result(quest_id: int, request: Request):
     if quest["completed"] == 0:
         raise HTTPException(status_code=400, detail="该闯关尚未结束")
 
-    # 获取所有题目记录
+    # 获取所有题目记录（排除预生成但未作答的题目）
     questions = execute_query_dict(
         """SELECT sort_order, category, question_text, options, correct_answer,
                   student_answer, is_correct, lifeline_used, time_spent, score, explanation
            FROM quest_question_records
-           WHERE quest_id=?
+           WHERE quest_id=? AND is_correct != -1
            ORDER BY sort_order""",
         (quest_id,),
     )
@@ -1148,7 +1147,7 @@ async def get_admin_quest_records(
             """SELECT sort_order, category, question_text, options, correct_answer,
                       student_answer, is_correct, lifeline_used, time_spent, score, explanation
                FROM quest_question_records
-               WHERE quest_id=?
+               WHERE quest_id=? AND is_correct != -1
                ORDER BY sort_order""",
             (r["id"],),
         )

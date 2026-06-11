@@ -826,6 +826,113 @@ def init_db():
             except sqlite3.OperationalError:
                 pass  # 字段已存在
 
+            # ═══════════════════════════════════════════════
+            # 知识抢答活动模块
+            # ═══════════════════════════════════════════════
+
+            # ── 抢答活动房间表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_rooms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_code TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL,
+                creator_username TEXT NOT NULL,
+                status TEXT DEFAULT 'waiting',
+                question_source TEXT DEFAULT 'bank',
+                question_count INTEGER DEFAULT 10,
+                time_limit INTEGER DEFAULT 15,
+                scoring_mode TEXT DEFAULT 'speed',
+                min_players INTEGER DEFAULT 2,
+                max_players INTEGER DEFAULT 50,
+                target_grade TEXT DEFAULT '',
+                target_class TEXT DEFAULT '',
+                use_ai_generate INTEGER DEFAULT 0,
+                subject TEXT DEFAULT '',
+                knowledge_points TEXT DEFAULT '',
+                difficulty TEXT DEFAULT 'medium',
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                ended_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqr_code ON quick_quiz_rooms(room_code)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqr_creator ON quick_quiz_rooms(creator_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqr_status ON quick_quiz_rooms(status)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 抢答活动参与者表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_players (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                student_name TEXT DEFAULT '',
+                grade TEXT DEFAULT '',
+                class_name TEXT DEFAULT '',
+                total_score REAL DEFAULT 0,
+                correct_count INTEGER DEFAULT 0,
+                wrong_count INTEGER DEFAULT 0,
+                total_time REAL DEFAULT 0,
+                streak INTEGER DEFAULT 0,
+                max_streak INTEGER DEFAULT 0,
+                joined_at TEXT NOT NULL,
+                UNIQUE(room_id, student_username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqp_room ON quick_quiz_players(room_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 抢答活动题目表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                question_text TEXT NOT NULL,
+                options TEXT NOT NULL,
+                correct_answer TEXT NOT NULL,
+                explanation TEXT DEFAULT '',
+                source TEXT DEFAULT 'bank',
+                source_question_id INTEGER,
+                UNIQUE(room_id, sort_order)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqq_room ON quick_quiz_questions(room_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 抢答活动答题记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL,
+                question_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                answer TEXT DEFAULT '',
+                is_correct INTEGER DEFAULT -1,
+                time_spent REAL DEFAULT 0,
+                score REAL DEFAULT 0,
+                answered_at TEXT,
+                UNIQUE(question_id, student_username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqa_room ON quick_quiz_answers(room_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqa_question ON quick_quiz_answers(question_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqa_student ON quick_quiz_answers(student_username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 抢答活动排行快照表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_rankings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL,
+                round_number INTEGER NOT NULL,
+                rankings TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqr_round ON quick_quiz_rankings(room_id, round_number)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 
