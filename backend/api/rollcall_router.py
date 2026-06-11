@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request, HTTPException
 
 from backend.config import BASE_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
+from backend.api.score_router import _get_teacher_allowed_grades
 from backend.auth import is_admin
 from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
@@ -222,31 +223,9 @@ def _save_to_student_chat(student_name, cls, content):
 # ── API 处理器 ──
 
 async def api_grades(request: Request):
-    """获取年级列表 - 管理员看到全部，教师只看到自己的年级"""
+    """获取年级列表（复用 score_router 统一函数）"""
     user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-
-    if role == 0:
-        # 管理员：全部年级
-        try:
-            rows = execute_query(
-                "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
-            )
-            return [row[0] for row in rows]
-        except Exception:
-            from backend.subject_config import get_grade_list
-            return get_grade_list()
-    else:
-        # 教师：只返回自己任教的年级
-        t_rows = execute_query(
-            "SELECT grade FROM users WHERE username=?", (username,)
-        )
-        if not t_rows or not t_rows[0][0]:
-            return []
-        grade_str = t_rows[0][0]
-        # grade 可能是 "高一|高二" 格式
-        return [g.strip() for g in grade_str.split("|") if g.strip()]
+    return _get_teacher_allowed_grades(user["username"])
 
 
 async def api_classes(request: Request):
