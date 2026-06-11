@@ -23,7 +23,7 @@ REWARD_CONFIG = {
     "learning":   {"participation": 2,  "has_grade": False},
     "login":      {"participation": 1,  "has_grade": False},  # 每日登录（一天一次）
     "code":       {"participation": 2,  "has_grade": True},
-    "quest":      {"participation": 5,  "has_grade": True},
+    "quest":      {"participation": 1,  "has_grade": True},
 }
 
 GRADE_POINTS = {
