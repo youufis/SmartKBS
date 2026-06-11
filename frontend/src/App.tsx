@@ -38,6 +38,11 @@ import QuestPage from './pages/QuestPage'
 import QuestBattlePage from './pages/QuestBattlePage'
 import QuestResultPage from './pages/QuestResultPage'
 import QuestAdminPage from './pages/QuestAdminPage'
+import QuickQuizPage from './pages/QuickQuizPage'
+import QuickQuizLobby from './pages/QuickQuizLobby'
+import QuickQuizPlay from './pages/QuickQuizPlay'
+import QuickQuizConsole from './pages/QuickQuizConsole'
+import QuickQuizResult from './pages/QuickQuizResult'
 
 function App() {
   const navigate = useNavigate()
@@ -105,6 +110,11 @@ function App() {
             <Route path="wrong-book" element={<WrongBookPage />} />
             <Route path="quest" element={user?.role === 'student' ? <QuestPage /> : <QuestAdminPage />} />
             <Route path="quest-records" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestAdminPage /> : <Navigate to="/chat" />} />
+            <Route path="quick-quiz" element={<QuickQuizPage />} />
+            <Route path="quick-quiz/lobby/:roomId" element={<QuickQuizLobby />} />
+            <Route path="quick-quiz/play/:roomId" element={<QuickQuizPlay />} />
+            <Route path="quick-quiz/console/:roomId" element={<QuickQuizConsole />} />
+            <Route path="quick-quiz/result/:roomId" element={<QuickQuizResult />} />
             <Route path="about" element={<AboutPage />} />
           </Route>
           <Route path="/quest/battle/:questId" element={isLoggedIn ? <QuestBattlePage /> : <Navigate to="/login" />} />

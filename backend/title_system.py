@@ -533,9 +533,9 @@ def _check_badge_condition(student_username: str, badge: dict) -> bool:
         try:
             rows = execute_query(
                 """SELECT 
-                       COALESCE(SUM(CASE WHEN status='correct' THEN 1 ELSE 0 END), 0) as correct,
+                       COALESCE(SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END), 0) as correct,
                        COUNT(*) as total
-                   FROM rollcall_history WHERE student_username=?""",
+                   FROM rollcall_history WHERE student_name=?""",
                 (student_username,),
             )
             if rows:
