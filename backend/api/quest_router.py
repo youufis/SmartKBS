@@ -2,6 +2,7 @@
 知识闯关 API 路由
 学生端：AI 即时出题的百科答题挑战
 """
+import asyncio
 import json
 import random
 from datetime import datetime
@@ -179,6 +180,64 @@ def _get_question_from_bank(used_categories: list[str]) -> dict | None:
         (qid,),
     )
     return result
+
+
+BATCH_SIZE = 3  # 预生成缓存量（开局 + 答题中补货）
+
+
+async def _generate_question_async(api_key: str, used_categories: list[str],
+                                    question_index: int, use_bank: int = 0) -> dict:
+    """异步生成一道题（AI 调用放到线程池避免阻塞）"""
+    return await asyncio.to_thread(
+        _generate_question, api_key, used_categories, question_index, use_bank
+    )
+
+
+async def _batch_generate(api_key: str, count: int,
+                           used_categories: list[str],
+                           start_index: int, use_bank: int = 0) -> list[dict]:
+    """批量生成 count 道题（并行 AI 调用 + 智能题库兜底）"""
+    tasks = []
+    for i in range(count):
+        idx = start_index + i
+        # 每道题模拟不同的已用领域——每道题保证不同类别
+        cat_snapshot = list(used_categories)
+        tasks.append(_generate_question_async(api_key, cat_snapshot, idx, use_bank))
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    questions = []
+    for r in results:
+        if isinstance(r, Exception):
+            logger.error(f"批量生成中某题失败: {r}")
+            continue
+        questions.append(r)
+    return questions
+
+
+async def _async_refill_buffer(quest_id: int, api_key: str,
+                                used_categories: list[str],
+                                start_index: int, use_bank: int = 0):
+    """后台异步补充题目缓存（答对后触发，不阻塞用户）"""
+    try:
+        count = min(BATCH_SIZE, MAX_QUEST_QUESTIONS - start_index + 1)
+        if count <= 0:
+            return
+        questions = await _batch_generate(api_key, count, used_categories, start_index, use_bank)
+        for i, q_data in enumerate(questions):
+            cat = q_data.get("category", "综合")
+            options_json = json.dumps(q_data["options"], ensure_ascii=False)
+            try:
+                execute_insert_update(
+                    """INSERT OR IGNORE INTO quest_question_records
+                       (quest_id, sort_order, category, question_text, options, correct_answer,
+                        student_answer, is_correct, lifeline_used, time_spent, score, explanation)
+                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
+                    (quest_id, start_index + i, cat, q_data["question"],
+                     options_json, q_data["answer"], q_data.get("explanation", "")),
+                )
+            except Exception:
+                pass  # 已存在则跳过
+    except Exception as e:
+        logger.error(f"后台补题失败 (quest={quest_id}): {e}")
 
 
 def _generate_question(api_key: str, used_categories: list[str],
@@ -405,36 +464,44 @@ async def start_quest(request: Request):
         (username, MAX_QUEST_QUESTIONS, now, use_bank),
     )
 
-    # 生成第 1 题（AI 或题库）
-    question_data = _generate_question(api_key, [], 1, use_bank=use_bank)
-    category = question_data.get("category", "综合")
-    options_json = json.dumps(question_data["options"], ensure_ascii=False)
-    correct_answer = question_data["answer"]
-    explanation = question_data.get("explanation", "")
-
-    execute_insert_update(
-        """INSERT INTO quest_question_records
-           (quest_id, sort_order, category, question_text, options, correct_answer,
-            student_answer, is_correct, lifeline_used, time_spent, score, explanation)
-           VALUES (?, 1, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
-        (quest_id, category, question_data["question"], options_json,
-         correct_answer, explanation),
+    # 批量生成首批 BATCH_SIZE 道题（并行 AI + 题库混合）
+    batch_count = min(BATCH_SIZE, MAX_QUEST_QUESTIONS)
+    questions_batch = await _batch_generate(
+        api_key, batch_count, [], 1, use_bank
     )
+
+    if not questions_batch:
+        raise HTTPException(status_code=500, detail="出题失败，请重试")
+
+    used_cats = []
+    for i, q_data in enumerate(questions_batch):
+        cat = q_data.get("category", "综合")
+        used_cats.append(cat)
+        options_json = json.dumps(q_data["options"], ensure_ascii=False)
+        execute_insert_update(
+            """INSERT INTO quest_question_records
+               (quest_id, sort_order, category, question_text, options, correct_answer,
+                student_answer, is_correct, lifeline_used, time_spent, score, explanation)
+               VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
+            (quest_id, i + 1, cat, q_data["question"], options_json,
+             q_data["answer"], q_data.get("explanation", "")),
+        )
 
     execute_insert_update(
         "UPDATE quest_records SET used_categories=?, current_question_index=1 WHERE id=?",
-        (json.dumps([category], ensure_ascii=False), quest_id),
+        (json.dumps(used_cats, ensure_ascii=False), quest_id),
     )
 
+    first = questions_batch[0]
     return {
         "quest_id": quest_id,
         "use_bank": bool(use_bank),
         "question": {
             "sort_order": 1,
-            "category": category,
-            "question_text": question_data["question"],
-            "options": question_data["options"],
-            "explanation": explanation,
+            "category": first.get("category", "综合"),
+            "question_text": first["question"],
+            "options": first["options"],
+            "explanation": first.get("explanation", ""),
         },
         "quest_info": {
             "answered_count": 0,
@@ -559,49 +626,91 @@ async def submit_answer(quest_id: int, request: Request):
                 "message": "🎉 恭喜你完成了全部 15 题！通关成功！",
             }
         else:
-            # 生成下一题（AI 或题库）
             next_idx = current_idx + 1
             used_categories = json.loads(quest["used_categories"]) if quest["used_categories"] else []
             use_bank = quest.get("use_bank", 0) or 0
-            question_data = _generate_question(api_key, used_categories, next_idx, use_bank)
-            new_category = question_data.get("category", "综合")
-            used_categories.append(new_category)
 
-            options_json = json.dumps(question_data["options"], ensure_ascii=False)
-            execute_insert_update(
-                """INSERT INTO quest_question_records
-                   (quest_id, sort_order, category, question_text, options, correct_answer,
-                    student_answer, is_correct, lifeline_used, time_spent, score, explanation)
-                   VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
-                (quest_id, next_idx, new_category, question_data["question"],
-                 options_json, question_data["answer"], question_data.get("explanation", "")),
+            # 检查是否已有预生成的下一题
+            buffered = execute_query_one(
+                """SELECT id, sort_order, category, question_text, options,
+                          correct_answer, explanation
+                   FROM quest_question_records
+                   WHERE quest_id=? AND sort_order=? AND is_correct=-1""",
+                (quest_id, next_idx),
             )
 
-            execute_insert_update(
-                """UPDATE quest_records
-                   SET answered_count=?, correct_count=?, score=?,
-                       current_question_index=?, used_categories=?
-                   WHERE id=?""",
-                (answered_count, correct_count, total_score,
-                 next_idx, json.dumps(used_categories, ensure_ascii=False), quest_id),
-            )
+            if buffered:
+                # ✅ 缓存命中，直接返回（零等待）
+                new_category = buffered["category"]
+                used_categories.append(new_category)
+                execute_insert_update(
+                    """UPDATE quest_records
+                       SET answered_count=?, correct_count=?, score=?,
+                           current_question_index=?, used_categories=?
+                       WHERE id=?""",
+                    (answered_count, correct_count, total_score,
+                     next_idx, json.dumps(used_categories, ensure_ascii=False), quest_id),
+                )
 
-            # 返回结果 + 下一题
-            return {
-                "is_correct": True,
-                "score": score,
-                "total_score": total_score,
-                "terminated": False,
-                "completed": False,
-                "explanation": question_data.get("explanation", ""),
-                "next_question": {
-                    "sort_order": next_idx,
-                    "category": new_category,
-                    "question_text": question_data["question"],
-                    "options": question_data["options"],
+                # 缓存即将耗尽时，后台补货
+                remaining = execute_query_one(
+                    """SELECT COUNT(*) as cnt FROM quest_question_records
+                       WHERE quest_id=? AND is_correct=-1 AND sort_order>?""",
+                    (quest_id, next_idx),
+                )
+                if remaining and remaining["cnt"] <= 1 and next_idx < MAX_QUEST_QUESTIONS:
+                    asyncio.create_task(_async_refill_buffer(
+                        quest_id, api_key, used_categories, next_idx + 1, use_bank
+                    ))
+
+                return {
+                    "is_correct": True, "score": score, "total_score": total_score,
+                    "terminated": False, "completed": False,
+                    "explanation": buffered["explanation"],
+                    "next_question": {
+                        "sort_order": buffered["sort_order"],
+                        "category": buffered["category"],
+                        "question_text": buffered["question_text"],
+                        "options": json.loads(buffered["options"]),
+                        "explanation": buffered["explanation"],
+                    },
+                }
+            else:
+                # ❌ 缓存未命中（极少发生），同步生成
+                question_data = _generate_question(api_key, used_categories, next_idx, use_bank)
+                new_category = question_data.get("category", "综合")
+                used_categories.append(new_category)
+                options_json = json.dumps(question_data["options"], ensure_ascii=False)
+                execute_insert_update(
+                    """INSERT INTO quest_question_records
+                       (quest_id, sort_order, category, question_text, options, correct_answer,
+                        student_answer, is_correct, lifeline_used, time_spent, score, explanation)
+                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
+                    (quest_id, next_idx, new_category, question_data["question"],
+                     options_json, question_data["answer"], question_data.get("explanation", "")),
+                )
+
+                execute_insert_update(
+                    """UPDATE quest_records
+                       SET answered_count=?, correct_count=?, score=?,
+                           current_question_index=?, used_categories=?
+                       WHERE id=?""",
+                    (answered_count, correct_count, total_score,
+                     next_idx, json.dumps(used_categories, ensure_ascii=False), quest_id),
+                )
+
+                return {
+                    "is_correct": True, "score": score, "total_score": total_score,
+                    "terminated": False, "completed": False,
                     "explanation": question_data.get("explanation", ""),
-                },
-            }
+                    "next_question": {
+                        "sort_order": next_idx,
+                        "category": new_category,
+                        "question_text": question_data["question"],
+                        "options": question_data["options"],
+                        "explanation": question_data.get("explanation", ""),
+                    },
+                }
     else:
         # 答错：闯关终止
         answered_count = quest["answered_count"] + 1
