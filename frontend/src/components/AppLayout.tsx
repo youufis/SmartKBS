@@ -43,6 +43,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
     { key: '/shared-center', icon: <FileOutlined />, label: '共享中心' },
   ]},
   { icon: <FileAddOutlined />, label: '学业', key: 'study', children: [
+    { key: '/quest', icon: <ThunderboltOutlined />, label: '知识闯关' },
     { key: '/student-exam-task', icon: <FileAddOutlined />, label: '考试任务' },
     { key: '/interaction', icon: <ThunderboltOutlined />, label: '课堂互动' },
     { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
@@ -83,6 +84,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
       { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
+      { key: '/quest-records', icon: <TrophyOutlined />, label: '闯关记录', adminOrTeacherOnly: true },
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析', adminOrTeacherOnly: true },
     ]},
     { type: 'group', icon: <SettingOutlined />, label: '管理', key: 'admin', children: [

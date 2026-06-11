@@ -23,6 +23,7 @@ REWARD_CONFIG = {
     "learning":   {"participation": 2,  "has_grade": False},
     "login":      {"participation": 1,  "has_grade": False},  # 每日登录（一天一次）
     "code":       {"participation": 2,  "has_grade": True},
+    "quest":      {"participation": 5,  "has_grade": True},
 }
 
 GRADE_POINTS = {
@@ -44,6 +45,7 @@ ACTIVITY_TYPE_NAMES = {
     "learning":   "学习进度",
     "login":      "每日登录",
     "code":       "代码练习",
+    "quest":      "知识闯关",
 }
 
 REWARD_TYPE_NAMES = {

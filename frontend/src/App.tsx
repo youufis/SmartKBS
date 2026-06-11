@@ -34,6 +34,10 @@ import CurriculumProgressPage from './pages/CurriculumProgressPage'
 import SharedCenterPage from './pages/SharedCenterPage'
 import StudentExamTaskPage from './pages/StudentExamTaskPage'
 import RewardPage from './pages/RewardPage'
+import QuestPage from './pages/QuestPage'
+import QuestBattlePage from './pages/QuestBattlePage'
+import QuestResultPage from './pages/QuestResultPage'
+import QuestAdminPage from './pages/QuestAdminPage'
 
 function App() {
   const navigate = useNavigate()
@@ -99,8 +103,12 @@ function App() {
             <Route path="curriculum" element={<CurriculumPage />} />
             <Route path="curriculum/progress" element={user?.role === 'admin' || user?.role === 'teacher' ? <CurriculumProgressPage /> : <Navigate to="/curriculum" />} />
             <Route path="wrong-book" element={<WrongBookPage />} />
+            <Route path="quest" element={user?.role === 'student' ? <QuestPage /> : <QuestAdminPage />} />
+            <Route path="quest-records" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestAdminPage /> : <Navigate to="/chat" />} />
             <Route path="about" element={<AboutPage />} />
           </Route>
+          <Route path="/quest/battle/:questId" element={isLoggedIn ? <QuestBattlePage /> : <Navigate to="/login" />} />
+          <Route path="/quest/result/:questId" element={isLoggedIn ? <QuestResultPage /> : <Navigate to="/login" />} />
           <Route path="*" element={<Navigate to="/login" />} />
         </Routes>
       )}

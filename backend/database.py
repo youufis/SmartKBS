@@ -743,6 +743,89 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 知识闯关模块
+            # ═══════════════════════════════════════════════
+
+            # ── 闯关记录表（每轮一条） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quest_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                total_questions INTEGER DEFAULT 15,
+                answered_count INTEGER DEFAULT 0,
+                correct_count INTEGER DEFAULT 0,
+                score INTEGER DEFAULT 0,
+                wrong_question_index INTEGER DEFAULT 0,
+                lifelines_used TEXT DEFAULT '[]',
+                current_question_index INTEGER DEFAULT 0,
+                used_categories TEXT DEFAULT '[]',
+                completed INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qr_student ON quest_records(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qr_status ON quest_records(student_username, completed)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 闯关题目记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quest_question_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quest_id INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                category TEXT DEFAULT '',
+                question_text TEXT NOT NULL,
+                options TEXT NOT NULL,
+                correct_answer TEXT NOT NULL,
+                student_answer TEXT DEFAULT '',
+                is_correct INTEGER DEFAULT -1,
+                lifeline_used TEXT DEFAULT '',
+                time_spent INTEGER DEFAULT 0,
+                score INTEGER DEFAULT 0,
+                explanation TEXT NOT NULL,
+                FOREIGN KEY (quest_id) REFERENCES quest_records(id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqr_quest ON quest_question_records(quest_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 闯关徽章计数表（可重复收集） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quest_badge_counts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL UNIQUE,
+                total_success_count INTEGER DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qbc_student ON quest_badge_counts(student_username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 闯关题库表（AI 出题持久化，可复用） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS quest_question_bank (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL,
+                question_text TEXT NOT NULL UNIQUE,
+                options TEXT NOT NULL,
+                correct_answer TEXT NOT NULL,
+                explanation TEXT NOT NULL,
+                used_count INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqb_category ON quest_question_bank(category)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qqb_used ON quest_question_bank(used_count)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── quest_records 增加 use_bank 标记 ──
+            try:
+                c.execute("ALTER TABLE quest_records ADD COLUMN use_bank INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # 字段已存在
+
             conn.commit()
             logger.debug("数据库初始化完成")
 
@@ -793,6 +876,16 @@ def execute_query_dict(sql: str, params: tuple = ()):
         c.execute(sql, params)
         rows = c.fetchall()
         return [dict(row) for row in rows]
+
+
+def execute_query_one(sql: str, params: tuple = ()):
+    """执行查询并返回单条结果（字典格式），无结果时返回 None"""
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute(sql, params)
+        row = c.fetchone()
+        return dict(row) if row else None
 
 
 def execute_insert_update(sql: str, params: tuple = ()):
