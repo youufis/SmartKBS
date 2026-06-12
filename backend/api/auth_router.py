@@ -66,7 +66,7 @@ async def login(req: LoginRequest, fastapi_request: Request):
 
     # 登录前递增 token_version，使旧 token 失效（强制单点登录）
     increment_token_version(username)
-    token = create_jwt_token(username, role_val)
+    token = create_jwt_token(username, role_val, name=name_val or "")
 
     # 格式化用户信息
     gender_str = ""

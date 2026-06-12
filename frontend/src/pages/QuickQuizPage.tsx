@@ -398,8 +398,6 @@ const QuickQuizPage: React.FC = () => {
                 <Select options={[
                   { value: 'bank_academic', label: '📚 学科试题库' },
                   { value: 'bank_general', label: '🧠 百科知识题库' },
-                  { value: 'mixed', label: '混合模式（学科+AI+百科）' },
-                  { value: 'ai', label: 'AI 即时出题' },
                 ]} />
               </Form.Item>
             </Col>
@@ -514,8 +512,6 @@ const QuickQuizPage: React.FC = () => {
             <Select options={[
               { value: 'bank_academic', label: '📚 学科试题库' },
               { value: 'bank_general', label: '🧠 百科知识题库' },
-              { value: 'mixed', label: '混合模式（学科+AI+百科）' },
-              { value: 'ai', label: 'AI 即时出题' },
             ]} />
           </Form.Item>
           <Row gutter={16}>
