@@ -141,6 +141,16 @@ def _delete_user_completely(username: str):
         ("DELETE FROM interaction_quizzes WHERE creator_username=?", (username,)),
         ("DELETE FROM interaction_polls WHERE creator_username=?", (username,)),
         ("DELETE FROM discussions WHERE creator_username=?", (username,)),
+        # 知识闯关（quest）
+        ("DELETE FROM quest_question_records WHERE quest_id IN (SELECT id FROM quest_records WHERE student_username=?)", (username,)),
+        ("DELETE FROM quest_records WHERE student_username=?", (username,)),
+        ("DELETE FROM quest_badge_counts WHERE student_username=?", (username,)),
+        # 知识抢答（quick_quiz）
+        ("DELETE FROM quick_quiz_answers WHERE student_username=?", (username,)),
+        ("DELETE FROM quick_quiz_players WHERE student_username=?", (username,)),
+        ("DELETE FROM quick_quiz_rankings WHERE room_id IN (SELECT id FROM quick_quiz_rooms WHERE creator_username=?)", (username,)),
+        ("DELETE FROM quick_quiz_questions WHERE room_id IN (SELECT id FROM quick_quiz_rooms WHERE creator_username=?)", (username,)),
+        ("DELETE FROM quick_quiz_rooms WHERE creator_username=?", (username,)),
         # 教师相关数据（积分、点名等）
         ("DELETE FROM scores WHERE teacher_username=?", (username,)),
         ("DELETE FROM rollcall_weights WHERE teacher_username=?", (username,)),
