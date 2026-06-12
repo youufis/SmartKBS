@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
 import { Tabs } from 'antd'
-import { DatabaseOutlined, FileAddOutlined, CodeOutlined } from '@ant-design/icons'
+import { DatabaseOutlined, FileAddOutlined, CodeOutlined, RobotOutlined } from '@ant-design/icons'
 import QuestionBankPage from './QuestionBankPage'
 import ExamPage from './ExamPage'
 import CodePracticePage from './CodePracticePage'
+import QuizManager from '../components/QuizManager'
 
 const QuestionExamPage: React.FC = () => {
   const [tab, setTab] = useState('question-bank')
@@ -23,6 +24,11 @@ const QuestionExamPage: React.FC = () => {
           key: 'exam',
           label: <span><FileAddOutlined /> 考试发布</span>,
           children: <ExamPage />,
+        },
+        {
+          key: 'quiz',
+          label: <span><RobotOutlined /> 测验题目</span>,
+          children: <QuizManager />,
         },
         {
           key: 'code',
