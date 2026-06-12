@@ -129,7 +129,7 @@ def _save_question_to_bank(question_data: dict):
             """INSERT OR IGNORE INTO quest_question_bank
                (category, question_text, options, correct_answer, explanation, used_count, created_at,
                 svg_content, has_svg, media_files, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '')""",
+               VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
             (
                 question_data.get("category", "综合"),
                 question_data["question"],
@@ -137,6 +137,10 @@ def _save_question_to_bank(question_data: dict):
                 question_data["answer"],
                 question_data.get("explanation", ""),
                 _now(),
+                question_data.get("svg_content", ""),
+                question_data.get("has_svg", 0),
+                question_data.get("media_files", ""),
+                question_data.get("media_placeholders", ""),
             ),
         )
     except Exception as e:
@@ -897,7 +901,8 @@ async def get_quest_result(quest_id: int, request: Request):
     # 获取所有题目记录（排除预生成但未作答的题目）
     questions = execute_query_dict(
         """SELECT sort_order, category, question_text, options, correct_answer,
-                  student_answer, is_correct, lifeline_used, time_spent, score, explanation
+                  student_answer, is_correct, lifeline_used, time_spent, score, explanation,
+                  svg_content, has_svg, media_files, media_placeholders
            FROM quest_question_records
            WHERE quest_id=? AND is_correct != -1
            ORDER BY sort_order""",
