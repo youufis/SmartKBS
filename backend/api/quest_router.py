@@ -72,7 +72,7 @@ def _calc_question_score(question_index: int, lifelines: list[str]) -> int:
 
 def _call_ai_generate_question(api_key: str, used_categories: list[str],
                                  question_index: int) -> dict:
-    """调用 AI 生成一道题目"""
+    """调用 AI 生成一道题目，支持公式($...$)和SVG配图(svg_content)"""
     used_cats_str = json.dumps(used_categories, ensure_ascii=False)
     prompt = QUEST_GENERATE_PROMPT.format(
         used_categories=used_cats_str,
@@ -93,6 +93,17 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         for key in ("category", "question", "options", "answer", "explanation"):
             if key not in result:
                 raise ValueError(f"AI 返回缺少字段: {key}")
+        # 补充可选媒体字段（AI 可能未返回）
+        result.setdefault("svg_content", "")
+        result.setdefault("has_svg", 1 if result.get("svg_content") else 0)
+        result.setdefault("media_files", "")
+        result.setdefault("media_placeholders", "")
+        # 如果有 SVG 内容，做基本合法性校验
+        svg = result.get("svg_content", "")
+        if svg and "<svg" not in svg:
+            logger.warning(f"AI 返回的 svg_content 格式异常，已忽略: {svg[:50]}")
+            result["svg_content"] = ""
+            result["has_svg"] = 0
         return result
     except Exception as e:
         logger.error(f"AI 出题失败: {e}，尝试从题库取备用题")
@@ -107,6 +118,7 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
             "options": {"A": "造纸术", "B": "火药", "C": "电灯", "D": "印刷术"},
             "answer": "C",
             "explanation": "中国的四大发明是造纸术、火药、印刷术和指南针。电灯是爱迪生发明的。",
+            "svg_content": "", "has_svg": 0, "media_files": "", "media_placeholders": "",
         }
 
 
@@ -115,8 +127,9 @@ def _save_question_to_bank(question_data: dict):
     try:
         execute_insert_update(
             """INSERT OR IGNORE INTO quest_question_bank
-               (category, question_text, options, correct_answer, explanation, used_count, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, ?)""",
+               (category, question_text, options, correct_answer, explanation, used_count, created_at,
+                svg_content, has_svg, media_files, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, 0, ?, '', 0, '', '')""",
             (
                 question_data.get("category", "综合"),
                 question_data["question"],
@@ -154,7 +167,8 @@ def _get_question_from_bank(used_categories: list[str]) -> dict | None:
 
     # 从该类别中按 used_count 升序取一道题（优先使用次数少的）
     rows = execute_query(
-        """SELECT id, category, question_text, options, correct_answer, explanation
+        """SELECT id, category, question_text, options, correct_answer, explanation,
+                   svg_content, has_svg, media_files, media_placeholders
            FROM quest_question_bank
            WHERE category=?
            ORDER BY used_count ASC, RANDOM()
@@ -171,6 +185,10 @@ def _get_question_from_bank(used_categories: list[str]) -> dict | None:
         "options": json.loads(r[3] if isinstance(r, (list, tuple)) else r["options"]),
         "answer": r[4] if isinstance(r, (list, tuple)) else r["correct_answer"],
         "explanation": r[5] if isinstance(r, (list, tuple)) else r["explanation"],
+        "svg_content": r[6] if isinstance(r, (list, tuple)) else r.get("svg_content", ""),
+        "has_svg": r[7] if isinstance(r, (list, tuple)) else r.get("has_svg", 0),
+        "media_files": r[8] if isinstance(r, (list, tuple)) else r.get("media_files", ""),
+        "media_placeholders": r[9] if isinstance(r, (list, tuple)) else r.get("media_placeholders", ""),
     }
 
     # 更新使用次数
@@ -228,10 +246,13 @@ async def _async_refill_buffer(quest_id: int, api_key: str,
                 execute_insert_update(
                     """INSERT OR IGNORE INTO quest_question_records
                        (quest_id, sort_order, category, question_text, options, correct_answer,
-                        student_answer, is_correct, lifeline_used, time_spent, score, explanation)
-                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
+                        student_answer, is_correct, lifeline_used, time_spent, score, explanation,
+                        svg_content, has_svg, media_files, media_placeholders)
+                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?)""",
                     (quest_id, start_index + i, cat, q_data["question"],
-                     options_json, q_data["answer"], q_data.get("explanation", "")),
+                     options_json, q_data["answer"], q_data.get("explanation", ""),
+                     q_data.get("svg_content", ""), q_data.get("has_svg", 0),
+                     q_data.get("media_files", ""), q_data.get("media_placeholders", "")),
                 )
             except Exception:
                 pass  # 已存在则跳过
@@ -480,10 +501,13 @@ async def start_quest(request: Request):
         execute_insert_update(
             """INSERT INTO quest_question_records
                (quest_id, sort_order, category, question_text, options, correct_answer,
-                student_answer, is_correct, lifeline_used, time_spent, score, explanation)
-               VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
+                student_answer, is_correct, lifeline_used, time_spent, score, explanation,
+                svg_content, has_svg, media_files, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?)""",
             (quest_id, i + 1, cat, q_data["question"], options_json,
-             q_data["answer"], q_data.get("explanation", "")),
+             q_data["answer"], q_data.get("explanation", ""),
+             q_data.get("svg_content", ""), q_data.get("has_svg", 0),
+             q_data.get("media_files", ""), q_data.get("media_placeholders", "")),
         )
 
     execute_insert_update(
@@ -501,6 +525,10 @@ async def start_quest(request: Request):
             "question_text": first["question"],
             "options": first["options"],
             "explanation": first.get("explanation", ""),
+            "svg_content": first.get("svg_content", ""),
+            "has_svg": first.get("has_svg", 0),
+            "media_files": first.get("media_files", ""),
+            "media_placeholders": first.get("media_placeholders", ""),
         },
         "quest_info": {
             "answered_count": 0,
@@ -527,7 +555,8 @@ async def get_current_question(quest_id: int, request: Request):
     current_idx = quest["current_question_index"]
     question = execute_query_one(
         """SELECT id, sort_order, category, question_text, options, correct_answer,
-                  explanation, lifeline_used
+                  explanation, lifeline_used,
+                  svg_content, has_svg, media_files, media_placeholders
            FROM quest_question_records
            WHERE quest_id=? AND sort_order=?""",
         (quest_id, current_idx),
@@ -546,6 +575,10 @@ async def get_current_question(quest_id: int, request: Request):
         "explanation": question["explanation"],
         "lifeline_used": lifeline_used,
         "lifeline_data": None,
+        "svg_content": question.get("svg_content", ""),
+        "has_svg": question.get("has_svg", 0),
+        "media_files": question.get("media_files", ""),
+        "media_placeholders": question.get("media_placeholders", ""),
     }
 
     # 如果使用过去伪存真，返回剩余选项
@@ -885,6 +918,10 @@ async def get_quest_result(quest_id: int, request: Request):
             "time_spent": q["time_spent"],
             "score": q["score"],
             "explanation": q["explanation"],
+            "svg_content": q.get("svg_content", ""),
+            "has_svg": q.get("has_svg", 0),
+            "media_files": q.get("media_files", ""),
+            "media_placeholders": q.get("media_placeholders", ""),
         })
 
     lifelines_used = json.loads(quest["lifelines_used"]) if quest["lifelines_used"] else []

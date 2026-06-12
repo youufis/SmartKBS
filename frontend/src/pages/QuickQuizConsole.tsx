@@ -17,6 +17,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import useSubjectOptions from '../hooks/useSubjectOptions'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 
 const { Title, Text } = Typography
 
@@ -49,6 +51,9 @@ const QuickQuizConsole: React.FC = () => {
   const [correctAnswer, setCorrectAnswer] = useState('')
   const [explanation, setExplanation] = useState('')
   const [options, setOptions] = useState<Record<string, string>>({})
+  const [svgContent, setSvgContent] = useState('')
+  const [hasSvg, setHasSvg] = useState(0)
+  const [mediaFiles, setMediaFiles] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const { subjects: subjectOptions } = useSubjectOptions()
   const [bankModalOpen, setBankModalOpen] = useState(false)
@@ -140,6 +145,9 @@ const QuickQuizConsole: React.FC = () => {
     setPhase(data.phase || 'question')
     setQuestionText(data.question.question_text)
     setOptions(data.question.options || {})
+    setSvgContent(data.question.svg_content || '')
+    setHasSvg(data.question.has_svg || 0)
+    setMediaFiles(data.question.media_files || '')
     setAnsweredCount(0)
     setOptionStats({})
     setFirstBlood(null)
@@ -196,6 +204,9 @@ const QuickQuizConsole: React.FC = () => {
         setTotalQuestions(msg.data.total_questions)
         setQuestionText(msg.data.question_text)
         setOptions(msg.data.options || {})
+        setSvgContent(msg.data.svg_content || '')
+        setHasSvg(msg.data.has_svg || 0)
+        setMediaFiles(msg.data.media_files || '')
         setAnsweredCount(0)
         setOptionStats({})
         setFirstBlood(null)
@@ -429,14 +440,22 @@ const QuickQuizConsole: React.FC = () => {
       {phase !== 'waiting' && (
         <Card title={`📝 第 ${currentQuestion} 题`} style={{ borderRadius: 12, marginBottom: 16 }}>
           {questionText && (
-            <Title level={5} style={{ marginBottom: 16 }}>{questionText}</Title>
+            <Title level={5} style={{ marginBottom: 12 }}>
+              <FormulaRenderer content={questionText} />
+            </Title>
           )}
+          {/* 配图（SVG + 万相图片） */}
+          <MediaDisplay
+            svgContent={svgContent}
+            hasSvg={hasSvg}
+            mediaFiles={mediaFiles}
+          />
           {Object.keys(options).length > 0 && (
             <div style={{ marginBottom: 16 }}>
               {Object.entries(options).map(([k, v]) => (
                 <Tag key={k} color={phase === 'reveal' && k === correctAnswer ? '#52c41a' : 'default'}
                   style={{ margin: 4, padding: '4px 12px', fontSize: 14 }}>
-                  {k}. {v as string}
+                  {k}. <FormulaRenderer content={v as string} inline />
                   {phase === 'reveal' && k === correctAnswer && ' ✅'}
                 </Tag>
               ))}
@@ -460,7 +479,8 @@ const QuickQuizConsole: React.FC = () => {
                 )}
                 {explanation && (
                   <div style={{ marginTop: 8 }}>
-                    <Text type="secondary">💡 {explanation}</Text>
+                    <Text type="secondary">💡 </Text>
+                    <FormulaRenderer content={explanation} />
                   </div>
                 )}
               </div>

@@ -14,6 +14,8 @@ import {
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 
 const { Title, Text } = Typography
 
@@ -23,6 +25,10 @@ interface QuestionData {
   options: Record<string, string>
   time_limit: number
   total_questions: number
+  svg_content?: string
+  has_svg?: number
+  media_files?: string
+  media_placeholders?: string
 }
 
 interface RankingEntry {
@@ -410,9 +416,16 @@ const QuickQuizPlay: React.FC = () => {
       {/* 题目 */}
       {question && (
         <Card style={{ borderRadius: 12, marginBottom: 16 }} styles={{ body: { padding: 24 } }}>
-          <Title level={4} style={{ marginBottom: 24, lineHeight: 1.6 }}>
-            {question.sort_order}. {question.question_text}
+          <Title level={4} style={{ marginBottom: 12, lineHeight: 1.6 }}>
+            {question.sort_order}. <FormulaRenderer content={question.question_text} />
           </Title>
+
+          {/* 配图（SVG + 万相图片） */}
+          <MediaDisplay
+            svgContent={question.svg_content}
+            hasSvg={question.has_svg}
+            mediaFiles={question.media_files}
+          />
 
           {/* 选项 */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -459,7 +472,7 @@ const QuickQuizPlay: React.FC = () => {
                   }
                 >
                   <Text strong style={{ fontSize: 16, marginRight: 8 }}>{key}.</Text>
-                  <Text style={{ fontSize: 15 }}>{value as string}</Text>
+                  <FormulaRenderer content={value as string} inline />
                 </Button>
               )
             })}
@@ -496,7 +509,8 @@ const QuickQuizPlay: React.FC = () => {
             }} styles={{ body: { padding: 12 } }}>
               <Space>
                 <CheckCircleOutlined style={{ fontSize: 20, color: '#52c41a' }} />
-                <Text strong>正确答案：{result.correct_answer}. {options[result.correct_answer]}</Text>
+                <Text strong>正确答案：{result.correct_answer}. </Text>
+                <FormulaRenderer content={options[result.correct_answer] as string} inline />
               </Space>
             </Card>
           )}

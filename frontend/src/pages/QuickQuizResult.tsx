@@ -16,6 +16,8 @@ import {
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 
 const { Title, Text } = Typography
 
@@ -222,17 +224,24 @@ const QuickQuizResult: React.FC = () => {
                   <Tag color={q.correct_count > q.total_answers / 2 ? '#52c41a' : '#faad14'}>
                     正确率: {q.total_answers > 0 ? Math.round(q.correct_count / q.total_answers * 100) : 0}%
                   </Tag>
-                  <Text style={{ flex: 1, maxWidth: 300 }} ellipsis>{q.question_text}</Text>
+                  <Text style={{ flex: 1, maxWidth: 300 }} ellipsis>
+                    <FormulaRenderer content={q.question_text} />
+                  </Text>
                 </Space>
               ),
               children: (
                 <div>
-                  <Text strong>{q.question_text}</Text>
+                  <FormulaRenderer content={q.question_text} />
+                  <MediaDisplay
+                    svgContent={q.svg_content}
+                    hasSvg={q.has_svg}
+                    mediaFiles={q.media_files}
+                  />
                   <div style={{ margin: '8px 0' }}>
                     {Object.entries(q.options || {}).map(([k, v]) => (
                       <Tag key={k} color={k === q.correct_answer ? '#52c41a' : 'default'}
                         style={{ margin: 4, padding: '2px 8px' }}>
-                        {k}. {v as string}
+                        {k}. <FormulaRenderer content={v as string} inline />
                         {k === q.correct_answer && ' ✅'}
                       </Tag>
                     ))}
@@ -243,7 +252,8 @@ const QuickQuizResult: React.FC = () => {
                   </Space>
                   {q.explanation && (
                     <div style={{ marginTop: 8, padding: 8, background: '#f6f8fa', borderRadius: 6 }}>
-                      <Text type="secondary">💡 {q.explanation}</Text>
+                      <Text type="secondary">💡 </Text>
+                      <FormulaRenderer content={q.explanation} />
                     </div>
                   )}
                   <Divider style={{ margin: '8px 0' }} />
