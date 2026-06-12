@@ -749,6 +749,56 @@ async def recent_activity(request: Request):
                 "detail": "",
             })
 
+        # 最近的知识闯关完成记录
+        quest_activities = execute_query(
+            """SELECT completed_at, score, correct_count, total_questions
+               FROM quest_records
+               WHERE student_username = ? AND completed = 1 AND completed_at IS NOT NULL
+               ORDER BY completed_at DESC LIMIT 5""",
+            (username,),
+        )
+        for act in quest_activities:
+            activities.append({
+                "time": act[0],
+                "type": "quest",
+                "title": "完成了知识闯关",
+                "detail": f"答对 {act[2]}/{act[3]} 题，得分 {act[1]} 分",
+            })
+
+        # 最近的知识抢答参与记录
+        qq_activities = execute_query(
+            """SELECT qp.joined_at, qr.title, qp.total_score, qp.correct_count
+               FROM quick_quiz_players qp
+               JOIN quick_quiz_rooms qr ON qp.room_id = qr.id
+               WHERE qp.student_username = ?
+               ORDER BY qp.joined_at DESC LIMIT 5""",
+            (username,),
+        )
+        for act in qq_activities:
+            activities.append({
+                "time": act[0],
+                "type": "quick_quiz",
+                "title": f"参与了知识抢答「{act[1]}」",
+                "detail": f"得分 {act[2]} 分 · 答对 {act[3]} 题",
+            })
+
+        # 最近的智能练习记录
+        practice_activities = q_execute_query(
+            """SELECT pa.submitted_at, ps.title, pa.score, pa.total_score
+               FROM practice_attempts pa
+               JOIN practice_sessions ps ON pa.session_id = ps.id
+               WHERE pa.student_username = ? AND pa.submitted_at IS NOT NULL
+               ORDER BY pa.submitted_at DESC LIMIT 5""",
+            (username,),
+        )
+        for act in practice_activities:
+            activities.append({
+                "time": act['submitted_at'],
+                "type": "practice",
+                "title": f"完成了智能练习「{act['title']}」",
+                "detail": f"得分 {act['score']}/{act['total_score']}",
+            })
+
     else:  # 教师/管理员
         # 最近的任务提交
         if role == 0:
@@ -934,6 +984,60 @@ async def recent_activity(request: Request):
                 "type": "discussion",
                 "title": f"{label}讨论「{act[1]}」",
                 "detail": "",
+            })
+
+        # 最近的智能练习提交（学生提交到教师的练习）
+        if role == 0:
+            practice_acts = q_execute_query(
+                """SELECT pa.submitted_at, ps.title, pa.student_username, pa.score, pa.total_score
+                   FROM practice_attempts pa
+                   JOIN practice_sessions ps ON pa.session_id = ps.id
+                   WHERE pa.submitted_at IS NOT NULL
+                   ORDER BY pa.submitted_at DESC LIMIT 5""",
+            )
+        else:
+            practice_acts = q_execute_query(
+                """SELECT pa.submitted_at, ps.title, pa.student_username, pa.score, pa.total_score
+                   FROM practice_attempts pa
+                   JOIN practice_sessions ps ON pa.session_id = ps.id
+                   WHERE ps.creator_username = ? AND pa.submitted_at IS NOT NULL
+                   ORDER BY pa.submitted_at DESC LIMIT 5""",
+                (username,),
+            )
+        for act in practice_acts:
+            activities.append({
+                "time": act['submitted_at'],
+                "type": "practice",
+                "title": f"学生 {act['student_username']} 完成了智能练习",
+                "detail": f"「{act['title']}」得分 {act['score']}/{act['total_score']}",
+            })
+
+        # 最近的知识抢答活动
+        if role == 0:
+            qq_acts = execute_query(
+                """SELECT qr.ended_at, qr.title, COUNT(qp.id) as player_count
+                   FROM quick_quiz_rooms qr
+                   LEFT JOIN quick_quiz_players qp ON qp.room_id = qr.id
+                   WHERE qr.ended_at IS NOT NULL
+                   GROUP BY qr.id
+                   ORDER BY qr.ended_at DESC LIMIT 5""",
+            )
+        else:
+            qq_acts = execute_query(
+                """SELECT qr.ended_at, qr.title, COUNT(qp.id) as player_count
+                   FROM quick_quiz_rooms qr
+                   LEFT JOIN quick_quiz_players qp ON qp.room_id = qr.id
+                   WHERE qr.creator_username = ? AND qr.ended_at IS NOT NULL
+                   GROUP BY qr.id
+                   ORDER BY qr.ended_at DESC LIMIT 5""",
+                (username,),
+            )
+        for act in qq_acts:
+            activities.append({
+                "time": act[0],
+                "type": "quick_quiz",
+                "title": f"知识抢答「{act[1]}」已结束",
+                "detail": f"{act[2]} 人参与",
             })
 
     # 按时间排序
