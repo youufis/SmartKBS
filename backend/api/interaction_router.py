@@ -333,6 +333,67 @@ async def delete_quiz(quiz_id: int, request: Request):
     return {"message": "测验已删除"}
 
 
+@router.delete("/quizzes/{quiz_id}/questions/{question_index}", summary="删除测验中的单道题")
+async def delete_quiz_question(quiz_id: int, question_index: int, request: Request):
+    """删除随堂测验中的单道题，同时清理该题对应的答题记录"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+    if not _can_manage_quiz(user["username"], role, quiz_id):
+        raise HTTPException(status_code=403, detail="无权修改此测验")
+
+    # 读出当前测验
+    rows = execute_query("SELECT questions FROM interaction_quizzes WHERE id = ?", (quiz_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="测验不存在")
+    questions_str = rows[0][0]
+    questions = json.loads(questions_str) if isinstance(questions_str, str) else questions_str
+
+    if question_index < 0 or question_index >= len(questions):
+        raise HTTPException(status_code=400, detail="题目索引超出范围")
+
+    # 从数组中移除指定题目
+    questions.pop(question_index)
+    new_questions_str = json.dumps(questions, ensure_ascii=False)
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE interaction_quizzes SET questions = ?, updated_at = ? WHERE id = ?",
+        (new_questions_str, now, quiz_id),
+    )
+
+    # 清理答题记录：移除该题对应的答案，并重新索引后续题目
+    answer_rows = execute_query(
+        "SELECT id, answers FROM interaction_quiz_answers WHERE quiz_id = ?",
+        (quiz_id,),
+    )
+    for ans_row in answer_rows:
+        ans_id = ans_row[0]
+        ans_str = ans_row[1]
+        try:
+            user_answers = json.loads(ans_str) if isinstance(ans_str, str) else ans_str
+            if not isinstance(user_answers, list):
+                continue
+            # 移除 question_index 对应的答案，并调整后续索引
+            new_answers = []
+            for a in user_answers:
+                qi = a.get("question_index")
+                if qi == question_index:
+                    continue  # 跳过被删除题的答案
+                if qi is not None and qi > question_index:
+                    a["question_index"] = qi - 1  # 索引前移
+                new_answers.append(a)
+            execute_insert_update(
+                "UPDATE interaction_quiz_answers SET answers = ? WHERE id = ?",
+                (json.dumps(new_answers, ensure_ascii=False), ans_id),
+            )
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    return {"message": "题目已删除", "questions_remaining": len(questions)}
+
+
 def _can_manage_poll(username: str, role: int, poll_id: int) -> bool:
     if role == 0:
         return True
