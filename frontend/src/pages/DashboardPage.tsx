@@ -6,7 +6,7 @@ import {
 } from 'antd'
 import {
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
-  MessageOutlined, TeamOutlined, BookOutlined,
+  MessageOutlined, TeamOutlined,
   ClockCircleOutlined, ThunderboltOutlined,
   AuditOutlined, BarChartOutlined, ReloadOutlined,
   RightOutlined, ExperimentOutlined, BellOutlined,
@@ -132,6 +132,9 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   quiz: { color: '#ff4d4f', icon: <ThunderboltOutlined /> },
   poll: { color: '#722ed1', icon: <BarChartOutlined /> },
   discussion: { color: '#1677ff', icon: <TeamOutlined /> },
+  quest: { color: '#ff4d4f', icon: <FireOutlined /> },
+  quick_quiz: { color: '#722ed1', icon: <CustomerServiceOutlined /> },
+  practice: { color: '#52c41a', icon: <ExperimentOutlined /> },
 }
 
 const DashboardPage: React.FC = () => {
@@ -250,104 +253,60 @@ const DashboardPage: React.FC = () => {
         </div>
       </Card>
 
-      {/* ─── 统计卡片（精简为每行 5 个） ─── */}
+      {/* ─── 统计卡片（整合为每行 4 个） ─── */}
       {isStudent ? (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/exam')} size="small">
               <Statistic
-                title="考试"
+                title="学习考试"
                 value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
                 prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考 · 错题{summary.wrong_exam_count ?? 0}场</Text>}
                 valueStyle={{ color: '#1677ff', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/score')} size="small">
               <Statistic
-                title="积分"
+                title="积分任务"
                 value={summary.total_score ?? 0}
                 prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名 {summary.rank ?? '-'}</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名{summary.rank ?? '-'} · 活跃任务{summary.active_task_count ?? 0}个</Text>}
                 valueStyle={{ color: '#faad14', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/tasks')} size="small">
-              <Statistic
-                title="任务"
-                value={summary.active_task_count ?? 0}
-                prefix={<BookOutlined style={{ color: '#fa8c16' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>个活跃</Text>}
-                valueStyle={{ color: '#fa8c16', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/interaction')} size="small">
               <Statistic
-                title="互动"
+                title="课堂互动"
                 value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0}</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0} · 对话{summary.recent_chat_count ?? 0}次</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/wrong-book')} size="small">
-              <Statistic
-                title="错题"
-                value={summary.wrong_exam_count ?? 0}
-                prefix={<BookOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>场考试有错题</Text>}
-                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card size="small">
-              <Statistic
-                title="对话"
-                value={summary.recent_chat_count ?? 0}
-                prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>次/本周</Text>}
-                valueStyle={{ color: '#13c2c2', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/quest')} size="small">
               <Statistic
-                title="知识闯关"
+                title="趣味挑战"
                 value={summary.quest_completed_count ?? 0}
                 prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>完成 · {summary.quest_score ?? 0}分</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关{summary.quest_completed_count ?? 0}关 · {summary.quest_score ?? 0}分 · 抢答参与{summary.quick_quiz_participated ?? 0}次</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/quick-quiz')} size="small">
-              <Statistic
-                title="知识抢答"
-                value={summary.quick_quiz_participated ?? 0}
-                prefix={<CustomerServiceOutlined style={{ color: '#722ed1' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>参与{summary.quick_quiz_participated ?? 0} · 答对{summary.quick_quiz_correct ?? 0}题</Text>}
-                valueStyle={{ color: '#722ed1', fontSize: 22 }}
               />
             </Card>
           </Col>
         </Row>
       ) : (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/exam')} size="small">
               <Statistic
-                title="考试"
+                title="考试管理"
                 value={summary.exam_stats?.total ?? 0}
                 prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
                 suffix={
@@ -359,84 +318,40 @@ const DashboardPage: React.FC = () => {
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/tasks')} size="small">
-              <Statistic
-                title="任务"
-                value={summary.total_submissions ?? 0}
-                prefix={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>提交 · {summary.active_task_count ?? 0}活跃</Text>}
-                valueStyle={{ color: '#52c41a', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate(isAdmin ? '/user-mgmt' : '/score')} size="small">
               <Statistic
-                title="师生"
+                title="教学概况"
                 value={summary.total_students ?? 0}
                 prefix={<TeamOutlined style={{ color: '#722ed1' }} />}
                 suffix={
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {isAdmin ? `教师 ${summary.total_teachers ?? 0}` : '名学生'}
+                    {isAdmin ? `教师${summary.total_teachers ?? 0}` : '名学生'} · 提交{summary.total_submissions ?? 0} · 点名{summary.rollcall_this_week ?? 0}次
                   </Text>
                 }
                 valueStyle={{ color: '#722ed1', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/rollcall')} size="small">
-              <Statistic
-                title="点名"
-                value={summary.rollcall_this_week ?? 0}
-                prefix={<AuditOutlined style={{ color: '#fa8c16' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>次/本周</Text>}
-                valueStyle={{ color: '#fa8c16', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/interaction')} size="small">
               <Statistic
-                title="互动"
+                title="课堂活动"
                 value={(summary.teacher_quiz_count ?? 0) + (summary.practice_published ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.teacher_quiz_count ?? 0} · 练习{summary.practice_published ?? 0}</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.teacher_quiz_count ?? 0} · 练习{summary.practice_published ?? 0} · 讨论{summary.discussion_active ?? 0}</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
           </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/discussion')} size="small">
-              <Statistic
-                title="讨论"
-                value={summary.discussion_active ?? 0}
-                prefix={<TeamOutlined style={{ color: '#1677ff' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>进行中 · 共{summary.discussion_total ?? 0}</Text>}
-                valueStyle={{ color: '#1677ff', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
+          <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/quest')} size="small">
               <Statistic
-                title="知识闯关"
+                title="趣味挑战"
                 value={summary.quest_total_count ?? 0}
                 prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>总{summary.quest_total_count ?? 0} · 完成{summary.quest_completed_count_t ?? 0}</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关总{summary.quest_total_count ?? 0} · 完成{summary.quest_completed_count_t ?? 0} · 抢答{summary.quick_quiz_total ?? 0}结束{summary.quick_quiz_ended ?? 0}</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={4}>
-            <Card hoverable onClick={() => navigate('/quick-quiz')} size="small">
-              <Statistic
-                title="知识抢答"
-                value={summary.quick_quiz_total ?? 0}
-                prefix={<CustomerServiceOutlined style={{ color: '#722ed1' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>总{summary.quick_quiz_total ?? 0} · 结束{summary.quick_quiz_ended ?? 0}</Text>}
-                valueStyle={{ color: '#722ed1', fontSize: 22 }}
               />
             </Card>
           </Col>
