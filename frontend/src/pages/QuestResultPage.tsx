@@ -16,6 +16,8 @@ import {
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -28,6 +30,10 @@ interface QuestionReview {
   student_answer: string | null
   is_correct: number
   lifeline_used: string
+  svg_content?: string
+  has_svg?: number
+  media_files?: string
+  media_placeholders?: string
   time_spent: number
   score: number
   explanation: string
@@ -265,8 +271,13 @@ const QuestResultPage: React.FC = () => {
               children: (
                 <div>
                   <Paragraph style={{ fontSize: 15, fontWeight: 500 }}>
-                    {q.sort_order}. {q.question_text}
+                    {q.sort_order}. <FormulaRenderer content={q.question_text} />
                   </Paragraph>
+                  <MediaDisplay
+                    svgContent={q.svg_content}
+                    hasSvg={q.has_svg}
+                    mediaFiles={q.media_files}
+                  />
                   <Space direction="vertical" style={{ width: '100%' }} size={4}>
                     {Object.entries(q.options).map(([k, v]) => {
                       const isStudentAns = q.student_answer === k
@@ -276,7 +287,7 @@ const QuestResultPage: React.FC = () => {
                       else if (isStudentAns && q.is_correct === 0) color = 'error'
                       return (
                         <Tag key={k} color={color} style={{ padding: '4px 8px', fontSize: 14 }}>
-                          {k}. {v}
+                          {k}. <FormulaRenderer content={v as string} inline />
                           {isCorrectAns && ' ✓'}
                           {isStudentAns && q.is_correct === 0 && ' ✗'}
                         </Tag>
@@ -286,9 +297,10 @@ const QuestResultPage: React.FC = () => {
                   {q.student_answer === '__timeout__' && (
                     <Tag color="warning" style={{ marginTop: 8 }}>⏱ 超时未答</Tag>
                   )}
-                  <Paragraph style={{ marginTop: 8, padding: 8, background: '#f6f8fa', borderRadius: 6 }}>
-                    💡 {q.explanation}
-                  </Paragraph>
+                  <div style={{ marginTop: 8, padding: 8, background: '#f6f8fa', borderRadius: 6 }}>
+                    <Text type="secondary">💡 </Text>
+                    <FormulaRenderer content={q.explanation} />
+                  </div>
                 </div>
               ),
             }))}

@@ -273,7 +273,8 @@ def _load_questions_from_bank(subject: str = "", knowledge_points: str = "",
     where = " AND ".join(conditions)
 
     rows = qb_execute_query(
-        f"""SELECT id, type, question_text, options, correct_answer, explanation
+        f"""SELECT id, type, question_text, options, correct_answer, explanation,
+                   svg_content, has_svg, media_files, media_placeholders
             FROM question_bank
             WHERE {where} AND type IN ('single', 'true_false')
             ORDER BY RANDOM()
@@ -300,6 +301,10 @@ def _load_questions_from_bank(subject: str = "", knowledge_points: str = "",
             "options": opts,
             "correct_answer": (r.get("correct_answer") or "").strip().upper(),
             "explanation": r.get("explanation") or "",
+            "svg_content": r.get("svg_content") or "",
+            "has_svg": r.get("has_svg") or 0,
+            "media_files": r.get("media_files") or "",
+            "media_placeholders": r.get("media_placeholders") or "",
         })
     return questions
 
@@ -350,6 +355,17 @@ def _call_ai_generate_question(subject: str = "信息科技",
                 raise ValueError(f"AI 返回缺少字段: {key}")
         # 统一答案为大写字母
         result["answer"] = result["answer"].strip().upper()
+        # 补充可选媒体字段
+        result.setdefault("svg_content", "")
+        result.setdefault("has_svg", 1 if result.get("svg_content") else 0)
+        result.setdefault("media_files", "")
+        result.setdefault("media_placeholders", "")
+        # SVG 合法性校验
+        svg = result.get("svg_content", "")
+        if svg and "<svg" not in svg:
+            logger.warning(f"AI 返回的 svg_content 格式异常，已忽略: {svg[:50]}")
+            result["svg_content"] = ""
+            result["has_svg"] = 0
         return result
     except Exception as e:
         logger.error(f"AI 出题失败: {e}")
@@ -403,6 +419,10 @@ def _prepare_questions_for_room(room_id: int, room: dict) -> list[dict]:
                         "options": q["options"],
                         "correct_answer": q["answer"],
                         "explanation": q.get("explanation", ""),
+                        "svg_content": q.get("svg_content", ""),
+                        "has_svg": q.get("has_svg", 0),
+                        "media_files": q.get("media_files", ""),
+                        "media_placeholders": q.get("media_placeholders", ""),
                     })
             except Exception as e:
                 logger.warning(f"AI 出题失败: {e}，将使用兜底题")
@@ -431,12 +451,15 @@ def _prepare_questions_for_room(room_id: int, room: dict) -> list[dict]:
     for i, q in enumerate(questions):
         operations.append((
             """INSERT INTO quick_quiz_questions
-               (room_id, sort_order, question_text, options, correct_answer, explanation, source)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (room_id, sort_order, question_text, options, correct_answer, explanation, source,
+                svg_content, has_svg, media_files, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (room_id, i + 1, q["question_text"],
              json.dumps(q["options"], ensure_ascii=False),
              q["correct_answer"], q.get("explanation", ""),
-             q.get("id") and "bank" or "ai"),
+             q.get("id") and "bank" or "ai",
+             q.get("svg_content", ""), q.get("has_svg", 0),
+             q.get("media_files", ""), q.get("media_placeholders", "")),
         ))
     if operations:
         execute_batch(operations)
@@ -991,9 +1014,12 @@ async def ai_generate_question(room_id: int, request: Request):
     options_json = json.dumps(q["options"], ensure_ascii=False)
     qid = execute_insert_update(
         """INSERT INTO quick_quiz_questions
-           (room_id, sort_order, question_text, options, correct_answer, explanation, source)
-           VALUES (?, ?, ?, ?, ?, ?, 'ai')""",
-        (room_id, next_order, q["question"], options_json, q["answer"], q.get("explanation", "")),
+           (room_id, sort_order, question_text, options, correct_answer, explanation, source,
+            svg_content, has_svg, media_files, media_placeholders)
+           VALUES (?, ?, ?, ?, ?, ?, 'ai', ?, ?, ?, ?)""",
+        (room_id, next_order, q["question"], options_json, q["answer"], q.get("explanation", ""),
+         q.get("svg_content", ""), q.get("has_svg", 0),
+         q.get("media_files", ""), q.get("media_placeholders", "")),
     )
 
     # 更新房间的总题数
@@ -1190,7 +1216,8 @@ async def add_bank_questions(room_id: int, request: Request):
     placeholders = ",".join(["?" for _ in question_ids])
     if bank_type == "general":
         rows = execute_query_dict(
-            f"""SELECT id, question_text, options, correct_answer, explanation
+            f"""SELECT id, question_text, options, correct_answer, explanation,
+                       '' as svg_content, 0 as has_svg, '' as media_files, '' as media_placeholders
                 FROM quest_question_bank
                 WHERE id IN ({placeholders})""",
             tuple(question_ids),
@@ -1200,7 +1227,8 @@ async def add_bank_questions(room_id: int, request: Request):
             r["type"] = "single"
     else:
         rows = qb_execute_query(
-            f"""SELECT id, type, question_text, options, correct_answer, explanation
+            f"""SELECT id, type, question_text, options, correct_answer, explanation,
+                       svg_content, has_svg, media_files, media_placeholders
                 FROM question_bank
                 WHERE id IN ({placeholders}) AND status='active' AND type IN ('single','true_false')""",
             tuple(question_ids),
@@ -1237,15 +1265,22 @@ async def add_bank_questions(room_id: int, request: Request):
         options_json = json.dumps(opts, ensure_ascii=False)
         operations.append((
             """INSERT INTO quick_quiz_questions
-               (room_id, sort_order, question_text, options, correct_answer, explanation, source, source_question_id)
-               VALUES (?, ?, ?, ?, ?, ?, 'bank', ?)""",
-            (room_id, sort_order, q_text, options_json, q_answer, q_explanation, q_id),
+               (room_id, sort_order, question_text, options, correct_answer, explanation, source, source_question_id,
+                svg_content, has_svg, media_files, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, 'bank', ?, ?, ?, ?, ?)""",
+            (room_id, sort_order, q_text, options_json, q_answer, q_explanation, q_id,
+             r.get("svg_content", ""), r.get("has_svg", 0),
+             r.get("media_files", ""), r.get("media_placeholders", "")),
         ))
         added.append({
             "sort_order": sort_order,
             "question_text": q_text,
             "options": opts,
             "correct_answer": q_answer,
+            "svg_content": r.get("svg_content", ""),
+            "has_svg": r.get("has_svg", 0),
+            "media_files": r.get("media_files", ""),
+            "media_placeholders": r.get("media_placeholders", ""),
         })
 
     if operations:
@@ -1469,6 +1504,10 @@ async def get_current_question(room_id: int, request: Request):
             "options": options,
             "time_limit": time_limit,
             "total_questions": total_q["cnt"] if total_q else room.get("question_count", 0),
+            "svg_content": question.get("svg_content", ""),
+            "has_svg": question.get("has_svg", 0),
+            "media_files": question.get("media_files", ""),
+            "media_placeholders": question.get("media_placeholders", ""),
         }
     }
 
@@ -1524,6 +1563,10 @@ async def get_result(room_id: int, request: Request):
             "options": options,
             "correct_answer": q["correct_answer"],
             "explanation": q["explanation"],
+            "svg_content": q.get("svg_content", ""),
+            "has_svg": q.get("has_svg", 0),
+            "media_files": q.get("media_files", ""),
+            "media_placeholders": q.get("media_placeholders", ""),
             "correct_count": sum(1 for a in answers if a["is_correct"] == 1),
             "total_answers": len(answers),
             "option_stats": option_stats,
@@ -1662,6 +1705,10 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
                 "SELECT COUNT(*) as cnt FROM quick_quiz_questions WHERE room_id=?",
                 (room_id,),
             )["cnt"],
+            "svg_content": question.get("svg_content", ""),
+            "has_svg": question.get("has_svg", 0),
+            "media_files": question.get("media_files", ""),
+            "media_placeholders": question.get("media_placeholders", ""),
         }
     })
 
