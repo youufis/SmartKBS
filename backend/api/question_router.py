@@ -52,6 +52,22 @@ class QuestionUpdate(BaseModel):
     difficulty: str | None = None
 
 
+class ImportQuestion(BaseModel):
+    """导入题目到题库请求"""
+    type: str = "single"
+    question_text: str
+    options: str | list | dict | None = None
+    correct_answer: str = ""
+    explanation: str = ""
+    knowledge_points: str = ""
+    difficulty: str = "medium"
+    source: str = "manual"
+    svg_content: str | None = None
+    has_svg: int = 0
+    media_placeholders: str | list | None = None
+    media_files: str | list | None = None
+
+
 # ── 题型配置 ──
 
 QUESTION_TYPE_MAP = {
@@ -75,6 +91,62 @@ TYPE_DESC = {
     "essay": "作文",
     "subjective": "主观题",
 }
+
+
+# ── 导入题目到题库（用于随堂测验题目复用） ──
+
+@router.post("/import", summary="导入题目到题库")
+async def import_question(req: ImportQuestion, request: Request):
+    """将题目导入 question_bank，返回新题目的 ID"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可导入题目")
+
+    # 获取用户姓名
+    from backend.database import execute_query as user_query
+    user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
+    creator_name = user_row[0][0] if user_row and user_row[0][0] else username
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    options_str = ""
+    if req.options:
+        if isinstance(req.options, (dict, list)):
+            options_str = json.dumps(req.options, ensure_ascii=False)
+        else:
+            options_str = req.options
+
+    # 处理配图字段
+    svg_content = req.svg_content or ""
+    has_svg = req.has_svg if req.has_svg else (1 if svg_content.strip() else 0)
+    media_placeholders_str = ""
+    if req.media_placeholders:
+        if isinstance(req.media_placeholders, (dict, list)):
+            media_placeholders_str = json.dumps(req.media_placeholders, ensure_ascii=False)
+        else:
+            media_placeholders_str = req.media_placeholders
+    media_files_str = ""
+    if req.media_files:
+        if isinstance(req.media_files, (dict, list)):
+            media_files_str = json.dumps(req.media_files, ensure_ascii=False)
+        else:
+            media_files_str = req.media_files
+
+    qid = execute_insert(
+        """INSERT INTO question_bank
+           (type, question_text, options, correct_answer, explanation,
+            knowledge_points, difficulty, creator_username, creator_name,
+            source, status, created_at, updated_at,
+            svg_content, has_svg, media_placeholders, media_files)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?,
+                   ?, ?, ?, ?)""",
+        (req.type, req.question_text, options_str, req.correct_answer,
+         req.explanation, req.knowledge_points, req.difficulty,
+         username, creator_name, req.source, now, now,
+         svg_content, has_svg, media_placeholders_str, media_files_str),
+    )
+    return {"id": qid, "message": "导入成功"}
 
 
 # ── 公共辅助函数 ──
