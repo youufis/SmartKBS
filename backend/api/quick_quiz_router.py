@@ -189,7 +189,6 @@ def _room_to_dict(room: dict) -> dict:
         "max_players": room["max_players"],
         "target_grade": room["target_grade"] or "",
         "target_class": room["target_class"] or "",
-        "use_ai_generate": room["use_ai_generate"],
         "subject": room.get("subject", "") or "",
         "knowledge_points": room.get("knowledge_points", "") or "",
         "difficulty": room.get("difficulty", "medium") or "medium",
@@ -309,123 +308,33 @@ def _load_questions_from_bank(subject: str = "", knowledge_points: str = "",
     return questions
 
 
-def _call_ai_generate_question(subject: str = "信息科技",
-                                 knowledge_points: str = "",
-                                 difficulty: str = "medium") -> dict | None:
-    """调用 AI 生成一道抢答题目"""
-    from backend.api.chat_router import get_api_keys
-    from backend.api.ai_service import call_ai_sync_direct
-    from backend.prompts.quick_quiz import QUICK_QUIZ_GENERATE_PROMPT
-
-    # 尝试获取 API key
-    api_key = None
-    try:
-        api_key, _ = get_api_keys("root")
-    except Exception:
-        pass
-    if not api_key:
-        import os
-        api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
-    if not api_key:
-        return None
-
-    prompt = QUICK_QUIZ_GENERATE_PROMPT.format(
-        subject=subject,
-        knowledge_points=knowledge_points or "综合知识",
-        difficulty=difficulty,
-    )
-    try:
-        text = call_ai_sync_direct(prompt, api_key)
-        text = text.strip()
-        if text.startswith("```"):
-            start = text.find("{")
-            end = text.rfind("}")
-            if start >= 0 and end > start:
-                text = text[start:end + 1]
-        result = json.loads(text)
-        for key in ("question", "options", "answer", "explanation"):
-            if key not in result:
-                raise ValueError(f"AI 返回缺少字段: {key}")
-        # 统一答案为大写字母
-        result["answer"] = result["answer"].strip().upper()
-        # 补充可选媒体字段
-        result.setdefault("svg_content", "")
-        result.setdefault("has_svg", 1 if result.get("svg_content") else 0)
-        result.setdefault("media_files", "")
-        result.setdefault("media_placeholders", "")
-        # SVG 合法性校验
-        svg = result.get("svg_content", "")
-        if svg and "<svg" not in svg:
-            logger.warning(f"AI 返回的 svg_content 格式异常，已忽略: {svg[:50]}")
-            result["svg_content"] = ""
-            result["has_svg"] = 0
-        return result
-    except Exception as e:
-        logger.error(f"AI 出题失败: {e}")
-        return None
-
-
 def _prepare_questions_for_room(room_id: int, room: dict) -> list[dict]:
-    """为房间准备题目（从题库/AI/手动）"""
+    """为房间准备题目（从题库加载）"""
     count = room["question_count"]
     source = room["question_source"]
     questions = []
 
     # ── 学科题库 ──
-    if source in ("bank", "bank_academic", "mixed"):
+    if source in ("bank", "bank_academic"):
         try:
             bank_qs = _load_questions_from_bank(
                 subject=room.get("subject", ""),
                 knowledge_points=room.get("knowledge_points", ""),
                 difficulty=room.get("difficulty", "medium"),
-                count=count if source in ("bank", "bank_academic") else max(1, count // 2),
+                count=count,
             )
             questions.extend(bank_qs)
         except Exception as e:
             logger.warning(f"从学科试题库加载题目失败: {e}")
 
     # ── 百科题库 ──
-    if source in ("bank", "bank_general", "mixed"):
+    if source == "bank_general":
         if len(questions) < count:
             try:
-                g_count = count if source == "bank_general" else (count - len(questions))
-                general_qs = _load_questions_from_general_bank(count=g_count)
+                general_qs = _load_questions_from_general_bank(count=count)
                 questions.extend(general_qs)
             except Exception as e:
                 logger.warning(f"从百科题库加载题目失败: {e}")
-
-    if source == "ai" or source == "mixed":
-        ai_count = count if source == "ai" else (count - len(questions))
-        for i in range(ai_count):
-            # 如果已从题库拿到足够题，跳过
-            if len(questions) >= count:
-                break
-            try:
-                q = _call_ai_generate_question(
-                    subject=room.get("subject", "信息科技"),
-                    knowledge_points=room.get("knowledge_points", ""),
-                    difficulty=room.get("difficulty", "medium"),
-                )
-                if q:
-                    questions.append({
-                        "question_text": q["question"],
-                        "options": q["options"],
-                        "correct_answer": q["answer"],
-                        "explanation": q.get("explanation", ""),
-                        "svg_content": q.get("svg_content", ""),
-                        "has_svg": q.get("has_svg", 0),
-                        "media_files": q.get("media_files", ""),
-                        "media_placeholders": q.get("media_placeholders", ""),
-                    })
-            except Exception as e:
-                logger.warning(f"AI 出题失败: {e}，将使用兜底题")
 
     # 如果题目不够，用兜底题补齐
     fallbacks = [
@@ -608,7 +517,6 @@ async def create_room(request: Request):
             target_grade = auto_grade
         if auto_cls and not target_class:
             target_class = auto_cls
-    use_ai_generate = 1 if body.get("use_ai_generate") else 0
     subject = body.get("subject", "")
     knowledge_points = body.get("knowledge_points", "")
     difficulty = body.get("difficulty", "medium")
@@ -620,12 +528,12 @@ async def create_room(request: Request):
         """INSERT INTO quick_quiz_rooms
            (room_code, title, creator_username, status, question_source, question_count,
             time_limit, scoring_mode, min_players, max_players,
-            target_grade, target_class, use_ai_generate, subject, knowledge_points, difficulty,
+            target_grade, target_class, subject, knowledge_points, difficulty,
             created_at)
-           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (room_code, title, username, question_source, question_count,
          time_limit, scoring_mode, min_players, max_players,
-         target_grade, target_class, use_ai_generate, subject, knowledge_points, difficulty,
+         target_grade, target_class, subject, knowledge_points, difficulty,
          now),
     )
 
@@ -974,73 +882,6 @@ async def reveal_answer(room_id: int, request: Request):
         raise HTTPException(status_code=400, detail="当前没有活跃题目或已公布")
 
     return result
-
-
-@router.post("/quick-quiz/room/{room_id}/ai-generate", summary="AI 生成题目")
-async def ai_generate_question(room_id: int, request: Request):
-    """教师在教学过程中用 AI 生成一道新题目并加入当前抢答"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-
-    room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
-    if not room:
-        raise HTTPException(status_code=404, detail="房间不存在")
-    if room["creator_username"] != username and role != 0:
-        raise HTTPException(status_code=403, detail="仅创建者可操作")
-
-    body = await request.json()
-    topic = body.get("topic", "").strip()
-    subject = body.get("subject", room.get("subject", "信息科技")) or "信息科技"
-    difficulty = body.get("difficulty", room.get("difficulty", "medium")) or "medium"
-
-    # 调用 AI 生成
-    q = _call_ai_generate_question(
-        subject=subject,
-        knowledge_points=topic or room.get("knowledge_points", "综合知识"),
-        difficulty=difficulty,
-    )
-    if not q:
-        raise HTTPException(status_code=500, detail="AI 出题失败，请检查 API Key 配置")
-
-    # 计算下一个题号
-    max_order = execute_query_one(
-        "SELECT COALESCE(MAX(sort_order), 0) as max_order FROM quick_quiz_questions WHERE room_id=?",
-        (room_id,),
-    )
-    next_order = (max_order["max_order"] if max_order else 0) + 1
-
-    # 插入题目
-    options_json = json.dumps(q["options"], ensure_ascii=False)
-    qid = execute_insert_update(
-        """INSERT INTO quick_quiz_questions
-           (room_id, sort_order, question_text, options, correct_answer, explanation, source,
-            svg_content, has_svg, media_files, media_placeholders)
-           VALUES (?, ?, ?, ?, ?, ?, 'ai', ?, ?, ?, ?)""",
-        (room_id, next_order, q["question"], options_json, q["answer"], q.get("explanation", ""),
-         q.get("svg_content", ""), q.get("has_svg", 0),
-         q.get("media_files", ""), q.get("media_placeholders", "")),
-    )
-
-    # 更新房间的总题数
-    total_q = execute_query_one(
-        "SELECT COUNT(*) as cnt FROM quick_quiz_questions WHERE room_id=?",
-        (room_id,),
-    )
-    execute_insert_update(
-        "UPDATE quick_quiz_rooms SET question_count=? WHERE id=?",
-        (total_q["cnt"] if total_q else next_order, room_id),
-    )
-
-    return {
-        "question_id": qid,
-        "sort_order": next_order,
-        "question_text": q["question"],
-        "options": q["options"],
-        "correct_answer": q["answer"],
-        "explanation": q.get("explanation", ""),
-        "total_questions": total_q["cnt"] if total_q else next_order,
-    }
 
 
 @router.get("/quick-quiz/room/{room_id}/bank-questions", summary="从题库选题")
