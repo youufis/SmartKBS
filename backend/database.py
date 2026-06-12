@@ -850,9 +850,7 @@ def init_db():
                     else:
                         c.execute(f"ALTER TABLE quest_question_bank ADD COLUMN {col} TEXT DEFAULT ''")
                 except sqlite3.OperationalError:
-                    pass
-            except sqlite3.OperationalError:
-                pass  # 字段已存在
+                    pass  # 字段已存在
 
             # ═══════════════════════════════════════════════
             # 知识抢答活动模块
