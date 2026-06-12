@@ -10,6 +10,7 @@ import {
   ClockCircleOutlined, ThunderboltOutlined,
   AuditOutlined, BarChartOutlined, ReloadOutlined,
   RightOutlined, ExperimentOutlined, BellOutlined,
+  FireOutlined, CustomerServiceOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
@@ -89,6 +90,12 @@ interface DashboardSummary {
   completed_practice_count?: number
   // 错题本
   wrong_exam_count?: number
+  // 知识闯关
+  quest_completed_count?: number
+  quest_score?: number
+  // 知识抢答
+  quick_quiz_participated?: number
+  quick_quiz_correct?: number
   // 教师 - 智能练习
   practice_published?: number
   practice_submitted?: number
@@ -99,6 +106,12 @@ interface DashboardSummary {
   discussion_total?: number
   discussion_active?: number
   discussion_member_count?: number
+  // 教师/管理员 - 知识闯关
+  quest_total_count?: number
+  quest_completed_count_t?: number
+  // 教师/管理员 - 知识抢答
+  quick_quiz_total?: number
+  quick_quiz_ended?: number
   // 管理员专有
   online_count?: number
   recent_exams?: Array<{ id: number; title: string; status: string; created_at: string; creator_username?: string; creator_name?: string }>
@@ -210,6 +223,25 @@ const DashboardPage: React.FC = () => {
           <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, whiteSpace: 'nowrap' }}>
             {isStudent ? '继续你的学习之旅吧' : '欢迎使用 SmartKBS 智慧教学平台'}
           </span>
+          {isStudent && (
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#fff', whiteSpace: 'nowrap' }}>
+              <TrophyOutlined style={{ marginRight: 4 }} />
+              积分 <Text strong style={{ color: '#fff', fontSize: 18 }}>{summary.total_score ?? 0}</Text>
+              <Text style={{ color: 'rgba(255,255,255,0.7)', marginLeft: 8, fontSize: 13 }}>
+                · 排名 {summary.rank ?? '-'}
+              </Text>
+              {summary.title_name && summary.next_title_name && (
+                <Progress
+                  percent={summary.title_progress ?? 0}
+                  size="small"
+                  strokeColor="#fff"
+                  trailColor="rgba(255,255,255,0.3)"
+                  format={() => ''}
+                  style={{ width: 80, display: 'inline-flex', marginLeft: 8, verticalAlign: 'middle' }}
+                />
+              )}
+            </span>
+          )}
           {isTeacher && summary.teacher_grades && (
             <span style={{ marginLeft: 'auto', fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
               <TeamOutlined /> {summary.teacher_grades} · {summary.teacher_classes}班
@@ -241,24 +273,6 @@ const DashboardPage: React.FC = () => {
                 suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名 {summary.rank ?? '-'}</Text>}
                 valueStyle={{ color: '#faad14', fontSize: 22 }}
               />
-              {isStudent && summary.title_name && (
-                <div style={{ marginTop: 6 }}>
-                  <Tag style={{ fontSize: 11, margin: 0 }}
-                    color={summary.title_color !== 'default' ? summary.title_color : undefined}>
-                    {summary.title_emoji} {summary.title_name}
-                  </Tag>
-                  {summary.next_title_name && (
-                    <Progress
-                      percent={summary.title_progress ?? 0}
-                      size="small"
-                      strokeColor="#faad14"
-                      trailColor="#fff7e6"
-                      format={() => ''}
-                      style={{ marginTop: 2, lineHeight: 1 }}
-                    />
-                  )}
-                </div>
-              )}
             </Card>
           </Col>
           <Col xs={12} sm={6} md={4}>
@@ -302,6 +316,28 @@ const DashboardPage: React.FC = () => {
                 prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
                 suffix={<Text type="secondary" style={{ fontSize: 12 }}>次/本周</Text>}
                 valueStyle={{ color: '#13c2c2', fontSize: 22 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/quest')} size="small">
+              <Statistic
+                title="知识闯关"
+                value={summary.quest_completed_count ?? 0}
+                prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>完成 · {summary.quest_score ?? 0}分</Text>}
+                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/quick-quiz')} size="small">
+              <Statistic
+                title="知识抢答"
+                value={summary.quick_quiz_participated ?? 0}
+                prefix={<CustomerServiceOutlined style={{ color: '#722ed1' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>参与{summary.quick_quiz_participated ?? 0} · 答对{summary.quick_quiz_correct ?? 0}题</Text>}
+                valueStyle={{ color: '#722ed1', fontSize: 22 }}
               />
             </Card>
           </Col>
@@ -379,6 +415,28 @@ const DashboardPage: React.FC = () => {
                 prefix={<TeamOutlined style={{ color: '#1677ff' }} />}
                 suffix={<Text type="secondary" style={{ fontSize: 12 }}>进行中 · 共{summary.discussion_total ?? 0}</Text>}
                 valueStyle={{ color: '#1677ff', fontSize: 22 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/quest')} size="small">
+              <Statistic
+                title="知识闯关"
+                value={summary.quest_total_count ?? 0}
+                prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>总{summary.quest_total_count ?? 0} · 完成{summary.quest_completed_count_t ?? 0}</Text>}
+                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={4}>
+            <Card hoverable onClick={() => navigate('/quick-quiz')} size="small">
+              <Statistic
+                title="知识抢答"
+                value={summary.quick_quiz_total ?? 0}
+                prefix={<CustomerServiceOutlined style={{ color: '#722ed1' }} />}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>总{summary.quick_quiz_total ?? 0} · 结束{summary.quick_quiz_ended ?? 0}</Text>}
+                valueStyle={{ color: '#722ed1', fontSize: 22 }}
               />
             </Card>
           </Col>

@@ -90,12 +90,13 @@ def increment_token_version(username: str) -> int:
     return get_token_version(username)
 
 
-def create_jwt_token(username: str, role: int) -> str:
+def create_jwt_token(username: str, role: int, name: str = "") -> str:
     """创建 JWT token（携带 token_version，用于单点登录校验）"""
     version = get_token_version(username)
     payload = {
         "username": username,
         "role": role,
+        "name": name,
         "token_version": version,
         "exp": datetime.now(timezone.utc) + timedelta(hours=get_config_value("JWT_EXPIRATION_HOURS", 24)),
         "iat": datetime.now(timezone.utc),

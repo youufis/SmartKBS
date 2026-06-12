@@ -5,17 +5,15 @@
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Card, Button, Typography, Space, Tag, Avatar, List, message, Spin,
-  Modal, Input, Select,
 } from 'antd'
 import {
   ThunderboltOutlined, TeamOutlined, UserOutlined,
   ClockCircleOutlined, SettingOutlined, CopyOutlined,
-  PlayCircleOutlined, RobotOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import useSubjectOptions from '../hooks/useSubjectOptions'
 
 const { Title, Text } = Typography
 
@@ -28,15 +26,8 @@ const QuickQuizLobby: React.FC = () => {
   const [room, setRoom] = useState<any>(null)
   const [players, setPlayers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const { subjects: subjectOptions } = useSubjectOptions()
   const [starting, setStarting] = useState(false)
   const [countdown, setCountdown] = useState<number | null>(null)
-  const [aiModalOpen, setAiModalOpen] = useState(false)
-  const [aiTopic, setAiTopic] = useState('')
-  const [aiSubject, setAiSubject] = useState('')
-  const [aiDifficulty, setAiDifficulty] = useState('medium')
-  const [aiGenerating, setAiGenerating] = useState(false)
-  const [aiPreview, setAiPreview] = useState<any>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -185,34 +176,6 @@ const QuickQuizLobby: React.FC = () => {
     }
   }
 
-  const handleAiGenerate = async () => {
-    if (!aiTopic.trim()) { message.warning('请输入知识点或主题'); return }
-    setAiGenerating(true)
-    setAiPreview(null)
-    try {
-      const { data } = await apiClient.post(`/api/quick-quiz/room/${roomId}/ai-generate`, {
-        topic: aiTopic,
-        subject: aiSubject || room?.subject || '信息科技',
-        difficulty: aiDifficulty,
-      })
-      setAiPreview(data)
-      // 更新房间配置显示
-      setRoom((prev: any) => prev ? { ...prev, question_count: data.total_questions } : prev)
-      message.success('AI 题目生成成功！')
-    } catch (err: any) {
-      message.error(err.response?.data?.detail || 'AI 出题失败')
-    } finally {
-      setAiGenerating(false)
-    }
-  }
-
-  const handleUseAiQuestion = () => {
-    setAiModalOpen(false)
-    setAiTopic('')
-    setAiPreview(null)
-    message.success('AI 题目已添加到抢答列表中')
-  }
-
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
@@ -276,8 +239,6 @@ const QuickQuizLobby: React.FC = () => {
           <Text>📚 题目来源：<Text strong>
             {room.question_source === 'bank_academic' ? '学科试题库' :
              room.question_source === 'bank_general' ? '百科知识题库' :
-             room.question_source === 'ai' ? 'AI 即时出题' :
-             room.question_source === 'mixed' ? '混合模式' :
              room.question_source === 'bank' ? '试题库' : room.question_source || '未设置'}
           </Text></Text>
           {room.subject && <Text>📖 学科：{room.subject}</Text>}
@@ -337,14 +298,6 @@ const QuickQuizLobby: React.FC = () => {
               >
                 🚀 开始抢答
               </Button>
-              <Button
-                size="large"
-                icon={<RobotOutlined />}
-                onClick={() => setAiModalOpen(true)}
-                style={{ height: 48, borderRadius: 24, paddingLeft: 24, paddingRight: 24 }}
-              >
-                AI 加题
-              </Button>
             </Space>
           </Space>
           <div style={{ marginTop: 8 }}>
@@ -361,106 +314,6 @@ const QuickQuizLobby: React.FC = () => {
           </div>
         </div>
       )}
-      {/* ── AI 生成题目弹窗 ── */}
-      <Modal
-        title={<Space><RobotOutlined style={{ color: '#1677ff' }} /> AI 即时出题</Space>}
-        open={aiModalOpen}
-        onCancel={() => { setAiModalOpen(false); setAiPreview(null); setAiTopic('') }}
-        footer={aiPreview ? [
-          <Button key="cancel" onClick={() => { setAiModalOpen(false); setAiPreview(null); setAiTopic('') }}>关闭</Button>,
-          <Button key="use" type="primary" onClick={handleUseAiQuestion}>确认添加此题目</Button>,
-        ] : [
-          <Button key="cancel" onClick={() => { setAiModalOpen(false); setAiPreview(null); setAiTopic('') }}>取消</Button>,
-          <Button key="generate" type="primary" icon={<RobotOutlined />}
-            onClick={handleAiGenerate} loading={aiGenerating}
-            disabled={!aiTopic.trim()}>
-            🤖 生成题目
-          </Button>,
-        ]}
-        width={640}
-      >
-        {!aiPreview ? (
-          <div>
-            <div style={{ marginBottom: 16 }}>
-              <Text>输入知识点或主题，AI 将自动生成一道适合抢答的单选题。</Text>
-            </div>
-            <div style={{ marginBottom: 12 }}>
-              <Text strong>知识点 / 主题 <span style={{ color: '#ff4d4f' }}>*</span></Text>
-              <Input
-                size="large"
-                placeholder="例如：计算机网络协议、光合作用、勾股定理..."
-                value={aiTopic}
-                onChange={e => setAiTopic(e.target.value)}
-                onPressEnter={handleAiGenerate}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <Text strong>学科</Text>
-                <Input
-                  placeholder="信息科技"
-                  value={aiSubject}
-                  onChange={e => setAiSubject(e.target.value)}
-                />
-              </div>
-              <div style={{ width: 140 }}>
-                <Text strong>学科</Text>
-                <Select
-                  value={aiSubject || (subjectOptions.length > 0 ? subjectOptions[0] : '信息科技')}
-                  onChange={setAiSubject}
-                  style={{ width: '100%' }}
-                  options={subjectOptions.map(s => ({ value: s, label: s }))}
-                />
-              </div>
-              <div style={{ width: 140 }}>
-                <Text strong>难度</Text>
-                <Select
-                  value={aiDifficulty}
-                  onChange={setAiDifficulty}
-                  style={{ width: '100%' }}
-                  options={[
-                    { value: 'easy', label: '简单' },
-                    { value: 'medium', label: '中等' },
-                    { value: 'hard', label: '困难' },
-                  ]}
-                />
-              </div>
-            </div>
-            {aiGenerating && (
-              <div style={{ textAlign: 'center', padding: 24 }}>
-                <Spin tip="AI 正在出题..." />
-              </div>
-            )}
-          </div>
-        ) : (
-          <div>
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">
-                已添加到第 <Text strong>{aiPreview.sort_order}</Text> 题，确认后题目将进入抢答列表。
-              </Text>
-            </div>
-            <Card style={{ borderRadius: 10, background: '#f6f8fa' }} size="small">
-              <Title level={5} style={{ marginBottom: 16 }}>
-                {aiPreview.sort_order}. {aiPreview.question_text}
-              </Title>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {Object.entries(aiPreview.options || {}).map(([k, v]) => (
-                  <Tag key={k} color={k === aiPreview.correct_answer ? '#52c41a' : 'default'}
-                    style={{ padding: '6px 12px', fontSize: 14 }}>
-                    {k}. {v as string}
-                    {k === aiPreview.correct_answer && ' ✅'}
-                  </Tag>
-                ))}
-              </div>
-              {aiPreview.explanation && (
-                <div style={{ marginTop: 12, padding: 8, background: '#fff', borderRadius: 6 }}>
-                  <Text type="secondary">💡 {aiPreview.explanation}</Text>
-                </div>
-              )}
-            </Card>
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }

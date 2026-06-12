@@ -86,10 +86,19 @@ async def dashboard_summary(request: Request):
     now = datetime.now()
     today_str = now.strftime("%Y-%m-%d")
 
+    # 获取用户显示名（JWT payload 可能不含 name，需从数据库兜底）
+    display_name = user.get("name", "")
+    if not display_name or display_name == username:
+        name_row = execute_query(
+            "SELECT name FROM users WHERE username=?",
+            (username,),
+        )
+        display_name = name_row[0][0] if name_row and name_row[0][0] else username
+
     result = {
         "role": "admin" if role == 0 else ("teacher" if role == 1 else "student"),
         "username": username,
-        "user_name": user.get("name", username),
+        "user_name": display_name,
     }
 
     if role == 2:  # ── 学生 ──
@@ -111,21 +120,21 @@ async def dashboard_summary(request: Request):
             (username,),
         )
 
-        total_score = _db_count(
-            """SELECT COALESCE(SUM(score), 0) FROM scores WHERE student_name = ?""",
-            (user.get("name", username),),
-        )
+        # 使用积分奖励系统中的总积分（与排行榜一致）
+        total_score = get_reward_total(username)
 
-        rank = _db_count(
-            """SELECT COUNT(*) + 1 FROM (
-                   SELECT student_name, SUM(score) as total
-                   FROM scores
-                   WHERE grade = (SELECT grade FROM users WHERE username = ?)
-                   GROUP BY student_name
-                   HAVING total > ?
-               )""",
-            (username, total_score),
-        )
+        # 同年级排名（基于 reward_engine 总积分）
+        grade_row = execute_query("SELECT grade FROM users WHERE username=?", (username,))
+        grade = grade_row[0][0] if grade_row else ""
+        if grade:
+            rank = _db_count(
+                """SELECT COUNT(*) + 1 FROM student_total_points stp
+                   JOIN users u ON stp.student_username = u.username
+                   WHERE u.role=2 AND u.grade=? AND stp.total_points > ?""",
+                (grade, total_score),
+            )
+        else:
+            rank = 1
 
         active_task_count = _db_count(
             "SELECT COUNT(*) FROM tasks WHERE status = 'active'",
@@ -271,6 +280,26 @@ async def dashboard_summary(request: Request):
             (username,),
         )
 
+        # ── 知识闯关数据（quest_records 在 smartkb.db 中，使用 _db_count）──
+        quest_completed_count = _db_count(
+            "SELECT COUNT(*) FROM quest_records WHERE student_username=? AND completed=1",
+            (username,),
+        )
+        quest_score = _db_count(
+            "SELECT COALESCE(SUM(score), 0) FROM quest_records WHERE student_username=? AND completed=1",
+            (username,),
+        )
+
+        # ── 知识抢答数据 ──
+        quick_quiz_participated = _db_count(
+            "SELECT COUNT(DISTINCT room_id) FROM quick_quiz_players WHERE student_username=?",
+            (username,),
+        )
+        quick_quiz_correct = _db_count(
+            "SELECT COALESCE(SUM(correct_count), 0) FROM quick_quiz_players WHERE student_username=?",
+            (username,),
+        )
+
         result.update({
             "pending_exam_count": pending_count,
             "completed_exam_count": completed_count,
@@ -293,6 +322,12 @@ async def dashboard_summary(request: Request):
             "completed_practice_count": completed_practice_count,
             # 错题本
             "wrong_exam_count": wrong_exam_count,
+            # 知识闯关
+            "quest_completed_count": quest_completed_count,
+            "quest_score": quest_score,
+            # 知识抢答
+            "quick_quiz_participated": quick_quiz_participated,
+            "quick_quiz_correct": quick_quiz_correct,
             # 共享资源
             "shared_files_count": _db_count(
                 """SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'
@@ -302,9 +337,8 @@ async def dashboard_summary(request: Request):
             ) if grade else _db_count("SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'"),
         })
         # 称号系统（使用 reward_engine 的活动积分）
-        _reward_points = get_reward_total(username)
-        _main_t = get_main_title(_reward_points)
-        _progress = get_main_title_progress(_reward_points)
+        _main_t = get_main_title(total_score)
+        _progress = get_main_title_progress(total_score)
         result["title_name"] = _main_t["name"]
         result["title_level"] = _main_t["level"]
         result["title_emoji"] = _main_t.get("emoji", "")
@@ -473,6 +507,45 @@ async def dashboard_summary(request: Request):
                 (username,),
             )
 
+        # ── 知识闯关统计（教师/管理员，quest_records 在 smartkb.db）──
+        if role == 0:
+            quest_total_count = _db_count("SELECT COUNT(*) FROM quest_records")
+            quest_completed_count_t = _db_count("SELECT COUNT(*) FROM quest_records WHERE completed=1")
+        else:
+            # 教师：统计自己班级学生的闯关记录
+            t_grade2 = execute_query(
+                "SELECT grade, class FROM users WHERE username=?", (username,)
+            )
+            if t_grade2 and t_grade2[0][0]:
+                _tg, _tc = t_grade2[0][0] or "", t_grade2[0][1] or ""
+                quest_total_count = _db_count(
+                    """SELECT COUNT(*) FROM quest_records WHERE student_username IN
+                       (SELECT username FROM users WHERE role=2 AND grade=? AND INSTR(','||class||',', ?)>0)""",
+                    (_tg, f",{_tc},"),
+                )
+                quest_completed_count_t = _db_count(
+                    """SELECT COUNT(*) FROM quest_records WHERE completed=1 AND student_username IN
+                       (SELECT username FROM users WHERE role=2 AND grade=? AND INSTR(','||class||',', ?)>0)""",
+                    (_tg, f",{_tc},"),
+                )
+            else:
+                quest_total_count = 0
+                quest_completed_count_t = 0
+
+        # ── 知识抢答统计（教师/管理员） ──
+        if role == 0:
+            quick_quiz_total = _db_count("SELECT COUNT(*) FROM quick_quiz_rooms")
+            quick_quiz_ended = _db_count("SELECT COUNT(*) FROM quick_quiz_rooms WHERE status='ended'")
+        else:
+            quick_quiz_total = _db_count(
+                "SELECT COUNT(*) FROM quick_quiz_rooms WHERE creator_username=?",
+                (username,),
+            )
+            quick_quiz_ended = _db_count(
+                "SELECT COUNT(*) FROM quick_quiz_rooms WHERE creator_username=? AND status='ended'",
+                (username,),
+            )
+
         result.update({
             "exam_stats": {
                 "total": exam_total,
@@ -499,6 +572,12 @@ async def dashboard_summary(request: Request):
             # 智能练习
             "practice_published": practice_published,
             "practice_submitted": practice_submitted,
+            # 知识闯关
+            "quest_total_count": quest_total_count,
+            "quest_completed_count_t": quest_completed_count_t,
+            # 知识抢答
+            "quick_quiz_total": quick_quiz_total,
+            "quick_quiz_ended": quick_quiz_ended,
             "online_count": get_online_count(),
             "shared_resources_count": _db_count(
                 "SELECT COUNT(*) FROM shared_resources"
@@ -556,6 +635,15 @@ async def recent_activity(request: Request):
     now = datetime.now()
 
     if role == 2:  # 学生
+        # 获取学生显示名（与 summary 逻辑一致）
+        _display_name = user.get("name", "")
+        if not _display_name or _display_name == username:
+            name_row = execute_query(
+                "SELECT name FROM users WHERE username=?",
+                (username,),
+            )
+            _display_name = name_row[0][0] if name_row and name_row[0][0] else username
+
         # 最近的考试结果 (question_db 返回 dict)
         exam_activities = q_execute_query(
             """SELECT ea.submitted_at, e.title, ea.score, ea.total_score
@@ -578,7 +666,7 @@ async def recent_activity(request: Request):
             """SELECT updated_at, score, class_name
                FROM scores WHERE student_name = ?
                ORDER BY updated_at DESC LIMIT 5""",
-            (user.get("name", username),),
+            (_display_name,),
         )
         for act in score_activities:
             activities.append({
