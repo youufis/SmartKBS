@@ -38,20 +38,25 @@ def remove_active_token_by_username(username: str):
             del _active_tokens[token]
 
 
-def get_online_count() -> int:
-    """获取在线用户数（按用户名去重），自动清理过期 token"""
+def get_online_usernames() -> set[str]:
+    """获取所有在线用户的用户名集合，自动清理过期 token"""
     now = time.time()
+    timeout = get_config_value("ONLINE_USER_TIMEOUT_SECONDS", 1800)
     expired = [t for t in _active_tokens
-               if now - _active_tokens[t] > get_config_value("ONLINE_USER_TIMEOUT_SECONDS", 1800)]
+               if now - _active_tokens[t] > timeout]
     for t in expired:
         del _active_tokens[t]
-    # 解码 token 统计唯一用户名
     usernames: set[str] = set()
     for token in list(_active_tokens.keys()):
         payload = decode_jwt_token(token)
         if payload and "username" in payload:
             usernames.add(payload["username"])
-    return len(usernames)
+    return usernames
+
+
+def get_online_count() -> int:
+    """获取在线用户数（按用户名去重）"""
+    return len(get_online_usernames())
 
 
 # ── 密码哈希 ──

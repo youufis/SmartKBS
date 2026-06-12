@@ -14,6 +14,8 @@ import {
 } from '@ant-design/icons'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import apiClient from '../api/client'
+import FormulaRenderer from '../components/FormulaRenderer'
+import MediaDisplay from '../components/MediaDisplay'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -26,6 +28,10 @@ interface QuestionData {
   lifeline_used?: string
   lifeline_data?: any
   correct_answer?: string
+  svg_content?: string
+  has_svg?: number
+  media_files?: string
+  media_placeholders?: string
 }
 
 interface QuestInfo {
@@ -380,9 +386,16 @@ const QuestBattlePage: React.FC = () => {
         </div>
 
         {/* 题目内容 */}
-        <Title level={4} style={{ marginBottom: 24, lineHeight: 1.6 }}>
-          {currentIdx}. {question.question_text}
+        <Title level={4} style={{ marginBottom: 12, lineHeight: 1.6 }}>
+          {currentIdx}. <FormulaRenderer content={question.question_text} />
         </Title>
+
+        {/* 配图 */}
+        <MediaDisplay
+          svgContent={question.svg_content}
+          hasSvg={question.has_svg}
+          mediaFiles={question.media_files}
+        />
 
         {/* 选项 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -428,7 +441,7 @@ const QuestBattlePage: React.FC = () => {
                 }
               >
                 <Text strong style={{ fontSize: 16, marginRight: 8 }}>{key}.</Text>
-                <Text style={{ fontSize: 15 }}>{value}</Text>
+                <FormulaRenderer content={value as string} inline />
               </Button>
             )
           })}
@@ -455,15 +468,17 @@ const QuestBattlePage: React.FC = () => {
                 </Text>
                 {!isCorrect && question.correct_answer && (
                   <div>
-                    <Text>正确答案：{question.correct_answer}. {options[question.correct_answer]}</Text>
+                    <Text>正确答案：{question.correct_answer}. </Text>
+                    <FormulaRenderer content={options[question.correct_answer] as string} inline />
                   </div>
                 )}
               </div>
             </div>
             {question?.explanation && (
-              <Paragraph style={{ marginTop: 8, marginBottom: 0, color: '#666' }}>
-                💡 {question.explanation}
-              </Paragraph>
+              <div style={{ marginTop: 8, marginBottom: 0, color: '#666' }}>
+                <Text type="secondary">💡 </Text>
+                <FormulaRenderer content={question.explanation} />
+              </div>
             )}
           </Card>
         )}

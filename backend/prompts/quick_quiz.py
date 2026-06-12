@@ -19,10 +19,14 @@ QUICK_QUIZ_GENERATE_PROMPT = """你是一位高中{subject}教师，正在组织
 - 解析要简短有力（20-40字），便于抢答后快速讲解
 - 题目和选项必须使用中文
 
-【格式要求】
-4个选项（A/B/C/D），只有一个正确答案。
+【公式支持】
+如果题目或选项涉及公式，请使用 LaTeX 语法：
+- 行内公式用 $...$，如 $E=mc^2$、$\\frac{{1}}{{2}}$
+- 化学式用 $\\ce{{H2O}}$
+
 严格按照以下 JSON 格式返回，不要包含任何其他内容：
-{{"question":"题目内容","options":{{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}},"answer":"A","explanation":"解析..."}}
+{{"question":"题目内容，含 $\\LaTeX$ 公式","options":{{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}},"answer":"A","explanation":"解析...","svg_content":"","has_svg":0}}
+注意：svg_content 和 has_svg 字段必须始终包含在返回中。
 """
 
 
@@ -47,6 +51,12 @@ QUICK_QUIZ_GENERAL_KNOWLEDGE_PROMPT = """你是一位百科知识竞赛的出题
 - 选项有迷惑性，答案唯一无歧义
 - 解析简短有趣（20-40字）
 
+【公式支持】
+如果题目或选项涉及公式，请使用 LaTeX 语法：
+- 行内公式用 $...$，如 $E=mc^2$
+- 化学式用 $\\ce{{H2O}}$
+
 严格按照以下 JSON 格式返回，不要包含任何其他内容：
-{{"category":"文学常识","question":"题目内容","options":{{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}},"answer":"A","explanation":"解析..."}}
+{{"category":"文学常识","question":"题目内容","options":{{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}},"answer":"A","explanation":"解析...","svg_content":"","has_svg":0}}
+注意：svg_content 和 has_svg 字段必须始终包含在返回中。
 """

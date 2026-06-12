@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, HTTPException
 from backend.config import BASE_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
 from backend.api.score_router import _get_teacher_allowed_grades
-from backend.auth import is_admin
+from backend.auth import is_admin, get_online_usernames
 from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
 
@@ -738,18 +738,13 @@ async def attendance_summary(request: Request):
         if uname:
             student_usernames.append(uname)
 
-    # 统计已登录的学生
-    logged_in_count = 0
-    if student_usernames:
-        placeholders = ",".join(["?"] * len(student_usernames))
-        logged_rows = execute_query_dict(
-            f"""SELECT DISTINCT username FROM login_logs
-                WHERE username IN ({placeholders})""",
-            tuple(student_usernames),
-        )
-        logged_in_count = len(logged_rows)
+    # 获取所有在线用户（有活跃 token 即为在线）
+    online_usernames = get_online_usernames()
 
-    # 获取每个学生的最新登录时间和 IP
+    # 统计在线学生
+    logged_in_count = sum(1 for u in student_usernames if u in online_usernames)
+
+    # 获取每个学生的最新登录时间和 IP（供展示用）
     latest_logins = {}
     if student_usernames:
         placeholders = ",".join(["?"] * len(student_usernames))
@@ -778,7 +773,7 @@ async def attendance_summary(request: Request):
             "name": s["name"],
             "username": uname,
             "gender": s.get("gender", ""),
-            "has_logged_in": uname in latest_logins,
+            "has_logged_in": uname in online_usernames,
             "last_login_time": login_info.get("login_time", ""),
             "last_login_ip": login_info.get("login_ip", ""),
         })

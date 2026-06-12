@@ -784,6 +784,10 @@ def init_db():
                 time_spent INTEGER DEFAULT 0,
                 score INTEGER DEFAULT 0,
                 explanation TEXT NOT NULL,
+                svg_content TEXT DEFAULT '',
+                has_svg INTEGER DEFAULT 0,
+                media_files TEXT DEFAULT '',
+                media_placeholders TEXT DEFAULT '',
                 FOREIGN KEY (quest_id) REFERENCES quest_records(id)
             )""")
             try:
@@ -812,7 +816,11 @@ def init_db():
                 correct_answer TEXT NOT NULL,
                 explanation TEXT NOT NULL,
                 used_count INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                svg_content TEXT DEFAULT '',
+                has_svg INTEGER DEFAULT 0,
+                media_files TEXT DEFAULT '',
+                media_placeholders TEXT DEFAULT ''
             )""")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qqb_category ON quest_question_bank(category)")
@@ -823,6 +831,26 @@ def init_db():
             # ── quest_records 增加 use_bank 标记 ──
             try:
                 c.execute("ALTER TABLE quest_records ADD COLUMN use_bank INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 闯关题目表媒体字段迁移（兼容旧表） ──
+            for col in ['svg_content', 'has_svg', 'media_files', 'media_placeholders']:
+                try:
+                    if col == 'has_svg':
+                        c.execute(f"ALTER TABLE quest_question_records ADD COLUMN {col} INTEGER DEFAULT 0")
+                    else:
+                        c.execute(f"ALTER TABLE quest_question_records ADD COLUMN {col} TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
+            for col in ['svg_content', 'has_svg', 'media_files', 'media_placeholders']:
+                try:
+                    if col == 'has_svg':
+                        c.execute(f"ALTER TABLE quest_question_bank ADD COLUMN {col} INTEGER DEFAULT 0")
+                    else:
+                        c.execute(f"ALTER TABLE quest_question_bank ADD COLUMN {col} TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
             except sqlite3.OperationalError:
                 pass  # 字段已存在
 
@@ -893,12 +921,26 @@ def init_db():
                 explanation TEXT DEFAULT '',
                 source TEXT DEFAULT 'bank',
                 source_question_id INTEGER,
+                svg_content TEXT DEFAULT '',
+                has_svg INTEGER DEFAULT 0,
+                media_files TEXT DEFAULT '',
+                media_placeholders TEXT DEFAULT '',
                 UNIQUE(room_id, sort_order)
             )""")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qqq_room ON quick_quiz_questions(room_id)")
             except sqlite3.OperationalError:
                 pass
+
+            # ── 媒体字段迁移（兼容旧表） ──
+            for col in ['svg_content', 'has_svg', 'media_files', 'media_placeholders']:
+                try:
+                    if col == 'has_svg':
+                        c.execute(f"ALTER TABLE quick_quiz_questions ADD COLUMN {col} INTEGER DEFAULT 0")
+                    else:
+                        c.execute(f"ALTER TABLE quick_quiz_questions ADD COLUMN {col} TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
 
             # ── 抢答活动答题记录表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_answers (
