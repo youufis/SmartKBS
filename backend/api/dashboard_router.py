@@ -300,6 +300,20 @@ async def dashboard_summary(request: Request):
             (username,),
         )
 
+        # ── 课堂提问/回答数据 ──
+        my_questions_count = _db_count(
+            "SELECT COUNT(*) FROM interaction_questions WHERE student_username = ?",
+            (username,),
+        )
+        my_answers_count = _db_count(
+            "SELECT COUNT(*) FROM interaction_question_answers WHERE student_username = ?",
+            (username,),
+        )
+        my_approved_answers_count = _db_count(
+            "SELECT COUNT(*) FROM interaction_question_answers WHERE student_username = ? AND status = 'approved'",
+            (username,),
+        )
+
         result.update({
             "pending_exam_count": pending_count,
             "completed_exam_count": completed_count,
@@ -314,6 +328,10 @@ async def dashboard_summary(request: Request):
             "active_quiz_count": active_quiz_count,
             "my_quiz_answers": my_quiz_answers,
             "student_poll_vote_count": poll_vote_count,
+            # 课堂提问/回答
+            "my_questions_count": my_questions_count,
+            "my_answers_count": my_answers_count,
+            "my_approved_answers_count": my_approved_answers_count,
             # 分组讨论
             "active_discussion_count": active_discussion_count,
             "my_discussion_count": my_discussion_count,
@@ -565,6 +583,75 @@ async def dashboard_summary(request: Request):
             "teacher_poll_count": poll_count,
             "teacher_quiz_answer_count": quiz_answer_count,
             "teacher_poll_vote_count": poll_vote_count,
+            # 课堂提问/回答
+            "teacher_question_count": (
+                _db_count("SELECT COUNT(*) FROM interaction_questions")
+                if role == 0 else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_questions q
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
+                    (grade, f",{cls},"),
+                ) if cls else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_questions q
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE u.grade = ?""",
+                    (grade,),
+                )
+            ),
+            "teacher_pending_question_count": (
+                _db_count("SELECT COUNT(*) FROM interaction_questions WHERE status = 'pending'")
+                if role == 0 else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_questions q
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE q.status = 'pending' AND u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
+                    (grade, f",{cls},"),
+                ) if cls else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_questions q
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE q.status = 'pending' AND u.grade = ?""",
+                    (grade,),
+                )
+            ),
+            "teacher_student_answer_count": (
+                _db_count("SELECT COUNT(*) FROM interaction_question_answers")
+                if role == 0 else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_question_answers a
+                       JOIN interaction_questions q ON a.question_id = q.id
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
+                    (grade, f",{cls},"),
+                ) if cls else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_question_answers a
+                       JOIN interaction_questions q ON a.question_id = q.id
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE u.grade = ?""",
+                    (grade,),
+                )
+            ),
+            "teacher_approved_answer_count": (
+                _db_count("SELECT COUNT(*) FROM interaction_question_answers WHERE status = 'approved'")
+                if role == 0 else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_question_answers a
+                       JOIN interaction_questions q ON a.question_id = q.id
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE a.status = 'approved' AND u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
+                    (grade, f",{cls},"),
+                ) if cls else
+                _db_count(
+                    """SELECT COUNT(*) FROM interaction_question_answers a
+                       JOIN interaction_questions q ON a.question_id = q.id
+                       JOIN users u ON q.student_username = u.username AND u.role = 2
+                       WHERE a.status = 'approved' AND u.grade = ?""",
+                    (grade,),
+                )
+            ),
             # 分组讨论
             "discussion_total": discussion_total,
             "discussion_active": discussion_active,

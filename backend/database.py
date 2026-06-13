@@ -387,6 +387,28 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 迁移：interaction_questions 添加 answered_by 列（学生互答功能） ──
+            try:
+                c.execute("ALTER TABLE interaction_questions ADD COLUMN answered_by TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 课堂互动：多学生回答表（每个学生限答一次） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS interaction_question_answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                status TEXT DEFAULT 'pending_approval',
+                created_at TEXT NOT NULL,
+                UNIQUE(question_id, student_username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_iqa_qid ON interaction_question_answers(question_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_iqa_status ON interaction_question_answers(status)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 分组讨论表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS discussions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

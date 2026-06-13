@@ -251,11 +251,10 @@ async def create_quiz(req: QuizCreate, request: Request):
             else:
                 grade, cls = _get_user_grade_class(creator)
                 if grade:
-                    cls_param = f",{cls}," if cls else ""
                     students = db_query(
                         f"SELECT username FROM users WHERE role = 2 AND grade = ?"
-                        + (" AND INSTR(',' || class || ',', ?) > 0" if cls else ""),
-                        (grade, cls_param) if cls else (grade,),
+                        + (" AND INSTR(',' || ? || ',', ',' || class || ',') > 0" if cls else ""),
+                        (grade, cls) if cls else (grade,),
                     )
                 else:
                     students = []
@@ -449,12 +448,11 @@ async def delete_question(question_id: int, request: Request):
         # 教师：只能删除自己班级学生的提问
         grade, cls = _get_user_grade_class(username)
         if cls:
-            cls_param = f",{cls},"
             deleted = execute_insert_update(
                 """DELETE FROM interaction_questions WHERE id = ? AND student_username IN (
-                    SELECT username FROM users WHERE role = 2 AND grade = ? AND INSTR(',' || class || ',', ?) > 0
+                    SELECT username FROM users WHERE role = 2 AND grade = ? AND INSTR(',' || ? || ',', ',' || class || ',') > 0
                 )""",
-                (question_id, grade, cls_param),
+                (question_id, grade, cls),
             )
         else:
             deleted = execute_insert_update(
@@ -910,11 +908,10 @@ async def create_poll(req: PollCreate, request: Request):
             else:
                 grade, cls = _get_user_grade_class(creator)
                 if grade:
-                    cls_param = f",{cls}," if cls else ""
                     students = db_query(
                         f"SELECT username FROM users WHERE role = 2 AND grade = ?"
-                        + (" AND INSTR(',' || class || ',', ?) > 0" if cls else ""),
-                        (grade, cls_param) if cls else (grade,),
+                        + (" AND INSTR(',' || ? || ',', ',' || class || ',') > 0" if cls else ""),
+                        (grade, cls) if cls else (grade,),
                     )
                 else:
                     students = []
@@ -1183,6 +1180,130 @@ async def get_poll_results(poll_id: int, request: Request):
     }
 
 
+# ── AI 内容审核 + 重复/频率限制（用于提问和回答的合规检查） ──
+
+import time as _time
+import hashlib as _hashlib
+
+# 内容审核跟踪：username -> { rejected_hashes: set, rejection_count: int, window_start: float, blocked_until: float }
+_content_review_tracker: dict[str, dict] = {}
+_MAX_REJECTIONS = 3           # 时间窗口内最大拒绝次数
+_WINDOW_SECONDS = 300         # 时间窗口（5分钟）
+_BLOCK_SECONDS = 60           # 触发限制后封禁时长
+
+
+def _check_review_rate_limit(username: str, content: str) -> tuple[bool, str]:
+    """检查是否触发频率限制或重复提交，返回 (是否放行, 提示消息)"""
+    now = _time.time()
+    tracker = _content_review_tracker.setdefault(username, {
+        "rejected_hashes": set(),
+        "rejection_count": 0,
+        "window_start": now,
+        "blocked_until": 0,
+    })
+
+    # 1. 检查是否被临时封禁
+    if now < tracker["blocked_until"]:
+        remain = int(tracker["blocked_until"] - now)
+        return False, f"提交过于频繁，请{remain}秒后再试"
+
+    # 2. 检查时间窗口是否过期，过期则重置
+    if now - tracker["window_start"] > _WINDOW_SECONDS:
+        tracker["rejected_hashes"] = set()
+        tracker["rejection_count"] = 0
+        tracker["window_start"] = now
+
+    # 3. 检查是否重复提交已被拒绝过的内容
+    content_hash = _hashlib.md5(content.encode("utf-8")).hexdigest()
+    if content_hash in tracker["rejected_hashes"]:
+        return False, "该内容与之前被拒绝的内容相同，请修改后重新提交"
+
+    return True, ""
+
+
+def _record_rejection(username: str, content: str):
+    """记录一次审核拒绝并扣除 2 分"""
+    now = _time.time()
+    tracker = _content_review_tracker.setdefault(username, {
+        "rejected_hashes": set(),
+        "rejection_count": 0,
+        "window_start": now,
+        "blocked_until": 0,
+    })
+    content_hash = _hashlib.md5(content.encode("utf-8")).hexdigest()
+    tracker["rejected_hashes"].add(content_hash)
+    tracker["rejection_count"] += 1
+
+    # 扣除 2 分
+    try:
+        from backend.reward_engine import deduct_points
+        deduct_points(username, "内容审核不通过", 2)
+    except Exception:
+        pass
+
+    # 如果累计拒绝次数达到上限，临时封禁
+    if tracker["rejection_count"] >= _MAX_REJECTIONS:
+        tracker["blocked_until"] = now + _BLOCK_SECONDS
+        logger.warning(f"用户 {username} 触发审核频率限制，封禁 {_BLOCK_SECONDS} 秒")
+
+
+def _ai_content_review(content: str, username: str, role: str = "question") -> tuple[bool, str]:
+    """调用 AI 审核内容是否合规，含重复提交和频率限制，返回 (是否通过, 原因)"""
+    # 先检查频率限制和重复提交
+    allowed, msg = _check_review_rate_limit(username, content)
+    if not allowed:
+        return False, msg
+
+    import json
+    role_desc = "提问" if role == "question" else "回答"
+    prompt = (
+        '你是一个课堂内容审核助手。请判断以下学生' + role_desc + '是否包含：\n'
+        '1. 违反法律法规的内容\n'
+        '2. 违反道德规范、社会公序良俗的内容\n'
+        '3. 不文明用语、辱骂、攻击性、歧视性言论\n'
+        '4. 色情、暴力、恐怖、血腥等内容\n'
+        '5. 广告、垃圾信息\n\n'
+        '学生' + role_desc + '：' + content + '\n\n'
+        '请严格判断。只返回以下JSON格式（不要包含其他文字）：\n'
+        '{"safe": true, "reason": ""} 或 {"safe": false, "reason": "简要说明违规原因（10字以内）"}'
+    )
+    import os
+    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not api_key:
+        try:
+            from backend.api.config_router import load_config
+            cfg = load_config()
+            api_key = cfg.get("dashscope_api_key", "")
+        except Exception:
+            pass
+    if not api_key:
+        # 无 API Key 时放行（不阻塞功能）
+        return True, ""
+
+    try:
+        from backend.api.ai_service import call_ai_sync_direct
+        # 使用 asyncio.wait_for 添加超时控制，防止 AI 调用挂死
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(call_ai_sync_direct, prompt, api_key)
+            try:
+                result = future.result(timeout=15)  # AI 审核最多等 15 秒
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
+                return True, ""
+        jm = re.search(r'\{[^}]+\}', result)
+        if jm:
+            data = json.loads(jm.group())
+            if not data.get("safe", True):
+                # 记录拒绝
+                _record_rejection(username, content)
+                return False, data.get("reason", "内容不合规")
+        return True, ""
+    except Exception:
+        # AI 调用失败时放行，不阻塞正常使用
+        return True, ""
+
+
 # ── 课堂提问 ──
 
 @router.post("/questions", summary="学生发起提问")
@@ -1190,6 +1311,29 @@ async def ask_question(req: QuestionCreate, request: Request):
     """学生在课堂上提问"""
     user = get_current_user(request)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # ── 每日提问上限检查 ──
+    role = user.get("role", 2)
+    if role == 2:
+        today_start = now[:10] + " 00:00:00"
+        today_count = execute_query(
+            "SELECT COUNT(*) FROM interaction_questions WHERE student_username = ? AND created_at >= ?",
+            (user["username"], today_start),
+        )
+        if today_count and today_count[0][0] >= 5:
+            raise HTTPException(
+                status_code=400,
+                detail="⚠️ 每日最多提 5 个问题，已达到今日上限。"
+            )
+
+    # ── AI 内容审核 ──
+    safe, reason = _ai_content_review(req.content, user["username"], "question")
+    if not safe:
+        logger.info(f"学生 {user['username']} 提问内容不合规已拦截: {reason}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"⚠️ 内容审核未通过：{reason}。请修改后重新提交。"
+        )
 
     qid = execute_insert_update(
         """INSERT INTO interaction_questions (student_username, content, is_anonymous, status, created_at)
@@ -1204,18 +1348,62 @@ async def ask_question(req: QuestionCreate, request: Request):
     except Exception:
         pass
 
-    return {"message": "提问成功", "question_id": qid}
+    # ── 异步通知教师 ──
+    async def _notify_question():
+        try:
+            from backend.api.notification_router import _notify_users
+            from backend.database import execute_query as db_query
+            student_grade, student_cls = _get_user_grade_class(user["username"])
+            if student_grade:
+                cls_param = f",{student_cls}," if student_cls else ""
+                teachers = db_query(
+                    f"SELECT username FROM users WHERE role = 1 AND grade = ?"
+                    + (" AND INSTR(',' || class || ',', ?) > 0" if student_cls else ""),
+                    (student_grade, cls_param) if student_cls else (student_grade,),
+                )
+                if teachers:
+                    _notify_users(
+                        [r[0] for r in teachers], "info",
+                        f"新课堂提问",
+                        f"学生提出了新问题：{req.content[:50]}{'...' if len(req.content) > 50 else ''}",
+                        "/interaction",
+                    )
+        except Exception as e:
+            logger.warning(f"发送提问通知失败: {e}")
+    asyncio.create_task(_notify_question())
+
+    return {
+        "message": "提问成功",
+        "question_id": qid,
+        "question": {
+            "id": qid,
+            "content": req.content,
+            "is_anonymous": bool(req.is_anonymous),
+            "status": "pending",
+            "answer": "",
+            "created_at": now,
+            "answered_at": "",
+            "answered_by": "",
+            "student_answer_count": 0,
+            "approved_answer_count": 0,
+            "my_answer_status": None,
+            "is_own": True,
+        }
+    }
 
 
 @router.get("/questions", summary="获取课堂提问列表")
 async def list_questions(
     request: Request,
     status: str = Query("", description="筛选状态"),
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
 ):
     """获取课堂提问（教师看自己班级学生的提问，学生看所有）"""
     user = get_current_user(request)
     role = user.get("role", 2)
     username = user["username"]
+    offset = (page - 1) * page_size
 
     if role == 2:
         # 学生：只看自己班级同学的提问和回答
@@ -1231,13 +1419,21 @@ async def list_questions(
             params.append(cls_param)
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = execute_query(
-            f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at
+            f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at, q.answered_by
                 FROM interaction_questions q
                 JOIN users u ON q.student_username = u.username AND u.role = 2
                 WHERE {where}
-                ORDER BY q.created_at DESC""",
+                ORDER BY q.created_at DESC LIMIT ? OFFSET ?""",
+            tuple(params + [page_size, offset]),
+        )
+        # 获取总数
+        count_rows = execute_query(
+            f"""SELECT COUNT(*) FROM interaction_questions q
+                JOIN users u ON q.student_username = u.username AND u.role = 2
+                WHERE {where}""",
             tuple(params),
         )
+        total = count_rows[0][0] if count_rows else 0
     elif role == 1:
         # 教师：只看自己班级学生的提问
         grade, cls = _get_user_grade_class(username)
@@ -1247,21 +1443,28 @@ async def list_questions(
             conditions.append("u.grade = ?")
             params.append(grade)
         if cls:
-            cls_param = f",{cls},"
-            conditions.append("INSTR(',' || u.class || ',', ?) > 0")
-            params.append(cls_param)
+            conditions.append("INSTR(',' || ? || ',', ',' || u.class || ',') > 0")
+            params.append(cls)  # 原始教师班级字符串，不额外加逗号
         if status:
             conditions.append("q.status = ?")
             params.append(status)
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = execute_query(
-            f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at
+            f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at, q.answered_by
                 FROM interaction_questions q
                 JOIN users u ON q.student_username = u.username AND u.role = 2
                 WHERE {where}
-                ORDER BY q.created_at DESC""",
+                ORDER BY q.created_at DESC LIMIT ? OFFSET ?""",
+            tuple(params + [page_size, offset]),
+        )
+        # 获取总数
+        count_rows = execute_query(
+            f"""SELECT COUNT(*) FROM interaction_questions q
+                JOIN users u ON q.student_username = u.username AND u.role = 2
+                WHERE {where}""",
             tuple(params),
         )
+        total = count_rows[0][0] if count_rows else 0
     else:
         # 管理员：看全部
         conditions = []
@@ -1271,11 +1474,17 @@ async def list_questions(
             params.append(status)
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = execute_query(
-            f"""SELECT id, student_username, content, is_anonymous, status, answer, created_at, answered_at
+            f"""SELECT id, student_username, content, is_anonymous, status, answer, created_at, answered_at, answered_by
                 FROM interaction_questions WHERE {where}
-                ORDER BY created_at DESC""",
+                ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            tuple(params + [page_size, offset]),
+        )
+        # 获取总数
+        count_rows = execute_query(
+            f"""SELECT COUNT(*) FROM interaction_questions WHERE {where}""",
             tuple(params),
         )
+        total = count_rows[0][0] if count_rows else 0
 
     questions = []
     for r in rows:
@@ -1286,34 +1495,160 @@ async def list_questions(
             "status": r[4],
             "answer": r[5] or "",
             "created_at": r[6],
+            "answered_at": r[7] or "",
+            "answered_by": r[8] or "",
         }
         if role != 2:
             q["student_username"] = r[1] if not r[3] else "(匿名)"
-            q["answered_at"] = r[7] or ""
+        else:
+            q["is_own"] = (r[1] == username)
+
+        # ── 附加多回答统计 ──
+        qid = r[0]
+        # 学生回答总数
+        cnt = execute_query(
+            "SELECT COUNT(*) FROM interaction_question_answers WHERE question_id = ?",
+            (qid,),
+        )
+        q["student_answer_count"] = cnt[0][0] if cnt else 0
+
+        # 已通过的回答数
+        approved = execute_query(
+            "SELECT COUNT(*) FROM interaction_question_answers WHERE question_id = ? AND status = 'approved'",
+            (qid,),
+        )
+        q["approved_answer_count"] = approved[0][0] if approved else 0
+
+        # 当前登录学生的回答状态
+        q["my_answer_status"] = None
+        if role == 2:
+            my_ans = execute_query(
+                "SELECT status FROM interaction_question_answers WHERE question_id = ? AND student_username = ?",
+                (qid, username),
+            )
+            if my_ans:
+                q["my_answer_status"] = my_ans[0][0]
+
         questions.append(q)
 
-    return {"questions": questions}
+    return {"questions": questions, "total": total}
 
 
-@router.put("/questions/{question_id}/answer", summary="教师回答提问")
+# ── 多学生回答：每个学生限答一次，教师按回答审批 ──
+
+@router.put("/questions/{question_id}/answer", summary="回答提问（教师直接通过，学生写入多回答表）")
 async def answer_question(question_id: int, req: QuestionAnswer, request: Request):
-    """教师回答学生提问（教师只能回答自己班级学生的问题）"""
+    """回答学生提问。教师直接写入主表；学生写入 interaction_question_answers（每人限答一次）。"""
     user = get_current_user(request)
     role = user.get("role", 2)
     username = user["username"]
-    if role == 2:
-        raise HTTPException(status_code=403, detail="仅教师可回答")
 
+    if not req.answer or not req.answer.strip():
+        raise HTTPException(status_code=400, detail="回答内容不能为空")
+
+    # 查询提问信息
+    question_rows = execute_query(
+        "SELECT student_username, content, status, answer, answered_by FROM interaction_questions WHERE id = ?",
+        (question_id,),
+    )
+    if not question_rows:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    asker_username = question_rows[0][0]
+    question_content = question_rows[0][1]
+    q_status = question_rows[0][2]
+    q_answer = question_rows[0][3] or ""
+    q_answered_by = question_rows[0][4] or ""
+
+    # 学生：不能回答已标记为已答的问题（教师已答或已审批通过）
+    if role == 2 and q_status == "answered":
+        raise HTTPException(status_code=400, detail="该问题已被回答")
+
+    # 教师/管理员：允许覆盖/更新自己的回答（与学生回答独立）
+    if role != 2 and q_answer and q_answered_by != username:
+        # 其他教师/管理员已回答过，询问是否覆盖
+        pass  # 允许覆盖
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if role == 2:
+        # ── 学生回答：写入多回答表 ──
+        if username == asker_username:
+            raise HTTPException(status_code=403, detail="不能回答自己的提问")
+
+        # 班级验证
+        grade, cls = _get_user_grade_class(username)
+        asker_grade, asker_cls = _get_user_grade_class(asker_username)
+        if grade != asker_grade:
+            raise HTTPException(status_code=403, detail="只能回答同班同学的提问")
+        if cls and asker_cls:
+            if not (f",{cls}," in f",{asker_cls}," or f",{asker_cls}," in f",{cls},"):
+                raise HTTPException(status_code=403, detail="只能回答同班同学的提问")
+
+        # ── AI 内容审核 ──
+        safe, reason = _ai_content_review(req.answer, username, "answer")
+        if not safe:
+            logger.info(f"学生 {username} 回答内容不合规已拦截: {reason}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"⚠️ 回答审核未通过：{reason}。请修改后重新提交。"
+            )
+
+        # INSERT OR REPLACE：每人限答一次
+        execute_insert_update(
+            """INSERT OR REPLACE INTO interaction_question_answers
+               (question_id, student_username, answer, status, created_at)
+               VALUES (?, ?, ?, 'pending_approval', ?)""",
+            (question_id, username, req.answer, now),
+        )
+
+        # ── 积分奖励：参与回答 ──
+        try:
+            from backend.reward_engine import award_participation
+            award_participation(username, "question", str(question_id),
+                                f"回答：{question_content[:30]}...")
+        except Exception:
+            pass
+
+        # ── 通知提问学生 ──
+        try:
+            from backend.api.notification_router import _create_notification
+            _create_notification(asker_username, "info",
+                "你的提问收到同学回答（待教师审批）",
+                f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
+                "/interaction")
+        except Exception as e:
+            logger.warning(f"发送回答通知失败: {e}")
+
+        # ── 通知教师审批 ──
+        try:
+            from backend.api.notification_router import _notify_users
+            from backend.database import execute_query as db_query
+            g, c = _get_user_grade_class(asker_username)
+            if g:
+                teachers = db_query(
+                    f"SELECT username FROM users WHERE role = 1 AND grade = ?"
+                    + (" AND INSTR(',' || ? || ',', ',' || class || ',') > 0" if c else ""),
+                    (g, c) if c else (g,),
+                )
+                if teachers:
+                    _notify_users([r[0] for r in teachers], "info",
+                        "有学生回答了提问，需要审批",
+                        f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
+                        "/interaction")
+        except Exception as e:
+            logger.warning(f"发送审批通知失败: {e}")
+
+        return {"message": "回答已提交，等待教师审批"}
+
+    # ── 教师/管理员回答：直接写入主表 ──
     if role == 1:
-        # 教师：验证该提问来自自己班级的学生
         grade, cls = _get_user_grade_class(username)
         if cls:
-            cls_param = f",{cls},"
             rows = execute_query(
                 """SELECT q.id FROM interaction_questions q
                    JOIN users u ON q.student_username = u.username AND u.role = 2
-                   WHERE q.id = ? AND u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
-                (question_id, grade, cls_param),
+                   WHERE q.id = ? AND u.grade = ? AND INSTR(',' || ? || ',', ',' || u.class || ',') > 0""",
+                (question_id, grade, cls),
             )
         else:
             rows = execute_query(
@@ -1325,13 +1660,203 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         if not rows:
             raise HTTPException(status_code=403, detail="无权回答非本班学生的提问")
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_insert_update(
-        "UPDATE interaction_questions SET answer = ?, status = 'answered', answered_at = ? WHERE id = ?",
-        (req.answer, now, question_id),
+        """UPDATE interaction_questions SET answer = ?, status = 'answered',
+           answered_at = ?, answered_by = ? WHERE id = ?""",
+        (req.answer, now, username, question_id),
     )
 
+    try:
+        from backend.api.notification_router import _create_notification
+        _create_notification(asker_username, "info",
+            "你的提问已被教师回答",
+            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
+            "/interaction")
+    except Exception as e:
+        logger.warning(f"发送回答通知失败: {e}")
+
     return {"message": "回答成功"}
+
+
+# ── 获取某个问题的所有学生回答（教师看全部，学生看已通过的） ──
+
+@router.get("/questions/{question_id}/answers", summary="获取问题的学生回答列表")
+async def list_question_answers(question_id: int, request: Request):
+    """获取某个问题的所有学生回答。教师看全部，学生看已通过的和自己的。"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    username = user["username"]
+
+    # 验证问题存在
+    q = execute_query("SELECT id FROM interaction_questions WHERE id = ?", (question_id,))
+    if not q:
+        raise HTTPException(status_code=404, detail="提问不存在")
+
+    if role == 2:
+        # 学生：看所有已通过的 + 自己的（含待审批/已拒绝）
+        rows = execute_query(
+            """SELECT id, student_username, answer, status, created_at
+               FROM interaction_question_answers
+               WHERE question_id = ? AND (status = 'approved' OR student_username = ?)
+               ORDER BY created_at DESC""",
+            (question_id, username),
+        )
+    else:
+        # 教师/管理员：看全部
+        rows = execute_query(
+            """SELECT a.id, a.student_username, a.answer, a.status, a.created_at
+               FROM interaction_question_answers a
+               JOIN users u ON a.student_username = u.username AND u.role = 2
+               WHERE a.question_id = ?
+               ORDER BY a.created_at DESC""",
+            (question_id,),
+        )
+
+    answers = []
+    for r in rows:
+        ans = {
+            "id": r[0],
+            "student_username": r[1],
+            "answer": r[2],
+            "status": r[3],
+            "created_at": r[4],
+        }
+        answers.append(ans)
+
+    return {"answers": answers}
+
+
+# ── 教师逐条审批学生回答 ──
+
+@router.put("/questions/{question_id}/answers/{answer_id}/approve", summary="教师审批通过某条学生回答")
+async def approve_student_answer(question_id: int, answer_id: int, request: Request):
+    """教师审批通过某条学生回答"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可审批")
+
+    # 查询该回答
+    answer_row = execute_query(
+        """SELECT a.id, a.student_username, a.answer, q.content, q.student_username
+           FROM interaction_question_answers a
+           JOIN interaction_questions q ON a.question_id = q.id
+           WHERE a.id = ? AND a.question_id = ?""",
+        (answer_id, question_id),
+    )
+    if not answer_row:
+        raise HTTPException(status_code=404, detail="回答不存在")
+    answer_username = answer_row[0][1]
+    question_content = answer_row[0][3]
+    asker_username = answer_row[0][4]
+
+    # 教师：验证该提问来自自己班级
+    if role == 1:
+        grade, cls = _get_user_grade_class(user["username"])
+        rows = execute_query(
+            """SELECT q.id FROM interaction_questions q
+               JOIN users u ON q.student_username = u.username AND u.role = 2
+               WHERE q.id = ? AND u.grade = ?"""
+            + (" AND INSTR(',' || ? || ',', ',' || u.class || ',') > 0" if cls else ""),
+            (question_id, grade, cls) if cls else (question_id, grade),
+        )
+        if not rows:
+            raise HTTPException(status_code=403, detail="无权审批非本班学生的提问")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE interaction_question_answers SET status = 'approved' WHERE id = ?",
+        (answer_id,),
+    )
+    # 标记问题已回答（但不覆盖主表 answer 字段，多个学生回答各自独立展示）
+    execute_insert_update(
+        """UPDATE interaction_questions SET status = 'answered',
+           answered_at = COALESCE(answered_at, ?) WHERE id = ?""",
+        (now, question_id),
+    )
+
+    # ── 积分奖励：回答被审批通过 ──
+    try:
+        from backend.reward_engine import award_participation
+        # 用 question_id + answer_id 作为唯一标识，确保不被重复发放
+        award_participation(answer_username, "question",
+            f"{question_id}_{answer_id}",
+            f"回答被审批通过：{question_content[:30]}...",
+            teacher_username=user["username"])
+    except Exception:
+        pass
+
+    # ── 通知回答者 ──
+    try:
+        from backend.api.notification_router import _create_notification
+        _create_notification(answer_username, "info",
+            "你的回答已通过教师审批",
+            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
+            "/interaction")
+    except Exception as e:
+        logger.warning(f"发送审批通过通知失败: {e}")
+
+    # ── 通知提问者 ──
+    try:
+        from backend.api.notification_router import _create_notification
+        _create_notification(asker_username, "info",
+            "你的提问已有回答（已通过教师审批）",
+            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
+            "/interaction")
+    except Exception as e:
+        logger.warning(f"发送审批通知失败: {e}")
+
+    return {"message": "审批通过"}
+
+
+@router.put("/questions/{question_id}/answers/{answer_id}/reject", summary="教师拒绝某条学生回答")
+async def reject_student_answer(question_id: int, answer_id: int, request: Request):
+    """教师拒绝某条学生回答，该学生仍可重新回答"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可审批")
+
+    answer_row = execute_query(
+        """SELECT a.id, a.student_username, q.content
+           FROM interaction_question_answers a
+           JOIN interaction_questions q ON a.question_id = q.id
+           WHERE a.id = ? AND a.question_id = ?""",
+        (answer_id, question_id),
+    )
+    if not answer_row:
+        raise HTTPException(status_code=404, detail="回答不存在")
+    answer_username = answer_row[0][1]
+    question_content = answer_row[0][2]
+
+    if role == 1:
+        grade, cls = _get_user_grade_class(user["username"])
+        rows = execute_query(
+            """SELECT q.id FROM interaction_questions q
+               JOIN users u ON q.student_username = u.username AND u.role = 2
+               WHERE q.id = ? AND u.grade = ?"""
+            + (" AND INSTR(',' || ? || ',', ',' || u.class || ',') > 0" if cls else ""),
+            (question_id, grade, cls) if cls else (question_id, grade),
+        )
+        if not rows:
+            raise HTTPException(status_code=403, detail="无权审批非本班学生的提问")
+
+    execute_insert_update(
+        "UPDATE interaction_question_answers SET status = 'rejected' WHERE id = ?",
+        (answer_id,),
+    )
+
+    # ── 通知回答者 ──
+    try:
+        from backend.api.notification_router import _create_notification
+        _create_notification(answer_username, "info",
+            "你的回答未通过教师审批，可重新回答",
+            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
+            "/interaction")
+    except Exception as e:
+        logger.warning(f"发送拒绝通知失败: {e}")
+
+    return {"message": "已拒绝"}
 
 
 # ═══════════════════════════════════════════════════════════

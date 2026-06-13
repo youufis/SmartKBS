@@ -19,6 +19,110 @@ from backend.ws_manager import manager as ws_manager
 router = APIRouter()
 
 
+# ── AI 内容审核 + 重复/频率限制（发言合规检查） ──
+
+import time as _dt_time
+import hashlib as _dt_hashlib
+
+# 内容审核跟踪：username -> { rejected_hashes: set, rejection_count: int, window_start: float, blocked_until: float }
+_discussion_review_tracker: dict[str, dict] = {}
+_DT_MAX_REJECTIONS = 3
+_DT_WINDOW_SECONDS = 300
+_DT_BLOCK_SECONDS = 60
+
+
+def _check_discussion_rate_limit(username: str, content: str) -> tuple[bool, str]:
+    """检查是否触发频率限制或重复提交"""
+    now = _dt_time.time()
+    tracker = _discussion_review_tracker.setdefault(username, {
+        "rejected_hashes": set(),
+        "rejection_count": 0,
+        "window_start": now,
+        "blocked_until": 0,
+    })
+    if now < tracker["blocked_until"]:
+        remain = int(tracker["blocked_until"] - now)
+        return False, f"提交过于频繁，请{remain}秒后再试"
+    if now - tracker["window_start"] > _DT_WINDOW_SECONDS:
+        tracker["rejected_hashes"] = set()
+        tracker["rejection_count"] = 0
+        tracker["window_start"] = now
+    content_hash = _dt_hashlib.md5(content.encode("utf-8")).hexdigest()
+    if content_hash in tracker["rejected_hashes"]:
+        return False, "该内容与之前被拒绝的内容相同，请修改后重新提交"
+    return True, ""
+
+
+def _record_discussion_rejection(username: str, content: str):
+    """记录一次审核拒绝并扣除 2 分"""
+    now = _dt_time.time()
+    tracker = _discussion_review_tracker.setdefault(username, {
+        "rejected_hashes": set(),
+        "rejection_count": 0,
+        "window_start": now,
+        "blocked_until": 0,
+    })
+    content_hash = _dt_hashlib.md5(content.encode("utf-8")).hexdigest()
+    tracker["rejected_hashes"].add(content_hash)
+    tracker["rejection_count"] += 1
+
+    # 扣除 2 分
+    try:
+        from backend.reward_engine import deduct_points
+        deduct_points(username, "讨论发言审核不通过", 2)
+    except Exception:
+        pass
+
+    if tracker["rejection_count"] >= _DT_MAX_REJECTIONS:
+        tracker["blocked_until"] = now + _DT_BLOCK_SECONDS
+        logger.warning(f"用户 {username} 触发审核频率限制，封禁 {_DT_BLOCK_SECONDS} 秒")
+
+
+def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
+    """调用 AI 审核讨论发言是否合规，含重复提交和频率限制，返回 (是否通过, 原因)"""
+    # 先检查频率限制和重复提交
+    allowed, msg = _check_discussion_rate_limit(username, content)
+    if not allowed:
+        return False, msg
+
+    import json
+    import re
+    prompt = (
+        '你是一个课堂内容审核助手。请判断以下学生在分组讨论中的发言是否包含：\n'
+        '1. 违反法律法规的内容\n'
+        '2. 违反道德规范、社会公序良俗的内容\n'
+        '3. 不文明用语、辱骂、攻击性、歧视性言论\n'
+        '4. 色情、暴力、恐怖、血腥等内容\n'
+        '5. 广告、垃圾信息\n\n'
+        '学生发言：' + content + '\n\n'
+        '请严格判断。只返回以下JSON格式（不要包含其他文字）：\n'
+        '{"safe": true, "reason": ""} 或 {"safe": false, "reason": "简要说明违规原因（10字以内）"}'
+    )
+    api_key = _get_api_key()
+    if not api_key:
+        return True, ""
+
+    try:
+        from backend.api.ai_service import call_ai_sync_direct
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(call_ai_sync_direct, prompt, api_key)
+            try:
+                result = future.result(timeout=15)
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
+                return True, ""
+        jm = re.search(r'\{[^}]+\}', result)
+        if jm:
+            data = json.loads(jm.group())
+            if not data.get("safe", True):
+                _record_discussion_rejection(username, content)
+                return False, data.get("reason", "内容不合规")
+        return True, ""
+    except Exception:
+        return True, ""
+
+
 # ── 辅助函数 ──
 
 def _now() -> str:
@@ -763,6 +867,15 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
         )
         if not is_member:
             raise HTTPException(status_code=403, detail="你不在该小组中")
+
+        # ── AI 内容审核（仅对学生发言审核） ──
+        safe, reason = _ai_content_review(req.content, username)
+        if not safe:
+            logger.info(f"学生 {username} 讨论发言内容不合规已拦截: {reason}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"⚠️ 发言审核未通过：{reason}。请修改后重新发送。"
+            )
 
     now = _now()
     msg_id = execute_insert_update(

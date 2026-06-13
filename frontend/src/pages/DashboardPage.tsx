@@ -61,6 +61,8 @@ interface DashboardSummary {
   active_quiz_count?: number
   my_quiz_answers?: number
   student_poll_vote_count?: number
+  my_questions_count?: number
+  my_answers_count?: number
   // 教师/管理员
   exam_stats?: {
     total: number
@@ -82,6 +84,10 @@ interface DashboardSummary {
   teacher_poll_count?: number
   teacher_quiz_answer_count?: number
   teacher_poll_vote_count?: number
+  teacher_question_count?: number
+  teacher_pending_question_count?: number
+  teacher_student_answer_count?: number
+  teacher_approved_answer_count?: number
   // 学生 - 分组讨论
   active_discussion_count?: number
   my_discussion_count?: number
@@ -284,7 +290,7 @@ const DashboardPage: React.FC = () => {
                 title="课堂互动"
                 value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0} · 对话{summary.recent_chat_count ?? 0}次</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0} · 提问{summary.my_questions_count ?? 0} · 回答{summary.my_answers_count ?? 0}</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
@@ -339,7 +345,7 @@ const DashboardPage: React.FC = () => {
                 title="课堂活动"
                 value={(summary.teacher_quiz_count ?? 0) + (summary.practice_published ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.teacher_quiz_count ?? 0} · 练习{summary.practice_published ?? 0} · 讨论{summary.discussion_active ?? 0}</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.teacher_quiz_count ?? 0} · 练习{summary.practice_published ?? 0} · 提问{summary.teacher_question_count ?? 0} · 回答{summary.teacher_student_answer_count ?? 0}</Text>}
                 valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
               />
             </Card>
