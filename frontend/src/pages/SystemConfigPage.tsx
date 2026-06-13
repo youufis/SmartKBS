@@ -26,7 +26,7 @@ const GLOBAL_CONFIG_FIELDS = [
     desc: '全局兜底密钥，用户未配置时使用。如已设置环境变量 DASHSCOPE_API_KEY 则优先使用，此处可不填' },
   // 模型与应用配置
   { key: 'APPID', label: 'APPID', type: 'text', group: 'model', required: false,
-    desc: '【可选】留空则直接调用大模型（使用下方「默认对话模型」）；填写后调用百炼智能体应用。创建路径：百炼 → 应用中心 → 我的应用 → 创建智能体应用 → 复制 APPID' },
+    desc: '【可选】留空则直接调用大模型（使用下方「默认对话模型」）；填写后调用百炼智能体应用。注意：APPID 必须与上方的 DASHSCOPE_API_KEY 归属于同一个阿里云账号，否则无法调用。创建路径：百炼 → 应用中心 → 我的应用 → 创建智能体应用 → 复制 APPID' },
   { key: 'QWEN_OPENAI_API_BASE', label: 'API 基础地址', type: 'text', group: 'model',
     desc: 'DashScope API 调用地址，通常无需修改' },
   { key: 'MODEL_LONG_NAME', label: '长文本模型', type: 'text', group: 'model',
