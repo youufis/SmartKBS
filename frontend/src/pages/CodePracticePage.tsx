@@ -49,6 +49,7 @@ const CompactCodeView: React.FC<{
   const [submissionResult, setSubmissionResult] = useState<any>(null)
   const [pollingSubmission, setPollingSubmission] = useState(false)
   const [problemData, setProblemData] = useState<any>(null)
+  const [descCollapsed, setDescCollapsed] = useState(false)
 
   // 加载题目信息（描述 + 样例输入）
   useEffect(() => {
@@ -108,24 +109,45 @@ const CompactCodeView: React.FC<{
 
   return (
     <div style={{ display: 'flex', gap: 12 }}>
-      {/* 左面板：题目描述 */}
+      {/* 左面板：题目描述（可折叠） */}
       {problemData && (
-        <div style={{ width: '35%', minWidth: 260, maxHeight: 400, overflow: 'auto', background: '#fafafa', borderRadius: 6, padding: 12, border: '1px solid #f0f0f0' }}>
-          <Text strong style={{ fontSize: 14 }}>{problemData.title}</Text>
-          <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: '#555' }}>
-            <ReactMarkdown>{problemData.description || ''}</ReactMarkdown>
-          </div>
-          {problemData.sample_cases?.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <Text strong style={{ fontSize: 12 }}>示例：</Text>
-              {problemData.sample_cases.map((sc: any, i: number) => (
-                <div key={sc.id || i} style={{ background: '#fff', padding: 6, borderRadius: 4, marginTop: 4, fontSize: 12, border: '1px solid #e8e8e8' }}>
-                  <Text type="secondary">示例 {i + 1}</Text>
-                  {sc.description && <Text type="secondary"> — {sc.description}</Text>}
-                  <pre style={{ margin: 2, fontSize: 11 }}>输入：{sc.input || '(无)'}{'\n'}输出：{sc.expected_output}</pre>
-                </div>
-              ))}
+        <div style={{
+          width: descCollapsed ? 36 : '35%',
+          minWidth: descCollapsed ? 36 : 260,
+          maxHeight: 400, overflow: 'auto',
+          background: '#fafafa', borderRadius: 6,
+          padding: descCollapsed ? '8px 4px' : 12,
+          border: '1px solid #f0f0f0',
+          cursor: descCollapsed ? 'pointer' : 'default',
+          transition: 'width 0.2s, minWidth 0.2s, padding 0.2s',
+          flexShrink: 0,
+        }} onClick={() => { if (descCollapsed) setDescCollapsed(false) }}>
+          {descCollapsed ? (
+            <div style={{ writingMode: 'vertical-rl', fontSize: 13, color: '#888', userSelect: 'none' }}>
+              <span onClick={(e) => { e.stopPropagation(); setDescCollapsed(false) }} style={{ cursor: 'pointer', color: '#1677ff' }}>📄 题目</span>
             </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <Text strong style={{ fontSize: 14 }}>{problemData.title}</Text>
+                <Button type="text" size="small" icon={<MinusSquareOutlined />} onClick={() => setDescCollapsed(true)} style={{ color: '#999' }} />
+              </div>
+              <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: '#555' }}>
+                <ReactMarkdown>{problemData.description || ''}</ReactMarkdown>
+              </div>
+              {problemData.sample_cases?.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <Text strong style={{ fontSize: 12 }}>示例：</Text>
+                  {problemData.sample_cases.map((sc: any, i: number) => (
+                    <div key={sc.id || i} style={{ background: '#fff', padding: 6, borderRadius: 4, marginTop: 4, fontSize: 12, border: '1px solid #e8e8e8' }}>
+                      <Text type="secondary">示例 {i + 1}</Text>
+                      {sc.description && <Text type="secondary"> — {sc.description}</Text>}
+                      <pre style={{ margin: 2, fontSize: 11 }}>输入：{sc.input || '(无)'}{'\n'}输出：{sc.expected_output}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
