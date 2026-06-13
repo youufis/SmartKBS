@@ -7,7 +7,7 @@ const AboutPage: React.FC = () => {
   const [content, setContent] = useState('')
 
   useEffect(() => {
-    fetch('/api/files/about_help.md')
+    fetch('/api/files/USER_MANUAL.md')
       .then((r) => r.text())
       .then(setContent)
       .catch(() => setContent('# 关于与帮助\n\n系统帮助文档加载失败。'))
