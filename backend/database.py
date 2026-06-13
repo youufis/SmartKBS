@@ -995,6 +995,32 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 错题本模块（v5.3）
+            # ═══════════════════════════════════════════════
+
+            # ── 错题记录表（精确追踪每道错题） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS wrong_book (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                question_id INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'exam',
+                source_id INTEGER DEFAULT 0,
+                knowledge_points TEXT DEFAULT '',
+                question_type TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                wrong_answer TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                mastered_at TEXT
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wb_student ON wrong_book(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wb_question ON wrong_book(question_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wb_kp ON wrong_book(knowledge_points)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wb_status ON wrong_book(status)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 

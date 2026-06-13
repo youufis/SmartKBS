@@ -1302,6 +1302,13 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     except Exception as notify_err:
         logger.warning(f"发送教师通知失败: {notify_err}")
 
+    # ── 记录错题到 wrong_book ──
+    try:
+        from backend.api.wrong_book_router import record_wrong_answers
+        record_wrong_answers(username, exam_id, graded_answers)
+    except Exception as wb_err:
+        logger.warning(f"记录错题失败: {wb_err}")
+
     # ── 积分奖励 ──
     try:
         from backend.reward_engine import award_participation, award_grade
