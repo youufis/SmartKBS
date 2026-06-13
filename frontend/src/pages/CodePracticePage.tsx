@@ -191,7 +191,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const pageSize = 10
+  const [pageSize, setPageSize] = useState(10)
 
   const [currentProblem, setCurrentProblem] = useState<any>(null)
 
@@ -684,7 +684,6 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
             </>
           )}
         </Space>
-        <Text type="secondary" style={{ fontSize: 13 }}>共 {total} 道题目</Text>
       </div>
 
       <Spin spinning={loading}>
@@ -767,18 +766,19 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       </Spin>
 
       {/* 分页 */}
-      {total > pageSize && (
-        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
-          <Pagination
-            current={page}
-            total={total}
-            pageSize={pageSize}
-            onChange={(p) => setPage(p)}
-            showSizeChanger={false}
-            showTotal={(t) => `共 ${t} 道题目`}
-          />
-        </div>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+        <Pagination
+          current={page}
+          total={total}
+          pageSize={pageSize}
+          onChange={(p) => { setPage(p); setTimeout(loadProblems, 0) }}
+          onShowSizeChange={(_p, size) => { setPageSize(size); setPage(1); setTimeout(loadProblems, 0) }}
+          showSizeChanger
+          pageSizeOptions={['5', '10', '20', '50']}
+          showTotal={(t) => `共 ${t} 道题目`}
+          hideOnSinglePage={false}
+        />
+      </div>
 
       {/* ── 提交统计弹窗 ── */}
       <Modal

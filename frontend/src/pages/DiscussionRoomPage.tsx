@@ -6,7 +6,7 @@ import {
 import {
   SendOutlined, RobotOutlined, ArrowLeftOutlined,
   UserOutlined, BellOutlined, BulbOutlined,
-  ThunderboltOutlined, StarOutlined,
+  ThunderboltOutlined, StarOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -535,6 +535,14 @@ const DiscussionRoomPage: React.FC = () => {
         onCancel={() => setSummaryModal(false)}
         footer={[
           <Button key="close" onClick={() => setSummaryModal(false)}>关闭</Button>,
+          <Button key="export" icon={<DownloadOutlined />}
+            disabled={!summaryData?.content}
+            onClick={() => {
+              const token = localStorage.getItem('smartkb_token')
+              window.open(`/api/interaction/groups/${groupId}/summary/export?token=${token}`, '_blank')
+            }}>
+            导出 Word
+          </Button>,
           <Button key="regenerate" type="primary" icon={<ThunderboltOutlined />}
             loading={generatingSummary}
             onClick={handleAiSummary}>
