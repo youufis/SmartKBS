@@ -61,7 +61,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
   ]},
   { icon: <TrophyOutlined />, label: '成长档案', key: 'growth', children: [
     { key: '/score', icon: <StarOutlined />, label: '积分奖励' },
-    { key: '/portfolio', icon: <UserOutlined />, label: '成长档案' },
+    { key: '/portfolio', icon: <UserOutlined />, label: '我的档案' },
   ]},
   { icon: <SettingOutlined />, label: '系统', key: 'sys', children: [
     { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
@@ -129,7 +129,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
 const AppLayout: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, onlineCount, logout, fetchOnlineCount } = useAuthStore()
+  const { user, onlineCount, logout, fetchOnlineCount, isLoggedIn } = useAuthStore()
   const [collapsed, setCollapsed] = React.useState(false)
   const [openKeys, setOpenKeys] = useState<string[]>(() => {
     try {
@@ -197,6 +197,46 @@ const AppLayout: React.FC = () => {
     }
   }, [location.pathname, isStudent])
 
+  // ── 加载当前用户称号等级（用于顶栏头像） ──
+  const [userTitleLevel, setUserTitleLevel] = useState(1)
+  const [userTitleColor, setUserTitleColor] = useState('#1677ff')
+  useEffect(() => {
+    if (isLoggedIn) {
+      apiClient.get('/api/rewards/my-title').then(({ data }) => {
+        if (data?.main_title) {
+          setUserTitleLevel(data.main_title.level || 1)
+          const cMap: Record<string, string> = {
+            lime: '#a0d911', green: '#52c41a', cyan: '#13c2c2',
+            blue: '#1677ff', geekblue: '#2f54eb', purple: '#722ed1',
+            magenta: '#eb2f96', gold: '#faad14', orange: '#fa8c16',
+            volcano: '#fa541c', red: '#f5222d',
+          }
+          setUserTitleColor(cMap[data.main_title.color] || '#1677ff')
+        }
+      }).catch(() => {})
+    }
+  }, [isLoggedIn])
+
+  // ── 等级头像 emoji 映射（与 PortfolioPage 保持一致） ──
+  const getTitleEmoji = (level: number, role: string, gender: string): string => {
+    if (role === 'admin') return '⚜️'
+    if (role === 'teacher') return '🎓'
+    if (level <= 1) return '🪴'
+    if (level <= 2) return '🌱'
+    if (level <= 3) return '🌿'
+    if (level <= 4) return '🌳'
+    if (level <= 5) return '🎯'
+    if (level <= 6) return '🔮'
+    if (level <= 7) return '🚀'
+    if (level <= 8) return '🌟'
+    if (level <= 9) return '🌙'
+    if (level <= 10) return '☀️'
+    if (level <= 11) return '👑'
+    return '💎'
+  }
+  const avatarEmoji = getTitleEmoji(userTitleLevel, user?.role || 'student', user?.gender || '')
+  const avatarBg = isAdmin ? '#f5222d' : isTeacher ? '#722ed1' : userTitleColor
+
   React.useEffect(() => {
     fetchOnlineCount()
     const timer = setInterval(fetchOnlineCount, 30000)
@@ -255,7 +295,9 @@ const AppLayout: React.FC = () => {
           <NotificationBell />
           <Dropdown menu={userMenu} placement="bottomRight">
             <Space style={{ cursor: 'pointer' }}>
-              <Avatar icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
+              <Avatar style={{ backgroundColor: avatarBg, verticalAlign: 'middle', fontSize: 18, lineHeight: '40px' }}>
+                {avatarEmoji}
+              </Avatar>
               <span>{user?.name || user?.username}</span>
             </Space>
           </Dropdown>

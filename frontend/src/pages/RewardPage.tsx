@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card, Table, Tabs, Button, Space, Typography, Tag, message,
   Spin, Empty, Statistic, Row, Col, Select, Tooltip, Progress,
-  Collapse,
+  Collapse, Modal, Divider,
 } from 'antd'
 import {
   TrophyOutlined, HistoryOutlined, TeamOutlined,
@@ -316,6 +316,41 @@ const RewardPage: React.FC = () => {
   const [titleConfig, setTitleConfig] = useState<MainTitle[]>([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('my')
+  const [rulesOpen, setRulesOpen] = useState(false)
+
+  // ── 积分规则（与后端 reward_engine.py 保持一致） ──
+  const RULES = [
+    { activity: '📝 随堂测验', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '📊 快速投票', base: 2, grade: '—' },
+    { activity: '🙋 课堂提问', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '📖 考试', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '🤖 智能练习', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '💬 分组讨论', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '✅ 点名签到', base: 2, grade: '—' },
+    { activity: '💭 AI 对话', base: 2, grade: '—' },
+    { activity: '📋 任务', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '📈 学习进度', base: 2, grade: '—' },
+    { activity: '🔑 每日登录', base: 1, grade: '—' },
+    { activity: '💻 代码练习', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '🎮 知识闯关', base: 1, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '⚡ 知识抢答', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+  ]
+
+  // ── 等级头像成长进化表（与 PortfolioPage / AppLayout 保持一致） ──
+  const LEVEL_AVATARS = [
+    { level: 'Lv.1', emoji: '🪴', range: '0~14 分 · 萌芽' },
+    { level: 'Lv.2', emoji: '🌱', range: '15~39 分 · 幼苗' },
+    { level: 'Lv.3', emoji: '🌿', range: '40~74 分 · 生长' },
+    { level: 'Lv.4', emoji: '🌳', range: '75~119 分 · 成才' },
+    { level: 'Lv.5', emoji: '🎯', range: '120~179 分 · 精准' },
+    { level: 'Lv.6', emoji: '🔮', range: '180~249 分 · 洞察' },
+    { level: 'Lv.7', emoji: '🚀', range: '250~329 分 · 突破' },
+    { level: 'Lv.8', emoji: '🌟', range: '330~419 分 · 闪耀' },
+    { level: 'Lv.9', emoji: '🌙', range: '420~519 分 · 卓越' },
+    { level: 'Lv.10', emoji: '☀️', range: '520~639 分 · 辉煌' },
+    { level: 'Lv.11', emoji: '👑', range: '640~799 分 · 至尊' },
+    { level: 'Lv.12', emoji: '💎', range: '800+ 分 · 巅峰' },
+  ]
 
   // 教师端：班级排名
   const [grades, setGrades] = useState<string[]>([])
@@ -437,8 +472,29 @@ const RewardPage: React.FC = () => {
   }, [isStudent, fetchTitleInfo])
 
   // 学生视图：称号 + 积分
+  // ── 积分规则弹窗 ──
+  const renderRulesModal = () => (
+    <Modal title="📋 积分奖励规则" open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={640}>
+      <Table dataSource={RULES} rowKey="activity" size="small" pagination={false}
+        columns={[
+          { title: '活动类型', dataIndex: 'activity', width: 140 },
+          { title: '参与基础分', dataIndex: 'base', width: 100, render: (v: number) => <Tag color="blue">+{v}</Tag> },
+          { title: '成绩等级奖励', dataIndex: 'grade', render: (v: string) => v === '—' ? <Text type="secondary">无</Text> : <Text style={{ color: '#52c41a' }}>{v}</Text> },
+        ]} />
+      <Divider />
+      <Text strong style={{ fontSize: 14 }}>🌱 等级头像·成长进化</Text>
+      <Table dataSource={LEVEL_AVATARS} rowKey="level" size="small" pagination={false} style={{ marginTop: 8 }}
+        columns={[
+          { title: '等级', dataIndex: 'level', width: 60, render: (lvl: string) => <Tag>{lvl}</Tag> },
+          { title: '头像', dataIndex: 'emoji', width: 60, render: (em: string) => <span style={{ fontSize: 22 }}>{em}</span> },
+          { title: '称号区间', dataIndex: 'range', render: (r: string) => <Text style={{ fontSize: 13 }}>{r}</Text> },
+        ]} />
+    </Modal>
+  )
+
   const renderStudentView = () => (
     <Spin spinning={loading}>
+      {renderRulesModal()}
       {/* 主称号卡片 */}
       {titleInfo && <TitleCard info={titleInfo} />}
 
@@ -694,30 +750,15 @@ const RewardPage: React.FC = () => {
   return (
     <div>
       <Card>
-        <Space style={{ marginBottom: 16 }}>
-          <TrophyOutlined style={{ fontSize: 24, color: '#faad14' }} />
-          <Title level={4} style={{ margin: 0 }}>🏆 积分奖励</Title>
-        </Space>
-
-        {/* 积分规则说明 */}
-        <Card size="small" style={{ marginBottom: 16, background: '#fffbe6' }}>
-          <Space direction="vertical" size={4}>
-            <Text type="secondary">📋 积分规则：</Text>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              • 参与任何课堂活动均可获得 <Tag color="blue">+2 分</Tag> 基础参与分
-            </Text>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              • 获得优秀成绩（得分率≥90%）可获得 <Tag color="success">+15 分</Tag> 优秀奖励
-            </Text>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              • 获得良好成绩（得分率≥75%）可获得 <Tag color="processing">+10 分</Tag> 良好奖励
-            </Text>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              • 成绩及格（得分率≥60%）可获得 <Tag color="warning">+5 分</Tag> 及格奖励
-            </Text>            <Text type="secondary" style={{ fontSize: 13 }}>
-              • 每日首次登录可获得 <Tag color="cyan">+1 分</Tag> 登录奖励（一天一次）
-            </Text>          </Space>
-        </Card>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Space>
+            <TrophyOutlined style={{ fontSize: 24, color: '#faad14' }} />
+            <Title level={4} style={{ margin: 0 }}>🏆 积分奖励</Title>
+          </Space>
+          <Button type="link" icon={<TrophyOutlined />} onClick={() => setRulesOpen(true)}>
+            积分规则
+          </Button>
+        </div>
 
         {isStudent ? renderStudentView() : (
           <Tabs activeKey={activeTab} onChange={setActiveTab}>
