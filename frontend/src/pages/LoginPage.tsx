@@ -101,7 +101,7 @@ const LoginPage: React.FC = () => {
         </Space>
       </Card>
       <div style={{ position: 'fixed', bottom: 16, textAlign: 'center', width: '100%', color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
-        Copyright © 2026 By UNET All rights reserved.
+        © 2026 UNET. All rights reserved.
       </div>
     </div>
   )
