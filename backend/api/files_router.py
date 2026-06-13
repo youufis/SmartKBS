@@ -149,7 +149,7 @@ async def serve_static_file(path: str, request: Request):
     - 管理员 (role=0): 可访问所有目录
     - 教师 (role=1): 可访问 root/（共享资源）和自己目录下的资源
     - 学生 (role=2): 仅可访问 stu/自己学号/ 下的资源 + 共享给该学生的资源
-    - 未登录: 仅可访问 about_help.md 等公开文件
+    - 未登录: 仅可访问 USER_MANUAL.md 等公开文件
     
     共享覆盖：管理员共享给所有人的资源、教师共享给对应年级/班级的资源也可访问。
     """
@@ -168,7 +168,7 @@ async def serve_static_file(path: str, request: Request):
     basename = os.path.basename(requested_path)
     
     # 公开文件：未登录也可访问
-    public_files = {"about_help.md"}
+    public_files = {"USER_MANUAL.md"}
     if basename in public_files:
         return FileResponse(requested_path)
 
