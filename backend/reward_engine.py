@@ -103,6 +103,22 @@ def _update_student_total(student_username: str, check_upgrade: bool = True):
     return new_total
 
 
+def deduct_points(student_username: str, reason: str, points: int = 2) -> int:
+    """扣除学生积分（记录为负数 reward），返回实际扣除的分数"""
+    if points <= 0:
+        return 0
+    now = _now()
+    execute_insert_update(
+        """INSERT INTO activity_rewards
+           (student_username, activity_type, activity_id, activity_title, reward_type, points, reason, created_at)
+           VALUES (?, ?, ?, ?, 'penalty', ?, ?, ?)""",
+        (student_username, "penalty", f"{now}_{student_username}", reason, -points, reason, now),
+    )
+    _update_student_total(student_username)
+    logger.info(f"积分扣除: {student_username} {points} 分 ({reason})")
+    return points
+
+
 def award_participation(student_username: str, activity_type: str, activity_id: str,
                         activity_title: str = "", teacher_username: str = "") -> int:
     """发放参与基础分（2分）"""

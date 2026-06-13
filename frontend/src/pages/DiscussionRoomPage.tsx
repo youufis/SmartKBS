@@ -227,8 +227,9 @@ const DiscussionRoomPage: React.FC = () => {
         lastPollIdRef.current = data.id
       }
       // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
-    } catch {
-      message.error('发送失败')
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      message.error(detail || '发送失败')
     } finally {
       setSending(false)
     }
