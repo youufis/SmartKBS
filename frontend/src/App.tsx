@@ -61,6 +61,19 @@ function App() {
     restoreSession()
   }, [restoreSession])
 
+  // 学生登录后自动检查错题数，超过30则生成错题巩固练习
+  useEffect(() => {
+    if (!sessionRestoring && isLoggedIn && user?.role === 'student') {
+      (async () => {
+        try {
+          await fetch('/api/wrong-book/practice/check-auto')
+        } catch {
+          // 静默失败，不影响登录
+        }
+      })()
+    }
+  }, [sessionRestoring, isLoggedIn, user?.role])
+
   // 监听异地登录踢出事件
   useEffect(() => {
     const handler = (e: Event) => {

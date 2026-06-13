@@ -729,10 +729,12 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
 
     # ── 标记错题本中已掌握的题目 ──
     try:
-        from backend.api.wrong_book_router import mark_wrong_mastered
+        from backend.api.wrong_book_router import mark_wrong_mastered, check_and_auto_generate_wrong_practice
         correct_graded = {k: v for k, v in graded.items() if isinstance(v, dict) and v.get("is_correct", False)}
         if correct_graded:
             mark_wrong_mastered(username, correct_graded)
+        # 检查并自动生成错题巩固练习（如果仍然超过30题）
+        check_and_auto_generate_wrong_practice(username)
     except Exception as wb_err:
         logger.warning(f"标记错题掌握状态失败: {wb_err}")
 
