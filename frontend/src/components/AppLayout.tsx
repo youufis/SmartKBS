@@ -262,7 +262,7 @@ const AppLayout: React.FC = () => {
         </Space>
       </Header>
 
-      <Layout>
+      <Layout style={{ height: 'calc(100vh - 64px)' }}>
         <Sider
           width={200}
           collapsedWidth={64}
@@ -274,6 +274,10 @@ const AppLayout: React.FC = () => {
             background: '#fff',
             borderRight: '1px solid #f0f0f0',
             overflow: 'auto',
+            height: '100%',
+            position: 'sticky',
+            top: 0,
+            left: 0,
           }}
         >
           {/* 折叠/展开切换按钮 */}
@@ -304,7 +308,7 @@ const AppLayout: React.FC = () => {
           />
         </Sider>
 
-        <Content style={{ padding: '8px 0', background: '#f5f5f5', overflow: 'auto' }}>
+        <Content style={{ padding: '8px 0', background: '#f5f5f5', overflow: 'auto', height: '100%' }}>
           {location.pathname === '/code-practice' && (
             <div style={{
               padding: '12px 24px',
