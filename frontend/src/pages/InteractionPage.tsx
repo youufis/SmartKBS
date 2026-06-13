@@ -75,11 +75,34 @@ const InteractionPage: React.FC = () => {
 
   // ── 提问 ──
   const [questions, setQuestions] = useState<any[]>([])
+  const [questionTotal, setQuestionTotal] = useState(0)
+  const [questionFilter, setQuestionFilter] = useState<string>('')
   const [questionLoading, setQuestionLoading] = useState(false)
   const [askModal, setAskModal] = useState(false)
   const [answerModal, setAnswerModal] = useState<any>(null)
   const [answerText, setAnswerText] = useState('')
   const [askForm] = Form.useForm()
+  // 弹窗中展示的学生回答列表
+  const [modalAnswers, setModalAnswers] = useState<any[]>([])
+  const [modalAnswersLoading, setModalAnswersLoading] = useState(false)
+  const [modalExpandedAnswers, setModalExpandedAnswers] = useState<Record<number, boolean>>({})
+  // 打开详情弹窗时，加载已通过的学生回答
+  useEffect(() => {
+    if (!answerModal?.id) { setModalAnswers([]); setModalExpandedAnswers({}); return }
+    (async () => {
+      setModalAnswersLoading(true)
+      try {
+        const { data } = await apiClient.get(`/api/interaction/questions/${answerModal.id}/answers`)
+        // 只展示已通过的，且过滤掉自己的（避免重复）
+        const approved = (data.answers || []).filter((a: any) => a.status === 'approved')
+        setModalAnswers(approved)
+      } catch { /* ignore */ }
+      setModalAnswersLoading(false)
+    })()
+  }, [answerModal?.id])
+
+  // ── 当前激活的 Tab ──
+  const [activeTab, setActiveTab] = useState('questions')
 
   // ── 编辑状态 ──
   const [editQuizModal, setEditQuizModal] = useState<any>(null)
@@ -91,22 +114,28 @@ const InteractionPage: React.FC = () => {
 
   // ── 编辑/删除处理 ──
   const handleDeleteQuiz = async (id: number) => {
-    try { await apiClient.delete(`/api/interaction/quizzes/${id}`); message.success('已删除'); loadQuizzes() }
+    try { await apiClient.delete(`/api/interaction/quizzes/${id}`); message.success('已删除'); setActiveTab('quizzes'); await loadQuizzes() }
     catch { message.error('删除失败') }
   }
   const handleDeletePoll = async (id: number) => {
-    try { await apiClient.delete(`/api/interaction/polls/${id}`); message.success('已删除'); loadPolls() }
+    try { await apiClient.delete(`/api/interaction/polls/${id}`); message.success('已删除'); setActiveTab('polls'); await loadPolls() }
     catch { message.error('删除失败') }
   }
   const handleDeleteQuestion = async (id: number) => {
-    try { await apiClient.delete(`/api/interaction/questions/${id}`); message.success('已删除'); loadQuestions() }
-    catch { message.error('删除失败') }
+    try {
+      await apiClient.delete(`/api/interaction/questions/${id}`)
+      message.success('已删除')
+      setActiveTab('questions')
+      // 乐观移除
+      setQuestions(prev => prev.filter(q => q.id !== id))
+      setQuestionTotal(prev => Math.max(0, prev - 1))
+    } catch (err: any) { message.error(err?.response?.data?.detail || '删除失败') }
   }
   const handleEditQuiz = async () => {
     const values = await editQuizForm.validateFields()
     try {
       await apiClient.put(`/api/interaction/quizzes/${editQuizModal.id}`, values)
-      message.success('已更新'); setEditQuizModal(null); loadQuizzes()
+      message.success('已更新'); setEditQuizModal(null); setActiveTab('quizzes'); await loadQuizzes()
     } catch { message.error('更新失败') }
   }
   const handleEditPoll = async () => {
@@ -117,15 +146,17 @@ const InteractionPage: React.FC = () => {
         options: values.options.split('\n').filter((l: string) => l.trim()),
         poll_type: values.poll_type || 'single',
       })
-      message.success('已更新'); setEditPollModal(null); loadPolls()
+      message.success('已更新'); setEditPollModal(null); setActiveTab('polls'); await loadPolls()
     } catch { message.error('更新失败') }
   }
   const handleEditQuestion = async () => {
     const values = await editQuestionForm.validateFields()
     try {
       await apiClient.put(`/api/interaction/questions/${editQuestionModal.id}`, { content: values.content })
-      message.success('已更新'); setEditQuestionModal(null); loadQuestions()
-    } catch { message.error('更新失败') }
+      message.success('已更新'); setEditQuestionModal(null); setActiveTab('questions')
+      // 乐观更新
+      setQuestions(prev => prev.map(q => q.id === editQuestionModal.id ? { ...q, content: values.content } : q))
+    } catch (err: any) { message.error(err?.response?.data?.detail || '更新失败') }
   }
 
   // ── 加载数据 ──
@@ -154,15 +185,24 @@ const InteractionPage: React.FC = () => {
     setPollLoading(false)
   }
 
-  const loadQuestions = async () => {
+  const loadQuestions = async (page?: number, pageSize?: number, filter?: string) => {
     setQuestionLoading(true)
     try {
-      const { data } = await apiClient.get('/api/interaction/questions', {
-        params: isTeacherOrAdmin ? {} : {},
-      })
-      setQuestions(data.questions || [])
-    } catch { /* ignore */ }
-    setQuestionLoading(false)
+      const p = page ?? questionPage
+      const ps = pageSize ?? questionPageSize
+      const f = filter !== undefined ? filter : questionFilter
+      const params: Record<string, any> = { page: p, page_size: ps }
+      if (f) params.status = f
+      const { data } = await apiClient.get('/api/interaction/questions', { params })
+      if (data) {
+        setQuestions(data.questions || [])
+        setQuestionTotal(data.total || 0)
+      }
+    } catch (e) {
+      console.error('加载提问列表失败:', e)
+    } finally {
+      setQuestionLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -200,7 +240,8 @@ const InteractionPage: React.FC = () => {
         message.success(`成功创建测验，共 ${aiQuizResult.questions.length} 题`)
         setAiQuizModal(false)
         setAiQuizResult(null)
-        loadQuizzes()
+        setActiveTab('quizzes')
+        await loadQuizzes()
       } catch (err: any) {
         message.error(err.response?.data?.detail || '创建失败')
       }
@@ -264,7 +305,8 @@ const InteractionPage: React.FC = () => {
       })
       message.success(`测验「${title}」创建成功，共 ${questions.length} 题`)
       setQuizEditorOpen(false)
-      loadQuizzes()
+      setActiveTab('quizzes')
+      await loadQuizzes()
     } catch (err: any) {
       message.error(err.response?.data?.detail || '创建失败')
       throw err
@@ -359,7 +401,8 @@ const InteractionPage: React.FC = () => {
       message.success('投票创建成功')
       setPollModal(false)
       pollForm.resetFields()
-      loadPolls()
+      setActiveTab('polls')
+      await loadPolls()
     } catch (err: any) {
       message.error(err.response?.data?.detail || '创建失败')
     }
@@ -380,7 +423,8 @@ const InteractionPage: React.FC = () => {
         })
         message.success('投票成功')
         setVotedPolls({ ...votedPolls, [pollId]: true })
-        loadPolls()
+        setActiveTab('polls')
+        await loadPolls()
         setTakingPoll(null)
       } catch (err: any) {
         message.error(err.response?.data?.detail || '投票失败')
@@ -394,7 +438,8 @@ const InteractionPage: React.FC = () => {
         })
         message.success('投票成功')
         setVotedPolls({ ...votedPolls, [pollId]: true })
-        loadPolls()
+        setActiveTab('polls')
+        await loadPolls()
         setTakingPoll(null)
       } catch (err: any) {
         message.error(err.response?.data?.detail || '投票失败')
@@ -419,27 +464,42 @@ const InteractionPage: React.FC = () => {
   // ── 提问 ──
   const handleAskQuestion = async (values: any) => {
     try {
-      await apiClient.post('/api/interaction/questions', {
+      const { data } = await apiClient.post('/api/interaction/questions', {
         content: values.content,
         is_anonymous: values.is_anonymous || false,
       })
       message.success('提问成功')
       setAskModal(false)
       askForm.resetFields()
-      loadQuestions()
-    } catch { message.error('提问失败') }
+      // 乐观更新：将新问题插入列表顶部，无需等待重新加载
+      if (data?.question) {
+        setQuestions(prev => [data.question, ...prev])
+        setQuestionTotal(prev => prev + 1)
+      }
+      setActiveTab('questions')
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      message.error(detail || '提问失败')
+    }
   }
 
   const handleAnswerQuestion = async (qId: number) => {
     if (!answerText.trim()) { message.warning('请输入回答'); return }
     try {
       await apiClient.put(`/api/interaction/questions/${qId}/answer`, { answer: answerText })
-      message.success('回答成功')
+      const isStudentAnswer = !isTeacherOrAdmin
+      message.success(isStudentAnswer ? '回答已提交，等待教师审批' : '回答成功')
       setAnswerModal(null)
       setAnswerText('')
-      loadQuestions()
-    } catch { message.error('回答失败') }
+      setActiveTab('questions')
+      await loadQuestions()
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      message.error(detail || '回答失败')
+    }
   }
+
+
 
   const tabItems = [
     {
@@ -632,13 +692,48 @@ const InteractionPage: React.FC = () => {
               发起提问
             </Button>
           )}
+          {/* 状态筛选 — 教师和学生都可用 */}
+          <div style={{ marginBottom: 12 }}>
+            <Space>
+              <Text type="secondary">状态：</Text>
+              <Select
+                value={questionFilter || 'all'}
+                onChange={(val) => {
+                  const newFilter = val === 'all' ? '' : val
+                  setQuestionFilter(newFilter)
+                  setQuestionPage(1)
+                  loadQuestions(1, questionPageSize, newFilter)
+                }}
+                style={{ width: 120 }}
+                options={[
+                  { label: '全部', value: 'all' },
+                  { label: '待回答', value: 'pending' },
+                  { label: '已回答', value: 'answered' },
+
+                ]}
+              />
+            </Space>
+          </div>
           <Spin spinning={questionLoading}>
             {questions.length === 0 ? <Empty description="暂无提问" /> : (
-              <>
               <List
-                dataSource={questions.slice((questionPage - 1) * questionPageSize, questionPage * questionPageSize)}
+                dataSource={questions}
                 renderItem={(q: any) => {
                   const qContent = q.content?.length > 50 ? q.content.slice(0, 50) + '...' : q.content
+                  const [expanded, setExpanded] = React.useState(false)
+                  const [studentAnswers, setStudentAnswers] = React.useState<any[]>([])
+                  const [answersLoading, setAnswersLoading] = React.useState(false)
+                  const [expandedAnswers, setExpandedAnswers] = React.useState<Record<number, boolean>>({})
+                  const loadStudentAnswers = async (forceRefresh = false) => {
+                    if (!forceRefresh && expanded) { setExpanded(false); return }
+                    setAnswersLoading(true)
+                    try {
+                      const { data } = await apiClient.get(`/api/interaction/questions/${q.id}/answers`)
+                      setStudentAnswers(data.answers || [])
+                      setExpanded(true)
+                    } catch { message.error('加载回答失败') }
+                    setAnswersLoading(false)
+                  }
                   return (
                     <Card size="small" style={{ marginBottom: 8 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -646,51 +741,180 @@ const InteractionPage: React.FC = () => {
                           <Text strong>{qContent}</Text>
                           <div style={{ marginTop: 4 }}>
                             {q.is_anonymous ? <Tag>匿名</Tag> : !isStudent && <Tag>{q.student_username}</Tag>}
-                            <Tag color={q.status === 'answered' ? 'green' : 'orange'}>
-                              {q.status === 'answered' ? '已回答' : '待回答'}
-                            </Tag>
+                            {q.status === 'answered' && <Tag color="green">已回答</Tag>}
+                            {q.status === 'pending' && <Tag color="orange">待回答</Tag>}
                             <Text type="secondary" style={{ fontSize: 12 }}>{q.created_at?.slice(0, 16)}</Text>
+                            {q.answered_by && q.status === 'answered' && (
+                              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                                回答者：{q.answered_by}
+                              </Text>
+                            )}
+                            {/* 学生回答统计 */}
+                            {q.student_answer_count > 0 && (
+                              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                                {q.student_answer_count} 位同学回答
+                                {q.approved_answer_count > 0 && `（${q.approved_answer_count} 已通过）`}
+                              </Text>
+                            )}
+                            {/* 当前学生的回答状态 */}
+                            {isStudent && q.my_answer_status === 'pending_approval' && (
+                              <Tag color="purple" style={{ marginLeft: 4 }}>我的回答待审批</Tag>
+                            )}
+                            {isStudent && q.my_answer_status === 'approved' && (
+                              <Tag color="green" style={{ marginLeft: 4 }}>我的回答已通过</Tag>
+                            )}
+                            {isStudent && q.my_answer_status === 'rejected' && (
+                              <Tag color="red" style={{ marginLeft: 4 }}>我的回答未通过</Tag>
+                            )}
                           </div>
                         </div>
                         <Space>
                           {isStudent && (
-                            <Button size="small" type="primary" icon={<QuestionCircleOutlined />}
-                              onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>查看详情</Button>
+                            <>
+                              <Button size="small" type="primary" icon={<QuestionCircleOutlined />}
+                                onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>查看详情</Button>
+                              {/* 学生可回答同学的提问（未答过、pending状态） */}
+                              {!q.is_own && q.status === 'pending' && !q.my_answer_status && (
+                                <Button size="small" icon={<SendOutlined />}
+                                  onClick={() => { setAnswerText(''); setAnswerModal(q) }}>回答</Button>
+                              )}
+                              {/* 如果曾被拒绝，可以重新回答 */}
+                              {!q.is_own && q.my_answer_status === 'rejected' && (
+                                <Button size="small" icon={<SendOutlined />}
+                                  onClick={() => { setAnswerText(''); setAnswerModal(q) }}>重新回答</Button>
+                              )}
+                              {q.is_own && (
+                                <Button size="small" icon={<EditOutlined />}
+                                  onClick={() => {
+                                    editQuestionForm.setFieldsValue({ content: q.content })
+                                    setEditQuestionModal(q)
+                                  }}>编辑</Button>
+                              )}
+                              {q.is_own && (
+                                <Popconfirm title="删除此提问？" onConfirm={() => handleDeleteQuestion(q.id)}>
+                                  <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                                </Popconfirm>
+                              )}
+                            </>
                           )}
                           {isTeacherOrAdmin && (
                             <>
-                              <Button size="small" type={q.status === 'pending' ? 'primary' : 'default'}
+                              {/* 教师始终可回答；若已有教师回答则显示「编辑」 */}
+                              <Button size="small"
+                                type={q.answer ? 'default' : 'primary'}
                                 icon={<SendOutlined />}
                                 onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>
-                                {q.status === 'pending' ? '回答' : '编辑'}
+                                {q.answer ? '编辑' : '回答'}
                               </Button>
+                              {/* 展开/收起查看所有学生回答 */}
+                              {q.student_answer_count > 0 && (
+                                <Button size="small" icon={expanded ? <EditOutlined /> : <PlusOutlined />}
+                                  loading={answersLoading}
+                                  onClick={() => {
+                                    if (expanded) { setExpanded(false); return }
+                                    loadStudentAnswers(true)
+                                  }}>
+                                  {expanded ? '收起' : `${q.student_answer_count} 个回答`}
+                                </Button>
+                              )}
                               <Popconfirm title="删除此提问？" onConfirm={() => handleDeleteQuestion(q.id)}>
                                 <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                               </Popconfirm>
                             </>
                           )}
-                          {isStudent && q.student_username === user?.username && (
-                            <Popconfirm title="删除此提问？" onConfirm={() => handleDeleteQuestion(q.id)}>
-                              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                            </Popconfirm>
-                          )}
                         </Space>
                       </div>
+                      {/* 展开的学生回答列表（教师端） */}
+                      {expanded && isTeacherOrAdmin && (
+                        <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid #d9d9d9' }}>
+                          {studentAnswers.length === 0 ? (
+                            <Text type="secondary">暂无学生回答</Text>
+                          ) : (
+                            studentAnswers.map((sa: any) => (
+                              <div key={sa.id} style={{
+                                marginBottom: 8, padding: 8, borderRadius: 4,
+                                background: sa.status === 'approved' ? '#f6ffed' :
+                                           sa.status === 'rejected' ? '#fff2f0' : '#fffbe6',
+                                border: '1px solid',
+                                borderColor: sa.status === 'approved' ? '#b7eb8f' :
+                                            sa.status === 'rejected' ? '#ffccc7' : '#ffe58f',
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                  <Text strong style={{ fontSize: 13 }}>{sa.student_username}</Text>
+                                  <Space size="small">
+                                    {sa.status === 'pending_approval' && (
+                                      <>
+                                        <Button size="small" type="primary"
+                                          icon={<CheckCircleOutlined />}
+                                          onClick={async () => {
+                                            try {
+                                              await apiClient.put(`/api/interaction/questions/${q.id}/answers/${sa.id}/approve`)
+                                              message.success('已通过')
+                                              loadStudentAnswers(true)
+                                              loadQuestions(questionPage, questionPageSize, questionFilter)
+                                            } catch { message.error('操作失败') }
+                                          }}>通过</Button>
+                                        <Popconfirm title="拒绝此回答？" onConfirm={async () => {
+                                          try {
+                                            await apiClient.put(`/api/interaction/questions/${q.id}/answers/${sa.id}/reject`)
+                                            message.success('已拒绝')
+                                            loadStudentAnswers(true)
+                                          } catch { message.error('操作失败') }
+                                        }}>
+                                          <Button size="small" danger icon={<DeleteOutlined />}>拒绝</Button>
+                                        </Popconfirm>
+                                      </>
+                                    )}
+                                    {sa.status === 'approved' && <Tag color="green">已通过</Tag>}
+                                    {sa.status === 'rejected' && <Tag color="red">已拒绝</Tag>}
+                                  </Space>
+                                </div>
+                                <div style={{
+                                  marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                                  maxHeight: expandedAnswers[sa.id] ? 'none' : '72px',
+                                  overflow: 'hidden',
+                                  transition: 'max-height 0.2s',
+                                  lineHeight: '22px',
+                                  display: 'block',
+                                }}>
+                                  {sa.answer}
+                                </div>
+                                {sa.answer?.length > 80 && (
+                                  <Button type="link" size="small" style={{ padding: 0, height: 20, fontSize: 12 }}
+                                    onClick={() => setExpandedAnswers(prev => ({ ...prev, [sa.id]: !prev[sa.id] }))}>
+                                    {expandedAnswers[sa.id] ? '收起' : '展开全文...'}
+                                  </Button>
+                                )}
+                                <div style={{ marginTop: 2 }}>
+                                  <Text type="secondary" style={{ fontSize: 11 }}>
+                                    {sa.created_at?.slice(0, 16)}
+                                  </Text>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
                     </Card>
                   )
                 }}
               />
-              <div style={{ marginTop: 12, textAlign: 'center' }}>
-                <Pagination
-                  current={questionPage} pageSize={questionPageSize} total={questions.length}
-                  showSizeChanger showTotal={(t) => `共 ${t} 个提问`}
-                  pageSizeOptions={['5', '10', '20', '50']}
-                  onChange={(p, ps) => { setQuestionPage(p); setQuestionPageSize(ps) }}
-                  size="small"
-                />
-              </div>
-            </>
             )}
+            {/* 分页始终显示，方便切换页面 */}
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <Pagination
+                current={questionPage} pageSize={questionPageSize}
+                total={questionTotal}
+                showSizeChanger showTotal={(t) => `共 ${t} 个提问`}
+                pageSizeOptions={['5', '10', '20', '50']}
+                onChange={(p, ps) => {
+                  setQuestionPage(p)
+                  setQuestionPageSize(ps)
+                  loadQuestions(p, ps, questionFilter)
+                }}
+                size="small"
+              />
+            </div>
           </Spin>
         </div>
       ),
@@ -745,7 +969,7 @@ const InteractionPage: React.FC = () => {
       </Card>
 
       <Card>
-        <Tabs items={tabItems} />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
 
       {/* ── 答题弹窗 ── */}
@@ -1131,7 +1355,7 @@ const InteractionPage: React.FC = () => {
             <TextArea rows={3} placeholder="输入你的问题...（支持 Markdown 格式）" />
           </Form.Item>
           <Form.Item name="is_anonymous" valuePropName="checked">
-            <Radio checked={false}>匿名提问</Radio>
+            <Checkbox>匿名提问</Checkbox>
           </Form.Item>
           <Button type="primary" htmlType="submit" block>提交问题</Button>
         </Form>
@@ -1197,34 +1421,89 @@ const InteractionPage: React.FC = () => {
           </Button>,
         ] : [
           <Button key="close" onClick={() => setAnswerModal(null)}>关闭</Button>,
+          ...(answerModal?.status === 'pending' && !answerModal?.is_own
+            ? [<Button key="submit" type="primary" onClick={() => handleAnswerQuestion(answerModal?.id)}>提交回答</Button>]
+            : []),
         ]}
         width={640}>
         {/* 问题信息 */}
         <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
           <div style={{ marginBottom: 8 }}>
-            {answerModal?.is_anonymous ? <Tag>匿名</Tag> : <Tag>{answerModal?.student_username}</Tag>}
-            <Tag color={answerModal?.status === 'answered' ? 'green' : 'orange'}>
-              {answerModal?.status === 'answered' ? '已回答' : '待回答'}
-            </Tag>
+            {answerModal?.is_anonymous ? <Tag>匿名</Tag> : (
+              isTeacherOrAdmin ? <Tag>{answerModal?.student_username}</Tag> : null
+            )}
+            {answerModal?.status === 'answered' && <Tag color="green">已回答</Tag>}
+            {answerModal?.status === 'pending' && <Tag color="orange">待回答</Tag>}
             <Text type="secondary" style={{ fontSize: 12 }}>{answerModal?.created_at?.slice(0, 16)}</Text>
+            {answerModal?.answered_at && (
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                回答于 {answerModal.answered_at?.slice(0, 16)}
+              </Text>
+            )}
           </div>
           <div className="markdown-content">
             <ReactMarkdown>{answerModal?.content || ''}</ReactMarkdown>
           </div>
         </Card>
-        {/* 教师回答区 */}
-        {answerModal?.answer && (
-          <div style={{ marginBottom: 12, padding: 12, background: '#f6f8ff', borderRadius: 6, borderLeft: '3px solid #1677ff' }}>
-            <Text type="secondary" strong>教师回答：</Text>
-            <div className="markdown-content" style={{ marginTop: 4 }}>
-              <ReactMarkdown>{answerModal.answer}</ReactMarkdown>
-            </div>
+        {/* 统一回答展示区：教师回答 + 已通过的学生回答 */}
+        {(answerModal?.answer || modalAnswers.length > 0) && (
+          <div style={{ marginBottom: 12 }}>
+            <Text strong style={{ fontSize: 14 }}>回答</Text>
+            {/* 教师回答 */}
+            {answerModal?.answer && (
+              <div style={{
+                marginTop: 8, padding: 10, borderRadius: 6,
+                background: '#e6f4ff', border: '1px solid #91caff',
+              }}>
+                <div style={{ marginBottom: 4 }}>
+                  <Text strong style={{ fontSize: 13 }}>教师 {answerModal.answered_by || ''}</Text>
+                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                    {answerModal.answered_at?.slice(0, 16)}
+                  </Text>
+                </div>
+                <div className="markdown-content">
+                  <ReactMarkdown>{answerModal.answer}</ReactMarkdown>
+                </div>
+              </div>
+            )}
+            {/* 已通过的学生回答 */}
+            {modalAnswers.map((ma: any) => (
+              <div key={ma.id} style={{
+                marginTop: 8, padding: 10, borderRadius: 6,
+                background: '#f6ffed', border: '1px solid #b7eb8f',
+              }}>
+                <div style={{ marginBottom: 4 }}>
+                  <Text strong style={{ fontSize: 13 }}>{ma.student_username}</Text>
+                  <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                    {ma.created_at?.slice(0, 16)}
+                  </Text>
+                </div>
+                <div style={{
+                  fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  maxHeight: modalExpandedAnswers[ma.id] ? 'none' : '72px',
+                  overflow: 'hidden',
+                  transition: 'max-height 0.2s',
+                  lineHeight: '22px',
+                  display: 'block',
+                }}>{ma.answer}</div>
+                {ma.answer?.length > 80 && (
+                  <Button type="link" size="small" style={{ padding: 0, height: 20, fontSize: 12 }}
+                    onClick={() => setModalExpandedAnswers(prev => ({ ...prev, [ma.id]: !prev[ma.id] }))}>
+                    {modalExpandedAnswers[ma.id] ? '收起' : '展开全文...'}
+                  </Button>
+                )}
+              </div>
+            ))}
           </div>
         )}
-        {/* 教师编辑区 */}
-        {isTeacherOrAdmin && (
+        {/* 回答编辑区：教师或学生回答同学的问题 */}
+        {(isTeacherOrAdmin || (answerModal?.status === 'pending' && !answerModal?.is_own) || answerModal?.my_answer_status === 'rejected') && (
           <div style={{ marginTop: 12 }}>
-            <Text strong>{answerModal?.status === 'answered' ? '编辑回答' : '撰写回答'}</Text>
+            <Text strong>
+              {answerModal?.status === 'answered'
+                ? '编辑回答'
+                : '撰写回答'}
+            </Text>
             <TextArea rows={4} value={answerText} onChange={(e) => setAnswerText(e.target.value)}
               placeholder="输入回答（支持 Markdown），或点击「AI 建议」生成..." style={{ marginTop: 8 }} />
           </div>
