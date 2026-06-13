@@ -207,17 +207,14 @@ const WrongBookPage: React.FC = () => {
         const { data: gen } = await apiClient.post('/api/wrong-book/practice/generate', {
           count: practiceCount,
           subjects: ['信息科技'],
+          knowledge_points: kps.join('，'),
+          student_username: selectedStudent,
         })
-        const result = await pollAiTask(gen.task_id, 120000)
-        if (!result) {
-          message.error('AI 出题超时或失败，请重试')
-          setGenLoading(false)
-          setPracticeModal(false)
-          return
-        }
+        // 直接返回题目列表（非异步）
+        const questions = gen.questions || []
         // 存入 state 供弹窗使用
         const studentName = students.find(s => s.username === selectedStudent)?.name || selectedStudent
-        setGeneratedQuestions(result.questions || [])
+        setGeneratedQuestions(questions)
         setGenKp(kps.join('，'))
         setGenLoading(false)
         setPubGrade('')
@@ -229,14 +226,15 @@ const WrongBookPage: React.FC = () => {
         setPracticeModal(false)
       }
     } else {
-      // 学生 → 提示去查看智能练习
-      message.info('已通知教师针对你的薄弱知识点布置练习')
+      // 学生 → 跳转到错题巩固练习（TODO）
+      message.info('正在从错题本中抽取原题进行巩固练习...')
     }
   }
 
   useEffect(() => {
     if (isStudent) {
       loadData()
+      apiClient.get('/api/wrong-book/practice/check-auto').then(() => {}).catch(() => {})
     } else {
       const init = async () => { await loadGrades() }
       init()
