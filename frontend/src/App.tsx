@@ -43,6 +43,11 @@ import QuickQuizLobby from './pages/QuickQuizLobby'
 import QuickQuizPlay from './pages/QuickQuizPlay'
 import QuickQuizConsole from './pages/QuickQuizConsole'
 import QuickQuizResult from './pages/QuickQuizResult'
+import PracticePage from './pages/PracticePage'
+import CodePracticePage from './pages/CodePracticePage'
+import StudentQuestionsPage from './pages/StudentQuestionsPage'
+import QuickPollPage from './pages/QuickPollPage'
+import ClassSummaryPage from './pages/ClassSummaryPage'
 
 function App() {
   const navigate = useNavigate()
@@ -115,6 +120,11 @@ function App() {
             <Route path="quick-quiz/play/:roomId" element={<QuickQuizPlay />} />
             <Route path="quick-quiz/console/:roomId" element={<QuickQuizConsole />} />
             <Route path="quick-quiz/result/:roomId" element={<QuickQuizResult />} />
+            <Route path="practice" element={<PracticePage />} />
+            <Route path="code-practice" element={<CodePracticePage />} />
+            <Route path="student-questions" element={<StudentQuestionsPage />} />
+            <Route path="quick-poll" element={<QuickPollPage />} />
+            <Route path="class-summary" element={user?.role === 'admin' || user?.role === 'teacher' ? <ClassSummaryPage /> : <Navigate to="/chat" />} />
             <Route path="about" element={<AboutPage />} />
           </Route>
           <Route path="/quest/battle/:questId" element={isLoggedIn ? <QuestBattlePage /> : <Navigate to="/login" />} />

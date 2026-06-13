@@ -2147,6 +2147,241 @@ async def ai_class_summary(
     return {"task_id": task_id, "message": "课堂总结已提交，请稍后查询结果"}
 
 
+@router.get("/class-summary/export", summary="导出课堂总结为 Word 文档")
+async def export_class_summary_docx(
+    request: Request,
+    grade: str = Query("", description="年级"),
+    cls: str = Query("", description="班级"),
+    subject: str = Query("", description="学科"),
+    teacher_username: str = Query("", description="教师用户名"),
+    token: str = Query("", description="认证令牌"),
+):
+    """导出 AI 课堂总结报告为 Word 文档"""
+    import io
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from fastapi.responses import StreamingResponse
+
+    if token:
+        request.state.user = None
+        from backend.auth import decode_jwt_token
+        payload = decode_jwt_token(token)
+        if payload:
+            request.state.user = payload
+
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role == 2:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
+
+    query_teacher = teacher_username or user["username"]
+    cls_display = cls
+    cls_name = f"{grade}{cls_display}班" if not cls.endswith("班") else f"{grade}{cls}"
+
+    # ── 收集数据（复用 class-summary 逻辑） ──
+    quizzes = execute_query(
+        """SELECT q.id, q.title, q.questions,
+                  (SELECT COUNT(*) FROM interaction_quiz_answers WHERE quiz_id = q.id) as answer_count
+           FROM interaction_quizzes q
+           WHERE q.creator_username = ? AND q.status = 'active'
+           ORDER BY q.created_at DESC LIMIT 5""",
+        (query_teacher,),
+    )
+    quiz_data = ""
+    quiz_participants = set()
+    for q in quizzes:
+        questions = json.loads(q[2]) if isinstance(q[2], str) else q[2]
+        q_count = len(questions) if isinstance(questions, list) else 0
+        quiz_data += f"- 《{q[1]}》: {q_count}题, {q[3]}人参与\n"
+        participants = execute_query(
+            "SELECT student_username FROM interaction_quiz_answers WHERE quiz_id = ?", (q[0],),
+        )
+        for p in participants:
+            quiz_participants.add(p[0])
+    if not quiz_data:
+        quiz_data = "暂无随堂测验数据"
+
+    polls = execute_query(
+        """SELECT p.id, p.question, p.options,
+                  (SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = p.id) as vote_count
+           FROM interaction_polls p
+           WHERE p.creator_username = ?
+           ORDER BY p.created_at DESC LIMIT 5""",
+        (query_teacher,),
+    )
+    poll_data = ""
+    poll_participants = set()
+    for p in polls:
+        options = json.loads(p[2]) if isinstance(p[2], str) else p[2]
+        opt_count = len(options) if isinstance(options, list) else 0
+        poll_data += f"- 「{p[1]}」: {opt_count}个选项, {p[3]}人投票\n"
+        voters = execute_query(
+            "SELECT student_username FROM interaction_poll_votes WHERE poll_id = ?", (p[0],),
+        )
+        for v in voters:
+            poll_participants.add(v[0])
+    if not poll_data:
+        poll_data = "暂无投票数据"
+
+    questions_data = execute_query(
+        """SELECT id, content, is_anonymous, status, created_at
+           FROM interaction_questions
+           ORDER BY created_at DESC LIMIT 10""",
+    )
+    question_data = ""
+    for q in questions_data:
+        status = "已回答" if q[3] == "answered" else "待回答"
+        question_data += f"- {q[1][:60]} ({status})\n"
+    if not question_data:
+        question_data = "暂无学生提问"
+
+    discussions = execute_query(
+        """SELECT d.id, d.title, d.status,
+                  (SELECT COUNT(*) FROM discussion_groups g
+                   INNER JOIN discussion_members m ON m.group_id = g.id
+                   WHERE g.discussion_id = d.id) as member_count,
+                  (SELECT COUNT(*) FROM discussion_groups g
+                   INNER JOIN discussion_messages m ON m.group_id = g.id
+                   WHERE g.discussion_id = d.id) as msg_count
+           FROM discussions d
+           WHERE d.creator_username = ?
+           ORDER BY d.created_at DESC LIMIT 5""",
+        (query_teacher,),
+    )
+    discussion_data = ""
+    for d in discussions:
+        discussion_data += f"- 《{d[1]}》: {d[3]}人参与, {d[4]}条消息 ({d[2]})\n"
+    if not discussion_data:
+        discussion_data = "暂无分组讨论数据"
+
+    all_participants = quiz_participants | poll_participants
+    student_count = len(all_participants)
+
+    from backend.api.ai_service import call_ai_async
+    from backend.prompts.class_summary import CLASS_SUMMARY_PROMPT
+    from backend.api.chat_router import get_api_keys
+
+    keys = get_api_keys(user["username"])
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    def _safe(s):
+        return str(s).replace('{', '{{').replace('}', '}}')
+
+    prompt = CLASS_SUMMARY_PROMPT.format(
+        subject=_safe(subject or "信息科技"),
+        time_range=_safe("本堂课"),
+        student_count=_safe(student_count),
+        quiz_data=_safe(quiz_data),
+        poll_data=_safe(poll_data),
+        question_data=_safe(question_data),
+        discussion_data=_safe(discussion_data),
+    )
+
+    try:
+        summary = await call_ai_async(prompt, api_key)
+    except Exception as e:
+        logger.error(f"AI 课堂总结调用失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
+
+    # ── 生成 Word 文档 ──
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Microsoft YaHei'
+    style.font.size = Pt(11)
+    style.paragraph_format.line_spacing = 1.5
+
+    title = doc.add_heading(f"{cls_name} 课堂总结报告", level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    info = doc.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = info.add_run(f"年级：{grade}  班级：{cls_display}  学科：{subject}  参与学生：{student_count}人")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    doc.add_paragraph()
+    # 写入统计数据
+    doc.add_heading("课堂数据统计", level=2)
+    stats_table_data = [
+        ("随堂测验", str(len(quizzes))),
+        ("投票活动", str(len(polls))),
+        ("学生提问", str(len(questions_data))),
+        ("分组讨论", str(len(discussions))),
+        ("参与学生", str(student_count)),
+    ]
+    table = doc.add_table(rows=len(stats_table_data), cols=2, style='Light Shading Accent 1')
+    for i, (label, value) in enumerate(stats_table_data):
+        table.rows[i].cells[0].text = label
+        table.rows[i].cells[1].text = value
+
+    doc.add_paragraph()
+    doc.add_heading("AI 分析总结", level=2)
+    # 复用 markdown 转 docx 函数
+    _markdown_to_docx(doc, summary)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    import urllib.parse
+    safe_filename = urllib.parse.quote(f"课堂总结_{cls_name}.docx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+# Word 导出工具
+# ═══════════════════════════════════════════════════════════
+
+def _markdown_to_docx(doc, text: str):
+    """将 Markdown 文本写入 docx 文档"""
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            doc.add_paragraph()
+            continue
+        if line.startswith('### '):
+            doc.add_heading(line[4:], level=3)
+        elif line.startswith('## '):
+            doc.add_heading(line[3:], level=2)
+        elif line.startswith('# '):
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith('- **') and '：' in line:
+            content = line.lstrip('- ')
+            p = doc.add_paragraph()
+            bold_end = content.find('**', 2)
+            if bold_end > 0:
+                run = p.add_run(content[2:bold_end])
+                run.bold = True
+                p.add_run(content[bold_end + 2:])
+            else:
+                p.add_run(content)
+        elif line.startswith('- '):
+            doc.add_paragraph(line[2:], style='List Bullet')
+        elif any(line.startswith(f'{i}. ') for i in range(1, 10)):
+            doc.add_paragraph(line, style='List Number')
+        else:
+            if '**' in line:
+                p = doc.add_paragraph()
+                parts = line.split('**')
+                for i, part in enumerate(parts):
+                    if part:
+                        run = p.add_run(part)
+                        if i % 2 == 1:
+                            run.bold = True
+            else:
+                doc.add_paragraph(line)
+
+
 # ═══════════════════════════════════════════════════════════
 # V3.4 新增：AI 异步任务状态查询
 # ═══════════════════════════════════════════════════════════

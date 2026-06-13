@@ -1246,6 +1246,137 @@ async def get_group_summary(group_id: int, request: Request):
     }
 
 
+@router.get("/groups/{group_id}/summary/export", summary="导出小组讨论总结为 Word 文档")
+async def export_group_summary_docx(
+    group_id: int,
+    request: Request,
+    token: str = Query("", description="认证令牌"),
+):
+    """导出 AI 小组讨论归纳总结为 Word 文档"""
+    import io
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from fastapi.responses import StreamingResponse
+
+    if token:
+        request.state.user = None
+        from backend.auth import decode_jwt_token
+        payload = decode_jwt_token(token)
+        if payload:
+            request.state.user = payload
+
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
+
+    # 获取小组信息
+    disc_row = execute_query(
+        """SELECT d.id, d.title, d.description, d.subject, dg.name
+           FROM discussions d
+           JOIN discussion_groups dg ON dg.discussion_id = d.id
+           WHERE dg.id=?""",
+        (group_id,),
+    )
+    if not disc_row:
+        raise HTTPException(status_code=404, detail="小组不存在")
+
+    disc_id = disc_row[0][0]
+    disc_title = disc_row[0][1]
+    subject = disc_row[0][3] or "信息科技"
+    group_name = disc_row[0][4] or f"第{disc_row[0][4]}组"
+
+    # 获取已有总结
+    rows = execute_query(
+        "SELECT id, report_content, generated_at FROM discussion_reports WHERE discussion_id=? AND group_id=? ORDER BY id DESC LIMIT 1",
+        (disc_id, group_id),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="该小组暂无 AI 总结，请先生成总结")
+
+    import json as _json
+    content = rows[0][1]
+    try:
+        parsed = _json.loads(content)
+    except _json.JSONDecodeError:
+        parsed = {"raw_content": content}
+
+    raw_content = parsed.get("raw_content", content)
+    parsed_data = parsed.get("parsed")
+    generated_at = rows[0][2] or ""
+
+    # ── 生成 Word 文档 ──
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Microsoft YaHei'
+    style.font.size = Pt(11)
+    style.paragraph_format.line_spacing = 1.5
+
+    title = doc.add_heading(f"讨论总结报告", level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    info = doc.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = info.add_run(f"主题：{disc_title}  小组：{group_name}  学科：{subject}")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+
+    if generated_at:
+        time_info = doc.add_paragraph()
+        time_info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = time_info.add_run(f"生成时间：{generated_at}")
+        run.font.size = Pt(10)
+        run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
+    doc.add_paragraph()
+
+    if parsed_data:
+        # 总体归纳
+        if parsed_data.get("summary"):
+            doc.add_heading("总体归纳", level=2)
+            doc.add_paragraph(str(parsed_data["summary"]))
+
+        # 关键观点
+        if parsed_data.get("key_points"):
+            doc.add_heading("关键观点", level=2)
+            for i, point in enumerate(parsed_data["key_points"]):
+                p = doc.add_paragraph(style='List Bullet')
+                run = p.add_run(f"观点{i+1}：")
+                run.bold = True
+                p.add_run(str(point))
+
+        # AI 评价
+        if parsed_data.get("ai_comment"):
+            doc.add_heading("AI 评价与建议", level=2)
+            doc.add_paragraph(str(parsed_data["ai_comment"]))
+
+        # 评分
+        if parsed_data.get("score"):
+            doc.add_heading("综合评分", level=2)
+            doc.add_paragraph(f"得分：{parsed_data['score']}/10")
+
+        # 原始内容
+        doc.add_paragraph()
+        doc.add_heading("原始 AI 回复", level=2)
+        _markdown_to_docx(doc, raw_content)
+    else:
+        # 无结构化数据，直接写入原始内容
+        _markdown_to_docx(doc, raw_content)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    import urllib.parse
+    safe_filename = urllib.parse.quote(f"讨论总结_{group_name}.docx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
+    )
+
+
 # ── AI 自动生成报告 ──
 
 @router.post("/discussions/{disc_id}/generate-report", summary="AI 生成讨论报告")
@@ -1572,3 +1703,50 @@ async def auto_trigger_ai(disc_id: int, request: Request):
             logger.warning(f"AI 自动触发失败 小组#{g[0]}: {e}")
 
     return {"status": "ok", "triggered": triggered}
+
+
+# ═══════════════════════════════════════════════════════════
+# Word 导出工具
+# ═══════════════════════════════════════════════════════════
+
+def _markdown_to_docx(doc, text: str):
+    """将 Markdown 文本写入 docx 文档"""
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            doc.add_paragraph()
+            continue
+        if line.startswith('### '):
+            doc.add_heading(line[4:], level=3)
+        elif line.startswith('## '):
+            doc.add_heading(line[3:], level=2)
+        elif line.startswith('# '):
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith('- **') and '：' in line:
+            content = line.lstrip('- ')
+            p = doc.add_paragraph()
+            bold_end = content.find('**', 2)
+            if bold_end > 0:
+                run = p.add_run(content[2:bold_end])
+                run.bold = True
+                p.add_run(content[bold_end + 2:])
+            else:
+                p.add_run(content)
+        elif line.startswith('- '):
+            doc.add_paragraph(line[2:], style='List Bullet')
+        elif any(line.startswith(f'{i}. ') for i in range(1, 10)):
+            doc.add_paragraph(line, style='List Number')
+        else:
+            if '**' in line:
+                p = doc.add_paragraph()
+                parts = line.split('**')
+                for i, part in enumerate(parts):
+                    if part:
+                        run = p.add_run(part)
+                        if i % 2 == 1:
+                            run.bold = True
+            else:
+                doc.add_paragraph(line)
