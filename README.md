@@ -373,7 +373,7 @@ SmartKBS/
 ├── stu/                    # 学生数据目录
 ├── question_media/         # 试题配图文件
 ├── temp_uploads/           # 临时上传文件（自动清理）
-├── about_help.md           # 系统帮助文档
+├── USER_MANUAL.md          # 系统帮助文档
 ├── package.json            # 项目配置
 ├── requirements.txt        # Python 依赖
 ├── web.config              # IIS 部署配置
@@ -460,6 +460,6 @@ SmartKBS/
 
 **SmartKBS** — 教育智能体 · 高中信通版
 
-- 详细使用指南请参阅 [`about_help.md`](about_help.md)
+- 详细使用指南请参阅 [`USER_MANUAL.md`](USER_MANUAL.md)
 - **作者：** UNET
 - **联系：** [youufis@sina.com](mailto:youufis@sina.com)
