@@ -18,6 +18,13 @@ import { useAuthStore } from '../stores/authStore'
 
 const { Title, Text } = Typography
 
+const COLOR_MAP: Record<string, string> = {
+  lime: '#a0d911', green: '#52c41a', cyan: '#13c2c2',
+  blue: '#1677ff', geekblue: '#2f54eb', purple: '#722ed1',
+  magenta: '#eb2f96', gold: '#faad14', orange: '#fa8c16',
+  volcano: '#fa541c', red: '#f5222d', default: '#d9d9d9',
+}
+
 interface PortfolioData {
   user: {
     username: string
@@ -153,6 +160,33 @@ const PortfolioPage: React.FC = () => {
 
   const { user: student, exams, scores, rollcall, tasks, chats } = data
   const examStats = exams?.stats
+
+  // ── 根据称号等级、性别、角色动态获取头像 emoji（成长进化主题）──
+  const getAvatarEmoji = (level: number, gender: string, role?: string): string => {
+    if (role === 'admin') return '⚜️'
+    if (role === 'teacher') return '🎓'
+    // 学生按等级：萌芽→生长→绽放→卓越→巅峰
+    if (level <= 1) return '🪴'   // 萌芽
+    if (level <= 2) return '🌱'   // 幼苗
+    if (level <= 3) return '🌿'   // 生长
+    if (level <= 4) return '🌳'   // 成才
+    if (level <= 5) return '🎯'   // 精准
+    if (level <= 6) return '🔮'   // 洞察
+    if (level <= 7) return '🚀'   // 突破
+    if (level <= 8) return '🌟'   // 闪耀
+    if (level <= 9) return '🌙'   // 卓越
+    if (level <= 10) return '☀️'  // 辉煌
+    if (level <= 11) return '👑'  // 至尊
+    return '💎'                    // 巅峰
+  }
+  // 判断：titleInfo 是否属于当前查看的学生（自己查看自己，或教师查看时的 titleInfo 取自 my-title）
+  const isSelfView = !isTeacherOrAdmin || targetUsername === user?.username
+  const avatarLevel = isSelfView ? (titleInfo?.main_title?.level || 1) : 2
+  const avatarRole = isSelfView ? undefined : (isTeacherOrAdmin ? 'teacher' : undefined)
+  const avatarEmoji = getAvatarEmoji(avatarLevel, student.gender, avatarRole)
+  const baseColor = COLOR_MAP[titleInfo?.main_title?.color] || '#667eea'
+  const avatarColor = isSelfView ? baseColor : (isTeacherOrAdmin ? '#722ed1' : '#667eea')
+
   const totalDataPoints = [
     { label: '考试', value: examStats?.total_exams ?? 0, icon: <FileAddOutlined />, color: '#1677ff' },
     { label: '课堂积分', value: scores?.total_score ?? 0, icon: <TrophyOutlined />, color: '#faad14' },
@@ -163,18 +197,23 @@ const PortfolioPage: React.FC = () => {
 
   return (
     <div>
-      {/* ─── 学生信息头 ─── */}
+      {/* ─── 页面标题 + 学生信息合并行 ─── */}
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#fff' }}>
           <div style={{
-            width: 64, height: 64, borderRadius: 32, background: 'rgba(255,255,255,0.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
+            width: 56, height: 56, borderRadius: 28,
+            background: `linear-gradient(135deg, ${avatarColor} 0%, ${avatarColor}cc 100%)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 28, flexShrink: 0, boxShadow: `0 2px 8px ${avatarColor}40`,
           }}>
-            <UserOutlined />
+            {avatarEmoji}
           </div>
-          <div style={{ flex: 1 }}>
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>{student.name}</Title>
-            <Space style={{ marginTop: 4 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <Title level={4} style={{ color: '#fff', margin: 0 }}>📋 我的档案</Title>
+              <Title level={3} style={{ color: '#fff', margin: 0 }}>{student.name}</Title>
+            </div>
+            <Space style={{ marginTop: 4, flexWrap: 'wrap' }}>
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.grade}</Tag>
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.class}班</Tag>
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.username}</Tag>
