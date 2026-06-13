@@ -727,6 +727,15 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         (session_id, username, json.dumps(graded, ensure_ascii=False), earned, total, now),
     )
 
+    # ── 标记错题本中已掌握的题目 ──
+    try:
+        from backend.api.wrong_book_router import mark_wrong_mastered
+        correct_graded = {k: v for k, v in graded.items() if isinstance(v, dict) and v.get("is_correct", False)}
+        if correct_graded:
+            mark_wrong_mastered(username, correct_graded)
+    except Exception as wb_err:
+        logger.warning(f"标记错题掌握状态失败: {wb_err}")
+
     # ── 积分奖励 ──
     try:
         from backend.reward_engine import award_participation, award_grade

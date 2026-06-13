@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select, Pagination, Divider, Input } from 'antd'
+import { Layout, Card, Table, Button, message, Tag, Space, Typography, Spin, Collapse, Modal, Select, Pagination, Divider, Input, InputNumber } from 'antd'
 import { ReloadOutlined, BookOutlined, RobotOutlined, DownloadOutlined } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -74,6 +74,8 @@ const WrongBookPage: React.FC = () => {
   const [pubGrade, setPubGrade] = useState('')
   const [pubClass, setPubClass] = useState('')
   const [pubLoading, setPubLoading] = useState(false)
+  const [practiceCount, setPracticeCount] = useState(5)
+  const [countModal, setCountModal] = useState(false)
 
   const loadGrades = async () => {
     if (isStudent) return
@@ -202,10 +204,9 @@ const WrongBookPage: React.FC = () => {
       setGenLoading(true)
       setPracticeModal(true)
       try {
-        const { data: gen } = await apiClient.post('/api/practice/generate-async', {
-          knowledge_points: kps.join('，'),
-          count: Math.min(kps.length * 2, 10),
-          difficulty: 'medium',
+        const { data: gen } = await apiClient.post('/api/wrong-book/practice/generate', {
+          count: practiceCount,
+          subjects: ['信息科技'],
         })
         const result = await pollAiTask(gen.task_id, 120000)
         if (!result) {
@@ -286,7 +287,7 @@ const WrongBookPage: React.FC = () => {
               </Button>
             )}
             {!isStudent && (
-              <Button icon={<RobotOutlined />} onClick={generatePracticeFromWrong}
+              <Button icon={<RobotOutlined />} onClick={() => setCountModal(true)}
                 disabled={!data || data.total_wrong === 0}>
                 生成练习
               </Button>
@@ -418,6 +419,27 @@ const WrongBookPage: React.FC = () => {
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      {/* ── 设置题目数量 ── */}
+      <Modal title="生成错题练习" open={countModal}
+        onCancel={() => setCountModal(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setCountModal(false)}>取消</Button>,
+          <Button key="go" type="primary" icon={<RobotOutlined />}
+            onClick={() => {
+              setCountModal(false);
+              setTimeout(() => generatePracticeFromWrong(), 100);
+            }}>
+            开始生成
+          </Button>,
+        ]}>
+        <Space direction="vertical" style={{ width: '100%', padding: '20px 0' }}>
+          <Text>生成题目数量：</Text>
+          <InputNumber min={1} max={20} value={practiceCount} onChange={v => setPracticeCount(v || 5)}
+            style={{ width: 120 }} />
+          <Text type="secondary" style={{ fontSize: 13 }}>将从题库中搜索同知识点的题目，不够时由 AI 补充。范围 1~20 题。</Text>
+        </Space>
       </Modal>
 
       {/* ── 生成练习弹窗 ── */}

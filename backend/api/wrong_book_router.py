@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Query
+from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.question_db import execute_query, execute_query_one
@@ -13,6 +14,7 @@ from backend.database import execute_query as user_query
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
+from backend.database import execute_query as db_exec, execute_insert_update as db_insert
 
 router = APIRouter()
 
@@ -164,6 +166,9 @@ async def get_wrong_questions(request: Request):
         exam_wrong = []
         for qid, ans in answers_data.items():
             if isinstance(ans, dict) and not ans.get("is_correct", False):
+                # 检查该题在后来的考试/练习中是否已被答对
+                if _is_question_mastered(target_username, qid, a["submitted_at"]):
+                    continue
                 q_info = q_map.get(qid, {})
                 # 解析选项
                 options_raw = q_info.get("options", "")
@@ -209,6 +214,52 @@ async def get_wrong_questions(request: Request):
         "exams": wrong_list,
         "student_username": target_username,
     }
+
+
+def _is_question_mastered(student_username: str, question_id: str, submitted_at: str) -> bool:
+    """检查学生在该次提交之后，是否在后续考试或练习中答对了该题"""
+    # 检查后续的考试中是否答对（exam_attempts 在 question_db 中，用顶层 execute_query）
+    later_exams = execute_query(
+        """SELECT ea.answers
+           FROM exam_attempts ea
+           JOIN exams e ON e.id = ea.exam_id
+           WHERE ea.student_username = ? AND ea.status = 'submitted' AND ea.submitted_at > ?
+           ORDER BY ea.submitted_at DESC""",
+        (student_username, submitted_at),
+    )
+    for exam in later_exams:
+        answers = exam.get("answers")
+        if isinstance(answers, str):
+            try:
+                answers = json.loads(answers)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if isinstance(answers, dict) and question_id in answers:
+            ans = answers[question_id]
+            if isinstance(ans, dict) and ans.get("is_correct", False):
+                return True
+
+    # 检查练习中是否答对（practice_attempts 在 smartkb.db 中，用顶层 user_query）
+    practice_attempts = user_query(
+        """SELECT pa.answers
+           FROM practice_attempts pa
+           WHERE pa.student_username = ? AND pa.status = 'submitted' AND pa.submitted_at > ?
+           ORDER BY pa.submitted_at DESC""",
+        (student_username, submitted_at),
+    )
+    for attempt in practice_attempts:
+        p_answers = attempt.get("answers")
+        if isinstance(p_answers, str):
+            try:
+                p_answers = json.loads(p_answers)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if isinstance(p_answers, dict) and question_id in p_answers:
+            ans = p_answers[question_id]
+            if isinstance(ans, dict) and ans.get("is_correct", False):
+                return True
+
+    return False
 
 
 @router.get("/students", summary="获取有错题记录的学生列表")
@@ -716,3 +767,333 @@ async def export_review_plan_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# 错本题追踪系统（v5.3）
+# ═══════════════════════════════════════════════════════════
+
+def record_wrong_answers(student_username: str, exam_id: int, graded_answers: dict):
+    """考试提交后，将答错的题目记录到 wrong_book 表"""
+    from backend.question_db import execute_query as q_exec
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for qid_str, ans in graded_answers.items():
+        if isinstance(ans, dict) and not ans.get("is_correct", False):
+            # 获取题目知识点和类型
+            q_info = q_exec(
+                "SELECT knowledge_points, type FROM question_bank WHERE id = ? AND status = 'active'",
+                (int(qid_str),),
+            )
+            kp = (q_info[0][0] or "") if q_info else ""
+            qtype = (q_info[0][1] or "") if q_info else ""
+            db_insert(
+                """INSERT INTO wrong_book (student_username, question_id, source, source_id,
+                   knowledge_points, question_type, status, wrong_answer, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (student_username, int(qid_str), 'exam', exam_id, kp, qtype,
+                 'pending', ans.get("student_answer", ""), now),
+            )
+
+
+def mark_wrong_mastered(student_username: str, correct_answers: dict):
+    """练习/考试答对后，标记 wrong_book 中的对应题目为已掌握"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    from backend.question_db import execute_query as q_exec
+    for qid_str, ans in correct_answers.items():
+        if isinstance(ans, dict) and ans.get("is_correct", False):
+            qid = int(qid_str)
+            # 精确匹配 question_id
+            db_insert(
+                "UPDATE wrong_book SET status='mastered', mastered_at=? WHERE student_username=? AND question_id=? AND status='pending'",
+                (now, student_username, qid),
+            )
+            # 也按知识点匹配—同知识点其他错题也标记掌握
+            q_info = q_exec(
+                "SELECT knowledge_points FROM question_bank WHERE id = ? AND status = 'active'",
+                (qid,),
+            )
+            if q_info and q_info[0][0]:
+                kp = q_info[0][0]
+                db_insert(
+                    "UPDATE wrong_book SET status='mastered', mastered_at=? WHERE student_username=? AND knowledge_points=? AND status='pending'",
+                    (now, student_username, kp),
+                )
+
+
+@router.get("/wrong-book/list", summary="从错题本获取待掌握错题")
+async def get_wrong_book_list(request: Request):
+    """从 wrong_book 表获取当前学生的待掌握错题"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role == 2:
+        target_username = username
+    else:
+        target = request.query_params.get("student_username", "")
+        target_username = target or username
+
+    rows = db_exec(
+        """SELECT wb.id, wb.question_id, wb.source, wb.source_id,
+                  wb.knowledge_points, wb.question_type, wb.wrong_answer,
+                  wb.created_at, qb.question_text, qb.correct_answer,
+                  qb.options, qb.svg_content, qb.has_svg, qb.media_files
+           FROM wrong_book wb
+           LEFT JOIN question_bank qb ON qb.id = wb.question_id
+           WHERE wb.student_username = ? AND wb.status = 'pending'
+           ORDER BY wb.created_at DESC""",
+        (target_username,),
+    )
+
+    wrong_list = []
+    for r in rows:
+        options = {}
+        if r.get("options"):
+            try:
+                opts = json.loads(r["options"]) if isinstance(r["options"], str) else r["options"]
+                if isinstance(opts, dict):
+                    options = opts
+            except (json.JSONDecodeError, TypeError):
+                pass
+        wrong_list.append({
+            "id": r["id"],
+            "question_id": r["question_id"],
+            "question_text": r["question_text"] or f"(题目ID:{r['question_id']})",
+            "question_type": r["question_type"],
+            "options": options,
+            "correct_answer": r["correct_answer"] or "",
+            "wrong_answer": r["wrong_answer"],
+            "knowledge_points": r["knowledge_points"],
+            "source": r["source"],
+            "source_id": r["source_id"],
+            "created_at": r["created_at"],
+            "svg_content": r.get("svg_content", ""),
+            "has_svg": r.get("has_svg", 0),
+            "media_files": r.get("media_files", ""),
+        })
+
+    return {"total_wrong": len(wrong_list), "wrong_questions": wrong_list, "student_username": target_username}
+
+
+class PracticeGenerateRequest(BaseModel):
+    count: int = 5
+    subjects: list[str] = ["信息科技"]
+
+@router.post("/practice/generate", summary="错题练习—生成题目")
+async def generate_wrong_practice(req: PracticeGenerateRequest, request: Request):
+    """根据错题知识点生成练习题（先搜题库，不够再AI生成）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role != 2:
+        raise HTTPException(status_code=403, detail="仅学生可生成错题练习")
+
+    if req.count < 1 or req.count > 20:
+        req.count = 5
+
+    # 获取该学生的待掌握错题知识点
+    wrong_rows = db_exec(
+        """SELECT DISTINCT knowledge_points FROM wrong_book
+           WHERE student_username = ? AND status = 'pending' AND knowledge_points != ''""",
+        (username,),
+    )
+    kp_list = [r["knowledge_points"] for r in wrong_rows]
+    if not kp_list:
+        # 回退到旧的 exam_attempts 方式
+        return await generate_wrong_practice_fallback(req, request, username)
+
+    questions = []
+    needed = req.count
+
+    # 1. 从 question_bank 中搜索同知识点的已有题目
+    from backend.question_db import execute_query as q_exec
+    for kp in kp_list:
+        if needed <= 0:
+            break
+        existing = q_exec(
+            """SELECT id, type, question_text, options, correct_answer, explanation,
+                      knowledge_points, difficulty, svg_content, has_svg, media_files
+               FROM question_bank
+               WHERE knowledge_points LIKE ? AND status = 'active'
+               ORDER BY RANDOM() LIMIT ?""",
+            (f"%{kp}%", needed),
+        )
+        for eq in existing:
+            qid = eq["id"]
+            # 排除已在 wrong_book 中 pending 的
+            dup = db_exec(
+                "SELECT id FROM wrong_book WHERE student_username=? AND question_id=? AND status='pending'",
+                (username, qid),
+            )
+            if dup:
+                continue
+            questions.append(eq)
+            needed -= 1
+
+    # 2. 不够则 AI 生成
+    if needed > 0:
+        try:
+            api_key, _ = get_api_keys(username)
+            if api_key:
+                kp_text = "、".join(kp_list[:5])
+                subject = req.subjects[0] if req.subjects else "信息科技"
+                from backend.prompts.practice import PRACTICE_GENERATE_PROMPT
+                prompt = PRACTICE_GENERATE_PROMPT.format(
+                    subject=subject,
+                    knowledge_points=kp_text,
+                    question_type="mixed",
+                    count=needed,
+                    difficulty_desc="medium",
+                )
+                result_text = await call_ai_async(prompt, api_key)
+                from backend.api.practice_router import _parse_ai_result
+                ai_questions = _parse_ai_result(result_text)
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                for q in ai_questions[:needed]:
+                    opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
+                    svg_code = q.get("svg_code") or ""
+                    has_svg = 1 if svg_code.strip() else 0
+                    qid = q_exec(
+                        """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
+                            knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
+                            svg_content,has_svg)
+                           VALUES (?,?,?,?,?,?,?,?,?,'ai_wrong_practice','active',?,?,?,?)""",
+                        (q.get("type", "single"), q.get("question", ""), opts,
+                         q.get("answer", ""), q.get("explanation", ""),
+                         kp_text, subject, "medium", username, now, now, svg_code, has_svg),
+                    )
+                    q["id"] = qid
+                    q["question_id"] = qid
+                    questions.append(q)
+        except Exception as e:
+            logger.warning(f"AI 错题练习出题失败: {e}")
+
+    return {"questions": questions[:req.count], "total": len(questions)}
+
+
+async def generate_wrong_practice_fallback(req: PracticeGenerateRequest, request: Request, username: str):
+    """回退方案：从 exam_attempts 获取错题知识点"""
+    from backend.question_db import execute_query as q_exec
+    attempts = q_exec(
+        """SELECT ea.answers, e.title
+           FROM exam_attempts ea JOIN exams e ON e.id = ea.exam_id
+           WHERE ea.student_username = ? AND ea.status = 'submitted'
+           ORDER BY ea.submitted_at DESC LIMIT 10""",
+        (username,),
+    )
+    kp_set = set()
+    for a in attempts:
+        ans_data = a.get("answers")
+        if isinstance(ans_data, str):
+            try:
+                ans_data = json.loads(ans_data)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not ans_data:
+            continue
+        for qid_str, ans in ans_data.items():
+            if isinstance(ans, dict) and not ans.get("is_correct", False):
+                q_info = q_exec(
+                    "SELECT knowledge_points FROM question_bank WHERE id = ? AND status = 'active'",
+                    (int(qid_str),),
+                )
+                if q_info and q_info[0][0]:
+                    kp_set.add(q_info[0][0])
+
+    questions = []
+    kp_list = list(kp_set)
+    needed = req.count
+    for kp in kp_list:
+        if needed <= 0:
+            break
+        existing = q_exec(
+            """SELECT id, type, question_text, options, correct_answer, explanation,
+                      knowledge_points, difficulty, svg_content, has_svg, media_files
+               FROM question_bank WHERE knowledge_points LIKE ? AND status = 'active'
+               ORDER BY RANDOM() LIMIT ?""",
+            (f"%{kp}%", needed),
+        )
+        for eq in existing:
+            questions.append(eq)
+            needed -= 1
+
+    if needed > 0:
+        api_key, _ = get_api_keys(username)
+        if api_key:
+            kp_text = "、".join(kp_list[:5]) if kp_list else "信息科技"
+            subject = req.subjects[0] if req.subjects else "信息科技"
+            from backend.prompts.practice import PRACTICE_GENERATE_PROMPT
+            prompt = PRACTICE_GENERATE_PROMPT.format(subject=subject, knowledge_points=kp_text,
+                question_type="mixed", count=needed, difficulty_desc="medium")
+            result_text = await call_ai_async(prompt, api_key)
+            from backend.api.practice_router import _parse_ai_result
+            ai_qs = _parse_ai_result(result_text)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for q in ai_qs[:needed]:
+                opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
+                svg_code = q.get("svg_code") or ""
+                has_svg = 1 if svg_code.strip() else 0
+                qid = q_exec(
+                    """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
+                        knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
+                        svg_content,has_svg) VALUES (?,?,?,?,?,?,?,?,?,'ai_wrong_practice','active',?,?,?,?)""",
+                    (q.get("type", "single"), q.get("question", ""), opts,
+                     q.get("answer", ""), q.get("explanation", ""),
+                     kp_text, subject, "medium", username, now, now, svg_code, has_svg),
+                )
+                q["id"] = qid
+                q["question_id"] = qid
+                questions.append(q)
+
+    return {"questions": questions[:req.count], "total": len(questions)}
+
+
+class PracticeSubmitRequest(BaseModel):
+    answers: dict[str, str]
+
+@router.post("/practice/submit", summary="错题练习—提交答案")
+async def submit_wrong_practice(req: PracticeSubmitRequest, request: Request):
+    """提交错题练习答案，答对则标记 wrong_book 为 mastered"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role != 2:
+        raise HTTPException(status_code=403, detail="仅学生可提交")
+
+    from backend.question_db import execute_query as q_exec
+    total = 0
+    earned = 0
+    graded = {}
+    correct_grade = {}
+
+    for qid_str, student_ans in req.answers.items():
+        q_info = q_exec(
+            "SELECT type, correct_answer FROM question_bank WHERE id = ? AND status = 'active'",
+            (int(qid_str),),
+        )
+        if not q_info:
+            graded[qid_str] = {"is_correct": False, "score": 0, "max_score": 10}
+            continue
+        qtype = q_info[0][0] if isinstance(q_info[0], (list, tuple)) else q_info[0].get("type", "")
+        correct = q_info[0][1] if isinstance(q_info[0], (list, tuple)) else q_info[0].get("correct_answer", "")
+        q_score = 10
+        is_correct = student_ans.strip().upper() == (correct or "").strip().upper()
+        s = q_score if is_correct else 0
+        earned += s
+        total += q_score
+        graded[qid_str] = {
+            "student_answer": student_ans, "correct_answer": correct,
+            "score": s, "max_score": q_score, "is_correct": is_correct,
+        }
+        if is_correct:
+            correct_grade[qid_str] = graded[qid_str]
+
+    # 标记掌握的题目
+    if correct_grade:
+        mark_wrong_mastered(username, correct_grade)
+
+    return {
+        "score": earned, "total_score": total,
+        "percentage": round(earned / total * 100, 1) if total else 0,
+        "graded": graded,
+    }
