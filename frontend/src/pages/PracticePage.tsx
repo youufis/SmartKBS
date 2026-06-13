@@ -462,7 +462,7 @@ const TeacherView: React.FC = () => {
               { title: '题数', dataIndex: 'question_count', width: 60 },
               { title: '状态', render: (_, r) => r.status === 'active' ? <Tag color="processing">进行中</Tag> : <Tag>已结束</Tag>, width: 80 },
               { title: '提交', render: (_, r) => `${r.submitted_count}/${r.student_count}`, width: 80 },
-              { title: '操作', render: (_, r) => <Space>
+              { title: '操作', render: (_, r) => <Space wrap>
                 <Button size="small" onClick={() => viewSessionDetail(r.id)}>详情</Button>
                 {r.status === 'active' && (
                   <Popconfirm title="结束此练习？学生将无法再提交" onConfirm={() => endSession(r.id)}>
@@ -472,7 +472,7 @@ const TeacherView: React.FC = () => {
                 <Popconfirm title="删除此练习？（所有答题记录将被清除）" onConfirm={() => deleteSession(r.id)}>
                   <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
                 </Popconfirm>
-              </Space>, width: 180 },
+              </Space> },
             ]}
           />
       )}
@@ -486,7 +486,11 @@ const TeacherView: React.FC = () => {
 const PracticePage: React.FC = () => {
   const user = useAuthStore(s => s.user)
   const isTeacher = user?.role === 'admin' || user?.role === 'teacher'
-  return isTeacher ? <TeacherView /> : <StudentView />
+  return (
+    <div style={{ padding: '0 24px' }}>
+      {isTeacher ? <TeacherView /> : <StudentView />}
+    </div>
+  )
 }
 
 export default PracticePage

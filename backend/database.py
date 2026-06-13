@@ -611,10 +611,20 @@ def init_db():
                 total_score INTEGER DEFAULT 0,
                 target_grade TEXT DEFAULT '',
                 target_class TEXT DEFAULT '',
+                target_students TEXT DEFAULT '',
+                source TEXT DEFAULT 'teacher',
                 status TEXT DEFAULT 'active',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )""")
+            try:
+                c.execute("ALTER TABLE practice_sessions ADD COLUMN target_students TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE practice_sessions ADD COLUMN source TEXT DEFAULT 'teacher'")
+            except sqlite3.OperationalError:
+                pass
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ps_creator ON practice_sessions(creator_username)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ps_target ON practice_sessions(target_grade, target_class)")

@@ -1304,8 +1304,14 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     # ── 记录错题到 wrong_book ──
     try:
-        from backend.api.wrong_book_router import record_wrong_answers
+        from backend.api.wrong_book_router import record_wrong_answers, mark_wrong_mastered, check_and_auto_generate_wrong_practice
         record_wrong_answers(username, exam_id, graded_answers)
+        # 同时标记本次答对的题目为已掌握
+        correct_graded = {k: v for k, v in graded_answers.items() if isinstance(v, dict) and v.get("is_correct", False)}
+        if correct_graded:
+            mark_wrong_mastered(username, correct_graded)
+        # 检查并自动生成错题巩固练习
+        check_and_auto_generate_wrong_practice(username)
     except Exception as wb_err:
         logger.warning(f"记录错题失败: {wb_err}")
 
