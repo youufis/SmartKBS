@@ -101,6 +101,9 @@ async def dashboard_summary(request: Request):
         "user_name": display_name,
     }
 
+    grade = ""
+    cls = ""
+
     if role == 2:  # ── 学生 ──
         pending_count = _q_count(
             """SELECT COUNT(*) FROM exams
