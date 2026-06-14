@@ -429,6 +429,26 @@ const InteractionPage: React.FC = () => {
                   <Col span={8}><Statistic title="题目数" value={quizResultsView.quiz?.question_count} /></Col>
                   <Col span={8}><Statistic title="参与人数" value={quizResultsView.total_answers} /></Col>
                 </Row>
+                {/* 学生答题汇总 */}
+                {quizResultsView.student_answers?.length > 0 && (
+                  <Card title="学生答题情况" size="small" style={{ marginBottom: 16 }}>
+                    <Table dataSource={quizResultsView.student_answers} rowKey="student" size="small"
+                      pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }}
+                      columns={[
+                        { title: '序号', key: 'idx', width: 50, render: (_: any, __: any, i: number) => i + 1 },
+                        { title: '学生', dataIndex: 'student', width: 120 },
+                        { title: '答对', dataIndex: 'correct_count', width: 80,
+                          render: (v: number, r: any) => (
+                            <Text strong style={{ color: v === r.total_questions ? '#52c41a' : v > 0 ? '#faad14' : '#ff4d4f' }}>
+                              {v}/{r.total_questions}
+                            </Text>
+                          ),
+                        },
+                        { title: '得分', dataIndex: 'score', width: 80 },
+                        { title: '提交时间', dataIndex: 'submitted_at', width: 160 },
+                      ]} />
+                  </Card>
+                )}
                 <div style={{ textAlign: 'right', marginBottom: 8 }}>
                   <Button icon={<RobotOutlined />} size="small"
                     loading={quizAiAnalysisLoading}

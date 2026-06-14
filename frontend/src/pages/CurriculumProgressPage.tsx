@@ -38,18 +38,16 @@ const CurriculumProgressPage: React.FC = () => {
 
   // ── 标记首次加载完成 ──
   const coursesLoaded = useRef(false)
-  const dataLoaded = useRef(false)
 
-  // ── 加载课程列表 ──
+  // ── 加载课程列表（不默认选中） ──
   useEffect(() => {
     curriculumApi.listCourses().then((res) => {
       setCourses(res.courses)
-      if (res.courses.length > 0) {
-        setCourseId(res.courses[0].id)
-      }
       coursesLoaded.current = true
+      setInitLoading(false)
     }).catch(() => {
       coursesLoaded.current = true
+      setInitLoading(false)
     })
   }, [])
 
@@ -75,8 +73,9 @@ const CurriculumProgressPage: React.FC = () => {
     }
   }, [grade, user?.username])
 
-  // ── 加载进度数据 ──
+  // ── 加载进度数据（仅在筛选条件就绪时） ──
   const loadData = useCallback(async () => {
+    if (!courseId) return
     setLoading(true)
     try {
       const params: Record<string, unknown> = { course_id: courseId }
@@ -110,36 +109,20 @@ const CurriculumProgressPage: React.FC = () => {
         totalRate = totalRate / total
       }
       setStats({ totalStudents: total, avgRate: totalRate, bestCourse, bestRate })
-      dataLoaded.current = true
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(detail || '加载学情数据失败')
     } finally {
       setLoading(false)
-      setInitLoading(false)
     }
   }, [courseId, grade, className])
 
-  // ── 课程列表加载完成后触发首次数据加载 ──
+  // ── 筛选条件变化时重新加载（仅当用户主动选择过课程） ──
   useEffect(() => {
-    if (!isTeacherOrAdmin) {
-      setInitLoading(false)
-      return
-    }
-    // 等课程列表加载完成且有了 courseId 后再加载数据
-    if (coursesLoaded.current && !dataLoaded.current) {
-      loadData()
-    }
-  }, [courseId, isTeacherOrAdmin, loadData])
-
-  // ── 筛选条件变化时重新加载 ──
-  useEffect(() => {
-    if (!isTeacherOrAdmin) return
-    if (dataLoaded.current) {
-      loadData()
-    }
+    if (!isTeacherOrAdmin || !courseId) return
+    loadData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [grade, className])
+  }, [courseId, grade, className])
 
   // ── 展开行渲染：知识点明细 ──
   const renderExpandedRow = (record: Record<string, unknown>) => {
@@ -263,6 +246,32 @@ const CurriculumProgressPage: React.FC = () => {
     return (
       <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
         <Card><div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" tip="正在加载数据..." /></div></Card>
+      </Layout>
+    )
+  }
+
+  if (!courseId) {
+    // 只显示筛选条件栏，不加载数据
+    return (
+      <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
+        <Card style={{ marginBottom: 16 }}>
+          <Space wrap>
+            <Select value={courseId} placeholder="选择课程" style={{ width: 240 }}
+              onChange={v => setCourseId(v)}
+              options={courses.map(c => ({ value: c.id, label: c.name }))} />
+            <Select value={grade} placeholder="选择年级" style={{ width: 140 }}
+              onChange={v => setGrade(v)} allowClear
+              options={gradeOptions.map(g => ({ value: g, label: g }))} />
+            <Select value={className} placeholder="选择班级" style={{ width: 140 }}
+              onChange={v => setClassName(v)} allowClear disabled={!grade || classOptions.length === 0}
+              options={classOptions.map(c => ({ value: c, label: c }))} />
+          </Space>
+        </Card>
+        <Card>
+          <div style={{ textAlign: 'center', padding: 80 }}>
+            <Typography.Text type="secondary" style={{ fontSize: 16 }}>请选择课程查看学生进度数据</Typography.Text>
+          </div>
+        </Card>
       </Layout>
     )
   }
