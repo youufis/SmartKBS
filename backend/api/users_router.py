@@ -274,12 +274,44 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
         raise HTTPException(status_code=404, detail=f"用户 '{username}' 不存在")
 
     gender_num = _standardize_gender(req.gender)
+    class_val = _normalize_class(req.class_val or "")
+    grade_val = req.grade or ""
+    role_rows = execute_query("SELECT role FROM users WHERE username=?", (username,))
+    role_num = role_rows[0][0] if role_rows else 2
 
     try:
+        # 解析新 FK 值
+        grade_id = None
+        class_id = None
+        if grade_val and role_num == 2:  # 学生
+            grade_id = upsert_grade(grade_val.strip())
+            if class_val:
+                cls_name = class_val
+                if "班" not in cls_name:
+                    cls_name = f"{cls_name}班"
+                class_id = upsert_class(grade_id, cls_name)
+
         execute_insert_update(
-            "UPDATE users SET class=?, name=?, gender=?, grade=? WHERE username=?",
-            (_normalize_class(req.class_val or ""), req.name, gender_num, req.grade or "", username),
+            "UPDATE users SET class=?, name=?, gender=?, grade=?, grade_id=?, class_id=? WHERE username=?",
+            (class_val, req.name, gender_num, grade_val, grade_id, class_id, username),
         )
+
+        # 教师：更新 teacher_assignments
+        if role_num == 1 and grade_val:
+            from backend.permission_service import clear_teacher_assignments, assign_teacher
+            clear_teacher_assignments(username)
+            gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
+            for g_name, cls_names in gcm.items():
+                gid = upsert_grade(g_name)
+                if not cls_names:
+                    assign_teacher(username, gid, None)
+                else:
+                    for cn in cls_names:
+                        if "班" not in cn:
+                            cn = f"{cn}班"
+                        cid = upsert_class(gid, cn)
+                        assign_teacher(username, gid, cid)
+
         logger.info(f"用户信息已更新: {username}")
         return {"message": f"用户 '{username}' 信息已更新"}
     except Exception as e:
@@ -607,15 +639,15 @@ async def download_import_template():
     import tempfile
 
     csv_content = "username,password,class,name,gender,role,grade\n"
-    csv_content += "# === 学生示例 ===\n"
+    csv_content += "# === 学生示例（class 自动去\"班\"后缀，按年级名匹配主数据） ===\n"
     csv_content += "s11001,123456,1班,张三,男,2,一年级\n"
     csv_content += "s11002,123456,2班,李四,女,2,一年级\n"
     csv_content += "s21001,123456,3班,王五,男,2,初一\n"
     csv_content += "s31001,123456,1班,赵六,女,2,高一\n"
-    csv_content += "# === 教师示例（多年级用|分隔，多班级用,分隔） ===\n"
+    csv_content += "# === 教师示例（用 | 分隔多年级，用 , 分隔多班级） ===\n"
     csv_content += "t001,123456,\"1班,2班|1班\",王老师,男,1,一年级|初一\n"
     csv_content += "t002,123456,\"1班,2班,3班\",李老师,女,1,高一\n"
-    csv_content += "# 说明: grade列支持 一年级~高三, class列纯数字会自动补\"班\"后缀"
+    csv_content += "# 说明: grade 列支持 \"一年级\"~\"高三\" 等任意年级名，class 列数字自动补\"班\"后缀并映射到 classes 表"
 
     # 创建临时文件
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", encoding="utf-8-sig")

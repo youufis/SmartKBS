@@ -347,19 +347,44 @@ def get_class_ranking(grade: str, class_name: str = "",
         allowed_classes: 教师有权限的班级列表，None 表示不过滤（管理员）
     """
     if class_name:
-        # 从 "高一1班" 提取纯数字 "1"，同时兼容 "1" 和 "1班" 格式
+        # 优先使用 FK 列
         import re
-        cls_num = re.sub(r'[^\d]', '', str(class_name))
-        rows = execute_query(
-            """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
-               FROM users u
-               LEFT JOIN student_total_points stp ON u.username = stp.student_username
-               WHERE u.role=2 AND u.grade=? AND (u.class=? OR u.class=?)
-               ORDER BY points DESC""",
-            (grade, cls_num, f"{cls_num}班"),
-        )
+        cls_nums = re.findall(r'\d+', class_name)
+        cls_num = cls_nums[0] if cls_nums else class_name
+        gid_rows = execute_query("SELECT id FROM grades WHERE name=?", (grade,))
+        if gid_rows:
+            grade_id = gid_rows[0][0]
+            cid_rows = execute_query("SELECT id FROM classes WHERE grade_id=? AND (name=? OR name=?)",
+                                     (grade_id, f"{cls_num}班", cls_num))
+            if cid_rows:
+                class_id = cid_rows[0][0]
+                rows = execute_query(
+                    """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
+                       FROM users u
+                       LEFT JOIN student_total_points stp ON u.username = stp.student_username
+                       WHERE u.role=2 AND u.grade_id=? AND u.class_id=?
+                       ORDER BY points DESC""",
+                    (grade_id, class_id),
+                )
+            else:
+                rows = execute_query(
+                    """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
+                       FROM users u
+                       LEFT JOIN student_total_points stp ON u.username = stp.student_username
+                       WHERE u.role=2 AND u.grade_id=?
+                       ORDER BY points DESC""",
+                    (grade_id,),
+                )
+        else:
+            rows = execute_query(
+                """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
+                   FROM users u
+                   LEFT JOIN student_total_points stp ON u.username = stp.student_username
+                   WHERE u.role=2 AND u.grade=? AND (u.class=? OR u.class=?)
+                   ORDER BY points DESC""",
+                (grade, cls_num, f"{cls_num}班"),
+            )
     elif allowed_classes:
-        # 按教师任教班级过滤
         placeholders = ",".join(["?" for _ in allowed_classes])
         rows = execute_query(
             f"""SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
@@ -370,14 +395,26 @@ def get_class_ranking(grade: str, class_name: str = "",
             (grade, *allowed_classes),
         )
     else:
-        rows = execute_query(
-            """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
-               FROM users u
-               LEFT JOIN student_total_points stp ON u.username = stp.student_username
-               WHERE u.role=2 AND u.grade=?
-               ORDER BY points DESC""",
-            (grade,),
-        )
+        gid_rows = execute_query("SELECT id FROM grades WHERE name=?", (grade,))
+        if gid_rows:
+            grade_id = gid_rows[0][0]
+            rows = execute_query(
+                """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
+                   FROM users u
+                   LEFT JOIN student_total_points stp ON u.username = stp.student_username
+                   WHERE u.role=2 AND u.grade_id=?
+                   ORDER BY points DESC""",
+                (grade_id,),
+            )
+        else:
+            rows = execute_query(
+                """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
+                   FROM users u
+                   LEFT JOIN student_total_points stp ON u.username = stp.student_username
+                   WHERE u.role=2 AND u.grade=?
+                   ORDER BY points DESC""",
+                (grade,),
+            )
     return [
         {
             "name": r[0] or r[1],
@@ -393,15 +430,29 @@ def get_activity_statistics(grade: str = "", class_name: str = "",
     """获取积分统计数据"""
     params = []
     where = []
+
+    # 解析年级/班级 ID
+    grade_id = None
+    class_id = None
     if grade:
-        where.append("u.grade=?")
-        params.append(grade)
-    if class_name:
-        # 统一格式：从 "高一1班" 提取 "1"，兼容 "1" 和 "1班"
+        gid_rows = execute_query("SELECT id FROM grades WHERE name=?", (grade,))
+        if gid_rows:
+            grade_id = gid_rows[0][0]
+    if class_name and grade_id:
         import re
-        cls_num = re.sub(r'[^\d]', '', str(class_name))
-        where.append("(u.class=? OR u.class=?)")
-        params.extend([cls_num, f"{cls_num}班"])
+        nums = re.findall(r'\d+', class_name)
+        cls_num = nums[0] if nums else class_name
+        cid_rows = execute_query("SELECT id FROM classes WHERE grade_id=? AND (name=? OR name=?)",
+                                 (grade_id, f"{cls_num}班", cls_num))
+        if cid_rows:
+            class_id = cid_rows[0][0]
+
+    if grade_id:
+        where.append("u.grade_id=?")
+        params.append(grade_id)
+    if class_id:
+        where.append("u.class_id=?")
+        params.append(class_id)
 
     where_clause = " AND ".join(where) if where else "1=1"
 
