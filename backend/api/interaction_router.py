@@ -803,6 +803,31 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
     }
 
 
+def _calc_student_correct_count(answer_row: tuple, questions: list) -> int:
+    """计算学生的答对题数"""
+    try:
+        user_answers = json.loads(answer_row[1]) if isinstance(answer_row[1], str) else answer_row[1]
+        correct = 0
+        for i, q in enumerate(questions):
+            q_type = q.get("type", "single")
+            correct_ans = str(q.get("answer", "")).strip()
+            for ua in user_answers:
+                if ua.get("question_index") == i:
+                    user_ans = str(ua.get("answer", "")).strip()
+                    if q_type == "multiple":
+                        us = sorted([x.strip().upper() for x in user_ans.split(",") if x.strip()])
+                        cs = sorted([x.strip().upper() for x in correct_ans.split(",") if x.strip()])
+                        if us == cs:
+                            correct += 1
+                    else:
+                        if user_ans.upper() == correct_ans.upper():
+                            correct += 1
+                    break
+        return correct
+    except Exception:
+        return 0
+
+
 @router.get("/quizzes/{quiz_id}/results", summary="教师查看测验结果统计")
 async def get_quiz_results(quiz_id: int, request: Request):
     """教师查看随堂测验结果统计"""
@@ -858,6 +883,17 @@ async def get_quiz_results(quiz_id: int, request: Request):
             "correct_rate": round(correct_count / max(len(answers), 1) * 100, 1),
         })
 
+    # 建立学生用户名→姓名映射（批量查询）
+    usernames = [a[0] for a in answers]
+    name_map = {}
+    if usernames:
+        placeholders = ",".join("?" * len(usernames))
+        name_rows = execute_query(
+            f"SELECT username, name FROM users WHERE username IN ({placeholders})",
+            tuple(usernames),
+        )
+        name_map = {r[0]: r[1] or r[0] for r in name_rows}
+
     return {
         "quiz": {
             "id": quiz[0][0],
@@ -867,7 +903,14 @@ async def get_quiz_results(quiz_id: int, request: Request):
         "total_answers": len(answers),
         "question_stats": question_stats,
         "student_answers": [
-            {"student": a[0], "score": a[2], "submitted_at": a[3]}
+            {
+                "student": a[0],
+                "student_name": name_map.get(a[0], a[0]),
+                "score": a[2],
+                "submitted_at": a[3],
+                "correct_count": _calc_student_correct_count(a, questions),
+                "total_questions": len(questions),
+            }
             for a in answers
         ],
     }
