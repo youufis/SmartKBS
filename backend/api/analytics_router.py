@@ -14,6 +14,28 @@ from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
 from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
 from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
+
+# ── 辅助：将 TEXT 年级/班级名解析为 ID ──
+def _resolve_grade_id(grade_name: str) -> int | None:
+    """将 '高一' 解析为 grades.id"""
+    if not grade_name:
+        return None
+    r = execute_query("SELECT id FROM grades WHERE name=?", (grade_name,))
+    return r[0][0] if r else None
+
+def _resolve_class_id(grade_name: str, cls_name: str) -> int | None:
+    """将 ('高一', '高一1班') 或 ('高一', '1') 解析为 classes.id"""
+    gid = _resolve_grade_id(grade_name)
+    if not gid or not cls_name:
+        return None
+    import re
+    nums = re.findall(r'\d+', cls_name)
+    cls_num = nums[0] if nums else cls_name
+    r = execute_query(
+        "SELECT id FROM classes WHERE grade_id=? AND (name=? OR name=?)",
+        (gid, f"{cls_num}班", cls_num),
+    )
+    return r[0][0] if r else None
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 
 router = APIRouter()
@@ -119,34 +141,58 @@ async def class_overview(
             raise HTTPException(status_code=403, detail="无权查看其他年级的数据")
 
     # 收集班级数据
-    # 班级号格式处理：users.class 存数字(1)，下拉框传"高一1班"
     class_num = _extract_class_num(cls)
+    grade_id = _resolve_grade_id(grade)
+    class_id = _resolve_class_id(grade, cls)
 
-    # 1. 学生人数（兼容 class="1" 和 class="1班"）
-    student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
-        (grade, class_num, f"{class_num}班"),
-    )
+    # 1. 学生人数（使用 FK 列）
+    if grade_id:
+        student_count = execute_query(
+            "SELECT COUNT(*) FROM users WHERE role=2 AND grade_id=? AND (class_id=? OR class_id IS NULL)",
+            (grade_id, class_id) if class_id else (grade_id,),
+        )
+    else:
+        student_count = execute_query(
+            "SELECT COUNT(*) FROM users WHERE role=2 AND grade=? AND (class=? OR class=?)",
+            (grade, class_num, f"{class_num}班"),
+        )
     total_students = student_count[0][0] if student_count else 0
     if total_students == 0:
         return {"report": "暂无该班级的学生数据", "data": {}}
 
-    # 2. 积分统计（scores.class_name 存 "高一1班" 格式）
-    score_stats = execute_query(
-        """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
-                  COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-           FROM scores WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls),
-    )
+    # 2. 积分统计（使用 FK 列或降级 TEXT）
+    if grade_id and class_id:
+        score_stats = execute_query(
+            """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
+                      COALESCE(MAX(score),0), COALESCE(MIN(score),0)
+               FROM scores WHERE teacher_username=? AND grade_id=? AND class_id=?""",
+            (query_teacher, grade_id, class_id),
+        )
+    else:
+        score_stats = execute_query(
+            """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
+                      COALESCE(MAX(score),0), COALESCE(MIN(score),0)
+               FROM scores WHERE teacher_username=? AND grade=? AND class_name=?""",
+            (query_teacher, grade, cls),
+        )
 
-    # 3. 点名统计（rollcall_history.result 存 correct/incorrect/skip）
-    rc_stats = execute_query(
-        """SELECT COUNT(*),
-                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-           FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls),
-    )
+    # 3. 点名统计（使用 FK 列或降级 TEXT）
+    if grade_id and class_id:
+        rc_stats = execute_query(
+            """SELECT COUNT(*),
+                      SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
+               FROM rollcall_history WHERE teacher_username=? AND grade_id=? AND class_id=?""",
+            (query_teacher, grade_id, class_id),
+        )
+    else:
+        rc_stats = execute_query(
+            """SELECT COUNT(*),
+                      SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
+               FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=?""",
+            (query_teacher, grade, cls),
+        )
 
     # 4. 考试统计（该班级最近的考试）
     exam_stats = q_execute_query(

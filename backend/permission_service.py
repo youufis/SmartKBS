@@ -180,12 +180,11 @@ def get_teacher_assignments(teacher_username: str) -> list[dict]:
 
 
 def get_teacher_grades(teacher_username: str) -> list[dict]:
-    """教师任教的年级列表（去重），管理员返回全部。
-    优先查 teacher_assignments，无数据时降级查旧 users.grade 管道格式。"""
+    """教师任教的年级列表（去重），管理员返回全部"""
     from backend.auth import is_admin
     if is_admin(teacher_username):
         return get_all_grades()
-    rows = execute_query_dict(
+    return execute_query_dict(
         """SELECT DISTINCT g.id, g.name, g.stage, g.sort_order
            FROM teacher_assignments ta
            JOIN grades g ON ta.grade_id = g.id
@@ -193,36 +192,14 @@ def get_teacher_grades(teacher_username: str) -> list[dict]:
            ORDER BY g.sort_order""",
         (teacher_username,),
     )
-    if rows:
-        return rows
-    # 降级：查旧 users.grade 管道格式
-    old_rows = execute_query("SELECT grade FROM users WHERE username=?", (teacher_username,))
-    if old_rows and old_rows[0][0]:
-        grade_str = (old_rows[0][0] or "").strip()
-        if grade_str:
-            result = []
-            for g_name in grade_str.split("|"):
-                g_name = g_name.strip()
-                if g_name:
-                    info = get_grade_by_name(g_name)
-                    if info:
-                        result.append(info)
-                    else:
-                        # 旧年级名不在新表中，动态创建
-                        gid = upsert_grade(g_name)
-                        result.append(get_grade_by_id(gid))
-            return result
-    return []
 
 
 def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict]:
-    """教师在指定年级的任教班级，class_id=NULL 表示该年级全部班级。
-    优先查 teacher_assignments，无数据时降级查旧 users.class 管道格式。"""
+    """教师在指定年级的任教班级，class_id=NULL 表示该年级全部班级"""
     from backend.auth import is_admin
     if is_admin(teacher_username):
         return get_all_classes(grade_id)
 
-    # 先查是否有 class_id=NULL（表示该年级全部班级）
     rows = execute_query(
         "SELECT class_id FROM teacher_assignments WHERE teacher_username=? AND grade_id=? AND class_id IS NULL",
         (teacher_username, grade_id),
@@ -230,7 +207,7 @@ def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict]:
     if rows:
         return get_all_classes(grade_id)
 
-    rows = execute_query_dict(
+    return execute_query_dict(
         """SELECT c.id, c.grade_id, c.name, c.display_name, c.sort_order
            FROM teacher_assignments ta
            JOIN classes c ON ta.class_id = c.id
@@ -238,35 +215,6 @@ def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict]:
            ORDER BY c.sort_order""",
         (teacher_username, grade_id),
     )
-    if rows:
-        return rows
-
-    # 降级：查旧 users.grade/class 管道格式
-    grade_info = get_grade_by_id(grade_id)
-    if not grade_info:
-        return []
-    grade_name = grade_info["name"]
-    old_rows = execute_query("SELECT grade, class FROM users WHERE username=?", (teacher_username,))
-    if old_rows and old_rows[0][0]:
-        gcm = parse_legacy_teacher_grade_class(
-            (old_rows[0][0] or "").strip(), str(old_rows[0][1] or "").strip()
-        )
-        class_names = gcm.get(grade_name, [])
-        if not class_names:
-            # 该年级没有限制 → 全部班级
-            return get_all_classes(grade_id)
-        result = []
-        for cn in class_names:
-            if "班" not in cn:
-                cn = f"{cn}班"
-            cls_info = get_class_by_name(grade_id, cn)
-            if cls_info:
-                result.append(cls_info)
-            else:
-                cid = upsert_class(grade_id, cn)
-                result.append(get_class_by_id(cid))
-        return result
-    return []
 
 
 def assign_teacher(teacher_username: str, grade_id: int, class_id: int = None, subject: str = ""):
@@ -305,7 +253,7 @@ def clear_teacher_assignments(teacher_username: str):
 # ═══════════════════════════════════════════════════════════════
 
 def can_access_grade(username: str, grade_id: int) -> bool:
-    """用户是否有权限访问该年级（新表优先，无数据时降级旧格式）"""
+    """用户是否有权限访问该年级"""
     from backend.auth import is_admin
     if is_admin(username):
         return True
@@ -313,25 +261,14 @@ def can_access_grade(username: str, grade_id: int) -> bool:
         "SELECT 1 FROM teacher_assignments WHERE teacher_username=? AND grade_id=?",
         (username, grade_id),
     )
-    if rows:
-        return True
-    # 降级：查旧 users.grade 管道格式
-    grade_info = get_grade_by_id(grade_id)
-    if not grade_info:
-        return False
-    old_rows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
-    if old_rows and old_rows[0][0]:
-        allowed = [g.strip() for g in (old_rows[0][0] or "").split("|") if g.strip()]
-        return grade_info["name"] in allowed
-    return False
+    return len(rows) > 0
 
 
 def can_access_class(username: str, grade_id: int, class_id: int) -> bool:
-    """用户是否有权限访问该班级（新表优先，无数据时降级旧格式）"""
+    """用户是否有权限访问该班级"""
     from backend.auth import is_admin
     if is_admin(username):
         return True
-    # 检查新表
     rows = execute_query(
         "SELECT 1 FROM teacher_assignments WHERE teacher_username=? AND grade_id=? AND class_id=?",
         (username, grade_id, class_id),
@@ -342,61 +279,21 @@ def can_access_class(username: str, grade_id: int, class_id: int) -> bool:
         "SELECT 1 FROM teacher_assignments WHERE teacher_username=? AND grade_id=? AND class_id IS NULL",
         (username, grade_id),
     )
-    if rows:
-        return True
-    # 降级：查旧格式
-    grade_info = get_grade_by_id(grade_id)
-    class_info = get_class_by_id(class_id) if class_id else None
-    if not grade_info:
-        return False
-    old_rows = execute_query("SELECT grade, class FROM users WHERE username=?", (username,))
-    if old_rows and old_rows[0][0]:
-        gcm = parse_legacy_teacher_grade_class(
-            (old_rows[0][0] or "").strip(), str(old_rows[0][1] or "").strip()
-        )
-        allowed = gcm.get(grade_info["name"], [])
-        if not allowed:
-            # 没有指定班级限制 → 该年级全部可访问
-            return True
-        if class_info:
-            cls_name = class_info["name"].replace("班", "")
-            return cls_name in allowed
-    return False
+    return len(rows) > 0
 
 
 def is_student_in_teacher_scope(student_username: str, teacher_username: str) -> bool:
-    """判断学生是否在教师的管辖范围内（新表优先，降级旧格式）"""
+    """判断学生是否在教师的管辖范围内"""
     from backend.auth import is_admin
     if is_admin(teacher_username):
         return True
-    # 获取学生年级班级（新字段优先，降级旧字段）
     student = execute_query_dict(
-        "SELECT grade_id, class_id, grade, class FROM users WHERE username=?", (student_username,)
+        "SELECT grade_id, class_id FROM users WHERE username=?", (student_username,)
     )
-    if not student:
+    if not student or not student[0].get("grade_id"):
         return False
     s = student[0]
-
-    # 优先用新字段
-    if s.get("grade_id"):
-        return can_access_class(teacher_username, s["grade_id"], s.get("class_id"))
-
-    # 降级：学生也是旧格式，教师也是旧格式，直接文本匹配
-    s_grade = (s.get("grade") or "").strip()
-    s_class = str(s.get("class") or "").strip()
-    if not s_grade:
-        return False
-
-    old_rows = execute_query("SELECT grade, class FROM users WHERE username=?", (teacher_username,))
-    if not old_rows or not old_rows[0][0]:
-        return False
-    gcm = parse_legacy_teacher_grade_class(
-        (old_rows[0][0] or "").strip(), str(old_rows[0][1] or "").strip()
-    )
-    allowed_classes = gcm.get(s_grade, [])
-    if not allowed_classes:
-        return s_grade in gcm  # 该年级无班级限制
-    return s_class in allowed_classes
+    return can_access_class(teacher_username, s["grade_id"], s.get("class_id"))
 
 
 def get_students_in_scope(username: str, grade_id: int = None, class_id: int = None) -> list[dict]:

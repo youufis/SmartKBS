@@ -127,14 +127,14 @@ async def dashboard_summary(request: Request):
         total_score = get_reward_total(username)
 
         # 同年级排名（基于 reward_engine 总积分）
-        grade_row = execute_query("SELECT grade FROM users WHERE username=?", (username,))
-        grade = grade_row[0][0] if grade_row else ""
-        if grade:
+        grade_row = execute_query("SELECT grade_id FROM users WHERE username=?", (username,))
+        grade_id = grade_row[0][0] if grade_row else None
+        if grade_id:
             rank = _db_count(
                 """SELECT COUNT(*) + 1 FROM student_total_points stp
                    JOIN users u ON stp.student_username = u.username
-                   WHERE u.role=2 AND u.grade=? AND stp.total_points > ?""",
-                (grade, total_score),
+                   WHERE u.role=2 AND u.grade_id=? AND stp.total_points > ?""",
+                (grade_id, total_score),
             )
         else:
             rank = 1
@@ -213,20 +213,22 @@ async def dashboard_summary(request: Request):
 
         # ── 课堂互动数据 ──
         grade, cls = _get_user_grade_class(username)
-        if grade:
+        grade_row2 = execute_query("SELECT grade_id FROM users WHERE username=?", (username,))
+        grade_id2 = grade_row2[0][0] if grade_row2 else None
+        if grade_id2:
             cls_param = "," + cls + "," if cls else ""
             cls_cond = "AND (u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)" if cls else ""
             sql = (
                 "SELECT COUNT(*) FROM interaction_quizzes q "
                 "JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1) "
                 "WHERE q.status = 'active' "
-                "AND (u.role = 0 OR u.grade = ?) "
+                "AND (u.role = 0 OR u.grade_id = ?) "
                 + cls_cond + " "
                 "AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)"
             )
             active_quiz_count = _db_count(
                 sql,
-                (grade, cls_param, username) if cls else (grade, username),
+                (grade_id2, cls_param, username) if cls else (grade_id2, username),
             )
         else:
             active_quiz_count = 0

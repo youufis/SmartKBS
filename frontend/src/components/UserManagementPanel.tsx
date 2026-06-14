@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
-import { Tabs, Form, Input, Button, message, Modal, Progress, Table, Upload, Space, Radio, Typography } from 'antd'
+import React, { useState, useEffect } from 'react'
+import { Tabs, Form, Input, Button, message, Modal, Progress, Table, Upload, Space, Radio, Typography, Select } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
+import apiClient from '../api/client'
 import * as usersApi from '../api/users'
 import type { ImportProgressEvent } from '../api/users'
 
@@ -8,6 +9,15 @@ const UserManagementPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState('register')
   const [users, setUsers] = useState<any[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
+
+  // ── 年级/班级选项 ──
+  const [gradeOptions, setGradeOptions] = useState<string[]>([])
+  useEffect(() => {
+    apiClient.get('/api/config/grades').then(({ data }) => {
+      const list = data?.grades
+      if (list?.length > 0) setGradeOptions(list.map((g: any) => g.name || g))
+    }).catch(() => {})
+  }, [])
 
   // ── 注册 ──
   const [registerForm] = Form.useForm()
@@ -229,11 +239,11 @@ const UserManagementPanel: React.FC = () => {
             <Form.Item name="password" label="密码" rules={[{ required: true }]}>
               <Input.Password placeholder="密码" />
             </Form.Item>
-            <Form.Item name="grade" label="年级" extra={<>教师/管理员：多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
+            <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
               <Input placeholder="如：高一 或 高一|高二" />
             </Form.Item>
-            <Form.Item name="class_val" label="班级" extra={<>教师/管理员：多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4|1,2,7,8</code></>}>
-              <Input placeholder="如：1 或 1,2,3 或 1,2,3|1,2,7,8" />
+            <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
+              <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
             </Form.Item>
             <Form.Item name="name" label="姓名"><Input placeholder="姓名" /></Form.Item>
             <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderOptions} /></Form.Item>
@@ -248,14 +258,15 @@ const UserManagementPanel: React.FC = () => {
         children: (
           <Form form={updateForm} layout="vertical" onFinish={handleUpdate}>
             <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="grade" label="年级" extra={<>教师/管理员：多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
+            <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
               <Input placeholder="如：高一 或 高一|高二" />
             </Form.Item>
-            <Form.Item name="class_val" label="班级" extra={<>教师/管理员：多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4|1,2,7,8</code></>}>
-              <Input placeholder="如：1 或 1,2,3 或 1,2,3|1,2,7,8" />
+            <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
+              <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
             </Form.Item>
             <Form.Item name="name" label="姓名"><Input /></Form.Item>
             <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderOptions} /></Form.Item>
+            <Form.Item name="role" label="角色" initialValue="普通用户"><Radio.Group options={roleOptions} /></Form.Item>
             <Button type="primary" htmlType="submit">更新</Button>
           </Form>
         ),

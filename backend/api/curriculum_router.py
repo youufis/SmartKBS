@@ -1567,16 +1567,31 @@ async def get_class_progress_overview(
             # 没有任教信息，不返回任何学生
             return {"students": [], "total": 0}
 
-    # 用户选择的额外筛选条件（对管理员直接应用，对教师则在教师权限基础上进一步缩小范围）
+    # 用户选择的额外筛选条件
     if grade:
-        conditions.append("grade=?")
-        params.append(grade)
+        from backend.permission_service import get_grade_by_name
+        ginfo = get_grade_by_name(grade)
+        if ginfo:
+            conditions.append("grade_id=?")
+            params.append(ginfo["id"])
+        else:
+            conditions.append("grade=?")
+            params.append(grade)
     if class_name:
-        # 统一格式：兼容 "1" 和 "1班"
         import re
         cn = re.sub(r'[^\d]', '', str(class_name))
-        conditions.append("(class=? OR class=?)")
-        params.extend([cn, f"{cn}班"])
+        gid = None
+        if grade:
+            from backend.permission_service import get_grade_by_name
+            gi = get_grade_by_name(grade)
+            if gi:
+                gid = gi["id"]
+        if gid:
+            conditions.append("class_id=(SELECT id FROM classes WHERE grade_id=? AND (name=? OR name=?))")
+            params.extend([gid, f"{cn}班", cn])
+        else:
+            conditions.append("(class=? OR class=?)")
+            params.extend([cn, f"{cn}班"])
 
     where = " AND ".join(conditions)
     students = execute_query(

@@ -39,26 +39,39 @@ def load_students(grade=""):
     """从数据库加载学生名单，按年级和班级筛选"""
     students = []
     try:
+        import re
+        grade_id = None
+        if grade:
+            if grade.isdigit():
+                grade_id = int(grade)
+            else:
+                from backend.database import execute_query as eq
+                r = eq("SELECT id FROM grades WHERE name=?", (grade,))
+                if r:
+                    grade_id = r[0][0]
+
         with get_connection() as conn:
             c = conn.cursor()
-            c.execute(
-                "SELECT name, class, gender FROM users WHERE role=2 AND grade=? AND name IS NOT NULL AND name!=''",
-                (grade,),
-            )
+            if grade_id:
+                c.execute(
+                    """SELECT u.name, COALESCE(c.display_name, u.class) as cls_display, u.gender
+                       FROM users u
+                       LEFT JOIN classes c ON u.class_id = c.id
+                       WHERE u.role=2 AND u.grade_id=? AND u.name IS NOT NULL AND u.name!=''""",
+                    (grade_id,),
+                )
+            else:
+                return []
+
             seen, class_map = set(), {}
-            for name, cls_num, gval in c.fetchall():
+            for name, cls_display, gender_val in c.fetchall():
                 if name in seen:
                     continue
                 seen.add(name)
-                cls_str = str(cls_num or "")
-                # 统一格式：如果已含"班"则直接拼接，否则补"班"
-                if "班" in cls_str:
-                    cls_key = f"{grade}{cls_str}"
-                else:
-                    cls_key = f"{grade}{cls_str}班" if cls_str else f"{grade}班"
-                class_map.setdefault(cls_key, []).append({
-                    "class": cls_key, "name": name,
-                    "gender": "男" if gval in (1, "1", "男") else "女" if gval in (2, "0", "女", 0) else "",
+                cls_display = cls_display or ""
+                class_map.setdefault(cls_display, []).append({
+                    "class": cls_display, "name": name,
+                    "gender": "男" if gender_val in (1, "1", "男") else "女" if gender_val in (2, "0", "女", 0) else "",
                     "language": "", "subjects": "", "major": "",
                 })
             for cls_name in sorted(class_map.keys()):
