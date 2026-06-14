@@ -261,11 +261,11 @@ const UserMgmtPage: React.FC = () => {
           <Form.Item name="password" label="密码" rules={[{ required: true }]}>
             <Input.Password placeholder="密码" />
           </Form.Item>
-          <Form.Item name="grade" label="年级" extra={<>教师/管理员：多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
+          <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
             <Input placeholder="如：高一 或 高一|高二" />
           </Form.Item>
-          <Form.Item name="class_val" label="班级" extra={<>教师/管理员：多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4|1,2,7,8</code></>}>
-            <Input placeholder="如：1 或 1,2,3 或 1,2,3|1,2,7,8" />
+          <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
+            <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
           </Form.Item>
           <Form.Item name="name" label="姓名"><Input placeholder="姓名" /></Form.Item>
           <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
@@ -280,11 +280,11 @@ const UserMgmtPage: React.FC = () => {
       children: (
         <Form form={updForm} layout="vertical" onFinish={handleUpdate} style={{ maxWidth: 400 }}>
           <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input placeholder="要更新的用户名" /></Form.Item>
-          <Form.Item name="grade" label="年级" extra={<>教师/管理员：多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
+          <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
             <Input placeholder="如：高一 或 高一|高二" />
           </Form.Item>
-          <Form.Item name="class_val" label="班级" extra={<>教师/管理员：多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4|1,2,7,8</code></>}>
-            <Input placeholder="如：1 或 1,2,3 或 1,2,3|1,2,7,8" />
+          <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
+            <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
           </Form.Item>
           <Form.Item name="name" label="姓名"><Input /></Form.Item>
           <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>

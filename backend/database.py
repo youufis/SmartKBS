@@ -217,6 +217,12 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_scores_lookup ON scores(teacher_username, grade, class_name)")
             except sqlite3.OperationalError:
                 pass
+            # ── 兼容：scores 表增加 FK 列 ──
+            for col in ["grade_id", "class_id"]:
+                try:
+                    c.execute(f"ALTER TABLE scores ADD COLUMN {col} INTEGER")
+                except sqlite3.OperationalError:
+                    pass
 
             # ── 点名权重表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS rollcall_weights (
@@ -232,6 +238,12 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_rcw_class ON rollcall_weights(teacher_username, grade, class_name)")
             except sqlite3.OperationalError:
                 pass
+            # ── 兼容：rollcall_weights 表增加 FK 列 ──
+            for col in ["grade_id", "class_id"]:
+                try:
+                    c.execute(f"ALTER TABLE rollcall_weights ADD COLUMN {col} INTEGER")
+                except sqlite3.OperationalError:
+                    pass
 
             # ── 点名轮次元数据 ──
             c.execute("""CREATE TABLE IF NOT EXISTS rollcall_meta (
@@ -244,6 +256,12 @@ def init_db():
                 updated_at TEXT,
                 UNIQUE(teacher_username, grade, class_name)
             )""")
+            # ── 兼容：rollcall_meta 表增加 FK 列 ──
+            for col in ["grade_id", "class_id"]:
+                try:
+                    c.execute(f"ALTER TABLE rollcall_meta ADD COLUMN {col} INTEGER")
+                except sqlite3.OperationalError:
+                    pass
 
             # ── 点名历史记录表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS rollcall_history (
@@ -260,6 +278,12 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_rch_class ON rollcall_history(teacher_username, grade, class_name)")
             except sqlite3.OperationalError:
                 pass
+            # ── 兼容：rollcall_history 表增加 FK 列 ──
+            for col in ["grade_id", "class_id"]:
+                try:
+                    c.execute(f"ALTER TABLE rollcall_history ADD COLUMN {col} INTEGER")
+                except sqlite3.OperationalError:
+                    pass
 
             # ── 任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS tasks (
