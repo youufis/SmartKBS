@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react'
-import { Tabs, Form, Input, Button, message, Modal, Progress, Table, Upload, Space, Radio, Typography, Select } from 'antd'
+import React, { useState } from 'react'
+import { Tabs, Form, Input, Button, message, Modal, Progress, Table, Upload, Space, Radio, Typography } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
-import apiClient from '../api/client'
 import * as usersApi from '../api/users'
 import type { ImportProgressEvent } from '../api/users'
 
@@ -9,15 +8,6 @@ const UserManagementPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState('register')
   const [users, setUsers] = useState<any[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
-
-  // ── 年级/班级选项 ──
-  const [gradeOptions, setGradeOptions] = useState<string[]>([])
-  useEffect(() => {
-    apiClient.get('/api/config/grades').then(({ data }) => {
-      const list = data?.grades
-      if (list?.length > 0) setGradeOptions(list.map((g: any) => g.name || g))
-    }).catch(() => {})
-  }, [])
 
   // ── 注册 ──
   const [registerForm] = Form.useForm()
@@ -68,11 +58,16 @@ const UserManagementPanel: React.FC = () => {
     }
   }
 
-  // ── 删除 ──
+  // ── 删除（支持模糊模式） ──
   const [deleteForm] = Form.useForm()
   const handleDelete = async (values: any) => {
+    const pattern = values.pattern?.trim()
+    if (!pattern) {
+      message.warning('请输入用户名模式')
+      return
+    }
     try {
-      const msg = await usersApi.deleteUser(values.username)
+      const msg = await usersApi.bulkDeleteUsers(pattern)
       message.success(msg)
       deleteForm.resetFields()
     } catch (err: any) {
@@ -109,7 +104,7 @@ const UserManagementPanel: React.FC = () => {
       const { users: userList } = await usersApi.getAllUsers()
       setUsers(userList)
       setActiveTab('list')
-    } catch (err: any) {
+    } catch {
       message.error('获取用户列表失败')
     } finally {
       setUsersLoading(false)
@@ -192,21 +187,6 @@ const UserManagementPanel: React.FC = () => {
     setImportProgress(prev => ({ ...prev, visible: false }))
   }
 
-  // ── 批量删除 ──
-  const [bulkPattern, setBulkPattern] = useState('')
-  const handleBulkDelete = async () => {
-    if (!bulkPattern.trim()) {
-      message.warning('请输入用户名模式')
-      return
-    }
-    try {
-      const msg = await usersApi.bulkDeleteUsers(bulkPattern)
-      message.success(msg)
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '批量删除失败')
-    }
-  }
-
   const genderOptions = [
     { label: '男', value: '男' },
     { label: '女', value: '女' },
@@ -239,11 +219,29 @@ const UserManagementPanel: React.FC = () => {
             <Form.Item name="password" label="密码" rules={[{ required: true }]}>
               <Input.Password placeholder="密码" />
             </Form.Item>
-            <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
-              <Input placeholder="如：高一 或 高一|高二" />
-            </Form.Item>
-            <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
-              <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
+            <Form.Item noStyle shouldUpdate={(p, c) => p.role !== c.role}>
+              {({ getFieldValue }) => {
+                const isTeacher = getFieldValue('role') === '教师'
+                return isTeacher ? (
+                  <span>
+                    <Form.Item name="grade" label="年级（教师）" extra={<span>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></span>}>
+                      <Input placeholder="如：高一|高二" />
+                    </Form.Item>
+                    <Form.Item name="class_val" label="班级（教师）" extra={<span>每个年级的班级用 <code>,</code> 分隔，跨年级用 <code>|</code> 对齐，如 <code>1,2,3,4,5|6,5,4,38,9</code></span>}>
+                      <Input placeholder="如：1,2,3|4,5" />
+                    </Form.Item>
+                  </span>
+                ) : (
+                  <span>
+                    <Form.Item name="grade" label="年级">
+                      <Input placeholder="如：高一" />
+                    </Form.Item>
+                    <Form.Item name="class_val" label="班级">
+                      <Input placeholder="如：1" />
+                    </Form.Item>
+                  </span>
+                )
+              }}
             </Form.Item>
             <Form.Item name="name" label="姓名"><Input placeholder="姓名" /></Form.Item>
             <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderOptions} /></Form.Item>
@@ -258,11 +256,29 @@ const UserManagementPanel: React.FC = () => {
         children: (
           <Form form={updateForm} layout="vertical" onFinish={handleUpdate}>
             <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
-              <Input placeholder="如：高一 或 高一|高二" />
-            </Form.Item>
-            <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
-              <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
+            <Form.Item noStyle shouldUpdate={(p, c) => p.role !== c.role}>
+              {({ getFieldValue }) => {
+                const isTeacher = getFieldValue('role') === '教师'
+                return isTeacher ? (
+                  <span>
+                    <Form.Item name="grade" label="年级（教师）" extra={<span>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></span>}>
+                      <Input placeholder="如：高一|高二" />
+                    </Form.Item>
+                    <Form.Item name="class_val" label="班级（教师）" extra={<span>每个年级的班级用 <code>,</code> 分隔，跨年级用 <code>|</code> 对齐，如 <code>1,2,3,4,5|6,5,4,38,9</code></span>}>
+                      <Input placeholder="如：1,2,3|4,5" />
+                    </Form.Item>
+                  </span>
+                ) : (
+                  <span>
+                    <Form.Item name="grade" label="年级">
+                      <Input placeholder="如：高一" />
+                    </Form.Item>
+                    <Form.Item name="class_val" label="班级">
+                      <Input placeholder="如：1" />
+                    </Form.Item>
+                  </span>
+                )
+              }}
             </Form.Item>
             <Form.Item name="name" label="姓名"><Input /></Form.Item>
             <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderOptions} /></Form.Item>
@@ -286,10 +302,16 @@ const UserManagementPanel: React.FC = () => {
         key: 'delete',
         label: '删除',
         children: (
-          <Form form={deleteForm} layout="vertical" onFinish={handleDelete}>
-            <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input /></Form.Item>
-            <Button type="primary" danger htmlType="submit">删除用户</Button>
-          </Form>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Form form={deleteForm} layout="vertical" onFinish={handleDelete} style={{ maxWidth: 400 }}>
+              <Form.Item name="pattern" label="用户名模式" extra={<>支持 <code>%</code> 模糊匹配，如 <code>s110%</code> 匹配所有 s110 开头用户</>}
+                rules={[{ required: true, message: '请输入用户名模式' }]}>
+                <Input placeholder="如：s110%  或  student_2026" />
+              </Form.Item>
+              <Button type="primary" danger htmlType="submit">批量删除匹配用户</Button>
+            </Form>
+            <Typography.Text type="warning">⚠️ 删除操作不可恢复，会同时清除该用户的所有数据</Typography.Text>
+          </Space>
         ),
       },
       {
@@ -304,11 +326,11 @@ const UserManagementPanel: React.FC = () => {
               <Button type="primary" htmlType="submit" loading={searchLoading}>查询</Button>
             </Form>
             {searchResult.length > 0 && (
-              <>
+              <span>
                 <p>共找到 {searchResult.length} 个匹配用户</p>
                 <Table dataSource={searchResult} columns={userColumns} rowKey="username"
                   size="small" pagination={{ pageSize: 20 }} scroll={{ y: 300 }} />
-              </>
+              </span>
             )}
             {searchResult.length === 0 && !searchLoading && (
               <p>请输入关键词查询用户（支持用户名和姓名模糊匹配）</p>
@@ -361,13 +383,6 @@ const UserManagementPanel: React.FC = () => {
                 )}
               </Space>
             </Modal>
-            <Input
-              placeholder="输入用户名关键词"
-              value={bulkPattern}
-              onChange={(e) => setBulkPattern(e.target.value)}
-              style={{ width: 300 }}
-            />
-            <Button danger onClick={handleBulkDelete}>批量删除</Button>
           </Space>
         ),
       },
