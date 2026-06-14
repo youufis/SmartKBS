@@ -7,10 +7,15 @@ from fastapi import APIRouter, Request, HTTPException
 
 from backend.config import BASE_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
-from backend.api.score_router import _get_teacher_allowed_grades
 from backend.auth import is_admin, get_online_usernames
 from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
+from backend.permission_service import (
+    get_teacher_grades,
+    get_teacher_classes,
+    get_grade_by_name,
+    parse_legacy_teacher_grade_class,
+)
 
 router = APIRouter()
 
@@ -52,40 +57,38 @@ def _score_key(teacher, grade, cls, name):
 
 
 def _is_teacher_allowed(username: str, grade: str, cls: str) -> bool:
-    """检查教师是否有权限访问该年级/班级"""
+    """检查教师是否有权限访问该年级/班级（统一使用 permission_service）"""
     if not grade and not cls:
         return True
-    rows = execute_query(
-        "SELECT grade, class FROM users WHERE username=?", (username,)
-    )
-    if not rows:
+    if is_admin(username):
+        return True
+
+    from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
+
+    grade_info = get_grade_by_name(grade)
+    if not grade_info:
         return False
-    t_grade = (rows[0][0] or "").strip()
-    t_class = str(rows[0][1] or "").strip()
 
-    # 检查年级
-    if grade:
-        allowed_grades = [g.strip() for g in t_grade.split("|") if g.strip()]
-        if grade not in allowed_grades:
-            return False
+    if not cls:
+        return can_access_grade(username, grade_info["id"])
 
-    # 检查班级（如果有指定）
-    if cls and t_class:
-        # 从班级名中提取数字部分，如 "高一10班" -> "10"
-        import re
-        cls_match = re.search(r'\d+', cls)
-        cls_num = cls_match.group() if cls_match else cls
-        grade_parts = [g.strip() for g in t_grade.split("|") if g.strip()]
-        class_parts = [c.strip() for c in t_class.split("|")] if t_class else []
-        for i, g in enumerate(grade_parts):
-            if g == grade:
-                if i < len(class_parts) and class_parts[i]:
-                    allowed_nums = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-                    if cls_num in allowed_nums:
-                        return True
-                    return False
-                break
-    return True
+    # 班级匹配：从 "高一1班" 提取数字，精确匹配 "1班"
+    import re
+    cls_match = re.search(r'\d+', cls)
+    cls_num = cls_match.group() if cls_match else cls
+    class_rows = execute_query_dict(
+        "SELECT id FROM classes WHERE grade_id=? AND name=?",
+        (grade_info["id"], f"{cls_num}班")
+    )
+    if not class_rows:
+        # 兼容班级名不含"班"的情况
+        class_rows = execute_query_dict(
+            "SELECT id FROM classes WHERE grade_id=? AND name=?",
+            (grade_info["id"], cls_num)
+        )
+    if class_rows:
+        return can_access_class(username, grade_info["id"], class_rows[0]["id"])
+    return can_access_grade(username, grade_info["id"])
 
 
 def _load_history(teacher, grade, cls):
@@ -223,9 +226,16 @@ def _save_to_student_chat(student_name, cls, content):
 # ── API 处理器 ──
 
 async def api_grades(request: Request):
-    """获取年级列表（复用 score_router 统一函数）"""
+    """获取年级列表 - 管理员基于实际学生数据，教师基于任教范围"""
     user = get_current_user(request)
-    return _get_teacher_allowed_grades(user["username"])
+    role = user.get("role", 2)
+    if role == 0:
+        rows = execute_query(
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+        )
+        return [row[0] for row in rows]
+    grades = get_teacher_grades(user["username"])
+    return [g["name"] for g in grades]
 
 
 async def api_classes(request: Request):
@@ -242,31 +252,36 @@ async def api_classes(request: Request):
         # 管理员：该年级全部班级
         students = _load_students(grade)
         return sorted(set(s.get("class", "") for s in students if s.get("class")))
-    else:
-        # 教师：只返回自己在该年级任教的班级
-        t_rows = execute_query(
-            "SELECT grade, class FROM users WHERE username=?", (username,)
-        )
-        if not t_rows:
-            return []
-        t_grade = (t_rows[0][0] or "").strip()
-        t_class = str(t_rows[0][1] or "").strip()
-        if not t_grade:
-            # 没有设置年级，返回全部
+
+    # 教师：优先使用新表 teacher_assignments
+    grade_info = get_grade_by_name(grade)
+    if grade_info:
+        classes = get_teacher_classes(username, grade_info["id"])
+        if classes:
+            return [c["display_name"] for c in classes]
+        # 新表无数据，降级查旧格式
+        if not classes:
             students = _load_students(grade)
             return sorted(set(s.get("class", "") for s in students if s.get("class")))
-        # 解析教师的年级/班级映射
-        grade_parts = [g.strip() for g in t_grade.split("|")]
-        class_parts = [c.strip() for c in t_class.split("|")] if t_class else []
-        for i, g in enumerate(grade_parts):
-            if g == grade:
-                if i < len(class_parts) and class_parts[i]:
-                    allowed = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-                    return [f"{grade}{c}班" for c in allowed]
-                break
-        # 没有匹配到具体班级限制，返回全部
+
+    # 降级：旧格式
+    t_rows = execute_query(
+        "SELECT grade, class FROM users WHERE username=?", (username,)
+    )
+    if not t_rows:
+        return []
+    t_grade = (t_rows[0][0] or "").strip()
+    t_class = str(t_rows[0][1] or "").strip()
+    if not t_grade:
         students = _load_students(grade)
         return sorted(set(s.get("class", "") for s in students if s.get("class")))
+    gcm = parse_legacy_teacher_grade_class(t_grade, t_class)
+    if grade in gcm:
+        allowed = gcm[grade]
+        if allowed:
+            return [f"{grade}{c}班" for c in allowed]
+    students = _load_students(grade)
+    return sorted(set(s.get("class", "") for s in students if s.get("class")))
 
 
 async def api_students(request: Request):
@@ -386,9 +401,12 @@ async def api_mark(request: Request):
     try:
         if result in ("correct", "incorrect"):
             from backend.reward_engine import award_participation
+            # 从 "高一1班" 提取纯数字班级号
+            import re
+            cls_num = re.sub(r'[^\d]', '', str(cls)) if cls else ""
             student_user = execute_query(
-                "SELECT username FROM users WHERE role=2 AND name=? AND grade=? AND class=?",
-                (student, grade, cls),
+                "SELECT username FROM users WHERE role=2 AND name=? AND grade=? AND (class=? OR class=?)",
+                (student, grade, cls_num, f"{cls_num}班"),
             )
             if student_user:
                 award_participation(student_user[0][0], "rollcall", f"{grade}_{cls}_{student}", f"点名-{student}")
@@ -656,10 +674,9 @@ async def attendance_grades(request: Request):
         )
         return [row[0] for row in rows]
     else:
-        t_rows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
-        if not t_rows or not t_rows[0][0]:
-            return []
-        return [g.strip() for g in t_rows[0][0].split("|") if g.strip()]
+        from backend.permission_service import get_teacher_grades
+        grades = get_teacher_grades(username)
+        return [g["name"] for g in grades]
 
 
 @router.get("/attendance/classes", summary="获取考勤班级列表")
@@ -679,20 +696,12 @@ async def attendance_classes(request: Request):
     else:
         if not _is_teacher_allowed(username, grade, ""):
             return []
-        t_rows = execute_query("SELECT grade, class FROM users WHERE username=?", (username,))
-        if not t_rows:
-            students = _load_students(grade)
-            return sorted(set(s.get("class", "") for s in students if s.get("class")))
-        t_grade = (t_rows[0][0] or "").strip()
-        t_class = str(t_rows[0][1] or "").strip()
-        grade_parts = [g.strip() for g in t_grade.split("|")]
-        class_parts = [c.strip() for c in t_class.split("|")] if t_class else []
-        for i, g in enumerate(grade_parts):
-            if g == grade:
-                if i < len(class_parts) and class_parts[i]:
-                    allowed = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-                    return [f"{grade}{c}班" for c in allowed]
-                break
+        from backend.permission_service import get_teacher_classes, get_grade_by_name
+        grade_info = get_grade_by_name(grade)
+        if grade_info:
+            classes = get_teacher_classes(username, grade_info["id"])
+            if classes:
+                return [c["display_name"] for c in classes]
         students = _load_students(grade)
         return sorted(set(s.get("class", "") for s in students if s.get("class")))
 
@@ -723,10 +732,10 @@ async def attendance_summary(request: Request):
     cls_match = re.search(r'(\d+)', cls)
     cls_num = cls_match.group(1) if cls_match else cls
 
-    # 直接查数据库获取该年级+班级所有学生的用户名
+    # 直接查数据库获取该年级+班级所有学生的用户名（兼容 class="1" 和 class="1班"）
     student_rows = execute_query(
-        "SELECT username, name FROM users WHERE role=2 AND grade=? AND class=?",
-        (grade, cls_num),
+        "SELECT username, name FROM users WHERE role=2 AND grade=? AND (class=? OR class=?)",
+        (grade, cls_num, f"{cls_num}班"),
     )
     # 建立 name -> username 映射
     name_to_username = {row[1]: row[0] for row in student_rows}

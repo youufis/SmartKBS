@@ -73,9 +73,14 @@ const CurriculumPage: React.FC = () => {
 
   // ── 从系统配置加载课程名称列表 ──
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+  const [gradeOptions, setGradeOptions] = useState<string[]>([])
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
+    }).catch(() => {})
+    apiClient.get('/api/config/grades').then(({ data }) => {
+      const list = data?.grades
+      if (list?.length > 0) setGradeOptions(list.map((g: any) => g.name || g))
     }).catch(() => {})
   }, [])
 
@@ -1048,14 +1053,13 @@ const CurriculumPage: React.FC = () => {
           <Form.Item name="grade" label="适用年级">
             <Select
               mode="tags"
-              placeholder="选择或输入年级（如 高一、高二）"
+              placeholder="选择或输入年级"
               tokenSeparators={[',', '|']}
               onChange={(vals: string[]) => {
                 courseForm.setFieldValue('grade', vals.join('|'))
               }}
             >
-              <Option value="高一">高一</Option>
-              <Option value="高二">高二</Option>
+              {gradeOptions.map(g => <Option key={g} value={g}>{g}</Option>)}
             </Select>
           </Form.Item>
           <Form.Item name="sort_order" label="排序号">

@@ -23,6 +23,11 @@ from backend.config import (
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
 from backend.database import execute_query, execute_insert_update, get_connection, execute_insert_update, get_connection
 from backend.logger import logger
+from backend.permission_service import (
+    parse_legacy_teacher_grade_class as _parse_teacher_grade_class,
+    get_teacher_assignments,
+    is_student_in_teacher_scope,
+)
 
 router = APIRouter()
 
@@ -94,45 +99,20 @@ def _check_task_ownership(task_id: str, username: str) -> dict | None:
     return None
 
 
-def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:
-    """解析教师的年级和班级字段，返回 {年级: [班级列表]} 的映射"""
-    result = {}
-    if not grade or not grade.strip():
-        return result
-    grade_parts = [g.strip() for g in grade.split("|")]
-    class_parts = [c.strip() for c in class_str.split("|")] if class_str else []
-    for i, g in enumerate(grade_parts):
-        if not g:
-            continue
-        if i < len(class_parts) and class_parts[i]:
-            classes = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-            result[g] = classes
-        else:
-            result[g] = []
-    return result
+from backend.permission_service import (
+    parse_legacy_teacher_grade_class as _parse_teacher_grade_class,
+    get_teacher_assignments,
+    is_student_in_teacher_scope,
+)
 
 
 def _get_user_relevant_tasks(student_user: str, active_tasks: list) -> list:
-    """获取与学生相关的任务（基于教师任教的年级和班级匹配）
+    """获取与学生相关的任务（基于教师的任教范围匹配）
 
-    匹配规则:
-    - 教师 grade="高一|高二", class="1,2,3,4|1,2,7,8"
-      → 高一教1,2,3,4班；高二教1,2,7,8班
-    - 学生 grade="高一", class="3"  → 匹配（3在高一的班级列表中）
-    - 管理员(root)的任务对所有学生可见
-    - 教师未设置年级/班级信息时，任务对所有学生可见（兼容旧数据）
+    使用 permission_service 统一判断学生是否在教师管辖范围内。
+    管理员(root)的任务对所有学生可见。
     """
     relevant = []
-
-    # 获取学生信息
-    student_rows = execute_query(
-        "SELECT grade, class FROM users WHERE username=?", (student_user,)
-    )
-    if not student_rows:
-        return relevant
-
-    student_grade = (student_rows[0][0] or "").strip()
-    student_class = str(student_rows[0][1] or "").strip()
 
     for task in active_tasks:
         creator = task["creator"]
@@ -147,35 +127,8 @@ def _get_user_relevant_tasks(student_user: str, active_tasks: list) -> list:
         if not is_teacher(creator):
             continue
 
-        # 获取教师的年级和班级信息
-        teacher_rows = execute_query(
-            "SELECT grade, class FROM users WHERE username=?", (creator,)
-        )
-        if not teacher_rows:
-            continue
-
-        teacher_grade = (teacher_rows[0][0] or "").strip()
-        teacher_class = str(teacher_rows[0][1] or "").strip()
-
-        # 如果教师没有设置年级班级信息，默认匹配所有学生（兼容旧数据）
-        if not teacher_grade and not teacher_class:
-            relevant.append(task)
-            continue
-
-        # 解析教师任教映射
-        grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
-
-        # 检查学生是否匹配教师任教的某个年级和班级
-        matched = False
-        if student_grade and student_grade in grade_class_map:
-            allowed_classes = grade_class_map[student_grade]
-            if not allowed_classes:
-                # 有年级但没指定具体班级，匹配该年级所有学生
-                matched = True
-            elif student_class in allowed_classes:
-                matched = True
-
-        if matched:
+        # 使用统一权限服务判断
+        if is_student_in_teacher_scope(student_user, creator):
             relevant.append(task)
 
     return relevant

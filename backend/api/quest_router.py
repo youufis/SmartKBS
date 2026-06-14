@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_query_dict, execute_insert_update, execute_query_one
-from backend.api.score_router import _get_teacher_allowed_classes, _get_teacher_allowed_grades, _parse_teacher_grade_class
+from backend.permission_service import get_teacher_classes, get_teacher_grades, parse_legacy_teacher_grade_class
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_sync_direct
 from backend.prompts.quest import (
@@ -1078,9 +1078,17 @@ async def get_bank_stats(request: Request):
 
 @router.get("/quest/admin/grades", summary="[教师] 可查看的年级列表")
 async def get_admin_quest_grades(request: Request):
-    """返回当前教师可查看的年级列表（复用 score_router 统一函数）"""
+    """管理员基于实际学生数据，教师基于任教范围"""
     user = get_current_user(request)
-    return _get_teacher_allowed_grades(user["username"])
+    role = user.get("role", 2)
+    if role == 0:
+        from backend.database import execute_query
+        rows = execute_query(
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+        )
+        return [row[0] for row in rows]
+    grades = get_teacher_grades(user["username"])
+    return [g["name"] for g in grades]
 
 
 @router.get("/quest/admin/classes", summary="[教师] 可查看的班级列表")
@@ -1101,7 +1109,12 @@ async def get_admin_quest_classes(
     if username == "root":
         return all_classes
 
-    allowed = _get_teacher_allowed_classes(username, grade)
+    from backend.permission_service import get_grade_by_name
+    grade_info = get_grade_by_name(grade)
+    allowed = []
+    if grade_info:
+        classes = get_teacher_classes(username, grade_info["id"])
+        allowed = [c["name"].replace("班", "") for c in classes]
     if allowed:
         allowed_set = {int(a) for a in allowed if a.isdigit()}
         return [c for c in all_classes if c in allowed_set]
@@ -1135,7 +1148,7 @@ async def get_admin_quest_records(
         if rows:
             tg = (rows[0][0] or "").strip()
             tc = str(rows[0][1] or "").strip()
-            allowed_all = _parse_teacher_grade_class(tg, tc) if tg else {}
+            allowed_all = parse_legacy_teacher_grade_class(tg, tc) if tg else {}
 
         if allowed_all:
             # 构建 (grade=G AND class IN (...)) OR ... 条件
@@ -1156,8 +1169,11 @@ async def get_admin_quest_records(
         conditions.append("u.grade=?")
         params.append(grade)
     if class_name:
-        conditions.append("u.class=?")
-        params.append(class_name)
+        # 统一格式：从 "高一1班" 提取 "1"，兼容 "1" 和 "1班"
+        import re
+        cls_num = re.sub(r'[^\d]', '', str(class_name))
+        conditions.append("(u.class=? OR u.class=?)")
+        params.extend([cls_num, f"{cls_num}班"])
     if student_name:
         conditions.append("u.name LIKE ?")
         params.append(f"%{student_name}%")

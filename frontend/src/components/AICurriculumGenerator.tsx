@@ -81,8 +81,9 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setSubjects(data.subjects)
     }).catch(() => {})
-    apiClient.get('/api/scores/my-grades', { params: { teacher: 'root' } }).then(({ data }) => {
-      if (Array.isArray(data) && data.length > 0) setGradeOptions(data)
+    apiClient.get('/api/config/grades').then(({ data }) => {
+      const list = data?.grades
+      if (list?.length > 0) setGradeOptions(list.map((g: any) => g.name || g))
     }).catch(() => {})
   }, [])
 
