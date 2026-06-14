@@ -1,14 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
-  Layout, Card, Tree, Tabs, Button, message, Modal, Form, Input, Select, InputNumber,
+  Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
 } from 'antd'
+
+const { Sider, Content } = Layout
 import type { DataNode } from 'antd/es/tree'
 import {
   BookOutlined, PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined,
   FileOutlined, FileTextOutlined, DownloadOutlined, QuestionCircleOutlined, FormOutlined,
   TeamOutlined, CheckCircleOutlined, ClockCircleOutlined,
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined,
+  RightOutlined, DownOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import * as curriculumApi from '../api/curriculum'
@@ -67,6 +72,7 @@ const RESOURCE_LABELS: Record<string, string> = {
 }
 
 const CurriculumPage: React.FC = () => {
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -227,6 +233,61 @@ const CurriculumPage: React.FC = () => {
   // ── 教师操作图标显隐 ──
   const [showActions, setShowActions] = useState(false)
 
+  // ── 侧栏折叠 & 分类展开状态（localStorage 持久化） ──
+  const [siderCollapsed, setSiderCollapsed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('curriculum_sider_collapsed') || 'false') } catch { return false }
+  })
+  const [expandedSubjects, setExpandedSubjects] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('curriculum_expanded_subjects')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+
+  // 持久化侧栏折叠状态
+  useEffect(() => {
+    localStorage.setItem('curriculum_sider_collapsed', JSON.stringify(siderCollapsed))
+  }, [siderCollapsed])
+
+  // 持久化分类展开状态
+  useEffect(() => {
+    localStorage.setItem('curriculum_expanded_subjects', JSON.stringify(expandedSubjects))
+  }, [expandedSubjects])
+
+  // 切换分类展开/收起
+  const toggleSubject = (subject: string) => {
+    setExpandedSubjects((prev) =>
+      prev.includes(subject) ? prev.filter((s) => s !== subject) : [...prev, subject]
+    )
+  }
+
+  // 客户端推断课程所属大类（兼容旧数据）
+  const getCourseSubject = useCallback((course: Course): string => {
+    if (course.subject) return course.subject
+    const nameMap: [string, string][] = [
+      ['技术与设计', '通用技术'],
+      ['数据与计算', '信息科技'],
+      ['信息系统与社会', '信息科技'],
+      ['人工智能', '人工智能'],
+    ]
+    for (const [kw, subj] of nameMap) {
+      if (course.name.includes(kw)) return subj
+    }
+    return ''
+  }, [])
+
+  // 当选中的课程变化时，自动展开其所属分类
+  useEffect(() => {
+    if (!activeCourseId) return
+    const course = courses.find((c) => c.id === activeCourseId)
+    if (!course) return
+    const subj = course.subject || getCourseSubject(course) || '未分类'
+    if (!expandedSubjects.includes(subj)) {
+      setExpandedSubjects((prev) => [...prev, subj])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCourseId])
+
   // ── 加载课程树 ──
   const loadTree = useCallback(async () => {
     setLoading(true)
@@ -251,6 +312,15 @@ const CurriculumPage: React.FC = () => {
     fetchData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 当课程列表变化时，确保有选中课程
+  useEffect(() => {
+    if (courses.length === 0) {
+      setActiveCourseId(null)
+    } else if (!activeCourseId || !courses.find((c) => c.id === activeCourseId)) {
+      setActiveCourseId(courses[0].id)
+    }
+  }, [courses])
 
   // ── 树节点选择 ──
   const handleTreeSelect = (_selectedKeys: React.Key[], info: Record<string, unknown>) => {
@@ -752,8 +822,28 @@ const CurriculumPage: React.FC = () => {
   // ── 当前课程 ──
   const activeCourse = courses.find((c) => c.id === activeCourseId)
 
+  // ── 按大类分组 ──
+  const groupedCourses: { subject: string; courses: Course[] }[] = subjectOptions
+    .map((subject) => ({
+      subject,
+      courses: courses.filter((c) => {
+        const cs = getCourseSubject(c)
+        return cs === subject
+      }),
+    }))
+    .filter((g) => g.courses.length > 0)
+  // 未匹配到任何大类的课程归入「未分类」
+  const unmatchedCourses = courses.filter((c) => {
+    const cs = getCourseSubject(c)
+    return !cs || !subjectOptions.includes(cs)
+  })
+  if (unmatchedCourses.length > 0) {
+    groupedCourses.push({ subject: '未分类', courses: unmatchedCourses })
+  }
+
+
   return (
-    <Layout style={{ padding: 24, minHeight: 'calc(100vh - 64px)', background: '#f5f5f5' }}>
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: '#f5f5f5' }}>
       {/* ── 加载中 ── */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
@@ -762,16 +852,32 @@ const CurriculumPage: React.FC = () => {
       )}
 
       {!loading && courses.length === 0 && (
-        <Card>
-          <Empty description="暂无课程">
+        <Card style={{ margin: 24 }}>
+          <Empty
+            description={
+              subjectOptions.length === 0
+                ? '系统中未配置课程大类（SUBJECTS），请先在「系统配置」中添加'
+                : '暂无课程，请创建或 AI 导入课程'
+            }
+          >
             {isTeacherOrAdmin && (
-              <Space>
-                <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
-                  创建课程
-                </Button>
-                <Button icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
-                  AI 导入
-                </Button>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                {subjectOptions.length === 0 && user?.role === 'admin' && (
+                  <Button
+                    icon={<SettingOutlined />}
+                    onClick={() => navigate('/system-config')}
+                  >
+                    前往系统配置
+                  </Button>
+                )}
+                <Space>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
+                    创建课程
+                  </Button>
+                  <Button icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
+                    AI 导入
+                  </Button>
+                </Space>
               </Space>
             )}
           </Empty>
@@ -779,250 +885,429 @@ const CurriculumPage: React.FC = () => {
       )}
 
       {!loading && courses.length > 0 && (
-        <Row gutter={16} style={{ height: '100%' }}>
-          {/* ── 左侧：课程 Tab + 树 ── */}
-          <Col span={selectedKp ? 14 : 24}>
-            <Card
-              title={
-                <Space>
-                  <BookOutlined />
-                  <span>{isStudent ? '课程导学' : '课程管理'}</span>
+        <Layout style={{ height: 'calc(100vh - 64px)', background: '#f5f5f5', overflow: 'hidden' }}>
+          {/* ── 左侧：课程分类导航（可折叠） ── */}
+          <Sider
+            width={260}
+            collapsedWidth={64}
+            collapsible
+            collapsed={siderCollapsed}
+            onCollapse={setSiderCollapsed}
+            trigger={null}
+            style={{
+              background: '#fff',
+              borderRight: '1px solid #f0f0f0',
+              overflow: 'auto',
+              height: '100%',
+            }}
+          >
+            {/* 折叠/展开切换按钮 */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 48,
+                borderBottom: '1px solid #f0f0f0',
+                cursor: 'pointer',
+                color: '#666',
+                fontSize: 16,
+              }}
+              onClick={() => setSiderCollapsed(!siderCollapsed)}
+            >
+              {siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+            </div>
+
+            {/* 未折叠时显示完整导航 */}
+            {!siderCollapsed && (
+              <>
+                {/* 侧栏头部 */}
+                <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                  <Typography.Title level={5} style={{ margin: 0, marginBottom: 12 }}>
+                    {isStudent ? '📖 课程导学' : '📚 课程管理'}
+                  </Typography.Title>
                   {isTeacherOrAdmin && (
-                    <>
-                      <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateCourse}>
+                    <Space wrap style={{ marginBottom: 8 }}>
+                      <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
                         新建课程
                       </Button>
                       <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
                         AI 导入
                       </Button>
-                    </>
+                    </Space>
                   )}
                   <Button size="small" icon={<ReloadOutlined />} onClick={loadTree} />
-                </Space>
-              }
-              style={{ marginBottom: 16 }}
-            >
-              {/* 课程 Tab */}
-              <Tabs
-                activeKey={String(activeCourseId)}
-                onChange={(key) => setActiveCourseId(Number(key))}
-                items={courses.map((course) => ({
-                  key: String(course.id),
-                  label: (
-                    <Space size={4}>
-                      <BookOutlined />
-                      {course.name}
-                      {isStudent && course.progress && (
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          ({course.progress.completed}/{course.progress.total})
-                        </Typography.Text>
-                      )}
-                    </Space>
-                  ),
-                  children: (
-                    <div>
-                      {/* 课程进度条（学生视图） */}
-                      {isStudent && course.progress && course.progress.total > 0 && (
-                        <Progress
-                          percent={Math.round(course.progress.completed / course.progress.total * 100)}
-                          size="small"
-                          format={() => course.progress ? `${course.progress.completed}/${course.progress.total}` : ''}
-                          style={{ marginBottom: 12 }}
-                        />
-                      )}
-                      {/* 课程描述 */}
-                      {course.description && (
-                        <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                          {course.description}
-                        </Typography.Paragraph>
-                      )}
-                      {/* 课程操作（教师） */}
-                      {isTeacherOrAdmin && (
-                        <Space style={{ marginBottom: 12 }}>
-                          <Button size="small" icon={<EditOutlined />} onClick={() => handleEditCourse(course)}>
-                            编辑课程
-                          </Button>
-                          <Popconfirm title="确认删除此课程？" onConfirm={() => handleDeleteCourse(course.id)} okText="确认" cancelText="取消">
-                            <Button size="small" danger icon={<DeleteOutlined />}>
-                              删除课程
+                </div>
+
+                {/* 课程分类列表 */}
+                <div style={{ padding: '8px 0' }}>
+                  {groupedCourses.map(({ subject, courses: subjectCourses }) => {
+                    const isExpanded = expandedSubjects.includes(subject)
+                    // 为每个大类选择一个图标
+                    const subjectIcons: Record<string, string> = {
+                      '通用技术': '🔧',
+                      '信息科技': '💻',
+                      '人工智能': '🤖',
+                    }
+                    const subjectIcon = subjectIcons[subject] || '📂'
+
+                    return (
+                      <div key={subject} style={{ marginBottom: 2 }}>
+                        {/* 大类标题 — 可点击展开/收起 */}
+                        <div
+                          onClick={() => toggleSubject(subject)}
+                          style={{
+                            padding: '11px 16px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            fontSize: 15,
+                            fontWeight: 700,
+                            color: '#333',
+                            userSelect: 'none',
+                            borderRadius: 0,
+                            transition: 'all 0.2s',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                        >
+                          <span style={{ fontSize: 13, width: 20, textAlign: 'center', color: '#999' }}>
+                            {isExpanded ? <DownOutlined /> : <RightOutlined />}
+                          </span>
+                          <span style={{ fontSize: 18 }}>{subjectIcon}</span>
+                          <span style={{ flex: 1, letterSpacing: 1 }}>{subject}</span>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {subjectCourses.length}
+                          </Typography.Text>
+                        </div>
+
+                        {/* 课程列表（展开时显示） */}
+                        {isExpanded && subjectCourses.map((course) => (
+                          <div
+                            key={course.id}
+                            onClick={(e) => { e.stopPropagation(); setActiveCourseId(course.id) }}
+                            style={{
+                              padding: '9px 16px 9px 48px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              fontSize: 14,
+                              color: activeCourseId === course.id ? '#1677ff' : '#333',
+                              background: activeCourseId === course.id ? '#e6f4ff' : 'transparent',
+                              borderRight: activeCourseId === course.id ? '3px solid #1677ff' : '3px solid transparent',
+                              transition: 'all 0.2s',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (activeCourseId !== course.id) {
+                                e.currentTarget.style.background = '#f5f5f5'
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (activeCourseId !== course.id) {
+                                e.currentTarget.style.background = 'transparent'
+                              }
+                            }}
+                          >
+                            <BookOutlined style={{ fontSize: 14 }} />
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {course.name}
+                            </span>
+                            {isStudent && course.progress && (
+                              <Typography.Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                                {course.progress.completed}/{course.progress.total}
+                              </Typography.Text>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* 折叠时只显示分类图标 */}
+            {siderCollapsed && (
+              <div style={{ padding: '8px 0' }}>
+                {groupedCourses.map(({ subject, courses: subjectCourses }) => {
+                  const subjectIcons: Record<string, string> = {
+                    '通用技术': '🔧',
+                    '信息科技': '💻',
+                    '人工智能': '🤖',
+                  }
+                  const subjectIcon = subjectIcons[subject] || '📂'
+                  const isActive = subjectCourses.some((c) => c.id === activeCourseId)
+
+                  return (
+                    <Tooltip key={subject} title={subject} placement="right">
+                      <div
+                        onClick={() => {
+                          // 折叠时点击图标展开该分类
+                          setExpandedSubjects((prev) =>
+                            prev.includes(subject) ? prev : [...prev, subject]
+                          )
+                          setSiderCollapsed(false)
+                        }}
+                        style={{
+                          padding: '12px 0',
+                          textAlign: 'center',
+                          cursor: 'pointer',
+                          fontSize: 20,
+                          color: isActive ? '#1677ff' : '#999',
+                          background: isActive ? '#e6f4ff' : 'transparent',
+                          borderLeft: isActive ? '3px solid #1677ff' : '3px solid transparent',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = isActive ? '#e6f4ff' : 'transparent'
+                        }}
+                      >
+                        {subjectIcon}
+                      </div>
+                    </Tooltip>
+                  )
+                })}
+              </div>
+            )}
+          </Sider>
+
+          {/* ── 右侧：课程内容区域 ── */}
+          <Content style={{ padding: '0 12px', overflow: 'auto', height: '100%' }}>
+            {!activeCourse ? (
+              <div style={{ textAlign: 'center', padding: '120px 40px' }}>
+                <BookOutlined style={{ fontSize: 64, color: '#d9d9d9', marginBottom: 24 }} />
+                <Typography.Title level={4} type="secondary" style={{ margin: '0 0 8px' }}>
+                  请从左侧选择一门课程
+                </Typography.Title>
+                <Typography.Text type="secondary">
+                  点击左侧导航中的课程名称，查看课程大纲与知识点
+                </Typography.Text>
+              </div>
+            ) : (
+              <Row gutter={16}>
+                {/* ── 课程树区域 ── */}
+                <Col span={selectedKp ? 14 : 24}>
+                  <Card
+                    title={
+                      <Space>
+                        <BookOutlined />
+                        <span>{activeCourse.name}</span>
+                        {isStudent && activeCourse.progress && activeCourse.progress.total > 0 && (
+                          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                            ({activeCourse.progress.completed}/{activeCourse.progress.total})
+                          </Typography.Text>
+                        )}
+                      </Space>
+                    }
+                    extra={
+                      <Space>
+                        {isTeacherOrAdmin && (
+                          <>
+                            <Button size="small" icon={<EditOutlined />} onClick={() => handleEditCourse(activeCourse)}>
+                              编辑
                             </Button>
-                          </Popconfirm>
-                          <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(course.id)}>
-                            添加章/节
-                          </Button>
-                          <Tooltip title={showActions ? '隐藏节点操作按钮' : '显示节点操作按钮'}>
-                            <Button
-                              size="small"
-                              icon={showActions ? <EditOutlined /> : <EditOutlined />}
-                              type={showActions ? 'primary' : 'default'}
-                              onClick={() => setShowActions(!showActions)}
-                            >
-                              {showActions ? '隐藏操作' : '节点操作'}
+                            <Popconfirm title="确认删除此课程？" onConfirm={() => handleDeleteCourse(activeCourse.id)} okText="确认" cancelText="取消">
+                              <Button size="small" danger icon={<DeleteOutlined />}>
+                                删除
+                              </Button>
+                            </Popconfirm>
+                            <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(activeCourse.id)}>
+                              添加章/节
                             </Button>
-                          </Tooltip>
+                            <Tooltip title={showActions ? '隐藏节点操作按钮' : '显示节点操作按钮'}>
+                              <Button
+                                size="small"
+                                icon={<EditOutlined />}
+                                type={showActions ? 'primary' : 'default'}
+                                onClick={() => setShowActions(!showActions)}
+                              >
+                                {showActions ? '隐藏操作' : '节点操作'}
+                              </Button>
+                            </Tooltip>
+                          </>
+                        )}
+                      </Space>
+                    }
+                    style={{ marginBottom: 16 }}
+                  >
+                    {/* 进度条（学生视图） */}
+                    {isStudent && activeCourse.progress && activeCourse.progress.total > 0 && (
+                      <Progress
+                        percent={Math.round(activeCourse.progress.completed / activeCourse.progress.total * 100)}
+                        size="small"
+                        format={() => activeCourse.progress ? `${activeCourse.progress.completed}/${activeCourse.progress.total}` : ''}
+                        style={{ marginBottom: 12 }}
+                      />
+                    )}
+                    {/* 课程描述 */}
+                    {activeCourse.description && (
+                      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                        {activeCourse.description}
+                      </Typography.Paragraph>
+                    )}
+                    {/* 课程树 */}
+                    <Tree
+                      treeData={buildTreeData(activeCourse)}
+                      defaultExpandAll
+                      showLine={{ showLeafIcon: false }}
+                      onSelect={handleTreeSelect}
+                      draggable={isTeacherOrAdmin}
+                      onDrop={handleTreeDrop}
+                      style={{ background: 'transparent' }}
+                    />
+                  </Card>
+                </Col>
+
+                {/* ── 右侧：知识点详情面板 ── */}
+                {selectedKp && (
+                  <Col span={10}>
+                    <Card
+                      title={
+                        <Space>
+                          <NodeIndexOutlined />
+                          <span>{selectedKp.name}</span>
+                        </Space>
+                      }
+                      loading={kpLoading}
+                      extra={
+                        <Space>
+                          {isTeacherOrAdmin && (
+                            <Tooltip title="AI 生成教案">
+                              <Button type="link" size="small" icon={<RobotOutlined />}
+                                loading={lessonPlanLoading}
+                                onClick={() => handleAiLessonPlan(selectedKp.id)}>
+                                AI 备课
+                              </Button>
+                            </Tooltip>
+                          )}
+                          {isTeacherOrAdmin && (
+                            <Tooltip title="AI 推荐教学资源">
+                              <Button type="link" size="small" icon={<RobotOutlined />}
+                                onClick={() => handleAiRecommend(selectedKp.id)}>
+                                AI 推荐
+                              </Button>
+                            </Tooltip>
+                          )}
+                          {isTeacherOrAdmin && (
+                            <Tooltip title="AI 生成 HTML 课件">
+                              <Button type="link" size="small" icon={<FileOutlined />}
+                                onClick={() => handleAiCourseware(selectedKp.id)}>
+                                AI 课件
+                              </Button>
+                            </Tooltip>
+                          )}
+                          {isStudent && (
+                            <>
+                              {selectedKp.progress_status !== 'completed' && (
+                                <Button
+                                  type="primary"
+                                  size="small"
+                                  icon={<CheckCircleOutlined />}
+                                  onClick={() => handleUpdateProgress(selectedKp.id, 'completed')}
+                                >
+                                  标记已完成
+                                </Button>
+                              )}
+                              {selectedKp.progress_status === 'not_started' && (
+                                <Button
+                                  size="small"
+                                  icon={<ClockCircleOutlined />}
+                                  onClick={() => handleUpdateProgress(selectedKp.id, 'in_progress')}
+                                >
+                                  开始学习
+                                </Button>
+                              )}
+                            </>
+                          )}
+                        </Space>
+                      }
+                    >
+                      {/* 知识点信息 */}
+                      {selectedKp.description && (
+                        <Typography.Paragraph>{selectedKp.description}</Typography.Paragraph>
+                      )}
+                      {selectedKp.learning_objectives && (
+                        <div style={{ marginBottom: 12 }}>
+                          <Typography.Text strong>学习目标：</Typography.Text>
+                          <Typography.Paragraph>{selectedKp.learning_objectives}</Typography.Paragraph>
+                        </div>
+                      )}
+                      <Space style={{ marginBottom: 12 }}>
+                        <Tag color={DIFFICULTY_COLORS[selectedKp.difficulty]}>
+                          {DIFFICULTY_LABELS[selectedKp.difficulty] || selectedKp.difficulty}
+                        </Tag>
+                        {selectedKp.estimated_minutes > 0 && (
+                          <Tag icon={<ClockCircleOutlined />}>{selectedKp.estimated_minutes} 分钟</Tag>
+                        )}
+                        {isStudent && selectedKp.progress_status && (
+                          <Tag color={STATUS_COLORS[selectedKp.progress_status]}>
+                            {STATUS_LABELS[selectedKp.progress_status]}
+                          </Tag>
+                        )}
+                      </Space>
+
+                      {/* 绑定的资源列表 */}
+                      <Typography.Title level={5} style={{ marginTop: 16 }}>
+                        关联资源
+                      </Typography.Title>
+                      {kpResources.length === 0 ? (
+                        <Typography.Text type="secondary">暂无关联资源</Typography.Text>
+                      ) : (
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          {kpResources.map((r) => {
+                            const isFileType = r.resource_type === 'html' || r.resource_type === 'download'
+                            const cardProps = r.resource_url
+                              ? isFileType
+                                ? { onClick: () => window.open(r.resource_url, '_blank') }
+                                : { onClick: () => window.location.href = r.resource_url }
+                              : {}
+                            return (
+                              <Card
+                                key={r.binding_id}
+                                size="small"
+                                hoverable
+                                style={{ cursor: r.resource_url ? 'pointer' : 'default' }}
+                                {...cardProps}
+                              >
+                                <Space>
+                                  {RESOURCE_ICONS[r.resource_type] || <FileOutlined />}
+                                  <Typography.Text style={{ color: r.resource_url ? '#1677ff' : undefined }}>
+                                    {r.resource_name || `[${r.resource_type}:${r.resource_id}]`}
+                                  </Typography.Text>
+                                  <Tag>{RESOURCE_LABELS[r.resource_type] || r.resource_type}</Tag>
+                                </Space>
+                              </Card>
+                            )
+                          })}
                         </Space>
                       )}
-                      {/* 课程树 */}
-                      <Tree
-                        treeData={buildTreeData(course)}
-                        defaultExpandAll
-                        showLine={{ showLeafIcon: false }}
-                        onSelect={handleTreeSelect}
-                        draggable={isTeacherOrAdmin}
-                        onDrop={handleTreeDrop}
-                        style={{ background: 'transparent' }}
-                      />
-                    </div>
-                  ),
-                }))}
-              />
-            </Card>
-          </Col>
 
-          {/* ── 右侧：知识点详情面板 ── */}
-          {selectedKp && (
-            <Col span={10}>
-              <Card
-                title={
-                  <Space>
-                    <NodeIndexOutlined />
-                    <span>{selectedKp.name}</span>
-                  </Space>
-                }
-                loading={kpLoading}
-                extra={
-                  <Space>
-                    {isTeacherOrAdmin && (
-                      <Tooltip title="AI 生成教案">
-                        <Button type="link" size="small" icon={<RobotOutlined />}
-                          loading={lessonPlanLoading}
-                          onClick={() => handleAiLessonPlan(selectedKp.id)}>
-                          AI 备课
-                        </Button>
-                      </Tooltip>
-                    )}
-                    {isTeacherOrAdmin && (
-                      <Tooltip title="AI 推荐教学资源">
-                        <Button type="link" size="small" icon={<RobotOutlined />}
-                          onClick={() => handleAiRecommend(selectedKp.id)}>
-                          AI 推荐
-                        </Button>
-                      </Tooltip>
-                    )}
-                    {isTeacherOrAdmin && (
-                      <Tooltip title="AI 生成 HTML 课件">
-                        <Button type="link" size="small" icon={<FileOutlined />}
-                          onClick={() => handleAiCourseware(selectedKp.id)}>
-                          AI 课件
-                        </Button>
-                      </Tooltip>
-                    )}
-                    {isStudent && (
-                      <>
-                        {selectedKp.progress_status !== 'completed' && (
-                          <Button
-                            type="primary"
-                            size="small"
-                            icon={<CheckCircleOutlined />}
-                            onClick={() => handleUpdateProgress(selectedKp.id, 'completed')}
-                          >
-                            标记已完成
-                          </Button>
-                        )}
-                        {selectedKp.progress_status === 'not_started' && (
-                          <Button
-                            size="small"
-                            icon={<ClockCircleOutlined />}
-                            onClick={() => handleUpdateProgress(selectedKp.id, 'in_progress')}
-                          >
-                            开始学习
-                          </Button>
-                        )}
-                      </>
-                    )}
-                  </Space>
-                }
-              >
-                {/* 知识点信息 */}
-                {selectedKp.description && (
-                  <Typography.Paragraph>{selectedKp.description}</Typography.Paragraph>
-                )}
-                {selectedKp.learning_objectives && (
-                  <div style={{ marginBottom: 12 }}>
-                    <Typography.Text strong>学习目标：</Typography.Text>
-                    <Typography.Paragraph>{selectedKp.learning_objectives}</Typography.Paragraph>
-                  </div>
-                )}
-                <Space style={{ marginBottom: 12 }}>
-                  <Tag color={DIFFICULTY_COLORS[selectedKp.difficulty]}>
-                    {DIFFICULTY_LABELS[selectedKp.difficulty] || selectedKp.difficulty}
-                  </Tag>
-                  {selectedKp.estimated_minutes > 0 && (
-                    <Tag icon={<ClockCircleOutlined />}>{selectedKp.estimated_minutes} 分钟</Tag>
-                  )}
-                  {isStudent && selectedKp.progress_status && (
-                    <Tag color={STATUS_COLORS[selectedKp.progress_status]}>
-                      {STATUS_LABELS[selectedKp.progress_status]}
-                    </Tag>
-                  )}
-                </Space>
-
-                {/* 绑定的资源列表 */}
-                <Typography.Title level={5} style={{ marginTop: 16 }}>
-                  关联资源
-                </Typography.Title>
-                {kpResources.length === 0 ? (
-                  <Typography.Text type="secondary">暂无关联资源</Typography.Text>
-                ) : (
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    {kpResources.map((r) => {
-                      const isFileType = r.resource_type === 'html' || r.resource_type === 'download'
-                      const cardProps = r.resource_url
-                        ? isFileType
-                          ? { onClick: () => window.open(r.resource_url, '_blank') }
-                          : { onClick: () => window.location.href = r.resource_url }
-                        : {}
-                      return (
-                        <Card
-                          key={r.binding_id}
-                          size="small"
-                          hoverable
-                          style={{ cursor: r.resource_url ? 'pointer' : 'default' }}
-                          {...cardProps}
+                      {/* 绑定资源按钮（教师） */}
+                      {isTeacherOrAdmin && (
+                        <Button
+                          type="dashed"
+                          block
+                          icon={<PlusOutlined />}
+                          style={{ marginTop: 12 }}
+                          onClick={() => {
+                            setBinderKpId(selectedKp.id)
+                            setBinderKpName(selectedKp.name)
+                            setBinderOpen(true)
+                          }}
                         >
-                          <Space>
-                            {RESOURCE_ICONS[r.resource_type] || <FileOutlined />}
-                            <Typography.Text style={{ color: r.resource_url ? '#1677ff' : undefined }}>
-                              {r.resource_name || `[${r.resource_type}:${r.resource_id}]`}
-                            </Typography.Text>
-                            <Tag>{RESOURCE_LABELS[r.resource_type] || r.resource_type}</Tag>
-                          </Space>
-                        </Card>
-                      )
-                    })}
-                  </Space>
+                          管理绑定资源
+                        </Button>
+                      )}
+                    </Card>
+                  </Col>
                 )}
-
-                {/* 绑定资源按钮（教师） */}
-                {isTeacherOrAdmin && (
-                  <Button
-                    type="dashed"
-                    block
-                    icon={<PlusOutlined />}
-                    style={{ marginTop: 12 }}
-                    onClick={() => {
-                      setBinderKpId(selectedKp.id)
-                      setBinderKpName(selectedKp.name)
-                      setBinderOpen(true)
-                    }}
-                  >
-                    管理绑定资源
-                  </Button>
-                )}
-              </Card>
-            </Col>
-          )}
-        </Row>
+              </Row>
+            )}
+          </Content>
+        </Layout>
       )}
 
       {/* ── 课程编辑弹窗 ── */}

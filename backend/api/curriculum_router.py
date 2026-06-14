@@ -32,6 +32,7 @@ class CourseCreate(BaseModel):
     grade: str = ""
     cover_image: str = ""
     sort_order: int = 0
+    subject: str = ""
 
 class CourseUpdate(BaseModel):
     name: str | None = None
@@ -41,6 +42,7 @@ class CourseUpdate(BaseModel):
     cover_image: str | None = None
     sort_order: int | None = None
     status: str | None = None
+    subject: str | None = None
 
 class ChapterCreate(BaseModel):
     course_id: int
@@ -135,6 +137,32 @@ def _check_resource_ownership(resource_type: str, resource_id: int, username: st
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+# 课程名称 → 所属大类的推断映射（用于已有课程回填）
+_SUBJECT_KEYWORDS: list[tuple[list[str], str]] = [
+    (["技术与设计"], "通用技术"),
+    (["数据与计算", "信息系统与社会"], "信息科技"),
+    (["人工智能"], "人工智能"),
+]
+
+
+def _infer_subject(course_name: str) -> str:
+    """根据课程名称推断所属大类，无法推断时返回空字符串"""
+    for keywords, subject in _SUBJECT_KEYWORDS:
+        for kw in keywords:
+            if kw in course_name:
+                return subject
+    return ""
+
+
+def _ensure_subject(course_dict: dict[str, Any]) -> dict[str, Any]:
+    """确保课程有 subject 字段，为空时尝试从名称推断"""
+    subject = course_dict.get("subject", "") or ""
+    if not subject:
+        subject = _infer_subject(course_dict.get("name", ""))
+        course_dict["subject"] = subject
+    return course_dict
 
 
 def _build_course_tree(course_id: int) -> list[dict[str, Any]]:
@@ -502,9 +530,9 @@ def _save_ai_result(result: dict[str, Any], subject: str, grade: str, username: 
     course_desc = result.get("course_description", f"AI 自动生成的{subject}课程大纲")
 
     course_id = execute_insert_update(
-        """INSERT INTO courses (name, code, description, grade, sort_order, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 0, 'active', ?, ?)""",
-        (course_name, course_code, course_desc, grade, now, now),
+        """INSERT INTO courses (name, code, description, grade, subject, sort_order, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 0, 'active', ?, ?)""",
+        (course_name, course_code, course_desc, grade, subject, now, now),
     )
     saved["course_id"] = course_id
 
@@ -700,6 +728,7 @@ async def get_curriculum_tree(request: Request):
     result = []
     for course in courses:
         course_dict = dict(course)
+        course_dict = _ensure_subject(course_dict)
         course_dict["chapters"] = _build_course_tree(course["id"])
 
         # 为所有知识点注入进度（学生视图）
@@ -749,6 +778,8 @@ async def list_courses(
         f"SELECT * FROM courses WHERE {where} ORDER BY sort_order, id",
         tuple(params),
     )
+    for row in rows:
+        _ensure_subject(row)
     return {"courses": rows, "total": len(rows)}
 
 
@@ -761,6 +792,7 @@ async def get_course(course_id: int, request: Request):
         raise HTTPException(status_code=404, detail="课程不存在")
 
     course_dict = dict(course)
+    course_dict = _ensure_subject(course_dict)
     course_dict["chapters"] = _build_course_tree(course_id)
 
     # 学生注入进度
@@ -791,9 +823,9 @@ async def create_course(req: CourseCreate, request: Request):
 
     now = _now()
     course_id = execute_insert_update(
-        """INSERT INTO courses (name, code, description, grade, cover_image, sort_order, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
-        (req.name, req.code, req.description, req.grade, req.cover_image, req.sort_order, now, now),
+        """INSERT INTO courses (name, code, description, grade, cover_image, sort_order, subject, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+        (req.name, req.code, req.description, req.grade, req.cover_image, req.sort_order, req.subject, now, now),
     )
     logger.info(f"用户 {user['username']} 创建课程: {req.name} (id={course_id})")
     return {"message": f"课程「{req.name}」创建成功", "course_id": course_id}
@@ -811,7 +843,7 @@ async def update_course(course_id: int, req: CourseUpdate, request: Request):
         raise HTTPException(status_code=404, detail="课程不存在")
 
     updates = {}
-    for field in ["name", "code", "description", "grade", "cover_image", "sort_order", "status"]:
+    for field in ["name", "code", "description", "grade", "cover_image", "sort_order", "status", "subject"]:
         val = getattr(req, field, None)
         if val is not None:
             updates[field] = val
@@ -870,6 +902,12 @@ async def delete_course(course_id: int, request: Request):
             )
             execute_insert_update(
                 f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
+            )
+            execute_insert_update(
+                f"DELETE FROM knowledge_prerequisites WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
+            )
+            execute_insert_update(
+                f"DELETE FROM knowledge_prerequisites WHERE prerequisite_id IN ({kp_placeholders})", kp_tuple,
             )
         execute_insert_update(
             f"DELETE FROM knowledge_points WHERE chapter_id IN ({placeholders})", tuple(all_chapter_ids),

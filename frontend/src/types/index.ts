@@ -340,6 +340,7 @@ export interface Course {
   cover_image: string;
   sort_order: number;
   status: string;
+  subject: string;
   created_at: string;
   updated_at: string;
   chapters?: ChapterTreeNode[];
@@ -392,6 +393,7 @@ export interface CourseCreateRequest {
   grade?: string;
   cover_image?: string;
   sort_order?: number;
+  subject?: string;
 }
 
 export interface ChapterCreateRequest {
