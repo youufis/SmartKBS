@@ -259,12 +259,11 @@ const CurriculumPage: React.FC = () => {
     localStorage.setItem('curriculum_expanded_subjects', JSON.stringify(expandedSubjects))
   }, [expandedSubjects])
 
-  // 持久化当前选中的课程
-  useEffect(() => {
-    if (activeCourseId !== null) {
-      localStorage.setItem('curriculum_active_course_id', JSON.stringify(activeCourseId))
-    }
-  }, [activeCourseId])
+  // 用户手动点击课程时保存到 localStorage
+  const handleSelectCourse = (courseId: number) => {
+    setActiveCourseId(courseId)
+    localStorage.setItem('curriculum_active_course_id', JSON.stringify(courseId))
+  }
 
   // 切换分类展开/收起
   const toggleSubject = (subject: string) => {
@@ -994,7 +993,7 @@ const CurriculumPage: React.FC = () => {
                         {isExpanded && subjectCourses.map((course) => (
                           <div
                             key={course.id}
-                            onClick={(e) => { e.stopPropagation(); setActiveCourseId(course.id) }}
+                            onClick={(e) => { e.stopPropagation(); handleSelectCourse(course.id) }}
                             style={{
                               padding: '9px 16px 9px 48px',
                               cursor: 'pointer',
