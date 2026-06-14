@@ -27,6 +27,13 @@ from backend.auth import (
 from backend.api.dependencies import get_current_user
 from backend.config import STU_DIR, ROOT_DIR, BASE_DIR
 from backend.logger import logger
+from backend.permission_service import (
+    upsert_grade,
+    upsert_class,
+    assign_teacher,
+    clear_teacher_assignments,
+    parse_legacy_teacher_grade_class,
+)
 
 router = APIRouter()
 
@@ -62,6 +69,14 @@ class BulkDeleteRequest(BaseModel):
 
 
 # ── 辅助函数 ──
+
+def _normalize_class(cls_val: str) -> str:
+    """统一班级格式：去除\"班\"后缀，保留纯数字"""
+    if not cls_val:
+        return ""
+    cls_val = str(cls_val).strip()
+    return cls_val.replace("班", "")
+
 
 def _standardize_gender(gender_value) -> int:
     """标准化性别值"""
@@ -203,10 +218,39 @@ async def register_user(req: RegisterRequest, request: Request):
     role_num = _standardize_role(req.role)
 
     try:
+        # 解析年级/班级 ID
+        grade_id = None
+        class_id = None
+        grade_val = req.grade or ""
+        class_val = _normalize_class(req.class_val or "")
+
+        if grade_val and role_num == 2:  # 学生：单个年级 + 单个班级
+            grade_id = upsert_grade(grade_val.strip())
+            if class_val:
+                cls_name = class_val.strip()
+                if "班" not in cls_name:
+                    cls_name = f"{cls_name}班"
+                class_id = upsert_class(grade_id, cls_name)
+
         execute_insert_update(
-            "INSERT INTO users (username, password, class, name, gender, role, grade) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (username, hashed, req.class_val, req.name, gender_num, role_num, req.grade or ""),
+            "INSERT INTO users (username, password, class, name, gender, role, grade, grade_id, class_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (username, hashed, class_val, req.name, gender_num, role_num, grade_val, grade_id, class_id),
         )
+
+        # 教师：解析多年级多班级并写入 teacher_assignments
+        if role_num == 1 and grade_val:
+            gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
+            for g_name, cls_names in gcm.items():
+                gid = upsert_grade(g_name)
+                if not cls_names:
+                    assign_teacher(username, gid, None)
+                else:
+                    for cn in cls_names:
+                        if "班" not in cn:
+                            cn = f"{cn}班"
+                        cid = upsert_class(gid, cn)
+                        assign_teacher(username, gid, cid)
+
         logger.info(f"用户注册成功: {username}")
         return {"message": f"用户 '{username}' 注册成功"}
     except Exception as e:
@@ -234,7 +278,7 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
     try:
         execute_insert_update(
             "UPDATE users SET class=?, name=?, gender=?, grade=? WHERE username=?",
-            (req.class_val, req.name, gender_num, req.grade or "", username),
+            (_normalize_class(req.class_val or ""), req.name, gender_num, req.grade or "", username),
         )
         logger.info(f"用户信息已更新: {username}")
         return {"message": f"用户 '{username}' 信息已更新"}
@@ -425,7 +469,31 @@ async def import_users(file: UploadFile = File(...), request: Request = None):
         # 发送开始事件
         yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
 
-        # 在单一事务中执行所有数据库操作，避免逐条连接/提交的开销
+        # 预解析所有年级/班级名称，构建缓存
+        grade_cache: dict[str, int] = {}   # grade_name → grade_id
+        class_cache: dict[tuple, int] = {}  # (grade_id, class_name) → class_id
+        for row in rows:
+            grade_val = row.get("grade", "").strip()
+            if grade_val:
+                for g_name in grade_val.split("|"):
+                    g_name = g_name.strip()
+                    if g_name and g_name not in grade_cache:
+                        grade_cache[g_name] = upsert_grade(g_name)
+            class_val = row.get("class", "").strip()
+            if class_val:
+                # 解析班级名（可能包含管道分隔）
+                class_groups = [c.strip() for c in class_val.split("|")] if "|" in class_val else [class_val]
+                for cg in class_groups:
+                    for cn in cg.split(","):
+                        cn = cn.strip()
+                        if not cn:
+                            continue
+                        if "班" not in cn:
+                            cn = f"{cn}班"
+                        # 需要知道 grade_id，但这里不好推断...
+                        # 对班级做宽松处理：导入时先按名称创建，grade_id 绑定在事务中处理
+
+        # 在单一事务中执行所有数据库操作
         with get_transaction() as conn:
             cursor = conn.cursor()
 
@@ -438,7 +506,7 @@ async def import_users(file: UploadFile = File(...), request: Request = None):
                         await asyncio.sleep(0)
                         continue
 
-                    # 检查是否已存在（同一连接，无额外开销）
+                    # 检查是否已存在
                     cursor.execute(
                         "SELECT username FROM users WHERE username=?", (username,)
                     )
@@ -448,16 +516,59 @@ async def import_users(file: UploadFile = File(...), request: Request = None):
                         continue
 
                     hashed = hash_password(password)
-                    class_val = row.get("class", "").strip()
+                    class_val = _normalize_class(row.get("class", "").strip())
                     name_val = row.get("name", "").strip()
                     gender_val = _standardize_gender(row.get("gender", "0"))
                     role_val = _standardize_role(row.get("role", "2"))
                     grade_val = row.get("grade", "").strip()
 
+                    # 解析年级/班级 ID
+                    grade_id = None
+                    class_id = None
+                    if grade_val and role_val == 2:
+                        # 学生：单年级单班级
+                        g_name = grade_val.split("|")[0].strip()  # 取第一个（学生不应有管道）
+                        grade_id = grade_cache.get(g_name) or upsert_grade(g_name)
+                        grade_cache[g_name] = grade_id
+                        if class_val:
+                            cls_name = class_val.strip()
+                            if "班" not in cls_name:
+                                cls_name = f"{cls_name}班"
+                            cache_key = (grade_id, cls_name)
+                            if cache_key not in class_cache:
+                                class_cache[cache_key] = upsert_class(grade_id, cls_name)
+                            class_id = class_cache[cache_key]
+
                     cursor.execute(
-                        "INSERT INTO users (username, password, class, name, gender, role, grade) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (username, hashed, class_val, name_val, gender_val, role_val, grade_val),
+                        "INSERT INTO users (username, password, class, name, gender, role, grade, grade_id, class_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (username, hashed, class_val, name_val, gender_val, role_val, grade_val, grade_id, class_id),
                     )
+
+                    # 教师：写入 teacher_assignments
+                    if role_val == 1 and grade_val:
+                        gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
+                        for g_name, cls_names in gcm.items():
+                            gid = grade_cache.get(g_name) or upsert_grade(g_name)
+                            grade_cache[g_name] = gid
+                            if not cls_names:
+                                # 该年级全部班级
+                                cursor.execute(
+                                    "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, NULL)",
+                                    (username, gid),
+                                )
+                            else:
+                                for cn in cls_names:
+                                    if "班" not in cn:
+                                        cn = f"{cn}班"
+                                    cache_key = (gid, cn)
+                                    if cache_key not in class_cache:
+                                        class_cache[cache_key] = upsert_class(gid, cn)
+                                    cid = class_cache[cache_key]
+                                    cursor.execute(
+                                        "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, ?)",
+                                        (username, gid, cid),
+                                    )
+
                     imported += 1
                 except Exception as e:
                     errors.append(f"第{row_num}行：{str(e)}")
@@ -496,9 +607,15 @@ async def download_import_template():
     import tempfile
 
     csv_content = "username,password,class,name,gender,role,grade\n"
-    csv_content += "s11001,123456,1,张三,男,2,高一\n"
-    csv_content += "s11002,123456,1,李四,女,2,高一\n"
-    csv_content += "t001,123456,\"1,2,3,4|1,2,7,8\",王老师,男,1,高一|高二\n"
+    csv_content += "# === 学生示例 ===\n"
+    csv_content += "s11001,123456,1班,张三,男,2,一年级\n"
+    csv_content += "s11002,123456,2班,李四,女,2,一年级\n"
+    csv_content += "s21001,123456,3班,王五,男,2,初一\n"
+    csv_content += "s31001,123456,1班,赵六,女,2,高一\n"
+    csv_content += "# === 教师示例（多年级用|分隔，多班级用,分隔） ===\n"
+    csv_content += "t001,123456,\"1班,2班|1班\",王老师,男,1,一年级|初一\n"
+    csv_content += "t002,123456,\"1班,2班,3班\",李老师,女,1,高一\n"
+    csv_content += "# 说明: grade列支持 一年级~高三, class列纯数字会自动补\"班\"后缀"
 
     # 创建临时文件
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", encoding="utf-8-sig")

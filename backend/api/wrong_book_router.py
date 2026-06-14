@@ -15,52 +15,20 @@ from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.database import execute_query as db_exec, execute_insert_update as db_insert
+from backend.permission_service import (
+    parse_legacy_teacher_grade_class as _parse_teacher_grade_class,
+    is_student_in_teacher_scope,
+)
 
 router = APIRouter()
 
-
-def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:
-    """解析教师的年级和班级字段，返回 {年级: [班级列表]} 的映射"""
-    result = {}
-    if not grade or not grade.strip():
-        return result
-
-    grade_parts = [g.strip() for g in grade.split("|")]
-    class_parts = [c.strip() for c in class_str.split("|")] if class_str else []
-
-    for i, g in enumerate(grade_parts):
-        if not g:
-            continue
-        if i < len(class_parts) and class_parts[i]:
-            classes = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-            result[g] = classes
-        else:
-            result[g] = []
-    return result
-
-
 def _check_teacher_can_view_student(teacher_username: str, student_username: str):
-    """检查教师是否有权限查看该学生的错题（教师只能看自己班级的学生）"""
-    teacher_rows = user_query(
-        "SELECT grade, class FROM users WHERE username=?", (teacher_username,)
-    )
-    teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
-    teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
-    grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
-
-    student_rows = user_query(
-        "SELECT grade, class FROM users WHERE username=?", (student_username,)
-    )
-    if not student_rows:
-        raise HTTPException(status_code=404, detail="学生不存在")
-    student_grade = (student_rows[0][0] or "").strip()
-    student_class = str(student_rows[0][1] or "").strip()
-
-    allowed_classes = grade_class_map.get(student_grade, [])
-    if allowed_classes and student_class not in allowed_classes:
+    """检查教师是否有权限查看该学生的错题（使用统一权限服务）"""
+    from backend.auth import is_admin
+    if is_admin(teacher_username):
+        return
+    if not is_student_in_teacher_scope(student_username, teacher_username):
         raise HTTPException(status_code=403, detail="无权查看其他班级学生的错题")
-    if not allowed_classes and student_grade not in grade_class_map:
-        raise HTTPException(status_code=403, detail="无权查看其他年级学生的错题")
 
 
 @router.get("/list", summary="获取我的错题")

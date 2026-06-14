@@ -238,28 +238,15 @@ async def list_code_problems(
         where += " AND cp.creator_username=?"
         params.append(username)
     else:
+        from backend.permission_service import is_student_in_teacher_scope
         si = db_query_dict("SELECT grade,class FROM users WHERE username=?", (username,))
         if si:
-            sg, sc = str(si[0]["grade"] or ""), str(si[0]["class"] or "")
             tu = db_query_dict("SELECT username FROM users WHERE role=1")
             at = []
             for t in tu:
                 tn = t["username"]
-                ti = db_query_dict("SELECT grade,class FROM users WHERE username=?", (tn,))
-                if not ti: continue
-                tg, tc = str(ti[0]["grade"] or "").strip(), str(ti[0]["class"] or "").strip()
-                if not tg: continue
-                gp = [g.strip() for g in tg.split("|") if g.strip()]
-                cp2 = [c.strip() for c in tc.split("|") if c.strip()] if tc else []
-                for gi, g in enumerate(gp):
-                    if g == sg:
-                        if gi < len(cp2) and cp2[gi]:
-                            if sc in [c.strip() for c in cp2[gi].split(",") if c.strip()]:
-                                at.append(tn)
-                                break
-                        else:
-                            at.append(tn)
-                            break
+                if is_student_in_teacher_scope(username, tn):
+                    at.append(tn)
             au = db_query_dict("SELECT username FROM users WHERE role=0")
             an = [a["username"] for a in au] if au else []
             aa = an + at

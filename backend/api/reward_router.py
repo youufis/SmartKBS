@@ -82,9 +82,12 @@ async def ranking(
     if role == 1:
         # 教师只能看自己任教的班级
         t = teacher or user["username"]
-        from backend.api.score_router import _get_teacher_allowed_classes
-        allowed = _get_teacher_allowed_classes(t, grade)
-        # _get_teacher_allowed_classes 返回班级数字（如 ["1","2"]），与 u.class 格式一致
+        from backend.permission_service import get_teacher_classes, get_grade_by_name
+        grade_info = get_grade_by_name(grade)
+        allowed = []
+        if grade_info:
+            classes = get_teacher_classes(t, grade_info["id"])
+            allowed = [c["name"].replace("班", "") for c in classes]
         if allowed:
             allowed_classes = allowed
 

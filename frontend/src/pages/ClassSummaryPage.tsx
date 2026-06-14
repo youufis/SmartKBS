@@ -2,10 +2,10 @@
  * ClassSummaryPage — AI 课堂总结（独立页）
  * 教师端：AI 生成课堂活动综合分析报告
  */
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Card, Button, Space, Typography, message, Spin, Empty,
-  Statistic, Row, Col,
+  Statistic, Row, Col, Select,
 } from 'antd'
 import {
   RobotOutlined, BarChartOutlined, DownloadOutlined,
@@ -20,15 +20,44 @@ const { Title, Text } = Typography
 const ClassSummaryPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
 
+  const [grades, setGrades] = useState<string[]>([])
+  const [classes, setClasses] = useState<string[]>([])
+  const [selectedGrade, setSelectedGrade] = useState<string>('')
+  const [selectedClass, setSelectedClass] = useState<string>('')
+
+  // 加载年级列表
+  useEffect(() => {
+    apiClient.get('/api/scores/my-grades')
+      .then(({ data }) => setGrades(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [])
+
+  // 年级变更 → 加载班级
+  useEffect(() => {
+    setSelectedClass('')
+    setClasses([])
+    if (!selectedGrade) return
+    apiClient.get('/api/scores/classes', { params: { grade: selectedGrade, teacher: user?.username || 'root' } })
+      .then(({ data }) => setClasses(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [selectedGrade, user?.username])
+
+  const grade = selectedGrade || ''
+  const cls = selectedClass || ''
+
   const [classSummaryLoading, setClassSummaryLoading] = useState(false)
   const [classSummaryData, setClassSummaryData] = useState<{ summary: string; data?: any } | null>(null)
 
   const handleClassSummary = async () => {
+    if (!grade || !cls) {
+      message.warning('请先选择年级和班级')
+      return
+    }
     setClassSummaryLoading(true)
     setClassSummaryData(null)
     try {
       const { data } = await apiClient.get('/api/interaction/class-summary', {
-        params: { grade: user?.grade || '', cls: user?.class || '', subject: '信息科技', teacher_username: user?.username },
+        params: { grade, cls, subject: '信息科技', teacher_username: user?.username },
       })
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
@@ -58,6 +87,21 @@ const ClassSummaryPage: React.FC = () => {
 
       <Card>
         <Space style={{ marginBottom: 16 }}>
+          <Select
+            placeholder="选择年级"
+            value={selectedGrade || undefined}
+            onChange={setSelectedGrade}
+            style={{ width: 140 }}
+            options={grades.map(g => ({ value: g, label: g }))}
+          />
+          <Select
+            placeholder="选择班级"
+            value={selectedClass || undefined}
+            onChange={setSelectedClass}
+            style={{ width: 140 }}
+            disabled={!selectedGrade || classes.length === 0}
+            options={classes.map(c => ({ value: c, label: c }))}
+          />
           <Button icon={<RobotOutlined />} onClick={handleClassSummary} loading={classSummaryLoading}>
             AI 课堂总结
           </Button>
@@ -79,8 +123,8 @@ const ClassSummaryPage: React.FC = () => {
                 onClick={() => {
                   const token = localStorage.getItem('smartkb_token')
                   const params = new URLSearchParams({
-                    grade: user?.grade || '',
-                    cls: user?.class || '',
+                      grade,
+                      cls,
                     subject: '信息科技',
                     teacher_username: user?.username || '',
                     token: token || '',

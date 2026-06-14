@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user, require_admin
@@ -238,9 +238,33 @@ async def get_question_types():
     }
 
 @router.get("/grades", summary="获取年级列表")
-async def get_grades():
-    """从数据库 users 表动态获取年级列表"""
-    from backend.subject_config import get_grades
+async def get_grades(stage: str = None):
+    """获取年级列表，支持按学段筛选（小学/初中/高中）"""
+    from backend.permission_service import get_all_grades, get_all_stages
+    grades = get_all_grades(stage)
+    stages = get_all_stages()
     return {
-        "grades": get_grades(),
+        "grades": grades,
+        "stages": stages,
     }
+
+
+@router.get("/grades/{grade_id}/classes", summary="获取某年级的班级列表")
+async def get_classes_by_grade(grade_id: int):
+    """获取指定年级下的所有班级"""
+    from backend.permission_service import get_all_classes, get_grade_by_id
+    grade = get_grade_by_id(grade_id)
+    if not grade:
+        raise HTTPException(status_code=404, detail="年级不存在")
+    classes = get_all_classes(grade_id)
+    return {
+        "grade": grade,
+        "classes": classes,
+    }
+
+
+@router.get("/stages", summary="获取学段列表")
+async def get_stages():
+    """获取所有学段"""
+    from backend.permission_service import get_all_stages
+    return {"stages": get_all_stages()}

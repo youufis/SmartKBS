@@ -343,10 +343,13 @@ async def list_teacher_sessions(request: Request):
         if target_students:
             student_count = len(target_students)
         elif r["target_grade"]:
-            student_count = len(db_execute_query(
-                'SELECT COUNT(*) FROM users WHERE role=2 AND grade=? AND class=?',
-                (r['target_grade'], r['target_class']),
-            )) if r["target_grade"] else 0
+            tc = str(r.get('target_class') or '')
+            tc_num = re.sub(r'[^\d]', '', tc) if tc else ''
+            student_count = db_execute_query(
+                'SELECT COUNT(*) FROM users WHERE role=2 AND grade=? AND (class=? OR class=?)',
+                (r['target_grade'], tc_num, f"{tc_num}班"),
+            )
+            student_count = student_count[0][0] if student_count else 0
         else:
             student_count = 0
 
@@ -497,25 +500,17 @@ async def list_my_practices(request: Request):
     # 本班教师
     if grade:
         teacher_rows = db_execute_query(
-            "SELECT username, grade, class FROM users WHERE role=1"
+            "SELECT username FROM users WHERE role=1"
         )
-        for t in teacher_rows:
-            t_grade = (t[1] or "").strip()
-            t_class = str(t[2] or "").strip()
-            if not t_grade:
-                continue
-            # 解析教师的年级班级映射
-            grade_parts = [g.strip() for g in t_grade.split("|") if g.strip()]
-            class_parts = [c.strip() for c in t_class.split("|")] if t_class else []
-            for i, g in enumerate(grade_parts):
-                if g == grade:
-                    if i < len(class_parts) and class_parts[i]:
-                        classes = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-                        if cls in classes:
-                            allowed_creators.append(t[0])
-                    else:
+        from backend.permission_service import get_teacher_classes, get_grade_by_name
+        grade_info = get_grade_by_name(grade)
+        if grade_info:
+            for t in teacher_rows:
+                teacher_classes = get_teacher_classes(t[0], grade_info["id"])
+                for tc in teacher_classes:
+                    if tc.get("name", "").replace("班", "") == cls:
                         allowed_creators.append(t[0])
-                    break
+                        break
 
     if not allowed_creators:
         return {"sessions": []}

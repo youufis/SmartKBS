@@ -26,7 +26,7 @@ const ExamComposePage: React.FC = () => {
   const [exam, setExam] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [subjects, setSubjects] = useState<string[]>(['信息科技', '通用技术'])
-  const [grades, setGrades] = useState<string[]>(['高一', '高二', '高三'])
+  const [grades, setGrades] = useState<string[]>([])
   const [wizardVisible, setWizardVisible] = useState(false)
 
   useEffect(() => {
@@ -65,8 +65,10 @@ const ExamComposePage: React.FC = () => {
   async function loadGrades() {
     try {
       const { data } = await apiClient.get('/api/config/grades')
-      if (data?.grades?.length > 0) {
-        setGrades(data.grades)
+      const gradeList = data?.grades
+      if (gradeList?.length > 0) {
+        // 新API返回 [{id, name, stage, sort_order}, ...]
+        setGrades(gradeList.map((g: any) => g.name || g))
       }
     } catch { /* ignore */ }
   }
