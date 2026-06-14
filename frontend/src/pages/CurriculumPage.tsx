@@ -93,7 +93,12 @@ const CurriculumPage: React.FC = () => {
   // ── 课程树数据 ──
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(false)
-  const [activeCourseId, setActiveCourseId] = useState<number | null>(null)
+  const [activeCourseId, setActiveCourseId] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem('curriculum_active_course_id')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
 
   // ── 课程创建/编辑 ──
   const [courseModal, setCourseModal] = useState(false)
@@ -254,6 +259,13 @@ const CurriculumPage: React.FC = () => {
     localStorage.setItem('curriculum_expanded_subjects', JSON.stringify(expandedSubjects))
   }, [expandedSubjects])
 
+  // 持久化当前选中的课程
+  useEffect(() => {
+    if (activeCourseId !== null) {
+      localStorage.setItem('curriculum_active_course_id', JSON.stringify(activeCourseId))
+    }
+  }, [activeCourseId])
+
   // 切换分类展开/收起
   const toggleSubject = (subject: string) => {
     setExpandedSubjects((prev) =>
@@ -294,9 +306,6 @@ const CurriculumPage: React.FC = () => {
     try {
       const data = await curriculumApi.getCurriculumTree()
       setCourses(data)
-      if (data.length > 0 && !activeCourseId) {
-        setActiveCourseId(data[0].id)
-      }
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(detail || '加载课程数据失败')
@@ -315,9 +324,8 @@ const CurriculumPage: React.FC = () => {
 
   // 当课程列表变化时，确保有选中课程
   useEffect(() => {
-    if (courses.length === 0) {
-      setActiveCourseId(null)
-    } else if (!activeCourseId || !courses.find((c) => c.id === activeCourseId)) {
+    if (courses.length === 0) return
+    if (!activeCourseId || !courses.find((c) => c.id === activeCourseId)) {
       setActiveCourseId(courses[0].id)
     }
   }, [courses])
