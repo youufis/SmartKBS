@@ -133,7 +133,7 @@ def _delete_user_completely(username: str):
         ("DELETE FROM notifications WHERE recipient_username=?", (username,)),
         ("DELETE FROM discussion_members WHERE username=?", (username,)),
         ("DELETE FROM discussion_messages WHERE username=?", (username,)),
-        ("DELETE FROM discussion_reports WHERE creator_username=? OR student_username=?", (username, username)),
+        ("DELETE FROM discussion_reports WHERE discussion_id IN (SELECT id FROM discussions WHERE creator_username=?)", (username,)),
         ("DELETE FROM interaction_quiz_answers WHERE student_username=?", (username,)),
         ("DELETE FROM interaction_poll_votes WHERE student_username=?", (username,)),
         ("DELETE FROM interaction_questions WHERE student_username=?", (username,)),
