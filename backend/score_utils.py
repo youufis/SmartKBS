@@ -51,7 +51,11 @@ def load_students(grade=""):
                     continue
                 seen.add(name)
                 cls_str = str(cls_num or "")
-                cls_key = f"{grade}{cls_str}班" if cls_str else f"{grade}班"
+                # 统一格式：如果已含"班"则直接拼接，否则补"班"
+                if "班" in cls_str:
+                    cls_key = f"{grade}{cls_str}"
+                else:
+                    cls_key = f"{grade}{cls_str}班" if cls_str else f"{grade}班"
                 class_map.setdefault(cls_key, []).append({
                     "class": cls_key, "name": name,
                     "gender": "男" if gval in (1, "1", "男") else "女" if gval in (2, "0", "女", 0) else "",

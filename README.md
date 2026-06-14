@@ -1,12 +1,14 @@
 # 智慧教学平台 (SmartKBS)
 
-> 通用学科 AI 智慧教学管理平台（以高中信息科技、通用技术课程为例开发设计）
+> **版本 V5.4.0** | 更新于 2026-06-14
+
+> 通用学科 AI 智慧教学管理平台（全学段：小学/初中/高中通用技术、信息科技等学科）
 > 集成流式 AI 对话、资源管理、试题库、在线考试、智能组卷 & Word 导出、
 > 任务管理、AI 智能批改、课程大纲、课堂互动、分组讨论、知识抢答活动、积分奖励、课堂积分、
 > 智能点名、考勤统计、错题巩固、智能练习、AI 资源推荐、学情分析、成长档案等功能。
 > 基于 **FastAPI + React** 构建。
 
-![版本](https://img.shields.io/badge/版本-5.3.0-blue)
+![版本](https://img.shields.io/badge/版本-5.4.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope-orange)
@@ -271,6 +273,25 @@ Copyright © 2026 youufis
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+
+---
+
+## 📦 更新日志
+
+### v5.4.0 (2026-06-14)
+
+🎯 **全学段年级班级重构**
+
+- **年级体系重构**：新增 `grades`/`classes`/`teacher_assignments` 三张核心表，支持小学/初中/高中全学段
+- **统一权限服务**：新建 `permission_service.py`，集中管理所有年级班级权限判断，替代散落各处的管道解析逻辑
+- **教师任教关系规范化**：多年级多班级从字符串拼接改为关系表存储，支持精确权限控制
+- **格式统一**：`users.class` 统一为纯数字格式，消除"1"与"1班"不一致问题
+- **动态加载**：所有年级/班级下拉框基于实际数据动态加载，无硬编码
+- **兼容降级**：旧管道格式数据自动迁移，新表无数据时回退旧格式
+
+### v5.3.0 (2026-06-13)
+
+- 历史版本功能
     GNU Affero General Public License for more details.
 
     You should have received a copy of the GNU Affero General Public License

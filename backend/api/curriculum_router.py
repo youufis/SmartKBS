@@ -1555,37 +1555,28 @@ async def get_class_progress_overview(
 
     # 教师只能查看自己班级的学生
     if role == 1:
-        teacher_info = execute_query_one(
-            "SELECT grade, class FROM users WHERE username=?", (username,)
-        )
-        if teacher_info and teacher_info.get("grade"):
-            teacher_grades = [g.strip() for g in teacher_info["grade"].split("|") if g.strip()]
-            raw_classes = (teacher_info.get("class") or "").strip()
-            grade_conditions = []
-            for g in teacher_grades:
-                grade_conditions.append("grade=?")
-                params.append(g)
-            if grade_conditions:
-                conditions.append(f"({' OR '.join(grade_conditions)})")
-            if raw_classes:
-                class_groups = [c.strip() for c in raw_classes.split("|") if c.strip()]
-                class_conditions = []
-                for cg in class_groups:
-                    for cls_val in cg.split(","):
-                        cls_val = cls_val.strip()
-                        if cls_val:
-                            class_conditions.append("class=?")
-                            params.append(cls_val)
-                if class_conditions:
-                    conditions.append(f"({' OR '.join(class_conditions)})")
+        from backend.permission_service import get_students_in_scope, get_grade_by_name
+        # 使用统一权限服务获取教师管辖学生
+        scoped = get_students_in_scope(username)
+        if scoped:
+            scoped_usernames = [s["username"] for s in scoped]
+            placeholders = ",".join("?" * len(scoped_usernames))
+            conditions.append(f"username IN ({placeholders})")
+            params.extend(scoped_usernames)
+        else:
+            # 没有任教信息，不返回任何学生
+            return {"students": [], "total": 0}
 
     # 用户选择的额外筛选条件（对管理员直接应用，对教师则在教师权限基础上进一步缩小范围）
     if grade:
         conditions.append("grade=?")
         params.append(grade)
     if class_name:
-        conditions.append("class=?")
-        params.append(class_name)
+        # 统一格式：兼容 "1" 和 "1班"
+        import re
+        cn = re.sub(r'[^\d]', '', str(class_name))
+        conditions.append("(class=? OR class=?)")
+        params.extend([cn, f"{cn}班"])
 
     where = " AND ".join(conditions)
     students = execute_query(

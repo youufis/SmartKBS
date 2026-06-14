@@ -6,7 +6,9 @@ from backend.logger import logger
 
 # 默认值（当 system_config.json 中未配置时使用）
 DEFAULT_SUBJECTS = ["信息科技", "通用技术"]
-DEFAULT_GRADES = ["高一", "高二", "高三"]
+DEFAULT_GRADES = ["一年级", "二年级", "三年级", "四年级", "五年级", "六年级",
+                  "初一", "初二", "初三",
+                  "高一", "高二", "高三"]
 
 
 def get_subjects() -> list[str]:

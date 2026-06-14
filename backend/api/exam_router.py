@@ -17,7 +17,7 @@ from backend.question_db import (
     execute_update,
 )
 from backend.api.dependencies import get_current_user
-from backend.api.score_router import _parse_teacher_grade_class
+from backend.permission_service import parse_legacy_teacher_grade_class as _parse_teacher_grade_class
 from backend.auth import is_admin
 from backend.database import execute_query as user_query
 from backend.logger import logger

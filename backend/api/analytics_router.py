@@ -12,6 +12,7 @@ from backend.api.dependencies import get_current_user
 from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
+from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
 from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 
@@ -112,25 +113,19 @@ async def class_overview(
 
     # 教师只能查看自己班级的数据
     if role == 1:
-        teacher_info = execute_query(
-            "SELECT grade, class FROM users WHERE username=?", (username,)
-        )
-        if teacher_info:
-            t_grade = (teacher_info[0][0] or "").strip()
-            t_class = (teacher_info[0][1] or "").strip()
-            allowed_grades = [g.strip() for g in t_grade.split("|") if g.strip()]
-            # 如果教师配置了年级，检查请求的年级是否在允许范围内
-            if allowed_grades and grade not in allowed_grades:
-                raise HTTPException(status_code=403, detail="无权查看其他年级的数据")
+        # 使用统一权限服务
+        grade_info = get_grade_by_name(grade)
+        if grade_info and not can_access_grade(username, grade_info["id"]):
+            raise HTTPException(status_code=403, detail="无权查看其他年级的数据")
 
     # 收集班级数据
     # 班级号格式处理：users.class 存数字(1)，下拉框传"高一1班"
     class_num = _extract_class_num(cls)
 
-    # 1. 学生人数
+    # 1. 学生人数（兼容 class="1" 和 class="1班"）
     student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND class = ?",
-        (grade, class_num),
+        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
+        (grade, class_num, f"{class_num}班"),
     )
     total_students = student_count[0][0] if student_count else 0
     if total_students == 0:
@@ -469,10 +464,10 @@ async def teaching_suggestions(
     cls_name = f"{grade}{cls_display}班"
 
     # ── 收集数据 ──
-    # 1. 学生人数
+    # 1. 学生人数（兼容 class="1" 和 class="1班"）
     student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND class = ?",
-        (grade, cls_display),
+        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
+        (grade, cls_display, f"{cls_display}班"),
     )
     total_students = student_count[0][0] if student_count else 0
     if total_students == 0:
@@ -653,8 +648,8 @@ async def export_class_overview_docx(
     class_num = _extract_class_num(cls)
 
     student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND class = ?",
-        (grade, class_num),
+        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
+        (grade, class_num, f"{class_num}班"),
     )
     total_students = student_count[0][0] if student_count else 0
     if total_students == 0:
@@ -804,8 +799,8 @@ async def export_teaching_suggestions_docx(
     cls_name = f"{grade}{class_num}班"
 
     student_count = execute_query(
-        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND class = ?",
-        (grade, class_num),
+        "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
+        (grade, class_num, f"{class_num}班"),
     )
     total_students = student_count[0][0] if student_count else 0
     if total_students == 0:

@@ -55,6 +55,83 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 兼容旧表：添加 grade_id / class_id 外键列（新年级班级体系）──
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN grade_id INTEGER REFERENCES grades(id)")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN class_id INTEGER REFERENCES classes(id)")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_users_grade_id ON users(grade_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_users_class_id ON users(class_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 年级主数据表（全学段：小学/初中/高中）──
+            c.execute("""CREATE TABLE IF NOT EXISTS grades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                stage TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER DEFAULT 1
+            )""")
+            # 预置默认年级数据（幂等）
+            default_grades = [
+                ("一年级", "小学", 10),
+                ("二年级", "小学", 12),
+                ("三年级", "小学", 14),
+                ("四年级", "小学", 16),
+                ("五年级", "小学", 18),
+                ("六年级", "小学", 20),
+                ("初一", "初中", 30),
+                ("初二", "初中", 32),
+                ("初三", "初中", 34),
+                ("高一", "高中", 50),
+                ("高二", "高中", 52),
+                ("高三", "高中", 54),
+            ]
+            for g_name, g_stage, g_order in default_grades:
+                try:
+                    c.execute(
+                        "INSERT OR IGNORE INTO grades (name, stage, sort_order) VALUES (?, ?, ?)",
+                        (g_name, g_stage, g_order),
+                    )
+                except sqlite3.OperationalError:
+                    pass
+
+            # ── 班级主数据表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS classes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                UNIQUE(grade_id, name)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_classes_grade ON classes(grade_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 教师任教关系表（核心：解耦多年级多班级）──
+            c.execute("""CREATE TABLE IF NOT EXISTS teacher_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                teacher_username TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+                grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+                class_id INTEGER,
+                subject TEXT DEFAULT '',
+                UNIQUE(teacher_username, grade_id, class_id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ta_teacher ON teacher_assignments(teacher_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ta_grade ON teacher_assignments(grade_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ta_class ON teacher_assignments(class_id)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 每日使用量统计表（限流用，与日志解耦） ──
             c.execute(
                 """CREATE TABLE IF NOT EXISTS daily_usage (

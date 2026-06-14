@@ -347,13 +347,16 @@ def get_class_ranking(grade: str, class_name: str = "",
         allowed_classes: 教师有权限的班级列表，None 表示不过滤（管理员）
     """
     if class_name:
+        # 从 "高一1班" 提取纯数字 "1"，同时兼容 "1" 和 "1班" 格式
+        import re
+        cls_num = re.sub(r'[^\d]', '', str(class_name))
         rows = execute_query(
             """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
                FROM users u
                LEFT JOIN student_total_points stp ON u.username = stp.student_username
-               WHERE u.role=2 AND u.grade=? AND u.class=?
+               WHERE u.role=2 AND u.grade=? AND (u.class=? OR u.class=?)
                ORDER BY points DESC""",
-            (grade, class_name),
+            (grade, cls_num, f"{cls_num}班"),
         )
     elif allowed_classes:
         # 按教师任教班级过滤
@@ -394,8 +397,11 @@ def get_activity_statistics(grade: str = "", class_name: str = "",
         where.append("u.grade=?")
         params.append(grade)
     if class_name:
-        where.append("u.class=?")
-        params.append(class_name)
+        # 统一格式：从 "高一1班" 提取 "1"，兼容 "1" 和 "1班"
+        import re
+        cls_num = re.sub(r'[^\d]', '', str(class_name))
+        where.append("(u.class=? OR u.class=?)")
+        params.extend([cls_num, f"{cls_num}班"])
 
     where_clause = " AND ".join(where) if where else "1=1"
 

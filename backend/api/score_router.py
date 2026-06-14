@@ -4,8 +4,14 @@
 import jwt as pyjwt
 from fastapi import APIRouter, Request
 
-from backend.database import get_connection, execute_query
+from backend.database import get_connection, execute_query, execute_query_dict
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
+from backend.permission_service import (
+    get_teacher_grades,
+    get_teacher_classes,
+    get_teacher_assignments,
+    get_grade_by_name,
+)
 
 router = APIRouter()
 
@@ -27,80 +33,61 @@ def _get_teacher(request: Request) -> str:
     return "root"
 
 
-
-def _parse_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:
-    """解析教师的年级和班级映射，返回 {年级: [班级列表]}"""
-    result = {}
-    if not grade or not grade.strip():
-        return result
-    grade_parts = [g.strip() for g in grade.split("|")]
-    class_parts = [c.strip() for c in class_str.split("|")] if class_str else []
-    for i, g in enumerate(grade_parts):
-        if not g:
-            continue
-        if i < len(class_parts) and class_parts[i]:
-            classes = [c.strip() for c in class_parts[i].split(",") if c.strip()]
-            result[g] = classes
-        else:
-            result[g] = []
-    return result
-
-
-def _get_teacher_allowed_grades(teacher: str) -> list[str]:
-    """获取教师有权限的年级列表，管理员返回全部"""
-    from backend.subject_config import get_grade_list
-    all_grades = get_grade_list()
-    if teacher == "root":
-        return all_grades
-    rows = execute_query("SELECT grade FROM users WHERE username=?", (teacher,))
-    if not rows:
-        return all_grades
-    grade_str = (rows[0][0] or "").strip()
-    if not grade_str:
-        return all_grades
-    return [g.strip() for g in grade_str.split("|") if g.strip()]
-
-
-def _get_teacher_allowed_classes(teacher: str, grade: str) -> list[str]:
-    """获取教师在某个年级任教的班级列表，管理员返回空（表示全部）"""
-    if teacher == "root":
-        return []
-    rows = execute_query("SELECT grade, class FROM users WHERE username=?", (teacher,))
-    if not rows:
-        return []
-    teacher_grade = (rows[0][0] or "").strip()
-    teacher_class = str(rows[0][1] or "").strip()
-    if not teacher_grade and not teacher_class:
-        return []
-    gcm = _parse_teacher_grade_class(teacher_grade, teacher_class)
-    return gcm.get(grade, [])
-
-
 # ── API 处理器 ──
 
 async def api_classes(request: Request):
     grade = request.query_params.get("grade", "")
     teacher = _get_teacher(request)
+    # 教师用权限服务过滤，管理员返回实际学生班级
+    grade_info = get_grade_by_name(grade)
+    if grade_info:
+        classes = get_teacher_classes(teacher, grade_info["id"])
+        if classes:
+            return [c["display_name"] for c in classes]
+    # 降级：从学生数据获取
     students = load_students(grade)
-    all_classes = sorted(set(s["class"] for s in students))
-    allowed = _get_teacher_allowed_classes(teacher, grade)
-    if allowed:
-        allowed_full = {f"{grade}{a}班" for a in allowed}
-        return [c for c in all_classes if c in allowed_full]
-    return all_classes
+    return sorted(set(s["class"] for s in students))
 
 
 async def api_my_grades(request: Request):
-    """返回当前教师可查看的年级列表"""
+    """返回当前教师可查看的年级列表 - 管理员基于实际学生数据"""
+    from backend.auth import is_admin
     teacher = _get_teacher(request)
-    return _get_teacher_allowed_grades(teacher)
+    if is_admin(teacher):
+        rows = execute_query(
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+        )
+        return [row[0] for row in rows]
+    grades = get_teacher_grades(teacher)
+    return [g["name"] for g in grades]
 
 
 async def api_teacher_info(request: Request):
     """返回当前教师的任教信息（年级+班级）"""
     teacher = _get_teacher(request)
-    if teacher == "root":
-        return {"username": "root", "teaching": "管理员，所有年级和班级"}
+    from backend.auth import is_admin
+    if is_admin(teacher):
+        return {"username": teacher, "teaching": "管理员，所有年级和班级"}
+
+    # 优先使用新表
+    assignments = get_teacher_assignments(teacher)
+    if assignments:
+        grade_map: dict[str, list[str]] = {}
+        for a in assignments:
+            gn = a["grade_name"]
+            if gn not in grade_map:
+                grade_map[gn] = []
+            if a.get("class_name"):
+                grade_map[gn].append(a["class_name"])
+        parts = []
+        for g, classes in grade_map.items():
+            if classes:
+                parts.append(f"{g}{','.join(classes)}")
+            else:
+                parts.append(f"{g}（全部班级）")
+        return {"username": teacher, "teaching": " | ".join(parts)}
+
+    # 降级：旧格式
     rows = execute_query("SELECT grade, class FROM users WHERE username=?", (teacher,))
     if not rows:
         return {"username": teacher, "teaching": "未配置任教信息"}
@@ -108,7 +95,7 @@ async def api_teacher_info(request: Request):
     teacher_class = str(rows[0][1] or "").strip()
     if not teacher_grade:
         return {"username": teacher, "teaching": "未配置任教信息"}
-    gcm = _parse_teacher_grade_class(teacher_grade, teacher_class)
+    gcm = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
     parts = []
     for g, classes in gcm.items():
         if classes:
