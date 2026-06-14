@@ -4,12 +4,12 @@ import MediaDisplay from '../components/MediaDisplay'
 import {
   Card, Tabs, Button, Space, Typography, List, Tag, Modal,
   Form, Input, InputNumber, Select, message, Empty, Spin, Radio, Result,
-  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Divider, Pagination,
+  Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination,
 } from 'antd'
 import {
   ThunderboltOutlined, BarChartOutlined,
-  PlusOutlined, PlayCircleOutlined, CheckCircleOutlined,
-  SendOutlined, RobotOutlined,
+  PlusOutlined, PlayCircleOutlined,
+  RobotOutlined,
   EditOutlined, DeleteOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
@@ -19,7 +19,6 @@ import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
 const { Title, Text } = Typography
-const { TextArea } = Input
 
 const InteractionPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
@@ -82,7 +81,6 @@ const InteractionPage: React.FC = () => {
 
   useEffect(() => {
     loadQuizzes()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── AI 生成测验 ──
