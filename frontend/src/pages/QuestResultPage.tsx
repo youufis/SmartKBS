@@ -116,7 +116,8 @@ const QuestResultPage: React.FC = () => {
   }
 
   const isAllCorrect = result.correct_count >= 15
-  const isSuccess = result.correct_count >= 1
+  // 闯关成功 = 后端标记 completed=1（完成全部 15 题）
+  const isSuccess = result.completed === 1
   const scoreColor = getScoreColor(result.correct_count)
 
   const getGradeTag = () => {
