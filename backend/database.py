@@ -1135,6 +1135,9 @@ def init_db():
             conn.commit()
             logger.debug("数据库初始化完成")
 
+            # ── 自动回填存量数据的 grade_id/class_id ──
+            _backfill_grade_class_ids(c)
+
             # 确保存在默认管理员账号
             _ensure_default_admin()
     except Exception as e:
@@ -1231,6 +1234,35 @@ def execute_batch(operations: list[tuple[str, tuple]]):
         for sql, params in operations:
             c.execute(sql, params)
         conn.commit()
+
+
+# ── 自动回填 grade_id/class_id ──
+
+def _backfill_grade_class_ids(c):
+    """回填存量数据的 grade_id/class_id（幂等，仅在缺失时执行）"""
+    try:
+        # 1. 学生 users
+        c.execute("SELECT COUNT(*) FROM users WHERE grade_id IS NULL AND grade IS NOT NULL AND grade!=''")
+        if c.fetchone()[0]:
+            c.execute("UPDATE users SET grade_id=(SELECT id FROM grades WHERE name=users.grade) "
+                      "WHERE grade_id IS NULL AND grade IS NOT NULL AND grade!=''")
+            c.execute("UPDATE users SET class_id=(SELECT c2.id FROM classes c2 JOIN grades g ON c2.grade_id=g.id "
+                      "WHERE g.name=users.grade AND (c2.name=users.class||'班' OR c2.name=users.class)) "
+                      "WHERE class_id IS NULL AND class IS NOT NULL AND class!=''")
+            logger.info("已自动回填 users 表 grade_id/class_id")
+
+        # 2. scores / rollcall 系列表
+        for table in ['scores', 'rollcall_weights', 'rollcall_meta', 'rollcall_history']:
+            c.execute(f"SELECT COUNT(*) FROM {table} WHERE grade_id IS NULL")
+            if c.fetchone()[0]:
+                c.execute(f"UPDATE {table} SET grade_id=(SELECT id FROM grades WHERE name={table}.grade) "
+                          f"WHERE grade_id IS NULL")
+                logger.info(f"已自动回填 {table} 表 grade_id")
+
+        conn = c.connection
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"自动回填 grade_id/class_id 失败: {e}")
 
 
 # ── 默认管理员账号 ──

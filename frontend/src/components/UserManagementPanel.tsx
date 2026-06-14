@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Tabs, Form, Input, Button, message, Modal, Progress, Table, Upload, Space, Radio, Typography } from 'antd'
+import { Tabs, Form, Input, Button, message, Modal, Progress, Table, Upload, Space, Radio, Typography, Card } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
 import type { ImportProgressEvent } from '../api/users'
@@ -58,16 +58,15 @@ const UserManagementPanel: React.FC = () => {
     }
   }
 
-  // ── 删除（支持模糊模式） ──
+  // ── 删除（精确匹配） ──
   const [deleteForm] = Form.useForm()
   const handleDelete = async (values: any) => {
-    const pattern = values.pattern?.trim()
-    if (!pattern) {
-      message.warning('请输入用户名模式')
+    if (!values.username?.trim()) {
+      message.warning('请输入用户名')
       return
     }
     try {
-      const msg = await usersApi.bulkDeleteUsers(pattern)
+      const msg = await usersApi.deleteUser(values.username.trim())
       message.success(msg)
       deleteForm.resetFields()
     } catch (err: any) {
@@ -75,7 +74,25 @@ const UserManagementPanel: React.FC = () => {
     }
   }
 
-  // ── 查询（支持用户名/姓名模糊搜索） ──
+  // ── 批量删除（模糊模式） ──
+  const handleBulkDelete = async () => {
+    const pattern = bulkPattern.trim()
+    if (!pattern) {
+      message.warning('请输入用户名模式')
+      return
+    }
+    try {
+      const msg = await usersApi.bulkDeleteUsers(pattern)
+      message.success(msg)
+      setBulkPattern('')
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '批量删除失败')
+    }
+  }
+
+  // ── 批量删除状态 ──
+  const [bulkPattern, setBulkPattern] = useState('')
+
   const [searchForm] = Form.useForm()
   const [searchResult, setSearchResult] = useState<any[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
@@ -303,13 +320,28 @@ const UserManagementPanel: React.FC = () => {
         label: '删除',
         children: (
           <Space direction="vertical" style={{ width: '100%' }}>
-            <Form form={deleteForm} layout="vertical" onFinish={handleDelete} style={{ maxWidth: 400 }}>
-              <Form.Item name="pattern" label="用户名模式" extra={<>支持 <code>%</code> 模糊匹配，如 <code>s110%</code> 匹配所有 s110 开头用户</>}
-                rules={[{ required: true, message: '请输入用户名模式' }]}>
-                <Input placeholder="如：s110%  或  student_2026" />
-              </Form.Item>
-              <Button type="primary" danger htmlType="submit">批量删除匹配用户</Button>
-            </Form>
+            <Card title="单用户删除（精确用户名）" size="small">
+              <Form form={deleteForm} layout="inline" onFinish={handleDelete}>
+                <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+                  <Input placeholder="输入精确用户名" style={{ width: 240 }} />
+                </Form.Item>
+                <Button type="primary" danger htmlType="submit">删除</Button>
+              </Form>
+            </Card>
+            <Card title="批量删除（模糊模式）" size="small">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Typography.Text type="secondary">用户名支持 <code>%</code> 通配符，如 <code>s110%</code> 匹配所有 s110 开头用户</Typography.Text>
+                <Space>
+                  <Input
+                    placeholder="如：s110%"
+                    value={bulkPattern}
+                    onChange={e => setBulkPattern(e.target.value)}
+                    style={{ width: 240 }}
+                  />
+                  <Button danger onClick={handleBulkDelete}>批量删除</Button>
+                </Space>
+              </Space>
+            </Card>
             <Typography.Text type="warning">⚠️ 删除操作不可恢复，会同时清除该用户的所有数据</Typography.Text>
           </Space>
         ),
