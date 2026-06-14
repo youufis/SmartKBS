@@ -605,9 +605,15 @@ def init_db():
                 cover_image TEXT DEFAULT '',
                 sort_order INTEGER DEFAULT 0,
                 status TEXT DEFAULT 'active',
+                subject TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )""")
+            # 兼容旧表：添加 subject 列（课程大类）
+            try:
+                c.execute("ALTER TABLE courses ADD COLUMN subject TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
 
             # ── 章/节表（自引用 parent_id，支持无限嵌套） ──
             c.execute("""CREATE TABLE IF NOT EXISTS chapters (
