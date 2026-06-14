@@ -440,7 +440,7 @@ const QuestPage: React.FC = () => {
           <div>
             <Title level={5}>🏅 徽章</Title>
             <Paragraph>
-              每次闯关成功（答对 ≥1 题）获得 <Text strong>🏅 闯关徽章 ×1</Text>，可无限累积！<br />
+              每次闯关答对1题即可积累积分，全部通关获得 <Text strong>🏅 闯关徽章 ×1</Text>，可无限累积！<br />
               集齐里程碑还可解锁专属称号：🥉初出茅庐 → 🥈闯关新秀 → 🥇闯关达人 → 💎闯关大师 → 👑闯关传奇
             </Paragraph>
           </div>
