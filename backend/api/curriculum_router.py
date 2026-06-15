@@ -2279,7 +2279,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
             safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
-            filename = f"{kp_id}_{safe_name}_练习.html"
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{kp_id}_{safe_name}_{ts}_练习.html"
             filepath = os.path.join(html_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(html_content)
@@ -2929,7 +2930,8 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
     html_dir = get_account_html_dir(username)
     os.makedirs(html_dir, exist_ok=True)
     safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
-    filename = f"{kp_id}_{safe_name}_练习.html"
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{kp_id}_{safe_name}_{ts}_练习.html"
     filepath = os.path.join(html_dir, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html_content)
