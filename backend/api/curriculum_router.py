@@ -2238,7 +2238,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
             # 生成 HTML 答题页面
             if session_id is None:
                 return {"error": "创建练习任务失败"}
-            html_content = _generate_practice_html(kp, questions, session_id, subject)
+            html_content = _generate_practice_html(kp, questions, session_id, subject, kp_id)
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
             safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -2267,7 +2267,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
     return {"task_id": task_id, "message": "AI 练习生成已开始，请稍候..."}
 
 
-def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int, subject: str) -> str:
+def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int, subject: str, kp_id: int = 0) -> str:
     """生成自包含的 HTML 答题页面"""
     import html as html_mod
 
@@ -2467,7 +2467,8 @@ body {{
 
 <script>
 const questions = {questions_json};
-const STORAGE_KEY = 'ai_practice_' + {session_id};
+const sessionId = {session_id};
+const kpId = {kp_id};
 const userAnswers = {{}};
 
 function renderQuestions() {{
@@ -2536,41 +2537,53 @@ function updateProgress() {{
     document.getElementById('progressText').textContent = answered + '/' + questions.length;
 }}
 
-// 从 localStorage 检查是否已作答过
+// 检查是否已作答过（独立 API，不依赖 practice_sessions）
 function checkPreviousAttempt() {{
-    var saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return;
-    try {{
-        var data = JSON.parse(saved);
-        if (!data || !data.attempt) return;
+    var token = localStorage.getItem('smartkb_token');
+    if (!token || !kpId) return;
+    fetch('/api/curriculum/ai-practice/' + kpId + '/my-result', {{
+        headers: {{ 'Authorization': 'Bearer ' + token }}
+    }})
+    .then(function(r) {{
+        if (r.status === 404) return null;
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }})
+    .then(function(data) {{
+        if (data && data.result) {{
+            var r = data.result;
+            // 已答过，显示上次成绩
+            var banner = document.getElementById('reattemptBanner');
+            if (banner) banner.style.display = 'block';
+            var prevScore = document.getElementById('prevScore');
+            if (prevScore) prevScore.textContent = r.score;
+            var prevAcc = document.getElementById('prevAccuracy');
+            if (prevAcc && r.total_score > 0) {{
+                var acc = Math.round(r.score / r.total_score * 100);
+                prevAcc.textContent = '（正确率 ' + acc + '%）';
+            }}
+            var prevTime = document.getElementById('prevSubmittedAt');
+            if (prevTime && r.submitted_at) {{
+                prevTime.textContent = '提交时间：' + r.submitted_at;
+            }}
 
-        var banner = document.getElementById('reattemptBanner');
-        if (banner) banner.style.display = 'block';
-        var prevScore = document.getElementById('prevScore');
-        if (prevScore) prevScore.textContent = data.attempt.score;
-        var prevAcc = document.getElementById('prevAccuracy');
-        if (prevAcc && data.attempt.total_score > 0) {{
-            prevAcc.textContent = '（正确率 ' + data.attempt.accuracy + '%）';
+            // 如果有结果明细，直接展示
+            if (r.questions && r.questions.length > 0) {{
+                document.getElementById('submitArea').style.display = 'none';
+                renderPreviousResults(r, data.allResults);
+            }}
         }}
-        var prevTime = document.getElementById('prevSubmittedAt');
-        if (prevTime) {{
-            prevTime.textContent = '提交时间：' + (data.attempt.submitted_at || '本地记录');
-        }}
-
-        if (data.results && data.results.length > 0) {{
-            document.getElementById('submitArea').style.display = 'none';
-            renderPreviousResults(data);
-        }}
-    }} catch(e) {{ /* ignore */ }}
+    }})
+    .catch(function(err) {{
+        console.error('检查历史作答失败:', err);
+    }});
 }}
 
-function renderPreviousResults(data) {{
-    var results = data.results;
-    var earned = data.attempt.score;
-    var totalScore = data.attempt.total_score;
+function renderPreviousResults(r, allResults) {{
+    var results = allResults || [];
+    var earned = r.score;
+    var totalScore = r.total_score;
     var accuracy = totalScore > 0 ? Math.round(earned / totalScore * 100) : 0;
-
-    // 用 showResults 的逻辑展示，但传入 results 数组
     showResults(accuracy, earned, totalScore, null, results);
 }}
 
@@ -2626,42 +2639,48 @@ function submitPractice() {{
     // 2. 即时显示结果
     showResults(accuracy, earned, totalScore, results);
 
-    // 3. 保存成绩到 localStorage（纯本地，无需后端）
-    var gradeData = {{
-        attempt: {{
+    // 3. 提交到后端（独立 API，不依赖 practice_sessions）
+    const token = localStorage.getItem('smartkb_token');
+    if (!token) {{
+        var errMsg = document.getElementById('resultNote');
+        if (errMsg) {{ errMsg.textContent = '⚠️ 未登录，成绩无法保存'; errMsg.style.display = 'block'; }}
+        return;
+    }}
+    const submitBtn = document.getElementById('btnSubmit');
+    if (submitBtn) {{ submitBtn.disabled = true; submitBtn.textContent = '⏳ 提交中...'; }}
+    fetch('/api/curriculum/ai-practice/' + kpId + '/save-result', {{
+        method: 'POST',
+        headers: {{
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        }},
+        body: JSON.stringify({{
             score: earned,
             total_score: totalScore,
-            accuracy: accuracy,
-            submitted_at: new Date().toLocaleString('zh-CN')
-        }},
-        results: []
-    }};
-    questions.forEach((q, i) => {{
-        var studentAns = userAnswers[i] || '';
-        var correctAns = q.answer || '';
-        var isCorrect = studentAns.toUpperCase() === correctAns.toUpperCase();
-        gradeData.results.push({{
-            is_correct: isCorrect,
-            student_answer: studentAns,
-            correct_answer: correctAns,
-            score: isCorrect ? 10 : 0,
-            max_score: 10
-        }});
+            answers: results
+        }})
+    }})
+    .then(function(r) {{
+        if (submitBtn) {{ submitBtn.textContent = '📤 提交答案'; }}
+        if (!r.ok) {{
+            return r.json().then(function(e) {{ throw new Error(e.detail || '提交失败'); }});
+        }}
+        return r.json();
+    }})
+    .then(function(data) {{
+        var noteEl = document.getElementById('resultNote');
+        if (noteEl) {{
+            noteEl.textContent = '✅ 成绩已记录';
+            noteEl.style.display = 'block';
+        }}
+    }})
+    .catch(function(err) {{
+        var noteEl = document.getElementById('resultNote');
+        if (noteEl) {{
+            noteEl.textContent = '⚠️ ' + (err.message || '提交失败，请重试');
+            noteEl.style.display = 'block';
+        }}
     }});
-    try {{
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(gradeData));
-        var noteEl = document.getElementById('resultNote');
-        if (noteEl) {{
-            noteEl.textContent = '✅ 成绩已保存（本地）';
-            noteEl.style.display = 'block';
-        }}
-    }} catch(e) {{
-        var noteEl = document.getElementById('resultNote');
-        if (noteEl) {{
-            noteEl.textContent = '⚠️ 成绩保存失败';
-            noteEl.style.display = 'block';
-        }}
-    }}
 }}
 
 function showResults(accuracy, score, totalScore, results, prevResults) {{
@@ -2844,7 +2863,7 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
     if session_id is None:
         raise HTTPException(status_code=500, detail="创建练习任务失败")
 
-    html_content = _generate_practice_html(kp, questions, session_id, subject)
+    html_content = _generate_practice_html(kp, questions, session_id, subject, kp_id)
     html_dir = get_account_html_dir(username)
     os.makedirs(html_dir, exist_ok=True)
     safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -2887,3 +2906,97 @@ async def preview_ai_practice(kp_id: int, request: Request):
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=content)
+
+
+# ═══════════════════════════════════════════════════════════
+# AI 练习独立成绩记录（不依赖 practice_sessions）
+# ═══════════════════════════════════════════════════════════
+
+class SavePracticeResultRequest(BaseModel):
+    """保存练习结果请求"""
+    score: int = 0
+    total_score: int = 0
+    answers: dict[str, Any] = {}
+
+
+@router.post("/ai-practice/{kp_id}/save-result", summary="保存AI练习成绩（独立存储）")
+async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, request: Request):
+    """保存AI练习的作答成绩，独立于 practice_sessions 体系"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    from backend.question_db import execute_insert, execute_query_one
+    import json
+    from datetime import datetime
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    accuracy = round(req.score / max(req.total_score, 1) * 100, 1)
+    answers_json = json.dumps(req.answers, ensure_ascii=False)
+
+    existing = execute_query_one(
+        "SELECT id FROM ai_practice_results WHERE kp_id=? AND student_username=?",
+        (kp_id, username),
+    )
+    if existing:
+        execute_insert(
+            """UPDATE ai_practice_results
+               SET score=?, total_score=?, accuracy=?, answers=?, submitted_at=?
+               WHERE kp_id=? AND student_username=?""",
+            (req.score, req.total_score, accuracy, answers_json, now, kp_id, username),
+        )
+    else:
+        execute_insert(
+            """INSERT INTO ai_practice_results (kp_id, student_username, score, total_score, accuracy, answers, submitted_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (kp_id, username, req.score, req.total_score, accuracy, answers_json, now),
+        )
+
+    logger.info(f"AI 练习成绩已保存: kp_id={kp_id}, username={username}, score={req.score}/{req.total_score}")
+    return {"message": "成绩已记录", "score": req.score, "total_score": req.total_score}
+
+
+@router.get("/ai-practice/{kp_id}/my-result", summary="获取我的AI练习历史成绩")
+async def get_my_ai_practice_result(kp_id: int, request: Request):
+    """获取当前用户在指定知识点上的AI练习历史成绩（独立存储）"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    from backend.question_db import execute_query_one
+    import json
+
+    row = execute_query_one(
+        "SELECT * FROM ai_practice_results WHERE kp_id=? AND student_username=?",
+        (kp_id, username),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="暂无作答记录")
+
+    answers_data = row.get("answers", "{}")
+    if isinstance(answers_data, str):
+        try:
+            answers_data = json.loads(answers_data)
+        except (json.JSONDecodeError, TypeError):
+            answers_data = {}
+
+    all_results = []
+    for qid_str, ans in answers_data.items():
+        if isinstance(ans, dict):
+            all_results.append({
+                "question_id": int(qid_str) if qid_str.isdigit() else qid_str,
+                "student_answer": ans.get("student_answer", ""),
+                "correct_answer": ans.get("correct_answer", ""),
+                "score": ans.get("score", 0),
+                "max_score": ans.get("max_score", 10),
+                "is_correct": ans.get("is_correct", False),
+            })
+
+    return {
+        "result": {
+            "score": row["score"],
+            "total_score": row["total_score"],
+            "accuracy": row["accuracy"],
+            "submitted_at": row["submitted_at"],
+            "questions": all_results,
+        },
+        "allResults": all_results,
+    }
