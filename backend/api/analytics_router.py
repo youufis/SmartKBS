@@ -782,7 +782,7 @@ async def export_class_overview_docx(
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
 
     doc = Document()
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5
@@ -940,7 +940,7 @@ async def export_teaching_suggestions_docx(
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
 
     doc = Document()
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5
@@ -1079,7 +1079,7 @@ async def export_exam_report_docx(
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
 
     doc = Document()
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5
