@@ -125,13 +125,6 @@ const CurriculumPage: React.FC = () => {
   const [practiceSessionId, setPracticeSessionId] = useState<number | null>(null)
   const [practiceQuestions, setPracticeQuestions] = useState<any[]>([])
   const [practiceKpId, setPracticeKpId] = useState<number | null>(null)
-  const [practicePublished, setPracticePublished] = useState(false)
-  // 发布用
-  const [pubGradeOptions, setPubGradeOptions] = useState<string[]>([])
-  const [pubClassOptions, setPubClassOptions] = useState<string[]>([])
-  const [pubGrade, setPubGrade] = useState('')
-  const [pubClass, setPubClass] = useState('')
-  const [publishing, setPublishing] = useState(false)
 
   // ── 章节/知识点管理 ──
   const [chapterModal, setChapterModal] = useState(false)
@@ -250,15 +243,7 @@ const CurriculumPage: React.FC = () => {
     setPracticeHtmlUrl('')
     setPracticeSessionId(null)
     setPracticeQuestions([])
-    setPracticePublished(false)
     setPracticeModal(true)
-    // 加载教师年级列表
-    try {
-      const { data: gradesData } = await apiClient.get('/api/scores/my-grades')
-      const grades = Array.isArray(gradesData) ? gradesData : []
-      setPubGradeOptions(grades)
-      if (grades.length > 0) setPubGrade(grades[0])
-    } catch { /* ignore */ }
     try {
       const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`)
       message.info('AI 正在生成练习题，请稍候...')
@@ -280,39 +265,6 @@ const CurriculumPage: React.FC = () => {
       setPracticeModal(false)
     } finally {
       setPracticeLoading(false)
-    }
-  }
-
-  // 选择年级时加载对应班级（教师只能看到自己的班级）
-  useEffect(() => {
-    if (!pubGrade || !practiceKpId) return
-    apiClient.get('/api/scores/classes', { params: { grade: pubGrade } })
-      .then(({ data }) => {
-        const classes = Array.isArray(data) ? data : []
-        const nums = classes.map((c: string) => c.replace(/^.*?(\d+).*$/, '$1')).filter((n: string) => n)
-        setPubClassOptions(nums)
-      }).catch(() => {})
-  }, [pubGrade, practiceKpId])
-
-  const handlePublishPractice = async () => {
-    if (!practiceKpId || !practiceSessionId) return
-    setPublishing(true)
-    try {
-      await curriculumApi.publishAiPractice(practiceKpId, {
-        target_grade: pubGrade,
-        target_class: pubClass,
-      })
-      message.success('练习已成功发布！')
-      setPracticePublished(true)
-      // 刷新资源列表
-      if (selectedKp) {
-        const res = await curriculumApi.getKpResources(selectedKp.id)
-        setKpResources(res.resources)
-      }
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || '发布失败')
-    } finally {
-      setPublishing(false)
     }
   }
 
@@ -1696,51 +1648,12 @@ const CurriculumPage: React.FC = () => {
         width={960}
         footer={
           practiceLoading ? null : practiceHtmlUrl ? (
-            <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-              <Space>
-                {!practicePublished ? (
-                  <>
-                    <Select
-                      value={pubGrade || undefined}
-                      onChange={setPubGrade}
-                      placeholder="目标年级"
-                      style={{ width: 140 }}
-                    >
-                      {pubGradeOptions.map(g => (
-                        <Select.Option key={g} value={g}>{g}</Select.Option>
-                      ))}
-                      {user?.role === 'admin' && <Select.Option value="">全部年级</Select.Option>}
-                    </Select>
-                    <Select
-                      value={pubClass || undefined}
-                      onChange={setPubClass}
-                      placeholder="目标班级"
-                      style={{ width: 130 }}
-                      allowClear
-                    >
-                      {pubClassOptions.map(n => (
-                        <Select.Option key={n} value={n}>{n}班</Select.Option>
-                      ))}
-                      <Select.Option value="">全部班级</Select.Option>
-                    </Select>
-                    <Button type="primary" icon={<CheckCircleOutlined />}
-                      loading={publishing} onClick={handlePublishPractice}>
-                      发布练习
-                    </Button>
-                  </>
-                ) : (
-                  <Tag icon={<CheckCircleOutlined />} color="success" style={{ padding: '4px 12px', fontSize: 14 }}>
-                    已发布到 {pubGrade || '全部'} {pubClass ? pubClass + '班' : '全部'}
-                  </Tag>
-                )}
-              </Space>
-              <Space>
-                <Button icon={<DownloadOutlined />}
-                  onClick={() => { if (practiceHtmlUrl) window.open(practiceHtmlUrl, '_blank') }}>
+            <Space style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
+              <Button icon={<DownloadOutlined />}
+                onClick={() => { if (practiceHtmlUrl) window.open(practiceHtmlUrl, '_blank') }}>
                   新标签页打开
-                </Button>
-                <Button onClick={() => setPracticeModal(false)}>关闭</Button>
-              </Space>
+              </Button>
+              <Button onClick={() => setPracticeModal(false)}>关闭</Button>
             </Space>
           ) : (
             <Button onClick={() => setPracticeModal(false)}>关闭</Button>
