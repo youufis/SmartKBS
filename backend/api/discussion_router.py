@@ -7,6 +7,7 @@ import json
 import random
 import asyncio
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -25,7 +26,7 @@ import time as _dt_time
 import hashlib as _dt_hashlib
 
 # 内容审核跟踪：username -> { rejected_hashes: set, rejection_count: int, window_start: float, blocked_until: float }
-_discussion_review_tracker: dict[str, dict] = {}
+_discussion_review_tracker: dict[str, dict[str, Any]] = {}
 _DT_MAX_REJECTIONS = 3
 _DT_WINDOW_SECONDS = 300
 _DT_BLOCK_SECONDS = 60
@@ -129,7 +130,7 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _get_user_grade_class(username: str) -> tuple:
+def _get_user_grade_class(username: str) -> tuple[Any, ...]:
     rows = execute_query(
         "SELECT grade, class FROM users WHERE username = ?",
         (username,),
@@ -229,33 +230,23 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
         duration_minutes=req.duration_minutes,
     )
 
-    import os
-    import json
-    import re
-
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
-
+    import json, re
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(user["username"])
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 DashScope API Key"}
 
     from backend.api.ai_service import call_ai_async
     from backend.ai_task_manager import task_manager
 
-    async def _do_generate() -> dict:
+    async def _do_generate() -> dict[str, Any]:
         try:
             result = await call_ai_async(prompt, api_key)
             if result:
-                json_match = __import__('re').search(r'\{[\s\S]*\}', result)
+                json_match = re.search(r'\{[\s\S]*\}', result)
                 if json_match:
                     try:
-                        data = __import__('json').loads(json_match.group())
+                        data = json.loads(json_match.group())
                         return {"status": "ok", "data": data, "raw": result}
                     except json.JSONDecodeError:
                         pass
@@ -1030,16 +1021,8 @@ async def ai_suggest(group_id: int, request: Request):
 请根据讨论情况给出简短的引导或总结（50-100字）："""
 
     # 调用 AI
-    import os
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
-
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(user["username"])
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
@@ -1073,17 +1056,10 @@ async def ai_suggest(group_id: int, request: Request):
 # ── AI 归纳总结（互动讨论后的 AI 总结功能）──
 
 def _get_api_key() -> str:
-    """获取 API Key 的辅助函数"""
-    import os
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
-    return api_key
+    """获取 API Key 的辅助函数（委托共享的 get_api_keys）"""
+    from backend.api.chat_router import get_api_keys
+    key, _ = get_api_keys("")
+    return key
 
 
 @router.post("/groups/{group_id}/ai-summary", summary="AI 生成小组讨论归纳总结")
@@ -1308,7 +1284,7 @@ async def export_group_summary_docx(
 
     # ── 生成 Word 文档 ──
     doc = Document()
-    style = doc.styles['Normal']
+    style: Any = doc.styles['Normal']
     style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5
@@ -1449,12 +1425,8 @@ async def generate_report(disc_id: int, request: Request):
 
             ai_summary = ""
             try:
-                import os
-                api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-                if not api_key:
-                    from backend.api.config_router import load_config
-                    cfg = load_config()
-                    api_key = cfg.get("dashscope_api_key", "")
+                from backend.api.chat_router import get_api_keys
+                api_key, _ = get_api_keys(user["username"])
                 if api_key:
                     from backend.api.ai_service import call_ai_async
                     ai_summary = await call_ai_async(prompt, api_key)
@@ -1640,16 +1612,8 @@ async def auto_trigger_ai(disc_id: int, request: Request):
     )
     now = datetime.now()
     triggered = 0
-    import os
-
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(user["username"])
     if not api_key:
         return {"status": "error", "triggered": 0, "message": "API Key 未配置"}
 

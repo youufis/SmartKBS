@@ -604,7 +604,7 @@ async def export_learning_report_docx(username: str, request: Request, token: st
 
     # ── 生成 Word 文档 ──
     doc = Document()
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5

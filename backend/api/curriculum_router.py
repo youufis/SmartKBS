@@ -407,7 +407,7 @@ async def ai_generate_from_file(request: Request):
 
     # 读取文件内容
     content_bytes = await file.read()
-    filename = file.filename.lower()
+    filename = (file.filename or "").lower()
 
     # 提取文本（按扩展名处理）
     text_content = ""
@@ -416,7 +416,8 @@ async def ai_generate_from_file(request: Request):
     elif filename.endswith(".pdf"):
         try:
             import io
-            import PyPDF2
+            import importlib
+            PyPDF2 = importlib.import_module('PyPDF2')
             reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
             text_content = "\n".join(page.extract_text() for page in reader.pages)
         except ImportError:
@@ -426,7 +427,7 @@ async def ai_generate_from_file(request: Request):
                 from pdfminer.high_level import extract_text as pdf_extract
                 text_content = pdf_extract(io.BytesIO(content_bytes))
             except ImportError:
-                raise HTTPException(status_code=400, detail="缺少 PDF 解析库，请安装 PyPDF2")
+                raise HTTPException(status_code=400, detail="缺少 PDF 解析库，请安装 PyPDF2 或 pdfminer")
     elif filename.endswith(".docx"):
         try:
             import io
@@ -1853,7 +1854,7 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
         raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
 
     doc = Document()
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5

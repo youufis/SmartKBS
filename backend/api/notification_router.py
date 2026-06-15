@@ -233,16 +233,9 @@ async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request
 }}
 """
 
-    import os, json, re
-
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
+    import json
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(user["username"])
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
