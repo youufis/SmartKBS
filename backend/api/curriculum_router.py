@@ -2990,9 +2990,8 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
 
     # ── 发放积分奖励 ──
     from backend.reward_engine import award_participation, award_grade
-    from backend.question_db import execute_query as q_exec
 
-    kp_name_row = q_exec("SELECT name FROM knowledge_points WHERE id=?", (kp_id,))
+    kp_name_row = execute_query("SELECT name FROM knowledge_points WHERE id=?", (kp_id,))
     kp_title = kp_name_row[0]["name"] if kp_name_row else f"知识点#{kp_id}"
 
     total_reward = 0
