@@ -2331,7 +2331,7 @@ async def export_class_summary_docx(
 
     # ── 生成 Word 文档 ──
     doc = Document()
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = 'Microsoft YaHei'
     style.font.size = Pt(11)
     style.paragraph_format.line_spacing = 1.5

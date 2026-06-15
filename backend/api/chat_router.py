@@ -59,11 +59,17 @@ def get_api_keys(username: str) -> Tuple[str, str]:
     优先级：
     1. 系统环境变量 DASHSCOPE_API_KEY（最安全，适合生产部署）
     2. system_config.json 中的 dashscope_api_key（管理员在页面配置）
+
+    注意：空 key 不会被缓存，确保环境变量在服务器启动后设置也能被及时拾取。
     """
     now = time.time()
     cached = _API_KEY_CACHE.get(username)
     if cached and (now - cached[0]) < _API_KEY_CACHE_TTL:
-        return cached[1], ""
+        # 缓存命中且非空 → 直接返回
+        if cached[1]:
+            return cached[1], ""
+        # 缓存命中但 key 为空 → 缓存过期，重新读取
+        # （避免因启动时序导致空 key 被缓存而阻塞后续请求）
 
     # 优先从系统环境变量读取（部署时设置，不留文件）
     key = os.environ.get("DASHSCOPE_API_KEY", "")
@@ -78,8 +84,10 @@ def get_api_keys(username: str) -> Tuple[str, str]:
 
     if not key:
         logger.warning("API Key 未配置：请设置环境变量 DASHSCOPE_API_KEY，或由管理员在系统配置中填写")
+    else:
+        # 仅在 key 非空时缓存，避免空 key 污染缓存
+        _API_KEY_CACHE[username] = (now, key)
 
-    _API_KEY_CACHE[username] = (now, key)
     return key, ""
 
 

@@ -626,7 +626,7 @@ def generate_exam_paper(
     section.right_margin = Cm(3.18)
 
     # ── 默认样式 ──
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = FONT_BODY
     style.font.size = SIZE_QUESTION
     style._element.rPr.rFonts.set(qn('w:eastAsia'), FONT_BODY)
@@ -831,7 +831,7 @@ def generate_answer_sheet(
     section.left_margin = Cm(2.0)
     section.right_margin = Cm(2.0)
 
-    style = doc.styles['Normal']
+    style = doc.styles['Normal']  # type: ignore[union-attr]
     style.font.name = FONT_BODY
     style.font.size = Pt(11)
 
