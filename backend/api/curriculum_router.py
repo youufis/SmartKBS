@@ -424,7 +424,7 @@ async def ai_generate_from_file(request: Request):
             # 无 PyPDF2 时尝试 pdfminer
             try:
                 import io
-                from pdfminer.high_level import extract_text as pdf_extract
+                from pdfminer.high_level import extract_text as pdf_extract  # type: ignore
                 text_content = pdf_extract(io.BytesIO(content_bytes))
             except ImportError:
                 raise HTTPException(status_code=400, detail="缺少 PDF 解析库，请安装 PyPDF2 或 pdfminer")
@@ -1760,7 +1760,7 @@ async def ai_lesson_plan(
 
     from backend.ai_task_manager import task_manager
 
-    async def _do_plan() -> dict:
+    async def _do_plan() -> dict[str, Any]:
         try:
             result = await call_ai_async(prompt, api_key)
             return {
@@ -1856,9 +1856,9 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
 
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'
-    style.font.size = Pt(11)
-    style.paragraph_format.line_spacing = 1.5
+    style.font.name = 'Microsoft YaHei'  # type: ignore[union-attr]
+    style.font.size = Pt(11)  # type: ignore[union-attr]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[union-attr]
 
     title = doc.add_heading(kp["name"], level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1973,7 +1973,7 @@ async def ai_generate_courseware(kp_id: int, request: Request):
 
     from backend.ai_task_manager import task_manager
 
-    async def _generate() -> dict:
+    async def _generate() -> dict[str, Any]:
         try:
             logger.info(f"AI 课件开始生成: kp_id={kp_id}, kp_name={kp['name']}")
             result = await call_ai_async(prompt, api_key)
@@ -2048,7 +2048,7 @@ async def preview_courseware(kp_id: int, request: Request):
 # AI 练习生成
 # ═══════════════════════════════════════════════════════════
 
-def _parse_ai_questions(text: str) -> list[dict] | None:
+def _parse_ai_questions(text: str) -> list[dict[str, Any]] | None:
     """从 AI 返回文本中解析 JSON 题目数组"""
     import re
     # 尝试直接解析
@@ -2132,7 +2132,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
 
     from backend.ai_task_manager import task_manager
 
-    async def _generate() -> dict:
+    async def _generate() -> dict[str, Any]:
         try:
             logger.info(f"AI 练习开始生成: kp_id={kp_id}, kp_name={kp['name']}")
             result_text = await call_ai_async(prompt, api_key)
@@ -2236,6 +2236,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
             q_update("UPDATE practice_sessions SET total_score=? WHERE id=?", (len(question_ids) * 10, session_id))
 
             # 生成 HTML 答题页面
+            if session_id is None:
+                return {"error": "创建练习任务失败"}
             html_content = _generate_practice_html(kp, questions, session_id, subject)
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
@@ -2265,7 +2267,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
     return {"task_id": task_id, "message": "AI 练习生成已开始，请稍候..."}
 
 
-def _generate_practice_html(kp: dict, questions: list, session_id: int, subject: str) -> str:
+def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int, subject: str) -> str:
     """生成自包含的 HTML 答题页面"""
     import html as html_mod
 
@@ -2750,6 +2752,9 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
             q["answer"] = q["correct_answer"]
         if "svg_content" in q and "svg_code" not in q:
             q["svg_code"] = q.get("svg_content") or ""
+
+    if session_id is None:
+        raise HTTPException(status_code=500, detail="创建练习任务失败")
 
     html_content = _generate_practice_html(kp, questions, session_id, subject)
     html_dir = get_account_html_dir(username)
