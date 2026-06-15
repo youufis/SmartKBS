@@ -605,13 +605,26 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
     if not sess:
         raise HTTPException(status_code=404, detail="练习不存在")
 
-    # 防重复提交
+    # 防重复提交 — 如已提交，直接返回已有成绩
     existing = execute_query_one(
-        "SELECT id FROM practice_attempts WHERE session_id=? AND student_username=?",
+        "SELECT * FROM practice_attempts WHERE session_id=? AND student_username=?",
         (session_id, username),
     )
     if existing:
-        raise HTTPException(status_code=400, detail="已提交过，不可重复提交")
+        answers_data = existing["answers"]
+        try:
+            graded = json.loads(answers_data) if isinstance(answers_data, str) else answers_data
+        except (json.JSONDecodeError, TypeError):
+            graded = {}
+        accuracy = round(existing["score"] / max(existing["total_score"], 1) * 100, 1)
+        return {
+            "score": existing["score"],
+            "total_score": existing["total_score"],
+            "accuracy": accuracy,
+            "results": graded,
+            "submitted_at": existing["submitted_at"],
+            "note": "你已提交过此练习，以下是已有成绩",
+        }
 
     # 获取题目和答案
     questions = execute_query(

@@ -165,3 +165,62 @@ COURSEWARE_GENERATE_PROMPT = """你是一位经验丰富的高中{subject}教师
    - 页面字符编码为UTF-8
 
 请生成完整的HTML代码："""
+
+
+PRACTICE_SINGLE_CHOICE_PROMPT = """你是一位经验丰富的高中{subject}教师，请根据以下知识点，生成10道单项选择题（每题4个选项），用于学生课后练习巩固。
+
+## 课程信息
+- 课程名称：{course_name}
+- 章节名称：{chapter_name}
+- 知识点：{knowledge_point}
+- 知识点描述：{kp_description}
+- 难度：{difficulty_desc}
+
+## 出题要求
+1. 必须生成**10道**单项选择题，每题4个选项（A/B/C/D）
+2. 题目要覆盖知识点的核心概念、原理和应用
+3. 选项要有区分度，干扰项要合理（基于常见错误理解）
+4. 正确答案唯一且明确
+5. 每道题都要有详细的解析，说明为什么选这个以及常见错误
+6. 题目难度分布：约3道简单、4道中等、3道困难
+7. 题目文字中涉及公式使用 $...$ LaTeX 语法
+
+## 配图规则（⚠️ 重要！必须遵守）
+每道题可输出 svg_code 和 media_placeholders 字段（都可以为 null）：
+
+【svg_code】— 技术图示
+适用于：电路图、流程图、光路图、函数图像、结构框图等技术图示。
+viewBox="0 0 600 400"，中文标注。
+**⚠️ 安全约束**：SVG 配图中**严禁**出现题目答案、解析、解题过程或任何会泄露正确选项的文字内容。
+
+【media_placeholders】— 真实图片（调用 AI 生图）
+适用于：硬件外观、电子元器件实物、实验装置、场景照片等。
+description 写 50-100 字详细描述。
+
+【配图覆盖率要求】
+- 超过 60% 的题目应包含至少一种配图
+
+## 输出格式
+请严格按照 JSON 数组格式输出，只返回一个 JSON 数组：
+
+[
+  {{
+    "type": "single",
+    "question": "题目内容（含 $...$ LaTeX 公式）",
+    "options": {{"A":"选项A","B":"选项B","C":"选项C","D":"选项D"}},
+    "answer": "A",
+    "explanation": "详细解析（含公式），说明为什么选这个以及常见错误",
+    "knowledge_point": "{knowledge_point}",
+    "difficulty": "easy/medium/hard",
+    "svg_code": "<svg>...</svg>",
+    "media_placeholders": [{{"key":"p1","description":"详细图片描述","purpose":"示意图"}}]
+  }}
+]
+
+注意：
+- 每道题的 type 必须为 "single"
+- options 必须有 A,B,C,D 四个选项
+- answer 为正确选项字母（A/B/C/D）
+- svg_code 和 media_placeholders 可以为 null
+- 超过 50% 的题目应包含至少一种配图
+"""

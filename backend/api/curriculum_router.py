@@ -2042,3 +2042,828 @@ async def preview_courseware(kp_id: int, request: Request):
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=content)
+
+
+# ═══════════════════════════════════════════════════════════
+# AI 练习生成
+# ═══════════════════════════════════════════════════════════
+
+def _parse_ai_questions(text: str) -> list[dict] | None:
+    """从 AI 返回文本中解析 JSON 题目数组"""
+    import re
+    # 尝试直接解析
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return data
+    except json.JSONDecodeError:
+        pass
+    # 尝试从 ```json ``` 代码块提取
+    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            pass
+    # 尝试从 [ 到 ] 提取最外层数组
+    start = text.find('[')
+    end = text.rfind(']')
+    if start != -1 and end != -1 and end > start:
+        try:
+            data = json.loads(text[start:end + 1])
+            if isinstance(data, list):
+                return data
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+@router.post("/ai-practice/{kp_id}")
+async def ai_generate_practice(kp_id: int, request: Request):
+    """[教师] AI 根据知识点生成10道单选题 + 创建练习任务 + 生成HTML答题页面"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+
+    keys = get_api_keys(username)
+    api_key = keys[0] if keys and keys[0] else ""
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    # 获取知识点信息
+    kp_rows = execute_query(
+        """SELECT kp.id, kp.name, kp.description, kp.learning_objectives, kp.difficulty,
+                  c.name as chapter_name, co.name as course_name, co.subject
+           FROM knowledge_points kp
+           JOIN chapters c ON c.id = kp.chapter_id
+           JOIN courses co ON co.id = c.course_id
+           WHERE kp.id = ?""",
+        (kp_id,),
+    )
+    if not kp_rows:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    kp = kp_rows[0]
+
+    from backend.prompts.teaching import PRACTICE_SINGLE_CHOICE_PROMPT
+    from backend.api.ai_service import call_ai_async
+    from backend.utils import get_account_html_dir
+    from backend.question_db import execute_insert as q_insert, execute_update as q_update
+    from backend.config import BASE_DIR
+
+    subject = kp.get("subject") or kp["course_name"] or "信息科技"
+    difficulty_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
+    difficulty_desc = difficulty_map.get(kp.get("difficulty", "medium"), "中等")
+
+    def _safe(s):
+        return str(s or "").replace('{', '{{').replace('}', '}}')
+
+    prompt = PRACTICE_SINGLE_CHOICE_PROMPT.format(
+        subject=_safe(subject),
+        course_name=_safe(kp["course_name"]),
+        chapter_name=_safe(kp["chapter_name"]),
+        knowledge_point=_safe(kp["name"]),
+        kp_description=_safe(kp.get("description", "")),
+        difficulty_desc=_safe(difficulty_desc),
+    )
+
+    from backend.ai_task_manager import task_manager
+
+    async def _generate() -> dict:
+        try:
+            logger.info(f"AI 练习开始生成: kp_id={kp_id}, kp_name={kp['name']}")
+            result_text = await call_ai_async(prompt, api_key)
+            logger.info(f"AI 响应已收到，长度={len(result_text)}")
+
+            questions = _parse_ai_questions(result_text)
+            if not questions:
+                logger.error("AI 返回格式异常，未能解析出题目")
+                return {"error": "AI 返回格式异常，未能解析出题目"}
+
+            # 限制最多10道，且必须全部为 single 类型
+            questions = questions[:10]
+            for q in questions:
+                q["type"] = "single"
+
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            question_ids = []
+
+            # 逐题入库
+            for q in questions:
+                opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
+                svg_code = q.get("svg_code") or ""
+                has_svg = 1 if svg_code.strip() else 0
+                media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
+                qid = q_insert(
+                    """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
+                        knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
+                        svg_content,has_svg,media_placeholders)
+                       VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
+                    ("single", q.get("question", ""), opts,
+                     q.get("answer", ""), q.get("explanation", ""),
+                     kp["name"], subject,
+                     q.get("difficulty", "medium"), username, now, now,
+                     svg_code, has_svg, media_placeholders),
+                )
+                q["id"] = qid
+                q["index"] = qid
+                if "svg_code" in q and "svg_content" not in q:
+                    q["svg_content"] = q["svg_code"]
+                if "has_svg" not in q:
+                    q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+
+                # 自动生图（有占位符时）
+                placeholders = q.get("media_placeholders") or []
+                media_files = []
+                if placeholders:
+                    try:
+                        from backend.api.image_gen_service import generate_and_save_image
+                        from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+                        from pathlib import Path as PPath
+                        media_dir = BASE_DIR / "question_media" / str(qid)
+                        for ph in placeholders:
+                            ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+                                subject=subject,
+                                purpose=ph.get("purpose", "示意图"),
+                                description=ph["description"],
+                            )
+                            local_path = await generate_and_save_image(ph_prompt, media_dir)
+                            if local_path:
+                                ph["status"] = "generated"
+                                media_files.append({
+                                    "key": ph["key"],
+                                    "type": "image",
+                                    "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
+                                    "alt": ph["description"],
+                                    "created_at": now,
+                                })
+                            else:
+                                ph["status"] = "failed"
+                        q_update(
+                            "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                            (json.dumps(placeholders, ensure_ascii=False),
+                             json.dumps(media_files, ensure_ascii=False), qid)
+                        )
+                    except Exception as img_err:
+                        logger.warning(f"自动生图失败: {img_err}")
+                q["media_files"] = media_files
+                question_ids.append(qid)
+
+            # 创建练习任务（draft 状态，未发布）
+            title = f"{kp['name']} 练习"
+            session_id = q_insert(
+                """INSERT INTO practice_sessions
+                   (title, knowledge_points, creator_username, subject, question_count,
+                    total_score, target_grade, target_class, target_students, source, status, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,'ai','draft',?,?)""",
+                (title, kp["name"], username, subject,
+                 len(question_ids), len(question_ids) * 10,
+                 "", "", "", now, now),
+            )
+
+            # 建立题目关联
+            for i, qid in enumerate(question_ids):
+                from backend.question_db import execute_insert as q_insert2
+                q_insert2(
+                    "INSERT INTO practice_session_questions (session_id, question_id, sort_order, score) VALUES (?,?,?,?)",
+                    (session_id, qid, i, 10),
+                )
+
+            # 更新总分
+            q_update("UPDATE practice_sessions SET total_score=? WHERE id=?", (len(question_ids) * 10, session_id))
+
+            # 生成 HTML 答题页面
+            html_content = _generate_practice_html(kp, questions, session_id, subject)
+            html_dir = get_account_html_dir(username)
+            os.makedirs(html_dir, exist_ok=True)
+            safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
+            filename = f"{kp_id}_{safe_name}_练习.html"
+            filepath = os.path.join(html_dir, filename)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+            file_url = f"/api/files/{rel_path}"
+
+            logger.info(f"AI 练习已生成: session_id={session_id}, file={filepath}")
+            return {
+                "session_id": session_id,
+                "file_url": file_url,
+                "filename": filename,
+                "questions": questions,
+                "total": len(questions),
+                "kp_name": kp["name"],
+            }
+        except Exception as e:
+            logger.error(f"AI 练习生成失败: {e}", exc_info=True)
+            return {"error": f"练习生成失败: {str(e)}"}
+
+    task_id = await task_manager.create_task(description="AI 练习生成", coro_factory=_generate)
+    return {"task_id": task_id, "message": "AI 练习生成已开始，请稍候..."}
+
+
+def _generate_practice_html(kp: dict, questions: list, session_id: int, subject: str) -> str:
+    """生成自包含的 HTML 答题页面"""
+    import html as html_mod
+
+    kp_name = html_mod.escape(kp.get("name", ""))
+    chapter_name = html_mod.escape(kp.get("chapter_name", ""))
+    course_name = html_mod.escape(kp.get("course_name", ""))
+    subject_esc = html_mod.escape(subject)
+
+    questions_json = json.dumps(questions, ensure_ascii=False)
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{kp_name} - AI练习</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    min-height: 100vh;
+    padding: 20px;
+}}
+.container {{
+    max-width: 900px;
+    margin: 0 auto;
+}}
+.header {{
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 16px;
+    padding: 32px 40px;
+    color: white;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+}}
+.header h1 {{ font-size: 24px; margin-bottom: 8px; }}
+.header .meta {{ font-size: 14px; opacity: 0.9; }}
+.header .meta span {{ margin-right: 16px; }}
+.progress-bar {{
+    display: flex; align-items: center; gap: 12px; margin-top: 16px;
+    background: rgba(255,255,255,0.2); border-radius: 8px; padding: 12px 16px;
+}}
+.progress-track {{
+    flex: 1; height: 6px; background: rgba(255,255,255,0.3); border-radius: 3px; overflow: hidden;
+}}
+.progress-fill {{
+    height: 100%; background: #fff; border-radius: 3px; transition: width 0.3s ease; width: 0%;
+}}
+.progress-text {{ font-size: 13px; white-space: nowrap; }}
+.question-card {{
+    background: #fff; border-radius: 12px; padding: 24px 28px; margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06); transition: box-shadow 0.2s;
+    border-left: 4px solid #667eea;
+}}
+.question-card:hover {{ box-shadow: 0 4px 20px rgba(0,0,0,0.1); }}
+.question-card.correct {{ border-left-color: #52c41a; }}
+.question-card.wrong {{ border-left-color: #ff4d4f; }}
+.q-number {{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; background: #667eea; color: #fff;
+    font-size: 14px; font-weight: 600; margin-right: 10px; flex-shrink: 0;
+}}
+.q-header {{ display: flex; align-items: flex-start; margin-bottom: 12px; }}
+.q-text {{ font-size: 16px; line-height: 1.6; flex: 1; }}
+.media-area {{ margin: 12px 0; text-align: center; }}
+.media-area svg {{ max-width: 100%; height: auto; border-radius: 8px; background: #fafafa; padding: 8px; }}
+.media-area img {{ max-width: 100%; max-height: 200px; border-radius: 8px; object-fit: contain; }}
+.options {{ margin: 12px 0 4px; }}
+.option-item {{
+    display: flex; align-items: flex-start; padding: 10px 14px; margin-bottom: 6px;
+    border: 2px solid #e8e8e8; border-radius: 10px; cursor: pointer;
+    transition: all 0.2s; font-size: 15px; line-height: 1.5;
+}}
+.option-item:hover {{ border-color: #667eea; background: #f8f9ff; }}
+.option-item.selected {{ border-color: #667eea; background: #eef0ff; }}
+.option-item.correct-answer {{ border-color: #52c41a; background: #f6ffed; }}
+.option-item.wrong-answer {{ border-color: #ff4d4f; background: #fff2f0; }}
+.option-label {{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%; background: #f0f0f0;
+    font-size: 13px; font-weight: 600; margin-right: 10px; flex-shrink: 0;
+}}
+.option-item.selected .option-label {{ background: #667eea; color: #fff; }}
+.option-item.correct-answer .option-label {{ background: #52c41a; color: #fff; }}
+.option-item.wrong-answer .option-label {{ background: #ff4d4f; color: #fff; }}
+.option-content {{ flex: 1; }}
+.explanation-box {{
+    margin-top: 12px; padding: 14px 16px; background: #f9f9f9; border-radius: 8px;
+    border-left: 3px solid #faad14; display: none;
+}}
+.explanation-box.show {{ display: block; }}
+.explanation-box .label {{ font-weight: 600; color: #faad14; margin-bottom: 4px; }}
+.explanation-box .text {{ font-size: 14px; line-height: 1.6; color: #555; }}
+.submit-area {{ text-align: center; margin: 32px 0; }}
+.btn-submit {{
+    padding: 14px 48px; font-size: 18px; border: none; border-radius: 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff; cursor: pointer; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+    transition: all 0.2s;
+}}
+.btn-submit:hover {{ transform: translateY(-2px); box-shadow: 0 6px 24px rgba(102, 126, 234, 0.5); }}
+.btn-submit:disabled {{ opacity: 0.5; cursor: not-allowed; transform: none; }}
+.result-area {{
+    display: none; background: #fff; border-radius: 16px; padding: 32px;
+    margin-bottom: 24px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); text-align: center;
+}}
+.result-area.show {{ display: block; }}
+.result-score {{ font-size: 48px; font-weight: 700; margin: 16px 0; }}
+.result-grade {{ font-size: 20px; margin-bottom: 8px; }}
+.result-stats {{ display: flex; justify-content: center; gap: 32px; margin: 16px 0; }}
+.result-stat {{ text-align: center; }}
+.result-stat .num {{ font-size: 24px; font-weight: 600; }}
+.result-stat .label {{ font-size: 13px; color: #888; }}
+.grade-excellent {{ color: #52c41a; }}
+.grade-good {{ color: #1677ff; }}
+.grade-medium {{ color: #faad14; }}
+.grade-poor {{ color: #ff4d4f; }}
+.footer {{ text-align: center; color: #999; font-size: 13px; padding: 20px 0; }}
+.error-msg {{ color: #ff4d4f; text-align: center; padding: 10px; }}
+.loading {{ text-align: center; padding: 60px 0; color: #666; }}
+@media (max-width: 640px) {{
+    .header {{ padding: 20px; }}
+    .question-card {{ padding: 16px; }}
+    .option-item {{ padding: 8px 12px; }}
+    .btn-submit {{ width: 100%; }}
+}}
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>📝 {kp_name}</h1>
+        <div class="meta">
+            <span>📚 {course_name}</span>
+            <span>📖 {chapter_name}</span>
+            <span>🏷️ {subject_esc}</span>
+            <span>📋 共 10 题 · 每题 10 分</span>
+        </div>
+        <div class="progress-bar" id="progress-bar">
+            <span style="font-size:14px;">⏳ 进度</span>
+            <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+            <span class="progress-text" id="progressText">0/10</span>
+        </div>
+    </div>
+
+    <div id="questionsContainer"></div>
+
+    <div id="existingResults" style="display:none;"></div>
+
+    <div class="submit-area" id="submitArea">
+        <button class="btn-submit" id="btnSubmit" onclick="submitPractice()">📤 提交答案</button>
+    </div>
+
+    <div class="result-area" id="resultArea">
+        <div style="font-size: 48px;" id="resultEmoji">🎉</div>
+        <div class="result-grade" id="resultGrade"></div>
+        <div class="result-score" id="resultScore"></div>
+        <div class="result-stats">
+            <div class="result-stat"><div class="num" id="statCorrect">0</div><div class="label">正确</div></div>
+            <div class="result-stat"><div class="num" id="statWrong">0</div><div class="label">错误</div></div>
+            <div class="result-stat"><div class="num" id="statAccuracy">0%</div><div class="label">正确率</div></div>
+        </div>
+        <div id="resultDetails" style="margin-top: 16px; font-size: 14px; color: #666;"></div>
+        <div id="resultNote" style="margin-top: 8px; font-size: 13px; color: #1677ff; display:none;"></div>
+        <div id="resultTime" style="margin-top: 4px; font-size: 12px; color: #999; display:none;"></div>
+        <button class="btn-submit" style="margin-top: 20px; padding: 10px 32px; font-size: 15px;" onclick="location.reload()">🔄 重新答题</button>
+    </div>
+
+    <div class="footer">AI 智能练习 · 系统自动批改</div>
+</div>
+
+<script>
+const questions = {questions_json};
+const sessionId = {session_id};
+const userAnswers = {{}};
+
+function renderQuestions() {{
+    const container = document.getElementById('questionsContainer');
+    container.innerHTML = '';
+    questions.forEach((q, i) => {{
+        const card = document.createElement('div');
+        card.className = 'question-card';
+        card.id = 'qcard_' + i;
+        card.dataset.index = i;
+
+        let mediaHtml = '';
+        if (q.svg_code && q.svg_code.trim()) {{
+            mediaHtml += '<div class="media-area">' + q.svg_code + '</div>';
+        }}
+        if (q.media_files && q.media_files.length > 0) {{
+            mediaHtml += '<div class="media-area">';
+            q.media_files.forEach(f => {{
+                mediaHtml += '<img src="' + f.url + '" alt="' + (f.alt || '') + '" loading="lazy">';
+            }});
+            mediaHtml += '</div>';
+        }}
+
+        let optionsHtml = '<div class="options">';
+        const labels = ['A', 'B', 'C', 'D'];
+        if (q.options) {{
+            labels.forEach(k => {{
+                if (q.options[k] !== undefined) {{
+                    optionsHtml += '<div class="option-item" id="opt_' + i + '_' + k + '" onclick="selectOption(' + i + ',\\'' + k + '\\')">';
+                    optionsHtml += '<span class="option-label">' + k + '</span>';
+                    optionsHtml += '<span class="option-content">' + q.options[k] + '</span>';
+                    optionsHtml += '</div>';
+                }}
+            }});
+        }}
+        optionsHtml += '</div>';
+
+        const explanationHtml = '<div class="explanation-box" id="expl_' + i + '">' +
+            '<div class="label">💡 解析</div>' +
+            '<div class="text">' + (q.explanation || '') + '</div>' +
+        '</div>';
+
+        card.innerHTML = '<div class="q-header">' +
+            '<span class="q-number">' + (i + 1) + '</span>' +
+            '<div class="q-text">' + q.question + '</div>' +
+        '</div>' + mediaHtml + optionsHtml + explanationHtml;
+
+        container.appendChild(card);
+    }});
+    updateProgress();
+}}
+
+function selectOption(qIdx, key) {{
+    if (document.getElementById('resultArea').classList.contains('show')) return;
+    userAnswers[qIdx] = key;
+    const card = document.getElementById('qcard_' + qIdx);
+    const opts = card.querySelectorAll('.option-item');
+    opts.forEach(o => o.classList.remove('selected'));
+    document.getElementById('opt_' + qIdx + '_' + key).classList.add('selected');
+    updateProgress();
+}}
+
+function updateProgress() {{
+    const answered = Object.keys(userAnswers).length;
+    document.getElementById('progressFill').style.width = (answered / questions.length * 100) + '%';
+    document.getElementById('progressText').textContent = answered + '/' + questions.length;
+}}
+
+// 页面加载时检测是否已有成绩
+document.addEventListener('DOMContentLoaded', function() {{
+    const token = localStorage.getItem('smartkb_token');
+    if (!token) {{
+        renderQuestions();
+        return;
+    }}
+    // 调用接口检测是否已提交
+    fetch('/api/practice/my-sessions/' + sessionId, {{
+        headers: {{ 'Authorization': 'Bearer ' + token }}
+    }})
+    .then(function(r) {{ return r.json(); }})
+    .then(function(data) {{
+        if (data && data.attempt) {{
+            // 已有成绩，直接显示结果
+            showExistingResult(data);
+        }} else {{
+            // 未提交，渲染题目
+            renderQuestions();
+            renderMath();
+        }}
+    }})
+    .catch(function() {{
+        renderQuestions();
+        renderMath();
+    }});
+}});
+
+function renderMath() {{
+    if (typeof renderMathInElement === 'function') {{
+        setTimeout(function() {{
+            renderMathInElement(document.body, {{
+                delimiters: [
+                    {{left: '$$', right: '$$', display: true}},
+                    {{left: '$', right: '$', display: false}}
+                ]
+            }});
+        }}, 500);
+    }}
+}}
+
+function showExistingResult(data) {{
+    // 隐藏题目区域和提交按钮
+    document.getElementById('questionsContainer').style.display = 'none';
+    document.getElementById('submitArea').style.display = 'none';
+    document.getElementById('progress-bar').style.display = 'none';
+
+    const area = document.getElementById('resultArea');
+    area.classList.add('show');
+
+    const att = data.attempt;
+    const accuracy = att.accuracy || 0;
+    const score = att.score || 0;
+    const totalScore = att.total_score || 100;
+
+    document.getElementById('resultScore').textContent = score + ' / ' + totalScore + ' 分';
+
+    let grade, emoji, gradeClass;
+    if (accuracy >= 90) {{ grade = '🏆 优秀！'; emoji = '🎉'; gradeClass = 'grade-excellent'; }}
+    else if (accuracy >= 80) {{ grade = '🌟 良好！'; emoji = '😊'; gradeClass = 'grade-good'; }}
+    else if (accuracy >= 60) {{ grade = '📖 及格'; emoji = '🤔'; gradeClass = 'grade-medium'; }}
+    else {{ grade = '💪 继续努力'; emoji = '📚'; gradeClass = 'grade-poor'; }}
+
+    document.getElementById('resultEmoji').textContent = emoji;
+    const gradeEl = document.getElementById('resultGrade');
+    gradeEl.textContent = grade;
+    gradeEl.className = 'result-grade ' + gradeClass;
+
+    const noteEl = document.getElementById('resultNote');
+    if (noteEl) {{
+        noteEl.textContent = 'ℹ️ 你已提交过此练习，以下是已有成绩';
+        noteEl.style.display = 'block';
+    }}
+    if (att.submitted_at) {{
+        const timeEl = document.getElementById('resultTime');
+        if (timeEl) {{
+            timeEl.textContent = '提交时间: ' + att.submitted_at;
+            timeEl.style.display = 'block';
+        }}
+    }}
+
+    let correct = 0, wrong = 0;
+    const container = document.getElementById('existingResults');
+    container.innerHTML = '';
+    container.style.display = 'block';
+
+    if (data.results && Array.isArray(data.results)) {{
+        data.results.forEach(function(r, i) {{
+            const isCorrect = r.is_correct;
+            if (isCorrect) correct++; else wrong++;
+
+            const card = document.createElement('div');
+            card.className = 'question-card' + (isCorrect ? ' correct' : ' wrong');
+            card.innerHTML = '<div class="q-header">' +
+                '<span class="q-number">' + (i + 1) + '</span>' +
+                '<div class="q-text">' + (r.question_text || '') + '</div>' +
+            '</div>' +
+            '<div style="margin:8px 0;">' +
+                '<span style="font-weight:600;">你的答案：</span>' +
+                '<span style="color:' + (isCorrect ? '#52c41a' : '#ff4d4f') + ';">' + (r.student_answer || '未作答') + '</span>' +
+                (!isCorrect && r.correct_answer ? ' <span style="color:#999;">正确答案: ' + r.correct_answer + '</span>' : '') +
+            '</div>' +
+            (r.explanation ? '<div class="explanation-box show"><div class="label">💡 解析</div><div class="text">' + r.explanation + '</div></div>' : '');
+            container.appendChild(card);
+        }});
+    }}
+
+    document.getElementById('statCorrect').textContent = correct;
+    document.getElementById('statWrong').textContent = wrong;
+    document.getElementById('statAccuracy').textContent = accuracy + '%';
+
+    let details = '';
+    if (accuracy >= 80) details = '掌握情况良好，继续保持！💪';
+    else if (accuracy >= 60) details = '基础尚可，建议复习错题巩固。📖';
+    else details = '需要加强练习，建议回顾知识点后重试。📚';
+    document.getElementById('resultDetails').textContent = details;
+
+    renderMath();
+}}
+
+function submitPractice() {{
+
+function submitPractice() {{
+    const total = questions.length;
+    const answered = Object.keys(userAnswers).length;
+    if (answered < total) {{
+        if (!confirm('还有 ' + (total - answered) + ' 道题未作答，确定提交吗？')) return;
+    }}
+
+    const btn = document.getElementById('btnSubmit');
+    btn.disabled = true;
+    btn.textContent = '⏳ 提交中...';
+
+    const answers = {{}};
+    questions.forEach((q, i) => {{
+        answers[q.id] = userAnswers[i] || '';
+    }});
+    console.log('Submitting answers:', JSON.stringify(answers));
+
+    // 从 localStorage 读取 JWT token（与主应用共享）
+    const token = localStorage.getItem('smartkb_token');
+    console.log('Token exists:', !!token, 'length:', token ? token.length : 0);
+
+    if (!token) {{
+        showErrorPage('未检测到登录信息，请先登录系统再重新打开此页面。');
+        btn.textContent = '📤 重试';
+        btn.disabled = false;
+        return;
+    }}
+
+    const headers = {{ 'Content-Type': 'application/json' }};
+    headers['Authorization'] = 'Bearer ' + token;
+
+    fetch('/api/practice/my-sessions/' + sessionId + '/submit', {{
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({{ answers }})
+    }})
+    .then(function(response) {{
+        console.log('Response status:', response.status);
+        if (!response.ok) {{
+            return response.text().then(function(text) {{
+                let msg = text;
+                try {{ const j = JSON.parse(text); msg = j.detail || JSON.stringify(j); }} catch(e) {{}}
+                throw new Error('错误(' + response.status + '): ' + msg);
+            }});
+        }}
+        return response.json();
+    }})
+    .then(function(data) {{
+        console.log('Submit response:', JSON.stringify(data));
+        if (data && typeof data.accuracy === 'number') {{
+            showResults(data);
+            btn.textContent = '✅ 已提交';
+        }} else if (data && data.detail) {{
+            throw new Error(data.detail);
+        }} else {{
+            throw new Error('服务器返回异常: ' + JSON.stringify(data));
+        }}
+    }})
+    .catch(function(err) {{
+        console.error('Submit error:', err);
+        btn.disabled = false;
+        btn.textContent = '📤 重试';
+        showErrorPage(err.message || '提交失败');
+    }});
+}}
+
+function showErrorPage(msg) {{
+    document.getElementById('submitArea').style.display = 'none';
+    const area = document.getElementById('resultArea');
+    area.classList.add('show');
+    document.getElementById('resultEmoji').textContent = '❌';
+    document.getElementById('resultGrade').textContent = '提交失败';
+    document.getElementById('resultGrade').className = 'result-grade grade-poor';
+    document.getElementById('resultScore').textContent = '';
+    document.getElementById('statCorrect').textContent = '0';
+    document.getElementById('statWrong').textContent = '0';
+    document.getElementById('statAccuracy').textContent = '0%';
+    document.getElementById('resultDetails').innerHTML = '<div style="color:#ff4d4f;font-size:14px;word-break:break-all;">' + msg + '</div>';
+}}
+
+function showResults(data) {{
+    document.getElementById('submitArea').style.display = 'none';
+    const area = document.getElementById('resultArea');
+    area.classList.add('show');
+
+    const accuracy = data.accuracy || 0;
+    const score = data.score || 0;
+    const totalScore = data.total_score || 100;
+
+    document.getElementById('resultScore').textContent = score + ' / ' + totalScore + ' 分';
+
+    let grade, emoji, gradeClass;
+    if (accuracy >= 90) {{ grade = '🏆 优秀！'; emoji = '🎉'; gradeClass = 'grade-excellent'; }}
+    else if (accuracy >= 80) {{ grade = '🌟 良好！'; emoji = '😊'; gradeClass = 'grade-good'; }}
+    else if (accuracy >= 60) {{ grade = '📖 及格'; emoji = '🤔'; gradeClass = 'grade-medium'; }}
+    else {{ grade = '💪 继续努力'; emoji = '📚'; gradeClass = 'grade-poor'; }}
+
+    document.getElementById('resultEmoji').textContent = emoji;
+    const gradeEl = document.getElementById('resultGrade');
+    gradeEl.textContent = grade;
+    gradeEl.className = 'result-grade ' + gradeClass;
+
+    // 已有成绩提示
+    if (data.note) {{
+        const noteEl = document.getElementById('resultNote');
+        if (noteEl) {{
+            noteEl.textContent = 'ℹ️ ' + data.note;
+            noteEl.style.display = 'block';
+        }}
+    }}
+    if (data.submitted_at) {{
+        const timeEl = document.getElementById('resultTime');
+        if (timeEl) {{
+            timeEl.textContent = '提交时间: ' + data.submitted_at;
+            timeEl.style.display = 'block';
+        }}
+    }}
+
+    let correct = 0, wrong = 0;
+    questions.forEach((q, i) => {{
+        const res = data.results && data.results[q.id];
+        const isCorrect = res && res.is_correct;
+        const studentAns = userAnswers[i] || '';
+        const correctAns = q.answer || '';
+        if (isCorrect) correct++; else wrong++;
+
+        const card = document.getElementById('qcard_' + i);
+        card.classList.add(isCorrect ? 'correct' : 'wrong');
+
+        if (studentAns) {{
+            const el = document.getElementById('opt_' + i + '_' + studentAns);
+            if (el) el.classList.add(isCorrect ? 'correct-answer' : 'wrong-answer');
+        }}
+        if (correctAns && correctAns !== studentAns) {{
+            const el = document.getElementById('opt_' + i + '_' + correctAns);
+            if (el) el.classList.add('correct-answer');
+        }}
+
+        const expl = document.getElementById('expl_' + i);
+        if (expl) expl.classList.add('show');
+    }});
+
+    document.getElementById('statCorrect').textContent = correct;
+    document.getElementById('statWrong').textContent = wrong;
+    document.getElementById('statAccuracy').textContent = accuracy + '%';
+
+    let details = '';
+    if (accuracy >= 80) details = '掌握情况良好，继续保持！💪';
+    else if (accuracy >= 60) details = '基础尚可，建议复习错题巩固。📖';
+    else details = '需要加强练习，建议回顾知识点后重试。📚';
+    document.getElementById('resultDetails').textContent = details;
+
+    // 渲染公式
+    if (typeof renderMathInElement === 'function') {{
+        renderMathInElement(document.body, {{
+            delimiters: [
+                {{left: '$$', right: '$$', display: true}},
+                {{left: '$', right: '$', display: false}}
+            ]
+        }});
+    }}
+}}
+
+//（旧的DOMContentLoaded已迁移到上方统一处理）
+</script>
+</body>
+</html>"""
+
+
+@router.post("/ai-practice/{kp_id}/publish")
+async def publish_ai_practice(kp_id: int, request: Request):
+    """[教师] 发布AI生成的练习到指定年级/班级"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可发布练习")
+
+    body = await request.json()
+    target_grade = (body.get("target_grade") or "").strip()
+    target_class = (body.get("target_class") or "").strip()
+
+    # 根据知识点ID找到最近生成的练习session
+    from backend.question_db import execute_query_one as q_one, execute_update as q_up
+
+    # 获取知识点对应的课程名称，用于匹配练习
+    kp_rows = execute_query(
+        "SELECT kp.name, co.subject FROM knowledge_points kp JOIN chapters c ON c.id=kp.chapter_id JOIN courses co ON co.id=c.course_id WHERE kp.id=?",
+        (kp_id,),
+    )
+    if not kp_rows:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    kp_name = kp_rows[0]["name"]
+
+    # 查找该教师创建的最新 draft 练习
+    sess = q_one(
+        "SELECT id, status FROM practice_sessions WHERE creator_username=? AND knowledge_points=? AND status='draft' ORDER BY created_at DESC LIMIT 1",
+        (username, kp_name),
+    )
+    if not sess:
+        raise HTTPException(status_code=404, detail="未找到可发布的练习，请先使用AI生成")
+
+    session_id = sess["id"]
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    q_up(
+        "UPDATE practice_sessions SET status='active', target_grade=?, target_class=?, updated_at=? WHERE id=?",
+        (target_grade, target_class, now, session_id),
+    )
+
+    logger.info(f"教师 {username} 发布练习 session_id={session_id} → {target_grade} {target_class}班")
+    return {"message": "练习已发布", "session_id": session_id}
+
+
+@router.get("/ai-practice/{kp_id}/preview")
+async def preview_ai_practice(kp_id: int, request: Request):
+    """预览已生成的AI练习HTML页面"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    from backend.utils import get_account_html_dir
+    html_dir = get_account_html_dir(username)
+    import glob
+    pattern = os.path.join(html_dir, f"{kp_id}_*_练习.html")
+    files = glob.glob(pattern)
+    if not files:
+        raise HTTPException(status_code=404, detail="尚未生成练习，请先使用 AI 生成")
+    latest = max(files, key=os.path.getmtime)
+    with open(latest, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=content)
