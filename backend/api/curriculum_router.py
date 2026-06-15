@@ -2699,7 +2699,7 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
     questions = q_exec(
         f"""SELECT * FROM question_bank
             WHERE id IN ({placeholders}) AND type='single' AND status='active'
-            ORDER BY CASE id {''.join(f'WHEN ? THEN {i}' for i, _ in enumerate(question_ids))} END""",
+            ORDER BY CASE id {' '.join(f'WHEN ? THEN {i}' for i, _ in enumerate(question_ids))} END""",
         tuple(question_ids) + tuple(question_ids),
     )
     if not questions:
