@@ -906,6 +906,7 @@ const CurriculumPage: React.FC = () => {
               borderRight: '1px solid #f0f0f0',
               overflow: 'auto',
               height: '100%',
+              paddingTop: 8,
             }}
           >
             {/* 折叠/展开切换按钮 */}
