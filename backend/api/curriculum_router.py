@@ -2543,7 +2543,10 @@ function checkPreviousAttempt() {{
     fetch('/api/practice/my-sessions/' + sessionId, {{
         headers: {{ 'Authorization': 'Bearer ' + token }}
     }})
-    .then(function(r) {{ if (r.ok) return r.json(); }})
+    .then(function(r) {{
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }})
     .then(function(data) {{
         if (data && data.attempt) {{
             // 已答过，显示上次成绩
@@ -2568,7 +2571,9 @@ function checkPreviousAttempt() {{
             }}
         }}
     }})
-    .catch(function() {{}});
+    .catch(function(err) {{
+        console.error('检查历史作答失败:', err);
+    }});
 }}
 
 function renderPreviousResults(data) {{
@@ -2633,33 +2638,48 @@ function submitPractice() {{
     // 2. 即时显示结果
     showResults(accuracy, earned, totalScore, results);
 
-    // 3. 异步记录成绩到后端（不影响页面显示）
+    // 3. 提交到后端（等待确认）
     const token = localStorage.getItem('smartkb_token');
-    if (token) {{
-        const answers = {{}};
-        questions.forEach((q, i) => {{ answers[q.id] = userAnswers[i] || ''; }});
-        fetch('/api/practice/my-sessions/' + sessionId + '/submit', {{
-            method: 'POST',
-            headers: {{
-                'Authorization': 'Bearer ' + token,
-                'Content-Type': 'application/json'
-            }},
-            body: JSON.stringify({{ answers }})
-        }})
-        .then(function(r) {{
-            if (r.ok) return r.json();
-        }})
-        .then(function(data) {{
-            var noteEl = document.getElementById('resultNote');
-            if (noteEl && data) {{
-                var txt = '✅ 成绩已记录';
-                if (data.reward_note) txt += '，' + data.reward_note;
-                noteEl.textContent = txt;
-                noteEl.style.display = 'block';
-            }}
-        }})
-        .catch(function() {{}});
+    if (!token) {{
+        var errMsg = document.getElementById('resultNote');
+        if (errMsg) {{ errMsg.textContent = '⚠️ 未登录，成绩无法保存'; errMsg.style.display = 'block'; }}
+        return;
     }}
+    const submitBtn = document.getElementById('btnSubmit');
+    if (submitBtn) {{ submitBtn.disabled = true; submitBtn.textContent = '⏳ 提交中...'; }}
+    const answers = {{}};
+    questions.forEach((q, i) => {{ answers[q.id] = userAnswers[i] || ''; }});
+    fetch('/api/practice/my-sessions/' + sessionId + '/submit', {{
+        method: 'POST',
+        headers: {{
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        }},
+        body: JSON.stringify({{ answers }})
+    }})
+    .then(function(r) {{
+        if (submitBtn) {{ submitBtn.textContent = '📤 提交答案'; }}
+        if (!r.ok) {{
+            return r.json().then(function(e) {{ throw new Error(e.detail || '提交失败'); }});
+        }}
+        return r.json();
+    }})
+    .then(function(data) {{
+        var noteEl = document.getElementById('resultNote');
+        if (noteEl && data) {{
+            var txt = '✅ 成绩已记录';
+            if (data.reward_note) txt += '，' + data.reward_note;
+            noteEl.textContent = txt;
+            noteEl.style.display = 'block';
+        }}
+    }})
+    .catch(function(err) {{
+        var noteEl = document.getElementById('resultNote');
+        if (noteEl) {{
+            noteEl.textContent = '⚠️ ' + (err.message || '提交失败，请重试');
+            noteEl.style.display = 'block';
+        }}
+    }});
 }}
 
 function showResults(accuracy, score, totalScore, results, prevResults) {{
