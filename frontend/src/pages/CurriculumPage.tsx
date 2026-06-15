@@ -390,7 +390,65 @@ const CurriculumPage: React.FC = () => {
     }
   }
 
-  // ── 资源绑定弹窗 ──
+  // ── 智能练习（默认混合模式，自动组合AI+题库，无需用户干预） ──
+  const handleSmartPractice = async (kpId: number) => {
+    setPracticeLoading(true)
+    setPracticeHtmlUrl('')
+    setPracticeMode('mixed')
+    setPracticeModal(true)
+    const kp = selectedKp
+    if (!kp) { setPracticeModal(false); return }
+
+    try {
+      // 1. 并行：AI生成 + 题库搜索
+      const aiCount = 5
+      const [aiResult, bankResult] = await Promise.all([
+        apiClient.post('/api/practice/generate', {
+          knowledge_points: kp.name,
+          subject: activeCourse?.subject || '信息科技',
+          question_type: 'single',
+          count: aiCount,
+          difficulty: kp.difficulty || 'medium',
+        }).catch(() => ({ data: { questions: [] } })),
+        apiClient.get('/api/questions', {
+          params: { type: 'single', keyword: kp.name, page_size: 15 }
+        }).catch(() => ({ data: { questions: [] } })),
+      ])
+
+      const aiQuestions: any[] = aiResult?.data?.questions || []
+      const bankQuestions: any[] = (bankResult?.data?.questions || []).filter((q: any) => q.id)
+
+      // 2. 智能组合：AI题优先，不足从题库补齐，最多10题
+      const remaining = Math.max(0, 10 - aiQuestions.length)
+      const selectedFromBank = bankQuestions.slice(0, Math.min(remaining, 10))
+      const allIds = [
+        ...aiQuestions.map((q: any) => q.id),
+        ...selectedFromBank.map((q: any) => q.id)
+      ].filter(Boolean)
+
+      if (allIds.length === 0) {
+        message.error('无法生成练习：未能获取到任何题目')
+        setPracticeModal(false)
+        return
+      }
+
+      // 3. 一键生成练习
+      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/from-bank`, {
+        question_ids: allIds,
+      })
+      if (data.file_url) {
+        setPracticeHtmlUrl(data.file_url)
+        setMixedAiQuestions([])
+        setMixedBankIds([])
+        message.success(`智能练习已生成（${allIds.length} 题）`)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '智能练习生成失败')
+      setPracticeModal(false)
+    } finally {
+      setPracticeLoading(false)
+    }
+  }
   const [binderOpen, setBinderOpen] = useState(false)
   const [binderKpId, setBinderKpId] = useState(0)
   const [binderKpName, setBinderKpName] = useState('')
@@ -1372,9 +1430,9 @@ const CurriculumPage: React.FC = () => {
                             </Tooltip>
                           )}
                           {isTeacherOrAdmin && (
-                            <Tooltip title="AI 生成10道单选题练习">
+                            <Tooltip title="AI 智能生成练习（混合模式，自动组合AI+题库）">
                               <Button type="link" size="small" icon={<FormOutlined />}
-                                onClick={() => handleAiPractice(selectedKp.id)}>
+                                onClick={() => handleSmartPractice(selectedKp.id)}>
                                 AI 练习
                               </Button>
                             </Tooltip>
@@ -1784,8 +1842,10 @@ const CurriculumPage: React.FC = () => {
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
             <div style={{ marginTop: 16, color: '#666' }}>
-              {practiceMode === 'ai' ? 'AI 正在生成练习题，请稍候...' : '正在生成练习...'}
-              <br /><span style={{ fontSize: 13 }}>包含HTML答题页面制作</span>
+              {practiceMode === 'ai' ? 'AI 正在生成练习题，请稍候...'
+               : practiceMode === 'bank' ? '正在生成练习...'
+               : '🧠 智能策略分析中，自动组合 AI+题库...'}
+              <br /><span style={{ fontSize: 13 }}>自动生成HTML答题页面</span>
             </div>
           </div>
         ) : practiceHtmlUrl ? (
@@ -1793,151 +1853,37 @@ const CurriculumPage: React.FC = () => {
             <iframe src={practiceHtmlUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="练习预览" />
           </div>
         ) : (
-          <>
-            {/* 模式切换 */}
-            <Space style={{ marginBottom: 16 }}>
-              <Button type={practiceMode === 'ai' ? 'primary' : 'default'} icon={<RobotOutlined />}
-                onClick={() => { setPracticeMode('ai'); handleAiPractice(selectedKp?.id || 0) }}>
-                AI 生成
-              </Button>
-              <Button type={practiceMode === 'bank' ? 'primary' : 'default'} icon={<QuestionCircleOutlined />}
-                onClick={() => {
-                  setPracticeMode('bank'); setSelectedBankIds([]);
-                  setBankKeyword(selectedKp?.name || '');
-                  setTimeout(() => searchBankQuestions(), 100);
-                }}>
-                从题库选取
-              </Button>
-              <Button type={practiceMode === 'mixed' ? 'primary' : 'default'} icon={<FileTextOutlined />}
-                onClick={() => {
-                  setPracticeMode('mixed'); setMixedAiQuestions([]); setMixedBankIds([]);
-                  setMixedBankSearch(selectedKp?.name || '');
-                }}>
-                混合模式
-              </Button>
-            </Space>
-
-            {/* AI 生成模式 */}
-            {practiceMode === 'ai' && !practiceHtmlUrl && (
-              <div style={{ textAlign: 'center', padding: '40px 0' }}>
-                <Spin size="large" />
-                <div style={{ marginTop: 16, color: '#666' }}>点击「AI 生成」按钮开始生成...</div>
-              </div>
-            )}
-
-            {/* 题库选取模式 */}
-            {practiceMode === 'bank' && (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Space direction="vertical" size="large" style={{ width: '100%' }}>
               <div>
-                <Space style={{ marginBottom: 12, width: '100%' }}>
-                  <Input.Search placeholder="搜索题目关键词..." value={bankKeyword}
-                    onChange={e => setBankKeyword(e.target.value)} onSearch={searchBankQuestions} style={{ width: 300 }} />
-                  <Tag color="blue">已选 {selectedBankIds.length}/10 题</Tag>
-                  <Button type="primary" disabled={selectedBankIds.length === 0} onClick={generateFromBank}>
-                    生成练习 ({selectedBankIds.length} 题)
+                <Button type="primary" size="large" icon={<RobotOutlined />}
+                  onClick={() => handleSmartPractice(selectedKp?.id || 0)}
+                  style={{ height: 48, padding: '0 32px', fontSize: 16 }}>
+                  🧠 智能生成练习
+                </Button>
+                <div style={{ marginTop: 8, color: '#999', fontSize: 13 }}>
+                  默认混合模式 · AI自动生成+题库补充 · 一键完成
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 20 }}>
+                <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>其他方式：</Typography.Text>
+                <Space>
+                  <Button icon={<RobotOutlined />}
+                    onClick={() => { setPracticeMode('ai'); handleAiPractice(selectedKp?.id || 0) }}>
+                    仅 AI 生成
+                  </Button>
+                  <Button icon={<QuestionCircleOutlined />}
+                    onClick={() => {
+                      setPracticeMode('bank'); setSelectedBankIds([]);
+                      setBankKeyword(selectedKp?.name || '');
+                      setTimeout(() => searchBankQuestions(), 100);
+                    }}>
+                    从题库选取
                   </Button>
                 </Space>
-                {bankLoading ? <Spin style={{ display: 'block', margin: '40px auto' }} />
-                : bankQuestions.length === 0 ? <Typography.Text type="secondary">未找到相关题目</Typography.Text>
-                : <div style={{ maxHeight: '55vh', overflow: 'auto' }}>
-                    {bankQuestions.map((q, i) => {
-                      const isSelected = selectedBankIds.includes(q.id)
-                      return (
-                        <Card key={q.id} size="small" style={{ marginBottom: 6, cursor: 'pointer', borderColor: isSelected ? '#1677ff' : undefined }}
-                          hoverable onClick={() => toggleBankQuestion(q.id)}>
-                          <Space>
-                            <span style={{ width: 20, height: 20, borderRadius: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              background: isSelected ? '#1677ff' : '#f0f0f0', color: isSelected ? '#fff' : '#666', fontSize: 12, fontWeight: 600 }}>{i + 1}</span>
-                            <Typography.Text style={{ flex: 1 }} ellipsis={{ tooltip: q.question_text }}>{q.question_text}</Typography.Text>
-                            <Tag color={q.difficulty === 'easy' ? 'green' : q.difficulty === 'hard' ? 'red' : 'gold'}>
-                              {q.difficulty === 'easy' ? '简单' : q.difficulty === 'hard' ? '困难' : '中等'}
-                            </Tag>
-                          </Space>
-                        </Card>
-                      )
-                    })}
-                  </div>
-                }
               </div>
-            )}
-
-            {/* 混合模式 */}
-            {practiceMode === 'mixed' && (
-              <div>
-                {/* AI 生成区 */}
-                <Card size="small" title="① AI 生成" style={{ marginBottom: 12 }}>
-                  <Space>
-                    <span>生成</span>
-                    <InputNumber min={1} max={10} value={mixedAiCount} onChange={v => setMixedAiCount(v || 5)} style={{ width: 60 }} />
-                    <span>道题</span>
-                    <Button icon={<RobotOutlined />} loading={mixedGenLoading} onClick={generateMixedAi}>
-                      开始生成
-                    </Button>
-                    {mixedAiQuestions.length > 0 && (
-                      <Tag color="green">已生成 {mixedAiQuestions.length} 题</Tag>
-                    )}
-                  </Space>
-                </Card>
-
-                {/* 题库选取区 */}
-                <Card size="small" title="② 从题库补充" style={{ marginBottom: 12 }}
-                  extra={<Button size="small" onClick={() => { searchMixedBank(); }}>搜索</Button>}>
-                  <Input.Search placeholder="搜索题目..." value={mixedBankSearch}
-                    onChange={e => setMixedBankSearch(e.target.value)} onSearch={() => searchMixedBank()}
-                    style={{ width: 300, marginBottom: 8 }} />
-                  {mixedBankLoading ? <Spin style={{ display: 'block', margin: '20px auto' }} />
-                  : <div style={{ maxHeight: 200, overflow: 'auto' }}>
-                      {mixedBankResults.map(q => (
-                        <div key={q.id} onClick={() => toggleMixedBank(q.id)}
-                          style={{ padding: '6px 8px', cursor: 'pointer', borderRadius: 4, marginBottom: 2,
-                            background: mixedBankIds.includes(q.id) ? '#e6f4ff' : 'transparent',
-                            border: mixedBankIds.includes(q.id) ? '1px solid #1677ff' : '1px solid transparent' }}>
-                          <Space>
-                            <Typography.Text style={{ fontSize: 13 }} ellipsis={{ tooltip: q.question_text }}>{q.question_text}</Typography.Text>
-                            {mixedBankIds.includes(q.id) && <Tag color="blue">已选</Tag>}
-                          </Space>
-                        </div>
-                      ))}
-                      {mixedBankResults.length === 0 && !mixedBankLoading && <Typography.Text type="secondary" style={{ fontSize: 13 }}>点击搜索查找题目</Typography.Text>}
-                    </div>
-                  }
-                </Card>
-
-                {/* 当前选题列表 */}
-                <Card size="small" title={`③ 确认选题（共 ${mixedAiQuestions.length + mixedBankIds.length} 题，最多10题）`}
-                  extra={
-                    <Button type="primary" size="small"
-                      disabled={mixedAiQuestions.length + mixedBankIds.length === 0}
-                      loading={practiceLoading} onClick={generateMixedPractice}>
-                      生成练习
-                    </Button>
-                  }>
-                  {mixedAiQuestions.length === 0 && mixedBankIds.length === 0 ? (
-                    <Typography.Text type="secondary">请先通过AI生成或从题库选取题目</Typography.Text>
-                  ) : (
-                    <Space direction="vertical" style={{ width: '100%' }}>
-                      {mixedAiQuestions.map((q, i) => (
-                        <div key={`ai-${q.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#f6ffed', borderRadius: 4 }}>
-                          <Tag color="green" style={{ flexShrink: 0 }}>AI</Tag>
-                          <Typography.Text style={{ flex: 1, fontSize: 13 }} ellipsis>{q.question || q.question_text}</Typography.Text>
-                          <Button type="text" size="small" danger onClick={() => removeMixedQuestion('ai', q.id)}>✕</Button>
-                        </div>
-                      ))}
-                      {mixedBankIds.map((qid, i) => {
-                        const q = [...mixedBankResults, ...bankQuestions].find(q => q.id === qid)
-                        return (
-                          <div key={`bank-${qid}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: '#e6f4ff', borderRadius: 4 }}>
-                            <Tag color="blue" style={{ flexShrink: 0 }}>题库</Tag>
-                            <Typography.Text style={{ flex: 1, fontSize: 13 }} ellipsis>{q?.question_text || `题#${qid}`}</Typography.Text>
-                            <Button type="text" size="small" danger onClick={() => removeMixedQuestion('bank', qid)}>✕</Button>
-                          </div>
-                        )
-                      })}
-                    </Space>
-                  )}
-                </Card>
-              </div>
-            )}
-          </>
+            </Space>
+          </div>
         )}
       </Modal>
     </Layout>
