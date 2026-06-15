@@ -195,6 +195,25 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── AI 练习独立成绩表（不依赖 practice_sessions）──
+            c.execute("""CREATE TABLE IF NOT EXISTS ai_practice_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kp_id INTEGER NOT NULL,
+                student_username TEXT NOT NULL,
+                score INTEGER DEFAULT 0,
+                total_score INTEGER DEFAULT 0,
+                accuracy REAL DEFAULT 0,
+                answers TEXT DEFAULT '',
+                questions TEXT DEFAULT '',
+                submitted_at TEXT NOT NULL,
+                UNIQUE(kp_id, student_username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_apr_kp ON ai_practice_results(kp_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_apr_student ON ai_practice_results(student_username)")
+            except sqlite3.OperationalError:
+                pass
+
             # ═══════════════════════════════════════════════════════════
             # 代码练习：独立表（不再依赖 question_bank）
             # ═══════════════════════════════════════════════════════════
