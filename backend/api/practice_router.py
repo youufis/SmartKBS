@@ -624,6 +624,7 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
             "results": graded,
             "submitted_at": existing["submitted_at"],
             "note": "你已提交过此练习，以下是已有成绩",
+            "reward_note": "积分奖励已发放",
         }
 
     # 获取题目和答案
@@ -760,6 +761,7 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         "score": earned, "total_score": total,
         "accuracy": round(earned / max(total, 1) * 100, 1),
         "results": graded,
+        "reward_note": "积分奖励已发放",
     }
 
 
