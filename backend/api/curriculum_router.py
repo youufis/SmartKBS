@@ -2552,26 +2552,39 @@ function checkPreviousAttempt() {{
     .then(function(data) {{
         if (data && data.result) {{
             var r = data.result;
-            // 已答过，显示上次成绩
+            // 已作答过 → 完全阻止再次答题
+            // 1. 隐藏进度条和提交区域
+            var pb = document.getElementById('progress-bar');
+            if (pb) pb.style.display = 'none';
+            document.getElementById('submitArea').style.display = 'none';
+            // 2. 显示已作答横幅（含评价）
             var banner = document.getElementById('reattemptBanner');
-            if (banner) banner.style.display = 'block';
-            var prevScore = document.getElementById('prevScore');
-            if (prevScore) prevScore.textContent = r.score;
-            var prevAcc = document.getElementById('prevAccuracy');
-            if (prevAcc && r.total_score > 0) {{
-                var acc = Math.round(r.score / r.total_score * 100);
-                prevAcc.textContent = '（正确率 ' + acc + '%）';
+            if (banner) {{
+                var gradeHtml = '<div><span class="label">📋 已作答</span>' +
+                    '成绩：<span class="score">' + r.score + '</span> / ' + r.total_score + ' 分';
+                if (r.accuracy > 0) {{
+                    gradeHtml += ' <span style="font-size:14px;color:#856404;">（正确率 ' + r.accuracy + '%）</span>';
+                }}
+                gradeHtml += '</div>';
+                if (r.evaluation) {{
+                    gradeHtml += '<div style="margin-top:6px;font-size:15px;">' + r.evaluation + '</div>';
+                }}
+                if (r.reward_points > 0) {{
+                    gradeHtml += '<div style="margin-top:4px;font-size:13px;color:#e67e22;">🎁 获得 ' + r.reward_points + ' 积分奖励</div>';
+                }}
+                gradeHtml += '<div class="hint">提交时间：' + (r.submitted_at || '') + '</div>';
+                banner.innerHTML = gradeHtml;
+                banner.style.display = 'block';
             }}
-            var prevTime = document.getElementById('prevSubmittedAt');
-            if (prevTime && r.submitted_at) {{
-                prevTime.textContent = '提交时间：' + r.submitted_at;
-            }}
-
-            // 如果有结果明细，直接展示
-            if (r.questions && r.questions.length > 0) {{
-                document.getElementById('submitArea').style.display = 'none';
+            // 3. 如果有结果明细，直接展示
+            if (data.allResults && data.allResults.length > 0) {{
                 renderPreviousResults(r, data.allResults);
             }}
+            // 4. 禁用所有选项点击
+            document.querySelectorAll('.option-item').forEach(function(el) {{
+                el.style.cursor = 'default';
+                el.onclick = null;
+            }});
         }}
     }})
     .catch(function(err) {{
@@ -2670,7 +2683,10 @@ function submitPractice() {{
     .then(function(data) {{
         var noteEl = document.getElementById('resultNote');
         if (noteEl) {{
-            noteEl.textContent = '✅ 成绩已记录';
+            var txt = '✅ 成绩已记录';
+            if (data.evaluation) txt = data.evaluation;
+            if (data.reward_points > 0) txt += ' 🎁 +' + data.reward_points + '积分';
+            noteEl.textContent = txt;
             noteEl.style.display = 'block';
         }}
     }})
@@ -2919,9 +2935,9 @@ class SavePracticeResultRequest(BaseModel):
     answers: dict[str, Any] = {}
 
 
-@router.post("/ai-practice/{kp_id}/save-result", summary="保存AI练习成绩（独立存储）")
+@router.post("/ai-practice/{kp_id}/save-result", summary="保存AI练习成绩（独立存储，仅一次）")
 async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, request: Request):
-    """保存AI练习的作答成绩，独立于 practice_sessions 体系"""
+    """保存AI练习的作答成绩（仅一次，含积分奖励）"""
     user = get_current_user(request)
     username = user["username"]
 
@@ -2929,30 +2945,65 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     import json
     from datetime import datetime
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    accuracy = round(req.score / max(req.total_score, 1) * 100, 1)
-    answers_json = json.dumps(req.answers, ensure_ascii=False)
-
+    # ── 防重复：已有记录则拒绝 ──
     existing = execute_query_one(
-        "SELECT id FROM ai_practice_results WHERE kp_id=? AND student_username=?",
+        "SELECT id, score FROM ai_practice_results WHERE kp_id=? AND student_username=?",
         (kp_id, username),
     )
     if existing:
-        execute_insert(
-            """UPDATE ai_practice_results
-               SET score=?, total_score=?, accuracy=?, answers=?, submitted_at=?
-               WHERE kp_id=? AND student_username=?""",
-            (req.score, req.total_score, accuracy, answers_json, now, kp_id, username),
-        )
-    else:
-        execute_insert(
-            """INSERT INTO ai_practice_results (kp_id, student_username, score, total_score, accuracy, answers, submitted_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (kp_id, username, req.score, req.total_score, accuracy, answers_json, now),
-        )
+        raise HTTPException(status_code=409, detail="你已作答过此练习，不能重复提交")
 
-    logger.info(f"AI 练习成绩已保存: kp_id={kp_id}, username={username}, score={req.score}/{req.total_score}")
-    return {"message": "成绩已记录", "score": req.score, "total_score": req.total_score}
+    # ── 生成评价 ──
+    accuracy = round(req.score / max(req.total_score, 1) * 100, 1)
+    if accuracy >= 90:
+        evaluation = "🏆 优秀！掌握情况非常好！"
+    elif accuracy >= 80:
+        evaluation = "🌟 良好！继续保持！"
+    elif accuracy >= 60:
+        evaluation = "📖 及格，建议复习错题巩固"
+    else:
+        evaluation = "💪 需要加强练习，建议回顾知识点后重试"
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    answers_json = json.dumps(req.answers, ensure_ascii=False)
+
+    # ── 发放积分奖励 ──
+    from backend.reward_engine import award_participation, award_grade
+    from backend.question_db import execute_query as q_exec
+
+    kp_name_row = q_exec("SELECT name FROM knowledge_points WHERE id=?", (kp_id,))
+    kp_title = kp_name_row[0]["name"] if kp_name_row else f"知识点#{kp_id}"
+
+    total_reward = 0
+    try:
+        total_reward += award_participation(
+            username, "practice", str(kp_id), kp_title, user.get("username", ""),
+        )
+        total_reward += award_grade(
+            username, "practice", str(kp_id),
+            req.score, req.total_score, kp_title, user.get("username", ""),
+        )
+    except Exception as e:
+        logger.warning(f"积分发放失败 (kp_id={kp_id}): {e}")
+
+    # ── 保存成绩 ──
+    execute_insert(
+        """INSERT INTO ai_practice_results
+           (kp_id, student_username, score, total_score, accuracy, evaluation,
+            reward_points, answers, submitted_at)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (kp_id, username, req.score, req.total_score, accuracy, evaluation,
+         total_reward, answers_json, now),
+    )
+
+    logger.info(f"AI 练习成绩已保存: kp_id={kp_id}, username={username}, score={req.score}/{req.total_score}, reward={total_reward}")
+    return {
+        "message": "成绩已记录",
+        "score": req.score,
+        "total_score": req.total_score,
+        "evaluation": evaluation,
+        "reward_points": total_reward,
+    }
 
 
 @router.get("/ai-practice/{kp_id}/my-result", summary="获取我的AI练习历史成绩")
@@ -2995,6 +3046,8 @@ async def get_my_ai_practice_result(kp_id: int, request: Request):
             "score": row["score"],
             "total_score": row["total_score"],
             "accuracy": row["accuracy"],
+            "evaluation": row.get("evaluation", ""),
+            "reward_points": row.get("reward_points", 0),
             "submitted_at": row["submitted_at"],
             "questions": all_results,
         },
