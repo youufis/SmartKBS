@@ -1269,6 +1269,13 @@ async def create_binding(req: BindingCreate, request: Request):
            VALUES (?, ?, ?, ?, ?)""",
         (req.knowledge_point_id, req.resource_type, req.resource_id, req.sort_order, now),
     )
+    # 重新绑定练习资源时清空学生作答记录
+    if req.resource_type == "html":
+        try:
+            from backend.question_db import execute_insert as q_clear
+            q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (req.knowledge_point_id,))
+        except Exception:
+            pass
     logger.info(f"用户 {user['username']} 绑定资源 {req.resource_type}:{req.resource_id} 到知识点 {req.knowledge_point_id}")
     return {"message": "资源绑定成功", "binding_id": binding_id}
 
@@ -1283,6 +1290,14 @@ async def delete_binding(binding_id: int, request: Request):
     binding = execute_query_one("SELECT * FROM curriculum_bindings WHERE id=?", (binding_id,))
     if not binding:
         raise HTTPException(status_code=404, detail="绑定记录不存在")
+
+    # 解绑练习资源时清空学生作答记录
+    if binding["resource_type"] == "html":
+        try:
+            from backend.question_db import execute_insert as q_clear
+            q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (binding["knowledge_point_id"],))
+        except Exception:
+            pass
 
     execute_insert_update("DELETE FROM curriculum_bindings WHERE id=?", (binding_id,))
     logger.info(f"用户 {user['username']} 解绑资源 binding_id={binding_id}")
