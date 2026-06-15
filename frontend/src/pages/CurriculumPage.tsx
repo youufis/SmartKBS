@@ -906,7 +906,6 @@ const CurriculumPage: React.FC = () => {
               borderRight: '1px solid #f0f0f0',
               overflow: 'auto',
               height: '100%',
-              paddingTop: 20,
             }}
           >
             {/* 折叠/展开切换按钮 */}
@@ -938,7 +937,7 @@ const CurriculumPage: React.FC = () => {
                     <Button size="small" icon={<ReloadOutlined />} onClick={loadTree} />
                   </div>
                   {isTeacherOrAdmin && (
-                    <Space wrap>
+                    <Space wrap style={{ marginBottom: 8 }}>
                       <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
                         新建课程
                       </Button>
