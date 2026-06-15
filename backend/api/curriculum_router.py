@@ -870,9 +870,10 @@ async def delete_course(course_id: int, request: Request):
     if not is_admin(user.get("username", "")):
         raise HTTPException(status_code=403, detail="权限不足：需要管理员权限")
 
-    course = execute_query("SELECT * FROM courses WHERE id=?", (course_id,))
-    if not course:
+    course_rows = execute_query("SELECT * FROM courses WHERE id=?", (course_id,))
+    if not course_rows:
         raise HTTPException(status_code=404, detail="课程不存在")
+    course = course_rows[0]
 
     # 获取所有级联的章节ID和知识点ID
     chapter_rows = execute_query(
