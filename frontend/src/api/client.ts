@@ -5,7 +5,6 @@ import type { AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axio
 const apiClient = axios.create({
   baseURL: '/',
   timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
 });
 
 // 请求拦截器：自动添加 JWT
