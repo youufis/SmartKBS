@@ -2390,6 +2390,20 @@ body {{
 .grade-good {{ color: #1677ff; }}
 .grade-medium {{ color: #faad14; }}
 .grade-poor {{ color: #ff4d4f; }}
+.reattempt-banner {{
+    display: none;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 10px;
+    padding: 12px 18px;
+    margin-bottom: 16px;
+    color: #856404;
+    font-size: 15px;
+    line-height: 1.6;
+}}
+.reattempt-banner .label {{ font-weight: 700; margin-right: 8px; }}
+.reattempt-banner .score {{ font-weight: 700; font-size: 18px; color: #e67e22; }}
+.reattempt-banner .hint {{ font-size: 13px; opacity: 0.8; margin-top: 4px; }}
 .footer {{ text-align: center; color: #999; font-size: 13px; padding: 20px 0; }}
 .error-msg {{ color: #ff4d4f; text-align: center; padding: 10px; }}
 .loading {{ text-align: center; padding: 60px 0; color: #666; }}
@@ -2416,6 +2430,13 @@ body {{
             <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
             <span class="progress-text" id="progressText">0/10</span>
         </div>
+    </div>
+
+    <div class="reattempt-banner" id="reattemptBanner">
+        <div><span class="label">📋 已答过</span>
+        上次成绩：<span class="score" id="prevScore">0</span> 分
+        <span id="prevAccuracy" style="margin-left:8px;font-size:14px;color:#856404;"></span></div>
+        <div class="hint" id="prevSubmittedAt"></div>
     </div>
 
     <div id="questionsContainer"></div>
@@ -2515,10 +2536,57 @@ function updateProgress() {{
     document.getElementById('progressText').textContent = answered + '/' + questions.length;
 }}
 
-// 页面加载时直接渲染题目
+// 检查是否已作答过
+function checkPreviousAttempt() {{
+    var token = localStorage.getItem('smartkb_token');
+    if (!token || !sessionId) return;
+    fetch('/api/practice/my-sessions/' + sessionId, {{
+        headers: {{ 'Authorization': 'Bearer ' + token }}
+    }})
+    .then(function(r) {{ if (r.ok) return r.json(); }})
+    .then(function(data) {{
+        if (data && data.attempt) {{
+            // 已答过，显示上次成绩
+            var banner = document.getElementById('reattemptBanner');
+            if (banner) banner.style.display = 'block';
+            var prevScore = document.getElementById('prevScore');
+            if (prevScore) prevScore.textContent = data.attempt.score;
+            var prevAcc = document.getElementById('prevAccuracy');
+            if (prevAcc && data.attempt.total_score > 0) {{
+                var acc = Math.round(data.attempt.score / data.attempt.total_score * 100);
+                prevAcc.textContent = '（正确率 ' + acc + '%）';
+            }}
+            var prevTime = document.getElementById('prevSubmittedAt');
+            if (prevTime && data.attempt.submitted_at) {{
+                prevTime.textContent = '提交时间：' + data.attempt.submitted_at;
+            }}
+
+            // 如果有结果明细，直接展示
+            if (data.results && data.results.length > 0) {{
+                document.getElementById('submitArea').style.display = 'none';
+                renderPreviousResults(data);
+            }}
+        }}
+    }})
+    .catch(function() {{}});
+}}
+
+function renderPreviousResults(data) {{
+    var results = data.results;
+    var earned = data.attempt.score;
+    var totalScore = data.attempt.total_score;
+    var accuracy = totalScore > 0 ? Math.round(earned / totalScore * 100) : 0;
+
+    // 用 showResults 的逻辑展示，但传入 results 数组
+    showResults(accuracy, earned, totalScore, null, results);
+}}
+
+// 页面加载时直接渲染题目 + 检查历史
+var _prevResults = null;
 document.addEventListener('DOMContentLoaded', function() {{
     renderQuestions();
     renderMath();
+    checkPreviousAttempt();
 }});
 
 function renderMath() {{
@@ -2594,7 +2662,7 @@ function submitPractice() {{
     }}
 }}
 
-function showResults(accuracy, score, totalScore, results) {{
+function showResults(accuracy, score, totalScore, results, prevResults) {{
     document.getElementById('submitArea').style.display = 'none';
     const area = document.getElementById('resultArea');
     area.classList.add('show');
@@ -2612,12 +2680,30 @@ function showResults(accuracy, score, totalScore, results) {{
     gradeEl.textContent = grade;
     gradeEl.className = 'result-grade ' + gradeClass;
 
+    // 使用 prevResults（来自API的结构化结果）或本地 results（来自 submitPractice）
+    var resultData = prevResults || results;
+    var usePrev = !!prevResults;
+
     let correct = 0, wrong = 0;
     questions.forEach((q, i) => {{
-        const res = results && results[q.id];
-        const isCorrect = res && res.is_correct;
-        const studentAns = userAnswers[i] || '';
-        const correctAns = q.answer || '';
+        var qid = q.id;
+        // prevResults 是数组，按索引查找；results 是对象，按 q.id 查找
+        var res = null;
+        if (usePrev) {{
+            res = prevResults[i] || null;
+        }} else {{
+            res = results && results[qid] ? results[qid] : null;
+        }}
+        var isCorrect = res && res.is_correct;
+        // 从 prevResults 中取学生答案
+        var studentAns = '';
+        var correctAns = q.answer || '';
+        if (usePrev && res) {{
+            studentAns = res.student_answer || '';
+            correctAns = res.correct_answer || correctAns;
+        }} else {{
+            studentAns = userAnswers[i] || '';
+        }}
         if (isCorrect) correct++; else wrong++;
 
         const card = document.getElementById('qcard_' + i);
