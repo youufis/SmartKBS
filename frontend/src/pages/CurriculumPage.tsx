@@ -931,11 +931,14 @@ const CurriculumPage: React.FC = () => {
               <>
                 {/* 侧栏头部 */}
                 <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f0f0' }}>
-                  <Typography.Title level={5} style={{ margin: 0, marginBottom: 12 }}>
-                    {isStudent ? '📖 课程导学' : '📚 课程管理'}
-                  </Typography.Title>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <Typography.Title level={5} style={{ margin: 0 }}>
+                      {isStudent ? '📖 课程导学' : '📚 课程管理'}
+                    </Typography.Title>
+                    <Button size="small" icon={<ReloadOutlined />} onClick={loadTree} />
+                  </div>
                   {isTeacherOrAdmin && (
-                    <Space wrap style={{ marginBottom: 8 }}>
+                    <Space wrap>
                       <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
                         新建课程
                       </Button>
@@ -944,7 +947,6 @@ const CurriculumPage: React.FC = () => {
                       </Button>
                     </Space>
                   )}
-                  <Button size="small" icon={<ReloadOutlined />} onClick={loadTree} />
                 </div>
 
                 {/* 课程分类列表 */}
