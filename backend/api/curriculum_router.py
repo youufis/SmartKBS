@@ -2172,8 +2172,24 @@ async def ai_generate_practice(kp_id: int, request: Request):
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             question_ids = []
 
-            # 逐题入库
+            # 逐题入库（含去重：相同题目文本不再重复插入）
+            kp_name_for_dedup = kp["name"]
             for q in questions:
+                q_text = q.get("question", "").strip()
+                if not q_text:
+                    continue
+                # 检查题库中是否已有相同题目文本
+                dup = q_execute_query(
+                    "SELECT id FROM question_bank WHERE knowledge_points LIKE ? AND question_text=? AND status='active'",
+                    (f"%{kp_name_for_dedup}%", q_text),
+                )
+                if dup:
+                    logger.info(f"跳过重复题目 (kp={kp_name_for_dedup}): {q_text[:40]}...")
+                    qid = dup[0]["id"]
+                    q["id"] = qid
+                    q["index"] = qid
+                    question_ids.append(qid)
+                    continue
                 opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
                 svg_code = q.get("svg_code") or ""
                 has_svg = 1 if svg_code.strip() else 0
@@ -2818,6 +2834,15 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
 
     body = await request.json()
     question_ids = body.get("question_ids", [])
+
+    # 去重
+    seen = set()
+    unique_ids = []
+    for qid in question_ids:
+        if qid not in seen:
+            seen.add(qid)
+            unique_ids.append(qid)
+    question_ids = unique_ids
 
     if len(question_ids) < 1 or len(question_ids) > 10:
         raise HTTPException(status_code=400, detail="请选择1-10道题")
