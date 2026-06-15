@@ -201,9 +201,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       formData.append('grade', values.grade || '')
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'false')
-      const data = await callApi('/api/curriculum/ai-generate-from-file', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const data = await callApi('/api/curriculum/ai-generate-from-file', formData)
       stopProgress(true)
       setResult(data)
       setTreeData(buildPreviewTree(data))
@@ -229,9 +227,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       formData.append('grade', values.grade || '')
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'true')
-      const data = await callApi('/api/curriculum/ai-generate-from-file', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const data = await callApi('/api/curriculum/ai-generate-from-file', formData)
       setResult(data)
       setSaveDone(true)
       message.success(`课程「${result.course_name}」已成功创建！共 ${result.saved?.chapters || 0} 章、${result.saved?.knowledge_points || 0} 个知识点`)
