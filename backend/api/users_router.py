@@ -206,6 +206,9 @@ def _delete_user_completely(username: str):
         q_execute_update(
             "DELETE FROM code_problems WHERE creator_username=?", (username,)
         )
+        q_execute_update(
+            "DELETE FROM ai_practice_results WHERE student_username=?", (username,)
+        )
     except Exception as e:
         logger.warning(f"删除 questions.db 记录失败: {e}")
 
