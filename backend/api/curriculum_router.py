@@ -2467,7 +2467,7 @@ body {{
 
 <script>
 const questions = {questions_json};
-const sessionId = {session_id};
+const STORAGE_KEY = 'ai_practice_' + {session_id};
 const userAnswers = {{}};
 
 function renderQuestions() {{
@@ -2536,44 +2536,32 @@ function updateProgress() {{
     document.getElementById('progressText').textContent = answered + '/' + questions.length;
 }}
 
-// 检查是否已作答过
+// 从 localStorage 检查是否已作答过
 function checkPreviousAttempt() {{
-    var token = localStorage.getItem('smartkb_token');
-    if (!token || !sessionId) return;
-    fetch('/api/practice/my-sessions/' + sessionId, {{
-        headers: {{ 'Authorization': 'Bearer ' + token }}
-    }})
-    .then(function(r) {{
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-    }})
-    .then(function(data) {{
-        if (data && data.attempt) {{
-            // 已答过，显示上次成绩
-            var banner = document.getElementById('reattemptBanner');
-            if (banner) banner.style.display = 'block';
-            var prevScore = document.getElementById('prevScore');
-            if (prevScore) prevScore.textContent = data.attempt.score;
-            var prevAcc = document.getElementById('prevAccuracy');
-            if (prevAcc && data.attempt.total_score > 0) {{
-                var acc = Math.round(data.attempt.score / data.attempt.total_score * 100);
-                prevAcc.textContent = '（正确率 ' + acc + '%）';
-            }}
-            var prevTime = document.getElementById('prevSubmittedAt');
-            if (prevTime && data.attempt.submitted_at) {{
-                prevTime.textContent = '提交时间：' + data.attempt.submitted_at;
-            }}
+    var saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+    try {{
+        var data = JSON.parse(saved);
+        if (!data || !data.attempt) return;
 
-            // 如果有结果明细，直接展示
-            if (data.results && data.results.length > 0) {{
-                document.getElementById('submitArea').style.display = 'none';
-                renderPreviousResults(data);
-            }}
+        var banner = document.getElementById('reattemptBanner');
+        if (banner) banner.style.display = 'block';
+        var prevScore = document.getElementById('prevScore');
+        if (prevScore) prevScore.textContent = data.attempt.score;
+        var prevAcc = document.getElementById('prevAccuracy');
+        if (prevAcc && data.attempt.total_score > 0) {{
+            prevAcc.textContent = '（正确率 ' + data.attempt.accuracy + '%）';
         }}
-    }})
-    .catch(function(err) {{
-        console.error('检查历史作答失败:', err);
-    }});
+        var prevTime = document.getElementById('prevSubmittedAt');
+        if (prevTime) {{
+            prevTime.textContent = '提交时间：' + (data.attempt.submitted_at || '本地记录');
+        }}
+
+        if (data.results && data.results.length > 0) {{
+            document.getElementById('submitArea').style.display = 'none';
+            renderPreviousResults(data);
+        }}
+    }} catch(e) {{ /* ignore */ }}
 }}
 
 function renderPreviousResults(data) {{
@@ -2638,48 +2626,42 @@ function submitPractice() {{
     // 2. 即时显示结果
     showResults(accuracy, earned, totalScore, results);
 
-    // 3. 提交到后端（等待确认）
-    const token = localStorage.getItem('smartkb_token');
-    if (!token) {{
-        var errMsg = document.getElementById('resultNote');
-        if (errMsg) {{ errMsg.textContent = '⚠️ 未登录，成绩无法保存'; errMsg.style.display = 'block'; }}
-        return;
-    }}
-    const submitBtn = document.getElementById('btnSubmit');
-    if (submitBtn) {{ submitBtn.disabled = true; submitBtn.textContent = '⏳ 提交中...'; }}
-    const answers = {{}};
-    questions.forEach((q, i) => {{ answers[q.id] = userAnswers[i] || ''; }});
-    fetch('/api/practice/my-sessions/' + sessionId + '/submit', {{
-        method: 'POST',
-        headers: {{
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json'
+    // 3. 保存成绩到 localStorage（纯本地，无需后端）
+    var gradeData = {{
+        attempt: {{
+            score: earned,
+            total_score: totalScore,
+            accuracy: accuracy,
+            submitted_at: new Date().toLocaleString('zh-CN')
         }},
-        body: JSON.stringify({{ answers }})
-    }})
-    .then(function(r) {{
-        if (submitBtn) {{ submitBtn.textContent = '📤 提交答案'; }}
-        if (!r.ok) {{
-            return r.json().then(function(e) {{ throw new Error(e.detail || '提交失败'); }});
-        }}
-        return r.json();
-    }})
-    .then(function(data) {{
-        var noteEl = document.getElementById('resultNote');
-        if (noteEl && data) {{
-            var txt = '✅ 成绩已记录';
-            if (data.reward_note) txt += '，' + data.reward_note;
-            noteEl.textContent = txt;
-            noteEl.style.display = 'block';
-        }}
-    }})
-    .catch(function(err) {{
+        results: []
+    }};
+    questions.forEach((q, i) => {{
+        var studentAns = userAnswers[i] || '';
+        var correctAns = q.answer || '';
+        var isCorrect = studentAns.toUpperCase() === correctAns.toUpperCase();
+        gradeData.results.push({{
+            is_correct: isCorrect,
+            student_answer: studentAns,
+            correct_answer: correctAns,
+            score: isCorrect ? 10 : 0,
+            max_score: 10
+        }});
+    }});
+    try {{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(gradeData));
         var noteEl = document.getElementById('resultNote');
         if (noteEl) {{
-            noteEl.textContent = '⚠️ ' + (err.message || '提交失败，请重试');
+            noteEl.textContent = '✅ 成绩已保存（本地）';
             noteEl.style.display = 'block';
         }}
-    }});
+    }} catch(e) {{
+        var noteEl = document.getElementById('resultNote');
+        if (noteEl) {{
+            noteEl.textContent = '⚠️ 成绩保存失败';
+            noteEl.style.display = 'block';
+        }}
+    }}
 }}
 
 function showResults(accuracy, score, totalScore, results, prevResults) {{
