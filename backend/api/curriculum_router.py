@@ -2661,6 +2661,120 @@ function showResults(accuracy, score, totalScore, results) {{
 </html>"""
 
 
+@router.post("/ai-practice/{kp_id}/from-bank")
+async def ai_practice_from_bank(kp_id: int, request: Request):
+    """[教师] 从题库选取已有题目生成练习"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用")
+
+    body = await request.json()
+    question_ids = body.get("question_ids", [])
+
+    if len(question_ids) < 1 or len(question_ids) > 10:
+        raise HTTPException(status_code=400, detail="请选择1-10道题")
+
+    # 获取知识点信息
+    kp_rows = execute_query(
+        """SELECT kp.id, kp.name, kp.description, kp.difficulty,
+                  c.name as chapter_name, co.name as course_name, co.subject
+           FROM knowledge_points kp
+           JOIN chapters c ON c.id = kp.chapter_id
+           JOIN courses co ON co.id = c.course_id
+           WHERE kp.id = ?""",
+        (kp_id,),
+    )
+    if not kp_rows:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    kp = kp_rows[0]
+
+    # 从题库获取题目
+    from backend.question_db import execute_query as q_exec, execute_insert as q_insert, execute_update as q_update
+
+    placeholders = ",".join("?" for _ in question_ids)
+    questions = q_exec(
+        f"""SELECT * FROM question_bank
+            WHERE id IN ({placeholders}) AND type='single' AND status='active'
+            ORDER BY CASE id {''.join(f'WHEN ? THEN {i}' for i, _ in enumerate(question_ids))} END""",
+        tuple(question_ids) + tuple(question_ids),
+    )
+    if not questions:
+        raise HTTPException(status_code=404, detail="未找到有效题目")
+
+    # 解析 options/media_files JSON
+    for q in questions:
+        for field in ["options", "media_placeholders", "media_files"]:
+            val = q.get(field)
+            if val and isinstance(val, str):
+                try:
+                    q[field] = json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    q[field] = {} if field == "options" else []
+        if q.get("options") is None:
+            q["options"] = {}
+
+    # 创建练习任务
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    subject = kp.get("subject") or kp["course_name"] or "信息科技"
+    title = f"{kp['name']} 练习"
+    session_id = q_insert(
+        """INSERT INTO practice_sessions
+           (title, knowledge_points, creator_username, subject, question_count,
+            total_score, target_grade, target_class, target_students, source, status, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,'bank','active',?,?)""",
+        (title, kp["name"], username, subject,
+         len(questions), len(questions) * 10,
+         "", "", "", now, now),
+    )
+
+    # 建立题目关联
+    for i, q in enumerate(questions):
+        q_insert(
+            "INSERT INTO practice_session_questions (session_id, question_id, sort_order, score) VALUES (?,?,?,?)",
+            (session_id, q["id"], i, 10),
+        )
+    q_update("UPDATE practice_sessions SET total_score=? WHERE id=?", (len(questions) * 10, session_id))
+
+    # 生成 HTML 答题页面
+    from backend.utils import get_account_html_dir
+    from backend.config import BASE_DIR
+
+    # 统一字段名（AI生成和题库字段名可能不同）
+    for q in questions:
+        if "question_text" in q and "question" not in q:
+            q["question"] = q["question_text"]
+        if "correct_answer" in q and "answer" not in q:
+            q["answer"] = q["correct_answer"]
+        if "svg_content" in q and "svg_code" not in q:
+            q["svg_code"] = q.get("svg_content") or ""
+
+    html_content = _generate_practice_html(kp, questions, session_id, subject)
+    html_dir = get_account_html_dir(username)
+    os.makedirs(html_dir, exist_ok=True)
+    safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
+    filename = f"{kp_id}_{safe_name}_练习.html"
+    filepath = os.path.join(html_dir, filename)
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
+    file_url = f"/api/files/{rel_path}"
+
+    logger.info(f"教师 {username} 从题库生成练习: session_id={session_id}, file={filepath}")
+    return {
+        "session_id": session_id,
+        "file_url": file_url,
+        "filename": filename,
+        "questions": questions,
+        "total": len(questions),
+        "kp_name": kp["name"],
+        "message": f"已从题库选取 {len(questions)} 道题生成练习",
+    }
+
+
 @router.get("/ai-practice/{kp_id}/preview")
 async def preview_ai_practice(kp_id: int, request: Request):
     """预览已生成的AI练习HTML页面"""

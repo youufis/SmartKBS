@@ -22,7 +22,6 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
-import FormulaRenderer from '../components/FormulaRenderer'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 
 const { TextArea } = Input
@@ -122,9 +121,12 @@ const CurriculumPage: React.FC = () => {
   const [practiceModal, setPracticeModal] = useState(false)
   const [practiceLoading, setPracticeLoading] = useState(false)
   const [practiceHtmlUrl, setPracticeHtmlUrl] = useState('')
-  const [practiceSessionId, setPracticeSessionId] = useState<number | null>(null)
-  const [practiceQuestions, setPracticeQuestions] = useState<any[]>([])
-  const [practiceKpId, setPracticeKpId] = useState<number | null>(null)
+  const [practiceMode, setPracticeMode] = useState<'ai' | 'bank'>('ai')
+  // 题库选取模式
+  const [bankKeyword, setBankKeyword] = useState('')
+  const [bankQuestions, setBankQuestions] = useState<any[]>([])
+  const [bankLoading, setBankLoading] = useState(false)
+  const [selectedBankIds, setSelectedBankIds] = useState<number[]>([])
 
   // ── 章节/知识点管理 ──
   const [chapterModal, setChapterModal] = useState(false)
@@ -238,20 +240,16 @@ const CurriculumPage: React.FC = () => {
 
   // ── AI 练习生成 ──
   const handleAiPractice = async (kpId: number) => {
-    setPracticeKpId(kpId)
     setPracticeLoading(true)
     setPracticeHtmlUrl('')
-    setPracticeSessionId(null)
-    setPracticeQuestions([])
     setPracticeModal(true)
+    setPracticeMode('ai')
     try {
       const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`)
       message.info('AI 正在生成练习题，请稍候...')
       const result = await pollAiTask(data.task_id, 180000)
       if (result && result.file_url) {
         setPracticeHtmlUrl(result.file_url)
-        setPracticeSessionId(result.session_id)
-        setPracticeQuestions(result.questions || [])
         message.success(`已生成 ${result.total || 10} 道练习题`)
       } else if (result && result.error) {
         message.error(result.error)
@@ -263,6 +261,51 @@ const CurriculumPage: React.FC = () => {
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'AI 练习生成失败')
       setPracticeModal(false)
+    } finally {
+      setPracticeLoading(false)
+    }
+  }
+
+  // 从题库选取模式
+  const searchBankQuestions = async () => {
+    if (!selectedKp) return
+    setBankLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/questions', {
+        params: {
+          type: 'single',
+          keyword: bankKeyword || selectedKp.name,
+          page_size: 50,
+        }
+      })
+      setBankQuestions(data.questions || [])
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '搜索题库失败')
+    } finally {
+      setBankLoading(false)
+    }
+  }
+
+  const toggleBankQuestion = (qid: number) => {
+    setSelectedBankIds(prev =>
+      prev.includes(qid) ? prev.filter(id => id !== qid) : prev.length < 10 ? [...prev, qid] : prev
+    )
+  }
+
+  const generateFromBank = async () => {
+    if (!selectedKp || selectedBankIds.length === 0) return
+    setPracticeLoading(true)
+    try {
+      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${selectedKp.id}/from-bank`, {
+        question_ids: selectedBankIds,
+      })
+      if (data.file_url) {
+        setPracticeHtmlUrl(data.file_url)
+        setPracticeMode('ai') // 切换到预览
+        message.success(data.message)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '生成练习失败')
     } finally {
       setPracticeLoading(false)
     }
@@ -335,7 +378,7 @@ const CurriculumPage: React.FC = () => {
     if (!course) return
     const subj = course.subject || getCourseSubject(course) || '未分类'
     if (!expandedSubjects.includes(subj)) {
-      setExpandedSubjects((prev) => [...prev, subj])
+      setTimeout(() => setExpandedSubjects((prev) => [...prev, subj]), 0)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCourseId])
@@ -352,7 +395,7 @@ const CurriculumPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [activeCourseId])
+  }, [])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -366,9 +409,9 @@ const CurriculumPage: React.FC = () => {
   useEffect(() => {
     if (courses.length === 0) return
     if (!activeCourseId || !courses.find((c) => c.id === activeCourseId)) {
-      setActiveCourseId(courses[0].id)
+      setTimeout(() => setActiveCourseId(courses[0].id), 0)
     }
-  }, [courses])
+  }, [courses, activeCourseId])
 
   // ── 树节点选择 ──
   const handleTreeSelect = (_selectedKeys: React.Key[], info: Record<string, unknown>) => {
@@ -1644,7 +1687,7 @@ const CurriculumPage: React.FC = () => {
       <Modal
         title={<><FormOutlined style={{ color: '#1677ff' }} /> AI 练习 - {selectedKp?.name || '生成中...'}</>}
         open={practiceModal}
-        onCancel={() => { if (practiceLoading) return; setPracticeModal(false) }}
+        onCancel={() => { if (practiceLoading) return; setPracticeModal(false); setPracticeMode('ai'); setSelectedBankIds([]); setBankQuestions([]); }}
         width={960}
         footer={
           practiceLoading ? null : practiceHtmlUrl ? (
@@ -1653,27 +1696,102 @@ const CurriculumPage: React.FC = () => {
                 onClick={() => { if (practiceHtmlUrl) window.open(practiceHtmlUrl, '_blank') }}>
                   新标签页打开
               </Button>
-              <Button onClick={() => setPracticeModal(false)}>关闭</Button>
+              <Button onClick={() => { setPracticeModal(false); setPracticeHtmlUrl(''); setPracticeMode('ai'); }}>关闭</Button>
             </Space>
-          ) : (
-            <Button onClick={() => setPracticeModal(false)}>关闭</Button>
-          )
+          ) : null
         }
       >
         {practiceLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
             <div style={{ marginTop: 16, color: '#666' }}>
-              AI 正在生成练习题（10道单选题），请稍候...
+              {practiceMode === 'ai' ? 'AI 正在生成练习题（10道单选题），请稍候...' : '正在生成练习...'}
               <br />
-              <span style={{ fontSize: 13 }}>包含题目生成、入库、HTML答题页面制作</span>
+              <span style={{ fontSize: 13 }}>包含HTML答题页面制作</span>
             </div>
           </div>
         ) : practiceHtmlUrl ? (
           <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
             <iframe src={practiceHtmlUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="练习预览" />
           </div>
-        ) : null}
+        ) : (
+          <>
+            <Space style={{ marginBottom: 16 }}>
+              <Button type={practiceMode === 'ai' ? 'primary' : 'default'} icon={<RobotOutlined />}
+                onClick={() => { setPracticeMode('ai'); handleAiPractice(selectedKp?.id || 0) }}>
+                AI 生成
+              </Button>
+              <Button type={practiceMode === 'bank' ? 'primary' : 'default'} icon={<QuestionCircleOutlined />}
+                onClick={() => {
+                  setPracticeMode('bank')
+                  setSelectedBankIds([])
+                  setBankKeyword(selectedKp?.name || '')
+                  setTimeout(() => searchBankQuestions(), 100)
+                }}>
+                从题库选取
+              </Button>
+            </Space>
+
+            {practiceMode === 'bank' && (
+              <div>
+                <Space style={{ marginBottom: 12, width: '100%' }}>
+                  <Input.Search
+                    placeholder="搜索题目关键词..."
+                    value={bankKeyword}
+                    onChange={e => setBankKeyword(e.target.value)}
+                    onSearch={searchBankQuestions}
+                    style={{ width: 300 }}
+                  />
+                  <Tag color="blue">已选 {selectedBankIds.length}/10 题</Tag>
+                  <Button type="primary" disabled={selectedBankIds.length === 0} onClick={generateFromBank}>
+                    生成练习 ({selectedBankIds.length} 题)
+                  </Button>
+                </Space>
+
+                {bankLoading ? (
+                  <Spin style={{ display: 'block', margin: '40px auto' }} />
+                ) : bankQuestions.length === 0 ? (
+                  <Typography.Text type="secondary">未找到相关题目，试试其他关键词</Typography.Text>
+                ) : (
+                  <div style={{ maxHeight: '55vh', overflow: 'auto' }}>
+                    {bankQuestions.map((q, i) => {
+                      const isSelected = selectedBankIds.includes(q.id)
+                      return (
+                        <Card
+                          key={q.id}
+                          size="small"
+                          style={{ marginBottom: 6, cursor: 'pointer', borderColor: isSelected ? '#1677ff' : undefined }}
+                          hoverable
+                          onClick={() => toggleBankQuestion(q.id)}
+                        >
+                          <Space>
+                            <span style={{
+                              width: 20, height: 20, borderRadius: 4, display: 'inline-flex',
+                              alignItems: 'center', justifyContent: 'center',
+                              background: isSelected ? '#1677ff' : '#f0f0f0',
+                              color: isSelected ? '#fff' : '#666', fontSize: 12, fontWeight: 600,
+                            }}>{i + 1}</span>
+                            <Typography.Text style={{ flex: 1 }} ellipsis={{ tooltip: q.question_text }}>
+                              {q.question_text}
+                            </Typography.Text>
+                            {q.options && (
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                {Object.keys(q.options).length}个选项
+                              </Typography.Text>
+                            )}
+                            <Tag color={q.difficulty === 'easy' ? 'green' : q.difficulty === 'hard' ? 'red' : 'gold'}>
+                              {q.difficulty === 'easy' ? '简单' : q.difficulty === 'hard' ? '困难' : '中等'}
+                            </Tag>
+                          </Space>
+                        </Card>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </Modal>
     </Layout>
   )
