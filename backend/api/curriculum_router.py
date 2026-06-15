@@ -911,6 +911,9 @@ async def delete_course(course_id: int, request: Request):
             execute_insert_update(
                 f"DELETE FROM knowledge_prerequisites WHERE prerequisite_id IN ({kp_placeholders})", kp_tuple,
             )
+            # 清理 AI 练习独立成绩
+            from backend.question_db import execute_insert as q_exec2
+            q_exec2(f"DELETE FROM ai_practice_results WHERE kp_id IN ({kp_placeholders})", kp_tuple)
         execute_insert_update(
             f"DELETE FROM knowledge_points WHERE chapter_id IN ({placeholders})", tuple(all_chapter_ids),
         )
@@ -1187,6 +1190,9 @@ async def delete_knowledge_point(kp_id: int, request: Request):
 
     execute_insert_update("DELETE FROM learning_progress WHERE knowledge_point_id=?", (kp_id,))
     execute_insert_update("DELETE FROM curriculum_bindings WHERE knowledge_point_id=?", (kp_id,))
+    # 清理 AI 练习独立成绩
+    from backend.question_db import execute_insert as q_exec
+    q_exec("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
     execute_insert_update("DELETE FROM knowledge_points WHERE id=?", (kp_id,))
 
     logger.info(f"用户 {user['username']} 硬删除知识点 id={kp_id}")
