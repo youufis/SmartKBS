@@ -391,7 +391,7 @@ async def ai_generate_from_file(request: Request):
         raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
 
     # 解析 multipart 表单
-    from fastapi import UploadFile
+    from starlette.datastructures import UploadFile
     form = await request.form()
     file_raw = form.get("file")
     subject_val = form.get("subject", "")
