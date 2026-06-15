@@ -171,3 +171,25 @@ export async function reorderNodes(items: ReorderItem[]): Promise<{ message: str
   const { data } = await apiClient.put('/api/curriculum/reorder', { items });
   return data;
 }
+
+/** ── AI 练习 ── */
+
+/** AI 生成练习（异步任务） */
+export async function generateAiPractice(kpId: number): Promise<{ task_id: string; message: string }> {
+  const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`);
+  return data;
+}
+
+/** 发布AI练习到班级 */
+export async function publishAiPractice(kpId: number, payload: {
+  target_grade: string;
+  target_class: string;
+}): Promise<{ message: string; session_id: number }> {
+  const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/publish`, payload);
+  return data;
+}
+
+/** 预览AI练习HTML页面 */
+export async function getAiPracticePreviewUrl(kpId: number): Promise<string> {
+  return `/api/curriculum/ai-practice/${kpId}/preview`;
+}
