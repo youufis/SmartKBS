@@ -2212,13 +2212,13 @@ async def ai_generate_practice(kp_id: int, request: Request):
                 q["media_files"] = media_files
                 question_ids.append(qid)
 
-            # 创建练习任务（draft 状态，未发布）
+            # 创建练习任务（用于成绩记录和积分发放）
             title = f"{kp['name']} 练习"
             session_id = q_insert(
                 """INSERT INTO practice_sessions
                    (title, knowledge_points, creator_username, subject, question_count,
                     total_score, target_grade, target_class, target_students, source, status, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,'ai','draft',?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?)""",
                 (title, kp["name"], username, subject,
                  len(question_ids), len(question_ids) * 10,
                  "", "", "", now, now),
@@ -2513,32 +2513,10 @@ function updateProgress() {{
     document.getElementById('progressText').textContent = answered + '/' + questions.length;
 }}
 
-// 页面加载时检测是否已有成绩
+// 页面加载时直接渲染题目
 document.addEventListener('DOMContentLoaded', function() {{
-    const token = localStorage.getItem('smartkb_token');
-    if (!token) {{
-        renderQuestions();
-        return;
-    }}
-    // 调用接口检测是否已提交
-    fetch('/api/practice/my-sessions/' + sessionId, {{
-        headers: {{ 'Authorization': 'Bearer ' + token }}
-    }})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(data) {{
-        if (data && data.attempt) {{
-            // 已有成绩，直接显示结果
-            showExistingResult(data);
-        }} else {{
-            // 未提交，渲染题目
-            renderQuestions();
-            renderMath();
-        }}
-    }})
-    .catch(function() {{
-        renderQuestions();
-        renderMath();
-    }});
+    renderQuestions();
+    renderMath();
 }});
 
 function renderMath() {{
@@ -2554,87 +2532,7 @@ function renderMath() {{
     }}
 }}
 
-function showExistingResult(data) {{
-    // 隐藏题目区域和提交按钮
-    document.getElementById('questionsContainer').style.display = 'none';
-    document.getElementById('submitArea').style.display = 'none';
-    document.getElementById('progress-bar').style.display = 'none';
-
-    const area = document.getElementById('resultArea');
-    area.classList.add('show');
-
-    const att = data.attempt;
-    const accuracy = att.accuracy || 0;
-    const score = att.score || 0;
-    const totalScore = att.total_score || 100;
-
-    document.getElementById('resultScore').textContent = score + ' / ' + totalScore + ' 分';
-
-    let grade, emoji, gradeClass;
-    if (accuracy >= 90) {{ grade = '🏆 优秀！'; emoji = '🎉'; gradeClass = 'grade-excellent'; }}
-    else if (accuracy >= 80) {{ grade = '🌟 良好！'; emoji = '😊'; gradeClass = 'grade-good'; }}
-    else if (accuracy >= 60) {{ grade = '📖 及格'; emoji = '🤔'; gradeClass = 'grade-medium'; }}
-    else {{ grade = '💪 继续努力'; emoji = '📚'; gradeClass = 'grade-poor'; }}
-
-    document.getElementById('resultEmoji').textContent = emoji;
-    const gradeEl = document.getElementById('resultGrade');
-    gradeEl.textContent = grade;
-    gradeEl.className = 'result-grade ' + gradeClass;
-
-    const noteEl = document.getElementById('resultNote');
-    if (noteEl) {{
-        noteEl.textContent = 'ℹ️ 你已提交过此练习，以下是已有成绩';
-        noteEl.style.display = 'block';
-    }}
-    if (att.submitted_at) {{
-        const timeEl = document.getElementById('resultTime');
-        if (timeEl) {{
-            timeEl.textContent = '提交时间: ' + att.submitted_at;
-            timeEl.style.display = 'block';
-        }}
-    }}
-
-    let correct = 0, wrong = 0;
-    const container = document.getElementById('existingResults');
-    container.innerHTML = '';
-    container.style.display = 'block';
-
-    if (data.results && Array.isArray(data.results)) {{
-        data.results.forEach(function(r, i) {{
-            const isCorrect = r.is_correct;
-            if (isCorrect) correct++; else wrong++;
-
-            const card = document.createElement('div');
-            card.className = 'question-card' + (isCorrect ? ' correct' : ' wrong');
-            card.innerHTML = '<div class="q-header">' +
-                '<span class="q-number">' + (i + 1) + '</span>' +
-                '<div class="q-text">' + (r.question_text || '') + '</div>' +
-            '</div>' +
-            '<div style="margin:8px 0;">' +
-                '<span style="font-weight:600;">你的答案：</span>' +
-                '<span style="color:' + (isCorrect ? '#52c41a' : '#ff4d4f') + ';">' + (r.student_answer || '未作答') + '</span>' +
-                (!isCorrect && r.correct_answer ? ' <span style="color:#999;">正确答案: ' + r.correct_answer + '</span>' : '') +
-            '</div>' +
-            (r.explanation ? '<div class="explanation-box show"><div class="label">💡 解析</div><div class="text">' + r.explanation + '</div></div>' : '');
-            container.appendChild(card);
-        }});
-    }}
-
-    document.getElementById('statCorrect').textContent = correct;
-    document.getElementById('statWrong').textContent = wrong;
-    document.getElementById('statAccuracy').textContent = accuracy + '%';
-
-    let details = '';
-    if (accuracy >= 80) details = '掌握情况良好，继续保持！💪';
-    else if (accuracy >= 60) details = '基础尚可，建议复习错题巩固。📖';
-    else details = '需要加强练习，建议回顾知识点后重试。📚';
-    document.getElementById('resultDetails').textContent = details;
-
-    renderMath();
-}}
-
-function submitPractice() {{
-
+// 本地批改：直接对比答案，即时显示结果
 function submitPractice() {{
     const total = questions.length;
     const answered = Object.keys(userAnswers).length;
@@ -2642,87 +2540,62 @@ function submitPractice() {{
         if (!confirm('还有 ' + (total - answered) + ' 道题未作答，确定提交吗？')) return;
     }}
 
-    const btn = document.getElementById('btnSubmit');
-    btn.disabled = true;
-    btn.textContent = '⏳ 提交中...';
-
-    const answers = {{}};
+    // 1. 本地批改
+    let earned = 0;
+    const totalScore = total * 10;
+    const results = {{}};
     questions.forEach((q, i) => {{
-        answers[q.id] = userAnswers[i] || '';
+        const studentAns = userAnswers[i] || '';
+        const correctAns = q.answer || '';
+        const isCorrect = studentAns.toUpperCase() === correctAns.toUpperCase();
+        const s = isCorrect ? 10 : 0;
+        earned += s;
+        results[q.id] = {{
+            student_answer: studentAns,
+            correct_answer: correctAns,
+            score: s,
+            max_score: 10,
+            is_correct: isCorrect
+        }};
     }});
-    console.log('Submitting answers:', JSON.stringify(answers));
+    const accuracy = Math.round(earned / totalScore * 100);
 
-    // 从 localStorage 读取 JWT token（与主应用共享）
+    // 2. 即时显示结果
+    showResults(accuracy, earned, totalScore, results);
+
+    // 3. 异步记录成绩到后端（不影响页面显示）
     const token = localStorage.getItem('smartkb_token');
-    console.log('Token exists:', !!token, 'length:', token ? token.length : 0);
-
-    if (!token) {{
-        showErrorPage('未检测到登录信息，请先登录系统再重新打开此页面。');
-        btn.textContent = '📤 重试';
-        btn.disabled = false;
-        return;
+    if (token) {{
+        const answers = {{}};
+        questions.forEach((q, i) => {{ answers[q.id] = userAnswers[i] || ''; }});
+        fetch('/api/practice/my-sessions/' + sessionId + '/submit', {{
+            method: 'POST',
+            headers: {{
+                'Authorization': 'Bearer ' + token,
+                'Content-Type': 'application/json'
+            }},
+            body: JSON.stringify({{ answers }})
+        }})
+        .then(function(r) {{
+            if (r.ok) return r.json();
+        }})
+        .then(function(data) {{
+            var noteEl = document.getElementById('resultNote');
+            if (noteEl && data) {{
+                var txt = '✅ 成绩已记录';
+                if (data.reward_note) txt += '，' + data.reward_note;
+                noteEl.textContent = txt;
+                noteEl.style.display = 'block';
+            }}
+        }})
+        .catch(function() {{}});
     }}
-
-    const headers = {{ 'Content-Type': 'application/json' }};
-    headers['Authorization'] = 'Bearer ' + token;
-
-    fetch('/api/practice/my-sessions/' + sessionId + '/submit', {{
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({{ answers }})
-    }})
-    .then(function(response) {{
-        console.log('Response status:', response.status);
-        if (!response.ok) {{
-            return response.text().then(function(text) {{
-                let msg = text;
-                try {{ const j = JSON.parse(text); msg = j.detail || JSON.stringify(j); }} catch(e) {{}}
-                throw new Error('错误(' + response.status + '): ' + msg);
-            }});
-        }}
-        return response.json();
-    }})
-    .then(function(data) {{
-        console.log('Submit response:', JSON.stringify(data));
-        if (data && typeof data.accuracy === 'number') {{
-            showResults(data);
-            btn.textContent = '✅ 已提交';
-        }} else if (data && data.detail) {{
-            throw new Error(data.detail);
-        }} else {{
-            throw new Error('服务器返回异常: ' + JSON.stringify(data));
-        }}
-    }})
-    .catch(function(err) {{
-        console.error('Submit error:', err);
-        btn.disabled = false;
-        btn.textContent = '📤 重试';
-        showErrorPage(err.message || '提交失败');
-    }});
 }}
 
-function showErrorPage(msg) {{
+function showResults(accuracy, score, totalScore, results) {{
     document.getElementById('submitArea').style.display = 'none';
     const area = document.getElementById('resultArea');
     area.classList.add('show');
-    document.getElementById('resultEmoji').textContent = '❌';
-    document.getElementById('resultGrade').textContent = '提交失败';
-    document.getElementById('resultGrade').className = 'result-grade grade-poor';
-    document.getElementById('resultScore').textContent = '';
-    document.getElementById('statCorrect').textContent = '0';
-    document.getElementById('statWrong').textContent = '0';
-    document.getElementById('statAccuracy').textContent = '0%';
-    document.getElementById('resultDetails').innerHTML = '<div style="color:#ff4d4f;font-size:14px;word-break:break-all;">' + msg + '</div>';
-}}
-
-function showResults(data) {{
-    document.getElementById('submitArea').style.display = 'none';
-    const area = document.getElementById('resultArea');
-    area.classList.add('show');
-
-    const accuracy = data.accuracy || 0;
-    const score = data.score || 0;
-    const totalScore = data.total_score || 100;
 
     document.getElementById('resultScore').textContent = score + ' / ' + totalScore + ' 分';
 
@@ -2737,25 +2610,9 @@ function showResults(data) {{
     gradeEl.textContent = grade;
     gradeEl.className = 'result-grade ' + gradeClass;
 
-    // 已有成绩提示
-    if (data.note) {{
-        const noteEl = document.getElementById('resultNote');
-        if (noteEl) {{
-            noteEl.textContent = 'ℹ️ ' + data.note;
-            noteEl.style.display = 'block';
-        }}
-    }}
-    if (data.submitted_at) {{
-        const timeEl = document.getElementById('resultTime');
-        if (timeEl) {{
-            timeEl.textContent = '提交时间: ' + data.submitted_at;
-            timeEl.style.display = 'block';
-        }}
-    }}
-
     let correct = 0, wrong = 0;
     questions.forEach((q, i) => {{
-        const res = data.results && data.results[q.id];
+        const res = results && results[q.id];
         const isCorrect = res && res.is_correct;
         const studentAns = userAnswers[i] || '';
         const correctAns = q.answer || '';
@@ -2802,50 +2659,6 @@ function showResults(data) {{
 </script>
 </body>
 </html>"""
-
-
-@router.post("/ai-practice/{kp_id}/publish")
-async def publish_ai_practice(kp_id: int, request: Request):
-    """[教师] 发布AI生成的练习到指定年级/班级"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-    if role not in (0, 1):
-        raise HTTPException(status_code=403, detail="仅教师和管理员可发布练习")
-
-    body = await request.json()
-    target_grade = (body.get("target_grade") or "").strip()
-    target_class = (body.get("target_class") or "").strip()
-
-    # 根据知识点ID找到最近生成的练习session
-    from backend.question_db import execute_query_one as q_one, execute_update as q_up
-
-    # 获取知识点对应的课程名称，用于匹配练习
-    kp_rows = execute_query(
-        "SELECT kp.name, co.subject FROM knowledge_points kp JOIN chapters c ON c.id=kp.chapter_id JOIN courses co ON co.id=c.course_id WHERE kp.id=?",
-        (kp_id,),
-    )
-    if not kp_rows:
-        raise HTTPException(status_code=404, detail="知识点不存在")
-    kp_name = kp_rows[0]["name"]
-
-    # 查找该教师创建的最新 draft 练习
-    sess = q_one(
-        "SELECT id, status FROM practice_sessions WHERE creator_username=? AND knowledge_points=? AND status='draft' ORDER BY created_at DESC LIMIT 1",
-        (username, kp_name),
-    )
-    if not sess:
-        raise HTTPException(status_code=404, detail="未找到可发布的练习，请先使用AI生成")
-
-    session_id = sess["id"]
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    q_up(
-        "UPDATE practice_sessions SET status='active', target_grade=?, target_class=?, updated_at=? WHERE id=?",
-        (target_grade, target_class, now, session_id),
-    )
-
-    logger.info(f"教师 {username} 发布练习 session_id={session_id} → {target_grade} {target_class}班")
-    return {"message": "练习已发布", "session_id": session_id}
 
 
 @router.get("/ai-practice/{kp_id}/preview")
