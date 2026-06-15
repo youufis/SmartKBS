@@ -105,6 +105,25 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
     # 入库到 question_bank，同时保留返回给教师预览
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for q in questions:
+        q_text = q.get("question", "").strip()
+        if not q_text:
+            continue
+        # 去重：相同知识点+题目文本不再重复插入
+        dup = execute_query(
+            "SELECT id FROM question_bank WHERE knowledge_points LIKE ? AND question_text=? AND status='active'",
+            (f"%{req.knowledge_points}%", q_text),
+        )
+        if dup:
+            logger.info(f"跳过重复题目 (kp={req.knowledge_points}): {q_text[:40]}...")
+            qid = dup[0]["id"]
+            q["id"] = qid
+            q["index"] = qid
+            if "svg_code" in q and "svg_content" not in q:
+                q["svg_content"] = q["svg_code"]
+            if "has_svg" not in q:
+                q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+            q["media_files"] = []
+            continue
         opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
         svg_code = q.get("svg_code") or ""
         has_svg = 1 if svg_code.strip() else 0
