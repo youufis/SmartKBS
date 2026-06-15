@@ -203,11 +203,21 @@ def init_question_db():
                 score INTEGER DEFAULT 0,
                 total_score INTEGER DEFAULT 0,
                 accuracy REAL DEFAULT 0,
+                evaluation TEXT DEFAULT '',
+                reward_points INTEGER DEFAULT 0,
                 answers TEXT DEFAULT '',
                 questions TEXT DEFAULT '',
                 submitted_at TEXT NOT NULL,
                 UNIQUE(kp_id, student_username)
             )""")
+            try:
+                c.execute("ALTER TABLE ai_practice_results ADD COLUMN evaluation TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE ai_practice_results ADD COLUMN reward_points INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_apr_kp ON ai_practice_results(kp_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_apr_student ON ai_practice_results(student_username)")
