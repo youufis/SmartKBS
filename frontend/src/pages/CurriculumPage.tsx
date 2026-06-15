@@ -22,6 +22,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
+import FormulaRenderer from '../components/FormulaRenderer'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 
 const { TextArea } = Input
@@ -116,6 +117,21 @@ const CurriculumPage: React.FC = () => {
   const [cwModal, setCwModal] = useState(false)
   const [cwLoading, setCwLoading] = useState(false)
   const [cwUrl, setCwUrl] = useState('')
+
+  // ── AI 练习生成 ──
+  const [practiceModal, setPracticeModal] = useState(false)
+  const [practiceLoading, setPracticeLoading] = useState(false)
+  const [practiceHtmlUrl, setPracticeHtmlUrl] = useState('')
+  const [practiceSessionId, setPracticeSessionId] = useState<number | null>(null)
+  const [practiceQuestions, setPracticeQuestions] = useState<any[]>([])
+  const [practiceKpId, setPracticeKpId] = useState<number | null>(null)
+  const [practicePublished, setPracticePublished] = useState(false)
+  // 发布用
+  const [pubGradeOptions, setPubGradeOptions] = useState<string[]>([])
+  const [pubClassOptions, setPubClassOptions] = useState<string[]>([])
+  const [pubGrade, setPubGrade] = useState('')
+  const [pubClass, setPubClass] = useState('')
+  const [publishing, setPublishing] = useState(false)
 
   // ── 章节/知识点管理 ──
   const [chapterModal, setChapterModal] = useState(false)
@@ -224,6 +240,79 @@ const CurriculumPage: React.FC = () => {
       setCwModal(false)
     } finally {
       setCwLoading(false)
+    }
+  }
+
+  // ── AI 练习生成 ──
+  const handleAiPractice = async (kpId: number) => {
+    setPracticeKpId(kpId)
+    setPracticeLoading(true)
+    setPracticeHtmlUrl('')
+    setPracticeSessionId(null)
+    setPracticeQuestions([])
+    setPracticePublished(false)
+    setPracticeModal(true)
+    // 加载教师年级列表
+    try {
+      const { data: gradesData } = await apiClient.get('/api/scores/my-grades')
+      const grades = Array.isArray(gradesData) ? gradesData : []
+      setPubGradeOptions(grades)
+      if (grades.length > 0) setPubGrade(grades[0])
+    } catch { /* ignore */ }
+    try {
+      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`)
+      message.info('AI 正在生成练习题，请稍候...')
+      const result = await pollAiTask(data.task_id, 180000)
+      if (result && result.file_url) {
+        setPracticeHtmlUrl(result.file_url)
+        setPracticeSessionId(result.session_id)
+        setPracticeQuestions(result.questions || [])
+        message.success(`已生成 ${result.total || 10} 道练习题`)
+      } else if (result && result.error) {
+        message.error(result.error)
+        setPracticeModal(false)
+      } else {
+        message.error('AI 练习生成失败（超时或未知错误）')
+        setPracticeModal(false)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'AI 练习生成失败')
+      setPracticeModal(false)
+    } finally {
+      setPracticeLoading(false)
+    }
+  }
+
+  // 选择年级时加载对应班级（教师只能看到自己的班级）
+  useEffect(() => {
+    if (!pubGrade || !practiceKpId) return
+    apiClient.get('/api/scores/classes', { params: { grade: pubGrade } })
+      .then(({ data }) => {
+        const classes = Array.isArray(data) ? data : []
+        const nums = classes.map((c: string) => c.replace(/^.*?(\d+).*$/, '$1')).filter((n: string) => n)
+        setPubClassOptions(nums)
+      }).catch(() => {})
+  }, [pubGrade, practiceKpId])
+
+  const handlePublishPractice = async () => {
+    if (!practiceKpId || !practiceSessionId) return
+    setPublishing(true)
+    try {
+      await curriculumApi.publishAiPractice(practiceKpId, {
+        target_grade: pubGrade,
+        target_class: pubClass,
+      })
+      message.success('练习已成功发布！')
+      setPracticePublished(true)
+      // 刷新资源列表
+      if (selectedKp) {
+        const res = await curriculumApi.getKpResources(selectedKp.id)
+        setKpResources(res.resources)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '发布失败')
+    } finally {
+      setPublishing(false)
     }
   }
 
@@ -1208,6 +1297,14 @@ const CurriculumPage: React.FC = () => {
                               </Button>
                             </Tooltip>
                           )}
+                          {isTeacherOrAdmin && (
+                            <Tooltip title="AI 生成10道单选题练习">
+                              <Button type="link" size="small" icon={<FormOutlined />}
+                                onClick={() => handleAiPractice(selectedKp.id)}>
+                                AI 练习
+                              </Button>
+                            </Tooltip>
+                          )}
                           {isStudent && (
                             <>
                               {selectedKp.progress_status !== 'completed' && (
@@ -1587,6 +1684,81 @@ const CurriculumPage: React.FC = () => {
         ) : cwUrl ? (
           <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
             <iframe src={cwUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="课件预览" />
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ── AI 练习弹窗 ── */}
+      <Modal
+        title={<><FormOutlined style={{ color: '#1677ff' }} /> AI 练习 - {selectedKp?.name || '生成中...'}</>}
+        open={practiceModal}
+        onCancel={() => { if (practiceLoading) return; setPracticeModal(false) }}
+        width={960}
+        footer={
+          practiceLoading ? null : practiceHtmlUrl ? (
+            <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+              <Space>
+                {!practicePublished ? (
+                  <>
+                    <Select
+                      value={pubGrade || undefined}
+                      onChange={setPubGrade}
+                      placeholder="目标年级"
+                      style={{ width: 140 }}
+                    >
+                      {pubGradeOptions.map(g => (
+                        <Select.Option key={g} value={g}>{g}</Select.Option>
+                      ))}
+                      {user?.role === 'admin' && <Select.Option value="">全部年级</Select.Option>}
+                    </Select>
+                    <Select
+                      value={pubClass || undefined}
+                      onChange={setPubClass}
+                      placeholder="目标班级"
+                      style={{ width: 130 }}
+                      allowClear
+                    >
+                      {pubClassOptions.map(n => (
+                        <Select.Option key={n} value={n}>{n}班</Select.Option>
+                      ))}
+                      <Select.Option value="">全部班级</Select.Option>
+                    </Select>
+                    <Button type="primary" icon={<CheckCircleOutlined />}
+                      loading={publishing} onClick={handlePublishPractice}>
+                      发布练习
+                    </Button>
+                  </>
+                ) : (
+                  <Tag icon={<CheckCircleOutlined />} color="success" style={{ padding: '4px 12px', fontSize: 14 }}>
+                    已发布到 {pubGrade || '全部'} {pubClass ? pubClass + '班' : '全部'}
+                  </Tag>
+                )}
+              </Space>
+              <Space>
+                <Button icon={<DownloadOutlined />}
+                  onClick={() => { if (practiceHtmlUrl) window.open(practiceHtmlUrl, '_blank') }}>
+                  新标签页打开
+                </Button>
+                <Button onClick={() => setPracticeModal(false)}>关闭</Button>
+              </Space>
+            </Space>
+          ) : (
+            <Button onClick={() => setPracticeModal(false)}>关闭</Button>
+          )
+        }
+      >
+        {practiceLoading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#666' }}>
+              AI 正在生成练习题（10道单选题），请稍候...
+              <br />
+              <span style={{ fontSize: 13 }}>包含题目生成、入库、HTML答题页面制作</span>
+            </div>
+          </div>
+        ) : practiceHtmlUrl ? (
+          <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
+            <iframe src={practiceHtmlUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="练习预览" />
           </div>
         ) : null}
       </Modal>
