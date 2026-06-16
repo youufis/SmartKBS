@@ -239,9 +239,9 @@ async def delete_resource(path: str = Query(...), request: Request = None):
 
             # 同步清理共享记录和关联的课程绑定
             try:
-                from backend.database import execute_query
+                from backend.database import execute_query_dict
                 # 匹配所有指向该文件的共享记录（统一用正斜杠匹配）
-                share_rows = execute_query(
+                share_rows = execute_query_dict(
                     """SELECT id FROM shared_resources
                        WHERE owner_username=? AND resource_type='html'
                        AND (file_path=? OR file_path LIKE ?)""",
@@ -249,7 +249,7 @@ async def delete_resource(path: str = Query(...), request: Request = None):
                 )
                 # 额外尝试一次：如果 path 是绝对路径（来自卡片视图），也用相对路径再查一次
                 if not share_rows and os.path.isabs(path):
-                    share_rows = execute_query(
+                    share_rows = execute_query_dict(
                         """SELECT id FROM shared_resources
                            WHERE owner_username=? AND resource_type='html'
                            AND (file_path=? OR file_path LIKE ?)""",
