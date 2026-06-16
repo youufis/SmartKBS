@@ -113,9 +113,10 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/wrong-book', icon: <BookOutlined />, label: '错题巩固' },
     ]},
     { type: 'group', icon: <BarChartOutlined />, label: '学情分析', key: 'analytics', children: [
-      { key: '/analytics', icon: <BarChartOutlined />, label: '学情分析' },
+      { key: '/analytics', icon: <BarChartOutlined />, label: '学情总览' },
       { key: '/class-summary', icon: <RobotOutlined />, label: '课堂总结' },
       { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '课程进度' },
+      { key: '/activity-monitor', icon: <BarChartOutlined />, label: '活动监控' },
       { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
     ]},
     { type: 'group', icon: <SettingOutlined />, label: '系统管理', key: 'admin', children: [
