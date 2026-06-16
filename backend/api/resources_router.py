@@ -235,6 +235,33 @@ async def delete_resource(path: str = Query(...), request: Request = None):
             except Exception as cleanup_err:
                 logger.warning(f"清理资源分组引用失败: {cleanup_err}")
 
+            # 同步清理共享记录和关联的课程绑定
+            try:
+                from backend.database import execute_query
+                # 匹配所有指向该文件的共享记录
+                share_rows = execute_query(
+                    """SELECT id FROM shared_resources
+                       WHERE owner_username=? AND resource_type='html'
+                       AND (file_path=? OR file_path LIKE ?)""",
+                    (username, rel_path, f"%{rel_path}"),
+                )
+                for row in share_rows:
+                    sid = row["id"]
+                    # 清理该共享关联的课程绑定
+                    execute_insert_update(
+                        "DELETE FROM curriculum_bindings WHERE resource_type='html' AND resource_id=?",
+                        (sid,),
+                    )
+                    # 清理共享记录
+                    execute_insert_update(
+                        "DELETE FROM shared_resources WHERE id=?",
+                        (sid,),
+                    )
+                if share_rows:
+                    logger.info(f"已同步清理 {len(share_rows)} 条共享记录及关联绑定")
+            except Exception as cleanup_err:
+                logger.warning(f"清理共享记录失败: {cleanup_err}")
+
             return {"message": msg}
         except Exception as e:
             logger.error(f"删除资源失败: {e}")
