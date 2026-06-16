@@ -2950,10 +2950,11 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 5. 每道题都要有详细的解析
 6. 涉及公式使用 $...$ LaTeX 语法
 
-## 配图规则
+## 配图规则（优先使用 SVG）
 每道题可输出 svg_code 和 media_placeholders 字段（都可以为 null）：
-【svg_code】— 技术图示，viewBox="0 0 600 400"
-【media_placeholders】— 真实图片占位符
+【svg_code — **优先使用**】技术图示，viewBox="0 0 600 400"；纯代码生成，零成本
+【media_placeholders】— **谨慎使用**，仅当需要真实图片时添加；会消耗 AI 生图配额
+**不需要配图的题目 svg_code 和 media_placeholders 都留 null 即可**
 
 ## 输出格式
 请严格按照 JSON 数组格式输出，只返回一个 JSON 数组：
