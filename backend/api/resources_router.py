@@ -221,16 +221,18 @@ async def delete_resource(path: str = Query(...), request: Request = None):
 
             # 同步清理资源分组中的引用
             rel_path = path if not os.path.isabs(path) else os.path.relpath(target_path, html_dir)
+            # 统一将路径分隔符转为正斜杠（数据库中用正斜杠）
+            db_path = rel_path.replace("\\", "/")
             try:
                 from backend.database import execute_insert_update
                 execute_insert_update(
                     "DELETE FROM resource_group_items WHERE file_path=?",
-                    (rel_path,),
+                    (db_path,),
                 )
                 # 也尝试清理绝对路径格式的引用
                 execute_insert_update(
                     "DELETE FROM resource_group_items WHERE file_path=?",
-                    (target_path,),
+                    (target_path.replace("\\", "/"),),
                 )
             except Exception as cleanup_err:
                 logger.warning(f"清理资源分组引用失败: {cleanup_err}")
@@ -238,13 +240,21 @@ async def delete_resource(path: str = Query(...), request: Request = None):
             # 同步清理共享记录和关联的课程绑定
             try:
                 from backend.database import execute_query
-                # 匹配所有指向该文件的共享记录
+                # 匹配所有指向该文件的共享记录（统一用正斜杠匹配）
                 share_rows = execute_query(
                     """SELECT id FROM shared_resources
                        WHERE owner_username=? AND resource_type='html'
                        AND (file_path=? OR file_path LIKE ?)""",
-                    (username, rel_path, f"%{rel_path}"),
+                    (username, db_path, f"%/{db_path}"),
                 )
+                # 额外尝试一次：如果 path 是绝对路径（来自卡片视图），也用相对路径再查一次
+                if not share_rows and os.path.isabs(path):
+                    share_rows = execute_query(
+                        """SELECT id FROM shared_resources
+                           WHERE owner_username=? AND resource_type='html'
+                           AND (file_path=? OR file_path LIKE ?)""",
+                        (username, os.path.basename(path), f"%/{os.path.basename(path)}"),
+                    )
                 for row in share_rows:
                     sid = row["id"]
                     # 清理该共享关联的课程绑定
