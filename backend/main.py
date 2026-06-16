@@ -99,9 +99,11 @@ from backend.api.reward_router import router as reward_router
 from backend.api.code_router import router as code_router
 from backend.api.quest_router import router as quest_router
 from backend.api.quick_quiz_router import router as quick_quiz_router
+from backend.api.activity_monitor_router import router as activity_monitor_router
 
 app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
 app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
+app.include_router(activity_monitor_router, prefix="/api", tags=["活动监控"])
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
 app.include_router(chat_router, prefix="/api/chat", tags=["对话"])

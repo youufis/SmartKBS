@@ -48,6 +48,7 @@ import CodePracticePage from './pages/CodePracticePage'
 import StudentQuestionsPage from './pages/StudentQuestionsPage'
 import QuickPollPage from './pages/QuickPollPage'
 import ClassSummaryPage from './pages/ClassSummaryPage'
+import ActivityMonitorPage from './pages/ActivityMonitorPage'
 
 function App() {
   const navigate = useNavigate()
@@ -138,6 +139,7 @@ function App() {
             <Route path="student-questions" element={<StudentQuestionsPage />} />
             <Route path="quick-poll" element={<QuickPollPage />} />
             <Route path="class-summary" element={user?.role === 'admin' || user?.role === 'teacher' ? <ClassSummaryPage /> : <Navigate to="/chat" />} />
+            <Route path="activity-monitor" element={user?.role === 'admin' || user?.role === 'teacher' ? <ActivityMonitorPage /> : <Navigate to="/chat" />} />
             <Route path="about" element={<AboutPage />} />
           </Route>
           <Route path="/quest/battle/:questId" element={isLoggedIn ? <QuestBattlePage /> : <Navigate to="/login" />} />
