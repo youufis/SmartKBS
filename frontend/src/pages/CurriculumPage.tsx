@@ -259,6 +259,10 @@ const CurriculumPage: React.FC = () => {
       if (result && result.file_url) {
         setPracticeHtmlUrl(result.file_url)
         message.success(`已生成 ${result.total || 10} 道练习题`)
+        // 自动刷新资源列表，显示刚共享绑定的练习
+        curriculumApi.getKpResources(kpId).then((res) => {
+          setKpResources(res.resources)
+        }).catch(() => {})
       } else if (result && result.error) {
         message.error(result.error)
         setPracticeModal(false)
@@ -1405,9 +1409,9 @@ const CurriculumPage: React.FC = () => {
                             </Tooltip>
                           )}
                           {isTeacherOrAdmin && (
-                            <Tooltip title="AI 智能生成练习（混合模式，自动组合AI+题库）">
+                            <Tooltip title="AI生成练习题">
                               <Button type="link" size="small" icon={<FormOutlined />}
-                                onClick={() => handleSmartPractice(selectedKp.id)}>
+                                onClick={() => handleAiPractice(selectedKp.id)}>
                                 AI 练习
                               </Button>
                             </Tooltip>
