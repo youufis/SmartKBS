@@ -2156,86 +2156,155 @@ async def ai_generate_practice(kp_id: int, request: Request):
     async def _generate() -> dict[str, Any]:
         try:
             logger.info(f"AI 练习开始生成: kp_id={kp_id}, kp_name={kp['name']}")
-            result_text = await call_ai_async(prompt, api_key)
-            logger.info(f"AI 响应已收到，长度={len(result_text)}")
-
-            questions = _parse_ai_questions(result_text)
-            if not questions:
-                logger.error("AI 返回格式异常，未能解析出题目")
-                return {"error": "AI 返回格式异常，未能解析出题目"}
-
-            # 限制最多10道，且必须全部为 single 类型
-            questions = questions[:10]
-            for q in questions:
-                q["type"] = "single"
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            question_ids = []
+            all_question_ids: list[int] = []
+            used_texts: set[str] = set()
+            max_rounds = 3
 
-            # 逐题入库（含去重：相同题目文本不再重复插入）
-            kp_name_for_dedup = kp["name"]
-            for q in questions:
-                q_text = q.get("question", "").strip()
-                if not q_text:
-                    continue
-                # 检查题库中是否已有相同题目文本
-                dup = q_execute_query(
-                    "SELECT id FROM question_bank WHERE knowledge_points LIKE ? AND question_text=? AND status='active'",
-                    (f"%{kp_name_for_dedup}%", q_text),
-                )
-                if dup:
-                    logger.info(f"跳过重复题目 (kp={kp_name_for_dedup}): {q_text[:40]}...")
-                    qid = dup[0]["id"]
+            for round_idx in range(max_rounds):
+                current_count = len(all_question_ids)
+                remaining = 10 - current_count
+                if remaining <= 0:
+                    break
+
+                # 多轮调用时，如果已有一些题目，调整 prompt 要求数量
+                if current_count == 0:
+                    round_prompt = prompt
+                else:
+                    round_prompt = prompt.replace(
+                        "生成10道单项选择题",
+                        f"再生成{remaining}道单项选择题（不要与已出的题重复）",
+                    )
+
+                logger.info(f"AI 生成第{round_idx+1}轮: 已有{current_count}道, 还需{remaining}道")
+                result_text = await call_ai_async(round_prompt, api_key)
+                logger.info(f"AI 第{round_idx+1}轮响应长度={len(result_text)}")
+
+                questions = _parse_ai_questions(result_text)
+                if not questions:
+                    logger.warning(f"AI 第{round_idx+1}轮返回格式异常")
+                    if current_count == 0:
+                        return {"error": "AI 返回格式异常，未能解析出题目"}
+                    break
+
+                # 强制 single 类型，限制数量
+                for q in questions:
+                    q["type"] = "single"
+                questions = questions[:remaining]
+
+                # 逐题入库（含去重）
+                kp_name_for_dedup = kp["name"]
+                round_new_ids: list[int] = []
+                for q in questions:
+                    q_text = q.get("question", "").strip()
+                    if not q_text or q_text in used_texts:
+                        continue
+                    used_texts.add(q_text)
+
+                    # 检查题库中是否已有相同题目文本
+                    dup = q_execute_query(
+                        "SELECT id FROM question_bank WHERE question_text=? AND status='active'",
+                        (q_text,),
+                    )
+                    if dup:
+                        logger.info(f"跳过重复题目: {q_text[:40]}...")
+                        qid = dup[0]["id"]
+                        q["id"] = qid
+                        q["index"] = qid
+                        if qid not in all_question_ids:
+                            round_new_ids.append(qid)
+                            all_question_ids.append(qid)
+                        continue
+
+                    opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
+                    svg_code = q.get("svg_code") or ""
+                    has_svg = 1 if svg_code.strip() else 0
+                    media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
+                    qid = q_insert(
+                        """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
+                            knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
+                            svg_content,has_svg,media_placeholders)
+                           VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
+                        ("single", q.get("question", ""), opts,
+                         q.get("answer", ""), q.get("explanation", ""),
+                         kp["name"], subject,
+                         q.get("difficulty", "medium"), username, now, now,
+                         svg_code, has_svg, media_placeholders),
+                    )
                     q["id"] = qid
                     q["index"] = qid
-                    question_ids.append(qid)
-                    continue
-                opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-                svg_code = q.get("svg_code") or ""
-                has_svg = 1 if svg_code.strip() else 0
-                media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
-                qid = q_insert(
-                    """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
-                        knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
-                        svg_content,has_svg,media_placeholders)
-                       VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
-                    ("single", q.get("question", ""), opts,
-                     q.get("answer", ""), q.get("explanation", ""),
-                     kp["name"], subject,
-                     q.get("difficulty", "medium"), username, now, now,
-                     svg_code, has_svg, media_placeholders),
-                )
-                q["id"] = qid
-                q["index"] = qid
-                if "svg_code" in q and "svg_content" not in q:
-                    q["svg_content"] = q["svg_code"]
-                if "has_svg" not in q:
-                    q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+                    if "svg_code" in q and "svg_content" not in q:
+                        q["svg_content"] = q["svg_code"]
+                    if "has_svg" not in q:
+                        q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
 
-                # 自动生图（有占位符时）
-                placeholders = q.get("media_placeholders") or []
-                media_files = []
-                if placeholders:
-                    try:
-                        from backend.api.image_gen_service import generate_placeholders_batch
-                        from backend.config import BASE_DIR
-                        media_dir = BASE_DIR / "question_media" / str(qid)
-                        media_files = await generate_placeholders_batch(
-                            placeholders=placeholders,
-                            subject=subject,
-                            media_dir=media_dir,
-                            qid=qid,
-                            now=now,
-                        )
-                        q_update(
-                            "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-                            (json.dumps(placeholders, ensure_ascii=False),
-                             json.dumps(media_files, ensure_ascii=False), qid)
-                        )
-                    except Exception as img_err:
-                        logger.warning(f"自动生图失败: {img_err}")
-                q["media_files"] = media_files
-                question_ids.append(qid)
+                    # 自动生图（有占位符时）
+                    placeholders = q.get("media_placeholders") or []
+                    media_files = []
+                    if placeholders:
+                        try:
+                            from backend.api.image_gen_service import generate_placeholders_batch
+                            from backend.config import BASE_DIR
+                            media_dir = BASE_DIR / "question_media" / str(qid)
+                            media_files = await generate_placeholders_batch(
+                                placeholders=placeholders,
+                                subject=subject,
+                                media_dir=media_dir,
+                                qid=qid,
+                                now=now,
+                            )
+                            q_update(
+                                "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                                (json.dumps(placeholders, ensure_ascii=False),
+                                 json.dumps(media_files, ensure_ascii=False), qid)
+                            )
+                        except Exception as img_err:
+                            logger.warning(f"自动生图失败: {img_err}")
+                    q["media_files"] = media_files
+                    round_new_ids.append(qid)
+                    all_question_ids.append(qid)
+
+                # 如果这轮没有新增有效题目，提前结束
+                if not round_new_ids and current_count > 0:
+                    logger.warning(f"AI 第{round_idx+1}轮无新题目，停止生成")
+                    break
+
+                if round_idx < max_rounds - 1 and len(all_question_ids) < 10:
+                    await asyncio.sleep(1)
+
+            if not all_question_ids:
+                logger.error("AI 练习生成失败：未能生成任何题目")
+                return {"error": "AI 返回格式异常，未能解析出题目"}
+            if len(all_question_ids) < 10:
+                logger.error(f"AI 练习仅生成 {len(all_question_ids)} 道题，不足10道")
+                return {"error": f"AI 练习必须包含10道题，当前仅生成{len(all_question_ids)}道，请稍后重试"}
+
+            # 从数据库读取完整题目信息（含已入库的题目）
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            placeholders_str = ",".join("?" for _ in all_question_ids)
+            final_questions = q_execute_query(
+                f"""SELECT * FROM question_bank
+                    WHERE id IN ({placeholders_str}) AND status='active'
+                    ORDER BY CASE id {' '.join(f'WHEN ? THEN {i}' for i, _ in enumerate(all_question_ids))} END""",
+                tuple(all_question_ids) + tuple(all_question_ids),
+            )
+            for q in final_questions:
+                for field in ["options", "media_placeholders", "media_files"]:
+                    val = q.get(field)
+                    if val and isinstance(val, str):
+                        try:
+                            q[field] = json.loads(val)
+                        except (json.JSONDecodeError, TypeError):
+                            q[field] = {} if field == "options" else []
+                if q.get("options") is None:
+                    q["options"] = {}
+                if "question_text" in q and "question" not in q:
+                    q["question"] = q["question_text"]
+                if "correct_answer" in q and "answer" not in q:
+                    q["answer"] = q["correct_answer"]
+                if "svg_content" in q and "svg_code" not in q:
+                    q["svg_code"] = q.get("svg_content") or ""
 
             # 创建练习任务（用于成绩记录和积分发放）
             title = f"{kp['name']} 练习"
@@ -2245,12 +2314,12 @@ async def ai_generate_practice(kp_id: int, request: Request):
                     total_score, target_grade, target_class, target_students, source, status, created_at, updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?)""",
                 (title, kp["name"], username, subject,
-                 len(question_ids), len(question_ids) * 10,
+                 len(all_question_ids), len(all_question_ids) * 10,
                  "", "", "", now, now),
             )
 
             # 建立题目关联
-            for i, qid in enumerate(question_ids):
+            for i, qid in enumerate(all_question_ids):
                 from backend.question_db import execute_insert as q_insert2
                 q_insert2(
                     "INSERT INTO practice_session_questions (session_id, question_id, sort_order, score) VALUES (?,?,?,?)",
@@ -2258,12 +2327,12 @@ async def ai_generate_practice(kp_id: int, request: Request):
                 )
 
             # 更新总分
-            q_update("UPDATE practice_sessions SET total_score=? WHERE id=?", (len(question_ids) * 10, session_id))
+            q_update("UPDATE practice_sessions SET total_score=? WHERE id=?", (len(all_question_ids) * 10, session_id))
 
             # 生成 HTML 答题页面
             if session_id is None:
                 return {"error": "创建练习任务失败"}
-            html_content = _generate_practice_html(kp, questions, session_id, subject, kp_id)
+            html_content = _generate_practice_html(kp, final_questions, session_id, subject, kp_id)
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
             safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -2276,13 +2345,13 @@ async def ai_generate_practice(kp_id: int, request: Request):
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
-            logger.info(f"AI 练习已生成: session_id={session_id}, file={filepath}")
+            logger.info(f"AI 练习已生成: session_id={session_id}, file={filepath}, total={len(all_question_ids)}")
             return {
                 "session_id": session_id,
                 "file_url": file_url,
                 "filename": filename,
-                "questions": questions,
-                "total": len(questions),
+                "questions": final_questions,
+                "total": len(all_question_ids),
                 "kp_name": kp["name"],
             }
         except Exception as e:
@@ -2918,11 +2987,11 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
     bank_questions = bank_questions[:10]
     bank_count = len(bank_questions)
 
-    # ── 第2步：计算差额，AI 补全 ──
+    # ── 第2步：计算差额，AI 补全（支持多轮重试，确保凑满10题） ──
     ai_questions = []
-    gap = max(0, 10 - bank_count)
+    existing_texts = {q.get("question_text", q.get("question", "")) for q in bank_questions if q.get("id")}
 
-    if gap > 0:
+    if bank_count < 10:
         try:
             from backend.api.ai_service import call_ai_async
 
@@ -2932,8 +3001,14 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
             def _safe(s):
                 return str(s or "").replace('{', '{{').replace('}', '}}')
 
-            # 使用针对性更强的 prompt，明确要求只生成 gap 道
-            smart_prompt = f"""你是一位经验丰富的高中{_safe(subject)}教师。请根据以下知识点，生成{gap}道单项选择题（每题4个选项），用于学生课后练习巩固。
+            max_ai_rounds = 3
+            for round_idx in range(max_ai_rounds):
+                current_total = bank_count + len(ai_questions)
+                gap = 10 - current_total
+                if gap <= 0:
+                    break
+
+                smart_prompt = f"""你是一位经验丰富的高中{_safe(subject)}教师。请根据以下知识点，生成{gap}道单项选择题（每题4个选项），用于学生课后练习巩固。
 
 ## 课程信息
 - 课程名称：{_safe(kp['course_name'])}
@@ -2980,16 +3055,32 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 - knowledge_point 字段必须填「{_safe(kp_name)}」
 """
 
-            logger.info(f"智能练习 AI 补全开始: kp_id={kp_id}, kp_name={kp_name}, gap={gap}")
-            result_text = await call_ai_async(smart_prompt, api_key)
-            parsed = _parse_ai_questions(result_text)
-            if parsed:
-                ai_questions = parsed[:gap]
-                logger.info(f"AI 补全成功: 生成 {len(ai_questions)} 道题")
-            else:
-                logger.warning("AI 返回格式异常，未能解析出题目，降级为纯题库模式")
+                logger.info(f"智能练习 AI 补全 第{round_idx+1}轮: kp_id={kp_id}, gap={gap}")
+                try:
+                    result_text = await call_ai_async(smart_prompt, api_key)
+                    parsed = _parse_ai_questions(result_text)
+                    if parsed:
+                        # 去重：过滤掉与已有题目重复的
+                        new_ones = []
+                        for q in parsed:
+                            q_text = q.get("question", "").strip()
+                            if q_text and q_text not in existing_texts:
+                                new_ones.append(q)
+                                existing_texts.add(q_text)
+                        ai_questions.extend(new_ones[:gap])
+                        logger.info(f"AI 补全第{round_idx+1}轮: AI返回{len(parsed)}道, 去重新增{len(new_ones[:gap])}道, 累计AI={len(ai_questions)}道")
+                    else:
+                        logger.warning(f"AI 第{round_idx+1}轮返回格式异常")
+                except Exception as e:
+                    logger.error(f"AI 第{round_idx+1}轮调用失败: {e}")
+
+                # 如果这轮没产生新题，等一会儿再试
+                if len(ai_questions) + bank_count < current_total:
+                    await asyncio.sleep(1)
+
+            logger.info(f"AI 补全结束: 共生成 {len(ai_questions)} 道 (已去重)")
         except Exception as e:
-            logger.error(f"AI 补全失败: {e}，降级为纯题库模式")
+            logger.error(f"AI 补全整体失败: {e}，降级使用已有题目")
     else:
         logger.info(f"题库已满足10题要求，跳过 AI 生成 (bank_count={bank_count})")
 
@@ -3070,7 +3161,10 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         logger.error("智能练习生成失败：题库为空且 AI 未能生成任何题目")
         raise HTTPException(status_code=502, detail="无法获取题目，题库中未找到相关题目且 AI 生成失败，请稍后重试或检查 API Key 配置")
 
-    all_question_ids = all_question_ids[:10]  # 最多10题
+    all_question_ids = all_question_ids[:10]
+    if len(all_question_ids) < 10:
+        logger.error(f"智能练习仅凑到 {len(all_question_ids)} 道题，不足10道")
+        raise HTTPException(status_code=502, detail=f"AI 练习必须包含10道题，当前仅生成{len(all_question_ids)}道，请稍后重试")
 
     # ── 第4步：创建练习任务 + 生成 HTML ──
     title = f"{kp_name} 智能练习"
