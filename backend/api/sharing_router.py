@@ -74,6 +74,14 @@ def cleanup_empty_dir_shares(owner_username: str = None):
             clean_path = file_path.strip("/")
             full_dir = os.path.join(str(BASE_DIR), owner, dir_name, clean_path)
             if not os.path.isdir(full_dir) or not os.listdir(full_dir):
+                # 清理关联的课程绑定
+                try:
+                    execute_insert_update(
+                        "DELETE FROM curriculum_bindings WHERE resource_type=? AND resource_id=?",
+                        (res_type, rid),
+                    )
+                except Exception:
+                    pass
                 execute_insert_update("DELETE FROM shared_resources WHERE id=?", (rid,))
                 removed += 1
                 logger.info(f"自动清理空目录共享: id={rid}, owner={owner}, path={file_path}")
@@ -246,26 +254,27 @@ async def unshare_resource(request: Request, id: int = Query(...)):
         )
         logger.info(f"共享已取消: id={id}, by={username}")
 
-        # 如果是 HTML 练习资源，清理关联的学生作答记录
-        if resource_type == "html":
-            try:
-                rows2 = execute_query(
-                    "SELECT knowledge_point_id FROM curriculum_bindings WHERE resource_type='html' AND resource_id=?",
-                    (id,),
-                )
-                if rows2:
-                    kp_ids = [r["knowledge_point_id"] for r in rows2]
+        # 清理关联的课程绑定
+        try:
+            bind_rows = execute_query(
+                "SELECT knowledge_point_id FROM curriculum_bindings WHERE resource_type=? AND resource_id=?",
+                (resource_type, id),
+            )
+            if bind_rows:
+                # 仅 HTML 资源（练习）需要清理学生作答记录
+                if resource_type == "html":
+                    kp_ids = [r["knowledge_point_id"] for r in bind_rows]
                     from backend.question_db import execute_insert as q_del
                     for kpid in kp_ids:
                         q_del("DELETE FROM ai_practice_results WHERE kp_id=?", (kpid,))
-                    # 同时清理关联的绑定记录
-                    execute_insert_update(
-                        "DELETE FROM curriculum_bindings WHERE resource_type='html' AND resource_id=?",
-                        (id,),
-                    )
-                    logger.info(f"已清理 HTML 资源 id={id} 关联的 {len(kp_ids)} 个知识点的学生记录")
-            except Exception as e2:
-                logger.warning(f"清理关联记录时出错: {e2}")
+                # 清理绑定记录
+                execute_insert_update(
+                    "DELETE FROM curriculum_bindings WHERE resource_type=? AND resource_id=?",
+                    (resource_type, id),
+                )
+                logger.info(f"已清理 {resource_type} 资源 id={id} 关联的 {len(bind_rows)} 个课程绑定")
+        except Exception as e2:
+            logger.warning(f"清理关联记录时出错: {e2}")
 
         # 取消共享后清理空目录共享
         cleanup_empty_dir_shares(owner)
