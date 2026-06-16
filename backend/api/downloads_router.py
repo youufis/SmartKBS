@@ -282,9 +282,9 @@ async def api_delete(request: Request):
             pass
         # 清理该文件的共享记录和关联的课程绑定
         try:
-            from backend.database import execute_insert_update, execute_query
+            from backend.database import execute_insert_update, execute_query_dict
             # 查找所有指向该文件的共享记录
-            share_rows = execute_query(
+            share_rows = execute_query_dict(
                 "SELECT id FROM shared_resources WHERE owner_username=? AND (file_path=? OR file_path LIKE ?)",
                 (username, rel, f"%/{rel}"),
             )
