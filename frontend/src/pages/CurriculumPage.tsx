@@ -390,7 +390,7 @@ const CurriculumPage: React.FC = () => {
     }
   }
 
-  // ── 智能练习（默认混合模式，自动组合AI+题库，无需用户干预） ──
+  // ── 智能练习（增强混合模式，自动组合AI+题库，无需用户干预） ──
   const handleSmartPractice = async (kpId: number) => {
     setPracticeLoading(true)
     setPracticeHtmlUrl('')
@@ -400,50 +400,25 @@ const CurriculumPage: React.FC = () => {
     if (!kp) { setPracticeModal(false); return }
 
     try {
-      // 1. 并行：AI生成 + 题库搜索
-      const aiCount = 5
-      const [aiResult, bankResult] = await Promise.all([
-        apiClient.post('/api/practice/generate', {
-          knowledge_points: kp.name,
-          subject: activeCourse?.subject || '信息科技',
-          question_type: 'single',
-          count: aiCount,
-          difficulty: kp.difficulty || 'medium',
-        }).catch(() => ({ data: { questions: [] } })),
-        apiClient.get('/api/questions', {
-          params: { type: 'single', keyword: kp.name, page_size: 15 }
-        }).catch(() => ({ data: { questions: [] } })),
-      ])
-
-      const aiQuestions: any[] = aiResult?.data?.questions || []
-      const bankQuestions: any[] = (bankResult?.data?.questions || []).filter((q: any) => q.id)
-
-      // 2. 智能组合：AI题优先，不足从题库补齐，最多10题
-      const remaining = Math.max(0, 10 - aiQuestions.length)
-      const selectedFromBank = bankQuestions.slice(0, Math.min(remaining, 10))
-      const allIds = [
-        ...aiQuestions.map((q: any) => q.id),
-        ...selectedFromBank.map((q: any) => q.id)
-      ].filter(Boolean)
-
-      if (allIds.length === 0) {
-        message.error('无法生成练习：未能获取到任何题目')
-        setPracticeModal(false)
-        return
-      }
-
-      // 3. 一键生成练习
-      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/from-bank`, {
-        question_ids: allIds,
-      })
+      // 调用后端增强智能生成端点，由服务端完成：
+      // 1. 多渠道搜索题库（knowledge_points + question_text 双重匹配）
+      // 2. AI 补全差额（最多10题）
+      // 3. 去重合并、创建练习、生成HTML
+      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/smart-generate`)
       if (data.file_url) {
         setPracticeHtmlUrl(data.file_url)
         setMixedAiQuestions([])
         setMixedBankIds([])
-        message.success(`智能练习已生成（${allIds.length} 题）`)
+        message.success(data.message || `智能练习已生成（${data.total} 题）`)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '智能练习生成失败')
+      // 如果后端返回了详细错误，直接显示
+      const detail = err?.response?.data?.detail
+      if (detail) {
+        message.error(detail)
+      } else {
+        message.error('智能练习生成失败，请稍后重试')
+      }
       setPracticeModal(false)
     } finally {
       setPracticeLoading(false)
@@ -1844,7 +1819,7 @@ const CurriculumPage: React.FC = () => {
             <div style={{ marginTop: 16, color: '#666' }}>
               {practiceMode === 'ai' ? 'AI 正在生成练习题，请稍候...'
                : practiceMode === 'bank' ? '正在生成练习...'
-               : '🧠 智能策略分析中，自动组合 AI+题库...'}
+               : '🧠 智能策略分析中（先搜题库 → AI 补全 → 自动组合）...'}
               <br /><span style={{ fontSize: 13 }}>自动生成HTML答题页面</span>
             </div>
           </div>
@@ -1862,7 +1837,7 @@ const CurriculumPage: React.FC = () => {
                   🧠 智能生成练习
                 </Button>
                 <div style={{ marginTop: 8, color: '#999', fontSize: 13 }}>
-                  默认混合模式 · AI自动生成+题库补充 · 一键完成
+                  增强混合模式 · 先搜题库 → AI补全差额 → 自动去重组合
                 </div>
               </div>
               <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 20 }}>
