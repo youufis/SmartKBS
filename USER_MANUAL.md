@@ -256,7 +256,8 @@ AI 助教辅助的课堂分组讨论：
    python backend/main.py
    ```
 
-   或使用 Uvicorn：`python -m uvicorn backend.main:app --host 0.0.0.0 --port 8086 --reload`
+   或使用 Uvicorn：
+   `python -m uvicorn backend.main:app --host 0.0.0.0 --port 8086 --reload`
 
 2. **启动前端开发服务器**（可选）
 
@@ -300,17 +301,24 @@ AI 助教辅助的课堂分组讨论：
 ### V5.5.0 (2026-06-16)
 
 #### ✨ 新增功能
-- **增强型智能练习生成**：新增 `/smart-generate` 端点，多渠道搜索题库（knowledge_points + question_text + 核心关键词提取），AI 仅填补差额，去重合并，最多 10 题
-- **AI 生图增强**：支持 3 次自动重试（指数退避 2s/4s/8s）、模型降级链（主模型→wanx2.1-t2i-turbo→wan2.2-t2i-flash）、全局并发控制（Semaphore 2），细化超时管理（生成 180s / 下载 60s）
+
+- **增强型智能练习生成**：新增 `/smart-generate` 端点，
+  多渠道搜索题库（knowledge_points + question_text + 核心关键词提取），
+  AI 仅填补差额，去重合并，最多 10 题
+- **AI 生图增强**：支持 3 次自动重试（指数退避 2s/4s/8s）、
+  模型降级链（主模型→wanx2.1-t2i-turbo→wan2.2-t2i-flash）、
+  全局并发控制（Semaphore 2），细化超时管理（生成 180s / 下载 60s）
 - **批量生图处理**：新增 `generate_placeholders_batch` 函数，顺序处理每张图间隔 1s，独立重试互不影响
 
 #### 🔧 优化改进
+
 - **配图策略统一**：所有 Prompt 统一为"优先使用 SVG，仅当需真实图片时才用 media_placeholders"，删除强制配图覆盖率要求
 - **SVG 优先原则**：技术图示类题目优先用 SVG（零成本纯代码），避免滥用 AI 生图配额
 - **10 题强制保障**：AI 练习两个端点均增加多轮重试机制，确保生成满 10 道单选题，不足则明确报错
 - **题库搜索增强**：智能练习通过三个策略搜索已有题目，提高复用率
 
 #### 🐛 问题修复
+
 - 修复智能练习并行调用导致题库搜索不到新生成题目的问题
 - 修复 AI 生图失败时无重试机制的问题
 - 修复 `/api/practice/generate` 返回空题时被静默吞掉的错误
