@@ -185,16 +185,17 @@ PRACTICE_SINGLE_CHOICE_PROMPT = """你是一位经验丰富的高中{subject}教
 6. 题目难度分布：约3道简单、4道中等、3道困难
 7. 题目文字中涉及公式使用 $...$ LaTeX 语法
 
-## 配图规则（⚠️ 重要！必须遵守）
+## 配图规则（⚠️ 优先使用 SVG）
 每道题可输出 svg_code 和 media_placeholders 字段（都可以为 null）：
 
-【svg_code】— 技术图示
+【svg_code — **优先使用**】
 适用于：电路图、流程图、光路图、函数图像、结构框图等技术图示。
 viewBox="0 0 600 400"，中文标注。
+*技术图示类题目优先用 svg_code*（纯代码生成，零成本）
 **⚠️ 安全约束**：SVG 配图中**严禁**出现题目答案、解析、解题过程或任何会泄露正确选项的文字内容。
 
-【media_placeholders】— 真实图片（调用 AI 生图）
-适用于：硬件外观、电子元器件实物、实验装置、场景照片等。
+【media_placeholders】— 真实图片（调用 AI 生图，**谨慎使用**）
+**仅当需要硬件外观、实验装置等真实图片时才用**，会消耗 AI 生图配额。
 description 写 50-100 字详细描述。
 
 ## 输出格式
@@ -219,5 +220,5 @@ description 写 50-100 字详细描述。
 - options 必须有 A,B,C,D 四个选项
 - answer 为正确选项字母（A/B/C/D）
 - svg_code 和 media_placeholders 可以为 null
-- **不需要配图的题目 svg_code 和 media_placeholders 留 null 即可，不要强行生成**
+- **不需要配图的题目留 null 即可，不要强行生成；能用 SVG 解决的问题不用 media_placeholders**
 """
