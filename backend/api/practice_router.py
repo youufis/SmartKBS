@@ -151,29 +151,16 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
         placeholders = q.get("media_placeholders") or []
         media_files = []
         if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
-            from backend.api.image_gen_service import generate_and_save_image
-            from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+            from backend.api.image_gen_service import generate_placeholders_batch
             from backend.config import BASE_DIR
-            from pathlib import Path as PPath
             media_dir = BASE_DIR / "question_media" / str(qid)
-            for ph in placeholders:
-                ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-                    subject=req.subject,
-                    purpose=ph.get("purpose", "示意图"),
-                    description=ph["description"],
-                )
-                local_path = await generate_and_save_image(ph_prompt, media_dir)
-                if local_path:
-                    ph["status"] = "generated"
-                    media_files.append({
-                        "key": ph["key"],
-                        "type": "image",
-                        "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
-                        "alt": ph["description"],
-                        "created_at": now,
-                    })
-                else:
-                    ph["status"] = "failed"
+            media_files = await generate_placeholders_batch(
+                placeholders=placeholders,
+                subject=req.subject,
+                media_dir=media_dir,
+                qid=qid,
+                now=now,
+            )
             # 更新占位符状态和 media_files
             execute_update(
                 "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
@@ -248,29 +235,16 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
             placeholders = q.get("media_placeholders") or []
             media_files = []
             if placeholders and get_config_value("IMAGE_GEN_ENABLED", True):
-                from backend.api.image_gen_service import generate_and_save_image
-                from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
+                from backend.api.image_gen_service import generate_placeholders_batch
                 from backend.config import BASE_DIR
-                from pathlib import Path as PPath
                 media_dir = BASE_DIR / "question_media" / str(qid)
-                for ph in placeholders:
-                    ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-                        subject=req.subject,
-                        purpose=ph.get("purpose", "示意图"),
-                        description=ph["description"],
-                    )
-                    local_path = await generate_and_save_image(ph_prompt, media_dir)
-                    if local_path:
-                        ph["status"] = "generated"
-                        media_files.append({
-                            "key": ph["key"],
-                            "type": "image",
-                            "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
-                            "alt": ph["description"],
-                            "created_at": now,
-                        })
-                    else:
-                        ph["status"] = "failed"
+                media_files = await generate_placeholders_batch(
+                    placeholders=placeholders,
+                    subject=req.subject,
+                    media_dir=media_dir,
+                    qid=qid,
+                    now=now,
+                )
                 execute_update(
                     "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
                     (json.dumps(placeholders, ensure_ascii=False),
