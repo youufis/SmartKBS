@@ -34,40 +34,40 @@ const { Header, Sider, Content } = Layout
 
 // 学生菜单分组（注意：标签中不要使用 emoji，折叠后会显示为 ?）
 const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
-  { icon: <HomeOutlined />, label: '概览', key: 'overview', children: [
-    { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
+  { icon: <HomeOutlined />, label: '首页概览', key: 'overview', children: [
+    { key: '/dashboard', icon: <HomeOutlined />, label: '系统首页' },
   ]},
   { icon: <BookOutlined />, label: '学习中心', key: 'learn', children: [
     { key: '/curriculum', icon: <BookOutlined />, label: '课程导学' },
-    { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
+    { key: '/chat', icon: <MessageOutlined />, label: '知识问答' },
     { key: '/wrong-book', icon: <BookOutlined />, label: '错题巩固' },
     { key: '/shared-center', icon: <FileOutlined />, label: '共享中心' },
   ]},
-  { icon: <FileAddOutlined />, label: '考试练习', key: 'exam-practice', children: [
-    { key: '/exam', icon: <FileAddOutlined />, label: '在线考试' },
-    { key: '/tasks', icon: <CheckCircleOutlined />, label: '在线任务' },
+  { icon: <FileAddOutlined />, label: '考核测评', key: 'exam-practice', children: [
+    { key: '/exam', icon: <FileAddOutlined />, label: '考试中心' },
+    { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务中心' },
+    { key: '/quest', icon: <ThunderboltOutlined />, label: '闯关挑战' },
+    { key: '/practice', icon: <ThunderboltOutlined />, label: '同步练习' },
+  ]},
+  { icon: <FileAddOutlined />, label: '编程实践', key: 'coding', children: [
     { key: '/code-practice', icon: <FileAddOutlined />, label: '代码练习' },
-    { key: '/quest', icon: <ThunderboltOutlined />, label: '知识闯关' },
-    { key: '/practice', icon: <ThunderboltOutlined />, label: '智能练习' },
   ]},
   { icon: <ThunderboltOutlined />, label: '互动课堂', key: 'interactive', children: [
     { key: '/interaction', icon: <ThunderboltOutlined />, label: '随堂测验' },
-    { key: '/quick-poll', icon: <BarChartOutlined />, label: '快速投票' },
-    { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '知识抢答' },
+    { key: '/quick-poll', icon: <BarChartOutlined />, label: '课堂投票' },
+    { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '抢答竞赛' },
     { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
-  ]},
-  { icon: <MessageOutlined />, label: '师生问答', key: 'qa', children: [
     { key: '/student-questions', icon: <MessageOutlined />, label: '课堂提问' },
   ]},
   { icon: <TrophyOutlined />, label: '成长档案', key: 'growth', children: [
-    { key: '/score', icon: <StarOutlined />, label: '积分奖励' },
-    { key: '/portfolio', icon: <UserOutlined />, label: '我的档案' },
+    { key: '/score', icon: <StarOutlined />, label: '积分中心' },
+    { key: '/portfolio', icon: <UserOutlined />, label: '个人档案' },
   ]},
-  { icon: <SettingOutlined />, label: '系统', key: 'sys', children: [
+  { icon: <SettingOutlined />, label: '系统服务', key: 'sys', children: [
     { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
     { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
     { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
-    { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
+    { key: '/about', icon: <InfoCircleOutlined />, label: '关于系统' },
   ]},
 ]
 
@@ -82,48 +82,44 @@ type TeacherMenuItem = {
 }
 
 const teacherMenuItems: TeacherMenuItem[] = [
-    { type: 'group', icon: <HomeOutlined />, label: '概览', key: 'overview', children: [
-      { key: '/dashboard', icon: <HomeOutlined />, label: '首页' },
+    { type: 'group', icon: <HomeOutlined />, label: '首页概览', key: 'overview', children: [
+      { key: '/dashboard', icon: <HomeOutlined />, label: '系统首页' },
     ]},
     { type: 'group', icon: <BookOutlined />, label: '教学管理', key: 'teach', children: [
       { key: '/curriculum', icon: <BookOutlined />, label: '课程管理' },
-      { key: '/chat', icon: <MessageOutlined />, label: '智能问答' },
-      { key: '/practice', icon: <ThunderboltOutlined />, label: '智能练习' },
+      { key: '/chat', icon: <MessageOutlined />, label: '知识问答' },
+      { key: '/practice', icon: <ThunderboltOutlined />, label: '同步练习' },
       { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理' },
       { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
+      { key: '/wrong-book', icon: <BookOutlined />, label: '错题管理' },
       { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
     ]},
-    { type: 'group', icon: <FileAddOutlined />, label: '编程练习', key: 'coding', children: [
+    { type: 'group', icon: <FileAddOutlined />, label: '编程实践', key: 'coding', children: [
       { key: '/code-practice', icon: <FileAddOutlined />, label: '代码练习' },
     ]},
     { type: 'group', icon: <ThunderboltOutlined />, label: '课堂活动', key: 'classroom', children: [
       { key: '/interaction', icon: <ThunderboltOutlined />, label: '随堂测验' },
-      { key: '/quick-poll', icon: <BarChartOutlined />, label: '快速投票' },
-      { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '知识抢答' },
+      { key: '/quick-poll', icon: <BarChartOutlined />, label: '课堂投票' },
+      { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '抢答竞赛' },
       { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
-    ]},
-    { type: 'group', icon: <MessageOutlined />, label: '课堂提问', key: 'qa', children: [
       { key: '/student-questions', icon: <MessageOutlined />, label: '提问管理' },
-    ]},
-    { type: 'group', icon: <CheckCircleOutlined />, label: '班级事务', key: 'affairs', children: [
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
-      { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
-      { key: '/quest', icon: <TrophyOutlined />, label: '闯关记录', adminOrTeacherOnly: true },
-      { key: '/wrong-book', icon: <BookOutlined />, label: '错题巩固' },
     ]},
     { type: 'group', icon: <BarChartOutlined />, label: '学情分析', key: 'analytics', children: [
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情总览' },
       { key: '/class-summary', icon: <RobotOutlined />, label: '课堂总结' },
       { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '课程进度' },
       { key: '/activity-monitor', icon: <BarChartOutlined />, label: '活动监控' },
-      { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
+      { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
+      { key: '/quest', icon: <TrophyOutlined />, label: '闯关记录', adminOrTeacherOnly: true },
     ]},
     { type: 'group', icon: <SettingOutlined />, label: '系统管理', key: 'admin', children: [
       { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
       { key: '/announcements', icon: <BellOutlined />, label: '公告管理' },
       { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
-      { key: '/about', icon: <InfoCircleOutlined />, label: '系统说明' },
+      { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
+      { key: '/about', icon: <InfoCircleOutlined />, label: '关于系统' },
     ]},
   ]
 
