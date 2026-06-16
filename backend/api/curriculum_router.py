@@ -3,6 +3,7 @@
 课程 → 章/节 → 知识点 四级树形结构管理
 支持资源绑定、学习进度追踪
 """
+import asyncio
 import json
 import os
 from datetime import datetime
@@ -2158,126 +2159,192 @@ async def ai_generate_practice(kp_id: int, request: Request):
             logger.info(f"AI 练习开始生成: kp_id={kp_id}, kp_name={kp['name']}")
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            all_question_ids: list[int] = []
-            used_texts: set[str] = set()
+            kp_name = kp["name"]
+
+            # ══════════════════════════════════════════════════════════
+            # 第1步：多渠道搜索题库，优先复用已有题目
+            # ══════════════════════════════════════════════════════════
+            from backend.question_db import execute_query as q_exec
+            bank_questions = []
+
+            # 策略A：按 knowledge_points 模糊匹配
+            bank_rows_a = q_exec(
+                """SELECT * FROM question_bank
+                   WHERE knowledge_points LIKE ? AND type='single' AND status='active'
+                   ORDER BY created_at DESC LIMIT 20""",
+                (f"%{kp_name}%",),
+            )
+            bank_questions.extend(bank_rows_a)
+
+            # 策略B：按 question_text 模糊匹配
+            bank_rows_b = q_exec(
+                """SELECT * FROM question_bank
+                   WHERE question_text LIKE ? AND type='single' AND status='active'
+                   ORDER BY created_at DESC LIMIT 20""",
+                (f"%{kp_name}%",),
+            )
+            seen_ids = {q["id"] for q in bank_questions if q.get("id")}
+            for q in bank_rows_b:
+                if q.get("id") and q["id"] not in seen_ids:
+                    bank_questions.append(q)
+                    seen_ids.add(q["id"])
+
+            # 解析 JSON 字段
+            for q in bank_questions:
+                for field in ["options", "media_placeholders", "media_files"]:
+                    val = q.get(field)
+                    if val and isinstance(val, str):
+                        try:
+                            q[field] = json.loads(val)
+                        except (json.JSONDecodeError, TypeError):
+                            q[field] = {} if field == "options" else []
+                if q.get("options") is None:
+                    q["options"] = {}
+                # 统一字段名
+                if "question_text" in q and "question" not in q:
+                    q["question"] = q["question_text"]
+                if "correct_answer" in q and "answer" not in q:
+                    q["answer"] = q["correct_answer"]
+                if "svg_content" in q and "svg_code" not in q:
+                    q["svg_code"] = q.get("svg_content") or ""
+
+            # 限制最多取10道
+            bank_questions = bank_questions[:10]
+            bank_count = len(bank_questions)
+
+            # ── 已入库的 bank 题目 ID ──
+            all_question_ids: list[int] = [q["id"] for q in bank_questions if q.get("id")]
+            used_texts: set[str] = {q.get("question_text", q.get("question", "")) for q in bank_questions if q.get("id")}
+
+            # ══════════════════════════════════════════════════════════
+            # 第2步：AI 补全差额（最多10题）
+            # ══════════════════════════════════════════════════════════
+            ai_question_ids: list[int] = []
             max_rounds = 3
 
-            for round_idx in range(max_rounds):
-                current_count = len(all_question_ids)
-                remaining = 10 - current_count
-                if remaining <= 0:
-                    break
+            if bank_count < 10:
+                gap = 10 - bank_count
 
-                # 多轮调用时，如果已有一些题目，调整 prompt 要求数量
-                if current_count == 0:
-                    round_prompt = prompt
-                else:
-                    round_prompt = prompt.replace(
-                        "生成10道单项选择题",
-                        f"再生成{remaining}道单项选择题（不要与已出的题重复）",
-                    )
+                for round_idx in range(max_rounds):
+                    current_count = len(all_question_ids) + len(ai_question_ids)
+                    remaining = 10 - current_count
+                    if remaining <= 0:
+                        break
 
-                logger.info(f"AI 生成第{round_idx+1}轮: 已有{current_count}道, 还需{remaining}道")
-                result_text = await call_ai_async(round_prompt, api_key)
-                logger.info(f"AI 第{round_idx+1}轮响应长度={len(result_text)}")
+                    # 构造本轮 prompt：第一轮用 gap，后续用 remaining
+                    if current_count == bank_count:
+                        round_prompt = prompt.replace(
+                            "生成10道单项选择题",
+                            f"生成{remaining}道单项选择题",
+                        )
+                    else:
+                        round_prompt = prompt.replace(
+                            "生成10道单项选择题",
+                            f"再生成{remaining}道单项选择题（不要与已出的题重复）",
+                        )
 
-                questions = _parse_ai_questions(result_text)
-                if not questions:
-                    logger.warning(f"AI 第{round_idx+1}轮返回格式异常")
-                    if current_count == 0:
-                        return {"error": "AI 返回格式异常，未能解析出题目"}
-                    break
+                    logger.info(f"AI 生成第{round_idx+1}轮: 已有题库{bank_count}道+AI{len(ai_question_ids)}道, 还需{remaining}道")
+                    result_text = await call_ai_async(round_prompt, api_key)
+                    logger.info(f"AI 第{round_idx+1}轮响应长度={len(result_text)}")
 
-                # 强制 single 类型，限制数量
-                for q in questions:
-                    q["type"] = "single"
-                questions = questions[:remaining]
+                    questions = _parse_ai_questions(result_text)
+                    if not questions:
+                        logger.warning(f"AI 第{round_idx+1}轮返回格式异常")
+                        if current_count == bank_count and len(ai_question_ids) == 0:
+                            return {"error": "AI 返回格式异常，未能解析出题目"}
+                        break
 
-                # 逐题入库（含去重）
-                kp_name_for_dedup = kp["name"]
-                round_new_ids: list[int] = []
-                for q in questions:
-                    q_text = q.get("question", "").strip()
-                    if not q_text or q_text in used_texts:
-                        continue
-                    used_texts.add(q_text)
+                    # 强制 single 类型，限制数量
+                    for q in questions:
+                        q["type"] = "single"
+                    questions = questions[:remaining]
 
-                    # 检查题库中是否已有相同题目文本
-                    dup = q_execute_query(
-                        "SELECT id FROM question_bank WHERE question_text=? AND status='active'",
-                        (q_text,),
-                    )
-                    if dup:
-                        logger.info(f"跳过重复题目: {q_text[:40]}...")
-                        qid = dup[0]["id"]
+                    round_new_ids: list[int] = []
+                    for q in questions:
+                        q_text = q.get("question", "").strip()
+                        if not q_text or q_text in used_texts:
+                            continue
+                        used_texts.add(q_text)
+
+                        # 检查题库中是否已有相同题目文本
+                        dup = q_execute_query(
+                            "SELECT id FROM question_bank WHERE question_text=? AND status='active'",
+                            (q_text,),
+                        )
+                        if dup:
+                            logger.info(f"跳过重复题目: {q_text[:40]}...")
+                            qid = dup[0]["id"]
+                            q["id"] = qid
+                            q["index"] = qid
+                            if qid not in round_new_ids:
+                                round_new_ids.append(qid)
+                                ai_question_ids.append(qid)
+                            continue
+
+                        opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
+                        svg_code = q.get("svg_code") or ""
+                        has_svg = 1 if svg_code.strip() else 0
+                        media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
+                        qid = q_insert(
+                            """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
+                                knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
+                                svg_content,has_svg,media_placeholders)
+                               VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
+                            ("single", q.get("question", ""), opts,
+                             q.get("answer", ""), q.get("explanation", ""),
+                             kp_name, subject,
+                             q.get("difficulty", "medium"), username, now, now,
+                             svg_code, has_svg, media_placeholders),
+                        )
+                        assert qid is not None, "插入题目失败，qid 为 None"
                         q["id"] = qid
                         q["index"] = qid
-                        if qid not in all_question_ids:
-                            round_new_ids.append(qid)
-                            all_question_ids.append(qid)
-                        continue
+                        if "svg_code" in q and "svg_content" not in q:
+                            q["svg_content"] = q["svg_code"]
+                        if "has_svg" not in q:
+                            q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
 
-                    opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
-                    svg_code = q.get("svg_code") or ""
-                    has_svg = 1 if svg_code.strip() else 0
-                    media_placeholders = json.dumps(q.get("media_placeholders") or [], ensure_ascii=False)
-                    qid = q_insert(
-                        """INSERT INTO question_bank (type,question_text,options,correct_answer,explanation,
-                            knowledge_points,subject,difficulty,creator_username,source,status,created_at,updated_at,
-                            svg_content,has_svg,media_placeholders)
-                           VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
-                        ("single", q.get("question", ""), opts,
-                         q.get("answer", ""), q.get("explanation", ""),
-                         kp["name"], subject,
-                         q.get("difficulty", "medium"), username, now, now,
-                         svg_code, has_svg, media_placeholders),
-                    )
-                    q["id"] = qid
-                    q["index"] = qid
-                    if "svg_code" in q and "svg_content" not in q:
-                        q["svg_content"] = q["svg_code"]
-                    if "has_svg" not in q:
-                        q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+                        # 自动生图（有占位符时）
+                        placeholders = q.get("media_placeholders") or []
+                        media_files = []
+                        if placeholders:
+                            try:
+                                from backend.api.image_gen_service import generate_placeholders_batch
+                                media_dir = BASE_DIR / "question_media" / str(qid)
+                                media_files = await generate_placeholders_batch(
+                                    placeholders=placeholders,
+                                    subject=subject,
+                                    media_dir=media_dir,
+                                    qid=qid,
+                                    now=now,
+                                )
+                                q_update(
+                                    "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                                    (json.dumps(placeholders, ensure_ascii=False),
+                                     json.dumps(media_files, ensure_ascii=False), qid)
+                                )
+                            except Exception as img_err:
+                                logger.warning(f"自动生图失败: {img_err}")
+                        q["media_files"] = media_files
+                        round_new_ids.append(qid)
+                        ai_question_ids.append(qid)
 
-                    # 自动生图（有占位符时）
-                    placeholders = q.get("media_placeholders") or []
-                    media_files = []
-                    if placeholders:
-                        try:
-                            from backend.api.image_gen_service import generate_placeholders_batch
-                            from backend.config import BASE_DIR
-                            media_dir = BASE_DIR / "question_media" / str(qid)
-                            media_files = await generate_placeholders_batch(
-                                placeholders=placeholders,
-                                subject=subject,
-                                media_dir=media_dir,
-                                qid=qid,
-                                now=now,
-                            )
-                            q_update(
-                                "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
-                                (json.dumps(placeholders, ensure_ascii=False),
-                                 json.dumps(media_files, ensure_ascii=False), qid)
-                            )
-                        except Exception as img_err:
-                            logger.warning(f"自动生图失败: {img_err}")
-                    q["media_files"] = media_files
-                    round_new_ids.append(qid)
-                    all_question_ids.append(qid)
+                    # 如果这轮没有新增有效题目，提前结束
+                    if not round_new_ids and len(ai_question_ids) > 0:
+                        logger.warning(f"AI 第{round_idx+1}轮无新题目，停止生成")
+                        break
 
-                # 如果这轮没有新增有效题目，提前结束
-                if not round_new_ids and current_count > 0:
-                    logger.warning(f"AI 第{round_idx+1}轮无新题目，停止生成")
-                    break
+                    if round_idx < max_rounds - 1 and len(all_question_ids) + len(ai_question_ids) < 10:
+                        await asyncio.sleep(1)
 
-                if round_idx < max_rounds - 1 and len(all_question_ids) < 10:
-                    await asyncio.sleep(1)
+            # ── 合并 bank + AI 题目 ID ──
+            all_question_ids = all_question_ids + ai_question_ids
 
             if not all_question_ids:
                 logger.error("AI 练习生成失败：未能生成任何题目")
                 return {"error": "AI 返回格式异常，未能解析出题目"}
             if len(all_question_ids) < 10:
-                logger.error(f"AI 练习仅生成 {len(all_question_ids)} 道题，不足10道")
+                logger.error(f"AI 练习仅生成 {len(all_question_ids)} 道题（题库 {bank_count} 道 + AI {len(ai_question_ids)} 道），不足10道")
                 return {"error": f"AI 练习必须包含10道题，当前仅生成{len(all_question_ids)}道，请稍后重试"}
 
             # 从数据库读取完整题目信息（含已入库的题目）
@@ -2320,13 +2387,72 @@ async def ai_generate_practice(kp_id: int, request: Request):
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
-            logger.info(f"AI 练习已生成: file={filepath}, total={len(all_question_ids)}")
+            # ── 自动共享到 shared_resources（按角色设置共享范围） ──
+            binding_id = None
+            try:
+                from backend.database import execute_insert_update as db_insert
+                from backend.permission_service import get_teacher_assignments
+
+                user_role = user.get("role", 2)
+                if user_role == 0:
+                    # 管理员：共享给所有人
+                    share_scope = "all"
+                    target_grade = ""
+                    target_class = ""
+                else:
+                    # 教师：共享给自己任教的年级/班级
+                    share_scope = "teacher"
+                    assignments = get_teacher_assignments(username)
+                    grades = sorted(set(a["grade_name"] for a in assignments if a.get("grade_name")))
+                    classes = sorted(set(
+                        a["class_display_name"] or a["class_name"]
+                        for a in assignments if a.get("class_name")
+                    ))
+                    target_grade = ",".join(grades) if grades else ""
+                    target_class = ",".join(classes) if classes else ""
+
+                share_id = db_insert(
+                    """INSERT OR IGNORE INTO shared_resources
+                       (owner_username, file_path, file_name, resource_type, share_scope,
+                        target_grade, target_class, created_at, updated_at)
+                       VALUES (?, ?, ?, 'html', ?, ?, ?, ?, ?)""",
+                    (username, rel_path, filename, share_scope, target_grade, target_class, now, now),
+                )
+                if not share_id:
+                    # 可能已存在同名记录，查询现有 ID
+                    existing = execute_query(
+                        "SELECT id FROM shared_resources WHERE owner_username=? AND file_path=? AND resource_type='html'",
+                        (username, rel_path),
+                    )
+                    share_id = existing[0]["id"] if existing else None
+
+                if share_id:
+                    # ── 自动绑定到当前知识点 ──
+                    # 清空旧作答记录
+                    from backend.question_db import execute_insert as q_clear
+                    q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
+                    # 创建绑定
+                    binding_id = db_insert(
+                        """INSERT INTO curriculum_bindings
+                           (knowledge_point_id, resource_type, resource_id, sort_order, created_at)
+                           VALUES (?, 'html', ?, 0, ?)""",
+                        (kp_id, share_id, now),
+                    )
+                    logger.info(f"AI 练习已自动共享并绑定: share_id={share_id}, binding_id={binding_id}")
+            except Exception as share_err:
+                logger.warning(f"自动共享/绑定失败: {share_err}")
+
+            logger.info(f"AI 练习已生成: file={filepath}, 题库={bank_count}, AI={len(ai_question_ids)}, 总计={len(all_question_ids)}")
             return {
                 "file_url": file_url,
                 "filename": filename,
                 "questions": final_questions,
                 "total": len(all_question_ids),
                 "kp_name": kp["name"],
+                "bank_count": bank_count,
+                "ai_count": len(ai_question_ids),
+                "binding_id": binding_id,
+                "message": f"AI 练习已生成（题库 {bank_count} 题 + AI 生成 {len(ai_question_ids)} 题，共 {len(all_question_ids)} 题）",
             }
         except Exception as e:
             logger.error(f"AI 练习生成失败: {e}", exc_info=True)
@@ -2896,6 +3022,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 
     # ── 第1步：多渠道搜索题库 ──
     from backend.question_db import execute_query as q_exec, execute_insert as q_insert, execute_update as q_update
+    from backend.config import BASE_DIR
     bank_questions = []
 
     # 策略A：按 knowledge_points 模糊匹配
@@ -3099,6 +3226,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
              q.get("difficulty", "medium"), username, now, now,
              svg_code, has_svg, media_placeholders),
         )
+        assert qid is not None, "插入题目失败，qid 为 None"
         q["id"] = qid
         if "svg_code" in q and "svg_content" not in q:
             q["svg_content"] = q["svg_code"]
@@ -3111,7 +3239,6 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         if placeholders:
             try:
                 from backend.api.image_gen_service import generate_placeholders_batch
-                from backend.config import BASE_DIR
                 media_dir = BASE_DIR / "question_media" / str(qid)
                 media_files = await generate_placeholders_batch(
                     placeholders=placeholders,
