@@ -280,14 +280,25 @@ async def api_delete(request: Request):
             _cleanup_empty_dir_shares(username)
         except Exception:
             pass
-        # 清理该文件的共享记录
+        # 清理该文件的共享记录和关联的课程绑定
         try:
-            from backend.database import execute_insert_update
-            # 尝试匹配相对路径和绝对路径两种格式
-            execute_insert_update(
-                "DELETE FROM shared_resources WHERE owner_username=? AND (file_path=? OR file_path LIKE ?)",
+            from backend.database import execute_insert_update, execute_query
+            # 查找所有指向该文件的共享记录
+            share_rows = execute_query(
+                "SELECT id FROM shared_resources WHERE owner_username=? AND (file_path=? OR file_path LIKE ?)",
                 (username, rel, f"%/{rel}"),
             )
+            for row in share_rows:
+                sid = row["id"]
+                # 先清理关联的课程绑定
+                execute_insert_update(
+                    "DELETE FROM curriculum_bindings WHERE resource_type='download' AND resource_id=?",
+                    (sid,),
+                )
+                # 再删除共享记录
+                execute_insert_update("DELETE FROM shared_resources WHERE id=?", (sid,))
+            if share_rows:
+                logger.info(f"已同步清理 {len(share_rows)} 条下载共享记录及关联绑定")
         except Exception:
             pass
         return {"success": True, "filename": rel}
