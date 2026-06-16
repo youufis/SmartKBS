@@ -157,6 +157,9 @@ def _delete_user_completely(username: str):
         ("DELETE FROM student_badges WHERE student_username=?", (username,)),
         ("DELETE FROM login_logs WHERE username=?", (username,)),
         # 以 username 为创建者/拥有者的表
+        # 先清理共享资源关联的课程绑定和 AI 练习成绩
+        ("DELETE FROM ai_practice_results WHERE kp_id IN (SELECT knowledge_point_id FROM curriculum_bindings WHERE resource_type='html' AND resource_id IN (SELECT id FROM shared_resources WHERE owner_username=?))", (username,)),
+        ("DELETE FROM curriculum_bindings WHERE resource_id IN (SELECT id FROM shared_resources WHERE owner_username=?)", (username,)),
         ("DELETE FROM shared_resources WHERE owner_username=?", (username,)),
         ("DELETE FROM tasks WHERE creator_username=?", (username,)),
         ("DELETE FROM task_grades WHERE task_id IN (SELECT id FROM tasks WHERE creator_username=?)", (username,)),
