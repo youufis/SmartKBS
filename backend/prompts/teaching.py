@@ -197,9 +197,6 @@ viewBox="0 0 600 400"，中文标注。
 适用于：硬件外观、电子元器件实物、实验装置、场景照片等。
 description 写 50-100 字详细描述。
 
-【配图覆盖率要求】
-- 超过 60% 的题目应包含至少一种配图
-
 ## 输出格式
 请严格按照 JSON 数组格式输出，只返回一个 JSON 数组：
 
@@ -222,5 +219,5 @@ description 写 50-100 字详细描述。
 - options 必须有 A,B,C,D 四个选项
 - answer 为正确选项字母（A/B/C/D）
 - svg_code 和 media_placeholders 可以为 null
-- 超过 50% 的题目应包含至少一种配图
+- **不需要配图的题目 svg_code 和 media_placeholders 留 null 即可，不要强行生成**
 """

@@ -38,9 +38,7 @@ description 写 50-100 字详细描述（主体、颜色、环境、用途），
 - svg_code 和 media_placeholders **可以同时存在**（SVG 画原理 + 占位符生成实物照）
 - 如果知识点明确要求「实物图」，则必须包含 media_placeholders
 - 两者都为 null 仅适用于纯概念文字题
-
-【配图覆盖率要求】
-- 超过 60% 的题目应包含至少一种配图
+- **仅在需要图示时配图**，不需要配图的题目 svg_code 和 media_placeholders 留 null 即可
 
 请严格按照 JSON 格式输出，只返回一个 JSON 数组：
 
@@ -63,5 +61,5 @@ description 写 50-100 字详细描述（主体、颜色、环境、用途），
 - 简答题/填空题 options 为 null，answer 为参考答案
 - 作文/主观题 options 为 null，answer 为评分要点或参考标准
 - svg_code 和 media_placeholders 可以同时存在
-- 超过 50% 的题目应包含至少一种配图
+- **不需要配图的题目 svg_code 和 media_placeholders 留 null 即可**
 """
