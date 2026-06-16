@@ -1,6 +1,6 @@
 # 智慧教学平台 (SmartKBS)
 
-> **版本 V5.4.0** | 更新于 2026-06-14
+> **版本 V5.5.0** | 更新于 2026-06-16
 >
 > 通用学科 AI 智慧教学管理平台（全学段：小学/初中/高中通用技术、信息科技等学科）
 > 集成流式 AI 对话、资源管理、试题库、在线考试、智能组卷 & Word 导出、
@@ -8,11 +8,13 @@
 > 智能点名、考勤统计、错题巩固、智能练习、AI 资源推荐、学情分析、成长档案等功能。
 > 基于 **FastAPI + React** 构建。
 
-![版本](https://img.shields.io/badge/版本-5.4.0-blue)
+![版本](https://img.shields.io/badge/版本-5.5.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope-orange)
 ![许可证](https://img.shields.io/badge/许可证-AGPL--3.0-red)
+
+> **V5.5.0 更新亮点**：增强型智能练习（多渠道搜题+AI差额补全+去重合并）、AI 生图增强（自动重试+模型降级+并发控制）、SVG 优先配图策略（减少生图 API 调用）
 
 ---
 
