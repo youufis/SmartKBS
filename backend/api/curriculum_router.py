@@ -2306,33 +2306,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
                 if "svg_content" in q and "svg_code" not in q:
                     q["svg_code"] = q.get("svg_content") or ""
 
-            # 创建练习任务（用于成绩记录和积分发放）
-            title = f"{kp['name']} 练习"
-            session_id = q_insert(
-                """INSERT INTO practice_sessions
-                   (title, knowledge_points, creator_username, subject, question_count,
-                    total_score, target_grade, target_class, target_students, source, status, created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?)""",
-                (title, kp["name"], username, subject,
-                 len(all_question_ids), len(all_question_ids) * 10,
-                 "", "", "", now, now),
-            )
-
-            # 建立题目关联
-            for i, qid in enumerate(all_question_ids):
-                from backend.question_db import execute_insert as q_insert2
-                q_insert2(
-                    "INSERT INTO practice_session_questions (session_id, question_id, sort_order, score) VALUES (?,?,?,?)",
-                    (session_id, qid, i, 10),
-                )
-
-            # 更新总分
-            q_update("UPDATE practice_sessions SET total_score=? WHERE id=?", (len(all_question_ids) * 10, session_id))
-
-            # 生成 HTML 答题页面
-            if session_id is None:
-                return {"error": "创建练习任务失败"}
-            html_content = _generate_practice_html(kp, final_questions, session_id, subject, kp_id)
+            # 生成 HTML 答题页面（AI练习独立存储，不创建 practice_sessions）
+            html_content = _generate_practice_html(kp, final_questions, session_id=0, subject=subject, kp_id=kp_id)
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
             safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -2345,9 +2320,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
-            logger.info(f"AI 练习已生成: session_id={session_id}, file={filepath}, total={len(all_question_ids)}")
+            logger.info(f"AI 练习已生成: file={filepath}, total={len(all_question_ids)}")
             return {
-                "session_id": session_id,
                 "file_url": file_url,
                 "filename": filename,
                 "questions": final_questions,
@@ -2362,7 +2336,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
     return {"task_id": task_id, "message": "AI 练习生成已开始，请稍候..."}
 
 
-def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int, subject: str, kp_id: int = 0) -> str:
+def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int = 0, subject: str = "", kp_id: int = 0) -> str:
     """生成自包含的 HTML 答题页面"""
     import html as html_mod
 
