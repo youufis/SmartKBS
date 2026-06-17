@@ -2,6 +2,8 @@
 课堂积分系统 API 路由
 """
 import jwt as pyjwt
+from typing import Any
+
 from fastapi import APIRouter, Request
 
 from backend.database import get_connection, execute_query, execute_query_dict
@@ -11,6 +13,7 @@ from backend.permission_service import (
     get_teacher_classes,
     get_teacher_assignments,
     get_grade_by_name,
+    parse_legacy_teacher_grade_class,
 )
 
 router = APIRouter()
@@ -105,7 +108,7 @@ async def api_teacher_info(request: Request):
     return {"username": teacher, "teaching": " | ".join(parts)}
 
 
-def _enrich_with_reward_points(students: list[dict], grade: str) -> list[dict]:
+def _enrich_with_reward_points(students: list[dict[str, Any]], grade: str) -> list[dict[str, Any]]:
     """为每个学生补充 reward_points（通过 users 表关联）"""
     if not students:
         return students

@@ -4,7 +4,7 @@ RAG 检索增强生成工具
 """
 import re
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from backend.logger import logger
 
@@ -32,7 +32,7 @@ def retrieve_knowledge(prompt: str, username: str = "") -> str:
     return "\n\n".join(context_parts)
 
 
-def _search_questions(prompt: str) -> list:
+def _search_questions(prompt: str) -> list[str]:
     """从试题库中检索与 prompt 相关的题目"""
     try:
         from backend.question_db import execute_query
@@ -63,7 +63,7 @@ def _search_questions(prompt: str) -> list:
         return []
 
 
-def _search_knowledge_points(prompt: str) -> list:
+def _search_knowledge_points(prompt: str) -> list[str]:
     """从课程大纲中检索与 prompt 相关的知识点"""
     try:
         from backend.database import execute_query_dict
@@ -93,7 +93,7 @@ def _search_knowledge_points(prompt: str) -> list:
         return []
 
 
-def _extract_keywords(text: str) -> list:
+def _extract_keywords(text: str) -> list[str]:
     """从文本中提取关键词"""
     # 去除常见停用词
     stop_words = {"的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",

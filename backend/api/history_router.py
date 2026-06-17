@@ -8,6 +8,8 @@ import shutil
 from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
 
+from typing import Any
+
 from backend.api.dependencies import get_current_user
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
 from backend.database import execute_query, execute_insert_update
@@ -17,7 +19,7 @@ from backend.logger import logger
 router = APIRouter()
 
 
-def _db_tree_to_response(username: str) -> list:
+def _db_tree_to_response(username: str) -> list[dict[str, Any]]:
     """从 conversations 表构建目录树"""
     rows = execute_query(
         """SELECT date, filename, title, message_count, file_size
@@ -28,7 +30,7 @@ def _db_tree_to_response(username: str) -> list:
         return []
 
     # 按日期分组
-    date_map: dict[str, list] = {}
+    date_map: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         date_str = row[0]
         if date_str not in date_map:
@@ -51,7 +53,7 @@ def _db_tree_to_response(username: str) -> list:
     return tree
 
 
-def _scan_tree(dirpath: str, base_rel: str = "") -> list:
+def _scan_tree(dirpath: str, base_rel: str = "") -> list[dict[str, Any]]:
     """递归扫描目录（DB 无数据时的回退方案）"""
     entries = []
     try:
@@ -98,7 +100,7 @@ async def get_history_tree(request: Request):
 
 
 @router.get("/file")
-async def read_history_file(path: str = Query(...), request: Request = None):
+async def read_history_file(path: str = Query(...), request: Request = None):  # type: ignore[assignment]
     """读取历史文件内容"""
     if request:
         user = get_current_user(request)
@@ -140,7 +142,9 @@ async def read_history_file(path: str = Query(...), request: Request = None):
 
 
 @router.delete("/file")
-async def delete_history_file(path: str = Query(...), request: Request = None):
+async def delete_history_file(path: str = Query(...), request: Request = None):  # type: ignore[assignment]
+    """删除历史文件或目录"""
+    username = ""
     """删除历史文件或目录"""
     if request:
         user = get_current_user(request)

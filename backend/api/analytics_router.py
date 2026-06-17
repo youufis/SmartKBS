@@ -14,6 +14,7 @@ from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
 from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
 from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
+from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 
 # ── 辅助：将 TEXT 年级/班级名解析为 ID ──
 def _resolve_grade_id(grade_name: str) -> int | None:
@@ -36,7 +37,6 @@ def _resolve_class_id(grade_name: str, cls_name: str) -> int | None:
         (gid, f"{cls_num}班", cls_num),
     )
     return r[0][0] if r else None
-from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 
 router = APIRouter()
 
@@ -54,7 +54,7 @@ def _get_dashscope_api_key() -> str:
     return key
 
 
-def _call_ai(prompt: str) -> str:
+def _call_ai(prompt: str) -> str:  # type: ignore[misc]
     """调用 AI 分析（同步，保留兼容）"""
     api_key = _get_dashscope_api_key()
     if not api_key:
@@ -79,12 +79,12 @@ async def _call_ai_task(description: str, prompt: str) -> str:
         task.status = TaskStatus.FAILED
         task.error = "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
         task.completed_at = __import__('time').time()
-        task_manager._tasks[task_id] = task
+        task_manager._tasks[task_id] = task  # type: ignore[attr-defined]
         return task_id
 
     from backend.api.ai_service import call_ai_async
 
-    async def _do_analysis() -> dict:
+    async def _do_analysis() -> dict[str, str]:
         try:
             result = await call_ai_async(prompt, api_key)
             return {"result": result}
@@ -782,10 +782,10 @@ async def export_class_overview_docx(
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
 
     doc = Document()
-    style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'
-    style.font.size = Pt(11)
-    style.paragraph_format.line_spacing = 1.5
+    style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
+    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
+    style.font.size = Pt(11)  # type: ignore[attr-defined]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
     title = doc.add_heading(f"{grade}{cls}班 学情分析报告", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -940,10 +940,10 @@ async def export_teaching_suggestions_docx(
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
 
     doc = Document()
-    style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'
-    style.font.size = Pt(11)
-    style.paragraph_format.line_spacing = 1.5
+    style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
+    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
+    style.font.size = Pt(11)  # type: ignore[attr-defined]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
     title = doc.add_heading(f"{grade}{class_num}班 AI 教学建议", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -1079,10 +1079,10 @@ async def export_exam_report_docx(
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
 
     doc = Document()
-    style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'
-    style.font.size = Pt(11)
-    style.paragraph_format.line_spacing = 1.5
+    style = doc.styles['Normal']  # type: ignore[union-attr, attr-defined]
+    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
+    style.font.size = Pt(11)  # type: ignore[attr-defined]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
     title = doc.add_heading(f"考试分析报告 - {exam['title']}", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER

@@ -5,6 +5,7 @@
 import json
 import os
 import time
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -21,10 +22,9 @@ from backend.config import (
     BASE_DIR,
 )
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
-from backend.database import execute_query, execute_insert_update, get_connection, execute_insert_update, get_connection
+from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
 from backend.permission_service import (
-    parse_legacy_teacher_grade_class as _parse_teacher_grade_class,
     get_teacher_assignments,
     is_student_in_teacher_scope,
 )
@@ -44,7 +44,7 @@ class SubmitTaskRequest(BaseModel):
 
 # ── 辅助函数（数据库版）──
 
-def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict:
+def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, Any]:
     """将 tasks 表行转换为前端期望的 dict 格式"""
     task = {
         "id": row[0],
@@ -64,7 +64,7 @@ def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict:
     return task
 
 
-def _get_all_tasks() -> list[dict]:
+def get_all_tasks() -> list[dict[str, Any]]:
     """从数据库获取所有活跃任务"""
     rows = execute_query(
         "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE status='active' ORDER BY created_at DESC"
@@ -72,7 +72,7 @@ def _get_all_tasks() -> list[dict]:
     return [_task_row_to_dict(row) for row in rows]
 
 
-def _get_all_tasks_raw() -> list[dict]:
+def _get_all_tasks_raw() -> list[dict[str, Any]]:
     """从数据库获取所有任务（含非活跃）"""
     rows = execute_query(
         "SELECT id, creator_username, name, description, status, created_at FROM tasks ORDER BY created_at DESC"
@@ -80,7 +80,7 @@ def _get_all_tasks_raw() -> list[dict]:
     return [_task_row_to_dict(row) for row in rows]
 
 
-def _get_creator_tasks(username: str) -> list[dict]:
+def _get_creator_tasks(username: str) -> list[dict[str, Any]]:  # type: ignore[valid-type]
     """获取指定创建者的所有任务"""
     rows = execute_query(
         "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE creator_username=? ORDER BY created_at DESC",
@@ -89,7 +89,7 @@ def _get_creator_tasks(username: str) -> list[dict]:
     return [_task_row_to_dict(row) for row in rows]
 
 
-def _check_task_ownership(task_id: str, username: str) -> dict | None:
+def _check_task_ownership(task_id: str, username: str) -> dict[str, Any] | None:
     """验证当前用户是否有权操作该任务，返回任务信息或 None"""
     for task in _get_all_tasks_raw():
         if task["id"] == task_id:
@@ -100,13 +100,12 @@ def _check_task_ownership(task_id: str, username: str) -> dict | None:
 
 
 from backend.permission_service import (
-    parse_legacy_teacher_grade_class as _parse_teacher_grade_class,
     get_teacher_assignments,
     is_student_in_teacher_scope,
 )
 
 
-def _get_user_relevant_tasks(student_user: str, active_tasks: list) -> list:
+def get_user_relevant_tasks(student_user: str, active_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """获取与学生相关的任务（基于教师的任教范围匹配）
 
     使用 permission_service 统一判断学生是否在教师管辖范围内。
@@ -144,11 +143,11 @@ async def get_active_tasks(request: Request):
 
     # 如果是学生，返回筛选后的任务
     if not is_admin(target_user) and not is_teacher(target_user):
-        all_tasks = _get_all_tasks()
-        relevant = _get_user_relevant_tasks(target_user, all_tasks)
+        all_tasks = get_all_tasks()
+        relevant = get_user_relevant_tasks(target_user, all_tasks)
         return {"tasks": relevant, "total": len(relevant)}
 
-    tasks = _get_all_tasks()
+    tasks = get_all_tasks()
     # 教师只能看到自己的任务，管理员看到所有
     if not is_admin(target_user):
         tasks = [t for t in tasks if t.get("creator") == target_user]
@@ -279,8 +278,8 @@ async def get_user_tasks(request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    active_tasks = _get_all_tasks()
-    relevant = _get_user_relevant_tasks(username, active_tasks)
+    active_tasks = get_all_tasks()
+    relevant = get_user_relevant_tasks(username, active_tasks)
 
     return {"tasks": relevant}
 
@@ -455,21 +454,24 @@ async def revert_submission(request: Request):
         raise HTTPException(status_code=404, detail="任务未找到或无权限操作")
 
     creator = task_info["creator"]
-    creator_tasks = _load_user_active_tasks(creator)
 
-    found = False
-    for task in creator_tasks["tasks"]:
-        if task["id"] == task_id:
-            if student in task["submissions"]:
-                task["submissions"].remove(student)
-                found = True
-            break
-
-    if not found:
+    # 检查学生是否有提交记录
+    sub_row = execute_query(
+        "SELECT id FROM task_submissions WHERE task_id=? AND student_username=?",
+        (task_id, student),
+    )
+    if not sub_row:
         raise HTTPException(status_code=404, detail=f"未找到学生 {student} 的提交记录")
 
-    _save_user_active_tasks(creator, creator_tasks)
-    _update_unified_tasks_file()
+    # 删除提交记录和 AI 批改记录
+    execute_insert_update(
+        "DELETE FROM task_submissions WHERE task_id=? AND student_username=?",
+        (task_id, student),
+    )
+    execute_insert_update(
+        "DELETE FROM task_grades WHERE task_id=? AND student_username=?",
+        (task_id, student),
+    )
 
     # 也从汇总文件中移除该学生的记录
     _remove_student_from_summary(creator, task_info["name"], student)
@@ -612,6 +614,10 @@ async def ai_grade_task(task_id: str, request: Request):
             if "```" in cleaned:
                 cleaned = cleaned.rsplit("```", 1)[0]
         cleaned = cleaned.strip()
+
+        result_data = json.loads(cleaned)
+        grades_list = result_data.get("grades", [])
+        class_summary = result_data.get("summary", "")
 
         logger.info(f"AI 批改结果: {len(grades_list)} 位学生, summary={bool(class_summary)}")
     except (json.JSONDecodeError, KeyError) as e:

@@ -224,7 +224,7 @@ async def create_quiz(req: QuizCreate, request: Request):
 
     # 验证 JSON
     try:
-        questions = json.loads(req.questions) if isinstance(req.questions, str) else req.questions
+        questions = json.loads(req.questions)
         if not isinstance(questions, list) or len(questions) == 0:
             raise ValueError("试题不能为空")
     except (json.JSONDecodeError, ValueError) as e:
@@ -243,7 +243,7 @@ async def create_quiz(req: QuizCreate, request: Request):
     # ── 异步通知学生（不阻塞创建操作） ──
     async def _notify_quiz():
         try:
-            from backend.api.notification_router import _notify_users
+            from backend.api.notification_router import notify_users
             from backend.database import execute_query as db_query
             creator = user["username"]
             role_u = user.get("role", 2)
@@ -260,7 +260,7 @@ async def create_quiz(req: QuizCreate, request: Request):
                 else:
                     students = []
             if students:
-                _notify_users(
+                notify_users(
                     [r[0] for r in students], "info",
                     f"新随堂测验「{req.title}」已发布",
                     f"共 {len(questions)} 题，请及时完成",
@@ -296,7 +296,7 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     updates = ["updated_at = ?"]
-    params = [now]
+    params: list[Any] = [now]
     for field in ("title", "description", "status"):
         val = getattr(req, field, None)
         if val is not None:
@@ -304,11 +304,11 @@ async def update_quiz(quiz_id: int, req: QuizUpdate, request: Request):
             params.append(val)
     if req.questions is not None:
         try:
-            json.loads(req.questions) if isinstance(req.questions, str) else req.questions
+            json.loads(req.questions)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="试题格式错误")
         updates.append("questions = ?")
-        params.append(req.questions if isinstance(req.questions, str) else json.dumps(req.questions, ensure_ascii=False))
+        params.append(req.questions)
 
     params.append(quiz_id)
     execute_insert_update(
@@ -502,7 +502,7 @@ async def list_quizzes(
     username = user["username"]
 
     conditions = []
-    params: list = []
+    params: list[Any] = []
 
     if role == 2:
         # 学生：看自己班级的测验（管理员创建的全体可见，教师创建的需匹配班级）
@@ -641,7 +641,7 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
 
     # 解析答案并评分
     questions = json.loads(quiz[0][4]) if isinstance(quiz[0][4], str) else quiz[0][4]
-    user_answers = json.loads(req.answers) if isinstance(req.answers, str) else req.answers
+    user_answers = json.loads(req.answers)
 
     total_score = 0
     q_score = sum(q.get("score", 1) for q in questions)
@@ -672,8 +672,9 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
             api_key, _ = get_api_keys(username)
         except Exception:
             api_key = ""
+            call_ai_async = None
 
-        if api_key and api_key.strip():
+        if api_key and api_key.strip() and call_ai_async is not None:
             sem = asyncio.Semaphore(3)
 
             async def _grade_short(idx):
@@ -804,7 +805,7 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
     }
 
 
-def _calc_student_correct_count(answer_row: tuple[Any, ...], questions: list) -> int:
+def _calc_student_correct_count(answer_row: tuple[Any, ...], questions: list[Any]) -> int:
     """计算学生的答对题数"""
     try:
         user_answers = json.loads(answer_row[1]) if isinstance(answer_row[1], str) else answer_row[1]
@@ -943,7 +944,7 @@ async def create_poll(req: PollCreate, request: Request):
     # ── 异步通知学生（不阻塞创建操作） ──
     async def _notify_poll():
         try:
-            from backend.api.notification_router import _notify_users
+            from backend.api.notification_router import notify_users
             from backend.database import execute_query as db_query
             creator = user["username"]
             role_u = user.get("role", 2)
@@ -960,7 +961,7 @@ async def create_poll(req: PollCreate, request: Request):
                 else:
                     students = []
             if students:
-                _notify_users(
+                notify_users(
                     [r[0] for r in students], "info",
                     f"新投票「{req.question}」已发布",
                     f"共 {len(req.options)} 个选项，请参与投票",
@@ -984,7 +985,7 @@ async def list_polls(request: Request):
         # 学生：看自己班级的投票（管理员创建的全体可见，教师创建的需匹配班级）
         grade, cls = _get_user_grade_class(username)
         conditions = ["p.status = 'active'"]
-        params: list = []
+        params: list[Any] = []
         if grade:
             conditions.append("(u.role = 0 OR u.grade = ?)")
             params.append(grade)
@@ -1158,6 +1159,7 @@ async def submit_vote(
         ops = [
             ("DELETE FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?", (poll_id, username)),
         ]
+        ops: list[tuple[str, tuple[Any, ...]]] = []
         for idx in selected_indices:
             ops.append((
                 "INSERT INTO interaction_poll_votes (poll_id, student_username, selected_option, created_at) VALUES (?, ?, ?, ?)",
@@ -1230,7 +1232,7 @@ import time as _time
 import hashlib as _hashlib
 
 # 内容审核跟踪：username -> { rejected_hashes: set, rejection_count: int, window_start: float, blocked_until: float }
-_content_review_tracker: dict[str, dict] = {}
+_content_review_tracker: dict[str, dict[str, Any]] = {}
 _MAX_REJECTIONS = 3           # 时间窗口内最大拒绝次数
 _WINDOW_SECONDS = 300         # 时间窗口（5分钟）
 _BLOCK_SECONDS = 60           # 触发限制后封禁时长
@@ -1395,7 +1397,7 @@ async def ask_question(req: QuestionCreate, request: Request):
     # ── 异步通知教师 ──
     async def _notify_question():
         try:
-            from backend.api.notification_router import _notify_users
+            from backend.api.notification_router import notify_users
             from backend.database import execute_query as db_query
             student_grade, student_cls = _get_user_grade_class(user["username"])
             if student_grade:
@@ -1406,7 +1408,7 @@ async def ask_question(req: QuestionCreate, request: Request):
                     (student_grade, cls_param) if student_cls else (student_grade,),
                 )
                 if teachers:
-                    _notify_users(
+                    notify_users(
                         [r[0] for r in teachers], "info",
                         f"新课堂提问",
                         f"学生提出了新问题：{req.content[:50]}{'...' if len(req.content) > 50 else ''}",
@@ -1453,7 +1455,7 @@ async def list_questions(
         # 学生：只看自己班级同学的提问和回答
         grade, cls = _get_user_grade_class(username)
         conditions = []
-        params: list = []
+        params: list[Any] = []
         if grade:
             conditions.append("u.grade = ?")
             params.append(grade)
@@ -1482,7 +1484,7 @@ async def list_questions(
         # 教师：只看自己班级学生的提问
         grade, cls = _get_user_grade_class(username)
         conditions = []
-        params: list = []
+        params: list[Any] = []
         if grade:
             conditions.append("u.grade = ?")
             params.append(grade)
@@ -1512,7 +1514,7 @@ async def list_questions(
     else:
         # 管理员：看全部
         conditions = []
-        params: list = []
+        params: list[Any] = []
         if status:
             conditions.append("status = ?")
             params.append(status)
@@ -1655,8 +1657,8 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
 
         # ── 通知提问学生 ──
         try:
-            from backend.api.notification_router import _create_notification
-            _create_notification(asker_username, "info",
+            from backend.api.notification_router import create_notification
+            create_notification(asker_username, "info",
                 "你的提问收到同学回答（待教师审批）",
                 f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
                 "/interaction")
@@ -1665,7 +1667,7 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
 
         # ── 通知教师审批 ──
         try:
-            from backend.api.notification_router import _notify_users
+            from backend.api.notification_router import notify_users
             from backend.database import execute_query as db_query
             g, c = _get_user_grade_class(asker_username)
             if g:
@@ -1675,7 +1677,7 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
                     (g, c) if c else (g,),
                 )
                 if teachers:
-                    _notify_users([r[0] for r in teachers], "info",
+                    notify_users([r[0] for r in teachers], "info",
                         "有学生回答了提问，需要审批",
                         f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
                         "/interaction")
@@ -1711,8 +1713,8 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
     )
 
     try:
-        from backend.api.notification_router import _create_notification
-        _create_notification(asker_username, "info",
+        from backend.api.notification_router import create_notification
+        create_notification(asker_username, "info",
             "你的提问已被教师回答",
             f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
             "/interaction")
@@ -1832,8 +1834,8 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
 
     # ── 通知回答者 ──
     try:
-        from backend.api.notification_router import _create_notification
-        _create_notification(answer_username, "info",
+        from backend.api.notification_router import create_notification
+        create_notification(answer_username, "info",
             "你的回答已通过教师审批",
             f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
             "/interaction")
@@ -1842,8 +1844,8 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
 
     # ── 通知提问者 ──
     try:
-        from backend.api.notification_router import _create_notification
-        _create_notification(asker_username, "info",
+        from backend.api.notification_router import create_notification
+        create_notification(asker_username, "info",
             "你的提问已有回答（已通过教师审批）",
             f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
             "/interaction")
@@ -1892,8 +1894,8 @@ async def reject_student_answer(question_id: int, answer_id: int, request: Reque
 
     # ── 通知回答者 ──
     try:
-        from backend.api.notification_router import _create_notification
-        _create_notification(answer_username, "info",
+        from backend.api.notification_router import create_notification
+        create_notification(answer_username, "info",
             "你的回答未通过教师审批，可重新回答",
             f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
             "/interaction")
@@ -1989,7 +1991,7 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
     from backend.api.ai_service import call_ai_async
     from backend.ai_task_manager import task_manager
 
-    async def _do_analysis() -> dict:
+    async def _do_analysis() -> dict[str, Any]:
         from backend.prompts.interaction import QUIZ_ANALYSIS_PROMPT
         from backend.api.chat_router import get_api_keys
 
@@ -2150,7 +2152,7 @@ async def ai_class_summary(
     _subject = subject
     _time_range = time_range
 
-    async def _do_summary() -> dict:
+    async def _do_summary() -> dict[str, Any]:
         from backend.prompts.class_summary import CLASS_SUMMARY_PROMPT
         from backend.api.chat_router import get_api_keys
 
@@ -2333,9 +2335,9 @@ async def export_class_summary_docx(
     # ── 生成 Word 文档 ──
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'
-    style.font.size = Pt(11)
-    style.paragraph_format.line_spacing = 1.5
+    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
+    style.font.size = Pt(11)  # type: ignore[attr-defined]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
     title = doc.add_heading(f"{cls_name} 课堂总结报告", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER

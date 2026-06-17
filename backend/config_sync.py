@@ -26,7 +26,7 @@ def _get_node_id() -> str:
     return node_id
 
 
-async def _send_sync(action: str = "sync") -> bool:
+async def send_sync(action: str = "sync") -> bool:
     """向远程配置中心发送同步请求"""
     if os.environ.get("SMARTKB_TELEMETRY_DISABLED", "").lower() in ("1", "true", "yes"):
         return False
@@ -70,13 +70,13 @@ async def _send_sync(action: str = "sync") -> bool:
 
 async def try_sync_remote_config():
     """启动时同步远程配置，并驻留后台周期性同步"""
-    await _send_sync("startup")
+    await send_sync("startup")
 
     async def _sync_loop():
         while True:
             await asyncio.sleep(_SYNC_INTERVAL)
             try:
-                await _send_sync("sync")
+                await send_sync("sync")
             except Exception:
                 pass
 

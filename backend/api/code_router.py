@@ -7,7 +7,7 @@ import asyncio
 import json
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
@@ -52,7 +52,7 @@ class CodeProblemCreate(BaseModel):
     template_code: str = ""
     starter_code: str = ""
     time_limit: int = 5
-    test_cases: list[dict] = []
+    test_cases: list[dict[str, Any]] = []
 
 
 class CodeProblemUpdate(BaseModel):
@@ -111,6 +111,8 @@ async def submit_code(req: CodeSubmitRequest, request: Request):
     sub_id = q_insert(
         "INSERT INTO code_submissions (problem_id,student_username,language,source_code,status,created_at) VALUES (?,?,?,?,'pending',?)",
         (req.problem_id, username, req.language, req.source_code, now))
+    if sub_id is None:
+        raise HTTPException(status_code=500, detail="创建提交记录失败")
     asyncio.create_task(_do_grade(sub_id, username, req.problem_id))
     return {"submission_id": sub_id, "status": "pending", "message": "评分中"}
 
@@ -174,7 +176,7 @@ async def ai_code_review(submission_id: int, request: Request):
     from backend.prompts.code_review import CODE_REVIEW_PROMPT
     prompt = CODE_REVIEW_PROMPT.format(problem_title=sub["problem_title"], language=sub["language"], source_code=sub["source_code"])
 
-    async def _do() -> dict:
+    async def _do() -> dict[str, Any]:
         try:
             rt = await call_ai_async(prompt, api_key)
             m = re.search(r'\{[\s\S]*\}', rt)
@@ -227,7 +229,7 @@ async def list_code_problems(
     where = "cp.status='active'"
     if status == "all":
         where = "1=1"
-    params: list = []
+    params: list[Any] = []
     if subject:
         where += " AND cp.subject=?"
         params.append(subject)
@@ -348,7 +350,7 @@ async def delete_code_problem(problem_id: int, request: Request):
 
 
 @router.post("/code/problems/{problem_id}/test-cases", summary="[教师] 添加测试用例")
-async def add_test_cases(problem_id: int, request: Request, cases: list[dict]):
+async def add_test_cases(problem_id: int, request: Request, cases: list[dict[str, Any]]):
     if request.state.user.get("role", 2) not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
     now = _now()
@@ -431,7 +433,7 @@ async def ai_generate_code_problem(req: AiGenerateCodeProblem, request: Request)
               "\"test_cases\":[{\"input\":\"...\",\"expected_output\":\"...\",\"description\":\"...\",\"is_sample\":true,\"score\":1}]}"
               "\n至少5个测试用例，前2个is_sample=true，总分10")
 
-    async def _do() -> dict:
+    async def _do() -> dict[str, Any]:
         try:
             rt = await call_ai_async(prompt, api_key)
             m = re.search(r'\{[\s\S]*\}', rt)

@@ -7,7 +7,7 @@ import json
 import random
 import string
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query, WebSocket, WebSocketDisconnect
 
@@ -67,7 +67,10 @@ def _generate_room_code() -> str:
     return f"R{int(datetime.now().timestamp()) % 100000:05d}"
 
 
-def _calc_speed_score(time_spent: float, time_limit: int) -> float:
+# ── 计分辅助函数 ──
+
+
+def _calc_speed_score(time_spent: float, time_limit: int) -> float:  # type: ignore[valid-type]
     """速度递减计分：用时越少得分越高"""
     min_score = 10
     max_score = 100
@@ -79,7 +82,7 @@ def _calc_speed_score(time_spent: float, time_limit: int) -> float:
     return round(max_score - decay * time_spent, 1)
 
 
-def _calc_tiered_score(time_spent: float) -> float:
+def _calc_tiered_score(time_spent: float) -> float:  # type: ignore[valid-type]
     """分段计分"""
     for lo, hi, score in SCORE_TIERS:
         if lo <= time_spent < hi:
@@ -87,7 +90,7 @@ def _calc_tiered_score(time_spent: float) -> float:
     return 10
 
 
-def _calc_streak_multiplier(streak: int) -> float:
+def _calc_streak_multiplier(streak: int) -> float:  # type: ignore[valid-type]
     """计算连击倍率"""
     for s, m in sorted(STREAK_MULTIPLIERS.items(), reverse=True):
         if streak >= s:
@@ -117,7 +120,7 @@ def _get_student_grade_class(username: str) -> tuple[str, str]:
     return "", ""
 
 
-def _can_view_room(room: dict, username: str, role: int) -> bool:
+def _can_view_room(room: dict[str, Any], username: str, role: int) -> bool:
     """判断用户是否有权限查看/管理该房间"""
     if role == 0:
         # 管理员：全部可见
@@ -173,7 +176,7 @@ def _can_view_room(room: dict, username: str, role: int) -> bool:
     return False
 
 
-def _room_to_dict(room: dict) -> dict:
+def _room_to_dict(room: dict[str, Any]) -> dict[str, Any]:
     """将房间数据库行转为返回字典"""
     return {
         "id": room["id"],
@@ -199,7 +202,7 @@ def _room_to_dict(room: dict) -> dict:
 
 
 def _load_questions_from_general_bank(category: str = "", count: int = 10,
-                                        exclude_ids: Optional[list[int]] = None) -> list[dict]:
+                                        exclude_ids: Optional[list[int]] = None) -> list[dict[str, Any]]:
     """从百科题库（smartkb.db quest_question_bank）加载题目"""
     exclude_ids = exclude_ids or []
     conditions = []
@@ -246,7 +249,7 @@ def _load_questions_from_general_bank(category: str = "", count: int = 10,
 
 def _load_questions_from_bank(subject: str = "", knowledge_points: str = "",
                                 difficulty: str = "medium", count: int = 10,
-                                exclude_ids: Optional[list[int]] = None) -> list[dict]:
+                                exclude_ids: Optional[list[int]] = None) -> list[dict[str, Any]]:
     """从学科题库（questions.db question_bank）加载题目"""
     exclude_ids = exclude_ids or []
     conditions = ["status='active'"]
@@ -308,7 +311,7 @@ def _load_questions_from_bank(subject: str = "", knowledge_points: str = "",
     return questions
 
 
-def _prepare_questions_for_room(room_id: int, room: dict) -> list[dict]:
+def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> list[dict[str, Any]]:
     """为房间准备题目（从题库加载）"""
     count = room["question_count"]
     source = room["question_source"]
@@ -382,7 +385,7 @@ class QuickQuizGameManager:
     """抢答活动状态管理器（内存中维护每局状态）"""
 
     def __init__(self):
-        self.rooms: dict[int, dict] = {}
+        self.rooms: dict[int, dict[str, Any]] = {}
         # {room_id: {
         #   "current_question": int,        # 当前题号 (1-based)
         #   "phase": str,                   # waiting | question | reveal | ended
@@ -414,7 +417,7 @@ class QuickQuizGameManager:
             "player_connections": old_player_connections,
         }
 
-    def get_room(self, room_id: int) -> dict | None:
+    def get_room(self, room_id: int) -> dict[str, Any] | None:
         return self.rooms.get(room_id)
 
     def remove_room(self, room_id: int):
@@ -443,7 +446,7 @@ class QuickQuizGameManager:
         if state:
             state["player_connections"][username] = ws
 
-    async def broadcast(self, room_id: int, message: dict):
+    async def broadcast(self, room_id: int, message: dict[str, Any]):
         """向房间内所有连接广播消息"""
         state = self.rooms.get(room_id)
         if not state:
@@ -457,7 +460,7 @@ class QuickQuizGameManager:
         for ws in disconnected:
             self.remove_connection(room_id, ws)
 
-    async def broadcast_to_player(self, room_id: int, username: str, message: dict):
+    async def broadcast_to_player(self, room_id: int, username: str, message: dict[str, Any]):
         """向指定玩家发送消息"""
         state = self.rooms.get(room_id)
         if not state:
@@ -538,13 +541,15 @@ async def create_room(request: Request):
     )
 
     # 初始化内存状态
+    assert room_id is not None
     game_manager.create_room_state(room_id, time_limit)
 
     room = execute_query_one(
         "SELECT * FROM quick_quiz_rooms WHERE id=?",
         (room_id,),
     )
-
+    if room is None:
+        raise HTTPException(status_code=404, detail="房间不存在")
     return _room_to_dict(room)
 
 
@@ -1545,7 +1550,7 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
             "total_questions": execute_query_one(
                 "SELECT COUNT(*) as cnt FROM quick_quiz_questions WHERE room_id=?",
                 (room_id,),
-            )["cnt"],
+            )["cnt"],  # type: ignore[index]
             "svg_content": question.get("svg_content", ""),
             "has_svg": question.get("has_svg", 0),
             "media_files": question.get("media_files", ""),
@@ -1559,7 +1564,7 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
     )
 
 
-async def _do_reveal(room_id: int) -> dict | None:
+async def _do_reveal(room_id: int) -> dict[str, Any] | None:
     """公布当前题目答案"""
     state = game_manager.get_room(room_id)
     if not state or state["phase"] != "question":
@@ -1707,7 +1712,7 @@ async def _do_end_game(room_id: int):
     game_manager.remove_room(room_id)
 
 
-async def _award_rewards(room_id: int, room: dict, ranking: list[dict]):
+async def _award_rewards(room_id: int, room: dict[str, Any], ranking: list[dict[str, Any]]):
     """发放抢答活动积分奖励"""
     activity_id = f"quick_quiz_{room_id}"
     title = room.get("title", "知识抢答")

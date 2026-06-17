@@ -5,11 +5,13 @@
 import os
 import shutil
 from datetime import datetime
+from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, UploadFile
 
 from backend.config import BASE_DIR
 from backend.utils import get_user_base_dir
+from backend.logger import logger
 from backend.database import execute_query
 from backend.api.config_router import get_config_value
 
@@ -79,7 +81,7 @@ def _safe_rel_path(rel_path: str) -> str:
     return norm
 
 
-def _scan_dir(dirpath: str, base_rel: str) -> list:
+def _scan_dir(dirpath: str, base_rel: str) -> list[dict[str, Any]]:
     """递归扫描目录，返回 [{name, path, size, mtime}]"""
     entries = []
     for name in sorted(os.listdir(dirpath), key=str.lower):
@@ -176,7 +178,7 @@ async def api_upload(request: Request):
         if key.startswith("file"):
             idx = key[4:]
             item = form[key]
-            if hasattr(item, "filename") and item.filename:
+            if isinstance(item, UploadFile) and item.filename:
                 file_map[idx] = [item, ""]
     for key in form.keys():
         if key.startswith("path"):
@@ -185,8 +187,12 @@ async def api_upload(request: Request):
                 file_map[idx][1] = form[key]
 
     for idx, (item, rel_path) in file_map.items():
+        raw_filename = ""
         try:
-            raw_filename = item.filename
+            if isinstance(item, UploadFile):
+                raw_filename = item.filename or ""
+            else:
+                raw_filename = str(item) if item else ""
             if not raw_filename:
                 continue
             content = await item.read()
@@ -276,8 +282,8 @@ async def api_delete(request: Request):
         _rm_and_clean(filepath)
         # 文件删除后清理空目录共享记录
         try:
-            from backend.api.sharing_router import _cleanup_empty_dir_shares
-            _cleanup_empty_dir_shares(username)
+            from backend.api.sharing_router import cleanup_empty_dir_shares
+            cleanup_empty_dir_shares(username)
         except Exception:
             pass
         # 清理该文件的共享记录和关联的课程绑定
