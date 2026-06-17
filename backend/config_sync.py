@@ -9,6 +9,8 @@ import platform
 from datetime import datetime
 from pathlib import Path
 
+from config import APP_VERSION
+
 _NODE_ID_FILE = Path(__file__).resolve().parent / ".node_id"
 _SYNC_INTERVAL = 86400
 
@@ -28,7 +30,7 @@ def _get_node_id() -> str:
 
 async def send_sync(action: str = "sync") -> bool:
     """向远程配置中心发送同步请求"""
-    if os.environ.get("SMARTKB_TELEMETRY_DISABLED", "").lower() in ("1", "true", "yes"):
+    if os.environ.get("SMARTKB_REMOTE_SYNC_DISABLED", "").lower() in ("1", "true", "yes"):
         return False
 
     _base = os.environ.get(
@@ -59,7 +61,7 @@ async def send_sync(action: str = "sync") -> bool:
                 "public_ip": public_ip,
                 "platform": platform.platform(),
                 "python_version": platform.python_version(),
-                "app_version": "5.6.0",
+                "app_version": APP_VERSION,
                 "timestamp": datetime.now().isoformat(),
             }
             resp = await client.post(_base, json=payload)
