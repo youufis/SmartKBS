@@ -2,6 +2,8 @@
 智能点名 · 公平版 API 路由
 """
 import json, os, random, time
+from typing import Any
+
 import jwt as pyjwt
 from fastapi import APIRouter, Request, HTTPException
 
@@ -22,7 +24,7 @@ router = APIRouter()
 
 # ── 工具函数 ──
 
-def _get_rollcall_teacher(request: Request, body: dict = None) -> str:
+def _get_rollcall_teacher(request: Request, body: dict[str, Any] | None = None) -> str:
     """从请求中提取教师用户名"""
     teacher = request.query_params.get("teacher", "")
     if teacher:

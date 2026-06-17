@@ -16,7 +16,7 @@ import time
 import re
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from backend.logger import logger
 
@@ -104,7 +104,7 @@ def _safety_check_python(source_code: str) -> tuple[bool, str]:
     return True, ""
 
 
-def get_supported_languages() -> list[dict]:
+def get_supported_languages() -> list[dict[str, Any]]:
     """获取当前环境支持的语言列表"""
     languages = [
         {"value": "python", "label": "Python", "available": True},
@@ -116,7 +116,7 @@ def get_supported_languages() -> list[dict]:
 
 # ── Python 代码执行 ──
 
-async def run_python(source_code: str, input_data: str = "") -> dict:
+async def run_python(source_code: str, input_data: str = "") -> dict[str, Any]:
     """安全执行 Python 代码
 
     Args:
@@ -201,7 +201,7 @@ async def run_python(source_code: str, input_data: str = "") -> dict:
 
 # ── JavaScript 代码执行（需要 Node.js） ──
 
-async def run_javascript(source_code: str, input_data: str = "") -> dict:
+async def run_javascript(source_code: str, input_data: str = "") -> dict[str, Any]:
     """安全执行 JavaScript 代码（需要服务端安装 Node.js）
 
     Args:

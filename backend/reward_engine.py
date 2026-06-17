@@ -3,6 +3,8 @@
 自动在学生参与活动后发放积分，支持参与基础分和成绩等级奖励
 """
 from datetime import datetime
+from typing import Any
+
 from backend.database import execute_query, execute_insert_update
 from backend.logger import logger
 from backend.title_system import check_main_title_upgrade, check_and_unlock_badges
@@ -64,7 +66,7 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _update_student_total(student_username: str, check_upgrade: bool = True):
+def update_student_total(student_username: str, check_upgrade: bool = True):
     """重新计算并更新学生的积分汇总，同时检测称号升级
 
     Args:
@@ -116,7 +118,7 @@ def deduct_points(student_username: str, reason: str, points: int = 2) -> int:
            VALUES (?, ?, ?, ?, 'penalty', ?, ?, ?)""",
         (student_username, "penalty", f"{now}_{student_username}", reason, -points, reason, now),
     )
-    _update_student_total(student_username)
+    update_student_total(student_username)
     logger.info(f"积分扣除: {student_username} {points} 分 ({reason})")
     return points
 
@@ -150,7 +152,7 @@ def award_participation(student_username: str, activity_type: str, activity_id: 
          points, f"参与「{activity_title}」基础奖励",
          teacher_username, now),
     )
-    _update_student_total(student_username)
+    update_student_total(student_username)
     logger.info(f"积分奖励: {student_username} +{points} ({activity_type}/{activity_id}) 参与奖")
     return points
 
@@ -220,7 +222,7 @@ def award_grade(student_username: str, activity_type: str, activity_id: str,
          f"{type_name}「{activity_title}」{grade_name}（得分率{pct}%）",
          teacher_username, now),
     )
-    _update_student_total(student_username)
+    update_student_total(student_username)
     logger.info(f"积分奖励: {student_username} +{points} ({activity_type}/{activity_id}) {grade_name}")
     return points
 
@@ -251,12 +253,12 @@ def award_daily_login(student_username: str) -> int:
          f"每日登录奖励（{today}）",
          _now()),
     )
-    _update_student_total(student_username)
+    update_student_total(student_username)
     logger.info(f"积分奖励: {student_username} +1 (login/{today}) 每日登录")
     return 1
 
 
-def batch_award(records: list[dict]) -> list[int]:
+def batch_award(records: list[dict[str, Any]]) -> list[int]:
     """批量发放积分
 
     Args:
@@ -287,13 +289,13 @@ def batch_award(records: list[dict]) -> list[int]:
              rec["points"], rec.get("reason", ""),
              rec.get("teacher_username", ""), now),
         )
-        _update_student_total(rec["student_username"])
+        update_student_total(rec["student_username"])
         results.append(rec["points"])
     return results
 
 
 def get_student_rewards(student_username: str, limit: int = 50,
-                        activity_type: str = "") -> list[dict]:
+                        activity_type: str = "") -> list[dict[str, Any]]:
     """查询学生的积分流水"""
     if activity_type:
         rows = execute_query(
@@ -336,11 +338,11 @@ def get_student_total(student_username: str) -> int:
     )
     if row:
         return row[0][0]
-    return _update_student_total(student_username)
+    return update_student_total(student_username)
 
 
 def get_class_ranking(grade: str, class_name: str = "",
-                      allowed_classes: list[str] | None = None) -> list[dict]:
+                      allowed_classes: list[str] | None = None) -> list[dict[str, Any]]:
     """获取班级积分排名，支持按教师任教的班级列表过滤
 
     Args:
@@ -428,7 +430,7 @@ def get_class_ranking(grade: str, class_name: str = "",
 
 
 def get_activity_statistics(grade: str = "", class_name: str = "",
-                            start_date: str = "", end_date: str = "") -> dict:
+                            start_date: str = "", end_date: str = "") -> dict[str, Any]:
     """获取积分统计数据"""
     params = []
     where = []

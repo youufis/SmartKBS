@@ -148,6 +148,7 @@ async def export_scores(
     # 创建 Excel
     wb = openpyxl.Workbook()
     ws = wb.active
+    assert ws is not None
     ws.title = "课堂积分"
 
     # 标题
@@ -231,6 +232,7 @@ async def export_exam_result(exam_id: int, request: Request):
 
     # ── Sheet 1: 成绩总表 ──
     ws1 = wb.active
+    assert ws1 is not None
     ws1.title = "成绩总表"
 
     title = f"考试报告 - {exam['title']}"
@@ -362,7 +364,7 @@ async def export_rollcall(
         raise HTTPException(status_code=403, detail="权限不足")
 
     conditions = []
-    params: list = []
+    params: list[str] = []
 
     if role == 1:
         conditions.append("teacher_username = ?")
@@ -397,6 +399,7 @@ async def export_rollcall(
 
     wb = openpyxl.Workbook()
     ws = wb.active
+    assert ws is not None
     ws.title = "点名记录"
 
     title = "点名记录"
@@ -470,6 +473,7 @@ async def export_tasks(
     for t in tasks:
         if first_sheet:
             ws = wb.active
+            assert ws is not None
             ws.title = _safe_sheet_name(t[2][:20])  # task name as sheet name
             first_sheet = False
         else:
@@ -538,6 +542,7 @@ async def export_progress(
 
     wb = openpyxl.Workbook()
     ws = wb.active
+    assert ws is not None
     ws.title = "学情进度"
 
     title = "学情进度报告"
@@ -595,7 +600,7 @@ def _safe_sheet_name(name: str) -> str:
 
 # ── CSV 响应辅助 ──
 
-def _csv_response(rows: list[list], headers: list[str], filename: str) -> StreamingResponse:
+def _csv_response(rows: list[list[str]], headers: list[str], filename: str) -> StreamingResponse:
     """将数据转为 CSV 响应（带 UTF-8 BOM，Excel 可直接打开）"""
     buf = io.StringIO()
     # 写入 BOM + 内容

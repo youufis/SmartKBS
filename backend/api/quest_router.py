@@ -6,7 +6,7 @@ import asyncio
 import json
 import random
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
@@ -21,7 +21,7 @@ from backend.prompts.quest import (
     AUDIENCE_VOTE_PROMPT,
 )
 from backend.logger import logger
-from backend.reward_engine import award_participation, award_grade, _update_student_total
+from backend.reward_engine import award_participation, award_grade, update_student_total
 from backend.title_system import check_and_unlock_badges
 
 router = APIRouter()
@@ -71,7 +71,7 @@ def _calc_question_score(question_index: int, lifelines: list[str]) -> int:
 
 
 def _call_ai_generate_question(api_key: str, used_categories: list[str],
-                                 question_index: int) -> dict:
+                                 question_index: int) -> dict[str, Any]:
     """调用 AI 生成一道题目，支持公式($...$)和SVG配图(svg_content)"""
     used_cats_str = json.dumps(used_categories, ensure_ascii=False)
     prompt = QUEST_GENERATE_PROMPT.format(
@@ -122,7 +122,7 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         }
 
 
-def _save_question_to_bank(question_data: dict):
+def _save_question_to_bank(question_data: dict[str, Any]):
     """将 AI 生成的题目持久化到题库表（去重）"""
     try:
         execute_insert_update(
@@ -147,7 +147,7 @@ def _save_question_to_bank(question_data: dict):
         logger.warning(f"保存题目到题库失败: {e}")
 
 
-def _get_question_from_bank(used_categories: list[str]) -> dict | None:
+def _get_question_from_bank(used_categories: list[str]) -> dict[str, Any] | None:
     """从题库中随机选取一道适合的题目（未使用过的类别优先）"""
     # 找可用类别（不在 used_categories 中）
     available_cats = execute_query(
@@ -208,7 +208,7 @@ BATCH_SIZE = 3  # 预生成缓存量（开局 + 答题中补货）
 
 
 async def _generate_question_async(api_key: str, used_categories: list[str],
-                                    question_index: int, use_bank: int = 0) -> dict:
+                                    question_index: int, use_bank: int = 0) -> dict[str, Any]:
     """异步生成一道题（AI 调用放到线程池避免阻塞）"""
     return await asyncio.to_thread(
         _generate_question, api_key, used_categories, question_index, use_bank
@@ -217,7 +217,7 @@ async def _generate_question_async(api_key: str, used_categories: list[str],
 
 async def _batch_generate(api_key: str, count: int,
                            used_categories: list[str],
-                           start_index: int, use_bank: int = 0) -> list[dict]:
+                           start_index: int, use_bank: int = 0) -> list[dict[str, Any]]:
     """批量生成 count 道题（逐个生成，确保领域随机分布）"""
     questions = []
     for i in range(count):
@@ -265,7 +265,7 @@ async def _async_refill_buffer(quest_id: int, api_key: str,
 
 
 def _generate_question(api_key: str, used_categories: list[str],
-                        question_index: int, use_bank: int = 0) -> dict:
+                        question_index: int, use_bank: int = 0) -> dict[str, Any]:
     """生成一道题：优先从题库取（use_bank=1 且题库有足够题），否则 AI 生成"""
     if use_bank:
         bank_q = _get_question_from_bank(used_categories)
@@ -278,7 +278,7 @@ def _generate_question(api_key: str, used_categories: list[str],
     return q
 
 
-def _call_ai_phone_friend(api_key: str, question: str, options: dict) -> str:
+def _call_ai_phone_friend(api_key: str, question: str, options: dict[str, Any]) -> str:
     """调用 AI 模拟电话朋友提示"""
     opts = options
     prompt = PHONE_FRIEND_PROMPT.format(
@@ -296,7 +296,7 @@ def _call_ai_phone_friend(api_key: str, question: str, options: dict) -> str:
         return "朋友说：这个题有点难，我也不敢确定，你相信自己的直觉吧！"
 
 
-def _call_ai_audience_vote(api_key: str, question: str, options: dict) -> dict:
+def _call_ai_audience_vote(api_key: str, question: str, options: dict[str, Any]) -> dict[str, Any]:
     """调用 AI 模拟现场观众投票"""
     prompt = AUDIENCE_VOTE_PROMPT.format(
         question=question,
@@ -359,7 +359,7 @@ def _increment_badge_count(student_username: str) -> int:
     return row["total_success_count"] if row else 1
 
 
-def _check_milestone_badges(student_username: str, total_count: int) -> list[dict]:
+def _check_milestone_badges(student_username: str, total_count: int) -> list[dict[str, Any]]:
     """检测里程碑徽章是否解锁"""
     newly = []
     for badge in MILESTONE_BADGES:
@@ -399,7 +399,7 @@ def _check_milestone_badges(student_username: str, total_count: int) -> list[dic
     return newly
 
 
-def _check_honor_badges(student_username: str, correct_count: int) -> list[dict]:
+def _check_honor_badges(student_username: str, correct_count: int) -> list[dict[str, Any]]:
     """检测荣誉徽章（一次性，额外条件）"""
     newly = []
     honor_checks = [
@@ -869,7 +869,7 @@ async def use_lifeline(quest_id: int, request: Request):
         correct = execute_query_one(
             "SELECT correct_answer FROM quest_question_records WHERE id=?",
             (question["id"],),
-        )["correct_answer"]
+        )["correct_answer"]  # type: ignore[index]
         wrong_options = [k for k in options.keys() if k != correct]
         if wrong_options:
             removed = random.choice(wrong_options)
@@ -1009,19 +1009,19 @@ async def get_quest_stats(request: Request):
     total_quests = execute_query_one(
         "SELECT COUNT(*) as cnt FROM quest_records WHERE student_username=?",
         (username,),
-    )["cnt"]
+    )["cnt"]  # type: ignore[index]
 
     # 成功次数（答对≥1题）
     success_count = execute_query_one(
         "SELECT COUNT(*) as cnt FROM quest_records WHERE student_username=? AND completed=1 AND correct_count>=1",
         (username,),
-    )["cnt"]
+    )["cnt"]  # type: ignore[index]
 
     # 总答对题数
     total_correct = execute_query_one(
         "SELECT COALESCE(SUM(correct_count), 0) as total FROM quest_records WHERE student_username=? AND completed!=0",
         (username,),
-    )["total"]
+    )["total"]  # type: ignore[index]
 
     # 最佳战绩（最高答对题数）
     best = execute_query_one(
@@ -1036,7 +1036,7 @@ async def get_quest_stats(request: Request):
     total_badges = execute_query_one(
         "SELECT COUNT(*) as cnt FROM student_badges WHERE student_username=?",
         (username,),
-    )["cnt"]
+    )["cnt"]  # type: ignore[index]
 
     return {
         "total_quests": total_quests,
@@ -1055,7 +1055,7 @@ async def get_bank_stats(request: Request):
     user = get_current_user(request)
     _ = user  # 仅需登录
 
-    total = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")["cnt"]
+    total = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")["cnt"]  # type: ignore[index]
 
     by_category = execute_query(
         """SELECT category, COUNT(*) as cnt, SUM(used_count) as total_used
@@ -1138,7 +1138,7 @@ async def get_admin_quest_records(
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
 
     conditions = ["qr.student_username = u.username"]
-    params: list = []
+    params: list[str] = []
 
     # 非管理员：限制只能看自己班级的学生
     if username != "root":
@@ -1281,7 +1281,7 @@ async def delete_quest_record(quest_id: int, request: Request):
 
 # ── 内部辅助 ──
 
-def _get_quest(quest_id: int, username: str) -> dict:
+def _get_quest(quest_id: int, username: str) -> dict[str, Any]:
     """获取闯关记录并校验所有权"""
     quest = execute_query_one(
         """SELECT * FROM quest_records WHERE id=? AND student_username=?""",
@@ -1347,7 +1347,7 @@ def _award_quest_rewards(student_username: str, quest_id: int,
 
     # 5. 称号升级检测（由 reward_engine 自动触发）
     try:
-        _update_student_total(student_username)
+        update_student_total(student_username)
     except Exception as e:
         logger.warning(f"更新学生总积分失败: {e}")
 

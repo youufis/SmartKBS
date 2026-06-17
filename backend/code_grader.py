@@ -3,7 +3,7 @@
 流程：获取提交记录 → 读取测试用例 → 逐用例执行 → 比较输出 → 计算得分
 """
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from backend.logger import logger
 from backend.question_db import execute_query as q_query, execute_update as q_update
@@ -18,7 +18,7 @@ def _normalize_output(text: str) -> str:
     return text.rstrip().replace('\r\n', '\n').replace('\r', '\n')
 
 
-async def grade_submission(submission_id: int) -> dict:
+async def grade_submission(submission_id: int) -> dict[str, Any]:
     """对代码提交进行自动评分
 
     流程:

@@ -128,9 +128,9 @@ async def login(req: LoginRequest, fastapi_request: Request):
     # 管理员登录时触发远程配置同步
     if role_val == 0:
         try:
-            from backend.config_sync import _send_sync
+            from backend.config_sync import send_sync
             import asyncio
-            asyncio.ensure_future(_send_sync("admin_login"))
+            asyncio.ensure_future(send_sync("admin_login"))
         except Exception:
             pass
 

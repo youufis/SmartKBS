@@ -78,7 +78,7 @@ TYPE_LABELS = {
 }
 
 
-def _can_manage_exam(username: str, exam: dict | None = None) -> bool:
+def _can_manage_exam(username: str, exam: dict[str, Any] | None = None) -> bool:
     """检查是否有管理考试的权限"""
     if is_admin(username):
         return True
@@ -91,7 +91,7 @@ def _get_question_pool(
     subject: str,
     exclude_ids: set[int],
     knowledge_points: list[str] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """获取候选题目池
 
     Args:
@@ -164,22 +164,22 @@ def _validate_compose_config(req: ComposeRequest) -> tuple[float, str]:
 
 
 def _select_questions_by_rules(
-    pool: list[dict],
+    pool: list[dict[str, Any]],
     type_configs: list[TypeConfigItem],
     easy_ratio: int,
     medium_ratio: int,
     hard_ratio: int,
-) -> tuple[list[dict], str]:
+) -> tuple[list[dict[str, Any]], str]:
     """基于规则从候选池中选题（非 AI 模式）
 
     Returns:
         (选中的题目列表, 说明文字)
     """
-    selected: list[dict] = []
+    selected: list[dict[str, Any]] = []
     reason_parts = []
 
     # 按题型分组
-    type_pool: dict[str, list[dict]] = {}
+    type_pool: dict[str, list[dict[str, Any]]] = {}
     for q in pool:
         q_type = q["type"]
         if q_type not in type_pool:
@@ -216,9 +216,9 @@ def _select_questions_by_rules(
         target_hard = target_count - target_easy - target_medium
 
         # 调整：如果某种难度的题不够，均分给其他难度
-        chosen: list[dict] = []
+        chosen: list[dict[str, Any]] = []
 
-        def _pick_from(pool_list: list[dict], n: int) -> list[dict]:
+        def _pick_from(pool_list: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
             if not pool_list or n <= 0:
                 return []
             return random.sample(pool_list, min(n, len(pool_list)))
@@ -252,15 +252,15 @@ def _select_questions_by_rules(
 
 
 async def _select_questions_by_ai(
-    pool: list[dict],
+    pool: list[dict[str, Any]],
     type_configs: list[TypeConfigItem],
     easy_ratio: int,
     medium_ratio: int,
     hard_ratio: int,
     knowledge_points: list[str],
-    exam_info: dict,
+    exam_info: dict[str, Any],
     username: str,
-) -> tuple[list[dict], str]:
+) -> tuple[list[dict[str, Any]], str]:
     """使用 AI 从候选池中智能选题"""
     from backend.api.chat_router import get_api_keys
     from backend.api.ai_service import call_ai_async

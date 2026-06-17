@@ -43,7 +43,7 @@ def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
     return f"{owner}/{dir_name}/{file_path}"
 
 
-def cleanup_empty_dir_shares(owner_username: str = None):
+def cleanup_empty_dir_shares(owner_username: str | None = None):
     """清理不存在的空目录的共享记录
 
     目录共享是指共享目录下的所有文件。如果目录不存在或为空，

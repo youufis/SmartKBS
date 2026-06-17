@@ -719,8 +719,8 @@ async def get_teacher_grades_classes(request: Request):
         return {"grades": []}
 
     # 按 grade_id 和 grade_name 分组去重
-    grade_dict: dict[int, dict] = {}
-    class_dict: dict[str, dict] = {}
+    grade_dict: dict[int, dict[str, Any]] = {}
+    class_dict: dict[str, dict[str, Any]] = {}
     for s in students:
         gid = s.get("grade_id")
         gname = s.get("grade") or ""

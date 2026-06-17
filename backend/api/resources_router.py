@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import urllib.parse
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, Query
 from fastapi.responses import HTMLResponse
@@ -63,7 +64,7 @@ async def list_resources(request: Request):
 
 # ── 目录树 ──
 
-def _scan_tree(dirpath: str, base_rel: str = "", with_meta: bool = True) -> list:
+def _scan_tree(dirpath: str, base_rel: str = "", with_meta: bool = True) -> list[dict[str, Any]]:
     entries = []
     try:
         for name in sorted(os.listdir(dirpath), key=str.lower):
@@ -116,22 +117,24 @@ async def upload_resource(request: Request):
     uploaded = []
     errors = []
 
-    file_items: dict[str, tuple[str, str]] = {}  # index -> (filename, subpath)
+    file_items: dict[str, tuple[UploadFile, str]] = {}  # index -> (filename, subpath)
     for key in form.keys():
         if key.startswith("file"):
             idx = key[4:]  # "file0" -> "0"
             item = form[key]
-            if not hasattr(item, "filename") or not item.filename:
+            if not isinstance(item, UploadFile) or not item.filename:
                 continue
             file_items[idx] = (item, item.filename)
         elif key.startswith("path"):
             idx = key[4:]  # "path0" -> "0"
             if idx in file_items:
                 _item, _fn = file_items[idx]
-                file_items[idx] = (_item, form[key] or "")
+                sub_path = form[key] or ""
+                assert isinstance(sub_path, str)
+                file_items[idx] = (_item, sub_path)
 
     for idx, (item, subpath) in file_items.items():
-        filename = item.filename if hasattr(item, 'filename') else ''
+        filename = item.filename or ''
         if not filename:
             continue
 
@@ -185,7 +188,7 @@ async def upload_resource(request: Request):
 # ── 删除文件 ──
 
 @router.delete("/file")
-async def delete_resource(path: str = Query(...), request: Request = None):
+async def delete_resource(path: str = Query(...), request: Request = None):  # type: ignore[assignment]
     """删除资源文件或目录（仅管理员/教师）"""
     if request:
         user = get_current_user(request)
@@ -239,7 +242,7 @@ async def delete_resource(path: str = Query(...), request: Request = None):
 
             # 同步清理共享记录和关联的课程绑定
             try:
-                from backend.database import execute_query_dict
+                from backend.database import execute_insert_update, execute_query_dict
                 # 匹配所有指向该文件的共享记录（统一用正斜杠匹配）
                 share_rows = execute_query_dict(
                     """SELECT id FROM shared_resources

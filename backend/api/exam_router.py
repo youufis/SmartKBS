@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
@@ -17,7 +18,7 @@ from backend.question_db import (
     execute_update,
 )
 from backend.api.dependencies import get_current_user
-from backend.permission_service import parse_legacy_teacher_grade_class as _parse_teacher_grade_class
+from backend.permission_service import parse_legacy_teacher_grade_class
 from backend.auth import is_admin
 from backend.database import execute_query as user_query
 from backend.logger import logger
@@ -68,7 +69,7 @@ class ExamQuestionAdd(BaseModel):
 
 class ExamSubmit(BaseModel):
     """学生提交答案请求"""
-    answers: dict  # {question_id: answer}
+    answers: dict[str, Any]  # {question_id: answer}
 
 
 class AutoSelectRequest(BaseModel):
@@ -83,7 +84,7 @@ class AutoSelectRequest(BaseModel):
 
 # ── 辅助函数 ──
 
-def _can_manage_exam(username: str, exam: dict | None = None) -> bool:
+def _can_manage_exam(username: str, exam: dict[str, Any] | None = None) -> bool:
     """检查是否有管理考试的权限"""
     if is_admin(username):
         return True
@@ -226,7 +227,7 @@ async def list_exams(
                 filtered.append(exam)
                 continue
             # 检查学生是否匹配教师的任课班级
-            grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+            grade_class_map = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
             matched = False
             if student_grade and student_grade in grade_class_map:
                 allowed_classes = grade_class_map[student_grade]
@@ -395,10 +396,10 @@ async def update_exam(exam_id: int, req: ExamUpdate, request: Request):
         if changed:
             async def _notify_update():
                 try:
-                    from backend.api.notification_router import _notify_users
+                    from backend.api.notification_router import notify_users
                     all_students = user_query("SELECT username FROM users WHERE role = 2")
                     student_usernames = [r[0] for r in all_students]
-                    _notify_users(
+                    notify_users(
                         student_usernames, "exam",
                         f"考试「{exam['title']}」信息已更新",
                         f"涉及字段：{'、'.join(changed)}，请重新查看考试详情",
@@ -429,14 +430,14 @@ async def delete_exam(exam_id: int, request: Request):
     if exam["status"] == "published":
         async def _notify_delete():
             try:
-                from backend.api.notification_router import _notify_users
+                from backend.api.notification_router import notify_users
                 affected = execute_query(
                     """SELECT DISTINCT student_username FROM exam_attempts
                        WHERE exam_id = ?""",
                     (exam_id,),
                 )
                 if affected:
-                    _notify_users(
+                    notify_users(
                         [r["student_username"] for r in affected], "exam",
                         f"考试「{exam['title']}」已取消",
                         f"教师已删除该考试",
@@ -489,11 +490,11 @@ async def publish_exam(exam_id: int, request: Request):
     # ── 异步发送通知给所有学生（不阻塞发布操作） ──
     async def _notify_publish():
         try:
-            from backend.api.notification_router import _notify_users
+            from backend.api.notification_router import notify_users
             from backend.database import execute_query as db_query
             all_students = db_query("SELECT username FROM users WHERE role = 2")
             student_usernames = [r[0] for r in all_students]
-            _notify_users(
+            notify_users(
                 student_usernames, "exam",
                 f"新考试「{exam['title']}」已发布",
                 f"时长 {exam['duration']} 分钟，满分 {exam['total_score']} 分",
@@ -528,14 +529,14 @@ async def end_exam(exam_id: int, request: Request):
     # ── 异步通知正在答题的学生（不阻塞结束操作） ──
     async def _notify_end():
         try:
-            from backend.api.notification_router import _notify_users
+            from backend.api.notification_router import notify_users
             in_progress = execute_query(
                 """SELECT student_username FROM exam_attempts
                    WHERE exam_id = ? AND status = 'in_progress'""",
                 (exam_id,),
             )
             if in_progress:
-                _notify_users(
+                notify_users(
                     [r["student_username"] for r in in_progress], "exam",
                     f"考试「{exam['title']}」已提前结束",
                     f"教师已结束考试，请查看成绩",
@@ -861,7 +862,7 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
     # 更新考试时间
     execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
-    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 条件={req.dict()} 选取={added}题")
+    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 条件={req.model_dump()} 选取={added}题")
 
     return {
         "message": f"智能选题完成，共添加 {added} 道试题",
@@ -950,7 +951,7 @@ async def start_exam(exam_id: int, request: Request):
 
 # ── AI 批改辅助函数 ──
 
-def _extract_json_from_ai_response(text: str) -> dict | None:
+def _extract_json_from_ai_response(text: str) -> dict[str, Any] | None:
     """从 AI 响应中提取 JSON 对象（支持嵌套 {}）"""
     if not text:
         return None
@@ -999,7 +1000,7 @@ def _extract_json_from_ai_response(text: str) -> dict | None:
     return None
 
 
-async def _grade_short_with_ai(q: dict, student_answer: str, api_key: str, sem: asyncio.Semaphore) -> dict:
+async def _grade_short_with_ai(q: dict[str, Any], student_answer: str, api_key: str, sem: asyncio.Semaphore) -> dict[str, Any]:
     """AI 批改简答题，返回含评语的详细批改结果"""
     qid = str(q["id"])
     correct_answer = q["correct_answer"]
@@ -1050,8 +1051,8 @@ async def _grade_short_with_ai(q: dict, student_answer: str, api_key: str, sem: 
     }
 
 
-async def _grade_essay_with_ai(q: dict, student_answer: str, api_key: str, sem: asyncio.Semaphore,
-                                 subject: str = "信息科技") -> dict:
+async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: str, sem: asyncio.Semaphore,
+                                 subject: str = "信息科技") -> dict[str, Any]:
     """AI 多维批改主观题/作文，返回含维度评分的详细批改结果"""
     qid = str(q["id"])
     correct_answer = q["correct_answer"]
@@ -1275,9 +1276,9 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     # ── 发送考试结果通知 ──
     try:
-        from backend.api.notification_router import _create_notification
+        from backend.api.notification_router import create_notification
         passed_str = "通过" if earned_score >= exam["pass_score"] else "未通过"
-        _create_notification(
+        create_notification(
             username, "exam",
             f"考试「{exam['title']}」成绩已出",
             f"得分 {earned_score}/{total_score}（{passed_str}）",
@@ -1288,12 +1289,12 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     # ── 通知教师 ──
     try:
-        from backend.api.notification_router import _create_notification
+        from backend.api.notification_router import create_notification
         teacher_username = exam["creator_username"]
         if teacher_username != username:
             name_rows = user_query("SELECT name FROM users WHERE username=?", (username,))
             student_display = name_rows[0][0] if name_rows and name_rows[0][0] else username
-            _create_notification(
+            create_notification(
                 teacher_username, "exam",
                 f"学生提交答卷: {student_display}",
                 f"已提交考试「{exam['title']}」，得分 {earned_score}/{total_score}",
@@ -1458,6 +1459,8 @@ async def get_grading_review_detail(attempt_id: int, request: Request):
             answers_data = json.loads(answers_data)
         except (json.JSONDecodeError, TypeError):
             answers_data = {}
+    if not isinstance(answers_data, dict):
+        answers_data = {}
 
     # 解析 grading_details（多维评分明细）
     grading_details = attempt.get("grading_details")
@@ -1593,6 +1596,8 @@ async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request)
             answers = json.loads(answers)
         except (json.JSONDecodeError, TypeError):
             answers = {}
+    if not isinstance(answers, dict):
+        answers = {}
 
     # 解析 AI 详细批改数据
     grading_details = attempt.get("grading_details")
@@ -1870,7 +1875,7 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
 
     from backend.ai_task_manager import task_manager
 
-    async def _do_explain() -> dict:
+    async def _do_explain() -> dict[str, Any]:
         from backend.prompts.teaching import KNOWLEDGE_EXPLAIN_PROMPT
         from backend.api.chat_router import get_api_keys
         from backend.api.ai_service import call_ai_async

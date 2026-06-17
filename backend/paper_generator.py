@@ -661,7 +661,7 @@ def generate_exam_paper(
                        space_before=4, space_after=6)
 
     # ── 按题型分组 ──
-    type_groups: dict[str, list[dict]] = {}
+    type_groups: dict[str, list[dict[str, Any]]] = {}
     for q in questions:
         q_type = q.get("type", "single")
         if q_type not in type_groups:
@@ -853,7 +853,7 @@ def generate_answer_sheet(
     _add_paragraph(doc, "", space_after=6)
 
     # 按题型生成填涂区域
-    type_groups: dict[str, list[dict]] = {}
+    type_groups: dict[str, list[dict[str, Any]]] = {}
     for q in questions:
         q_type = q.get("type", "single")
         if q_type not in type_groups:

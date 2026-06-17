@@ -238,10 +238,10 @@ async def get_question_types():
     }
 
 @router.get("/grades", summary="获取年级列表")
-async def get_grades(stage: str = None):
+async def get_grades(stage: str | None = None):
     """获取年级列表，支持按学段筛选（小学/初中/高中）"""
     from backend.permission_service import get_all_grades, get_all_stages
-    grades = get_all_grades(stage)
+    grades = get_all_grades(stage or "")
     stages = get_all_stages()
     return {
         "grades": grades,

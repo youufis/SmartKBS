@@ -4,6 +4,7 @@ AI 教学资源推荐 API 路由
 """
 import json
 import re
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -160,7 +161,7 @@ async def recommend_resources(kp_id: int, request: Request):
     }
 
 
-def _parse_recommend_result(text: str) -> list[dict]:
+def _parse_recommend_result(text: str) -> list[dict[str, Any]]:
     """解析 AI 返回的 JSON 推荐结果"""
     text = text.strip()
     json_match = re.search(r'\{[\s\S]*\}', text)

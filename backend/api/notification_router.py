@@ -3,6 +3,7 @@
 提供用户通知的增删改查和公告管理
 """
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
@@ -63,7 +64,7 @@ def _is_notification_type_enabled(type_: str) -> bool:
     return type_ in enabled
 
 
-def _create_notification(recipient: str, type_: str, title: str, content: str = "", related_link: str = ""):
+def create_notification(recipient: str, type_: str, title: str, content: str = "", related_link: str = ""):
     """创建一条通知（内部调用，会检查类型是否启用）"""
     if not _is_notification_type_enabled(type_):
         return
@@ -78,7 +79,7 @@ def _create_notification(recipient: str, type_: str, title: str, content: str = 
         logger.error(f"创建通知失败: {e}")
 
 
-def _notify_users(usernames: list[str], type_: str, title: str, content: str = "", related_link: str = ""):
+def notify_users(usernames: list[str], type_: str, title: str, content: str = "", related_link: str = ""):
     """批量通知多个用户（使用批量插入优化性能，会检查类型是否启用）"""
     if not usernames:
         return
@@ -242,7 +243,7 @@ async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request
     from backend.api.ai_service import call_ai_async
     from backend.ai_task_manager import task_manager
 
-    async def _do_generate() -> dict:
+    async def _do_generate() -> dict[str, Any]:
         try:
             result = await call_ai_async(prompt, api_key)
             if result:

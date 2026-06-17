@@ -18,6 +18,7 @@ import asyncio
 import os
 import uuid
 from pathlib import Path
+from typing import Any
 
 import dashscope
 
@@ -39,7 +40,7 @@ SUPPORTED_MODELS = {
 FALLBACK_MODEL_CHAIN = ["wanx2.1-t2i-turbo", "wan2.2-t2i-flash"]
 
 
-def get_image_gen_config() -> dict | None:
+def get_image_gen_config() -> dict[str, Any] | None:
     """读取生图配置，返回配置字典或 None（禁用时）"""
     if not get_config_value("IMAGE_GEN_ENABLED", True):
         logger.debug("图片生成功能已禁用（IMAGE_GEN_ENABLED=False）")
@@ -221,12 +222,12 @@ async def generate_and_save_image(
 
 
 async def generate_placeholders_batch(
-    placeholders: list[dict],
+    placeholders: list[dict[str, Any]],
     subject: str,
     media_dir: Path,
     qid: int,
     now: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     批量处理一道题的所有占位符生图请求
 
@@ -250,7 +251,7 @@ async def generate_placeholders_batch(
 
     from backend.prompts.chat import IMAGE_GEN_PROMPT_TEMPLATE
 
-    media_files: list[dict] = []
+    media_files: list[dict[str, Any]] = []
 
     for idx, ph in enumerate(placeholders):
         # 每张图之间间隔至少 1 秒，避免触发限流
