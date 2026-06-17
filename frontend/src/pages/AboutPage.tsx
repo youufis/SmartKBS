@@ -1,10 +1,28 @@
 import React, { useState, useEffect } from 'react'
-import { Typography } from 'antd'
+import { Typography, Alert, Button, message } from 'antd'
+import { LockOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 const AboutPage: React.FC = () => {
+  const navigate = useNavigate()
   const [content, setContent] = useState('')
+  const [clickCount, setClickCount] = useState(0)
+  const [showEntry, setShowEntry] = useState(false)
+
+  const handleVersionClick = () => {
+    const newCount = clickCount + 1
+    setClickCount(newCount)
+    if (newCount >= 10) {
+      setClickCount(0)
+      setShowEntry(true)
+      message.success('🔓 已解锁')
+      return
+    }
+    clearTimeout((window as any).__aboutTimer)
+    ;(window as any).__aboutTimer = setTimeout(() => setClickCount(0), 3000)
+  }
 
   useEffect(() => {
     fetch('/api/files/USER_MANUAL.md')
@@ -18,7 +36,39 @@ const AboutPage: React.FC = () => {
       width: '100%', padding: 24,
       background: '#fff', borderRadius: 8, minHeight: 'calc(100vh - 160px)',
     }}>
-      <Typography.Title level={3}>ℹ️ 关于与帮助</Typography.Title>
+      <Typography.Title level={3} style={{ userSelect: 'none' }}>
+        ℹ️ 关于与帮助
+        <Typography.Text
+          type="secondary"
+          style={{ fontSize: 14, marginLeft: 12, cursor: 'pointer' }}
+          onClick={handleVersionClick}
+        >
+          v5.6.0
+        </Typography.Text>
+      </Typography.Title>
+
+      {showEntry && (
+        <Alert
+          type="success"
+          icon={<LockOutlined />}
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={
+            <span>
+              已解锁！
+              <Button
+                type="link"
+                size="small"
+                onClick={() => navigate('/console')}
+                style={{ marginLeft: 8 }}
+              >
+                进入 →
+              </Button>
+            </span>
+          }
+        />
+      )}
+
       <div className="markdown-content">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
           {content}
