@@ -180,7 +180,54 @@ async def get_portfolio(username: str, request: Request):
             ],
         }
 
-    # ── 6. 综合摘要 ──
+    # ── 7. 课程练习（知识点练习） ──
+    # 注：ai_practice_results 在 questions.db 中，knowledge_points 在 smartkb.db 中，需分开查询
+    cp_rows = q_execute_query(
+        """SELECT id, kp_id, score, total_score, accuracy, evaluation, submitted_at
+           FROM ai_practice_results
+           WHERE student_username = ?
+           ORDER BY submitted_at DESC""",
+        (username,),
+    )
+
+    course_practice_stats = {}
+    if cp_rows:
+        # 批量查询知识点名称
+        kp_ids = list(set(r['kp_id'] for r in cp_rows))
+        kp_name_map = {}
+        if kp_ids:
+            placeholders = ",".join("?" for _ in kp_ids)
+            kp_rows = execute_query(
+                f"SELECT id, name FROM knowledge_points WHERE id IN ({placeholders})",
+                tuple(kp_ids),
+            )
+            for kr in kp_rows:
+                kp_name_map[kr[0]] = kr[1]
+
+        total_practices = len(cp_rows)
+        avg_accuracy = round(
+            sum(r['accuracy'] for r in cp_rows) / total_practices, 1
+        )
+        total_score_sum = sum(r['score'] for r in cp_rows)
+        course_practice_stats = {
+            "total_count": total_practices,
+            "avg_accuracy": avg_accuracy,
+            "total_score": total_score_sum,
+            "records": [
+                {
+                    "id": r['id'],
+                    "kp_name": kp_name_map.get(r['kp_id'], f"知识点#{r['kp_id']}"),
+                    "score": r['score'],
+                    "total_score": r['total_score'],
+                    "accuracy": r['accuracy'],
+                    "evaluation": r['evaluation'],
+                    "submitted_at": r['submitted_at'],
+                }
+                for r in cp_rows
+            ],
+        }
+
+    # ── 8. 综合摘要 ──
     summary_parts = []
     if exam_stats:
         summary_parts.append(
@@ -205,6 +252,11 @@ async def get_portfolio(username: str, request: Request):
         summary_parts.append(
             f"AI 对话活跃 {chat_stats['total_days']} 天，共 {chat_stats['total_chats']} 次"
         )
+    if course_practice_stats:
+        summary_parts.append(
+            f"完成 {course_practice_stats['total_count']} 个课程练习，"
+            f"平均正确率 {course_practice_stats['avg_accuracy']}%"
+        )
 
     return {
         "user": user_info,
@@ -217,6 +269,7 @@ async def get_portfolio(username: str, request: Request):
         "rollcall": rollcall_stats,
         "tasks": task_stats,
         "chats": chat_stats,
+        "course_practice": course_practice_stats,
     }
 
 
@@ -310,6 +363,37 @@ async def get_timeline(username: str, request: Request):
                 "detail": "",
                 "icon": "task",
             })
+
+    # 课程练习事件（ai_practice_results 在 questions.db，knowledge_points 在 smartkb.db）
+    cp_raw = q_execute_query(
+        """SELECT kp_id, submitted_at, score, total_score, accuracy
+           FROM ai_practice_results
+           WHERE student_username = ? AND submitted_at IS NOT NULL
+           ORDER BY submitted_at ASC""",
+        (username,),
+    )
+    if cp_raw:
+        cp_kp_ids = list(set(r['kp_id'] for r in cp_raw))
+        cp_kp_map = {}
+        if cp_kp_ids:
+            ph = ",".join("?" for _ in cp_kp_ids)
+            kp_rows = execute_query(
+                f"SELECT id, name FROM knowledge_points WHERE id IN ({ph})",
+                tuple(cp_kp_ids),
+            )
+            for kr in kp_rows:
+                cp_kp_map[kr[0]] = kr[1]
+        for ev in cp_raw:
+            if ev['submitted_at']:
+                kp_name = cp_kp_map.get(ev['kp_id'], f"知识点#{ev['kp_id']}")
+                passed = ev['accuracy'] >= 60
+                events.append({
+                    "time": ev['submitted_at'],
+                    "type": "exam",
+                    "title": f"完成了课程练习「{kp_name}」",
+                    "detail": f"得分 {ev['score']}/{ev['total_score']} · 正确率 {ev['accuracy']}% {'✅' if passed else '🔄'}",
+                    "icon": "practice",
+                })
 
     # 按时间排序
     events.sort(key=lambda x: x["time"] or "")

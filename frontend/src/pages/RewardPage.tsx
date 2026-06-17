@@ -334,6 +334,7 @@ const RewardPage: React.FC = () => {
     { activity: '💻 代码练习', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
     { activity: '🎮 知识闯关', base: 1, grade: '优秀+15 / 良好+10 / 及格+5' },
     { activity: '⚡ 知识抢答', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+    { activity: '📚 课程练习', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
   ]
 
   // ── 等级头像成长进化表（与 PortfolioPage / AppLayout 保持一致） ──
