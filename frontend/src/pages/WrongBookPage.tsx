@@ -82,11 +82,11 @@ const WrongBookPage: React.FC = () => {
     try {
       const { data: res } = await apiClient.get('/api/wrong-book/grades')
       setGrades(res.grades || [])
-      if (res.grades?.length > 0) {
-        setSelectedGrade(res.grades[0])
-        // 自动加载第一个年级的班级
-        loadClasses(res.grades[0])
-      }
+      setSelectedGrade('')
+      setSelectedClass('')
+      setSelectedStudent('')
+      setStudents([])
+      setData(null)
     } catch { /* ignore */ }
   }
 
@@ -94,15 +94,10 @@ const WrongBookPage: React.FC = () => {
     try {
       const { data: res } = await apiClient.get('/api/wrong-book/classes', { params: { grade } })
       setClasses(res.classes || [])
-      if (res.classes?.length > 0) {
-        setSelectedClass(res.classes[0])
-        // 自动加载第一个班级的学生
-        loadStudents(grade, res.classes[0])
-      } else {
-        setSelectedClass('')
-        setSelectedStudent('')
-        setStudents([])
-      }
+      setSelectedClass('')
+      setSelectedStudent('')
+      setStudents([])
+      setData(null)
     } catch { /* ignore */ }
   }
 
@@ -112,14 +107,8 @@ const WrongBookPage: React.FC = () => {
       if (cls) params.class_name = cls
       const { data: res } = await apiClient.get('/api/wrong-book/students', { params })
       setStudents(res.students || [])
-      if (res.students?.length > 0) {
-        // 自动选择第一个学生并加载错题
-        setSelectedStudent(res.students[0].username)
-        loadData(res.students[0].username)
-      } else {
-        setSelectedStudent('')
-        setData(null)
-      }
+      setSelectedStudent('')
+      setData(null)
     } catch { /* ignore */ }
   }
 
