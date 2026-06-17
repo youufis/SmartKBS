@@ -3,6 +3,7 @@
 """
 import json
 import time
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Request
@@ -11,11 +12,11 @@ from backend.database import execute_insert_update, execute_query
 
 router = APIRouter()
 
-_geo_cache: dict[str, dict] = {}
+_geo_cache: dict[str, dict[str, Any]] = {}
 _GEO_CACHE_TTL = 86400
 
 
-async def _resolve_geo(ip: str) -> dict:
+async def _resolve_geo(ip: str) -> dict[str, Any]:
     """解析 IP 地理位置"""
     if not ip or ip in ("127.0.0.1", "::1", "localhost", "unknown", ""):
         return {"country": "未知", "city": "未知", "isp": ""}
