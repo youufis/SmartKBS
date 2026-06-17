@@ -7,6 +7,8 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from typing import Any
+
 from backend.config import ROOT_DIR, STU_DIR
 from backend.logger import logger
 
@@ -1212,7 +1214,7 @@ def get_connection():
             conn.close()
 
 
-def execute_query(sql: str, params: tuple = ()):
+def execute_query(sql: str, params: tuple[Any, ...] = ()):
     """执行查询并返回所有结果（返回元组列表）"""
     with get_connection() as conn:
         c = conn.cursor()
@@ -1220,7 +1222,7 @@ def execute_query(sql: str, params: tuple = ()):
         return c.fetchall()
 
 
-def execute_query_dict(sql: str, params: tuple = ()):
+def execute_query_dict(sql: str, params: tuple[Any, ...] = ()):
     """执行查询并返回所有结果（返回字典列表，支持按列名访问）"""
     with get_connection() as conn:
         conn.row_factory = sqlite3.Row
@@ -1230,7 +1232,7 @@ def execute_query_dict(sql: str, params: tuple = ()):
         return [dict(row) for row in rows]
 
 
-def execute_query_one(sql: str, params: tuple = ()):
+def execute_query_one(sql: str, params: tuple[Any, ...] = ()):
     """执行查询并返回单条结果（字典格式），无结果时返回 None"""
     with get_connection() as conn:
         conn.row_factory = sqlite3.Row
@@ -1240,7 +1242,7 @@ def execute_query_one(sql: str, params: tuple = ()):
         return dict(row) if row else None
 
 
-def execute_insert_update(sql: str, params: tuple = ()):
+def execute_insert_update(sql: str, params: tuple[Any, ...] = ()):
     """执行插入/更新操作并提交"""
     with get_connection() as conn:
         c = conn.cursor()
@@ -1256,7 +1258,10 @@ def get_transaction():
     退出时自动提交，异常时自动回滚
     适用于批量导入等需要多次操作统一提交的场景
     """
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     try:
         yield conn
         conn.commit()
@@ -1267,7 +1272,7 @@ def get_transaction():
         conn.close()
 
 
-def execute_batch(operations: list[tuple[str, tuple]]):
+def execute_batch(operations: list[tuple[str, tuple[Any, ...]]]):
     """
     批量执行多个写操作，共用同一个事务
     operations: [(sql1, params1), (sql2, params2), ...]

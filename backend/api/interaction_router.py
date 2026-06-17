@@ -7,6 +7,7 @@ import asyncio
 import json
 import re
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
@@ -18,7 +19,7 @@ from backend.logger import logger
 router = APIRouter()
 
 
-def _get_user_grade_class(username: str) -> tuple:
+def _get_user_grade_class(username: str) -> tuple[str, str]:
     """查询用户的年级(grade)和班级(class)"""
     rows = execute_query(
         "SELECT grade, class FROM users WHERE username = ?",
@@ -803,7 +804,7 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
     }
 
 
-def _calc_student_correct_count(answer_row: tuple, questions: list) -> int:
+def _calc_student_correct_count(answer_row: tuple[Any, ...], questions: list) -> int:
     """计算学生的答对题数"""
     try:
         user_answers = json.loads(answer_row[1]) if isinstance(answer_row[1], str) else answer_row[1]

@@ -106,7 +106,7 @@ def _get_username_display(username: str) -> str:
     return username
 
 
-def _get_student_grade_class(username: str) -> tuple:
+def _get_student_grade_class(username: str) -> tuple[str, str]:
     """查询学生的年级和班级"""
     row = execute_query_one(
         "SELECT grade, class FROM users WHERE username=?",
