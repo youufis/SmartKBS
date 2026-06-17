@@ -366,9 +366,9 @@ const TeacherView: React.FC = () => {
 
   return (
     <div>
-      <Title level={4}><RobotOutlined /> 智能练习</Title>
+      <Title level={4}><RobotOutlined /> 同步练习</Title>
       <Space style={{ marginBottom: 16 }}>
-        <Button type={tab === 'generate' ? 'primary' : 'default'} onClick={() => setTab('generate')}>AI 出题</Button>
+        <Button type={tab === 'generate' ? 'primary' : 'default'} onClick={() => setTab('generate')}>AI 生成</Button>
         <Button type={tab === 'sessions' ? 'primary' : 'default'} onClick={() => setTab('sessions')}>已发布练习</Button>
       </Space>
 
