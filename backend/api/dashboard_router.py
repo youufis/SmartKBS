@@ -4,6 +4,7 @@
 """
 import time
 from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Request
 
@@ -47,13 +48,13 @@ def _set_cache(key: str, data: dict):
             del _dashboard_cache[k]
 
 
-def _q_count(sql: str, params: tuple = ()) -> int:
+def _q_count(sql: str, params: tuple[Any, ...] = ()) -> int:
     """执行 question_db 的 COUNT 查询并返回数值（返回 dict，按列名访问）"""
     rows = q_execute_query(sql, params)
     return rows[0]['COUNT(*)'] if rows else 0
 
 
-def _get_user_grade_class(username: str) -> tuple:
+def _get_user_grade_class(username: str) -> tuple[str, str]:
     """查询用户的年级(grade)和班级(class)"""
     rows = execute_query(
         "SELECT grade, class FROM users WHERE username = ?",
@@ -64,7 +65,7 @@ def _get_user_grade_class(username: str) -> tuple:
     return "", ""
 
 
-def _db_count(sql: str, params: tuple = ()) -> int:
+def _db_count(sql: str, params: tuple[Any, ...] = ()) -> int:
     """执行 database 的 COUNT 查询并返回数值（返回 tuple，按下标访问）"""
     rows = execute_query(sql, params)
     return rows[0][0] if rows else 0

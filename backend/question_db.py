@@ -6,6 +6,8 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
+from typing import Any
+
 from backend.logger import logger
 
 # 数据库文件路径（backend 目录下）
@@ -345,7 +347,7 @@ def get_connection():
             conn.close()
 
 
-def execute_query(sql: str, params: tuple = ()):
+def execute_query(sql: str, params: tuple[Any, ...] = ()):
     """执行查询并返回所有结果（字典格式）"""
     with get_connection() as conn:
         c = conn.cursor()
@@ -354,7 +356,7 @@ def execute_query(sql: str, params: tuple = ()):
         return [dict(row) for row in rows]
 
 
-def execute_query_one(sql: str, params: tuple = ()):
+def execute_query_one(sql: str, params: tuple[Any, ...] = ()):
     """执行查询并返回单条结果（字典格式）"""
     with get_connection() as conn:
         c = conn.cursor()
@@ -363,7 +365,7 @@ def execute_query_one(sql: str, params: tuple = ()):
         return dict(row) if row else None
 
 
-def execute_insert(sql: str, params: tuple = ()):
+def execute_insert(sql: str, params: tuple[Any, ...] = ()):
     """执行插入操作并返回自增 ID"""
     with get_connection() as conn:
         c = conn.cursor()
@@ -372,7 +374,7 @@ def execute_insert(sql: str, params: tuple = ()):
         return c.lastrowid
 
 
-def execute_update(sql: str, params: tuple = ()):
+def execute_update(sql: str, params: tuple[Any, ...] = ()):
     """执行更新/删除操作"""
     with get_connection() as conn:
         c = conn.cursor()
