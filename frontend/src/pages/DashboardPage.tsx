@@ -102,6 +102,9 @@ interface DashboardSummary {
   // 知识抢答
   quick_quiz_participated?: number
   quick_quiz_correct?: number
+  // 课程练习
+  course_practice_count?: number
+  course_practice_avg_accuracy?: number
   // 教师 - 智能练习
   practice_published?: number
   practice_submitted?: number
@@ -261,52 +264,72 @@ const DashboardPage: React.FC = () => {
 
       {/* ─── 统计卡片（整合为每行 4 个） ─── */}
       {isStudent ? (
-        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          <Col xs={12} sm={6} md={6}>
-            <Card hoverable onClick={() => navigate('/exam')} size="small">
-              <Statistic
-                title="学习考试"
-                value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
-                prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考 · 错题{summary.wrong_exam_count ?? 0}场</Text>}
-                valueStyle={{ color: '#1677ff', fontSize: 22 }}
-              />
+        <>
+          <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+            <Col xs={12} sm={6} md={6}>
+              <Card hoverable onClick={() => navigate('/exam')} size="small">
+                <Statistic
+                  title="学习考试"
+                  value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
+                  prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考 · 错题{summary.wrong_exam_count ?? 0}场</Text>}
+                  valueStyle={{ color: '#1677ff', fontSize: 22 }}
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6} md={6}>
+              <Card hoverable onClick={() => navigate('/score')} size="small">
+                <Statistic
+                  title="积分任务"
+                  value={summary.total_score ?? 0}
+                  prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名{summary.rank ?? '-'} · 活跃任务{summary.active_task_count ?? 0}个</Text>}
+                  valueStyle={{ color: '#faad14', fontSize: 22 }}
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6} md={6}>
+              <Card hoverable onClick={() => navigate('/interaction')} size="small">
+                <Statistic
+                  title="课堂互动"
+                  value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
+                  prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0} · 提问{summary.my_questions_count ?? 0} · 回答{summary.my_answers_count ?? 0}</Text>}
+                  valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+                />
+              </Card>
+            </Col>
+            <Col xs={12} sm={6} md={6}>
+              <Card hoverable onClick={() => navigate('/quest')} size="small">
+                <Statistic
+                  title="趣味挑战"
+                  value={summary.quest_completed_count ?? 0}
+                  prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关{summary.quest_completed_count ?? 0}关 · {summary.quest_score ?? 0}分 · 抢答参与{summary.quick_quiz_participated ?? 0}次</Text>}
+                  valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+                />
+              </Card>
+            </Col>
+          </Row>
+
+          {/* 课程练习进度条 */}
+          {(summary.course_practice_count ?? 0) > 0 && (
+            <Card size="small" style={{ marginBottom: 16, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Space>
+                  <ExperimentOutlined style={{ color: '#52c41a', fontSize: 18 }} />
+                  <Text strong>课程练习</Text>
+                  <Text type="secondary" style={{ fontSize: 13 }}>
+                    已完成 <Text strong style={{ color: '#52c41a' }}>{summary.course_practice_count}</Text> 个知识点练习
+                  </Text>
+                </Space>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  平均正确率 <Text strong style={{ color: '#1677ff' }}>{summary.course_practice_avg_accuracy ?? 0}%</Text>
+                </Text>
+              </Space>
             </Card>
-          </Col>
-          <Col xs={12} sm={6} md={6}>
-            <Card hoverable onClick={() => navigate('/score')} size="small">
-              <Statistic
-                title="积分任务"
-                value={summary.total_score ?? 0}
-                prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名{summary.rank ?? '-'} · 活跃任务{summary.active_task_count ?? 0}个</Text>}
-                valueStyle={{ color: '#faad14', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={6}>
-            <Card hoverable onClick={() => navigate('/interaction')} size="small">
-              <Statistic
-                title="课堂互动"
-                value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
-                prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0} · 提问{summary.my_questions_count ?? 0} · 回答{summary.my_answers_count ?? 0}</Text>}
-                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6} md={6}>
-            <Card hoverable onClick={() => navigate('/quest')} size="small">
-              <Statistic
-                title="趣味挑战"
-                value={summary.quest_completed_count ?? 0}
-                prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关{summary.quest_completed_count ?? 0}关 · {summary.quest_score ?? 0}分 · 抢答参与{summary.quick_quiz_participated ?? 0}次</Text>}
-                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
-              />
-            </Card>
-          </Col>
-        </Row>
+          )}
+        </>
       ) : (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           <Col xs={12} sm={6} md={6}>
