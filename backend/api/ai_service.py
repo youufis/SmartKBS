@@ -174,6 +174,15 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
                 if text:
                     full_text += text
                     yield {"text": full_text, "session_id": new_session_id}
+        # 智能体返回空文本时降级
+        if not full_text:
+            logger.warning(f"智能体流式返回为空，降级到直接调模型 (app_id={app_id})")
+            from backend.api.config_router import get_config_value
+            model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+            api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                         "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            for chunk in _call_model_stream(prompt, api_key, model, api_base):
+                yield chunk
     except Exception as e:
         logger.error(f"智能体流式调用失败: {e}，降级到直接调模型")
         from backend.api.config_router import get_config_value
