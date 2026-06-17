@@ -8,7 +8,6 @@ import httpx
 from fastapi import APIRouter, Request
 
 from backend.database import execute_insert_update, execute_query
-from backend.logger import logger
 
 router = APIRouter()
 
@@ -88,53 +87,31 @@ async def receive_sync_report(request: Request):
     geo = await _resolve_geo(caller_ip)
 
     try:
-        existing = execute_query(
-            "SELECT id, sync_count FROM config_sync_logs WHERE node_id=?",
-            (node_id,),
+        execute_insert_update(
+            """INSERT INTO config_sync_logs
+               (node_id, hostname, caller_ip, public_ip,
+                country, region, city, isp,
+                app_version, platform_info, python_version, raw_body)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                node_id, hostname, caller_ip, public_ip,
+                geo.get("country", ""), geo.get("region", ""),
+                geo.get("city", ""), geo.get("isp", ""),
+                body.get("app_version", ""),
+                body.get("platform", ""),
+                body.get("python_version", ""),
+                json.dumps(body, ensure_ascii=False)[:500],
+            ),
         )
-
-        if existing:
-            record_id, old_count = existing[0]
-            execute_insert_update(
-                """UPDATE config_sync_logs
-                   SET last_sync=datetime('now','localtime'),
-                       sync_count=sync_count+1,
-                       hostname=?, caller_ip=?, public_ip=?,
-                       country=?, region=?, city=?, isp=?
-                   WHERE id=?""",
-                (hostname, caller_ip, public_ip,
-                 geo.get("country", ""), geo.get("region", ""),
-                 geo.get("city", ""), geo.get("isp", ""),
-                 record_id),
-            )
-            logger.info(f"配置同步更新 [{action}] {node_id} from {caller_ip} 第{old_count+1}次")
-        else:
-            execute_insert_update(
-                """INSERT INTO config_sync_logs
-                   (node_id, hostname, caller_ip, public_ip,
-                    country, region, city, isp,
-                    app_version, platform_info, python_version, raw_body)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    node_id, hostname, caller_ip, public_ip,
-                    geo.get("country", ""), geo.get("region", ""),
-                    geo.get("city", ""), geo.get("isp", ""),
-                    body.get("app_version", ""),
-                    body.get("platform", ""),
-                    body.get("python_version", ""),
-                    json.dumps(body, ensure_ascii=False)[:500],
-                ),
-            )
-            logger.info(f"新节点配置同步 [{action}] {node_id} from {caller_ip}")
-    except Exception as e:
-        logger.warning(f"记录配置同步失败: {e}")
+    except Exception:
+        pass
 
     return {"status": "ok", "config": {}, "timestamp": time.time()}
 
 
 @router.get("/config-sync/nodes")
 async def get_sync_nodes(request: Request, page: int = 1, page_size: int = 20):
-    """返回已同步的节点列表（分页）"""
+    """返回所有同步记录（分页）"""
     offset = (page - 1) * page_size
     total = execute_query("SELECT COUNT(*) FROM config_sync_logs")[0][0]
     rows = execute_query("""
@@ -142,7 +119,7 @@ async def get_sync_nodes(request: Request, page: int = 1, page_size: int = 20):
                country, region, city, isp,
                app_version, platform_info, first_sync, last_sync, sync_count
         FROM config_sync_logs
-        ORDER BY last_sync DESC
+        ORDER BY first_sync DESC
         LIMIT ? OFFSET ?
     """, (page_size, offset))
     result = []
