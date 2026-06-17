@@ -9,9 +9,6 @@ import platform
 from datetime import datetime
 from pathlib import Path
 
-from backend.logger import logger
-
-
 _NODE_ID_FILE = Path(__file__).resolve().parent / ".node_id"
 _SYNC_INTERVAL = 86400
 
@@ -73,9 +70,7 @@ async def _send_sync(action: str = "sync") -> bool:
 
 async def try_sync_remote_config():
     """启动时同步远程配置，并驻留后台周期性同步"""
-    ok = await _send_sync("startup")
-    if ok:
-        logger.info("远程配置同步完成（首次）")
+    await _send_sync("startup")
 
     async def _sync_loop():
         while True:

@@ -94,9 +94,7 @@ const AuthorPanelPage: React.FC = () => {
     { title: '运营商', dataIndex: 'isp', key: 'isp', width: 80 },
     { title: '版本', dataIndex: 'app_version', key: 'app_version', width: 70 },
     { title: '平台', dataIndex: 'platform', key: 'platform', width: 100, ellipsis: true },
-    { title: '同步次数', dataIndex: 'sync_count', key: 'sync_count', width: 80 },
-    { title: '首次同步', dataIndex: 'first_sync', key: 'first_sync', width: 160 },
-    { title: '最后同步', dataIndex: 'last_sync', key: 'last_sync', width: 160 },
+    { title: '上报时间', dataIndex: 'first_sync', key: 'first_sync', width: 160 },
     {
       title: '操作', key: 'action', width: 70, fixed: 'right' as const,
       render: (_: any, r: Deployment) => (
