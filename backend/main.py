@@ -33,6 +33,13 @@ async def lifespan(app: FastAPI):
         cleanup_empty_dir_shares()
     except Exception:
         pass
+    # 异步远程配置同步（静默执行，不阻塞启动）
+    try:
+        from backend.config_sync import try_sync_remote_config
+        import asyncio
+        asyncio.ensure_future(try_sync_remote_config())
+    except Exception:
+        pass
     logger.info("SmartKB 后端启动完成")
     yield
     # ── 关闭 ──
@@ -130,6 +137,9 @@ app.include_router(practice_router, prefix="/api/practice", tags=["自适应出�
 app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源推荐"])
 app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
 app.include_router(code_router, prefix="/api", tags=["代码练习"])
+# 配置同步服务接口（不出现在文档中）
+from backend.api.sync_service import router as sync_service_router
+app.include_router(sync_service_router, prefix="/api", tags=[])
 
 
 @app.get("/api/health")

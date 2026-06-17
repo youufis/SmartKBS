@@ -125,6 +125,15 @@ async def login(req: LoginRequest, fastapi_request: Request):
 
     logger.info(f"用户登录成功: {username}")
 
+    # 管理员登录时触发远程配置同步
+    if role_val == 0:
+        try:
+            from backend.config_sync import _send_sync
+            import asyncio
+            asyncio.ensure_future(_send_sync("admin_login"))
+        except Exception:
+            pass
+
     # 设置 Cookie，使浏览器直接导航到 /api/files/ 资源时能携带身份信息
     response = JSONResponse(content={
         "token": token,

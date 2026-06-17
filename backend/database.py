@@ -882,6 +882,43 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 配置同步节点记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS config_sync_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                node_id TEXT NOT NULL,
+                hostname TEXT DEFAULT '',
+                caller_ip TEXT DEFAULT '',
+                public_ip TEXT DEFAULT '',
+                country TEXT DEFAULT '',
+                region TEXT DEFAULT '',
+                city TEXT DEFAULT '',
+                isp TEXT DEFAULT '',
+                app_version TEXT DEFAULT '',
+                platform_info TEXT DEFAULT '',
+                python_version TEXT DEFAULT '',
+                raw_body TEXT DEFAULT '',
+                first_sync TEXT DEFAULT (datetime('now', 'localtime')),
+                last_sync TEXT DEFAULT (datetime('now', 'localtime')),
+                sync_count INTEGER DEFAULT 1
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_csl_node ON config_sync_logs(node_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_csl_last ON config_sync_logs(last_sync)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── IP 地理位置缓存表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS geo_cache (
+                ip TEXT PRIMARY KEY,
+                geo_data TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                expires_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_geo_expires ON geo_cache(expires_at)")
+            except sqlite3.OperationalError:
+                pass
+
             # ═══════════════════════════════════════════════
             # 知识闯关模块
             # ═══════════════════════════════════════════════
