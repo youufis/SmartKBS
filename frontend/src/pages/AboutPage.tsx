@@ -11,7 +11,7 @@ const AboutPage: React.FC = () => {
   const [clickCount, setClickCount] = useState(0)
   const [showEntry, setShowEntry] = useState(false)
 
-  const handleVersionClick = () => {
+  const handlePageClick = () => {
     const newCount = clickCount + 1
     setClickCount(newCount)
     if (newCount >= 10) {
@@ -32,7 +32,7 @@ const AboutPage: React.FC = () => {
   }, [])
 
   return (
-    <div style={{
+    <div onClick={handlePageClick} style={{
       width: '100%', padding: 24,
       background: '#fff', borderRadius: 8, minHeight: 'calc(100vh - 160px)',
     }}>
@@ -40,8 +40,7 @@ const AboutPage: React.FC = () => {
         ℹ️ 关于与帮助
         <Typography.Text
           type="secondary"
-          style={{ fontSize: 14, marginLeft: 12, cursor: 'pointer' }}
-          onClick={handleVersionClick}
+          style={{ fontSize: 14, marginLeft: 12 }}
         >
           v5.6.0
         </Typography.Text>
