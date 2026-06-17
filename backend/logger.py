@@ -1,12 +1,18 @@
 """
 统一日志配置
 替代 AgentSmartKBXS.py 中散落的 print() 调用
+使用 RotatingFileHandler 按大小轮转，防止日志无限增长。
 """
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from backend.config import LOG_FILES_DIR
+
+# 日志轮转配置
+_LOG_MAX_BYTES = 5 * 1024 * 1024   # 单个日志文件最大 5 MB
+_LOG_BACKUP_COUNT = 5              # 保留最近 5 个备份文件
 
 
 def setup_logger(name: str = "smartkb") -> logging.Logger:
@@ -28,12 +34,15 @@ def setup_logger(name: str = "smartkb") -> logging.Logger:
     console_handler.setFormatter(console_fmt)
     logger.addHandler(console_handler)
 
-    # 文件 handler
+    # 文件 handler（自动轮转）
     try:
         log_dir = Path(LOG_FILES_DIR)
         log_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(
-            log_dir / "backend.log", encoding="utf-8"
+        file_handler = RotatingFileHandler(
+            log_dir / "backend.log",
+            maxBytes=_LOG_MAX_BYTES,
+            backupCount=_LOG_BACKUP_COUNT,
+            encoding="utf-8",
         )
         file_handler.setLevel(logging.DEBUG)
         file_fmt = logging.Formatter(
