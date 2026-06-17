@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Typography, Table, Card, Row, Col, Statistic, Tag, Button, Modal, message, Popconfirm, Space
+  Typography, Table, Card, Row, Col, Statistic, Tag, Button, Modal, message, Popconfirm, Space, Tooltip
 } from 'antd'
 import {
   EyeOutlined, GlobalOutlined, ApiOutlined, TeamOutlined,
-  LoginOutlined, EnvironmentOutlined, DeleteOutlined, ReloadOutlined
+  LoginOutlined, EnvironmentOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, ClearOutlined
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 
 interface Deployment {
+  id: number
   node_id: string
   hostname: string
   caller_ip: string
@@ -39,7 +40,7 @@ const AuthorPanelPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(20)
   const [stats, setStats] = useState<Stats | null>(null)
   const [mapModalOpen, setMapModalOpen] = useState(false)
-  const [deleting, setDeleting] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<number | null>(null)
 
   const loadData = useCallback(async (p: number, ps: number) => {
     setLoading(true)
@@ -62,16 +63,43 @@ const AuthorPanelPage: React.FC = () => {
     loadData(page, pageSize)
   }, [page, pageSize, loadData])
 
-  const handleDelete = async (nodeId: string) => {
-    setDeleting(nodeId)
+  const handleDelete = async (id: number) => {
+    setDeleting(id)
     try {
-      await apiClient.delete(`/api/config-sync/nodes/${nodeId}`)
+      await apiClient.delete(`/api/config-sync/record/${id}`)
       message.success('已删除')
       loadData(page, pageSize)
     } catch (err) {
       message.error('删除失败')
     } finally {
       setDeleting(null)
+    }
+  }
+
+  const handleClearAll = async () => {
+    try {
+      await apiClient.delete('/api/config-sync/clear')
+      message.success('已清空全部记录')
+      loadData(1, pageSize)
+      setPage(1)
+    } catch {
+      message.error('清空失败')
+    }
+  }
+
+  const handleExport = async () => {
+    try {
+      const { data } = await apiClient.get('/api/config-sync/export')
+      const blob = new Blob([JSON.stringify(data.nodes, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `sync-logs-${new Date().toISOString().slice(0, 10)}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      message.success('导出成功')
+    } catch {
+      message.error('导出失败')
     }
   }
 
@@ -100,7 +128,7 @@ const AuthorPanelPage: React.FC = () => {
       render: (_: any, r: Deployment) => (
         <Popconfirm
           title="确定删除此记录？"
-          onConfirm={() => handleDelete(r.node_id)}
+          onConfirm={() => handleDelete(r.id)}
           okText="确定"
           cancelText="取消"
         >
@@ -109,7 +137,7 @@ const AuthorPanelPage: React.FC = () => {
             danger
             size="small"
             icon={<DeleteOutlined />}
-            loading={deleting === r.node_id}
+            loading={deleting === r.id}
           />
         </Popconfirm>
       ),
@@ -161,14 +189,29 @@ const AuthorPanelPage: React.FC = () => {
         title={
           <Space>
             <EyeOutlined />
-            <span>节点列表</span>
+            <span>同步记录</span>
             <Tag color="blue">共 {total} 条</Tag>
           </Space>
         }
         extra={
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => loadData(page, pageSize)}>
-            刷新
-          </Button>
+          <Space>
+            <Button size="small" icon={<DownloadOutlined />} onClick={handleExport}>
+              导出
+            </Button>
+            <Popconfirm
+              title="确定清空全部记录？此操作不可恢复"
+              onConfirm={handleClearAll}
+              okText="确定"
+              cancelText="取消"
+            >
+              <Button size="small" danger icon={<ClearOutlined />}>
+                清空
+              </Button>
+            </Popconfirm>
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => loadData(page, pageSize)}>
+              刷新
+            </Button>
+          </Space>
         }
       >
         <Table

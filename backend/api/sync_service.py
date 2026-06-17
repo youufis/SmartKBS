@@ -116,7 +116,7 @@ async def get_sync_nodes(request: Request, page: int = 1, page_size: int = 20):
     offset = (page - 1) * page_size
     total = execute_query("SELECT COUNT(*) FROM config_sync_logs")[0][0]
     rows = execute_query("""
-        SELECT node_id, hostname, caller_ip, public_ip,
+        SELECT id, node_id, hostname, caller_ip, public_ip,
                country, region, city, isp,
                app_version, platform_info, first_sync, last_sync, sync_count
         FROM config_sync_logs
@@ -126,28 +126,65 @@ async def get_sync_nodes(request: Request, page: int = 1, page_size: int = 20):
     result = []
     for r in rows:
         result.append({
-            "node_id": r[0],
-            "hostname": r[1],
-            "caller_ip": r[2],
-            "public_ip": r[3],
-            "country": r[4],
-            "region": r[5],
-            "city": r[6],
-            "isp": r[7],
-            "app_version": r[8],
-            "platform": r[9],
-            "first_sync": r[10],
-            "last_sync": r[11],
-            "sync_count": r[12],
+            "id": r[0],
+            "node_id": r[1],
+            "hostname": r[2],
+            "caller_ip": r[3],
+            "public_ip": r[4],
+            "country": r[5],
+            "region": r[6],
+            "city": r[7],
+            "isp": r[8],
+            "app_version": r[9],
+            "platform": r[10],
+            "first_sync": r[11],
+            "last_sync": r[12],
+            "sync_count": r[13],
         })
     return {"nodes": result, "total": total, "page": page, "page_size": page_size}
 
 
-@router.delete("/config-sync/nodes/{node_id}")
-async def delete_sync_node(node_id: str):
-    """删除指定节点记录"""
-    execute_insert_update("DELETE FROM config_sync_logs WHERE node_id=?", (node_id,))
-    return {"status": "ok", "node_id": node_id}
+@router.delete("/config-sync/record/{record_id}")
+async def delete_sync_record(record_id: int):
+    """删除指定单条记录"""
+    execute_insert_update("DELETE FROM config_sync_logs WHERE id=?", (record_id,))
+    return {"status": "ok", "id": record_id}
+
+
+@router.delete("/config-sync/clear")
+async def clear_sync_logs():
+    """清空所有同步记录"""
+    execute_insert_update("DELETE FROM config_sync_logs")
+    return {"status": "ok"}
+
+
+@router.get("/config-sync/export")
+async def export_sync_logs():
+    """导出所有同步记录为 JSON"""
+    rows = execute_query("""
+        SELECT id, node_id, hostname, caller_ip, public_ip,
+               country, region, city, isp,
+               app_version, platform_info, first_sync
+        FROM config_sync_logs
+        ORDER BY first_sync DESC
+    """)
+    result = []
+    for r in rows:
+        result.append({
+            "id": r[0],
+            "node_id": r[1],
+            "hostname": r[2],
+            "caller_ip": r[3],
+            "public_ip": r[4],
+            "country": r[5],
+            "region": r[6],
+            "city": r[7],
+            "isp": r[8],
+            "app_version": r[9],
+            "platform": r[10],
+            "time": r[11],
+        })
+    return {"nodes": result, "total": len(result)}
 
 
 @router.get("/config-sync/summary")
