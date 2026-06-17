@@ -1297,7 +1297,7 @@ def _backfill_grade_class_ids(c):
             c.execute("UPDATE users SET class_id=(SELECT c2.id FROM classes c2 JOIN grades g ON c2.grade_id=g.id "
                       "WHERE g.name=users.grade AND (c2.name=users.class||'班' OR c2.name=users.class)) "
                       "WHERE class_id IS NULL AND class IS NOT NULL AND class!=''")
-            logger.info("已自动回填 users 表 grade_id/class_id")
+            pass
 
         # 2. scores / rollcall 系列表
         for table in ['scores', 'rollcall_weights', 'rollcall_meta', 'rollcall_history']:

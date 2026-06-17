@@ -76,7 +76,7 @@ def get_subject_list() -> list[str]:
     return ["信息科技", "通用技术"]
 
 
-def _load_system_config() -> dict:
+def _load_system_config() -> dict[str, Any]:
     """从 system_config.json 加载配置，不存在则返回空 dict"""
     try:
         if _CONFIG_FILE.exists():
@@ -86,7 +86,7 @@ def _load_system_config() -> dict:
     return {}
 
 
-def _load_title_config() -> list[dict]:
+def _load_title_config() -> list[dict[str, Any]]:
     """从 system_config.json 加载称号配置，不存在则返回默认"""
     cfg = _load_system_config()
     custom = cfg.get("TITLE_CONFIG")
@@ -95,7 +95,7 @@ def _load_title_config() -> list[dict]:
     return DEFAULT_TITLE_CONFIG
 
 
-def _load_subject_title_config() -> list[dict]:
+def _load_subject_title_config() -> list[dict[str, Any]]:
     """加载学科称号配置"""
     cfg = _load_system_config()
     custom = cfg.get("SUBJECT_TITLE_CONFIG")
@@ -104,7 +104,7 @@ def _load_subject_title_config() -> list[dict]:
     return DEFAULT_SUBJECT_TITLE_CONFIG
 
 
-def _load_badge_config() -> list[dict]:
+def _load_badge_config() -> list[dict[str, Any]]:
     """加载成就徽章配置"""
     cfg = _load_system_config()
     custom = cfg.get("BADGE_CONFIG")
@@ -116,17 +116,17 @@ def _load_badge_config() -> list[dict]:
     return DEFAULT_BADGE_CONFIG
 
 
-def get_title_config() -> list[dict]:
+def get_title_config() -> list[dict[str, Any]]:
     """获取完整的主称号配置（含所有等级）"""
     return _load_title_config()
 
 
-def get_subject_title_config() -> list[dict]:
+def get_subject_title_config() -> list[dict[str, Any]]:
     """获取学科称号配置"""
     return _load_subject_title_config()
 
 
-def get_badge_config() -> list[dict]:
+def get_badge_config() -> list[dict[str, Any]]:
     """获取成就徽章配置"""
     return _load_badge_config()
 
@@ -134,7 +134,7 @@ def get_badge_config() -> list[dict]:
 # ── 积分主称号计算 ──
 
 
-def get_main_title(points: int) -> dict:
+def get_main_title(points: int) -> dict[str, Any]:
     """根据总积分计算当前主称号
 
     Args:
@@ -153,7 +153,7 @@ def get_main_title(points: int) -> dict:
     return result
 
 
-def get_main_title_progress(points: int) -> dict:
+def get_main_title_progress(points: int) -> dict[str, Any]:
     """获取当前称号进度信息
 
     Returns:
@@ -196,7 +196,7 @@ def get_main_title_progress(points: int) -> dict:
     }
 
 
-def check_main_title_upgrade(student_username: str, old_total: int, new_total: int) -> dict | None:
+def check_main_title_upgrade(student_username: str, old_total: int, new_total: int) -> dict[str, Any] | None:
     """检测主称号是否升级
 
     Args:
@@ -255,7 +255,7 @@ def check_main_title_upgrade(student_username: str, old_total: int, new_total: i
     return None
 
 
-def _create_title_upgrade_notification(student_username: str, old_title: dict, new_title: dict):
+def _create_title_upgrade_notification(student_username: str, old_title: dict[str, Any], new_title: dict[str, Any]):
     """创建称号升级系统通知"""
     try:
         from backend.database import execute_insert_update
@@ -281,7 +281,7 @@ def _create_title_upgrade_notification(student_username: str, old_title: dict, n
 # ── 学科称号计算 ──
 
 
-def get_subject_title(subject: str, question_count: int) -> dict:
+def get_subject_title(subject: str, question_count: int) -> dict[str, Any]:
     """根据答题数计算学科称号
 
     Args:
@@ -302,7 +302,7 @@ def get_subject_title(subject: str, question_count: int) -> dict:
     return result
 
 
-def check_subject_title_upgrade(student_username: str, subject: str, old_count: int, new_count: int) -> dict | None:
+def check_subject_title_upgrade(student_username: str, subject: str, old_count: int, new_count: int) -> dict[str, Any] | None:
     """检测学科称号是否升级
 
     Returns:
@@ -333,7 +333,7 @@ def check_subject_title_upgrade(student_username: str, subject: str, old_count: 
     return None
 
 
-def get_student_subject_titles(student_username: str) -> list[dict]:
+def get_student_subject_titles(student_username: str) -> list[dict[str, Any]]:
     """获取学生所有科目的称号"""
     rows = execute_query(
         "SELECT subject, question_count, title_level, title_name FROM student_subject_titles WHERE student_username=?",
@@ -369,7 +369,7 @@ def get_student_subject_titles(student_username: str) -> list[dict]:
 # ── 成就徽章计算 ──
 
 
-def check_and_unlock_badges(student_username: str) -> list[dict]:
+def check_and_unlock_badges(student_username: str) -> list[dict[str, Any]]:
     """检测学生所有可解锁的徽章，并自动解锁
 
     Returns:
@@ -411,7 +411,7 @@ def check_and_unlock_badges(student_username: str) -> list[dict]:
     return newly_unlocked
 
 
-def _check_badge_condition(student_username: str, badge: dict) -> bool:
+def _check_badge_condition(student_username: str, badge: dict[str, Any]) -> bool:
     """检查单个徽章条件是否满足"""
     ctype = badge.get("condition_type", "")
     cvalue = badge.get("condition_value")
@@ -422,7 +422,7 @@ def _check_badge_condition(student_username: str, badge: dict) -> bool:
                 "SELECT COUNT(*) FROM activity_rewards WHERE student_username=?",
                 (student_username,),
             )
-            return row and row[0][0] > 0
+            return bool(row and row[0][0] > 0)
         except Exception:
             return False
 
@@ -435,7 +435,7 @@ def _check_badge_condition(student_username: str, badge: dict) -> bool:
                    WHERE student_username=? AND score = total_score AND total_score > 0""",
                 (student_username,),
             )
-            return rows and rows[0]["COUNT(*)"] > 0
+            return bool(rows and rows[0]["COUNT(*)"] > 0)
         except Exception:
             return False
 
@@ -486,7 +486,7 @@ def _check_badge_condition(student_username: str, badge: dict) -> bool:
                 (student_username,),
             )
             total_types = len(set(t["activity_type"] for t in _get_all_activity_types()))
-            return rows and rows[0][0] >= total_types
+            return bool(rows and rows[0][0] >= total_types)
         except Exception:
             return False
 
@@ -496,7 +496,7 @@ def _check_badge_condition(student_username: str, badge: dict) -> bool:
                 "SELECT COUNT(*) FROM conversations WHERE username=?",
                 (student_username,),
             )
-            return rows and rows[0][0] >= (cvalue or 50)
+            return bool(rows and rows[0][0] >= (cvalue or 50))
         except Exception:
             return False
 
@@ -508,7 +508,7 @@ def _check_badge_condition(student_username: str, badge: dict) -> bool:
                    WHERE dm.username=?""",
                 (student_username,),
             )
-            return rows and rows[0][0] >= (cvalue or 10)
+            return bool(rows and rows[0][0] >= (cvalue or 10))
         except Exception:
             return False
 
@@ -558,20 +558,20 @@ def _check_badge_condition(student_username: str, badge: dict) -> bool:
                 (student_username, f"{month}%"),
             )
             # 当月至少有 20 天登录（按上课日估算）
-            return rows and rows[0][0] >= 20
+            return bool(rows and rows[0][0] >= 20)
         except Exception:
             return False
 
     return False
 
 
-def _get_all_activity_types() -> list[dict]:
+def _get_all_activity_types() -> list[dict[str, Any]]:
     """获取所有活动类型列表"""
     from backend.reward_engine import ACTIVITY_TYPE_NAMES
     return [{"activity_type": k} for k in ACTIVITY_TYPE_NAMES]
 
 
-def _create_badge_notification(student_username: str, badge: dict):
+def _create_badge_notification(student_username: str, badge: dict[str, Any]):
     """创建徽章解锁通知"""
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -588,7 +588,7 @@ def _create_badge_notification(student_username: str, badge: dict):
         logger.warning(f"创建徽章解锁通知失败: {e}")
 
 
-def get_student_badges(student_username: str) -> list[dict]:
+def get_student_badges(student_username: str) -> list[dict[str, Any]]:
     """获取学生所有徽章状态（已解锁+未解锁）"""
     badge_config = _load_badge_config()
     unlocked_rows = execute_query(
@@ -612,7 +612,7 @@ def get_student_badges(student_username: str) -> list[dict]:
     return result
 
 
-def get_title_upgrade_history(student_username: str, limit: int = 50) -> list[dict]:
+def get_title_upgrade_history(student_username: str, limit: int = 50) -> list[dict[str, Any]]:
     """获取学生称号/徽章升级历史"""
     rows = execute_query(
         """SELECT old_title, new_title, title_type, subject, created_at
@@ -633,7 +633,7 @@ def get_title_upgrade_history(student_username: str, limit: int = 50) -> list[di
     ]
 
 
-def get_or_init_student_title(student_username: str) -> dict:
+def get_or_init_student_title(student_username: str) -> dict[str, Any]:
     """获取学生当前称号，如果尚未初始化则创建"""
     row = execute_query(
         "SELECT title_level, title_name FROM student_titles WHERE student_username=?",
@@ -660,7 +660,7 @@ def get_or_init_student_title(student_username: str) -> dict:
     return {"level": title["level"], "name": title["name"]}
 
 
-def get_full_title_info(student_username: str, total_points: int = -1) -> dict:
+def get_full_title_info(student_username: str, total_points: int = -1) -> dict[str, Any]:
     """获取学生完整称号信息（供 API 使用）
 
     Returns:
@@ -705,7 +705,7 @@ def get_full_title_info(student_username: str, total_points: int = -1) -> dict:
 # ── 学科题目数统计与自动升级 ──
 
 
-def update_subject_question_counts(student_username: str) -> list[dict]:
+def update_subject_question_counts(student_username: str) -> list[dict[str, Any]]:
     """统计学生的各学科答题数，更新学科称号并检测升级
 
     从 exam_attempts + practice_attempts 中按科目统计答题数，

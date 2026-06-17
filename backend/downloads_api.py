@@ -75,7 +75,7 @@ def _safe_rel_path(rel_path: str) -> str:
         return ''
     return norm
 
-def _scan_dir(dirpath: str, base_rel: str) -> list:
+def _scan_dir(dirpath: str, base_rel: str) -> list[dict[str, object]]:
     """递归扫描目录，返回 [{name, path, size, mtime}]，path 为相对于用户 downloads 目录"""
     entries = []
     for name in sorted(os.listdir(dirpath), key=str.lower):
@@ -163,7 +163,7 @@ async def api_upload(request: Request):
         if key.startswith('file'):
             idx = key[4:]
             item = form[key]
-            if hasattr(item, 'filename') and item.filename:
+            if getattr(item, 'filename', None):
                 file_map[idx] = [item, '']
     for key in form.keys():
         if key.startswith('path'):
@@ -172,9 +172,9 @@ async def api_upload(request: Request):
                 file_map[idx][1] = form[key]
 
     for idx, (item, rel_path) in file_map.items():
+        raw_filename = getattr(item, 'filename', None) or '?'
         try:
-            raw_filename = item.filename
-            if not raw_filename:
+            if not raw_filename or raw_filename == '?':
                 continue
             content = await item.read()
             file_size = len(content)
@@ -208,7 +208,7 @@ async def api_upload(request: Request):
             uploaded.append(full_rel)
             current_usage += file_size
         except Exception as e:
-            errors.append(f"{raw_filename if 'raw_filename' in dir() else '?'}: {str(e)}")
+            errors.append(f"{raw_filename}: {str(e)}")
 
     return {"success": len(uploaded) > 0, "files": uploaded, "errors": errors}
 

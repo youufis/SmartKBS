@@ -267,8 +267,9 @@ async def register_user(req: RegisterRequest, request: Request):
             gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
             for g_name, cls_names in gcm.items():
                 gid = upsert_grade(g_name)
+                assert gid is not None
                 if not cls_names:
-                    assign_teacher(username, gid, None)
+                    assign_teacher(username, gid, None)  # type: ignore[arg-type]
                 else:
                     for cn in cls_names:
                         if "班" not in cn:
@@ -328,8 +329,9 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
             gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
             for g_name, cls_names in gcm.items():
                 gid = upsert_grade(g_name)
+                assert gid is not None
                 if not cls_names:
-                    assign_teacher(username, gid, None)
+                    assign_teacher(username, gid, None)  # type: ignore[arg-type]
                 else:
                     for cn in cls_names:
                         if "班" not in cn:
@@ -492,14 +494,14 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
 
 
 @router.post("/import")
-async def import_users(file: UploadFile = File(...), request: Request = None):
+async def import_users(file: UploadFile = File(...), request: Request = None):  # type: ignore[assignment]
     """CSV 批量导入用户（流式进度返回）"""
     if request:
         current_user = get_current_user(request)
         if not can_import_users(current_user["username"]):
             raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以导入用户")
 
-    if not file.filename.endswith(".csv"):
+    if not (file.filename or "").endswith(".csv"):
         raise HTTPException(status_code=400, detail="请上传 CSV 文件")
 
     content = await file.read()
@@ -528,7 +530,7 @@ async def import_users(file: UploadFile = File(...), request: Request = None):
 
         # 预解析所有年级/班级名称，构建缓存
         grade_cache: dict[str, int] = {}   # grade_name → grade_id
-        class_cache: dict[tuple, int] = {}  # (grade_id, class_name) → class_id
+        class_cache: dict[tuple[int, str], int] = {}  # (grade_id, class_name) → class_id
         for row in rows:
             grade_val = row.get("grade", "").strip()
             if grade_val:

@@ -24,10 +24,10 @@ async def create_ai_task(description: str, prompt: str, api_key: str) -> str:
         task.status = TaskStatus.FAILED
         task.error = "API Key 未配置"
         task.completed_at = time.time()
-        task_manager._tasks[task_id] = task
+        task_manager._tasks[task_id] = task  # type: ignore[protected-access]
         return task_id
 
-    async def _do_call() -> dict:
+    async def _do_call() -> dict[str, Any]:
         from backend.api.ai_service import call_ai_async
         result = await call_ai_async(prompt, api_key)
         return {"result": result}
@@ -57,7 +57,7 @@ class AITask:
         self.created_at = time.time()
         self.completed_at: Optional[float] = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "description": self.description,
@@ -136,7 +136,7 @@ class AITaskManager:
         """获取任务状态"""
         return self._tasks.get(task_id)
 
-    def get_task_dict(self, task_id: str) -> Optional[dict]:
+    def get_task_dict(self, task_id: str) -> Optional[dict[str, Any]]:
         """获取任务状态字典"""
         task = self.get_task(task_id)
         return task.to_dict() if task else None

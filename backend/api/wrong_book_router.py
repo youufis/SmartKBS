@@ -4,6 +4,7 @@
 """
 import json
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
@@ -16,7 +17,7 @@ from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.database import execute_query as db_exec, execute_insert_update as db_insert
 from backend.permission_service import (
-    parse_legacy_teacher_grade_class as _parse_teacher_grade_class,
+    parse_legacy_teacher_grade_class,
     is_student_in_teacher_scope,
 )
 
@@ -57,7 +58,7 @@ async def get_wrong_questions(request: Request):
                 )
                 teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
                 teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
-                grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+                grade_class_map = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
 
                 # 构建教师班级的 OR 条件
                 grade_conditions = []
@@ -356,7 +357,7 @@ async def get_students_with_wrong(
         )
         teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
         teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
-        grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+        grade_class_map = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
 
         if not grade:
             # 没有指定年级，限制在所有所教年级和班级
@@ -433,7 +434,7 @@ async def get_grades_with_wrong(request: Request):
     )
     teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
     teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
-    grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+    grade_class_map = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
     teacher_grades = list(grade_class_map.keys())
 
     if not teacher_grades:
@@ -494,7 +495,7 @@ async def get_classes_with_wrong(
     )
     teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
     teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
-    grade_class_map = _parse_teacher_grade_class(teacher_grade, teacher_class)
+    grade_class_map = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
     allowed_classes = grade_class_map.get(grade, [])
 
     if not allowed_classes:
@@ -594,7 +595,7 @@ async def get_review_plan(request: Request):
 
     type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
                    "fill": "填空题", "essay": "作文", "subjective": "主观题"}
-    weak_types = "、".join(type_labels.get(t, t) for t in type_set)
+    weak_types = "、".join(str(type_labels.get(t, t)) for t in type_set)
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
@@ -615,7 +616,7 @@ async def get_review_plan(request: Request):
 
     from backend.ai_task_manager import task_manager
 
-    async def _do_plan() -> dict:
+    async def _do_plan() -> dict[str, Any]:
         try:
             result = await call_ai_async(prompt, api_key)
             return {"plan": result}
@@ -730,7 +731,7 @@ async def export_review_plan_docx(
 
     type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
                    "fill": "填空题", "essay": "作文", "subjective": "主观题"}
-    weak_types = "、".join(type_labels.get(t, t) for t in type_set)
+    weak_types = "、".join(str(type_labels.get(t, t)) for t in type_set)
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
@@ -758,9 +759,9 @@ async def export_review_plan_docx(
     # 生成 Word 文档
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'
-    style.font.size = Pt(11)
-    style.paragraph_format.line_spacing = 1.5
+    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
+    style.font.size = Pt(11)  # type: ignore[attr-defined]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
     title = doc.add_heading(f"{student_name} 的 AI 复习计划", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -827,7 +828,7 @@ async def export_review_plan_docx(
 # 错本题追踪系统（v5.3）
 # ═══════════════════════════════════════════════════════════
 
-def record_wrong_answers(student_username: str, exam_id: int, graded_answers: dict):
+def record_wrong_answers(student_username: str, exam_id: int, graded_answers: dict[str, Any]):
     """考试提交后，将答错的题目记录到 wrong_book 表"""
     from backend.question_db import execute_query as q_exec
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -849,7 +850,7 @@ def record_wrong_answers(student_username: str, exam_id: int, graded_answers: di
             )
 
 
-def mark_wrong_mastered(student_username: str, correct_answers: dict):
+def mark_wrong_mastered(student_username: str, correct_answers: dict[str, Any]):
     """练习/考试答对后，标记 wrong_book 中的对应题目为已掌握"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     from backend.question_db import execute_query as q_exec
@@ -974,7 +975,7 @@ async def generate_wrong_practice(req: PracticeGenerateRequest, request: Request
         )
         seen = set()
         for a in attempts:
-            ans_data = a.get("answers") if isinstance(a, dict) else (a[0] if a else "{}")
+            ans_data = a.get("answers") or "{}"
             if isinstance(ans_data, str):
                 try:
                     ans_data = json.loads(ans_data)
@@ -1005,7 +1006,7 @@ async def generate_wrong_practice(req: PracticeGenerateRequest, request: Request
                    svg_content, has_svg, media_files
             FROM question_bank
             WHERE id IN ({placeholders}) AND status='active'""",
-        question_ids,
+        tuple(question_ids),
     )
 
     combined = []
@@ -1057,7 +1058,7 @@ def check_and_auto_generate_wrong_practice(student_username: str):
         )
         seen = set()
         for a in attempts:
-            ans_data = a.get("answers") if isinstance(a, dict) else (a[0] if a else "{}")
+            ans_data = a.get("answers") or "{}"
             if isinstance(ans_data, str):
                 try:
                     ans_data = json.loads(ans_data)
@@ -1085,7 +1086,7 @@ def check_and_auto_generate_wrong_practice(student_username: str):
         (f'%{student_username}%',),
     )
     for sess in pending:
-        sid = sess["id"] if isinstance(sess, dict) else sess[0]
+        sid = sess["id"]
         attempt = q_exec(
             "SELECT id FROM practice_attempts WHERE session_id=? AND student_username=?",
             (sid, student_username),
@@ -1104,7 +1105,7 @@ def check_and_auto_generate_wrong_practice(student_username: str):
     seen = set()
     all_wrong_ids = []
     for a in attempts:
-        ans_data = a.get("answers") if isinstance(a, dict) else (a[0] if a else "{}")
+        ans_data = a.get("answers") or "{}"
         if isinstance(ans_data, str):
             try:
                 ans_data = json.loads(ans_data)
@@ -1198,7 +1199,7 @@ async def trigger_auto_wrong_practice(request: Request):
         )
         triggered = 0
         for sw in students_with_wrong:
-            s_user = sw["student_username"] if isinstance(sw, dict) else sw[0]
+            s_user = sw["student_username"]
             try:
                 check_and_auto_generate_wrong_practice(s_user)
                 triggered += 1

@@ -56,7 +56,7 @@ class ImportQuestion(BaseModel):
     """导入题目到题库请求"""
     type: str = "single"
     question_text: str
-    options: str | list | dict | None = None
+    options: str | list[Any] | dict[str, Any] | None = None
     correct_answer: str = ""
     explanation: str = ""
     knowledge_points: str = ""
@@ -64,8 +64,8 @@ class ImportQuestion(BaseModel):
     source: str = "manual"
     svg_content: str | None = None
     has_svg: int = 0
-    media_placeholders: str | list | None = None
-    media_files: str | list | None = None
+    media_placeholders: str | list[Any] | None = None
+    media_files: str | list[Any] | None = None
 
 
 # ── 题型配置 ──
@@ -254,6 +254,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
         # 如果是代码题，额外创建 code_problems + code_test_cases
         if q_type == 'code':
+            assert qid is not None
             _save_code_problem(qid, q_data, username, now)
 
         saved_questions.append({
@@ -322,7 +323,7 @@ def _parse_ai_response(text: str) -> list[dict[str, Any]]:
     return []
 
 
-def _save_code_problem(question_id: int, q_data: dict, username: str, now: str):
+def _save_code_problem(question_id: int, q_data: dict[str, Any], username: str, now: str):
     """保存代码题的 code_problems 和 code_test_cases 记录"""
     try:
         language = q_data.get("language", "python")
@@ -649,7 +650,7 @@ async def extract_questions_from_text(
     questions = None
     json_bytes: bytes | None = None
     if file and file.filename and source_label == "json":
-        json_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        json_bytes = content.encode("utf-8")
     if json_bytes:
         try:
             parsed = json.loads(json_bytes.decode("utf-8", errors="replace"))
@@ -782,7 +783,8 @@ async def extract_questions_from_image(
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
 
     # 验证图片格式
-    ext = os.path.splitext(file.filename.lower())[1]
+    filename_lower = (file.filename or "").lower()
+    ext = os.path.splitext(filename_lower)[1]
     supported_images = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
     if ext not in supported_images:
         raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}，支持 jpg/png/gif/webp/bmp")
@@ -1196,6 +1198,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
         # ── 代码题额外保存 code_problems 和测试用例 ──
         if q_type == 'code':
+            assert qid is not None
             _save_code_problem(qid, q_data, username, now)
 
         # ── 自动配图（通义万相） ──
@@ -1209,7 +1212,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
             if placeholders:
                 # 策略 A：AI 指定了占位符 → 按描述**并发**生图
-                async def _gen_one(ph: dict) -> dict | None:
+                async def _gen_one(ph: dict[str, Any]) -> dict[str, Any] | None:
                     ph_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
                         subject=req.subject,
                         purpose=ph.get("purpose", "示意图"),

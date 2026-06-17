@@ -2,6 +2,8 @@
 WebSocket 连接管理器
 管理分组讨论的实时连接，支持广播消息
 """
+from typing import Any
+
 from fastapi import WebSocket
 from backend.logger import logger
 
@@ -27,7 +29,7 @@ class ConnectionManager:
                     del self.active_connections[group_id]
         logger.info(f"WebSocket 断开: 小组 #{group_id}")
 
-    async def broadcast(self, group_id: int, message: dict):
+    async def broadcast(self, group_id: int, message: dict[str, Any]):
         """广播消息到指定小组的所有连接"""
         if group_id not in self.active_connections:
             return

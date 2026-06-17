@@ -25,11 +25,11 @@ from backend.reward_engine import get_student_total as get_reward_total
 router = APIRouter()
 
 # ── 简单内存缓存（TTL 30 秒） ──
-_dashboard_cache: dict[str, tuple[float, dict]] = {}
+_dashboard_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _DASHBOARD_CACHE_TTL = 30
 
 
-def _get_cached(key: str) -> dict | None:
+def _get_cached(key: str) -> dict[str, Any] | None:
     """获取缓存"""
     cached = _dashboard_cache.get(key)
     if cached and (time.time() - cached[0]) < _DASHBOARD_CACHE_TTL:
@@ -37,7 +37,7 @@ def _get_cached(key: str) -> dict | None:
     return None
 
 
-def _set_cache(key: str, data: dict):
+def _set_cache(key: str, data: dict[str, Any]):
     """设置缓存"""
     _dashboard_cache[key] = (time.time(), data)
     # 限制缓存大小，防止内存泄漏
@@ -145,9 +145,9 @@ async def dashboard_summary(request: Request):
         )
         if active_task_count > 0:
             # 与学生相关的活跃任务（按年级/班级匹配教师）才计数
-            from backend.api.tasks_router import _get_all_tasks, _get_user_relevant_tasks
-            all_active = _get_all_tasks()
-            relevant = _get_user_relevant_tasks(username, all_active)
+            from backend.api.tasks_router import get_all_tasks, get_user_relevant_tasks
+            all_active = get_all_tasks()
+            relevant = get_user_relevant_tasks(username, all_active)
             active_task_count = len(relevant)
 
         submission_count = _db_count(
@@ -388,7 +388,7 @@ async def dashboard_summary(request: Request):
 
     else:  # ── 教师/管理员 ──
         exam_where = ""
-        exam_params: list = []
+        exam_params: list[Any] = []
         if role == 1:
             exam_where = "WHERE creator_username = ?"
             exam_params.append(username)

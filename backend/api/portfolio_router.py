@@ -4,6 +4,7 @@
 """
 from datetime import datetime, timedelta
 from collections import defaultdict
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 
@@ -539,7 +540,7 @@ async def get_learning_report(username: str, request: Request):
     from backend.ai_task_manager import task_manager
     _student_username = username
 
-    async def _do_report() -> dict:
+    async def _do_report() -> dict[str, Any]:
         try:
             result = await call_ai_async(prompt, api_key)
             return {
@@ -689,9 +690,9 @@ async def export_learning_report_docx(username: str, request: Request, token: st
     # ── 生成 Word 文档 ──
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr]
-    style.font.name = 'Microsoft YaHei'
-    style.font.size = Pt(11)
-    style.paragraph_format.line_spacing = 1.5
+    style.font.name = 'Microsoft YaHei'  # type: ignore[attr-defined]
+    style.font.size = Pt(11)  # type: ignore[attr-defined]
+    style.paragraph_format.line_spacing = 1.5  # type: ignore[attr-defined]
 
     title = doc.add_heading(f"{student_name} 的学习报告", level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER

@@ -65,8 +65,7 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
         # 方式2: response.text（兼容旧版 SDK）
         if not text:
             try:
-                if hasattr(response, "text"):
-                    text = response.text
+                text = getattr(response, "text", None)
             except (KeyError, AttributeError, TypeError):
                 pass
         # 方式3: response 本身是 dict

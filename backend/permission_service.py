@@ -7,7 +7,7 @@
 - 教师 (role=1): 查 teacher_assignments 表
 - 学生 (role=2): 查自身 grade_id/class_id 与教师匹配
 """
-from typing import Optional
+from typing import Any, Optional
 
 from backend.database import execute_query, execute_insert_update, get_connection, execute_query_dict
 from backend.logger import logger
@@ -17,7 +17,7 @@ from backend.logger import logger
 # 年级主数据
 # ═══════════════════════════════════════════════════════════════
 
-def get_all_grades(stage: str = None) -> list[dict]:
+def get_all_grades(stage: str | None = None) -> list[dict[str, Any]]:
     """获取所有年级，可按学段筛选"""
     if stage:
         rows = execute_query_dict(
@@ -57,15 +57,16 @@ def upsert_grade(name: str, stage: str = "", sort_order: int = 0) -> int:
             (name, stage, sort_order),
         )
         conn.commit()
+        assert c.lastrowid is not None
         return c.lastrowid
 
 
-def get_grade_by_id(grade_id: int) -> dict | None:
+def get_grade_by_id(grade_id: int) -> dict[str, Any] | None:
     rows = execute_query_dict("SELECT id, name, stage, sort_order FROM grades WHERE id=?", (grade_id,))
     return rows[0] if rows else None
 
 
-def get_grade_by_name(name: str) -> dict | None:
+def get_grade_by_name(name: str) -> dict[str, Any] | None:
     rows = execute_query_dict("SELECT id, name, stage, sort_order FROM grades WHERE name=?", (name,))
     return rows[0] if rows else None
 
@@ -109,7 +110,7 @@ def _infer_sort_order(name: str, stage: str) -> int:
 # 班级主数据
 # ═══════════════════════════════════════════════════════════════
 
-def get_all_classes(grade_id: int) -> list[dict]:
+def get_all_classes(grade_id: int) -> list[dict[str, Any]]:
     """获取某年级下的所有班级"""
     return execute_query_dict(
         "SELECT id, grade_id, name, display_name, sort_order FROM classes WHERE grade_id=? ORDER BY sort_order",
@@ -142,17 +143,18 @@ def upsert_class(grade_id: int, name: str, display_name: str = "") -> int:
             (grade_id, name, display_name, sort_order),
         )
         conn.commit()
+        assert c.lastrowid is not None
         return c.lastrowid
 
 
-def get_class_by_id(class_id: int) -> dict | None:
+def get_class_by_id(class_id: int) -> dict[str, Any] | None:
     rows = execute_query_dict(
         "SELECT id, grade_id, name, display_name, sort_order FROM classes WHERE id=?", (class_id,)
     )
     return rows[0] if rows else None
 
 
-def get_class_by_name(grade_id: int, name: str) -> dict | None:
+def get_class_by_name(grade_id: int, name: str) -> dict[str, Any] | None:
     rows = execute_query_dict(
         "SELECT id, grade_id, name, display_name, sort_order FROM classes WHERE grade_id=? AND name=?",
         (grade_id, name),
@@ -164,7 +166,7 @@ def get_class_by_name(grade_id: int, name: str) -> dict | None:
 # 教师任教关系
 # ═══════════════════════════════════════════════════════════════
 
-def get_teacher_assignments(teacher_username: str) -> list[dict]:
+def get_teacher_assignments(teacher_username: str) -> list[dict[str, Any]]:
     """获取教师的所有任教关系"""
     return execute_query_dict(
         """SELECT ta.id, ta.teacher_username, ta.grade_id, ta.class_id, ta.subject,
@@ -179,7 +181,7 @@ def get_teacher_assignments(teacher_username: str) -> list[dict]:
     )
 
 
-def get_teacher_grades(teacher_username: str) -> list[dict]:
+def get_teacher_grades(teacher_username: str) -> list[dict[str, Any]]:
     """教师任教的年级列表（去重），管理员返回全部"""
     from backend.auth import is_admin
     if is_admin(teacher_username):
@@ -194,7 +196,7 @@ def get_teacher_grades(teacher_username: str) -> list[dict]:
     )
 
 
-def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict]:
+def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict[str, Any]]:
     """教师在指定年级的任教班级，class_id=NULL 表示该年级全部班级"""
     from backend.auth import is_admin
     if is_admin(teacher_username):
@@ -217,7 +219,7 @@ def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict]:
     )
 
 
-def assign_teacher(teacher_username: str, grade_id: int, class_id: int = None, subject: str = ""):
+def assign_teacher(teacher_username: str, grade_id: int, class_id: int | None = None, subject: str = ""):
     """为教师添加任教关系（幂等）"""
     execute_insert_update(
         """INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id, subject)
@@ -226,7 +228,7 @@ def assign_teacher(teacher_username: str, grade_id: int, class_id: int = None, s
     )
 
 
-def remove_teacher_assignment(teacher_username: str, grade_id: int, class_id: int = None):
+def remove_teacher_assignment(teacher_username: str, grade_id: int, class_id: int | None = None):
     """移除教师的任教关系"""
     if class_id is None:
         execute_insert_update(
@@ -293,10 +295,10 @@ def is_student_in_teacher_scope(student_username: str, teacher_username: str) ->
     if not student or not student[0].get("grade_id"):
         return False
     s = student[0]
-    return can_access_class(teacher_username, s["grade_id"], s.get("class_id"))
+    return can_access_class(teacher_username, s["grade_id"], s.get("class_id") or 0)
 
 
-def get_students_in_scope(username: str, grade_id: int = None, class_id: int = None) -> list[dict]:
+def get_students_in_scope(username: str, grade_id: int | None = None, class_id: int | None = None) -> list[dict[str, Any]]:
     """获取用户管辖范围内的学生"""
     from backend.auth import is_admin
     if is_admin(username):
@@ -312,7 +314,7 @@ def get_students_in_scope(username: str, grade_id: int = None, class_id: int = N
         where = " AND ".join(conditions)
         return execute_query_dict(
             f"SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE {where} ORDER BY u.grade, u.class, u.name",
-            params,
+            tuple(params),
         )
 
     # 教师：只返回自己任教范围内的学生

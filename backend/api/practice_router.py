@@ -139,6 +139,7 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
              q.get("difficulty", req.difficulty), username, now, now,
              svg_code, has_svg, media_placeholders),
         )
+        assert qid is not None
         q["id"] = qid
         q["index"] = qid
         # 统一字段名：AI 返回 svg_code → 前端用 svg_content
@@ -199,7 +200,7 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
 
-    async def _generate_and_save() -> dict:
+    async def _generate_and_save() -> dict[str, Any]:
         result_text = await call_ai_async(prompt, api_key)
         questions = _parse_ai_result(result_text)
         if not questions:
@@ -223,6 +224,7 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
                  q.get("difficulty", req.difficulty), username, now, now,
                  svg_code, has_svg, media_placeholders),
             )
+            assert qid is not None
             q["id"] = qid
             q["index"] = qid
             # 统一字段名

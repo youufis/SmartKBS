@@ -23,7 +23,7 @@ router = APIRouter()
 TEMP_UPLOAD_DIR = BASE_DIR / "temp_uploads"
 TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-def _get_allowed_extensions() -> set:
+def _get_allowed_extensions() -> set[str]:
     """获取允许的文件扩展名集合（运行时读取，支持热更新）"""
     img = get_config_value("IMAGE_EXTENSIONS", ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'])
     doc = get_config_value("DOCUMENT_EXTENSIONS", ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm'])
