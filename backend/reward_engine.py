@@ -25,6 +25,7 @@ REWARD_CONFIG = {
     "code":       {"participation": 2,  "has_grade": True},
     "quest":      {"participation": 1,  "has_grade": True},
     "quick_quiz": {"participation": 2,  "has_grade": True},
+    "course_practice": {"participation": 2, "has_grade": True},
 }
 
 GRADE_POINTS = {
@@ -48,6 +49,7 @@ ACTIVITY_TYPE_NAMES = {
     "code":       "代码练习",
     "quest":      "知识闯关",
     "quick_quiz": "知识抢答",
+    "course_practice": "课程练习",
 }
 
 REWARD_TYPE_NAMES = {

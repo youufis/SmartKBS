@@ -10,6 +10,7 @@ import {
   AuditOutlined, MessageOutlined, UserOutlined,
   RightOutlined,
   BookOutlined, CalendarOutlined, RobotOutlined, DownloadOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
@@ -72,6 +73,20 @@ interface PortfolioData {
     avg_daily: number
     recent_days: Array<{ date: string; count: number }>
   } | null
+  course_practice: {
+    total_count: number
+    avg_accuracy: number
+    total_score: number
+    records: Array<{
+      id: number
+      kp_name: string
+      score: number
+      total_score: number
+      accuracy: number
+      evaluation: string
+      submitted_at: string
+    }>
+  } | null
 }
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -79,6 +94,7 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
   score: <TrophyOutlined style={{ color: '#faad14' }} />,
   rollcall: <AuditOutlined style={{ color: '#722ed1' }} />,
   task: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+  practice: <ExperimentOutlined style={{ color: '#52c41a' }} />,
 }
 
 const PortfolioPage: React.FC = () => {
@@ -158,7 +174,7 @@ const PortfolioPage: React.FC = () => {
     return <Empty description="暂无数据" />
   }
 
-  const { user: student, exams, scores, rollcall, tasks, chats } = data
+  const { user: student, exams, scores, rollcall, tasks, chats, course_practice } = data
   const examStats = exams?.stats
 
   // ── 根据称号等级、性别、角色动态获取头像 emoji（成长进化主题）──
@@ -193,6 +209,7 @@ const PortfolioPage: React.FC = () => {
     { label: '点名次数', value: rollcall?.total_calls ?? 0, icon: <AuditOutlined />, color: '#722ed1' },
     { label: '完成任务', value: tasks?.completed ?? 0, icon: <CheckCircleOutlined />, color: '#52c41a' },
     { label: '对话天数', value: chats?.total_days ?? 0, icon: <MessageOutlined />, color: '#13c2c2' },
+    { label: '课程练习', value: course_practice?.total_count ?? 0, icon: <ExperimentOutlined />, color: '#52c41a' },
   ]
 
   return (
@@ -429,6 +446,52 @@ const PortfolioPage: React.FC = () => {
                 <Col span={8}><Statistic title="总对话数" value={chats.total_chats} suffix="次" /></Col>
                 <Col span={8}><Statistic title="日均" value={chats.avg_daily} suffix="次" /></Col>
               </Row>
+            </Card>
+          )}
+
+          {/* 课程练习 */}
+          {course_practice && course_practice.records.length > 0 && (
+            <Card title={<Space><ExperimentOutlined style={{ color: '#52c41a' }} />课程练习</Space>} style={{ marginBottom: 16 }} size="small">
+              <Row gutter={16} style={{ marginBottom: 12 }}>
+                <Col span={8}><Statistic title="完成数" value={course_practice.total_count} suffix="个知识点" valueStyle={{ color: '#52c41a' }} /></Col>
+                <Col span={8}><Statistic title="平均正确率" value={course_practice.avg_accuracy} suffix="%" valueStyle={{ color: '#1677ff' }} /></Col>
+                <Col span={8}><Statistic title="累计得分" value={course_practice.total_score} valueStyle={{ color: '#faad14' }} /></Col>
+              </Row>
+              <Table
+                dataSource={course_practice.records}
+                rowKey="id"
+                size="small"
+                pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条记录` }}
+                columns={[
+                  { title: '知识点', dataIndex: 'kp_name', ellipsis: true },
+                  {
+                    title: '得分', key: 'score',
+                    render: (_: any, r: any) => (
+                      <Text strong style={{ color: r.accuracy >= 60 ? '#52c41a' : '#ff4d4f' }}>
+                        {r.score} / {r.total_score}
+                      </Text>
+                    ),
+                  },
+                  {
+                    title: '正确率', dataIndex: 'accuracy',
+                    render: (v: number) => (
+                      <Tag color={v >= 90 ? 'green' : v >= 60 ? 'blue' : 'red'}>{v}%</Tag>
+                    ),
+                  },
+                  {
+                    title: '评价', dataIndex: 'evaluation',
+                    ellipsis: true,
+                    render: (v: string) => (
+                      <Text type="secondary" style={{ fontSize: 12 }}>{v?.slice(0, 20)}</Text>
+                    ),
+                  },
+                  {
+                    title: '时间', dataIndex: 'submitted_at',
+                    render: (t: string) => t ? t.slice(0, 10) : '-',
+                    width: 90,
+                  },
+                ]}
+              />
             </Card>
           )}
         </Col>

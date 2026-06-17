@@ -305,6 +305,19 @@ async def dashboard_summary(request: Request):
             (username,),
         )
 
+        # ── 课程练习数据（ai_practice_results 在 questions.db） ──
+        course_practice_count = _q_count(
+            "SELECT COUNT(*) FROM ai_practice_results WHERE student_username=?",
+            (username,),
+        )
+        course_practice_avg_accuracy = 0
+        if course_practice_count > 0:
+            acc_row = q_execute_query(
+                "SELECT COALESCE(AVG(accuracy), 0) FROM ai_practice_results WHERE student_username=?",
+                (username,),
+            )
+            course_practice_avg_accuracy = round(acc_row[0]["COALESCE(AVG(accuracy), 0)"], 1) if acc_row else 0
+
         # ── 课堂提问/回答数据 ──
         my_questions_count = _db_count(
             "SELECT COUNT(*) FROM interaction_questions WHERE student_username = ?",
@@ -351,6 +364,9 @@ async def dashboard_summary(request: Request):
             # 知识抢答
             "quick_quiz_participated": quick_quiz_participated,
             "quick_quiz_correct": quick_quiz_correct,
+            # 课程练习
+            "course_practice_count": course_practice_count,
+            "course_practice_avg_accuracy": course_practice_avg_accuracy,
             # 共享资源
             "shared_files_count": _db_count(
                 """SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'
@@ -891,6 +907,35 @@ async def recent_activity(request: Request):
                 "detail": f"得分 {act['score']}/{act['total_score']}",
             })
 
+        # 最近的课程练习（知识点练习）记录
+        # 注：ai_practice_results 在 questions.db，knowledge_points 在 smartkb.db
+        kp_raw = q_execute_query(
+            """SELECT kp_id, submitted_at, score, total_score, accuracy
+               FROM ai_practice_results
+               WHERE student_username = ? AND submitted_at IS NOT NULL
+               ORDER BY submitted_at DESC LIMIT 5""",
+            (username,),
+        )
+        if kp_raw:
+            k_ids = list(set(r['kp_id'] for r in kp_raw))
+            k_name_map = {}
+            if k_ids:
+                ph = ",".join("?" for _ in k_ids)
+                k_rows = execute_query(
+                    f"SELECT id, name FROM knowledge_points WHERE id IN ({ph})",
+                    tuple(k_ids),
+                )
+                for kr in k_rows:
+                    k_name_map[kr[0]] = kr[1]
+            for act in kp_raw:
+                kp_name = k_name_map.get(act['kp_id'], f"知识点#{act['kp_id']}")
+                activities.append({
+                    "time": act['submitted_at'],
+                    "type": "practice",
+                    "title": f"完成了课程练习「{kp_name}」",
+                    "detail": f"得分 {act['score']}/{act['total_score']} · 正确率 {act['accuracy']}%",
+                })
+
     else:  # 教师/管理员
         # 最近的任务提交
         if role == 0:
@@ -909,11 +954,23 @@ async def recent_activity(request: Request):
                    ORDER BY ts.submitted_at DESC LIMIT 10""",
                 (username,),
             )
+        # 批量获取学生姓名
+        sub_usernames = list(set(act[2] for act in sub_activities))
+        sub_name_map = {}
+        if sub_usernames:
+            ph = ",".join("?" for _ in sub_usernames)
+            u_rows = execute_query(
+                f"SELECT username, name FROM users WHERE username IN ({ph})",
+                tuple(sub_usernames),
+            )
+            for ur in u_rows:
+                sub_name_map[ur[0]] = ur[1] or ur[0]
         for act in sub_activities:
+            s_name = sub_name_map.get(act[2], act[2])
             activities.append({
                 "time": act[0],
                 "type": "task",
-                "title": f"学生 {act[2]} 提交了任务「{act[1]}」",
+                "title": f"学生 {act[2]} {s_name} 提交了任务「{act[1]}」",
                 "detail": "",
             })
 
@@ -979,11 +1036,22 @@ async def recent_activity(request: Request):
                    ORDER BY a.submitted_at DESC LIMIT 5""",
                 (username,),
             )
+        quiz_usernames = list(set(act[2] for act in quiz_acts))
+        quiz_name_map = {}
+        if quiz_usernames:
+            ph = ",".join("?" for _ in quiz_usernames)
+            u_rows = execute_query(
+                f"SELECT username, name FROM users WHERE username IN ({ph})",
+                tuple(quiz_usernames),
+            )
+            for ur in u_rows:
+                quiz_name_map[ur[0]] = ur[1] or ur[0]
         for act in quiz_acts:
+            s_name = quiz_name_map.get(act[2], act[2])
             activities.append({
                 "time": act[0],
                 "type": "quiz",
-                "title": f"学生 {act[2]} 完成了测验「{act[1]}」",
+                "title": f"学生 {act[2]} {s_name} 完成了测验「{act[1]}」",
                 "detail": "",
             })
 
@@ -1096,11 +1164,22 @@ async def recent_activity(request: Request):
                    ORDER BY pa.submitted_at DESC LIMIT 5""",
                 (username,),
             )
+        prac_usernames = list(set(act['student_username'] for act in practice_acts))
+        prac_name_map = {}
+        if prac_usernames:
+            ph = ",".join("?" for _ in prac_usernames)
+            u_rows = execute_query(
+                f"SELECT username, name FROM users WHERE username IN ({ph})",
+                tuple(prac_usernames),
+            )
+            for ur in u_rows:
+                prac_name_map[ur[0]] = ur[1] or ur[0]
         for act in practice_acts:
+            s_name = prac_name_map.get(act['student_username'], act['student_username'])
             activities.append({
                 "time": act['submitted_at'],
                 "type": "practice",
-                "title": f"学生 {act['student_username']} 完成了智能练习",
+                "title": f"学生 {act['student_username']} {s_name} 完成了智能练习",
                 "detail": f"「{act['title']}」得分 {act['score']}/{act['total_score']}",
             })
 
@@ -1130,6 +1209,46 @@ async def recent_activity(request: Request):
                 "type": "quick_quiz",
                 "title": f"知识抢答「{act[1]}」已结束",
                 "detail": f"{act[2]} 人参与",
+            })
+
+        # 最近的课程练习（知识点练习）完成记录
+        if role == 0:
+            cp_acts = q_execute_query(
+                """SELECT ar.submitted_at, ar.student_username, ar.score, ar.total_score, ar.accuracy
+                   FROM ai_practice_results ar
+                   WHERE ar.submitted_at IS NOT NULL
+                   ORDER BY ar.submitted_at DESC LIMIT 10""",
+            )
+        else:
+            # 教师：看自己班级学生的课程练习
+            cp_acts = q_execute_query(
+                """SELECT ar.submitted_at, ar.student_username, ar.score, ar.total_score, ar.accuracy
+                   FROM ai_practice_results ar
+                   JOIN users u ON u.username = ar.student_username AND u.role = 2
+                   WHERE ar.submitted_at IS NOT NULL
+                   AND (u.grade_id IN (SELECT grade_id FROM teacher_assignments WHERE teacher_username=?)
+                        OR u.grade IN (SELECT grade FROM users WHERE username=?))
+                   ORDER BY ar.submitted_at DESC LIMIT 10""",
+                (username, username),
+            )
+        # 批量获取学生姓名
+        cp_usernames = list(set(act['student_username'] for act in cp_acts))
+        cp_name_map = {}
+        if cp_usernames:
+            ph = ",".join("?" for _ in cp_usernames)
+            u_rows = execute_query(
+                f"SELECT username, name FROM users WHERE username IN ({ph})",
+                tuple(cp_usernames),
+            )
+            for ur in u_rows:
+                cp_name_map[ur[0]] = ur[1] or ur[0]
+        for act in cp_acts:
+            s_name = cp_name_map.get(act['student_username'], act['student_username'])
+            activities.append({
+                "time": act['submitted_at'],
+                "type": "practice",
+                "title": f"学生 {act['student_username']} {s_name} 完成了课程练习",
+                "detail": f"得分 {act['score']}/{act['total_score']} · 正确率 {act['accuracy']}%",
             })
 
     # 按时间排序
