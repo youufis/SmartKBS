@@ -3,10 +3,13 @@
 文件服务
 """
 import os
+import random
+import time
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 
+from backend.config import ROOT_DIR
 from backend.utils import get_account_html_dir
 from backend.logger import logger
 
