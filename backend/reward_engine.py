@@ -99,6 +99,12 @@ def update_student_total(student_username: str, check_upgrade: bool = True):
         upgrade = check_main_title_upgrade(student_username, old_total, new_total)
         if upgrade:
             logger.info(f"学生 {student_username} 称号升级: {upgrade['old_title']['name']} → {upgrade['new_title']['name']}")
+            # AI 学伴推送称号升级通知
+            try:
+                from backend.companion_push import push_title_upgrade
+                push_title_upgrade(student_username, upgrade['old_title']['name'], upgrade['new_title']['name'])
+            except Exception:
+                pass
         # 同时检测徽章
         new_badges = check_and_unlock_badges(student_username)
         if new_badges:

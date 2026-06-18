@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useCompanionStore } from '../stores/companionStore'
 import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
 
@@ -190,6 +191,13 @@ const DashboardPage: React.FC = () => {
     notificationsApi.getAnnouncements(1, 5).then((data) => {
       if (!cancelled) setAnnouncements(data.announcements || [])
     }).catch(() => {})
+
+    // 学伴初始化（学生用户）
+    if (user?.role === 'student') {
+      const companionStore = useCompanionStore.getState()
+      companionStore.checkMorningPush()
+      companionStore.loadPushes()
+    }
     return () => { cancelled = true }
   }, [])
 
@@ -329,6 +337,30 @@ const DashboardPage: React.FC = () => {
               </Space>
             </Card>
           )}
+
+          {/* 🧠 AI 学伴卡片 */}
+          <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
+            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+              <Space>
+                <span style={{ fontSize: 24 }}>🧠</span>
+                <Text strong>AI 学伴「小智」</Text>
+                <Text type="secondary" style={{ fontSize: 13 }}>
+                  {summary.title_name ? `当前称号：${summary.title_emoji || '🏆'} ${summary.title_name}` : '你的专属学习伙伴'}
+                </Text>
+              </Space>
+              <Space>
+                {summary.total_score !== undefined && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {summary.total_score} 积分 · 🔥 {summary.recent_chat_count ?? 0} 次对话
+                  </Text>
+                )}
+                <Button size="small" type="primary" ghost icon={<span>🧠</span>}
+                  onClick={() => navigate('/chat?companion=1')}>
+                  找小智聊聊
+                </Button>
+              </Space>
+            </Space>
+          </Card>
         </>
       ) : (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
