@@ -38,12 +38,6 @@ const AboutPage: React.FC = () => {
     }}>
       <Typography.Title level={3} style={{ userSelect: 'none' }}>
         ℹ️ 关于与帮助
-        <Typography.Text
-          type="secondary"
-          style={{ fontSize: 14, marginLeft: 12 }}
-        >
-          v5.7.0
-        </Typography.Text>
       </Typography.Title>
 
       {showEntry && (
