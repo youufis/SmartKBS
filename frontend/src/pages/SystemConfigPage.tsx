@@ -32,9 +32,9 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MODEL_LONG_NAME', label: '长文本模型', type: 'text', group: 'model',
     desc: '用于长文档处理的模型名称，如 qwen-long' },
   { key: 'MODEL_VL_NAME', label: '视觉模型', type: 'text', group: 'model',
-    desc: '用于图像理解的模型名称，如 qwen3-vl-flash' },
+    desc: '用于图像理解的模型名称，如 qwen3-vl-plus' },
   { key: 'MODEL_NAME', label: '默认对话模型', type: 'text', group: 'model',
-    desc: '未配置 APPID 时使用的对话模型，如 deepseek-v4-flash、qwen-plus 等' },
+    desc: '推荐: deepseek-v4-flash、qwen3.5-flash 等' },
   // AI 对话权限
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', label: 'AI 对话权限', type: 'roles', group: 'ai',
     desc: '选择可使用 AI 对话的角色（管理员始终可用）' },

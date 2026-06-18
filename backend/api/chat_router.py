@@ -205,7 +205,7 @@ class FileSummaryCache:
                     f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
-                        "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-flash"),
+                        "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-plus"),
                         "messages": [{
                             "role": "user",
                             "content": [
@@ -463,7 +463,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
     try:
         logger.info(f"开始处理图片: {file_path}")
         encoded_image = encode_image_to_base64(file_path)
-        model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-flash")
+        model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-plus")
         logger.info(f"调用视觉模型: {model_name}")
         payload = {
             "model": model_name,

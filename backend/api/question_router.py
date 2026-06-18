@@ -809,7 +809,7 @@ async def extract_questions_from_image(
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
     # 调用视觉模型提取试题
-    model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-flash")
+    model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-plus")
     api_base = get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
