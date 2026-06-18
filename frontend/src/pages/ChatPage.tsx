@@ -22,6 +22,9 @@ import * as chatApi from '../api/chat'
 import CameraCapture from '../components/CameraCapture'
 import VoiceInput from '../components/VoiceInput'
 
+/** 根据文件扩展名判断是否为图片 */
+const isImageFile = (name: string) => /\.(jpg|jpeg|png|gif|bmp|webp|tiff)$/i.test(name)
+
 const { TextArea } = Input
 
 // 打字光标组件
@@ -237,10 +240,12 @@ const ChatPage: React.FC = () => {
   const messagesRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<React.ComponentRef<typeof TextArea>>(null)
   const [usage, setUsage] = useState<chatApi.UsageInfo | null>(null)
+  const [multimodalEnabled, setMultimodalEnabled] = useState(false)
 
-  // 加载用量信息
+  // 加载用量信息 & 多模态状态
   useEffect(() => {
     chatApi.getUsage().then(setUsage).catch(() => {})
+    chatApi.getMultimodalStatus().then(r => setMultimodalEnabled(r.multimodal_enabled)).catch(() => {})
   }, [])
 
   // 检测最后一条 AI 回复是否有 HTML（派生状态）
@@ -1051,10 +1056,13 @@ const ChatPage: React.FC = () => {
             )}
             <Tooltip title={
               <span style={{ fontSize: 12, lineHeight: 1.6 }}>
-                开启后 AI 会先摘要文件再回答，关闭则直接交由 AI 处理
+                {multimodalEnabled
+                  ? '多模态模式下图片直接由模型理解，无需摘要'
+                  : '开启后 AI 会先摘要文件再回答，关闭则直接交由 AI 处理'}
               </span>
             }>
               <Checkbox checked={contextEnhance}
+                disabled={multimodalEnabled && filePaths.some(isImageFile)}
                 onChange={(e) => setContextEnhance(e.target.checked)}>
                 摘要
               </Checkbox>

@@ -31,6 +31,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-plus",
     "MODEL_NAME": "deepseek-v4-flash",
+    # 多模态模型开关（当默认对话模型为 qwen3.5-flash / qwen3.6-flash 等多模态模型时，
+    # 开启后对话支持图片+文本同时输入，走多模态 API 格式）
+    "ENABLE_MULTIMODAL": False,
     # 文件大小限制
     "MAX_DOC_SIZE_MB": 10,
     "MAX_IMAGE_SIZE_MB": 5,
@@ -186,6 +189,13 @@ async def get_apikey_status(request: Request):
         "hint": hint,
         "configured": status != "missing",
     }
+
+
+@router.get("/multimodal-status")
+async def get_multimodal_status():
+    """公开接口：获取多模态模型启用状态（无需管理员权限）"""
+    cfg = load_config()
+    return {"multimodal_enabled": cfg.get("ENABLE_MULTIMODAL", False)}
 
 
 @router.get("/titles", summary="获取称号配置（管理员）")
