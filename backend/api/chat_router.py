@@ -248,11 +248,14 @@ async def get_usage(request: Request):
     if role_val == 0:
         return {"enabled": enabled, "used": 0, "max": 0, "remaining": -1}
 
+    multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
+
     return {
         "enabled": enabled,
         "used": used,
         "max": max_req,
         "remaining": max(0, max_req - used),
+        "multimodal_enabled": multimodal_enabled,
     }
 
 
@@ -338,7 +341,12 @@ def _chat_event_generator(
         except Exception as e:
             logger.warning(f"RAG 检索失败: {e}")
 
-        if context_enhance and valid_file_paths:
+        # ── 判断是否启用多模态 ──
+        multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
+        image_files = [fp for fp in valid_file_paths if is_image_file(fp)]
+
+        # 多模态模式下跳过摘要流程：图片直接由多模态模型理解，无需先调用视觉模型摘要
+        if not (multimodal_enabled and image_files) and context_enhance and valid_file_paths:
             summaries = []
             for fp in valid_file_paths:
                 s = file_summary_cache.get(fp, dashscope_api_key, user_payload)
@@ -346,6 +354,32 @@ def _chat_event_generator(
                     summaries.append(f"文件 {os.path.basename(fp)} 摘要：\n{s.strip()}")
             if summaries:
                 enhanced_prompt = ("\n\n".join(summaries) + "\n\n" + enhanced_prompt).strip()
+
+        if multimodal_enabled and image_files:
+            model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+            # 安全校验：检查模型是否真的是多模态模型，防止配置不一致导致 API 报错
+            from backend.api.ai_service import is_multimodal_model
+            if not is_multimodal_model(model):
+                logger.warning(f"多模态已勾选但模型 {model} 不支持多模态，降级到视觉模型处理")
+                multimodal_enabled = False  # 降级，走下方旧逻辑
+            else:
+                api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                            "https://dashscope.aliyuncs.com/compatible-mode/v1")
+                from backend.api.ai_service import call_multimodal_stream
+
+                full_text = ""
+                for chunk in call_multimodal_stream(
+                    prompt=enhanced_prompt,
+                    api_key=dashscope_api_key,
+                    model=model,
+                    api_base=api_base,
+                    image_paths=image_files,
+                ):
+                    full_text = chunk["text"]
+                    yield f"data: {json.dumps({'type': 'delta', 'content': full_text})}\n\n"
+
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
+                return
 
         if not valid_file_paths:
             for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key, username):

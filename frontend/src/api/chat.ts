@@ -6,6 +6,7 @@ export interface UsageInfo {
   used: number;
   max: number;
   remaining: number;
+  multimodal_enabled?: boolean;
 }
 
 /** 获取当前用户的每日用量 */
@@ -25,6 +26,12 @@ export interface ApiKeyStatus {
 /** 检查 API Key 是否已配置 */
 export async function checkApiKeyStatus(): Promise<ApiKeyStatus> {
   const { data } = await apiClient.get('/api/config/apikey-status');
+  return data;
+}
+
+/** 获取多模态模型启用状态 */
+export async function getMultimodalStatus(): Promise<{ multimodal_enabled: boolean }> {
+  const { data } = await apiClient.get('/api/config/multimodal-status');
   return data;
 }
 
