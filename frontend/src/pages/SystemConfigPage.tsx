@@ -35,6 +35,8 @@ const GLOBAL_CONFIG_FIELDS = [
     desc: '用于图像理解的模型名称，如 qwen3-vl-plus' },
   { key: 'MODEL_NAME', label: '默认对话模型', type: 'text', group: 'model',
     desc: '推荐: deepseek-v4-flash、qwen3.5-flash 等' },
+  { key: 'ENABLE_MULTIMODAL', label: '多模态', type: 'multimodal_toggle', group: 'model',
+    desc: '开启后对话中发送图片时将调用多模态模型（图片+文本同时输入）。仅当模型为 qwen3.5-flash、qwen3.6-flash 等多模态模型时可用' },
   // AI 对话权限
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', label: 'AI 对话权限', type: 'roles', group: 'ai',
     desc: '选择可使用 AI 对话的角色（管理员始终可用）' },
@@ -90,7 +92,14 @@ const SystemConfigPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [apikeyStatus, setApikeyStatus] = useState<{ status: string; source: string; hint: string; configured: boolean } | null>(null)
+  const [modelName, setModelName] = useState('')
   const [form] = Form.useForm()
+
+  // ── 判断模型是否为多模态模型 ──
+  const isMultimodalModel = (name: string) => {
+    const kws = ['qwen3.5-flash', 'qwen3.6-flash']
+    return kws.some(kw => name.toLowerCase().includes(kw))
+  }
 
   // ── 加载 API Key 状态 ──
   const loadApikeyStatus = useCallback(async () => {
@@ -304,6 +313,17 @@ const SystemConfigPage: React.FC = () => {
                     <Checkbox value="info">ℹ️ 系统信息通知</Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
+              ) : field.type === 'multimodal_toggle' ? (
+                <Form.Item
+                  name={field.key}
+                  label={field.label}
+                  valuePropName="checked"
+                  extra={field.desc}
+                >
+                  <Checkbox disabled={!isMultimodalModel(modelName)}>
+                    启用多模态对话（支持图片+文本同时输入）
+                  </Checkbox>
+                </Form.Item>
               ) : (
                 <Form.Item
                   name={field.key}
@@ -413,6 +433,11 @@ const SystemConfigPage: React.FC = () => {
                 layout="vertical"
                 initialValues={config}
                 style={{ maxWidth: 900 }}
+                onValuesChange={(changedValues) => {
+                  if ('MODEL_NAME' in changedValues) {
+                    setModelName(changedValues['MODEL_NAME'])
+                  }
+                }}
               >
                 {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen'].map(renderGroup)}
 

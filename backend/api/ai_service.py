@@ -6,7 +6,7 @@ AI 服务封装：根据是否配置 APPID 自动选择调用模式
 """
 import json
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from backend.logger import logger
 
@@ -298,4 +298,151 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
             raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
     except Exception as e:
         logger.error(f"大模型异步调用异常: {e}")
+        raise
+
+
+# ═══════════════════════════════════════════════════════════════
+# 多模态调用（图片+文本混合输入，OpenAI 兼容格式）
+# ═══════════════════════════════════════════════════════════════
+
+# 已知的多模态模型关键词列表（用于前端判断是否可勾选）
+MULTIMODAL_MODEL_KEYWORDS = ["qwen3.5-flash", "qwen3.6-flash"]
+
+
+def is_multimodal_model(model_name: str) -> bool:
+    """判断模型名称是否为多模态模型"""
+    name = model_name.lower().strip()
+    return any(kw in name for kw in MULTIMODAL_MODEL_KEYWORDS)
+
+
+def _build_multimodal_content(
+    prompt: str,
+    image_paths: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """构建多模态 messages 的 content 数组（OpenAI 兼容格式）"""
+    content = []
+
+    # 添加图片（本地文件 → base64 data URI）
+    if image_paths:
+        for img_path in image_paths:
+            if not img_path or not os.path.exists(img_path):
+                continue
+            try:
+                mime = _get_multimodal_mime(img_path)
+                with open(img_path, "rb") as f:
+                    import base64
+                    b64 = base64.b64encode(f.read()).decode("utf-8")
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"}
+                })
+            except Exception as e:
+                logger.warning(f"图片编码失败 {img_path}: {e}")
+
+    # 添加文本（放在最后）
+    content.append({"type": "text", "text": prompt})
+
+    return content
+
+
+def _get_multimodal_mime(file_path: str) -> str:
+    """根据文件扩展名返回 MIME 类型"""
+    ext = os.path.splitext(file_path.lower())[1]
+    mime_map = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.png': 'image/png', '.gif': 'image/gif',
+        '.bmp': 'image/bmp', '.tiff': 'image/tiff',
+        '.tif': 'image/tiff', '.webp': 'image/webp',
+    }
+    return mime_map.get(ext, 'image/jpeg')
+
+
+def call_multimodal_stream(
+    prompt: str,
+    api_key: str,
+    model: str,
+    api_base: str,
+    image_paths: list[str] | None = None,
+):
+    """多模态流式调用（OpenAI 兼容接口），yield {"text": str, "session_id": None}
+
+    支持图片+文本同时输入，适用于 qwen3.5-flash / qwen3.6-flash 等多模态模型。
+    """
+    import requests as sync_requests
+
+    content = _build_multimodal_content(prompt, image_paths)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "stream": True,
+    }
+
+    try:
+        resp = sync_requests.post(
+            f"{api_base}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            stream=True,
+            timeout=180,
+        )
+        if resp.status_code != 200:
+            logger.error(f"多模态流式调用失败: status={resp.status_code}, {resp.text[:300]}")
+            yield {"text": f"AI 调用失败 (HTTP {resp.status_code})", "session_id": None}
+            return
+
+        full_text = ""
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            decoded = line.decode("utf-8") if isinstance(line, bytes) else line
+            if decoded.startswith("data:"):
+                data_str = decoded[5:].strip()
+                if data_str == "[DONE]":
+                    break
+                try:
+                    data = json.loads(data_str)
+                    if "choices" in data and data["choices"]:
+                        delta = data["choices"][0].get("delta", {})
+                        content_piece = delta.get("content", "")
+                        if content_piece:
+                            full_text += content_piece
+                            yield {"text": full_text, "session_id": None}
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        logger.error(f"多模态流式调用异常: {e}")
+        yield {"text": f"网络连接错误：{str(e)}", "session_id": None}
+
+
+def call_multimodal_sync(
+    prompt: str,
+    api_key: str,
+    model: str,
+    api_base: str,
+    image_paths: list[str] | None = None,
+) -> str:
+    """多模态同步调用（OpenAI 兼容接口），返回完整文本"""
+    import requests as sync_requests
+
+    content = _build_multimodal_content(prompt, image_paths)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "stream": False,
+    }
+
+    try:
+        resp = sync_requests.post(
+            f"{api_base}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=(30, 120),
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        logger.error(f"多模态同步调用失败: status={resp.status_code}, {resp.text[:300]}")
+        raise Exception(f"AI 多模态调用失败 (HTTP {resp.status_code})")
+    except Exception as e:
+        logger.error(f"多模态同步调用异常: {e}")
         raise
