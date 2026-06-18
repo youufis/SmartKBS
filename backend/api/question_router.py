@@ -1501,9 +1501,10 @@ async def upload_media_for_placeholder(
         raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
 
     content = await file.read()
-    max_size = 5 * 1024 * 1024
+    max_size_mb = get_config_value("MAX_IMAGE_SIZE_MB", 5)
+    max_size = max_size_mb * 1024 * 1024
     if len(content) > max_size:
-        raise HTTPException(status_code=400, detail="图片大小超过 5MB 限制")
+        raise HTTPException(status_code=400, detail=f"图片大小超过 {max_size_mb}MB 限制")
 
     # 保存文件
     from backend.config import BASE_DIR

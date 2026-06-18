@@ -78,9 +78,12 @@ def is_document_file(file_path: str) -> bool:
     return ext in get_config_value("DOCUMENT_EXTENSIONS", ['.txt', '.md', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.json', '.html', '.htm'])
 
 
-def check_file_size(file_path: str, max_size_mb: int = 10) -> bool:
+def check_file_size(file_path: str, max_size_mb: int | None = None) -> bool:
     if not file_path or not os.path.exists(file_path):
         return True
+    from backend.api.config_router import get_config_value
+    if max_size_mb is None:
+        max_size_mb = get_config_value("MAX_DOC_SIZE_MB", 10)
     file_size = os.path.getsize(file_path)
     return file_size <= max_size_mb * 1024 * 1024
 
