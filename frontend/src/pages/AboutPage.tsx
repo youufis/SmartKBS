@@ -42,7 +42,7 @@ const AboutPage: React.FC = () => {
           type="secondary"
           style={{ fontSize: 14, marginLeft: 12 }}
         >
-          v5.6.0
+          v5.7.0
         </Typography.Text>
       </Typography.Title>
 

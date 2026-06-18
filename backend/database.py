@@ -1177,6 +1177,53 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # AI 学伴模块（v5.7）
+            # ═══════════════════════════════════════════════
+
+            # ── 学伴配置表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS ai_companion_config (
+                username TEXT PRIMARY KEY,
+                enabled INTEGER DEFAULT 1,
+                personality TEXT DEFAULT 'encouraging',
+                companion_name TEXT DEFAULT '小智',
+                avatar_style TEXT DEFAULT 'default',
+                wakeup_time TEXT DEFAULT '08:00',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+
+            # ── 学伴记忆表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS ai_companion_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                memory_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_acm_student ON ai_companion_memory(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_acm_type ON ai_companion_memory(student_username, memory_type)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 学伴推送记录表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS ai_companion_push_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                push_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                read_status INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_acpl_student ON ai_companion_push_log(student_username, read_status)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 
