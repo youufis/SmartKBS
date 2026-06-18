@@ -1,6 +1,5 @@
 """
 SmartKB 全局配置
-从 AgentSmartKBXS.py 提取并集中管理所有常量
 """
 import json
 import os
@@ -10,13 +9,16 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ── 应用版本（从前端 package.json 读取，避免硬编码） ──
-_FE_PKG = BASE_DIR / "frontend" / "package.json"
-APP_VERSION: str = "0.0.0"
-try:
-    if _FE_PKG.exists():
-        APP_VERSION = json.loads(_FE_PKG.read_text(encoding="utf-8")).get("version", "0.0.0")
-except Exception:
-    pass
+def _load_app_version() -> str:
+    pkg = BASE_DIR / "frontend" / "package.json"
+    try:
+        if pkg.exists():
+            return json.loads(pkg.read_text(encoding="utf-8")).get("version", "0.0.0")
+    except Exception:
+        pass
+    return "0.0.0"
+
+APP_VERSION: str = _load_app_version()
 
 # ── 目录/文件相关 ──
 CHAT_HISTORY_DIR = "ChatHistory"
