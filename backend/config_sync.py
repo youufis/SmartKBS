@@ -9,7 +9,7 @@ import platform
 from datetime import datetime
 from pathlib import Path
 
-from config import APP_VERSION
+from backend.config import APP_VERSION
 
 _NODE_ID_FILE = Path(__file__).resolve().parent / ".node_id"
 _SYNC_INTERVAL = 86400
