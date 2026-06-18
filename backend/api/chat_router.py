@@ -378,6 +378,23 @@ def _chat_event_generator(
                     full_text = chunk["text"]
                     yield f"data: {json.dumps({'type': 'delta', 'content': full_text})}\n\n"
 
+                # 多模态处理完图片后，继续处理剩余的非图片文件（文档等）
+                non_image_files = [fp for fp in valid_file_paths if fp not in image_files]
+                if non_image_files:
+                    _sep = "\n\n"
+                    for fp in non_image_files:
+                        if is_document_file(fp):
+                            doc_content = ""
+                            for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
+                                doc_content = chunk['text']
+                                combined = full_text + _sep + doc_content
+                                yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
+                            full_text += _sep + doc_content
+                        else:
+                            err = f'不支持的文件类型: {fp}'
+                            combined = full_text + _sep + err
+                            yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
+
                 yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
                 return
 
