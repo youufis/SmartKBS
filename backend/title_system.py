@@ -98,6 +98,9 @@ def _load_title_config() -> list[dict[str, Any]]:
 def _load_subject_title_config() -> list[dict[str, Any]]:
     """加载学科称号配置"""
     cfg = _load_system_config()
+    enabled = cfg.get("ENABLE_SUBJECT_TITLES", True)
+    if not enabled:
+        return []
     custom = cfg.get("SUBJECT_TITLE_CONFIG")
     if custom and isinstance(custom, list) and len(custom) == len(DEFAULT_SUBJECT_TITLE_CONFIG):
         return custom
