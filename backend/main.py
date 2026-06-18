@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version="5.6.0",
+    version="5.7.0",
     docs_url="/docs",
     lifespan=lifespan,
 )
@@ -107,6 +107,7 @@ from backend.api.code_router import router as code_router
 from backend.api.quest_router import router as quest_router
 from backend.api.quick_quiz_router import router as quick_quiz_router
 from backend.api.activity_monitor_router import router as activity_monitor_router
+from backend.api.companion_router import router as companion_router
 
 app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
 app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
@@ -137,6 +138,7 @@ app.include_router(practice_router, prefix="/api/practice", tags=["自适应出�
 app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源推荐"])
 app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
 app.include_router(code_router, prefix="/api", tags=["代码练习"])
+app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
 # 配置同步服务接口（不出现在文档中）
 from backend.api.sync_service import router as sync_service_router
 app.include_router(sync_service_router, prefix="/api", tags=[])
@@ -145,7 +147,7 @@ app.include_router(sync_service_router, prefix="/api", tags=[])
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    return {"status": "ok", "version": "5.6.0"}
+    return {"status": "ok", "version": "5.7.0"}
 
 
 # ── 试题多媒体静态文件服务 ──

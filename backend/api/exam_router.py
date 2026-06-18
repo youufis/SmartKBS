@@ -1324,6 +1324,19 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     except Exception:
         pass
 
+    # ── AI 学伴考试结果推送 ──
+    try:
+        from backend.companion_push import push_exam_result
+        push_exam_result(
+            username,
+            exam["title"],
+            earned_score,
+            total_score,
+            earned_score >= exam["pass_score"],
+        )
+    except Exception as cp_err:
+        logger.warning(f"学伴推送失败: {cp_err}")
+
     result = {
         "message": "提交成功",
         "attempt_id": attempt["id"],

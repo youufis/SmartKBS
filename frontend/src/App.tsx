@@ -50,6 +50,7 @@ import QuickPollPage from './pages/QuickPollPage'
 import ClassSummaryPage from './pages/ClassSummaryPage'
 import ActivityMonitorPage from './pages/ActivityMonitorPage'
 import AuthorPanelPage from './pages/AuthorPanelPage'
+import CompanionSettings from './pages/CompanionSettings'
 
 function App() {
   const navigate = useNavigate()
@@ -141,6 +142,7 @@ function App() {
             <Route path="quick-poll" element={<QuickPollPage />} />
             <Route path="class-summary" element={user?.role === 'admin' || user?.role === 'teacher' ? <ClassSummaryPage /> : <Navigate to="/chat" />} />
             <Route path="activity-monitor" element={user?.role === 'admin' || user?.role === 'teacher' ? <ActivityMonitorPage /> : <Navigate to="/chat" />} />
+            <Route path="companion-settings" element={<CompanionSettings />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="console" element={<AuthorPanelPage />} />
           </Route>
