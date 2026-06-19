@@ -118,20 +118,19 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
             media_type="text/event-stream",
         )
 
-    # 构建学伴增强提示词
+    # 构建学伴增强提示词（含画像/人格/教学助手提示词）
     enhanced_prompt = _build_companion_prompt_with_profile(req.prompt, username, role)
 
-    # 构建学伴增强提示词
-    enhanced_prompt = _build_companion_prompt_with_profile(req.prompt, username, role)
-
-    # 调用流式对话生成器（与智答模式共用 _chat_event_generator，支持文件/多模态/摘要/RAG）
+    # 调用流式对话生成器（与智答模式共用 _chat_event_generator）
+    # 注意：user_payload=None 避免 enhance_prompt_with_user_context 二次包装，
+    # 因为学伴/助手模式已有自己的系统提示词
     return StreamingResponse(
         _chat_event_generator(
             prompt=enhanced_prompt,
             file_paths=req.file_paths,
             session_id=req.session_id,
             username=username,
-            user_payload=user,
+            user_payload=None,  # 学伴/助手已有自己的系统提示词，避免 enhance 二次包装
             dashscope_api_key=dashscope_api_key,
             context_enhance=req.context_enhance,
         ),
