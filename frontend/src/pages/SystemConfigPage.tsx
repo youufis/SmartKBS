@@ -199,6 +199,12 @@ const SystemConfigPage: React.FC = () => {
           formValues['enabled_notification_types'] = ['exam']
         }
         form.setFieldsValue(formValues)
+        // 加载后同步：如果模型不支持多模态，强制取消勾选
+        const loadedModel = formValues['MODEL_NAME'] || ''
+        setModelName(loadedModel)
+        if (!isMultimodalModel(loadedModel)) {
+          form.setFieldsValue({ ENABLE_MULTIMODAL: false })
+        }
         loadApikeyStatus()
       } catch {
         message.error('加载系统配置失败')
@@ -435,7 +441,12 @@ const SystemConfigPage: React.FC = () => {
                 style={{ maxWidth: 900 }}
                 onValuesChange={(changedValues) => {
                   if ('MODEL_NAME' in changedValues) {
-                    setModelName(changedValues['MODEL_NAME'])
+                    const newModel = changedValues['MODEL_NAME']
+                    setModelName(newModel)
+                    // 模型切换为非多模态时自动取消勾选
+                    if (!isMultimodalModel(newModel)) {
+                      form.setFieldsValue({ ENABLE_MULTIMODAL: false })
+                    }
                   }
                 }}
               >
