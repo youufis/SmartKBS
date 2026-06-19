@@ -90,6 +90,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/chat', icon: <MessageOutlined />, label: '知识问答' },
       { key: '/practice', icon: <ThunderboltOutlined />, label: '同步练习' },
       { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理' },
+      { key: '/quest-records', icon: <TrophyOutlined />, label: '闯关题库', adminOrTeacherOnly: true },
       { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
       { key: '/wrong-book', icon: <BookOutlined />, label: '错题管理' },
       { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
@@ -112,7 +113,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '课程进度' },
       { key: '/activity-monitor', icon: <BarChartOutlined />, label: '活动监控' },
       { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
-      { key: '/quest', icon: <TrophyOutlined />, label: '闯关记录', adminOrTeacherOnly: true },
+      { key: '/quest', icon: <TrophyOutlined />, label: '闯关管理', adminOrTeacherOnly: true },
     ]},
     { type: 'group', icon: <SettingOutlined />, label: '系统管理', key: 'admin', children: [
       { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },

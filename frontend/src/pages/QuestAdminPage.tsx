@@ -1,20 +1,28 @@
 /**
- * QuestAdminPage — 教师端闯关记录查看
- * 分页展示学生闯关记录，+ 号展开显示每题详情
+ * QuestAdminPage — 教师端闯关管理
+ * 包含两个标签页：
+ *   1. 闯关记录 — 查看学生闯关记录
+ *   2. 题库管理 — 闯关题目的 CRUD 管理
  */
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, startTransition } from 'react'
 import {
-  Card, Table, Tag, Typography, Space, Spin, Input, Select,
-  message, Progress, Button, Modal,
+  Card, Table, Tag, Typography, Space, Input, Select,
+  message, Button, Modal, Tabs, Form, Image, Tooltip,
 } from 'antd'
 import {
-  TrophyOutlined, SearchOutlined, ReloadOutlined,
-  CheckCircleOutlined, CloseCircleOutlined,
+  TrophyOutlined, SearchOutlined,
   ClockCircleOutlined, DeleteOutlined, ExclamationCircleOutlined,
+  DatabaseOutlined, PlusOutlined, EditOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
+import FormulaRenderer from '../components/FormulaRenderer'
+import SVGViewer from '../components/SVGViewer'
+import PlaceholderManager from '../components/PlaceholderManager'
 
 const { Title, Text } = Typography
+const { TextArea } = Input
+
+// ── 闯关记录类型 ──
 
 interface QuestionDetail {
   sort_order: number
@@ -47,6 +55,23 @@ interface QuestRecord {
   completed_at: string | null
 }
 
+// ── 闯关题目类型 ──
+
+interface QuestBankQuestion {
+  id: number
+  category: string
+  question_text: string
+  options: Record<string, string>
+  correct_answer: string
+  explanation: string
+  used_count: number
+  svg_content: string
+  has_svg: number
+  media_files: any
+  media_placeholders: any
+  created_at: string
+}
+
 const LIFELINE_LABELS: Record<string, string> = {
   remove_one: '🎯去伪存真',
   phone_friend: '📞远程连线',
@@ -55,7 +80,11 @@ const LIFELINE_LABELS: Record<string, string> = {
 
 const SCORE_COLORS = ['#ff4d4f', '#fa8c16', '#fadb14', '#52c41a', '#1677ff', '#722ed1']
 
-const QuestAdminPage: React.FC = () => {
+// ════════════════════════════════════════════
+// 子组件：闯关记录标签页
+// ════════════════════════════════════════════
+
+const QuestRecordsTab: React.FC = () => {
   const [records, setRecords] = useState<QuestRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -87,22 +116,19 @@ const QuestAdminPage: React.FC = () => {
 
   // 年级变化时加载班级
   useEffect(() => {
-    if (!gradeFilter) {
-      setClasses([])
-      return
-    }
-    setClassesLoading(true)
-    setClassFilter('')
+    if (!gradeFilter) return
+    startTransition(() => setClassesLoading(true))
+    startTransition(() => setClassFilter(''))
     ;(async () => {
       try {
         const { data } = await apiClient.get('/api/quest/admin/classes', {
           params: { grade: gradeFilter },
         })
-        setClasses(Array.isArray(data) ? data : [])
+        startTransition(() => setClasses(Array.isArray(data) ? data : []))
       } catch {
         // ignore
       } finally {
-        setClassesLoading(false)
+        startTransition(() => setClassesLoading(false))
       }
     })()
   }, [gradeFilter])
@@ -125,7 +151,7 @@ const QuestAdminPage: React.FC = () => {
   }, [page, pageSize, gradeFilter, classFilter, nameFilter])
 
   useEffect(() => {
-    loadRecords()
+    startTransition(() => loadRecords())
   }, [loadRecords])
 
   const handleDelete = (record: QuestRecord) => {
@@ -340,7 +366,7 @@ const QuestAdminPage: React.FC = () => {
     <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
       <Title level={3}>
         <TrophyOutlined style={{ marginRight: 8 }} />
-        闯关记录 · 教师查看
+        闯关管理
       </Title>
 
       {/* ── 筛选栏 ── */}
@@ -359,7 +385,10 @@ const QuestAdminPage: React.FC = () => {
             placeholder="选择年级"
             style={{ width: 120 }}
             value={gradeFilter || undefined}
-            onChange={(v) => setGradeFilter(v || '')}
+            onChange={(v) => {
+              setGradeFilter(v || '')
+              if (!v) setClasses([])
+            }}
             allowClear
             loading={gradesLoading}
             options={grades.map((g) => ({ label: g, value: g }))}
@@ -403,6 +432,617 @@ const QuestAdminPage: React.FC = () => {
           }}
           scroll={{ x: 900 }}
         />
+      </Card>
+    </div>
+  )
+}
+
+
+// ════════════════════════════════════════════
+// 子组件：闯关题库管理标签页
+// ════════════════════════════════════════════
+
+const QuestBankTab: React.FC = () => {
+  const [questions, setQuestions] = useState<QuestBankQuestion[]>([])
+  const [loading, setLoading] = useState(true)
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [keyword, setKeyword] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [categories, setCategories] = useState<{ name: string; count: number }[]>([])
+
+  // 编辑弹窗
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editingQuestion, setEditingQuestion] = useState<QuestBankQuestion | null>(null)
+  const [editForm] = Form.useForm()
+  const [saving, setSaving] = useState(false)
+
+  // 新增弹窗
+  const [addModalOpen, setAddModalOpen] = useState(false)
+  const [addForm] = Form.useForm()
+  const [adding, setAdding] = useState(false)
+
+  // ── 配图管理 ──
+  const [mediaModalOpen, setMediaModalOpen] = useState(false)
+  const [mediaQuestion, setMediaQuestion] = useState<QuestBankQuestion | null>(null)
+  const [svgLoading, setSvgLoading] = useState(false)
+  const [wanxiangLoading, setWanxiangLoading] = useState(false)
+
+  const handleManageMedia = (q: QuestBankQuestion) => {
+    setMediaQuestion(q)
+    setMediaModalOpen(true)
+  }
+
+  const handleRegenerateSVG = async () => {
+    if (!mediaQuestion) return
+    setSvgLoading(true)
+    try {
+      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-svg`)
+      message.success('SVG 已重新生成')
+      await loadQuestions()
+      const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'SVG 生成失败')
+    } finally {
+      setSvgLoading(false)
+    }
+  }
+
+  const handleDeleteSVG = async () => {
+    if (!mediaQuestion) return
+    try {
+      await apiClient.delete(`/api/quest/admin/bank/${mediaQuestion.id}/svg`)
+      message.success('SVG 配图已删除')
+      await loadQuestions()
+      const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '删除失败')
+    }
+  }
+
+  const handleGenerateImage = async () => {
+    if (!mediaQuestion) return
+    setWanxiangLoading(true)
+    try {
+      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-image`)
+      message.success('配图已生成')
+      await loadQuestions()
+      const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '生图失败')
+    } finally {
+      setWanxiangLoading(false)
+    }
+  }
+
+  const handleGenerateMedia = async (key: string) => {
+    if (!mediaQuestion) return
+    try {
+      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-media/${key}`)
+      message.success('图片已生成')
+      await loadQuestions()
+      const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '图片生成失败')
+    }
+  }
+
+  const handleUploadMedia = async (key: string, file: File) => {
+    if (!mediaQuestion) return
+    const formData = new FormData()
+    formData.append('file', file)
+    try {
+      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/upload-media/${key}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      message.success('图片已上传')
+      await loadQuestions()
+      const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '上传失败')
+    }
+  }
+
+  const handleDeleteMedia = async (key: string) => {
+    if (!mediaQuestion) return
+    try {
+      await apiClient.delete(`/api/quest/admin/bank/${mediaQuestion.id}/media/${key}`)
+      message.success('配图已删除')
+      await loadQuestions()
+      const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
+      setMediaQuestion(data)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '删除失败')
+    }
+  }
+
+  const loadQuestions = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params: any = { page, page_size: pageSize }
+      if (keyword) params.keyword = keyword
+      if (categoryFilter) params.category = categoryFilter
+      const { data } = await apiClient.get('/api/quest/admin/bank', { params })
+      setQuestions(data.questions || [])
+      setTotal(data.total || 0)
+      if (data.categories) setCategories(data.categories)
+    } catch {
+      message.error('加载闯关题库失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [page, pageSize, keyword, categoryFilter])
+
+  useEffect(() => {
+    startTransition(() => loadQuestions())
+  }, [loadQuestions])
+
+  // ── 删除 ──
+  const handleDelete = (q: QuestBankQuestion) => {
+    Modal.confirm({
+      title: '确认删除',
+      icon: <ExclamationCircleOutlined />,
+      content: `确定删除题目 #${q.id}：「${q.question_text.slice(0, 50)}」？此操作不可恢复。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await apiClient.delete(`/api/quest/admin/bank/${q.id}`)
+          message.success('删除成功')
+          loadQuestions()
+        } catch (e: any) {
+          message.error(e?.response?.data?.detail || '删除失败')
+        }
+      },
+    })
+  }
+
+  // ── 编辑 ──
+  const openEdit = (q: QuestBankQuestion) => {
+    setEditingQuestion(q)
+    editForm.setFieldsValue({
+      category: q.category,
+      question_text: q.question_text,
+      option_a: Object.entries(q.options || {})[0]?.[1] || '',
+      option_b: Object.entries(q.options || {})[1]?.[1] || '',
+      option_c: Object.entries(q.options || {})[2]?.[1] || '',
+      option_d: Object.entries(q.options || {})[3]?.[1] || '',
+      correct_answer: q.correct_answer,
+      explanation: q.explanation,
+    })
+    setEditModalOpen(true)
+  }
+
+  const handleEditSave = async () => {
+    try {
+      const values = await editForm.validateFields()
+      if (!editingQuestion) return
+      setSaving(true)
+      const options: Record<string, string> = {
+        A: values.option_a,
+        B: values.option_b,
+        C: values.option_c,
+        D: values.option_d,
+      }
+      await apiClient.put(`/api/quest/admin/bank/${editingQuestion.id}`, {
+        category: values.category,
+        question_text: values.question_text,
+        options,
+        correct_answer: values.correct_answer,
+        explanation: values.explanation,
+      })
+      message.success('更新成功')
+      setEditModalOpen(false)
+      loadQuestions()
+    } catch (e: any) {
+      if (e?.errorFields) return // 表单验证失败
+      message.error(e?.response?.data?.detail || '更新失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── 新增 ──
+  const openAdd = () => {
+    addForm.resetFields()
+    setAddModalOpen(true)
+  }
+
+  const handleAddSave = async () => {
+    try {
+      const values = await addForm.validateFields()
+      setAdding(true)
+      const options: Record<string, string> = {
+        A: values.option_a,
+        B: values.option_b,
+        C: values.option_c,
+        D: values.option_d,
+      }
+      await apiClient.post('/api/quest/admin/bank', {
+        category: values.category,
+        question_text: values.question_text,
+        options,
+        correct_answer: values.correct_answer,
+        explanation: values.explanation || '',
+      })
+      message.success('添加成功')
+      setAddModalOpen(false)
+      loadQuestions()
+    } catch (e: any) {
+      if (e?.errorFields) return
+      message.error(e?.response?.data?.detail || '添加失败')
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  // ── 配图列渲染 ──
+  const renderMediaCell = (_: any, r: QuestBankQuestion) => {
+    let mf: any[] = []
+    if (Array.isArray(r.media_files)) {
+      mf = r.media_files
+    } else if (typeof r.media_files === 'string') {
+      try { mf = JSON.parse(r.media_files) } catch { /* ignore */ }
+    }
+    if (r.has_svg && r.svg_content) {
+      return <SVGViewer svgCode={r.svg_content} description="预览" thumbHeight={50} />
+    }
+    if (mf.length > 0 && mf[0].url) {
+      return (
+        <div style={{ width: 60, height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+          <Image src={mf[0].url} alt="" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+            preview={{ mask: null }} />
+        </div>
+      )
+    }
+    let ph: any[] = []
+    if (Array.isArray(r.media_placeholders)) ph = r.media_placeholders
+    else if (typeof r.media_placeholders === 'string') {
+      try { ph = JSON.parse(r.media_placeholders) } catch { /* ignore */ }
+    }
+    if (ph.length > 0) {
+      return (
+        <Tooltip title={`${ph.length} 个占位符`}>
+          <Tag color="orange">📷 {ph.length}</Tag>
+        </Tooltip>
+      )
+    }
+    return <span style={{ color: '#ddd' }}>—</span>
+  }
+
+  // ── 展开行渲染 ──
+  const expandedRowRender = (r: QuestBankQuestion) => (
+    <div style={{ padding: '8px 0', maxWidth: '100%', overflow: 'auto' }}>
+      <Space direction="vertical" style={{ width: '100%' }} size={8}>
+        <div>
+          <Text strong style={{ fontSize: 13 }}>📝 题目：</Text>
+          <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
+            <FormulaRenderer content={r.question_text} />
+          </div>
+        </div>
+        <div>
+          <Text strong style={{ fontSize: 13 }}>🔤 选项：</Text>
+          <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
+            {Object.entries(r.options || {}).map(([k, v]) => (
+              <div key={k} style={{ marginBottom: 4 }}>
+                <Tag color={k === r.correct_answer ? 'green' : 'default'}>{k}</Tag>
+                <FormulaRenderer content={v} inline />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div>
+          <Text strong style={{ fontSize: 13 }}>✅ 正确答案：</Text>
+          <Tag color="green" style={{ marginLeft: 8 }}>{r.correct_answer}</Tag>
+        </div>
+        {r.explanation && (
+          <div>
+            <Text strong style={{ fontSize: 13 }}>💡 解析：</Text>
+            <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
+              <FormulaRenderer content={r.explanation} />
+            </div>
+          </div>
+        )}
+        {(r.has_svg && r.svg_content) && (
+          <div>
+            <Text strong style={{ fontSize: 13 }}>🖼️ SVG 配图：</Text>
+            <div style={{ marginTop: 4 }}>
+              <SVGViewer svgCode={r.svg_content} description="配图" expandable={false} />
+            </div>
+          </div>
+        )}
+      </Space>
+    </div>
+  )
+
+  const columns = [
+    {
+      title: 'ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 60,
+    },
+    {
+      title: '分类',
+      dataIndex: 'category',
+      key: 'category',
+      width: 90,
+      render: (c: string) => <Tag color="blue">{c}</Tag>,
+    },
+    {
+      title: '题目',
+      dataIndex: 'question_text',
+      key: 'question_text',
+      width: 220,
+      render: (t: string) => (
+        <div style={{ maxWidth: 220, wordBreak: 'break-word' }}>
+          <Text>{t.length > 50 ? t.slice(0, 50) + '…' : t}</Text>
+        </div>
+      ),
+    },
+    {
+      title: '配图',
+      key: 'media',
+      width: 80,
+      render: renderMediaCell,
+    },
+    {
+      title: '使用次数',
+      dataIndex: 'used_count',
+      key: 'used_count',
+      width: 70,
+      render: (c: number) => <Text>{c} 次</Text>,
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 130,
+      render: (t: string) => t?.slice(0, 16) || '-',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 180,
+      render: (_: any, r: QuestBankQuestion) => (
+        <Space size="small">
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
+            编辑
+          </Button>
+          <Tooltip title="配图管理">
+            <Button type="link" size="small" icon={<span>🎨</span>} onClick={() => handleManageMedia(r)} />
+          </Tooltip>
+          <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={() => handleDelete(r)}>
+            删除
+          </Button>
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <div>
+      {/* ── 操作栏 ── */}
+      <Card style={{ marginBottom: 16, borderRadius: 10 }} size="small">
+        <Space wrap>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
+            添加题目
+          </Button>
+          <Input
+            placeholder="搜索题目"
+            prefix={<SearchOutlined />}
+            style={{ width: 200 }}
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            allowClear
+            onPressEnter={loadQuestions}
+          />
+          <Select
+            placeholder="按分类筛选"
+            style={{ width: 140 }}
+            value={categoryFilter || undefined}
+            onChange={(v) => setCategoryFilter(v || '')}
+            allowClear
+            options={categories.map((c) => ({ label: `${c.name} (${c.count})`, value: c.name }))}
+          />
+          <Button icon={<ReloadOutlined />} onClick={loadQuestions}>刷新</Button>
+          <Text type="secondary" style={{ fontSize: 13 }}>共 {total} 道题</Text>
+        </Space>
+      </Card>
+
+      {/* ── 表格 ── */}
+      <Card style={{ borderRadius: 10 }}>
+        <Table
+          dataSource={questions}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          size="small"
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            hideOnSinglePage: false,
+            showTotal: (t, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${t} 条`,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps) },
+          }}
+          expandable={{
+            expandedRowRender,
+            rowExpandable: () => true,
+          }}
+          scroll={{ x: 1200 }}
+        />
+      </Card>
+
+      {/* ── 编辑弹窗 ── */}
+      <Modal
+        title="编辑闯关题目"
+        open={editModalOpen}
+        onOk={handleEditSave}
+        onCancel={() => setEditModalOpen(false)}
+        confirmLoading={saving}
+        width={700}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item name="category" label="分类" rules={[{ required: true }]}>
+            <Input placeholder="例如：科学、历史、地理" />
+          </Form.Item>
+          <Form.Item name="question_text" label="题目" rules={[{ required: true }]}>
+            <TextArea rows={3} placeholder="请输入题目内容" />
+          </Form.Item>
+          <Space style={{ width: '100%' }} align="start">
+            <Form.Item name="option_a" label="选项 A" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 A" />
+            </Form.Item>
+            <Form.Item name="option_b" label="选项 B" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 B" />
+            </Form.Item>
+          </Space>
+          <Space style={{ width: '100%' }} align="start">
+            <Form.Item name="option_c" label="选项 C" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 C" />
+            </Form.Item>
+            <Form.Item name="option_d" label="选项 D" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 D" />
+            </Form.Item>
+          </Space>
+          <Form.Item name="correct_answer" label="正确答案" rules={[{ required: true }]}>
+            <Select placeholder="选择正确答案">
+              <Select.Option value="A">A</Select.Option>
+              <Select.Option value="B">B</Select.Option>
+              <Select.Option value="C">C</Select.Option>
+              <Select.Option value="D">D</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="explanation" label="解析">
+            <TextArea rows={3} placeholder="题目解析（可选）" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── 新增弹窗 ── */}
+      <Modal
+        title="添加闯关题目"
+        open={addModalOpen}
+        onOk={handleAddSave}
+        onCancel={() => setAddModalOpen(false)}
+        confirmLoading={adding}
+        width={700}
+      >
+        <Form form={addForm} layout="vertical">
+          <Form.Item name="category" label="分类" rules={[{ required: true }]}>
+            <Input placeholder="例如：科学、历史、地理" />
+          </Form.Item>
+          <Form.Item name="question_text" label="题目" rules={[{ required: true }]}>
+            <TextArea rows={3} placeholder="请输入题目内容" />
+          </Form.Item>
+          <Space style={{ width: '100%' }} align="start">
+            <Form.Item name="option_a" label="选项 A" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 A" />
+            </Form.Item>
+            <Form.Item name="option_b" label="选项 B" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 B" />
+            </Form.Item>
+          </Space>
+          <Space style={{ width: '100%' }} align="start">
+            <Form.Item name="option_c" label="选项 C" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 C" />
+            </Form.Item>
+            <Form.Item name="option_d" label="选项 D" rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder="选项 D" />
+            </Form.Item>
+          </Space>
+          <Form.Item name="correct_answer" label="正确答案" rules={[{ required: true }]}>
+            <Select placeholder="选择正确答案">
+              <Select.Option value="A">A</Select.Option>
+              <Select.Option value="B">B</Select.Option>
+              <Select.Option value="C">C</Select.Option>
+              <Select.Option value="D">D</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item name="explanation" label="解析">
+            <TextArea rows={3} placeholder="题目解析（可选）" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── 配图管理弹窗 ── */}
+      <Modal
+        title={`🎨 配图管理 #${mediaQuestion?.id}`}
+        open={mediaModalOpen}
+        onCancel={() => setMediaModalOpen(false)}
+        footer={<Button onClick={() => setMediaModalOpen(false)}>关闭</Button>}
+        width={700}
+      >
+        {mediaQuestion && (
+          <PlaceholderManager
+            questionId={mediaQuestion.id}
+            svgContent={mediaQuestion.svg_content}
+            hasSvg={mediaQuestion.has_svg}
+            placeholders={mediaQuestion.media_placeholders}
+            mediaFiles={mediaQuestion.media_files}
+            svgLoading={svgLoading}
+            wanxiangLoading={wanxiangLoading}
+            onRegenerateSVG={handleRegenerateSVG}
+            onDeleteSVG={handleDeleteSVG}
+            onGenerateImage={handleGenerateImage}
+            onGenerateMedia={handleGenerateMedia}
+            onUploadMedia={handleUploadMedia}
+            onDeleteMedia={handleDeleteMedia}
+          />
+        )}
+      </Modal>
+    </div>
+  )
+}
+
+
+// ════════════════════════════════════════════
+// 主组件：含标签页切换
+// ════════════════════════════════════════════
+
+const QuestAdminPage: React.FC = () => {
+  // 根据 URL 路径自动切换默认标签
+  // /quest → 闯关记录, /quest-records → 题库管理
+  const path = window.location.pathname
+  const [activeTab, setActiveTab] = useState(
+    path.includes('quest-records') ? 'bank' : 'records'
+  )
+
+  const tabItems = [
+    {
+      key: 'records',
+      label: (
+        <span><TrophyOutlined /> 闯关记录</span>
+      ),
+      children: <QuestRecordsTab />,
+    },
+    {
+      key: 'bank',
+      label: (
+        <span><DatabaseOutlined /> 题库管理</span>
+      ),
+      children: <QuestBankTab />,
+    },
+  ]
+
+  return (
+    <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
+      <Title level={3}>
+        <TrophyOutlined style={{ marginRight: 8 }} />
+        闯关挑战管理
+      </Title>
+      <Card style={{ borderRadius: 10 }}>
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
     </div>
   )
