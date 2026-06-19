@@ -344,6 +344,7 @@ def _chat_event_generator(
         # ── 判断是否启用多模态 ──
         multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
         image_files = [fp for fp in valid_file_paths if is_image_file(fp)]
+        _summaries_generated = False
 
         if context_enhance and valid_file_paths:
             summaries = []
@@ -353,6 +354,7 @@ def _chat_event_generator(
                     summaries.append(f"文件 {os.path.basename(fp)} 摘要：\n{s.strip()}")
             if summaries:
                 enhanced_prompt = ("\n\n".join(summaries) + "\n\n" + enhanced_prompt).strip()
+                _summaries_generated = True
 
         if multimodal_enabled and image_files:
             model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
@@ -366,13 +368,16 @@ def _chat_event_generator(
                                             "https://dashscope.aliyuncs.com/compatible-mode/v1")
                 from backend.api.ai_service import call_multimodal_stream
 
+                # 如果摘要已由视觉模型生成文字描述，多模态模型无需再看原图
+                image_files_for_mm = [] if _summaries_generated else image_files
+
                 full_text = ""
                 for chunk in call_multimodal_stream(
                     prompt=enhanced_prompt,
                     api_key=dashscope_api_key,
                     model=model,
                     api_base=api_base,
-                    image_paths=image_files,
+                    image_paths=image_files_for_mm,
                 ):
                     full_text = chunk["text"]
                     yield f"data: {json.dumps({'type': 'delta', 'content': full_text})}\n\n"
