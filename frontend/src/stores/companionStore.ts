@@ -54,7 +54,7 @@ interface CompanionStore {
   loadTeacherData: () => Promise<void>;
 
   // 对话
-  sendMessage: (prompt: string) => Promise<void>;
+  sendMessage: (prompt: string, file_paths?: string[], context_enhance?: boolean) => Promise<void>;
   stopStreaming: () => void;
   clearMessages: () => void;
 
@@ -188,7 +188,7 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
     }
   },
 
-  sendMessage: async (prompt) => {
+  sendMessage: async (prompt, file_paths, context_enhance) => {
     const { companionMessages } = get();
     if (!prompt.trim()) return;
 
@@ -228,6 +228,8 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
         abortController = null;
       },
       abortController.signal,
+      file_paths,
+      context_enhance,
     );
   },
 

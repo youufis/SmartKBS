@@ -106,7 +106,9 @@ export async function companionChat(
   onDelta: (text: string) => void,
   onDone: (sessionId: string) => void,
   onError: (error: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  file_paths?: string[],
+  context_enhance?: boolean,
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token');
 
@@ -117,7 +119,7 @@ export async function companionChat(
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ prompt, session_id: null }),
+      body: JSON.stringify({ prompt, session_id: null, file_paths, context_enhance }),
       signal,
     });
 

@@ -43,7 +43,9 @@ router = APIRouter()
 
 class CompanionChatRequest(BaseModel):
     prompt: str = ""
+    file_paths: list[str] = []
     session_id: Optional[str] = None
+    context_enhance: bool = False
 
 
 class CompanionConfigUpdate(BaseModel):
@@ -119,13 +121,19 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
     # 构建学伴增强提示词
     enhanced_prompt = _build_companion_prompt_with_profile(req.prompt, username, role)
 
-    # 调用流式对话生成器
+    # 构建学伴增强提示词
+    enhanced_prompt = _build_companion_prompt_with_profile(req.prompt, username, role)
+
+    # 调用流式对话生成器（与智答模式共用 _chat_event_generator，支持文件/多模态/摘要/RAG）
     return StreamingResponse(
-        _companion_event_generator(
+        _chat_event_generator(
             prompt=enhanced_prompt,
+            file_paths=req.file_paths,
             session_id=req.session_id,
             username=username,
+            user_payload=user,
             dashscope_api_key=dashscope_api_key,
+            context_enhance=req.context_enhance,
         ),
         media_type="text/event-stream",
     )
@@ -156,11 +164,11 @@ def _companion_event_generator(
     username: str,
     dashscope_api_key: str,
 ):
-    """学伴流式事件生成器"""
-    from backend.api.chat_router import _agent_chat_stream
+    """学伴流式事件生成器（保留用于兼容，新代码直接使用 _chat_event_generator）"""
+    from backend.api.chat_router import _chat_event_generator as _cg
 
     try:
-        for chunk in _agent_chat_stream(prompt, session_id, dashscope_api_key, username):
+        for chunk in _cg(prompt, [], session_id, username, None, dashscope_api_key, False):
             yield f"data: {json.dumps({'type': 'delta', 'content': chunk['text']})}\n\n"
             session_id = chunk.get("session_id") or session_id
 
