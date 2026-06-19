@@ -37,6 +37,8 @@ const GLOBAL_CONFIG_FIELDS = [
     desc: '推荐: deepseek-v4-flash、qwen3.5-flash 等' },
   { key: 'ENABLE_MULTIMODAL', label: '多模态', type: 'multimodal_toggle', group: 'model',
     desc: '开启后对话中发送图片时将调用多模态模型（图片+文本同时输入）。仅当模型为 qwen3.5-flash、qwen3.6-flash 等多模态模型时可用' },
+  { key: 'MULTIMODAL_MODELS', label: '多模态模型关键词', type: 'tags', group: 'model',
+    desc: '用于识别多模态模型的关键词列表，输入模型名称中的关键词即可，多个用逗号分隔。如 qwen3.5-flash,qwen3.6-flash' },
   // AI 对话权限
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', label: 'AI 对话权限', type: 'roles', group: 'ai',
     desc: '选择可使用 AI 对话的角色（管理员始终可用）' },
@@ -97,8 +99,8 @@ const SystemConfigPage: React.FC = () => {
 
   // ── 判断模型是否为多模态模型 ──
   const isMultimodalModel = (name: string) => {
-    const kws = ['qwen3.5-flash', 'qwen3.6-flash']
-    return kws.some(kw => name.toLowerCase().includes(kw))
+    const kws: string[] = (config['MULTIMODAL_MODELS'] as string[]) || ['qwen3.5-flash', 'qwen3.6-flash']
+    return kws.some(kw => name.toLowerCase().includes(kw.toLowerCase()))
   }
 
   // ── 加载 API Key 状态 ──

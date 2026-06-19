@@ -310,9 +310,11 @@ MULTIMODAL_MODEL_KEYWORDS = ["qwen3.5-flash", "qwen3.6-flash"]
 
 
 def is_multimodal_model(model_name: str) -> bool:
-    """判断模型名称是否为多模态模型"""
+    """判断模型名称是否为多模态模型（从系统配置读取关键词列表）"""
+    from backend.api.config_router import get_config_value
+    keywords = get_config_value("MULTIMODAL_MODELS", ["qwen3.5-flash", "qwen3.6-flash"])
     name = model_name.lower().strip()
-    return any(kw in name for kw in MULTIMODAL_MODEL_KEYWORDS)
+    return any(kw.lower() in name for kw in keywords)
 
 
 def _build_multimodal_content(
