@@ -305,16 +305,10 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
 # 多模态调用（图片+文本混合输入，OpenAI 兼容格式）
 # ═══════════════════════════════════════════════════════════════
 
-# 已知的多模态模型关键词列表（用于前端判断是否可勾选）
-MULTIMODAL_MODEL_KEYWORDS = ["qwen3.5-flash", "qwen3.6-flash"]
-
 
 def is_multimodal_model(model_name: str) -> bool:
-    """判断模型名称是否为多模态模型（从系统配置读取关键词列表）"""
-    from backend.api.config_router import get_config_value
-    keywords = get_config_value("MULTIMODAL_MODELS", ["qwen3.5-flash", "qwen3.6-flash"])
-    name = model_name.lower().strip()
-    return any(kw.lower() in name for kw in keywords)
+    """判断模型名称是否为多模态模型（由用户勾选决定，此处始终返回 True）"""
+    return True
 
 
 def _build_multimodal_content(
