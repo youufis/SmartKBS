@@ -4,9 +4,7 @@ import apiClient from '../api/client';
 import type { CompanionConfig, CompanionProfile, PushMessage } from '../api/companion';
 import * as companionApi from '../api/companion';
 import * as historyApi from '../api/history';
-
-/** 文件上传缓存：文件名 -> File 对象（与智答模式共享） */
-export const fileUploadCache = new Map<string, File>();
+import { fileUploadCache } from './chatStore';
 
 async function uploadFiles(filePaths: string[]): Promise<string[]> {
   const results: string[] = [];
