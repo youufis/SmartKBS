@@ -34,8 +34,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 多模态模型开关（当默认对话模型为 qwen3.5-flash / qwen3.6-flash 等多模态模型时，
     # 开启后对话支持图片+文本同时输入，走多模态 API 格式）
     "ENABLE_MULTIMODAL": False,
-    # 多模态模型关键词列表（匹配模型名称，不区分大小写，支持模糊匹配）
-    "MULTIMODAL_MODELS": ["qwen3.5-flash", "qwen3.6-flash"],
     # 文件大小限制
     "MAX_DOC_SIZE_MB": 10,
     "MAX_IMAGE_SIZE_MB": 5,

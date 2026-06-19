@@ -36,9 +36,7 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MODEL_NAME', label: '默认对话模型', type: 'text', group: 'model',
     desc: '推荐: deepseek-v4-flash、qwen3.5-flash 等' },
   { key: 'ENABLE_MULTIMODAL', label: '多模态', type: 'multimodal_toggle', group: 'model',
-    desc: '开启后对话中发送图片时将调用多模态模型（图片+文本同时输入）。仅当模型为 qwen3.5-flash、qwen3.6-flash 等多模态模型时可用' },
-  { key: 'MULTIMODAL_MODELS', label: '多模态模型关键词', type: 'tags', group: 'model',
-    desc: '用于识别多模态模型的关键词列表，输入模型名称中的关键词即可，多个用逗号分隔。如 qwen3.5-flash,qwen3.6-flash' },
+    desc: '开启后对话中发送图片时使用多模态格式（图片+文本同时输入）。请根据模型能力自行判断，勾选后将视为多模态模型处理' },
   // AI 对话权限
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', label: 'AI 对话权限', type: 'roles', group: 'ai',
     desc: '选择可使用 AI 对话的角色（管理员始终可用）' },
@@ -94,14 +92,7 @@ const SystemConfigPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [apikeyStatus, setApikeyStatus] = useState<{ status: string; source: string; hint: string; configured: boolean } | null>(null)
-  const [modelName, setModelName] = useState('')
   const [form] = Form.useForm()
-
-  // ── 判断模型是否为多模态模型 ──
-  const isMultimodalModel = (name: string) => {
-    const kws: string[] = (config['MULTIMODAL_MODELS'] as string[]) || ['qwen3.5-flash', 'qwen3.6-flash']
-    return kws.some(kw => name.toLowerCase().includes(kw.toLowerCase()))
-  }
 
   // ── 加载 API Key 状态 ──
   const loadApikeyStatus = useCallback(async () => {
@@ -201,12 +192,6 @@ const SystemConfigPage: React.FC = () => {
           formValues['enabled_notification_types'] = ['exam']
         }
         form.setFieldsValue(formValues)
-        // 加载后同步：如果模型不支持多模态，强制取消勾选
-        const loadedModel = formValues['MODEL_NAME'] || ''
-        setModelName(loadedModel)
-        if (!isMultimodalModel(loadedModel)) {
-          form.setFieldsValue({ ENABLE_MULTIMODAL: false })
-        }
         loadApikeyStatus()
       } catch {
         message.error('加载系统配置失败')
@@ -328,7 +313,7 @@ const SystemConfigPage: React.FC = () => {
                   valuePropName="checked"
                   extra={field.desc}
                 >
-                  <Checkbox disabled={!isMultimodalModel(modelName)}>
+                  <Checkbox>
                     启用多模态对话（支持图片+文本同时输入）
                   </Checkbox>
                 </Form.Item>
@@ -341,19 +326,6 @@ const SystemConfigPage: React.FC = () => {
                 >
                   {field.key === 'AGENT_EDITION' ? (
                     <Input placeholder="例如：高中信通版" />
-                  ) : field.key === 'MODEL_NAME' ? (
-                    <Input
-                      placeholder="例如：deepseek-v4-flash、qwen3.5-flash"
-                      suffix={
-                        modelName ? (
-                          isMultimodalModel(modelName) ? (
-                            <Tag color="blue" style={{ marginRight: 0 }}>🖼️ 多模态</Tag>
-                          ) : (
-                            <Tag style={{ marginRight: 0 }}>📝 文本</Tag>
-                          )
-                        ) : null
-                      }
-                    />
                   ) : (
                     <Input />
                   )}
@@ -454,16 +426,6 @@ const SystemConfigPage: React.FC = () => {
                 layout="vertical"
                 initialValues={config}
                 style={{ maxWidth: 900 }}
-                onValuesChange={(changedValues) => {
-                  if ('MODEL_NAME' in changedValues) {
-                    const newModel = changedValues['MODEL_NAME']
-                    setModelName(newModel)
-                    // 模型切换为非多模态时自动取消勾选
-                    if (!isMultimodalModel(newModel)) {
-                      form.setFieldsValue({ ENABLE_MULTIMODAL: false })
-                    }
-                  }
-                }}
               >
                 {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen'].map(renderGroup)}
 
