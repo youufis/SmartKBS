@@ -5,6 +5,31 @@ import type { CompanionConfig, CompanionProfile, PushMessage } from '../api/comp
 import * as companionApi from '../api/companion';
 import * as historyApi from '../api/history';
 
+/** 文件上传缓存：文件名 -> File 对象（与智答模式共享） */
+export const fileUploadCache = new Map<string, File>();
+
+async function uploadFiles(filePaths: string[]): Promise<string[]> {
+  const results: string[] = [];
+  for (const fp of filePaths) {
+    try {
+      const formData = new FormData();
+      const fileObj = fileUploadCache.get(fp);
+      if (fileObj) {
+        formData.append('file', fileObj, fileObj.name);
+      } else {
+        continue;
+      }
+      const { data } = await apiClient.post('/api/files/upload-temp', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (data.path) results.push(data.path);
+    } catch (e) {
+      console.error('文件上传失败:', fp, e);
+    }
+  }
+  return results;
+}
+
 export interface TeacherDashboardData {
   exam_stats?: { total: number; draft: number; published: number; ended: number }
   total_submissions?: number
@@ -190,7 +215,13 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
 
   sendMessage: async (prompt, file_paths, context_enhance) => {
     const { companionMessages } = get();
-    if (!prompt.trim()) return;
+    if (!prompt.trim() && (!file_paths || file_paths.length === 0)) return;
+
+    // 上传文件到服务器（与智答模式一致），获取真实路径
+    let serverFilePaths: string[] = [];
+    if (file_paths && file_paths.length > 0) {
+      serverFilePaths = await uploadFiles(file_paths);
+    }
 
     const userMsg = { role: 'user' as const, content: prompt };
     const aiMsg = { role: 'assistant' as const, content: '' };
@@ -214,7 +245,7 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
           set({ companionMessages: [...msgs] });
         }
       },
-      (_sessionId) => {
+      () => {
         set({ isStreaming: false, currentText: '' });
         abortController = null;
       },
@@ -228,7 +259,7 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
         abortController = null;
       },
       abortController.signal,
-      file_paths,
+      serverFilePaths,
       context_enhance,
     );
   },
