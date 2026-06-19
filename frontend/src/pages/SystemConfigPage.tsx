@@ -72,7 +72,7 @@ const GLOBAL_CONFIG_FIELDS = [
     desc: 'DashScope格式：1024*1024(方形) / 720*1280(竖屏) / 1280*720(横屏)' },
   // 闯关挑战
   { key: 'QUEST_USE_BANK', label: '闯关出题模式', type: 'boolean', group: 'quest',
-    desc: '🟢 开启（ON）→ 题库出题模式，从闯关题库中随机抽题\n🔴 关闭（OFF）→ AI 出题模式，由 AI 即时生成百科题目\n💡 当题库题目数超过 500 题时，自动切换为题库出题模式，不受此开关控制' },
+    desc: '🟢 开启（ON）→ 题库出题模式，从闯关题库中随机抽题\n🔴 关闭（OFF）→ AI 出题模式，由 AI 即时生成百科题目' },
 ]
 
 const GROUP_LABELS: Record<string, string> = {
@@ -233,6 +233,7 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={field.label}
                   valuePropName="checked"
+                  extra={field.desc}
                 >
                   <Switch />
                 </Form.Item>
