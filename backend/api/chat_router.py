@@ -345,8 +345,7 @@ def _chat_event_generator(
         multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
         image_files = [fp for fp in valid_file_paths if is_image_file(fp)]
 
-        # 多模态模式下跳过摘要流程：图片直接由多模态模型理解，无需先调用视觉模型摘要
-        if not (multimodal_enabled and image_files) and context_enhance and valid_file_paths:
+        if context_enhance and valid_file_paths:
             summaries = []
             for fp in valid_file_paths:
                 s = file_summary_cache.get(fp, dashscope_api_key, user_payload)
