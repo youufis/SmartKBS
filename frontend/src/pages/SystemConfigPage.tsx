@@ -36,7 +36,7 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MODEL_NAME', label: '默认对话模型', type: 'text', group: 'model',
     desc: '推荐: deepseek-v4-flash、qwen3.5-flash 等' },
   { key: 'ENABLE_MULTIMODAL', label: '多模态', type: 'multimodal_toggle', group: 'model',
-    desc: '开启后对话中发送图片时使用多模态格式（图片+文本同时输入）。请根据模型能力自行判断，勾选后将视为多模态模型处理' },
+    desc: '开启后对话中发送图片时使用多模态格式（图片+文本同时输入）。请确认模型是支持多模态，勾选后将视为多模态模型处理' },
   // AI 对话权限
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', label: 'AI 对话权限', type: 'roles', group: 'ai',
     desc: '选择可使用 AI 对话的角色（管理员始终可用）' },
