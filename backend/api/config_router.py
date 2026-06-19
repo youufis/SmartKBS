@@ -76,6 +76,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 称号系统配置
     "ENABLE_BADGES": True,
     "ENABLE_SUBJECT_TITLES": True,
+    # 闯关挑战出题模式：false=AI 出题（默认）, true=从题库出题
+    "QUEST_USE_BANK": False,
 }
 
 
@@ -130,7 +132,7 @@ async def update_config(req: ConfigUpdate, request: Request):
     require_admin(user)
     current = load_config()
     # 允许更新已知的 key + 称号配置相关 key
-    _title_keys = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG", "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES"}
+    _title_keys = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG", "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK"}
     for key, value in req.config.items():
         if key in DEFAULT_CONFIG or key in _title_keys:
             current[key] = value

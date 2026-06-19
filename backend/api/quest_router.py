@@ -1,14 +1,17 @@
 """
 知识闯关 API 路由
 学生端：AI 即时出题的百科答题挑战
+教师端：闯关记录查看 + 闯关题库管理
 """
 import asyncio
 import json
 import random
+import re
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi import APIRouter, HTTPException, Request, Query, UploadFile, File
+from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_query_dict, execute_insert_update, execute_query_one
@@ -20,6 +23,7 @@ from backend.prompts.quest import (
     PHONE_FRIEND_PROMPT,
     AUDIENCE_VOTE_PROMPT,
 )
+from backend.prompts.chat import SVG_GENERATE_PROMPT, IMAGE_GEN_PROMPT_TEMPLATE
 from backend.logger import logger
 from backend.reward_engine import award_participation, award_grade, update_student_total
 from backend.title_system import check_and_unlock_badges
@@ -453,13 +457,13 @@ async def start_quest(request: Request):
     if role != 2:
         raise HTTPException(status_code=403, detail="仅学生可参与闯关")
 
-    # 读取请求体（可选）
-    use_bank = 0
-    try:
-        body = await request.json()
-        use_bank = 1 if body.get("use_bank", False) else 0
-    except Exception:
-        pass
+    # 从系统配置读取出题模式（不由学生控制）
+    # 题库数量 >= 500 时自动切换为题库模式
+    from backend.api.config_router import get_config_value
+    count_row = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")
+    bank_count = count_row["cnt"] if count_row else 0
+    use_bank_config = get_config_value("QUEST_USE_BANK", False)
+    use_bank = 1 if (use_bank_config or bank_count >= 500) else 0
 
     # 检查是否有未完成的闯关
     existing = execute_query_one(
@@ -1076,6 +1080,31 @@ async def get_bank_stats(request: Request):
     }
 
 
+@router.get("/quest/config", summary="获取闯关系统配置")
+async def get_quest_config():
+    """返回闯关挑战的系统配置（无需登录）
+    当题库超过 500 题时自动切换为题库出题模式。
+    """
+    from backend.api.config_router import get_config_value
+
+    # 检测题库数量
+    count_row = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")
+    bank_count = count_row["cnt"] if count_row else 0
+    bank_full = bank_count >= 500
+
+    config_use_bank = bool(get_config_value("QUEST_USE_BANK", False))
+
+    # 题库充足时强制使用题库模式，否则遵循配置
+    effective = config_use_bank or bank_full
+
+    return {
+        "use_bank": effective,
+        "config_use_bank": config_use_bank,
+        "bank_count": bank_count,
+        "bank_full": bank_full,
+    }
+
+
 @router.get("/quest/admin/grades", summary="[教师] 可查看的年级列表")
 async def get_admin_quest_grades(request: Request):
     """管理员基于实际学生数据，教师基于任教范围"""
@@ -1170,7 +1199,6 @@ async def get_admin_quest_records(
         params.append(grade)
     if class_name:
         # 统一格式：从 "高一1班" 提取 "1"，兼容 "1" 和 "1班"
-        import re
         cls_num = re.sub(r'[^\d]', '', str(class_name))
         conditions.append("(u.class=? OR u.class=?)")
         params.extend([cls_num, f"{cls_num}班"])
@@ -1277,6 +1305,518 @@ async def delete_quest_record(quest_id: int, request: Request):
     )
 
     return {"success": True, "message": f"闯关记录 #{quest_id} 已删除"}
+
+
+# ═══════════════════════════════════════════════════════════
+# 闯关题库管理（教师端 CRUD）
+# ═══════════════════════════════════════════════════════════
+
+class QuestBankCreate(BaseModel):
+    """添加闯关题目请求"""
+    category: str = "综合"
+    question_text: str
+    options: dict[str, str]
+    correct_answer: str
+    explanation: str = ""
+    svg_content: str = ""
+    has_svg: int = 0
+    media_files: str = ""
+    media_placeholders: str = ""
+
+
+class QuestBankUpdate(BaseModel):
+    """更新闯关题目请求"""
+    category: str | None = None
+    question_text: str | None = None
+    options: dict[str, str] | None = None
+    correct_answer: str | None = None
+    explanation: str | None = None
+    svg_content: str | None = None
+    has_svg: int | None = None
+    media_files: str | None = None
+    media_placeholders: str | None = None
+
+
+@router.get("/quest/admin/bank", summary="[教师] 获取闯关题库列表")
+async def list_quest_bank(
+    request: Request,
+    category: str = Query("", description="分类筛选"),
+    keyword: str = Query("", description="关键词搜索(题目)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    """教师/管理员查看闯关题库列表，支持筛选和分页"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可管理闯关题库")
+
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if category:
+        conditions.append("category = ?")
+        params.append(category)
+    if keyword:
+        conditions.append("question_text LIKE ?")
+        params.append(f"%{keyword}%")
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    count_row = execute_query_one(
+        f"SELECT COUNT(*) as cnt FROM quest_question_bank {where}",
+        tuple(params),
+    )
+    total = count_row["cnt"] if count_row else 0
+
+    offset = (page - 1) * page_size
+    rows = execute_query_dict(
+        f"""SELECT id, category, question_text, options, correct_answer, explanation,
+                   used_count, svg_content, has_svg, media_files, media_placeholders,
+                   created_at
+           FROM quest_question_bank {where}
+           ORDER BY id DESC
+           LIMIT ? OFFSET ?""",
+        tuple(params + [page_size, offset]),
+    )
+
+    questions = []
+    for r in rows:
+        # 解析 JSON 字符串字段
+        media_files = r.get("media_files", "")
+        if isinstance(media_files, str):
+            try: media_files = json.loads(media_files) if media_files else []
+            except: media_files = []
+        media_placeholders = r.get("media_placeholders", "")
+        if isinstance(media_placeholders, str):
+            try: media_placeholders = json.loads(media_placeholders) if media_placeholders else []
+            except: media_placeholders = []
+        questions.append({
+            "id": r["id"],
+            "category": r["category"],
+            "question_text": r["question_text"],
+            "options": json.loads(r["options"]) if isinstance(r["options"], str) else r["options"],
+            "correct_answer": r["correct_answer"],
+            "explanation": r["explanation"],
+            "used_count": r["used_count"],
+            "svg_content": r.get("svg_content", ""),
+            "has_svg": r.get("has_svg", 0),
+            "media_files": media_files,
+            "media_placeholders": media_placeholders,
+            "created_at": r["created_at"],
+        })
+
+    # 同时返回分类列表供筛选
+    categories = execute_query_dict(
+        "SELECT category, COUNT(*) as cnt FROM quest_question_bank GROUP BY category ORDER BY cnt DESC"
+    )
+
+    return {
+        "questions": questions,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "categories": [{"name": c["category"], "count": c["cnt"]} for c in categories],
+    }
+
+
+@router.get("/quest/admin/bank/{question_id}", summary="[教师] 获取单道闯关题")
+async def get_quest_bank_question(question_id: int, request: Request):
+    """获取单道闯关题库题目详情"""
+    user = get_current_user(request)
+    _ = user  # 仅验证登录
+
+    row = execute_query_one(
+        "SELECT * FROM quest_question_bank WHERE id=?",
+        (question_id,),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="题目不存在")
+
+    result = dict(row)
+    if isinstance(result.get("options"), str):
+        result["options"] = json.loads(result["options"])
+    for field in ["media_files", "media_placeholders"]:
+        val = result.get(field, "")
+        if isinstance(val, str):
+            try: result[field] = json.loads(val) if val else []
+            except: result[field] = []
+    return result
+
+
+@router.post("/quest/admin/bank", summary="[教师] 添加闯关题")
+async def create_quest_bank_question(req: QuestBankCreate, request: Request):
+    """教师手动添加一道闯关题到题库"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可添加")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    options_json = json.dumps(req.options, ensure_ascii=False)
+
+    # 检查是否已存在相同题目
+    existing = execute_query_one(
+        "SELECT id FROM quest_question_bank WHERE question_text=?",
+        (req.question_text,),
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="该题目已存在于题库中")
+
+    qid = execute_insert_update(
+        """INSERT INTO quest_question_bank
+           (category, question_text, options, correct_answer, explanation,
+            used_count, created_at, svg_content, has_svg, media_files, media_placeholders)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
+        (req.category, req.question_text, options_json, req.correct_answer,
+         req.explanation, now,
+         req.svg_content, req.has_svg, req.media_files, req.media_placeholders),
+    )
+
+    return {"id": qid, "message": "添加成功"}
+
+
+@router.put("/quest/admin/bank/{question_id}", summary="[教师] 更新闯关题")
+async def update_quest_bank_question(question_id: int, req: QuestBankUpdate, request: Request):
+    """更新闯关题库中的题目"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可编辑")
+
+    row = execute_query_one(
+        "SELECT id FROM quest_question_bank WHERE id=?",
+        (question_id,),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="题目不存在")
+
+    updates: list[str] = []
+    params: list[Any] = []
+
+    for field in ["category", "question_text", "correct_answer", "explanation",
+                   "svg_content", "has_svg", "media_files", "media_placeholders"]:
+        val = getattr(req, field, None)
+        if val is not None:
+            updates.append(f"{field} = ?")
+            params.append(val)
+
+    if req.options is not None:
+        updates.append("options = ?")
+        params.append(json.dumps(req.options, ensure_ascii=False))
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="没有需要更新的字段")
+
+    params.append(question_id)
+    execute_insert_update(
+        f"UPDATE quest_question_bank SET {', '.join(updates)} WHERE id=?",
+        tuple(params),
+    )
+
+    return {"success": True, "message": "更新成功"}
+
+
+@router.delete("/quest/admin/bank/{question_id}", summary="[教师] 删除闯关题")
+async def delete_quest_bank_question(question_id: int, request: Request):
+    """删除闯关题库中的一道题"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可删除")
+
+    row = execute_query_one(
+        "SELECT id FROM quest_question_bank WHERE id=?",
+        (question_id,),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="题目不存在")
+
+    execute_insert_update(
+        "DELETE FROM quest_question_bank WHERE id=?",
+        (question_id,),
+    )
+
+    return {"success": True, "message": "删除成功"}
+
+
+# ═══════════════════════════════════════════════════════════
+# 闯关题库配图管理（教师端）
+# ═══════════════════════════════════════════════════════════
+
+
+def _get_quest_bank_question(question_id: int) -> dict[str, Any]:
+    """获取闯关题库单题并校验存在"""
+    row = execute_query_one(
+        "SELECT * FROM quest_question_bank WHERE id=?", (question_id,)
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="题目不存在")
+    return row
+
+
+@router.post("/quest/admin/bank/{question_id}/generate-svg", summary="[教师] 生成SVG配图")
+async def quest_bank_generate_svg(question_id: int, request: Request):
+    """为闯关题库题目生成 SVG 配图"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    row = _get_quest_bank_question(question_id)
+    api_key, _ = get_api_keys(user["username"])
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置")
+
+    prompt = SVG_GENERATE_PROMPT.format(
+        description=row["question_text"],
+        subject=row.get("category", "百科")
+    )
+    try:
+        text = call_ai_sync_direct(prompt, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 生成 SVG 失败: {str(e)}")
+
+    # 提取 SVG 代码
+    svg_match = re.search(r'<svg[\s\S]*?</svg>', text, re.IGNORECASE)
+    svg_code = svg_match.group() if svg_match else ""
+
+    if not svg_code:
+        raise HTTPException(status_code=502, detail="AI 未能生成有效的 SVG 代码")
+
+    # 安全过滤
+    svg_code = re.sub(r'<script[\s\S]*?</script>', '', svg_code, flags=re.IGNORECASE)
+    svg_code = re.sub(r'\bon\w+\s*=\s*["\'][\s\S]*?["\']', '', svg_code)
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE quest_question_bank SET svg_content=?, has_svg=1 WHERE id=?",
+        (svg_code, question_id),
+    )
+
+    return {"message": "SVG 配图已生成", "svg_code": svg_code}
+
+
+@router.post("/quest/admin/bank/{question_id}/generate-image", summary="[教师] 万相生图")
+async def quest_bank_generate_image(question_id: int, request: Request):
+    """为闯关题库题目生成 AI 配图"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    row = _get_quest_bank_question(question_id)
+    q_text = (row["question_text"] or "")[:200]
+
+    prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+        subject=row.get("category", "百科"),
+        purpose="示意图",
+        description=f"与「{q_text}」相关的教学插图",
+    )
+
+    from backend.api.image_gen_service import generate_and_save_image
+    from backend.config import BASE_DIR
+    from pathlib import Path
+
+    media_dir = BASE_DIR / "question_media" / str(question_id)
+    local_path = await generate_and_save_image(prompt, media_dir)
+    if not local_path:
+        raise HTTPException(status_code=502, detail="AI 生图失败，请检查 API Key 或稍后重试")
+
+    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    media_files = json.loads(row.get("media_files") or "[]")
+    key = "wanxiang"
+    existing = next((f for f in media_files if f.get("key") == key), None)
+    if existing:
+        existing["url"] = relative_url
+        existing["alt"] = q_text[:100]
+        existing["created_at"] = now
+    else:
+        media_files.append({
+            "key": key, "type": "image", "url": relative_url,
+            "alt": q_text[:100], "created_at": now,
+        })
+
+    execute_insert_update(
+        "UPDATE quest_question_bank SET media_files=? WHERE id=?",
+        (json.dumps(media_files, ensure_ascii=False), question_id),
+    )
+    return {"message": "配图已生成", "url": relative_url, "key": key}
+
+
+@router.post("/quest/admin/bank/{question_id}/generate-media/{placeholder_key}", summary="[教师] 占位符生图")
+async def quest_bank_generate_media(question_id: int, placeholder_key: str, request: Request):
+    """为闯关题目的占位符生成图片"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    row = _get_quest_bank_question(question_id)
+    placeholders = json.loads(row.get("media_placeholders") or "[]")
+    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="占位符不存在")
+
+    prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
+        subject=row.get("category", "百科"),
+        purpose=target.get("purpose", "示意图"),
+        description=target["description"],
+    )
+
+    from backend.api.image_gen_service import generate_and_save_image
+    from backend.config import BASE_DIR
+    from pathlib import Path
+
+    media_dir = BASE_DIR / "question_media" / str(question_id)
+
+    # 清理旧文件
+    media_files = json.loads(row.get("media_files") or "[]")
+    old_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    if old_entry and old_entry.get("url"):
+        old_filename = old_entry["url"].rstrip("/").split("/")[-1]
+        old_path = media_dir / old_filename
+        if old_path.exists():
+            old_path.unlink()
+
+    local_path = await generate_and_save_image(prompt, media_dir)
+    if not local_path:
+        raise HTTPException(status_code=502, detail="AI 生图失败")
+
+    target["status"] = "generated"
+    relative_url = f"/api/files/question_media/{question_id}/{Path(local_path).name}"
+
+    file_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if file_entry:
+        file_entry["url"] = relative_url
+        file_entry["created_at"] = now
+    else:
+        media_files.append({
+            "key": placeholder_key, "type": "image", "url": relative_url,
+            "alt": target["description"], "created_at": now,
+        })
+
+    execute_insert_update(
+        "UPDATE quest_question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+        (json.dumps(placeholders, ensure_ascii=False),
+         json.dumps(media_files, ensure_ascii=False), question_id),
+    )
+    return {"message": "图片已生成", "url": relative_url, "placeholder_key": placeholder_key}
+
+
+@router.post("/quest/admin/bank/{question_id}/upload-media/{placeholder_key}", summary="[教师] 上传图片")
+async def quest_bank_upload_media(
+    question_id: int, placeholder_key: str,
+    request: Request, file: UploadFile = File(...),
+):
+    """上传图片替换闯关题目的占位符"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    row = _get_quest_bank_question(question_id)
+
+    _, ext = (file.filename or "").lower().rsplit(".", 1) if "." in (file.filename or "") else ("", ".jpg")
+    ext = f".{ext}" if not ext.startswith(".") else ext
+    allowed = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
+
+    content = await file.read()
+    from backend.api.config_router import get_config_value
+    max_size_mb = get_config_value("MAX_IMAGE_SIZE_MB", 5)
+    max_size = max_size_mb * 1024 * 1024
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail=f"图片大小超过 {max_size_mb}MB 限制")
+
+    from backend.config import BASE_DIR
+    from pathlib import Path
+    import uuid
+
+    media_dir = BASE_DIR / "question_media" / str(question_id)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    file_id = uuid.uuid4().hex
+    save_path = media_dir / f"{file_id}{ext}"
+    save_path.write_bytes(content)
+
+    placeholders = json.loads(row.get("media_placeholders") or "[]")
+    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    if target:
+        target["status"] = "uploaded"
+
+    relative_url = f"/api/files/question_media/{question_id}/{file_id}{ext}"
+    media_files = json.loads(row.get("media_files") or "[]")
+    file_entry = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if file_entry:
+        file_entry["url"] = relative_url
+        file_entry["created_at"] = now
+    else:
+        media_files.append({
+            "key": placeholder_key, "type": "image", "url": relative_url,
+            "alt": target["description"] if target else file.filename,
+            "created_at": now,
+        })
+
+    execute_insert_update(
+        "UPDATE quest_question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+        (json.dumps(placeholders, ensure_ascii=False),
+         json.dumps(media_files, ensure_ascii=False), question_id),
+    )
+    return {"message": "图片上传成功", "url": relative_url, "placeholder_key": placeholder_key}
+
+
+@router.delete("/quest/admin/bank/{question_id}/svg", summary="[教师] 删除SVG配图")
+async def quest_bank_delete_svg(question_id: int, request: Request):
+    """删除闯关题目的 SVG 配图"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+    _get_quest_bank_question(question_id)
+    execute_insert_update(
+        "UPDATE quest_question_bank SET svg_content='', has_svg=0 WHERE id=?",
+        (question_id,),
+    )
+    return {"message": "SVG 配图已删除"}
+
+
+@router.delete("/quest/admin/bank/{question_id}/media/{placeholder_key}", summary="[教师] 删除配图")
+async def quest_bank_delete_media(question_id: int, placeholder_key: str, request: Request):
+    """删除闯关题目的配图"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    row = _get_quest_bank_question(question_id)
+
+    placeholders = json.loads(row.get("media_placeholders") or "[]")
+    target = next((p for p in placeholders if p["key"] == placeholder_key), None)
+    if target:
+        target["status"] = "pending"
+
+    media_files = json.loads(row.get("media_files") or "[]")
+    deleted_file = next((f for f in media_files if f.get("key") == placeholder_key), None)
+    if deleted_file and deleted_file.get("url"):
+        from backend.config import BASE_DIR
+        from pathlib import Path
+        filename = deleted_file["url"].rstrip("/").split("/")[-1]
+        file_path = BASE_DIR / "question_media" / str(question_id) / filename
+        if file_path.exists():
+            file_path.unlink()
+    media_files = [f for f in media_files if f.get("key") != placeholder_key]
+
+    execute_insert_update(
+        "UPDATE quest_question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+        (json.dumps(placeholders, ensure_ascii=False),
+         json.dumps(media_files, ensure_ascii=False), question_id),
+    )
+    return {"message": "配图已删除", "placeholder_key": placeholder_key}
 
 
 # ── 内部辅助 ──

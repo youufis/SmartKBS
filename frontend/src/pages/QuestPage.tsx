@@ -5,10 +5,10 @@
 import React, { useState, useEffect } from 'react'
 import {
   Card, Button, Typography, Space, Statistic,
-  Table, Tag, message, Spin, Empty, Modal, Switch,
+  Table, Tag, message, Spin, Modal,
 } from 'antd'
 import {
-  ThunderboltOutlined, TrophyOutlined, HistoryOutlined,
+  ThunderboltOutlined, HistoryOutlined,
   FireOutlined, CrownOutlined, StarOutlined,
   RobotOutlined, DatabaseOutlined, QuestionCircleOutlined,
   ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined,
@@ -50,7 +50,7 @@ const QuestPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [useBank, setUseBank] = useState(false)
+  const [questConfig, setQuestConfig] = useState<{ use_bank: boolean } | null>(null)
   const [bankStats, setBankStats] = useState<{ total_questions: number; by_category: any[] } | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -66,15 +66,17 @@ const QuestPage: React.FC = () => {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [statsRes, historyRes, bankRes] = await Promise.all([
+      const [statsRes, historyRes, bankRes, configRes] = await Promise.all([
         apiClient.get('/api/quest/stats'),
         apiClient.get('/api/quest/history', { params: { page, page_size: pageSize } }),
         apiClient.get('/api/quest/bank/stats'),
+        apiClient.get('/api/quest/config'),
       ])
       setStats(statsRes.data)
       setRecords(historyRes.data.records || [])
       setTotal(historyRes.data.total || 0)
       setBankStats(bankRes.data)
+      setQuestConfig(configRes.data)
     } catch (e: any) {
       if (e?.response?.status !== 403) {
         message.error('加载闯关数据失败')
@@ -91,7 +93,7 @@ const QuestPage: React.FC = () => {
     }
     setStarting(true)
     try {
-      const { data } = await apiClient.post('/api/quest/start', { use_bank: useBank })
+      const { data } = await apiClient.post('/api/quest/start')
       navigate(`/quest/battle/${data.quest_id}`, { state: { initialData: data } })
     } catch (e: any) {
       const detail = e?.response?.data?.detail || '启动闯关失败'
@@ -265,18 +267,22 @@ const QuestPage: React.FC = () => {
               12 大领域 · 答错即止
             </Text>
             <Space size={4}>
-              <RobotOutlined style={{ color: useBank ? 'rgba(255,255,255,0.4)' : '#fff', fontSize: 13 }} />
-              <Switch
-                checked={useBank}
-                onChange={setUseBank}
-                checkedChildren="题库"
-                unCheckedChildren="AI"
-                size="small"
-                style={{ background: useBank ? '#52c41a' : '#1677ff' }}
-              />
-              <DatabaseOutlined style={{ color: useBank ? '#fff' : 'rgba(255,255,255,0.4)', fontSize: 13 }} />
+              {questConfig?.use_bank ? (
+                <DatabaseOutlined style={{ fontSize: 13, color: '#52c41a' }} />
+              ) : (
+                <RobotOutlined style={{ fontSize: 13, color: '#fff' }} />
+              )}
+              <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: 500 }}>
+                {questConfig?.use_bank ? '📚 题库出题' : '🤖 AI 出题'}
+              </Text>
+              {questConfig?.bank_full && (
+                <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>
+                  题库充足 · 自动切换
+                </Tag>
+              )}
+              <DatabaseOutlined style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }} />
               {bankStats && (
-                <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12 }}>
+                <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
                   {bankStats.total_questions}题
                 </Text>
               )}
