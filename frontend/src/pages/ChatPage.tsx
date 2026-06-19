@@ -441,7 +441,7 @@ const ChatPage: React.FC = () => {
       return;
     }
     if (companionMode) {
-      companionSendMsg(input)
+      companionSendMsg(input, filePaths, contextEnhance)
     } else {
       sendMessage(input)
     }
