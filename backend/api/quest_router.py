@@ -457,13 +457,9 @@ async def start_quest(request: Request):
     if role != 2:
         raise HTTPException(status_code=403, detail="仅学生可参与闯关")
 
-    # 从系统配置读取出题模式（不由学生控制）
-    # 题库数量 >= 500 时自动切换为题库模式
+    # 从系统配置读取出题模式（不由学生控制，始终遵循开关）
     from backend.api.config_router import get_config_value
-    count_row = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")
-    bank_count = count_row["cnt"] if count_row else 0
-    use_bank_config = get_config_value("QUEST_USE_BANK", False)
-    use_bank = 1 if (use_bank_config or bank_count >= 500) else 0
+    use_bank = 1 if get_config_value("QUEST_USE_BANK", False) else 0
 
     # 检查是否有未完成的闯关
     existing = execute_query_one(
@@ -1082,26 +1078,10 @@ async def get_bank_stats(request: Request):
 
 @router.get("/quest/config", summary="获取闯关系统配置")
 async def get_quest_config():
-    """返回闯关挑战的系统配置（无需登录）
-    当题库超过 500 题时自动切换为题库出题模式。
-    """
+    """返回闯关挑战的系统配置（无需登录）"""
     from backend.api.config_router import get_config_value
-
-    # 检测题库数量
-    count_row = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")
-    bank_count = count_row["cnt"] if count_row else 0
-    bank_full = bank_count >= 500
-
-    config_use_bank = bool(get_config_value("QUEST_USE_BANK", False))
-
-    # 题库充足时强制使用题库模式，否则遵循配置
-    effective = config_use_bank or bank_full
-
     return {
-        "use_bank": effective,
-        "config_use_bank": config_use_bank,
-        "bank_count": bank_count,
-        "bank_full": bank_full,
+        "use_bank": bool(get_config_value("QUEST_USE_BANK", False)),
     }
 
 
