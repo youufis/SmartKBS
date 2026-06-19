@@ -517,3 +517,4 @@ SmartKBS/
 - 详细使用指南请参阅 [`USER_MANUAL.md`](USER_MANUAL.md)
 - **作者：** UNET
 - **联系：** [youufis@sina.com](mailto:youufis@sina.com)
+- **微信：** UNET-WX
