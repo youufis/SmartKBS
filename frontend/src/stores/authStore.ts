@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type { User } from '../types';
 import * as authApi from '../api/auth';
 import { useChatStore } from './chatStore';
+import { useCompanionStore } from './companionStore';
 
 interface AuthStore {
   token: string | null;
@@ -41,6 +42,7 @@ export const useAuthStore = create<AuthStore>()((set) => ({
 
   forceLogout: (msg?: string) => {
     useChatStore.getState().newTopic();
+    useCompanionStore.getState().clearMessages();
     localStorage.removeItem('smartkb_token');
     localStorage.removeItem('smartkb_user');
     if (msg) localStorage.setItem('smartkb_kickout_msg', msg);
@@ -55,6 +57,7 @@ export const useAuthStore = create<AuthStore>()((set) => ({
     }
     // 退出时清空对话
     useChatStore.getState().newTopic();
+    useCompanionStore.getState().clearMessages();
     localStorage.removeItem('smartkb_token');
     localStorage.removeItem('smartkb_user');
     set({ token: null, user: null, isLoggedIn: false });
