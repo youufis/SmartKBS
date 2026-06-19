@@ -339,6 +339,19 @@ const SystemConfigPage: React.FC = () => {
                 >
                   {field.key === 'AGENT_EDITION' ? (
                     <Input placeholder="例如：高中信通版" />
+                  ) : field.key === 'MODEL_NAME' ? (
+                    <Input
+                      placeholder="例如：deepseek-v4-flash、qwen3.5-flash"
+                      suffix={
+                        modelName ? (
+                          isMultimodalModel(modelName) ? (
+                            <Tag color="blue" style={{ marginRight: 0 }}>🖼️ 多模态</Tag>
+                          ) : (
+                            <Tag style={{ marginRight: 0 }}>📝 文本</Tag>
+                          )
+                        ) : null
+                      }
+                    />
                   ) : (
                     <Input />
                   )}
