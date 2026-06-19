@@ -2,7 +2,7 @@
  * QuestPage — 知识闯关 主页
  * 学生入口：开始闯关 + 历史记录 + 统计
  */
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, startTransition } from 'react'
 import {
   Card, Button, Typography, Space, Statistic,
   Table, Tag, message, Spin, Modal,
@@ -11,7 +11,7 @@ import {
   ThunderboltOutlined, HistoryOutlined,
   FireOutlined, CrownOutlined, StarOutlined,
   RobotOutlined, DatabaseOutlined, QuestionCircleOutlined,
-  ClockCircleOutlined, CheckCircleOutlined, CloseCircleOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -50,18 +50,12 @@ const QuestPage: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [rulesOpen, setRulesOpen] = useState(false)
-  const [questConfig, setQuestConfig] = useState<{ use_bank: boolean } | null>(null)
+  const [questConfig, setQuestConfig] = useState<{ use_bank: boolean; bank_full?: boolean } | null>(null)
   const [bankStats, setBankStats] = useState<{ total_questions: number; by_category: any[] } | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [expandedQuestions, setExpandedQuestions] = useState<Record<number, any[]>>({})
-  const [expandingIds, setExpandingIds] = useState<number[]>([])
-
-  useEffect(() => {
-    loadData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize])
 
   const loadData = async () => {
     setLoading(true)
@@ -86,6 +80,11 @@ const QuestPage: React.FC = () => {
     }
   }
 
+  useEffect(() => {
+    startTransition(() => loadData())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize])
+
   const handleStart = async () => {
     if (!isStudent) {
       message.warning('仅学生可以参与闯关')
@@ -100,21 +99,6 @@ const QuestPage: React.FC = () => {
       message.error(detail)
     } finally {
       setStarting(false)
-    }
-  }
-
-  const handleContinue = async () => {
-    // 检查是否有未完成的闯关
-    try {
-      const { data } = await apiClient.get('/api/quest/history', { params: { page: 1, page_size: 1 } })
-      const recent = data.records?.[0]
-      if (recent && recent.completed === 0) {
-        navigate(`/quest/battle/${recent.id}`)
-      } else {
-        handleStart()
-      }
-    } catch {
-      handleStart()
     }
   }
 
@@ -136,14 +120,11 @@ const QuestPage: React.FC = () => {
 
   const loadQuestions = async (questId: number) => {
     if (expandedQuestions[questId]) return // 已加载
-    setExpandingIds((prev) => [...prev, questId])
     try {
       const { data } = await apiClient.get(`/api/quest/${questId}/result`)
       setExpandedQuestions((prev) => ({ ...prev, [questId]: data.questions || [] }))
     } catch {
       message.error('加载题目详情失败')
-    } finally {
-      setExpandingIds((prev) => prev.filter((id) => id !== questId))
     }
   }
 
@@ -275,12 +256,6 @@ const QuestPage: React.FC = () => {
               <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: 500 }}>
                 {questConfig?.use_bank ? '📚 题库出题' : '🤖 AI 出题'}
               </Text>
-              {questConfig?.bank_full && (
-                <Tag color="green" style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>
-                  题库充足 · 自动切换
-                </Tag>
-              )}
-              <DatabaseOutlined style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }} />
               {bankStats && (
                 <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
                   {bankStats.total_questions}题
