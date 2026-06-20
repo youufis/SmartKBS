@@ -398,6 +398,7 @@ export interface WhiteboardRoom {
   room_type: WhiteboardRoomType
   mode: WhiteboardMode
   creator_username: string
+  creator_name: string
   course_kp_id: number | null
   grade: string
   class_name: string
