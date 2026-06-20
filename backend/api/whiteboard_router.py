@@ -81,6 +81,18 @@ async def create_room(req: CreateRoomRequest, request: Request):
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师和管理员可创建白板房间")
 
+    # 如果教师未指定年级，自动从用户信息中补全
+    grade = req.grade
+    class_name = req.class_name
+    if _get_user_role(user) == 1 and not grade:
+        rows = execute_query(
+            "SELECT grade FROM users WHERE username=?", (user["username"],),
+        )
+        if rows and rows[0][0]:
+            raw = rows[0][0]
+            # 取第一个年级（支持 "高一|高二" 格式）
+            grade = raw.split("|")[0].strip()
+
     room_code = whiteboard_manager.generate_room_code()
     now = _now()
     room_id = execute_insert_update(
@@ -89,7 +101,7 @@ async def create_room(req: CreateRoomRequest, request: Request):
             grade, class_name, max_pages, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (room_code, req.title, req.room_type, req.mode, user["username"],
-         req.course_kp_id, req.grade, req.class_name, req.max_pages, now),
+         req.course_kp_id, grade, class_name, req.max_pages, now),
     )
     # 创建默认第1页
     execute_insert_update(
@@ -108,10 +120,23 @@ async def list_rooms(
     size: int = Query(20, ge=1, le=100),
 ):
     user = get_current_user(request)
-    if _is_teacher_or_admin(user):
+    if _is_admin(user):
+        # 管理员：查看所有房间
         rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
-                      r.creator_username, COALESCE(u.name, r.creator_username),
+                      r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
+                      r.status, r.student_count, r.created_at
+               FROM whiteboard_rooms r
+               LEFT JOIN users u ON u.username = r.creator_username
+               ORDER BY r.created_at DESC
+               LIMIT ? OFFSET ?""",
+            (size, (page - 1) * size),
+        )
+    elif _get_user_role(user) == 1:
+        # 教师：只看自己的房间
+        rows = execute_query(
+            """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
+                      r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
                       r.status, r.student_count, r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
@@ -121,25 +146,24 @@ async def list_rooms(
             (user["username"], size, (page - 1) * size),
         )
     else:
-        # 学生：只看自己年级班级教师（及管理员）创建的房间
+        # 学生：看自己年级/班级匹配的房间 + 管理员创建的所有房间
         user_rows = execute_query(
-            "SELECT grade, class_name FROM users WHERE username=?",
+            "SELECT grade FROM users WHERE username=?",
             (user["username"],),
         )
         u_grade = (user_rows[0][0] or "") if user_rows else ""
-        u_class = (user_rows[0][1] or "") if user_rows else ""
         rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
-                      r.creator_username, COALESCE(u.name, r.creator_username),
+                      r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
                       r.status, r.student_count, r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.status='active'
-                 AND (? = '' OR r.grade = '' OR r.grade = ?)
-                 AND (? = '' OR r.class_name = '' OR r.class_name = ?)
+                 AND (r.creator_username IN (SELECT username FROM users WHERE role=0)
+                   OR (? = '' OR r.grade = '' OR r.grade = ?))
                ORDER BY r.created_at DESC
                LIMIT ? OFFSET ?""",
-            (u_grade, u_grade, u_class, u_class, size, (page - 1) * size),
+            (u_grade, u_grade, size, (page - 1) * size),
         )
     return [
         {
@@ -266,29 +290,31 @@ async def delete_room(room_id: int, request: Request):
 async def join_by_code(req: JoinByCodeRequest, request: Request):
     user = get_current_user(request)
     rows = execute_query(
-        "SELECT id, title, mode, grade, class_name FROM whiteboard_rooms WHERE room_code=? AND status='active'",
+        "SELECT id, title, mode, grade, class_name, creator_username FROM whiteboard_rooms WHERE room_code=? AND status='active'",
         (req.room_code.upper().strip(),),
     )
     if not rows:
         raise HTTPException(status_code=404, detail="房间不存在或已结束")
     r = rows[0]
 
-    # 学生只能加入自己年级/班级的房间
+    # 学生只能加入自己年级/班级的房间（管理员创建的房间不受限制）
     if _get_user_role(user) == 2:  # student
-        user_rows = execute_query(
-            "SELECT grade, class_name FROM users WHERE username=?",
-            (user["username"],),
+        # 检查创建者是否为管理员
+        creator_rows = execute_query(
+            "SELECT role FROM users WHERE username=?", (r[5],),
         )
-        if user_rows:
-            u_grade = user_rows[0][0] or ""
-            u_class = user_rows[0][1] or ""
-            room_grade = r[3] or ""
-            room_class = r[4] or ""
-            # 如果房间指定了年级/班级，学生必须匹配
-            if room_grade and room_grade != u_grade:
-                raise HTTPException(status_code=403, detail="该白板房间不属于你的年级")
-            if room_class and room_class != u_class:
-                raise HTTPException(status_code=403, detail="该白板房间不属于你的班级")
+        is_admin_room = creator_rows and creator_rows[0][0] == 0
+        if not is_admin_room:
+            user_rows = execute_query(
+                "SELECT grade FROM users WHERE username=?",
+                (user["username"],),
+            )
+            if user_rows:
+                u_grade = user_rows[0][0] or ""
+                room_grade = r[3] or ""
+                # 如果房间指定了年级，学生必须匹配
+                if room_grade and room_grade != u_grade:
+                    raise HTTPException(status_code=403, detail="该白板房间不属于你的年级")
 
     # 插入或更新成员记录
     execute_insert_update(
