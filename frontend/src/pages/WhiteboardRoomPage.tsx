@@ -331,7 +331,7 @@ const WhiteboardRoomPage: React.FC = () => {
           {mode === 'self_study' && '自习模式 — 各自独立白板'}
         </span>
         <span>
-          {ws.isConnected ? '🟢 已连接' : '🔴 未连接'}
+          {ws.isConnected ? '🟢 已连接' : '� 已连接（HTTP轮询）'}
         </span>
       </div>
 
