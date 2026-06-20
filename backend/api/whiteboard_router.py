@@ -708,7 +708,6 @@ async def ai_chat_stream(request: Request):
     # 检测白板中是否有图片，有则走视觉模型
     image_paths = _get_snapshot_images(room_id) if room_id else []
     if image_paths:
-        logger.info(f"[白板AI] 检测到 {len(image_paths)} 张图片，使用视觉模型")
         return StreamingResponse(
             _whiteboard_ai_vision_stream(system_prompt, prompt, image_paths, username, dashscope_api_key),
             media_type="text/event-stream",
@@ -1162,7 +1161,6 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                 # 使用管理器中的实时模式，而非连接时的缓存值
                 live_mode = whiteboard_manager.get_mode(room_id)
                 if _can_operate(room_id, username, role, live_mode):
-                    logger.debug(f"[白板WS] op from {username}({role}), room={room_id}, page={data.get('page','?')}, snapshotSize={len(str(data.get('data',{}).get('snapshot','')))}")
                     await whiteboard_manager.handle_op(room_id, username, data)
                 else:
                     logger.warning(f"[白板WS] op denied for {username}({role}), room={room_id}, mode={live_mode}")
@@ -1225,7 +1223,6 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
                         "sender": "system",
                         "data": {"snapshot": last_snap},
                     })
-                    logger.info(f"[白板] request_sync: 响应 {username}, size={len(last_snap)}")
 
             # ── 自习模式：学生保存自己的白板 ──
             elif msg_type == "self_save":
