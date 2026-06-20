@@ -490,29 +490,6 @@ def _get_snapshot_text(room_id: int) -> str:
 
     try:
         parsed = json.loads(snap)
-        # 调试：将快照关键结构写入文件
-        try:
-            with open("LogFiles/debug_snapshot.txt", "w", encoding="utf-8") as f:
-                doc = parsed.get("document", {})
-                store = doc.get("store", parsed.get("store", {}))
-                f.write(f"snap_size={len(snap)}\n")
-                f.write(f"has_document={'document' in parsed}\n")
-                f.write(f"has_session={'session' in parsed}\n")
-                f.write(f"store_type={type(store).__name__}\n")
-                f.write(f"store_keys={len(store)}\n")
-                # 写所有 key 的前缀分类
-                for k in list(store.keys())[:10]:
-                    v = store[k]
-                    tn = v.get("typeName", "?") if isinstance(v, dict) else "?"
-                    f.write(f"  key={k[:60]} typeName={tn}\n")
-                # 筛选 shapes
-                shapes = {k: v for k, v in store.items() if isinstance(v, dict) and v.get("typeName") == "shape"}
-                f.write(f"found_shapes={len(shapes)}\n")
-                for sid, s in list(shapes.items())[:5]:
-                    f.write(f"  {sid} type={s.get('type','?')} text={_extract_text(s.get('props',{}) or {})[:50]}\n")
-        except Exception:
-            pass
-
         # TLDraw getSnapshot() 格式: { document: { store: { shapeId: {...}, ... } }, session: {...} }
         doc = parsed.get("document", {})
         store = doc.get("store", parsed.get("store", {}))
@@ -700,13 +677,6 @@ async def ai_chat_stream(request: Request):
     body = await request.json()
     prompt = body.get("prompt", "")
     room_id = body.get("room_id")
-
-    # 调试：写入绝对有权限的文件
-    try:
-        with open("LogFiles/ai_call_debug.txt", "w", encoding="utf-8") as f:
-            f.write(f"user={username} room_id={room_id} prompt={prompt[:100]}\n")
-    except Exception:
-        pass
 
     if not prompt:
         raise HTTPException(status_code=400, detail="请输入问题")
