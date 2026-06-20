@@ -145,10 +145,11 @@ async def list_rooms(
     else:
         # 学生：看自己年级/班级匹配的房间 + 管理员创建的所有房间
         user_rows = execute_query(
-            "SELECT grade FROM users WHERE username=?",
+            "SELECT grade, class_id FROM users WHERE username=?",
             (user["username"],),
         )
         u_grade = (user_rows[0][0] or "") if user_rows else ""
+        u_class_id = user_rows[0][1] if user_rows else None
         rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
@@ -157,10 +158,15 @@ async def list_rooms(
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.status='active'
                  AND (r.creator_username IN (SELECT username FROM users WHERE role=0)
-                   OR (? = '' OR INSTR(COALESCE(NULLIF(r.grade, ''), (SELECT grade FROM users WHERE username = r.creator_username)), ?) > 0))
+                   OR (? = ''
+                       OR EXISTS (
+                         SELECT 1 FROM teacher_assignments ta
+                         WHERE ta.teacher_username = r.creator_username
+                           AND ta.grade_id = (SELECT id FROM grades WHERE name = ?)
+                           AND (ta.class_id IS NULL OR ta.class_id = ?))))
                ORDER BY r.created_at DESC
                LIMIT ? OFFSET ?""",
-            (u_grade, u_grade, size, (page - 1) * size),
+            (u_grade, u_grade, u_class_id, size, (page - 1) * size),
         )
     return [
         {
@@ -302,16 +308,23 @@ async def join_by_code(req: JoinByCodeRequest, request: Request):
         )
         is_admin_room = creator_rows and creator_rows[0][0] == 0
         if not is_admin_room:
+            # 检查教师是否任教该学生的年级和班级
             user_rows = execute_query(
-                "SELECT grade FROM users WHERE username=?",
+                "SELECT grade_id, class_id FROM users WHERE username=?",
                 (user["username"],),
             )
-            if user_rows:
-                u_grade = user_rows[0][0] or ""
-                room_grade = r[3] or ""
-                # 如果房间指定了年级，学生必须匹配
-                if room_grade and room_grade != u_grade:
-                    raise HTTPException(status_code=403, detail="该白板房间不属于你的年级")
+            if user_rows and user_rows[0][0]:
+                u_grade_id = user_rows[0][0]
+                u_class_id = user_rows[0][1]
+                assign_rows = execute_query(
+                    """SELECT 1 FROM teacher_assignments
+                       WHERE teacher_username=?
+                         AND grade_id=?
+                         AND (class_id IS NULL OR class_id=?)""",
+                    (r[5], u_grade_id, u_class_id),
+                )
+                if not assign_rows:
+                    raise HTTPException(status_code=403, detail="该白板房间不属于你的年级或班级")
 
     # 插入或更新成员记录
     execute_insert_update(
