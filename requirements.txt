@@ -1,7 +1,7 @@
 # SmartKB 后端依赖
 # 安装: pip install -r requirements.txt
 
-fastapi>=0.104.0         # Web 框架 FastAPI 0.135.1 + Starlette 0.41.3
+fastapi>=0.104.0         # Web 框架
 uvicorn>=0.24.0          # ASGI 服务器
 bcrypt>=4.1.0            # 密码哈希
 PyJWT>=2.8.0             # JWT 令牌

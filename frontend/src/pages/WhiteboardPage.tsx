@@ -152,6 +152,9 @@ const WhiteboardPage: React.FC = () => {
       ),
     },
     { title: '标题', dataIndex: 'title', key: 'title' },
+    { title: '创建人', dataIndex: 'creator_name', key: 'creator_name', width: 100,
+      render: (n: string) => n || '-',
+    },
     { title: '模式', dataIndex: 'mode', key: 'mode', width: 80,
       render: (m: string) => (
         <Tag color={modeLabels[m]?.color}>{modeLabels[m]?.label || m}</Tag>
