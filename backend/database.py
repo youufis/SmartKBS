@@ -1224,6 +1224,83 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 协作白板：房间表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS whiteboard_rooms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_code TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL,
+                room_type TEXT NOT NULL DEFAULT 'classroom',
+                mode TEXT NOT NULL DEFAULT 'demo',
+                creator_username TEXT NOT NULL,
+                course_kp_id INTEGER REFERENCES knowledge_points(id),
+                grade TEXT DEFAULT '',
+                class_name TEXT DEFAULT '',
+                allow_student_draw INTEGER DEFAULT 0,
+                max_pages INTEGER DEFAULT 20,
+                auto_save_interval INTEGER DEFAULT 30,
+                status TEXT DEFAULT 'active',
+                student_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ended_at TIMESTAMP
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wbr_code ON whiteboard_rooms(room_code)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wbr_creator ON whiteboard_rooms(creator_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wbr_kp ON whiteboard_rooms(course_kp_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 协作白板：页面表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS whiteboard_pages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL REFERENCES whiteboard_rooms(id) ON DELETE CASCADE,
+                page_number INTEGER NOT NULL,
+                title TEXT DEFAULT '',
+                snapshot_data TEXT NOT NULL DEFAULT '{}',
+                thumbnail TEXT DEFAULT '',
+                is_current INTEGER DEFAULT 0,
+                duration_seconds INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(room_id, page_number)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wbp_room ON whiteboard_pages(room_id, page_number)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 协作白板：房间成员表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS whiteboard_room_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL REFERENCES whiteboard_rooms(id) ON DELETE CASCADE,
+                username TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'student',
+                join_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                leave_time TIMESTAMP,
+                self_snapshot TEXT,
+                UNIQUE(room_id, username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wbrm_room ON whiteboard_room_members(room_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 协作白板：操作日志表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS whiteboard_operations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_id INTEGER NOT NULL REFERENCES whiteboard_rooms(id) ON DELETE CASCADE,
+                page_number INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                op_type TEXT NOT NULL,
+                op_data TEXT NOT NULL,
+                seq_number INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_wbo_room ON whiteboard_operations(room_id, seq_number)")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 
