@@ -1,7 +1,7 @@
 /**
  * 白板房间页面 — 教师演示/学生观看的交互界面
  */
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Button, Space, Typography, Tag, message, Modal, Input, Drawer,
   Tooltip, Badge, Divider, Segmented,
@@ -10,14 +10,17 @@ import {
   ArrowLeftOutlined, TeamOutlined, SettingOutlined,
   StopOutlined, CopyOutlined, RobotOutlined,
   ReloadOutlined, ExpandOutlined, CompressOutlined,
+  CustomerServiceOutlined, ClearOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useWhiteboardStore } from '../stores/whiteboardStore'
 import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
+import { AIPanel } from '../components/whiteboard/AIPanel'
 import { useWhiteboardWS } from '../hooks/useWhiteboardWS'
 import * as whiteboardApi from '../api/whiteboard'
 import apiClient from '../api/client'
+import type { Editor } from 'tldraw'
 import type { WhiteboardMode, WhiteboardMember } from '../types'
 
 const { Title, Text } = Typography
@@ -41,6 +44,8 @@ const WhiteboardRoomPage: React.FC = () => {
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [grantedToMe, setGrantedToMe] = useState(false) // 学生：是否被授权操作
+  const [aiPanelOpen, setAiPanelOpen] = useState(false)
+  const editorRef = useRef<Editor | null>(null)
 
   // ── 加载房间信息 ──
   useEffect(() => {
@@ -177,6 +182,28 @@ const WhiteboardRoomPage: React.FC = () => {
     setFullscreen(!fullscreen)
   }
 
+  // ── 清空白板 ──
+  const handleClearBoard = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const shapeIds = editor.getCurrentPageShapeIds()
+    if (shapeIds.size === 0) {
+      message.info('白板已经是空的')
+      return
+    }
+    Modal.confirm({
+      title: '清空白板',
+      content: `确定要删除全部 ${shapeIds.size} 个形状吗？此操作不可撤销。`,
+      okText: '清空',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => {
+        editor.deleteShapes(Array.from(shapeIds))
+        message.success('白板已清空')
+      },
+    })
+  }, [])
+
   // ── 退出 ──
   const handleLeave = async () => {
     try {
@@ -192,7 +219,7 @@ const WhiteboardRoomPage: React.FC = () => {
 
   return (
     <div style={{ 
-      height: fullscreen ? '100vh' : 'calc(100vh - 80px)',
+      height: fullscreen ? '100vh' : '100%',
       display: 'flex', flexDirection: 'column',
       position: fullscreen ? 'fixed' : 'relative',
       top: 0, left: 0, right: 0, bottom: 0,
@@ -248,15 +275,46 @@ const WhiteboardRoomPage: React.FC = () => {
               }}
             />
           </Tooltip>
+          {isTeacher && (
+            <Tooltip title="清空白板">
+              <Button
+                type="text"
+                icon={<ClearOutlined />}
+                onClick={handleClearBoard}
+              />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title="AI 白板助手">
+              <Button
+                type={aiPanelOpen ? 'primary' : 'text'}
+                icon={<CustomerServiceOutlined />}
+                onClick={() => setAiPanelOpen(!aiPanelOpen)}
+              >
+                AI
+              </Button>
+            </Tooltip>
+          )}
           {isTeacher && roomStatus === 'active' && (
             <Button danger icon={<StopOutlined />} onClick={handleEnd}>结束</Button>
           )}
         </Space>
       </div>
 
-      {/* ── 主区域：白板 ── */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <WhiteboardCanvas roomId={rid} readOnly={readOnly} isBroadcaster={isTeacher} ws={ws} />
+      {/* ── 主区域：白板 + AI 面板 ── */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <WhiteboardCanvas roomId={rid} readOnly={readOnly} isBroadcaster={isTeacher} ws={ws} externalEditorRef={editorRef} />
+        </div>
+        <AIPanel
+          roomId={rid}
+          visible={aiPanelOpen}
+          onClose={() => setAiPanelOpen(false)}
+          editorRef={editorRef}
+          isTeacher={isTeacher}
+          kpName={wb.room?.course_kp_id ? `知识点#${wb.room.course_kp_id}` : ''}
+          subject="通用技术"
+        />
       </div>
 
       {/* ── 底部状态栏 ── */}

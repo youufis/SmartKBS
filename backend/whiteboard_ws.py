@@ -164,9 +164,7 @@ class WhiteboardManager:
         if op_id:
             self.processed_ops[op_id] = time.time()
             self._cleanup_old_ops()
-        # 日志：统计房间内连接数
-        conn_count = len(self.rooms.get(room_id, {}).get("connections", {}))
-        logger.info(f"[白板WS] 广播 op 到 room={room_id}, 接收端数={conn_count - 1} (excl sender={username})")
+
         # 存入内存 + 写库持久化
         snap = data.get("data", {}).get("snapshot", "")
         if snap and isinstance(snap, str) and len(snap) > 100:

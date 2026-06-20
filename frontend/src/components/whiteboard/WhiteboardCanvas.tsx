@@ -23,6 +23,7 @@ interface Props {
   readOnly?: boolean
   isBroadcaster?: boolean  // 教师端可广播；自习模式下学生虽非只读，但不广播
   ws: ReturnType<typeof useWhiteboardWS>
+  externalEditorRef?: React.MutableRefObject<Editor | null>  // 外部 editor ref（供 AI 面板使用）
 }
 
 // crypto.randomUUID 在 HTTP（非 localhost）环境下不可用，用兼容实现兜底
@@ -36,9 +37,10 @@ function generateUUID(): string {
   })
 }
 
-export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, isBroadcaster = false, ws }) => {
+export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, isBroadcaster = false, ws, externalEditorRef }) => {
   const store = useWhiteboardStore()
-  const editorRef = useRef<Editor | null>(null)
+  const internalEditorRef = useRef<Editor | null>(null)
+  const editorRef = externalEditorRef || internalEditorRef
   const [ready, setReady] = useState(false)
   const isSendingRef = useRef(false) // 防止远程变更触发本地发送
   const readOnlyRef = useRef(readOnly)  // 用 ref 追踪 readOnly，避免闭包陈旧

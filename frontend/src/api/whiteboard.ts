@@ -105,10 +105,148 @@ export async function spotlightStudent(roomId: number, username: string): Promis
 
 // ── AI 辅助 ──
 
-export async function aiGenerateDiagram(description: string, subject?: string): Promise<{
-  shapes: unknown[]
+/**
+ * AI 教学助手 SSE 流式对话
+ */
+export async function aiChatStream(
+  prompt: string,
+  roomId: number,
+  onDelta: (text: string) => void,
+  onDone: () => void,
+  onError: (error: string) => void,
+  options?: {
+    kpName?: string
+    subject?: string
+    signal?: AbortSignal
+  },
+): Promise<void> {
+  const token = localStorage.getItem('smartkb_token')
+  try {
+    const response = await fetch('/api/whiteboard/ai/chat-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        prompt,
+        room_id: roomId,
+        kp_name: options?.kpName || '',
+        subject: options?.subject || '',
+      }),
+      signal: options?.signal,
+    })
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}))
+      onError(errData.detail || `HTTP ${response.status}`)
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      onError('无法读取响应流')
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          switch (data.type) {
+            case 'delta':
+              onDelta(data.content)
+              break
+            case 'done':
+              break
+            case 'error':
+              onError(data.content)
+              return
+          }
+        } catch { /* skip parse errors */ }
+      }
+    }
+
+    onDone()
+  } catch (err: any) {
+    if (err.name === 'AbortError') return
+    onError(err.message || '网络错误')
+  }
+}
+
+export async function aiGenerateDiagram(
+  description: string,
+  subject?: string,
+): Promise<{
+  mode: 'svg' | 'image' | 'text'
+  svg?: string
+  image_url?: string
+  title?: string
+  error?: string
+  width?: number
+  height?: number
 }> {
   const res = await apiClient.post('/api/whiteboard/ai/generate-diagram', { description, subject })
+  return res.data
+}
+
+export async function aiGenerateBoard(
+  kpName: string,
+  subject?: string,
+  grade?: string,
+): Promise<{
+  title: string
+  shapes: unknown[]
+}> {
+  const res = await apiClient.post('/api/whiteboard/ai/generate-board', {
+    kp_name: kpName,
+    subject: subject || '',
+    grade: grade || '',
+  })
+  return res.data
+}
+
+export async function aiGenerateQuiz(
+  roomId: number,
+  subject?: string,
+  kpName?: string,
+): Promise<{
+  question: string
+  options: string[]
+  correct_index: number
+  explanation?: string
+  error?: string
+}> {
+  const res = await apiClient.post('/api/whiteboard/ai/generate-quiz', {
+    room_id: roomId,
+    subject: subject || '',
+    kp_name: kpName || '',
+  })
+  return res.data
+}
+
+export async function aiGenerateBilingual(
+  roomId: number,
+  subject?: string,
+): Promise<{
+  title: string
+  shapes: unknown[]
+}> {
+  const res = await apiClient.post('/api/whiteboard/ai/generate-bilingual', {
+    room_id: roomId,
+    subject: subject || '',
+  })
   return res.data
 }
 
