@@ -4,7 +4,6 @@ SmartKB 后端入口
 """
 import os
 import sys
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 # 确保项目根目录在 sys.path 中
@@ -21,19 +20,25 @@ from backend.logger import logger
 from backend.middleware import register_middleware
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用生命周期管理（替代已弃用的 on_event）"""
-    # ── 启动 ──
+# 创建 FastAPI 应用
+app = FastAPI(
+    title="SmartKBS - 智慧教学平台 API",
+    description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
+    version="5.7.0",
+    docs_url="/docs",
+)
+
+
+@app.on_event("startup")
+async def startup():
+    """应用启动初始化"""
     init_db()
     init_question_db()
-    # 启动时清理残留的空目录共享记录
     try:
         from backend.api.sharing_router import cleanup_empty_dir_shares
         cleanup_empty_dir_shares()
     except Exception:
         pass
-    # 异步远程配置同步（静默执行，不阻塞启动）
     try:
         from backend.config_sync import try_sync_remote_config
         import asyncio
@@ -41,19 +46,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     logger.info("SmartKB 后端启动完成")
-    yield
-    # ── 关闭 ──
+
+
+@app.on_event("shutdown")
+async def shutdown():
     logger.info("SmartKB 后端关闭")
-
-
-# 创建 FastAPI 应用
-app = FastAPI(
-    title="SmartKBS - 智慧教学平台 API",
-    description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version="5.7.0",
-    docs_url="/docs",
-    lifespan=lifespan,
-)
 
 # CORS 配置（开发环境允许前端 dev server 跨域）
 app.add_middleware(

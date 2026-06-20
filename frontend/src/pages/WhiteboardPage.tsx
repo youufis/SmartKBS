@@ -196,7 +196,7 @@ const WhiteboardPage: React.FC = () => {
   ]
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: '8px 16px', maxWidth: '100%', margin: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Title level={3} style={{ margin: 0 }}>🎨 白板</Title>
         <Space>
