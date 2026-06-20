@@ -143,31 +143,66 @@ async def list_rooms(
             (user["username"], size, (page - 1) * size),
         )
     else:
-        # 学生：看自己年级/班级匹配的房间 + 管理员创建的所有房间
-        user_rows = execute_query(
-            "SELECT grade, class_id FROM users WHERE username=?",
-            (user["username"],),
+        # 学生：和考试发布一样的权限逻辑
+        student_rows = execute_query(
+            "SELECT grade, class FROM users WHERE username=?", (user["username"],),
         )
-        u_grade = (user_rows[0][0] or "") if user_rows else ""
-        u_class_id = user_rows[0][1] if user_rows else None
-        rows = execute_query(
+        student_grade = (student_rows[0][0] or "").strip() if student_rows else ""
+        student_class = str(student_rows[0][1] or "").strip() if student_rows else ""
+
+        # 获取所有活跃房间
+        all_rows = execute_query(
             """SELECT r.id, r.room_code, r.title, r.room_type, r.mode,
                       r.creator_username, COALESCE(NULLIF(u.name, ''), r.creator_username),
                       r.status, r.student_count, r.created_at
                FROM whiteboard_rooms r
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.status='active'
-                 AND (r.creator_username IN (SELECT username FROM users WHERE role=0)
-                   OR (? = ''
-                       OR EXISTS (
-                         SELECT 1 FROM teacher_assignments ta
-                         WHERE ta.teacher_username = r.creator_username
-                           AND ta.grade_id = (SELECT id FROM grades WHERE name = ?)
-                           AND (ta.class_id IS NULL OR ta.class_id = ?))))
-               ORDER BY r.created_at DESC
-               LIMIT ? OFFSET ?""",
-            (u_grade, u_grade, u_class_id, size, (page - 1) * size),
+               ORDER BY r.created_at DESC""",
         )
+
+        # 管理员列表
+        admin_rows = execute_query("SELECT username FROM users WHERE role=0")
+        admin_set = set(row[0] for row in admin_rows) if admin_rows else set()
+
+        from backend.permission_service import parse_legacy_teacher_grade_class
+
+        filtered = []
+        for room in all_rows:
+            creator = room[5]  # creator_username
+            # 管理员创建的房间 → 全部可见
+            if creator in admin_set:
+                filtered.append(room)
+                continue
+            # 查询创建者的年级班级信息
+            teacher_rows = execute_query(
+                "SELECT grade, class FROM users WHERE username=?", (creator,),
+            )
+            if not teacher_rows:
+                filtered.append(room)
+                continue
+            t_grade = (teacher_rows[0][0] or "").strip()
+            t_class = str(teacher_rows[0][1] or "").strip()
+            # 教师未设置年级班级 → 对所有学生可见（兼容旧数据）
+            if not t_grade and not t_class:
+                filtered.append(room)
+                continue
+            # 用和考试一致的解析函数
+            grade_class_map = parse_legacy_teacher_grade_class(t_grade, t_class)
+            matched = False
+            if student_grade and student_grade in grade_class_map:
+                allowed_classes = grade_class_map[student_grade]
+                if not allowed_classes:
+                    matched = True  # 有年级无班级限制 → 该年级全部可见
+                elif student_class in allowed_classes:
+                    matched = True
+            if matched:
+                filtered.append(room)
+
+        # 分页
+        total = len(filtered)
+        offset = (page - 1) * size
+        rows = filtered[offset:offset + size]
     return [
         {
             "id": r[0], "room_code": r[1], "title": r[2], "room_type": r[3],
@@ -300,7 +335,7 @@ async def join_by_code(req: JoinByCodeRequest, request: Request):
         raise HTTPException(status_code=404, detail="房间不存在或已结束")
     r = rows[0]
 
-    # 学生只能加入自己年级/班级的房间（管理员创建的房间不受限制）
+    # 学生权限：和考试发布一致的逻辑
     if _get_user_role(user) == 2:  # student
         # 检查创建者是否为管理员
         creator_rows = execute_query(
@@ -308,23 +343,32 @@ async def join_by_code(req: JoinByCodeRequest, request: Request):
         )
         is_admin_room = creator_rows and creator_rows[0][0] == 0
         if not is_admin_room:
-            # 检查教师是否任教该学生的年级和班级
-            user_rows = execute_query(
-                "SELECT grade_id, class_id FROM users WHERE username=?",
+            student_rows = execute_query(
+                "SELECT grade, class FROM users WHERE username=?",
                 (user["username"],),
             )
-            if user_rows and user_rows[0][0]:
-                u_grade_id = user_rows[0][0]
-                u_class_id = user_rows[0][1]
-                assign_rows = execute_query(
-                    """SELECT 1 FROM teacher_assignments
-                       WHERE teacher_username=?
-                         AND grade_id=?
-                         AND (class_id IS NULL OR class_id=?)""",
-                    (r[5], u_grade_id, u_class_id),
+            if student_rows:
+                s_grade = (student_rows[0][0] or "").strip()
+                s_class = str(student_rows[0][1] or "").strip()
+                # 查询创建者的年级班级
+                t_rows = execute_query(
+                    "SELECT grade, class FROM users WHERE username=?", (r[5],),
                 )
-                if not assign_rows:
-                    raise HTTPException(status_code=403, detail="该白板房间不属于你的年级或班级")
+                if t_rows:
+                    t_grade = (t_rows[0][0] or "").strip()
+                    t_class = str(t_rows[0][1] or "").strip()
+                    if t_grade or t_class:
+                        from backend.permission_service import parse_legacy_teacher_grade_class
+                        gcm = parse_legacy_teacher_grade_class(t_grade, t_class)
+                        matched = False
+                        if s_grade and s_grade in gcm:
+                            allowed = gcm[s_grade]
+                            if not allowed:
+                                matched = True
+                            elif s_class in allowed:
+                                matched = True
+                        if not matched:
+                            raise HTTPException(status_code=403, detail="该白板房间不属于你的年级或班级")
 
     # 插入或更新成员记录
     execute_insert_update(
