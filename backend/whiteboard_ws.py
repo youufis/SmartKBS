@@ -68,7 +68,6 @@ class WhiteboardManager:
                 "type": "control_granted",
                 "by": "system",
             })
-            logger.info(f"[白板] 自动恢复授权: {username}, room={room_id}")
 
         # 更新数据库：清除离开时间，标记为在线
         execute_insert_update(
@@ -101,7 +100,6 @@ class WhiteboardManager:
                 "sender": "system",
                 "data": {"snapshot": last_snap},
             })
-            logger.info(f"[白板] 发送初始快照给 {username}, size={len(last_snap)}")
 
     async def leave_room(self, room_id: int, username: str):
         if room_id in self.rooms:
@@ -202,7 +200,6 @@ class WhiteboardManager:
             self.rooms[room_id].setdefault("granted_users", set()).add(target)
             if target in self.rooms[room_id]["connections"]:
                 self.rooms[room_id]["connections"][target]["granted"] = True
-            logger.info(f"[白板] 授权 {target} 操作, room={room_id}, by={by}")
             # 先发送最新快照（学生仍是只读，会加载），再发送授权通知
             last_snap = self.rooms[room_id].get("last_snapshot", "")
             if last_snap:
