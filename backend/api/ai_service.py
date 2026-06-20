@@ -162,7 +162,8 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
     try:
         response = DashScopeApp.call(**call_params)
         new_session_id = session_id
-        full_text = ""
+        has_output = False
+        last_accumulated = ""
         for chunk in response:
             output = getattr(chunk, "output", None)
             if output:
@@ -171,10 +172,17 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
                     new_session_id = sid
                 text = getattr(output, "text", None)
                 if text:
-                    full_text += text
-                    yield {"text": full_text, "session_id": new_session_id}
+                    has_output = True
+                    # 计算增量（兼容 API 返回累计文本或增量文本）
+                    if text.startswith(last_accumulated):
+                        delta = text[len(last_accumulated):]
+                    else:
+                        delta = text
+                    last_accumulated = text
+                    if delta:
+                        yield {"text": delta, "session_id": new_session_id}
         # 智能体返回空文本时降级
-        if not full_text:
+        if not has_output:
             logger.warning(f"智能体流式返回为空，降级到直接调模型 (app_id={app_id})")
             from backend.api.config_router import get_config_value
             model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
@@ -213,7 +221,7 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
             yield {"text": f"AI 调用失败 (HTTP {resp.status_code})", "session_id": None}
             return
 
-        full_text = ""
+        last_accumulated = ""
         for line in resp.iter_lines():
             if not line:
                 continue
@@ -228,8 +236,14 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
                         delta = data["choices"][0].get("delta", {})
                         content = delta.get("content", "")
                         if content:
-                            full_text += content
-                            yield {"text": full_text, "session_id": None}
+                            # 计算增量（兼容 OpenAI 标准和累计两种模式）
+                            if content.startswith(last_accumulated):
+                                inc = content[len(last_accumulated):]
+                            else:
+                                inc = content
+                            last_accumulated = content
+                            if inc:
+                                yield {"text": inc, "session_id": None}
                 except json.JSONDecodeError:
                     continue
     except Exception as e:
