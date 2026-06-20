@@ -10,7 +10,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   PlusOutlined, CopyOutlined, PlayCircleOutlined,
   StopOutlined, DeleteOutlined, ReloadOutlined,
-  EyeOutlined,
+  EyeOutlined, EditOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -80,6 +80,41 @@ const WhiteboardPage: React.FC = () => {
       message.error(err?.response?.data?.detail || '创建失败')
     } finally {
       setCreating(false)
+    }
+  }
+
+  // ── 编辑房间 ──
+  const [editOpen, setEditOpen] = useState(false)
+  const [editingRoom, setEditingRoom] = useState<WhiteboardRoom | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editMode, setEditMode] = useState<WhiteboardMode>('demo')
+  const [editing, setEditing] = useState(false)
+
+  const handleEditOpen = (record: WhiteboardRoom) => {
+    setEditingRoom(record)
+    setEditTitle(record.title)
+    setEditMode(record.mode as WhiteboardMode)
+    setEditOpen(true)
+  }
+
+  const handleEdit = async () => {
+    if (!editingRoom || !editTitle.trim()) {
+      message.warning('请输入标题')
+      return
+    }
+    setEditing(true)
+    try {
+      await whiteboardApi.updateRoom(editingRoom.id, {
+        title: editTitle.trim(),
+        mode: editMode,
+      })
+      message.success('白板已更新')
+      setEditOpen(false)
+      loadRooms()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || '更新失败')
+    } finally {
+      setEditing(false)
     }
   }
 
@@ -172,25 +207,34 @@ const WhiteboardPage: React.FC = () => {
       render: (t: string) => t?.replace('T', ' ').substring(0, 19) || '-',
     },
     {
-      title: '操作', key: 'actions', width: 200,
+      title: '操作', key: 'actions', width: 120,
       render: (_, record) => (
         <Space>
-          <Button
-            size="small"
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            onClick={() => navigate(`/whiteboard-room/${record.id}`)}
-          >
-            进入
-          </Button>
+          <Tooltip title="进入房间">
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={() => navigate(`/whiteboard-room/${record.id}`)}
+            />
+          </Tooltip>
           {isTeacher && record.status === 'active' && (
             <Popconfirm title="确定结束此房间？" onConfirm={() => handleEnd(record.id)}>
-              <Button size="small" danger icon={<StopOutlined />}>结束</Button>
+              <Tooltip title="结束房间">
+                <Button size="small" danger icon={<StopOutlined />} />
+              </Tooltip>
             </Popconfirm>
           )}
           {isTeacher && (
+            <Tooltip title="编辑">
+              <Button size="small" icon={<EditOutlined />} onClick={() => handleEditOpen(record)} />
+            </Tooltip>
+          )}
+          {isTeacher && (
             <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
-              <Button size="small" danger icon={<DeleteOutlined />} />
+              <Tooltip title="删除房间">
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Tooltip>
             </Popconfirm>
           )}
         </Space>
@@ -204,16 +248,18 @@ const WhiteboardPage: React.FC = () => {
         <Title level={3} style={{ margin: 0 }}>🎨 白板</Title>
         <Space>
           {isStudent && (
-            <Button type="default" icon={<EyeOutlined />} onClick={() => setJoinOpen(true)}>
-              加入白板
-            </Button>
+            <Tooltip title="加入白板">
+              <Button type="default" icon={<EyeOutlined />} onClick={() => setJoinOpen(true)} />
+            </Tooltip>
           )}
           {isTeacher && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              创建白板
-            </Button>
+            <Tooltip title="创建白板">
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)} />
+            </Tooltip>
           )}
-          <Button icon={<ReloadOutlined />} onClick={loadRooms}>刷新</Button>
+          <Tooltip title="刷新">
+            <Button icon={<ReloadOutlined />} onClick={loadRooms} />
+          </Tooltip>
         </Space>
       </div>
 
@@ -296,6 +342,41 @@ const WhiteboardPage: React.FC = () => {
             maxLength={7}
             style={{ textTransform: 'uppercase', fontFamily: 'monospace', letterSpacing: 2 }}
           />
+        </Space>
+      </Modal>
+
+      {/* ── 编辑房间弹窗 ── */}
+      <Modal
+        title="编辑白板房间"
+        open={editOpen}
+        onOk={handleEdit}
+        onCancel={() => setEditOpen(false)}
+        confirmLoading={editing}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div>
+            <Text strong>白板标题</Text>
+            <Input
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onPressEnter={handleEdit}
+            />
+          </div>
+          <div>
+            <Text strong>使用模式</Text>
+            <Radio.Group value={editMode} onChange={(e) => setEditMode(e.target.value as WhiteboardMode)} style={{ marginTop: 8 }}>
+              <Radio.Button value="demo">演示模式</Radio.Button>
+              <Radio.Button value="interactive">互动模式</Radio.Button>
+              <Radio.Button value="self_study">自习模式</Radio.Button>
+            </Radio.Group>
+            <div style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
+              {editMode === 'demo' && '教师独占操作，学生只读观看'}
+              {editMode === 'interactive' && '教师授权后学生可上台操作'}
+              {editMode === 'self_study' && '学生各自独立白板，教师巡览'}
+            </div>
+          </div>
         </Space>
       </Modal>
     </div>

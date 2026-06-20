@@ -85,13 +85,10 @@ async def create_room(req: CreateRoomRequest, request: Request):
     grade = req.grade
     class_name = req.class_name
     if _get_user_role(user) == 1 and not grade:
-        rows = execute_query(
-            "SELECT grade FROM users WHERE username=?", (user["username"],),
-        )
-        if rows and rows[0][0]:
-            raw = rows[0][0]
-            # 取第一个年级（支持 "高一|高二" 格式）
-            grade = raw.split("|")[0].strip()
+        from backend.permission_service import get_teacher_grades
+        grades = get_teacher_grades(user["username"])
+        if grades:
+            grade = grades[0]["name"]
 
     room_code = whiteboard_manager.generate_room_code()
     now = _now()
@@ -160,7 +157,7 @@ async def list_rooms(
                LEFT JOIN users u ON u.username = r.creator_username
                WHERE r.status='active'
                  AND (r.creator_username IN (SELECT username FROM users WHERE role=0)
-                   OR (? = '' OR r.grade = '' OR r.grade = ?))
+                   OR (? = '' OR INSTR(COALESCE(NULLIF(r.grade, ''), (SELECT grade FROM users WHERE username = r.creator_username)), ?) > 0))
                ORDER BY r.created_at DESC
                LIMIT ? OFFSET ?""",
             (u_grade, u_grade, size, (page - 1) * size),
