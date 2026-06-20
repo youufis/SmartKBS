@@ -386,6 +386,65 @@ export interface CurriculumResource {
   created_at: string;
 }
 
+// ── 协作白板类型 ──
+
+export type WhiteboardMode = 'demo' | 'interactive' | 'self_study'
+export type WhiteboardRoomType = 'classroom' | 'course' | 'temporary'
+
+export interface WhiteboardRoom {
+  id: number
+  room_code: string
+  title: string
+  room_type: WhiteboardRoomType
+  mode: WhiteboardMode
+  creator_username: string
+  course_kp_id: number | null
+  grade: string
+  class_name: string
+  allow_student_draw: number
+  max_pages: number
+  status: string
+  student_count: number
+  created_at: string
+  ended_at: string | null
+}
+
+export interface WhiteboardPage {
+  page_number: number
+  title: string
+  snapshot_data: string
+  thumbnail: string
+  is_current: boolean
+  duration_seconds: number
+}
+
+export interface WhiteboardMember {
+  username: string
+  role: string
+  name: string
+  class: string
+  join_time: string
+  self_snapshot?: string
+  online?: boolean
+  cursor?: { x: number; y: number }
+  granted?: boolean
+}
+
+export interface WhiteboardWSMessage {
+  type: string
+  [key: string]: unknown
+}
+
+export interface CreateRoomRequest {
+  title: string
+  room_type?: WhiteboardRoomType
+  mode?: WhiteboardMode
+  course_kp_id?: number | null
+  grade?: string
+  class_name?: string
+  max_pages?: number
+}
+
 export interface CourseCreateRequest {
   name: string;
   code?: string;

@@ -51,6 +51,8 @@ import ClassSummaryPage from './pages/ClassSummaryPage'
 import ActivityMonitorPage from './pages/ActivityMonitorPage'
 import AuthorPanelPage from './pages/AuthorPanelPage'
 import CompanionSettings from './pages/CompanionSettings'
+import WhiteboardPage from './pages/WhiteboardPage'
+import WhiteboardRoomPage from './pages/WhiteboardRoomPage'
 
 function App() {
   const navigate = useNavigate()
@@ -143,6 +145,8 @@ function App() {
             <Route path="class-summary" element={user?.role === 'admin' || user?.role === 'teacher' ? <ClassSummaryPage /> : <Navigate to="/chat" />} />
             <Route path="activity-monitor" element={user?.role === 'admin' || user?.role === 'teacher' ? <ActivityMonitorPage /> : <Navigate to="/chat" />} />
             <Route path="companion-settings" element={<CompanionSettings />} />
+            <Route path="whiteboard" element={<WhiteboardPage />} />
+            <Route path="whiteboard-room/:roomId" element={<WhiteboardRoomPage />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="console" element={<AuthorPanelPage />} />
           </Route>

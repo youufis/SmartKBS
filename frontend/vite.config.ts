@@ -10,7 +10,11 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:8086',
+      '/api': {
+        target: 'http://localhost:8086',
+        changeOrigin: true,
+        ws: true,
+      },
       '/score-api': 'http://localhost:8086',
       '/rollcall-api': 'http://localhost:8086',
       '/downloads-api': 'http://localhost:8086',
