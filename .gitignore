@@ -20,6 +20,8 @@ temp_uploads/
 
 # ── 数据库 ──
 backend/smartkb.db
+backend/smartkb.db-shm
+backend/smartkb.db-wal
 backend/questions.db
 *.db
 
