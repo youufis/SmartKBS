@@ -40,12 +40,35 @@ function generateUUID(): string {
 export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, isBroadcaster = false, ws, externalEditorRef }) => {
   const store = useWhiteboardStore()
   const internalEditorRef = useRef<Editor | null>(null)
-  const editorRef = externalEditorRef || internalEditorRef
   const [ready, setReady] = useState(false)
   const isSendingRef = useRef(false) // 防止远程变更触发本地发送
   const readOnlyRef = useRef(readOnly)  // 用 ref 追踪 readOnly，避免闭包陈旧
   const httpSyncedRef = useRef(false) // 防止重复 HTTP 同步
   const lastWSUpdateRef = useRef(0) // 上次 WS 收到快照的时间戳
+  const containerRef = useRef<HTMLDivElement>(null) // 容器 ref，用于 ResizeObserver
+
+  // ResizeObserver 兜底：HTTPS 下 TLDraw 内部 ResizeObserver 可能失效，手动触发 UI 刷新
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    let rafId: number
+    const ro = new ResizeObserver(() => {
+      // 延迟一帧再触发，确保布局完全稳定
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => {
+        const editor = internalEditorRef.current
+        if (editor) {
+          // 强制 TLDraw 重算视口（会触发工具栏等 UI 重新渲染）
+          try {
+            const bounds = editor.getViewportScreenBounds()
+            editor.updateViewportScreenBounds(bounds)
+          } catch { /* ignore */ }
+        }
+      })
+    })
+    ro.observe(el)
+    return () => { ro.disconnect(); cancelAnimationFrame(rafId) }
+  }, [])
 
   // 同步 readOnly 到 ref
   useEffect(() => {
@@ -61,21 +84,21 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
           const { data } = await apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`)
           if (data.granted && readOnlyRef.current && data.mode === 'interactive') {
             readOnlyRef.current = false
-            if (editorRef.current) {
-              editorRef.current.updateInstanceState({ isReadonly: false })
+            if (internalEditorRef.current) {
+              internalEditorRef.current.updateInstanceState({ isReadonly: false })
             }
           } else if (!data.granted && !readOnlyRef.current && data.mode === 'interactive') {
             readOnlyRef.current = true
-            if (editorRef.current) {
-              editorRef.current.updateInstanceState({ isReadonly: true })
+            if (internalEditorRef.current) {
+              internalEditorRef.current.updateInstanceState({ isReadonly: true })
             }
           }
           // 只有当前仍是只读状态才加载快照（防止初始 demo 定时器在切自习后覆盖学生内容）
-          if (data.snapshot && editorRef.current && readOnlyRef.current) {
+          if (data.snapshot && internalEditorRef.current && readOnlyRef.current) {
             // WS 近 5 秒内有更新则跳过（防止覆盖用户刚画的内容）
             if (Date.now() - lastWSUpdateRef.current > 5000) {
-              editorRef.current.store.mergeRemoteChanges(() => {
-                try { editorRef.current?.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
+              internalEditorRef.current.store.mergeRemoteChanges(() => {
+                try { internalEditorRef.current?.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
               })
             }
           }
@@ -85,7 +108,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     } else if (isBroadcaster) {
       // 教师端：每 500ms 广播快照（WS 方式） + 每 3s HTTP 保存
       const wsTimer = setInterval(() => {
-        const editor = editorRef.current
+        const editor = internalEditorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
@@ -99,7 +122,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
         }
       }, 500)
       const httpTimer = setInterval(async () => {
-        const editor = editorRef.current
+        const editor = internalEditorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
@@ -110,7 +133,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     } else if (store.mode === 'interactive') {
       // 互动模式已授权学生：每 1s 广播快照（WS 方式）
       const wsTimer = setInterval(() => {
-        const editor = editorRef.current
+        const editor = internalEditorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
@@ -126,10 +149,15 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     } else {
       // 自习模式学生：自己画自己的，不做任何同步
     }
-  }, [roomId, store.mode, readOnly])
+  }, [roomId, store.mode, readOnly, isBroadcaster, ws])
+
+  const pendingSnapshots = useRef<string[]>([]) // editor 就绪前的消息缓冲
 
   const handleMount = useCallback((editor: Editor) => {
-    editorRef.current = editor
+    internalEditorRef.current = editor
+    if (externalEditorRef) {
+      externalEditorRef.current = editor
+    }
     if (readOnly) {
       editor.updateInstanceState({ isReadonly: true })
     }
@@ -148,36 +176,34 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       } catch { /* skip */ }
     }
     // HTTP 兜底拉取初始快照（仅限只读端，且仅一次）
-if (readOnlyRef.current && !httpSyncedRef.current) {
-  httpSyncedRef.current = true
-  apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`)
-    .then(res => {
-      // 请求发出后可能已切换为非只读（如自习），此时不加载快照以免覆盖
-      if (!readOnlyRef.current) return
-      const data = res.data
-      if (data.snapshot) {
-        editor.store.mergeRemoteChanges(() => {
-          try { editor.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
+    if (readOnlyRef.current && !httpSyncedRef.current) {
+      httpSyncedRef.current = true
+      apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`)
+        .then(res => {
+          // 请求发出后可能已切换为非只读（如自习），此时不加载快照以免覆盖
+          if (!readOnlyRef.current) return
+          const data = res.data
+          if (data.snapshot) {
+            editor.store.mergeRemoteChanges(() => {
+              try { editor.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
+            })
+          }
         })
-      }
-    })
-    .catch(() => {})
-}
-  }, [readOnly, ws, store.currentPage, roomId])
+        .catch(() => {})
+    }
+  }, [readOnly, roomId, externalEditorRef])
 
   // readOnly 变化时实时更新编辑器状态（如互动模式授权）
   useEffect(() => {
-    const editor = editorRef.current
+    const editor = internalEditorRef.current
     if (editor) {
       editor.updateInstanceState({ isReadonly: readOnly })
     }
   }, [readOnly])
 
-  const pendingSnapshots = useRef<string[]>([]) // editor 就绪前的消息缓冲
-
   useEffect(() => {
     const unsub = ws.onMessage((msg) => {
-      const editor = editorRef.current
+      const editor = internalEditorRef.current
 
       // editor 未就绪 → 缓存 op_broadcast 消息
       if (!editor) {
@@ -218,10 +244,10 @@ if (readOnlyRef.current && !httpSyncedRef.current) {
       }
     })
     return unsub
-  }, [ws, store])
+  }, [ws, store, isBroadcaster])
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Tldraw onMount={handleMount} components={minimalComponents} licenseKey="oss" />
       {/* 隐藏 TLDraw 右下角 "Get a license for production" 水印 */}
       <style>{`
