@@ -3,13 +3,13 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Button, Space, Typography, Tag, message, Modal, Input, Drawer,
-  Tooltip, Badge, Divider, Segmented,
+  Button, Space, Typography, Tag, message, Modal, Drawer,
+  Tooltip, Badge, Segmented,
 } from 'antd'
 import {
-  ArrowLeftOutlined, TeamOutlined, SettingOutlined,
-  StopOutlined, CopyOutlined, RobotOutlined,
-  ReloadOutlined, ExpandOutlined, CompressOutlined,
+  ArrowLeftOutlined, TeamOutlined,
+  StopOutlined, CopyOutlined,
+  ExpandOutlined, CompressOutlined,
   CustomerServiceOutlined, ClearOutlined,
   UndoOutlined, RedoOutlined, DownloadOutlined,
 } from '@ant-design/icons'
@@ -20,7 +20,6 @@ import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
 import { AIPanel } from '../components/whiteboard/AIPanel'
 import { useWhiteboardWS } from '../hooks/useWhiteboardWS'
 import * as whiteboardApi from '../api/whiteboard'
-import apiClient from '../api/client'
 import type { Editor } from 'tldraw'
 import type { WhiteboardMode, WhiteboardMember } from '../types'
 
@@ -42,7 +41,6 @@ const WhiteboardRoomPage: React.FC = () => {
   const [mode, setModeState] = useState<WhiteboardMode>('demo')
   const [roomStatus, setRoomStatus] = useState('active')
   const [membersOpen, setMembersOpen] = useState(false)
-  const [selectedStudent, setSelectedStudent] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   const [grantedToMe, setGrantedToMe] = useState(false) // 学生：是否被授权操作
   const [aiPanelOpen, setAiPanelOpen] = useState(false)
@@ -82,9 +80,12 @@ const WhiteboardRoomPage: React.FC = () => {
 
   useEffect(() => {
     if (isTeacher) {
-      loadMembers()
+      const timer = setTimeout(() => loadMembers(), 0)
       const interval = setInterval(loadMembers, 10000)
-      return () => clearInterval(interval)
+      return () => {
+        clearTimeout(timer)
+        clearInterval(interval)
+      }
     }
   }, [isTeacher, loadMembers])
 
@@ -152,7 +153,6 @@ const WhiteboardRoomPage: React.FC = () => {
   const handleSpotlight = async (username: string) => {
     try {
       await whiteboardApi.spotlightStudent(rid, username)
-      setSelectedStudent(username)
       message.info(`已投屏 ${username} 的白板`)
     } catch {
       message.error('投屏失败')
@@ -343,7 +343,7 @@ const WhiteboardRoomPage: React.FC = () => {
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="白板A助手">
+            <Tooltip title="AI 白板助手">
               <Button
                 type={aiPanelOpen ? 'primary' : 'text'}
                 icon={<CustomerServiceOutlined />}
@@ -359,19 +359,15 @@ const WhiteboardRoomPage: React.FC = () => {
         </Space>
       </div>
 
-      {/* ── 主区域：白板 + AI 面板（占位模式） ── */}
+      {/* ── 主区域：白板 + AI 面板 ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
           <WhiteboardCanvas roomId={rid} readOnly={readOnly} isBroadcaster={isTeacher} ws={ws} externalEditorRef={editorRef} />
         </div>
         <AIPanel
           roomId={rid}
           visible={aiPanelOpen}
-          onClose={() => {
-            setAiPanelOpen(false)
-            // 关闭面板后触发 TLDraw 重新计算布局，修复 HTTPS 下工具栏消失
-            setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
-          }}
+          onClose={() => setAiPanelOpen(false)}
           editorRef={editorRef}
           isTeacher={isTeacher}
           kpName={wb.room?.course_kp_id ? `知识点#${wb.room.course_kp_id}` : ''}
