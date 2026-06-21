@@ -37,7 +37,7 @@ function generateUUID(): string {
   })
 }
 
-export const WhiteboardCanvas = React.memo<Props>(({ roomId, readOnly = false, isBroadcaster = false, ws, externalEditorRef }) => {
+export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, isBroadcaster = false, ws, externalEditorRef }) => {
   const store = useWhiteboardStore()
   const internalEditorRef = useRef<Editor | null>(null)
   const [ready, setReady] = useState(false)
@@ -47,26 +47,31 @@ export const WhiteboardCanvas = React.memo<Props>(({ roomId, readOnly = false, i
   const lastWSUpdateRef = useRef(0) // 上次 WS 收到快照的时间戳
   const containerRef = useRef<HTMLDivElement>(null) // 容器 ref，用于 ResizeObserver
 
-  // ResizeObserver 兜底：HTTPS 下 TLDraw 内部 ResizeObserver 可能失效，手动触发 UI 刷新
+  // ResizeObserver 兜底：HTTPS 下 TLDraw 内部 ResizeObserver 可能失效
+  // 直接更新 viewport + 触发 window resize 事件让 TLDraw 内部机制也重新计算
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    let rafId: number
+    let timerId: ReturnType<typeof setTimeout>
     const ro = new ResizeObserver(() => {
-      // 延迟一帧再触发，确保布局完全稳定
-      cancelAnimationFrame(rafId)
-      rafId = requestAnimationFrame(() => {
-        const editor = internalEditorRef.current
-        if (editor) {
-          // 强制 TLDraw 重算视口（传入容器元素直接获取真实尺寸）
-          try {
-            editor.updateViewportScreenBounds(el)
-          } catch { /* ignore */ }
-        }
-      })
+      const editor = internalEditorRef.current
+      if (!editor) return
+      // 用 setTimeout 0 代替 RAF：确保在 ResizeObserver 回调的微任务之后、
+      // 浏览器完成布局计算之后再执行，避免 getBoundingClientRect 返回中间态
+      clearTimeout(timerId)
+      timerId = setTimeout(() => {
+        try {
+          // 方法1：直接传入容器元素，TLDraw 内部会调用 getBoundingClientRect()
+          editor.updateViewportScreenBounds(el)
+        } catch { /* ignore */ }
+        try {
+          // 方法2：派发 resize 事件，触发 TLDraw 自身的 useScreenBounds 监听器
+          window.dispatchEvent(new Event('resize'))
+        } catch { /* ignore */ }
+      }, 0)
     })
     ro.observe(el)
-    return () => { ro.disconnect(); cancelAnimationFrame(rafId) }
+    return () => { ro.disconnect(); clearTimeout(timerId) }
   }, [])
 
   // 同步 readOnly 到 ref
@@ -271,5 +276,5 @@ export const WhiteboardCanvas = React.memo<Props>(({ roomId, readOnly = false, i
       )}
     </div>
   )
-})
+}
 
