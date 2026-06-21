@@ -3,7 +3,7 @@
 房间管理、页面管理、WebSocket 通信、AI 辅助
 """
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -512,24 +512,31 @@ async def list_students(room_id: int, request: Request):
 
     # 从 WebSocket 内存中获取当前真实在线的学生
     room_data = whiteboard_manager.rooms.get(room_id)
-    if not room_data:
-        return []
-    connected_students = {
-        username for username, conn in room_data.get("connections", {}).items()
-        if conn.get("role") == "student"
-    }
-    if not connected_students:
-        return []
+    connected_students = set()
+    if room_data:
+        connected_students = {
+            username for username, conn in room_data.get("connections", {}).items()
+            if conn.get("role") == "student"
+        }
 
-    placeholders = ",".join("?" * len(connected_students))
+    # 清理超过40分钟的旧记录（WS 断开时可能漏掉标记 leave_time）
+    expiry = (datetime.now() - timedelta(minutes=40)).strftime("%Y-%m-%d %H:%M:%S")
+    execute_insert_update(
+        "UPDATE whiteboard_room_members SET leave_time=? "
+        "WHERE room_id=? AND role='student' AND leave_time IS NULL "
+        "AND join_time < ?",
+        (expiry, room_id, expiry),
+    )
+
+    # 从数据库获取所有未离开的学生（覆盖 WS 连接和 HTTP 轮询两种场景）
     rows = execute_query(
-        f"""SELECT m.username, m.role, m.self_snapshot, u.name, u.class,
+        """SELECT m.username, m.role, m.self_snapshot, u.name, u.class,
                   m.join_time
            FROM whiteboard_room_members m
            LEFT JOIN users u ON u.username = m.username
-           WHERE m.room_id=? AND m.role='student' AND m.username IN ({placeholders})
+           WHERE m.room_id=? AND m.role='student' AND m.leave_time IS NULL
            ORDER BY m.join_time""",
-        (room_id, *connected_students),
+        (room_id,),
     )
     return [
         {
@@ -539,6 +546,20 @@ async def list_students(room_id: int, request: Request):
         }
         for r in rows
     ]
+
+
+@router.post("/rooms/{room_id}/register", summary="学生进入房间时注册")
+async def register_room(room_id: int, request: Request):
+    """HTTP 方式注册学生进入房间（IIS 下 WS 不通时替代 join_room）"""
+    user = get_current_user(request)
+    role = "teacher" if _is_teacher_or_admin(user) else "student"
+    execute_insert_update(
+        """INSERT OR REPLACE INTO whiteboard_room_members
+           (room_id, username, role, join_time)
+           VALUES (?, ?, ?, ?)""",
+        (room_id, user["username"], role, _now()),
+    )
+    return {"status": "ok"}
 
 
 @router.post("/rooms/{room_id}/spotlight", summary="投屏学生白板到全班")

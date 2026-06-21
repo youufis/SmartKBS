@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    // TLDraw v5 在生产模式下检查 license key，HTTPS 下判定为非开发环境
+    // 覆写 NODE_ENV 为 development 让 TLDraw 始终以开发模式运行，跳过 license 强制验证
+    'process.env.NODE_ENV': JSON.stringify('development'),
+  },
   build: {
     target: 'es2015',
   },

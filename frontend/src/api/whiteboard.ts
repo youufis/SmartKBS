@@ -53,8 +53,9 @@ export async function leaveRoom(roomId: number): Promise<void> {
   await apiClient.post(`/api/whiteboard/rooms/${roomId}/leave`)
 }
 
-// ── 页面管理 ──
-
+export async function registerToRoom(roomId: number): Promise<void> {
+    await apiClient.post(`/api/whiteboard/rooms/${roomId}/register`)
+}
 export async function listPages(roomId: number): Promise<WhiteboardPage[]> {
   const res = await apiClient.get(`/api/whiteboard/rooms/${roomId}/pages`)
   return res.data
