@@ -168,6 +168,24 @@ export const AIPanel: React.FC<Props> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false)  // 防止并发发送
 
+  // 计算右侧空白区域起始位置：遍历已有形状，取最右侧边界 + 间距
+  const getRightSidePosition = useCallback((editor: Editor) => {
+    let rightEdge = 50
+    try {
+      const existing = editor.getCurrentPageShapes()
+      if (existing && existing.length > 0) {
+        for (const shape of existing) {
+          const bounds = editor.getShapePageBounds(shape.id)
+          if (bounds) {
+            const edge = bounds.x + bounds.w
+            if (edge > rightEdge) rightEdge = edge
+          }
+        }
+      }
+    } catch { /* 静默降级 */ }
+    return { x: rightEdge + 60, y: 60 }
+  }, [])
+
   // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -376,11 +394,11 @@ export const AIPanel: React.FC<Props> = ({
           content: `将插入 ${result.shapes.length} 个形状到白板，是否继续？`,
           okText: '插入',
           onOk: async () => {
+            const pos = getRightSidePosition(editor)
             const shapes = result.shapes.map((s: any, index: number) => {
               const shapeId = `shape:ai-board-${Date.now()}-${index}`
-              // 只允许 geo 类型，arrow/draw 不受支持
               const fixedType = convertTextType(s.type)
-              const finalType = fixedType === 'geo' ? 'geo' : 'geo' // 降级到 geo
+              const finalType = fixedType === 'geo' ? 'geo' : 'geo'
               const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
               if (finalType === 'geo' && !shapeProps.richText) {
                 shapeProps.richText = { type: 'doc', content: [] }
@@ -388,8 +406,8 @@ export const AIPanel: React.FC<Props> = ({
               return {
                 id: shapeId,
                 type: finalType,
-                x: s.x || 100,
-                y: s.y || 100 + index * 80,
+                x: (s.x || 100) + pos.x - 50,
+                y: (s.y || 100 + index * 80) + pos.y - 60,
                 props: shapeProps,
               } as Record<string, any>
             })
@@ -497,23 +515,9 @@ export const AIPanel: React.FC<Props> = ({
       const maxW = 500
 
       // 动态计算位置：放在所有已有内容的右侧空白区
-      let rightEdge = 50
-      try {
-        const existingShapes = editor.getCurrentPageShapes()
-        if (existingShapes && existingShapes.length > 0) {
-          for (const shape of existingShapes) {
-            const bounds = editor.getShapePageBounds(shape.id)
-            if (bounds) {
-              const edge = bounds.x + bounds.w
-              if (edge > rightEdge) rightEdge = edge
-            }
-          }
-        }
-      } catch {
-        // 静默降级
-      }
-      const startX = rightEdge + 60
-      const startY = 60
+      const pos = getRightSidePosition(editor)
+      const startX = pos.x
+      const startY = pos.y
 
       const shapes: any[] = []
       const now = Date.now()
@@ -814,6 +818,7 @@ export const AIPanel: React.FC<Props> = ({
           content: `将插入 ${result.shapes.length} 个形状到白板，是否继续？`,
           okText: '插入',
           onOk: async () => {
+            const pos = getRightSidePosition(editor)
             const shapes = result.shapes.map((s: any, index: number) => {
               const shapeId = `shape:mindmap-${Date.now()}-${index}`
               const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
@@ -824,8 +829,8 @@ export const AIPanel: React.FC<Props> = ({
               return {
                 id: shapeId,
                 type: 'geo',
-                x: s.x || 100,
-                y: s.y || 100 + index * 80,
+                x: (s.x || 100) + pos.x - 50,
+                y: (s.y || 100 + index * 80) + pos.y - 60,
                 props: shapeProps,
               } as Record<string, any>
             })
