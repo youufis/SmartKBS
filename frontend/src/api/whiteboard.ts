@@ -250,6 +250,36 @@ export async function aiGenerateQuiz(
   return res.data
 }
 
+export async function aiSmartAnnotation(
+  selectionDesc: string,
+  mode?: string,
+): Promise<{
+  summary: string
+  label_type: string
+  label_text: string
+  color: string
+}> {
+  const res = await apiClient.post('/api/whiteboard/ai/smart-annotation', {
+    selection_desc: selectionDesc,
+    mode: mode || 'demo',
+  })
+  return res.data
+}
+
+export async function aiGenerateMindmap(
+  roomId: number,
+  subject?: string,
+): Promise<{
+  title: string
+  shapes: unknown[]
+}> {
+  const res = await apiClient.post('/api/whiteboard/ai/generate-mindmap', {
+    room_id: roomId,
+    subject: subject || '',
+  })
+  return res.data
+}
+
 export async function aiGenerateBilingual(
   roomId: number,
   subject?: string,
