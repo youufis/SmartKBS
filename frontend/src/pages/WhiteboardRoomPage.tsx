@@ -359,29 +359,20 @@ const WhiteboardRoomPage: React.FC = () => {
         </Space>
       </div>
 
-      {/* ── 主区域：白板（占满） + AI 面板（悬浮层，不改变画布尺寸） ── */}
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+      {/* ── 主区域：白板 + AI 面板 ── */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
           <WhiteboardCanvas roomId={rid} readOnly={readOnly} isBroadcaster={isTeacher} ws={ws} externalEditorRef={editorRef} />
         </div>
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          right: 0,
-          height: '100%',
-          zIndex: 100,
-          pointerEvents: aiPanelOpen ? 'auto' : 'none',
-        }}>
-          <AIPanel
-            roomId={rid}
-            visible={aiPanelOpen}
-            onClose={() => setAiPanelOpen(false)}
-            editorRef={editorRef}
-            isTeacher={isTeacher}
-            kpName={wb.room?.course_kp_id ? `知识点#${wb.room.course_kp_id}` : ''}
-            subject="通用技术"
-          />
-        </div>
+        <AIPanel
+          roomId={rid}
+          visible={aiPanelOpen}
+          onClose={() => setAiPanelOpen(false)}
+          editorRef={editorRef}
+          isTeacher={isTeacher}
+          kpName={wb.room?.course_kp_id ? `知识点#${wb.room.course_kp_id}` : ''}
+          subject="通用技术"
+        />
       </div>
 
       {/* ── 底部状态栏 ── */}
