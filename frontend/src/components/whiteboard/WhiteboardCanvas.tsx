@@ -217,8 +217,10 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       if (msg.type === 'op_broadcast') {
         const snapshot = (msg.data as { snapshot?: string })?.snapshot
         if (!snapshot) return
-        // 非只读且非广播端（互动模式下已授权学生）：跳过加载，防止覆盖自己正在画的内容
-        if (!readOnlyRef.current && !isBroadcaster) {
+        // 广播端（教师）：跳过加载自己的广播，避免快照覆盖当前视口
+        // 非只读非广播端（互动学生）：跳过，防止覆盖自己正在画的内容
+        // 只有纯只读端（演示学生）才加载远程快照
+        if (isBroadcaster || !readOnlyRef.current) {
           lastWSUpdateRef.current = Date.now()
           return
         }
