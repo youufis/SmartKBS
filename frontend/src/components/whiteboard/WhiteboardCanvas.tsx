@@ -60,9 +60,8 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
         const editor = internalEditorRef.current
         if (editor) {
           try {
-            // 使用 TLDraw 自身的容器元素，尺寸匹配最精准
-            const container = editor.getContainer()
-            if (container) editor.updateViewportScreenBounds(container)
+            // 直接传入容器元素，TLDraw 内部会调用 getBoundingClientRect() 获取真实尺寸
+            editor.updateViewportScreenBounds(el)
           } catch { /* ignore */ }
         }
       })
