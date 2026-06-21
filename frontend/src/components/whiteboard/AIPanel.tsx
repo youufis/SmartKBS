@@ -13,6 +13,7 @@ import {
   ClearOutlined, LoadingOutlined, StopOutlined,
   FullscreenOutlined, FullscreenExitOutlined,
   CopyOutlined, BulbOutlined, HighlightOutlined,
+  EditOutlined, ApartmentOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
@@ -734,6 +735,119 @@ export const AIPanel: React.FC<Props> = ({
     }
   }, [editorRef, roomId, kpName, subject])
 
+  // 智能批注：分析选中内容并添加标注
+  const handleSmartAnnotation = useCallback(async () => {
+    const editor = editorRef.current
+    if (!editor) {
+      message.warning('白板尚未加载')
+      return
+    }
+
+    const selectedShapes = editor.getSelectedShapes()
+    if (!selectedShapes || selectedShapes.length === 0) {
+      message.warning('请先在白板上选中要批注的内容')
+      return
+    }
+
+    // 提取选中形状的文字描述
+    const desc = selectedShapes.map((s: any) => {
+      const props = s.props || {}
+      const text = props.richText?.content?.map((n: any) => n.content?.map((c: any) => c.text).join('')).join('') || props.text || ''
+      return `[${s.type}] 位置(${Math.round(s.x)},${Math.round(s.y)}) 文字: ${text}`
+    }).join('\n')
+
+    message.loading({ content: 'AI 正在分析...', key: 'aiAnnotation' })
+    try {
+      const result = await whiteboardApi.aiSmartAnnotation(desc)
+      if (result.label_text) {
+        // 在选中区域旁边创建批注形状
+        const selBounds = editor.getSelectionPageBounds()
+        const ax = (selBounds?.x || 100) + (selBounds?.w || 200) + 20
+        const ay = selBounds?.y || 100
+        editor.createShapes([{
+          id: `shape:annotation-${Date.now()}`,
+          type: 'geo',
+          x: ax,
+          y: ay,
+          props: {
+            geo: 'rectangle',
+            w: 280,
+            h: 80,
+            color: 'orange',
+            fill: 'none',
+            size: 'm',
+            richText: {
+              type: 'doc',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: `📌 ${result.label_text}` }] }],
+            },
+          },
+        }] as any)
+        message.success({ content: '批注已添加', key: 'aiAnnotation' })
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: '📌 智能批注' },
+          { role: 'assistant', content: `**批注**：${result.label_text}\n\n**概括**：${result.summary || ''}` },
+        ])
+      } else {
+        message.warning({ content: result.summary || 'AI 未能生成批注', key: 'aiAnnotation' })
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      console.error('[AI智能批注]', err)
+      message.error({ content: detail || '批注失败', key: 'aiAnnotation' })
+    }
+  }, [editorRef])
+
+  // 生成思维导图
+  const handleGenerateMindmap = useCallback(async () => {
+    const editor = editorRef.current
+    if (!editor) {
+      message.warning('白板尚未加载')
+      return
+    }
+    message.loading({ content: 'AI 正在生成思维导图...', key: 'aiMindmap' })
+    try {
+      const result = await whiteboardApi.aiGenerateMindmap(roomId, subject)
+      if (result.shapes && result.shapes.length > 0) {
+        Modal.confirm({
+          title: `思维导图: ${result.title}`,
+          content: `将插入 ${result.shapes.length} 个形状到白板，是否继续？`,
+          okText: '插入',
+          onOk: async () => {
+            const shapes = result.shapes.map((s: any, index: number) => {
+              const shapeId = `shape:mindmap-${Date.now()}-${index}`
+              const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
+              if (!shapeProps.richText && shapeProps.text) {
+                shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
+                delete shapeProps.text
+              }
+              return {
+                id: shapeId,
+                type: 'geo',
+                x: s.x || 100,
+                y: s.y || 100 + index * 80,
+                props: shapeProps,
+              } as Record<string, any>
+            })
+            editor.createShapes(shapes as any)
+            message.success({ content: `思维导图已插入`, key: 'aiMindmap' })
+            setMessages((prev) => [
+              ...prev,
+              { role: 'user', content: '🧠 生成思维导图' },
+              { role: 'assistant', content: `已生成思维导图「${result.title}」（${shapes.length} 个节点）` },
+            ])
+          },
+        })
+      } else {
+        message.warning({ content: 'AI 未能生成思维导图', key: 'aiMindmap' })
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      console.error('[AI思维导图]', err)
+      message.error({ content: detail || '生成失败', key: 'aiMindmap' })
+    }
+  }, [editorRef, roomId, subject])
+
   // 快捷键：Ctrl+Enter 发送
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -809,6 +923,16 @@ export const AIPanel: React.FC<Props> = ({
           {isTeacher && (
             <Tooltip title="美化排版">
               <Button size="small" icon={<HighlightOutlined />} onClick={handleBeautify} />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title="智能批注（选中内容后使用）">
+              <Button size="small" icon={<EditOutlined />} onClick={handleSmartAnnotation} />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title="思维导图">
+              <Button size="small" icon={<ApartmentOutlined />} onClick={handleGenerateMindmap} />
             </Tooltip>
           )}
           {isTeacher && (
