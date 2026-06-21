@@ -348,7 +348,7 @@ const WhiteboardRoomPage: React.FC = () => {
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="白板A助手">
+            <Tooltip title="AI白板助手">
               <Button
                 type={aiPanelOpen ? 'primary' : 'text'}
                 icon={<CustomerServiceOutlined />}

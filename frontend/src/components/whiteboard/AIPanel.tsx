@@ -1,5 +1,5 @@
 /**
- * 白板A助手侧栏面板
+ * AI白板助手侧栏面板
  * 支持：流式对话、图示生成、一键板书、教学建议
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react'
@@ -992,7 +992,7 @@ export const AIPanel: React.FC<Props> = ({
       >
         <Space>
           <RobotOutlined style={{ color: '#1890ff', fontSize: 18 }} />
-          <Text strong>白板A助手</Text>
+          <Text strong>AI白板助手</Text>
           {kpName && <Tag color="blue" style={{ fontSize: 12 }}>{kpName}</Tag>}
         </Space>
         <Space size={4}>
@@ -1098,7 +1098,7 @@ export const AIPanel: React.FC<Props> = ({
         {messages.length === 0 && !loading && (
           <div style={{ textAlign: 'center', color: '#bbb', marginTop: 40 }}>
             <RobotOutlined style={{ fontSize: 40, display: 'block', marginBottom: 12 }} />
-            <Text type="secondary">向白板A助手提问</Text>
+            <Text type="secondary">向AI白板助手提问</Text>
             <div style={{ marginTop: 8, fontSize: 12, color: '#ccc' }}>
               例如：解释白板上的内容 / 总结重点 / 生成流程图
             </div>
