@@ -1096,6 +1096,76 @@ async def ai_beautify_board(request: Request):
         raise HTTPException(status_code=500, detail=f"AI 美化排版失败: {str(e)}")
 
 
+@router.post("/ai/smart-annotation", summary="AI 智能批注选中内容")
+async def ai_smart_annotation(request: Request):
+    """智能批注：分析白板选中的内容并给出标注建议"""
+    user = get_current_user(request)
+    if not _is_teacher_or_admin(user):
+        raise HTTPException(status_code=403, detail="仅教师可使用")
+    body = await request.json()
+    selection_desc = body.get("selection_desc", "")
+    mode = body.get("mode", "demo")
+    if not selection_desc:
+        raise HTTPException(status_code=400, detail="请先在白板上选中内容")
+
+    dashscope_api_key, _ = get_api_keys(user["username"])
+    if not dashscope_api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    from backend.prompts.whiteboard_ai import SMART_LABEL_PROMPT
+    prompt = SMART_LABEL_PROMPT.format(selection_desc=selection_desc, mode=mode)
+
+    try:
+        from backend.api.ai_service import call_ai_sync
+        result = call_ai_sync(prompt, dashscope_api_key)
+        import re
+        jm = re.search(r'\{[\s\S]*\}', result.strip())
+        if jm:
+            data = json.loads(jm.group())
+            return data
+        return {"summary": "", "label_type": "comment", "label_text": result, "color": "#ff4d4f"}
+    except Exception as e:
+        logger.error(f"AI 智能批注失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 批注失败: {str(e)}")
+
+
+@router.post("/ai/generate-mindmap", summary="AI 根据板书生成思维导图")
+async def ai_generate_mindmap(request: Request):
+    """思维导图：根据白板内容生成结构化思维导图"""
+    user = get_current_user(request)
+    if not _is_teacher_or_admin(user):
+        raise HTTPException(status_code=403, detail="仅教师可使用")
+    body = await request.json()
+    room_id = body.get("room_id")
+    subject = body.get("subject", "通用技术")
+    if not room_id:
+        raise HTTPException(status_code=400, detail="请提供房间 ID")
+
+    dashscope_api_key, _ = get_api_keys(user["username"])
+    if not dashscope_api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    snapshot_text = _get_snapshot_text(room_id)
+    if not snapshot_text or snapshot_text == "白板当前为空":
+        raise HTTPException(status_code=400, detail="白板当前为空")
+
+    from backend.prompts.whiteboard_ai import MIND_MAP_PROMPT
+    prompt = MIND_MAP_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
+
+    try:
+        from backend.api.ai_service import call_ai_sync
+        result = call_ai_sync(prompt, dashscope_api_key)
+        import re
+        jm = re.search(r'\{[\s\S]*\}', result.strip())
+        if jm:
+            data = json.loads(jm.group())
+            return {"title": data.get("title", "思维导图"), "shapes": data.get("shapes", [])}
+        return {"title": "思维导图", "shapes": [], "raw": result}
+    except Exception as e:
+        logger.error(f"AI 思维导图生成失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 思维导图生成失败: {str(e)}")
+
+
 @router.post("/ai/suggest", summary="AI 根据当前内容推荐下一步")
 async def ai_suggest(request: Request):
     user = get_current_user(request)

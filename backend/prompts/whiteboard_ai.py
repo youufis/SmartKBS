@@ -325,3 +325,34 @@ BEAUTIFY_BOARD_PROMPT = """你是一位教学板书美化设计师。请将白�
 
 TLDraw 可用颜色：black/grey/blue/light-blue/green/light-green/orange/yellow/red/light-red/violet/light-violet/white
 """
+
+
+# ── AI 思维导图 ──
+
+MIND_MAP_PROMPT = """你是一位教学思维导图设计师。请根据白板内容生成一张结构化思维导图。
+
+## 白板当前内容（AI 识别结果）
+```
+{snapshot_text}
+```
+
+## 学科
+{subject}
+
+## 思维导图设计要求
+1. **中心主题**：位于上方居中，使用大矩形+蓝色边框
+2. **一级分支**：中心主题下方横向排列 3-5 个一级分支，使用矩形+绿色
+3. **二级分支**：每个一级分支下方缩进排列 1-3 个子要点，使用小矩形+灰色
+4. **层次分明**：父节点在上，子节点在下，逐级缩进
+5. **仅使用 geo 类型**，所有文字通过 props.text 设置
+6. **配色方案**：中心主题用 blue，一级用 green，二级用 grey
+7. **布局要求**：总宽度不超过 900，上下间距均匀
+
+## 输出格式
+请输出一个 JSON 对象（不要其他文字）：
+```json
+{{"title": "思维导图标题", "shapes": [{{"type": "geo", "x": 数值, "y": 数值, "props": {{"geo": "rectangle", "w": 数值, "h": 数值, "color": "颜色名", "fill": "none", "size": "xl|l|m", "text": "文字内容"}}}}]}}
+```
+
+TLDraw 可用颜色：black/grey/blue/light-blue/green/light-green/orange/yellow/red/light-red/violet/light-violet/white
+"""
