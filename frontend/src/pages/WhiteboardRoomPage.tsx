@@ -11,6 +11,7 @@ import {
   StopOutlined, CopyOutlined, RobotOutlined,
   ReloadOutlined, ExpandOutlined, CompressOutlined,
   CustomerServiceOutlined, ClearOutlined,
+  UndoOutlined, RedoOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -204,6 +205,40 @@ const WhiteboardRoomPage: React.FC = () => {
     })
   }, [])
 
+  // ── 撤销/恢复 ──
+  const handleUndo = useCallback(() => {
+    editorRef.current?.undo()
+  }, [])
+
+  const handleRedo = useCallback(() => {
+    editorRef.current?.redo()
+  }, [])
+
+  // ── 导出板书总结 ──
+  const handleExportSummary = useCallback(async () => {
+    message.loading({ content: 'AI 正在生成总结并导出 Word...', key: 'exportBoard' })
+    try {
+      const token = localStorage.getItem('smartkb_token') || ''
+      const response = await fetch(`/api/whiteboard/ai/export-summary/${rid}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: '导出失败' }))
+        throw new Error(err.detail || `HTTP ${response.status}`)
+      }
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `板书总结_${roomTitle}.docx`
+      a.click()
+      window.URL.revokeObjectURL(url)
+      message.success({ content: '板书总结已导出', key: 'exportBoard' })
+    } catch (err: any) {
+      message.error({ content: err.message || '导出失败', key: 'exportBoard' })
+    }
+  }, [rid, roomTitle])
+
   // ── 退出 ──
   const handleLeave = async () => {
     try {
@@ -258,6 +293,20 @@ const WhiteboardRoomPage: React.FC = () => {
               成员 ({onlineCount})
             </Button>
           )}
+          <Tooltip title="撤销 Ctrl+Z">
+            <Button
+              type="text"
+              icon={<UndoOutlined />}
+              onClick={handleUndo}
+            />
+          </Tooltip>
+          <Tooltip title="恢复 Ctrl+Shift+Z">
+            <Button
+              type="text"
+              icon={<RedoOutlined />}
+              onClick={handleRedo}
+            />
+          </Tooltip>
           <Tooltip title="全屏">
             <Button
               type="text"
@@ -275,6 +324,15 @@ const WhiteboardRoomPage: React.FC = () => {
               }}
             />
           </Tooltip>
+          {isTeacher && (
+            <Tooltip title="导出板书总结（Word）">
+              <Button
+                type="text"
+                icon={<DownloadOutlined />}
+                onClick={handleExportSummary}
+              />
+            </Tooltip>
+          )}
           {isTeacher && (
             <Tooltip title="清空白板">
               <Button
