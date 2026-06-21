@@ -1056,6 +1056,46 @@ async def ai_generate_board(request: Request):
         raise HTTPException(status_code=500, detail=f"AI 生成板书失败: {str(e)}")
 
 
+@router.post("/ai/beautify-board", summary="AI 美化排版白板内容")
+async def ai_beautify_board(request: Request):
+    """板书美化+自动排版：读取白板当前内容，AI 重新组织为整洁的结构化板书"""
+    user = get_current_user(request)
+    if not _is_teacher_or_admin(user):
+        raise HTTPException(status_code=403, detail="仅教师可使用")
+    body = await request.json()
+    room_id = body.get("room_id")
+    subject = body.get("subject", "通用技术")
+    if not room_id:
+        raise HTTPException(status_code=400, detail="请提供房间 ID")
+
+    dashscope_api_key, _ = get_api_keys(user["username"])
+    if not dashscope_api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    snapshot_text = _get_snapshot_text(room_id)
+    if not snapshot_text or snapshot_text == "白板当前为空":
+        raise HTTPException(status_code=400, detail="白板当前为空，无内容可美化")
+
+    from backend.prompts.whiteboard_ai import BEAUTIFY_BOARD_PROMPT
+    prompt = BEAUTIFY_BOARD_PROMPT.format(
+        snapshot_text=snapshot_text,
+        subject=subject,
+    )
+
+    try:
+        from backend.api.ai_service import call_ai_sync
+        result = call_ai_sync(prompt, dashscope_api_key)
+        import re
+        jm = re.search(r'\{[\s\S]*\}', result.strip())
+        if jm:
+            data = json.loads(jm.group())
+            return {"title": data.get("title", "美化板书"), "shapes": data.get("shapes", [])}
+        return {"title": "美化板书", "shapes": [], "raw": result}
+    except Exception as e:
+        logger.error(f"AI 美化排版失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 美化排版失败: {str(e)}")
+
+
 @router.post("/ai/suggest", summary="AI 根据当前内容推荐下一步")
 async def ai_suggest(request: Request):
     user = get_current_user(request)

@@ -217,6 +217,20 @@ export async function aiGenerateBoard(
   return res.data
 }
 
+export async function aiBeautifyBoard(
+  roomId: number,
+  subject?: string,
+): Promise<{
+  title: string
+  shapes: unknown[]
+}> {
+  const res = await apiClient.post('/api/whiteboard/ai/beautify-board', {
+    room_id: roomId,
+    subject: subject || '',
+  })
+  return res.data
+}
+
 export async function aiGenerateQuiz(
   roomId: number,
   subject?: string,
