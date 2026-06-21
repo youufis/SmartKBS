@@ -343,7 +343,7 @@ const WhiteboardRoomPage: React.FC = () => {
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="AI 白板助手">
+            <Tooltip title="白板A助手">
               <Button
                 type={aiPanelOpen ? 'primary' : 'text'}
                 icon={<CustomerServiceOutlined />}
@@ -359,15 +359,19 @@ const WhiteboardRoomPage: React.FC = () => {
         </Space>
       </div>
 
-      {/* ── 主区域：白板 + AI 面板 ── */}
+      {/* ── 主区域：白板 + AI 面板（占位模式） ── */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'row' }}>
-        <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <WhiteboardCanvas roomId={rid} readOnly={readOnly} isBroadcaster={isTeacher} ws={ws} externalEditorRef={editorRef} />
         </div>
         <AIPanel
           roomId={rid}
           visible={aiPanelOpen}
-          onClose={() => setAiPanelOpen(false)}
+          onClose={() => {
+            setAiPanelOpen(false)
+            // 关闭面板后触发 TLDraw 重新计算布局，修复 HTTPS 下工具栏消失
+            setTimeout(() => window.dispatchEvent(new Event('resize')), 150)
+          }}
           editorRef={editorRef}
           isTeacher={isTeacher}
           kpName={wb.room?.course_kp_id ? `知识点#${wb.room.course_kp_id}` : ''}

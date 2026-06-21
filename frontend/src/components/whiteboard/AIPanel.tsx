@@ -1,5 +1,5 @@
 /**
- * AI 白板助手侧栏面板
+ * 白板A助手侧栏面板
  * 支持：流式对话、图示生成、一键板书、教学建议
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react'
@@ -13,8 +13,10 @@ import {
   ClearOutlined, LoadingOutlined, StopOutlined,
   FullscreenOutlined, FullscreenExitOutlined,
   CopyOutlined, BulbOutlined, HighlightOutlined,
-  EditOutlined, ApartmentOutlined,
+  EditOutlined, ApartmentOutlined, TranslationOutlined,
+  RiseOutlined,
 } from '@ant-design/icons'
+import VoiceInput from '../VoiceInput'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
@@ -164,6 +166,7 @@ export const AIPanel: React.FC<Props> = ({
   const [loading, setLoading] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false)  // 防止并发发送
@@ -195,6 +198,12 @@ export const AIPanel: React.FC<Props> = ({
   const handleClear = useCallback(() => {
     setMessages([])
     setStreamingText('')
+  }, [])
+
+  // 语音输入回调
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setInput((prev) => prev + text)
+    inputRef.current?.focus()
   }, [])
 
   // 停止生成
@@ -853,6 +862,96 @@ export const AIPanel: React.FC<Props> = ({
     }
   }, [editorRef, roomId, subject])
 
+  // 中英双语转换
+  const handleGenerateBilingual = useCallback(async () => {
+    const editor = editorRef.current
+    if (!editor) {
+      message.warning('白板尚未加载')
+      return
+    }
+    message.loading({ content: 'AI 正在生成双语板书...', key: 'aiBilingual' })
+    try {
+      const result = await whiteboardApi.aiGenerateBilingual(roomId, subject)
+      if (result.shapes && result.shapes.length > 0) {
+        Modal.confirm({
+          title: `双语板书: ${result.title}`,
+          content: `将插入 ${result.shapes.length} 个形状到白板，是否继续？`,
+          okText: '插入',
+          onOk: async () => {
+            const pos = getRightSidePosition(editor)
+            const shapes = result.shapes.map((s: any, index: number) => {
+              const shapeId = `shape:bilingual-${Date.now()}-${index}`
+              const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
+              if (!shapeProps.richText && shapeProps.text) {
+                shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
+                delete shapeProps.text
+              }
+              return {
+                id: shapeId,
+                type: 'geo',
+                x: (s.x || 100) + pos.x - 50,
+                y: (s.y || 100 + index * 80) + pos.y - 60,
+                props: shapeProps,
+              } as Record<string, any>
+            })
+            editor.createShapes(shapes as any)
+            message.success({ content: `双语板书已插入`, key: 'aiBilingual' })
+            setMessages((prev) => [
+              ...prev,
+              { role: 'user', content: '🌐 生成双语板书' },
+              { role: 'assistant', content: `已生成双语板书「${result.title}」（${shapes.length} 个对照项）` },
+            ])
+          },
+        })
+      } else {
+        message.warning({ content: 'AI 未能生成双语板书', key: 'aiBilingual' })
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      console.error('[AI双语板书]', err)
+      message.error({ content: detail || '生成失败', key: 'aiBilingual' })
+    }
+  }, [editorRef, roomId, subject])
+
+  // AI 教学建议
+  const handleSuggest = useCallback(async () => {
+    const editor = editorRef.current
+    if (!editor) {
+      message.warning('白板尚未加载')
+      return
+    }
+    // 提取白板上的文字内容
+    const allShapes = editor.getCurrentPageShapes()
+    const content = allShapes.map((s: any) => {
+      const props = s.props || {}
+      return props.richText?.content?.map((n: any) => n.content?.map((c: any) => c.text).join('')).join('') || props.text || ''
+    }).filter(Boolean).join('\n')
+
+    if (!content) {
+      message.warning('白板为空，请先在白板上书写内容')
+      return
+    }
+
+    message.loading({ content: 'AI 正在分析并给出建议...', key: 'aiSuggest' })
+    try {
+      const result = await whiteboardApi.aiSuggest(content, kpName)
+      if (result.suggestion) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: '💡 请给出教学建议' },
+          { role: 'assistant', content: result.suggestion },
+        ])
+        message.success({ content: '建议已生成', key: 'aiSuggest' })
+      } else {
+        message.warning({ content: 'AI 未能生成建议', key: 'aiSuggest' })
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      console.error('[AI教学建议]', err)
+      message.error({ content: detail || '生成失败', key: 'aiSuggest' })
+    }
+  }, [editorRef, kpName])
+
   // 快捷键：Ctrl+Enter 发送
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -877,7 +976,6 @@ export const AIPanel: React.FC<Props> = ({
         borderLeft: '1px solid #f0f0f0',
         background: '#fff',
         flexShrink: 0,
-        transition: 'width 0.3s ease',
         userSelect: 'text',
       }}
     >
@@ -894,7 +992,7 @@ export const AIPanel: React.FC<Props> = ({
       >
         <Space>
           <RobotOutlined style={{ color: '#1890ff', fontSize: 18 }} />
-          <Text strong>AI 白板助手</Text>
+          <Text strong>白板A助手</Text>
           {kpName && <Tag color="blue" style={{ fontSize: 12 }}>{kpName}</Tag>}
         </Space>
         <Space size={4}>
@@ -938,6 +1036,16 @@ export const AIPanel: React.FC<Props> = ({
           {isTeacher && (
             <Tooltip title="思维导图">
               <Button size="small" icon={<ApartmentOutlined />} onClick={handleGenerateMindmap} />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title="中英双语">
+              <Button size="small" icon={<TranslationOutlined />} onClick={handleGenerateBilingual} />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title="教学建议">
+              <Button size="small" icon={<RiseOutlined />} onClick={handleSuggest} />
             </Tooltip>
           )}
           {isTeacher && (
@@ -990,7 +1098,7 @@ export const AIPanel: React.FC<Props> = ({
         {messages.length === 0 && !loading && (
           <div style={{ textAlign: 'center', color: '#bbb', marginTop: 40 }}>
             <RobotOutlined style={{ fontSize: 40, display: 'block', marginBottom: 12 }} />
-            <Text type="secondary">向 AI 白板助手提问</Text>
+            <Text type="secondary">向白板A助手提问</Text>
             <div style={{ marginTop: 8, fontSize: 12, color: '#ccc' }}>
               例如：解释白板上的内容 / 总结重点 / 生成流程图
             </div>
@@ -1090,21 +1198,26 @@ export const AIPanel: React.FC<Props> = ({
             停止生成
           </Button>
         ) : (
-          <Space.Compact style={{ width: '100%' }}>
+          <Space.Compact style={{ width: '100%', alignItems: 'stretch' }}>
+            <VoiceInput
+              onTranscript={handleVoiceTranscript}
+              disabled={loading}
+            />
             <TextArea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="输入问题... (Ctrl+Enter 发送)"
-              rows={2}
-              style={{ fontSize: 13 }}
+              autoSize={{ minRows: 1, maxRows: 4 }}
+              style={{ flex: 1, fontSize: 13 }}
             />
             <Button
               type="primary"
+              size="small"
               icon={<SendOutlined />}
               onClick={handleSend}
               disabled={!input.trim()}
-              style={{ height: '100%' }}
             />
           </Space.Compact>
         )}
@@ -1117,6 +1230,10 @@ export const AIPanel: React.FC<Props> = ({
         @keyframes blink {
           0%, 100% { opacity: 1; }
           50% { opacity: 0; }
+        }
+        @keyframes voice-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4); }
+          50% { box-shadow: 0 0 0 6px rgba(255, 77, 79, 0); }
         }
         .ai-msg-content, .ai-msg-content * {
           user-select: text !important;

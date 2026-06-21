@@ -1211,7 +1211,7 @@ async def export_board_summary(room_id: int, request: Request):
 
     # 获取房间信息
     room_rows = execute_query(
-        "SELECT title, subject FROM whiteboard_rooms WHERE id=?", (room_id,),
+        "SELECT title FROM whiteboard_rooms WHERE id=?", (room_id,),
     )
     room_title = room_rows[0][0] if room_rows else "白板"
     subject = "通用技术"

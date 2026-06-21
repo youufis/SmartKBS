@@ -1,6 +1,6 @@
 # 智慧教学平台 (SmartKBS)
 
-> **版本 V6.0.0** | 更新于 2026-06-20
+> **版本 V6.1.0** | 更新于 2026-06-21
 >
 > 通用学科 AI 智慧教学管理平台（全学段：小学/初中/高中通用技术、信息科技等学科）
 > 集成流式 AI 对话、资源管理、试题库、在线考试、智能组卷 & Word 导出、
@@ -8,18 +8,18 @@
 > 智能点名、考勤统计、错题巩固、智能练习、课程练习、AI 资源推荐、学情分析、成长档案、AI 学伴等功能。
 > 基于 **FastAPI + React** 构建。
 
-![版本](https://img.shields.io/badge/版本-6.0.0-blue)
+![版本](https://img.shields.io/badge/版本-6.1.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope-orange)
 ![许可证](https://img.shields.io/badge/许可证-AGPL--3.0-red)
 
-> **V6.0.0 更新亮点**：
-> 白板随堂提问：AI 根据板书内容生成选择题并绘制到白板上、所有学生实时可见；
-> 白板 AI 视觉理解：支持识别白板中的图片（视觉模型），可解答图片中的题目；
-> 工具栏图标化：快捷操作按钮改为纯图标（附 Tooltip 提示），新增解答题目、复制全部对话按钮；
-> AI 回复 Markdown 增强：支持表格（GFM）渲染；
-> 新增清空白板功能
+> **V6.1.0 更新亮点**：
+> 系统整体性能优化与稳定性提升；
+> AI 对话与白板交互体验改进；
+> 课程管理、试题库、考试系统多项增强；
+> 学情分析与成长档案数据展示优化；
+> 界面 UI/UX 细节打磨与易用性改进
 
 ---
 

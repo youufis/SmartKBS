@@ -1076,6 +1076,10 @@ const ChatPage: React.FC = () => {
             )}
             <div style={{ width: 1, height: 20, background: '#e8e8e8', margin: '0 2px' }} />
             <Button size="small" icon={<PlusOutlined />} onClick={() => {
+              // 清除图片预览和文件缓存
+              setImagePreviewHtml('')
+              setFilePaths([])
+              fileUploadCache.clear()
               if (companionMode) {
                 useCompanionStore.getState().clearMessages()
               } else {
