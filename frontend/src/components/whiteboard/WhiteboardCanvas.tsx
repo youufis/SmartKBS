@@ -37,7 +37,7 @@ function generateUUID(): string {
   })
 }
 
-export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, isBroadcaster = false, ws, externalEditorRef }) => {
+export const WhiteboardCanvas = React.memo<Props>(({ roomId, readOnly = false, isBroadcaster = false, ws, externalEditorRef }) => {
   const store = useWhiteboardStore()
   const internalEditorRef = useRef<Editor | null>(null)
   const [ready, setReady] = useState(false)
@@ -58,10 +58,9 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       rafId = requestAnimationFrame(() => {
         const editor = internalEditorRef.current
         if (editor) {
-          // 强制 TLDraw 重算视口（会触发工具栏等 UI 重新渲染）
+          // 强制 TLDraw 重算视口（传入容器元素直接获取真实尺寸）
           try {
-            const bounds = editor.getViewportScreenBounds()
-            editor.updateViewportScreenBounds(bounds)
+            editor.updateViewportScreenBounds(el)
           } catch { /* ignore */ }
         }
       })
@@ -272,5 +271,5 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       )}
     </div>
   )
-}
+})
 
