@@ -12,7 +12,7 @@ import {
   PictureOutlined, FileTextOutlined, QuestionCircleOutlined,
   ClearOutlined, LoadingOutlined, StopOutlined,
   FullscreenOutlined, FullscreenExitOutlined,
-  CopyOutlined, BulbOutlined,
+  CopyOutlined, BulbOutlined, HighlightOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
@@ -412,6 +412,64 @@ export const AIPanel: React.FC<Props> = ({
     }
   }, [editorRef, kpName, subject, grade])
 
+  // 板书美化+自动排版
+  const handleBeautify = useCallback(async () => {
+    const editor = editorRef.current
+    if (!editor) {
+      message.warning('白板尚未加载')
+      return
+    }
+
+    message.loading({ content: 'AI 正在美化排版...', key: 'aiBeautify' })
+    try {
+      const result = await whiteboardApi.aiBeautifyBoard(roomId, subject)
+      if (result.shapes && result.shapes.length > 0) {
+        Modal.confirm({
+          title: `美化排版: ${result.title}`,
+          content: `将替换为 ${result.shapes.length} 个重新排版的形状，是否继续？`,
+          okText: '替换',
+          onOk: async () => {
+            // 删除原有形状
+            const oldIds = editor.getCurrentPageShapeIds()
+            if (oldIds.size > 0) {
+              editor.deleteShapes(Array.from(oldIds))
+            }
+            // 插入美化后的形状
+            const shapes = result.shapes.map((s: any, index: number) => {
+              const shapeId = `shape:beautify-${Date.now()}-${index}`
+              const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
+              if (!shapeProps.richText && shapeProps.text) {
+                shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
+                delete shapeProps.text
+              }
+              return {
+                id: shapeId,
+                type: 'geo',
+                x: s.x || 100,
+                y: s.y || 100 + index * 80,
+                props: shapeProps,
+              } as Record<string, any>
+            })
+            editor.createShapes(shapes as any)
+            message.success({ content: `美化排版完成`, key: 'aiBeautify' })
+            setMessages((prev) => [
+              ...prev,
+              { role: 'user', content: '🎨 美化排版' },
+              { role: 'assistant', content: `已重新排版为「${result.title}」（${shapes.length} 个形状）` },
+            ])
+          },
+        })
+      } else {
+        message.warning({ content: 'AI 未能生成美化排版', key: 'aiBeautify' })
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      const status = err?.response?.status
+      console.error('[AI美化排版]', err)
+      message.error({ content: detail || (status ? `HTTP ${status}` : err.message || '美化失败'), key: 'aiBeautify' })
+    }
+  }, [editorRef, roomId, subject])
+
   // 随堂提问
   const handleQuiz = useCallback(async () => {
     const editor = editorRef.current
@@ -746,6 +804,11 @@ export const AIPanel: React.FC<Props> = ({
           {isTeacher && (
             <Tooltip title="一键板书">
               <Button size="small" icon={<FileTextOutlined />} onClick={handleGenerateBoard} />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title="美化排版">
+              <Button size="small" icon={<HighlightOutlined />} onClick={handleBeautify} />
             </Tooltip>
           )}
           {isTeacher && (

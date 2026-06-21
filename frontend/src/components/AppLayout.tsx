@@ -58,7 +58,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
     { key: '/quick-poll', icon: <BarChartOutlined />, label: '课堂投票' },
     { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '抢答竞赛' },
     { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
-    { key: '/whiteboard', icon: <EditOutlined />, label: '课堂白板' },
+    { key: '/whiteboard', icon: <EditOutlined />, label: '教学白板' },
     { key: '/student-questions', icon: <MessageOutlined />, label: '课堂提问' },
   ]},
   { icon: <TrophyOutlined />, label: '成长档案', key: 'growth', children: [
@@ -105,7 +105,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/quick-poll', icon: <BarChartOutlined />, label: '课堂投票' },
       { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '抢答竞赛' },
       { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
-      { key: '/whiteboard', icon: <EditOutlined />, label: '课堂白板' },
+      { key: '/whiteboard', icon: <EditOutlined />, label: '教学白板' },
       { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
       { key: '/student-questions', icon: <MessageOutlined />, label: '提问管理' },
       { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },

@@ -293,3 +293,35 @@ BILINGUAL_BOARD_PROMPT = """你是一位双语教学设计师。将白板上的�
 ```
 其中 x/y 为建议的插入位置，从左到右、从上到下排列。
 """
+
+
+# ── AI 板书美化+自动排版 ──
+
+BEAUTIFY_BOARD_PROMPT = """你是一位教学板书美化设计师。请将白板上的杂乱内容重新组织为清晰、美观、结构化的板书。
+
+## 白板当前内容（AI 识别结果）
+```
+{snapshot_text}
+```
+
+## 学科
+{subject}
+
+## 美化排版要求
+1. **总分结构**：标题在上方居中，主体内容按逻辑分区排列
+2. **知识分层**：一级概念使用大矩形+粗体，二级使用小矩形缩进
+3. **对齐整洁**：所有形状水平对齐、间距均匀，去掉重叠和散落的内容
+4. **配色方案**：标题用 black，一级用 blue，二级用 green，关键公式用 orange
+5. **仅使用 geo 类型**，所有文字通过 props.text 设置
+6. **宽度控制**：总宽度不超过 900，每行形状宽度保持一致
+7. **删除冗余**：去除重复内容，合并同类信息
+8. **保留核心**：保留所有原始文字内容，只重组布局不改内容
+
+## 输出格式
+请输出一个 JSON 对象（不要其他文字）：
+```json
+{{"title": "板书标题", "shapes": [{{"type": "geo", "x": 数值, "y": 数值, "props": {{"geo": "rectangle", "w": 数值, "h": 数值, "color": "颜色名", "fill": "none", "size": "xl|l|m", "text": "文字内容"}}}}]}}
+```
+
+TLDraw 可用颜色：black/grey/blue/light-blue/green/light-green/orange/yellow/red/light-red/violet/light-violet/white
+"""
