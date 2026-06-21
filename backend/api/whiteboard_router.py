@@ -1193,6 +1193,114 @@ async def ai_suggest(request: Request):
         raise HTTPException(status_code=500, detail=f"AI 建议失败: {str(e)}")
 
 
+@router.get("/ai/export-summary/{room_id}", summary="导出板书总结（Word）")
+async def export_board_summary(room_id: int, request: Request):
+    """板书总结 + 导出 Word：AI 总结白板内容并生成 docx 文件"""
+    user = get_current_user(request)
+    if not _is_teacher_or_admin(user):
+        raise HTTPException(status_code=403, detail="仅教师可使用")
+    username = user["username"]
+
+    dashscope_api_key, _ = get_api_keys(username)
+    if not dashscope_api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+
+    snapshot_text = _get_snapshot_text(room_id)
+    if not snapshot_text or snapshot_text == "白板当前为空":
+        raise HTTPException(status_code=400, detail="白板当前为空，无内容可导出")
+
+    # 获取房间信息
+    room_rows = execute_query(
+        "SELECT title, subject FROM whiteboard_rooms WHERE id=?", (room_id,),
+    )
+    room_title = room_rows[0][0] if room_rows else "白板"
+    subject = "通用技术"
+
+    # AI 生成总结
+    from backend.prompts.whiteboard_ai import BOARD_SUMMARY_PROMPT
+    prompt = BOARD_SUMMARY_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
+    try:
+        from backend.api.ai_service import call_ai_sync
+        result = call_ai_sync(prompt, dashscope_api_key)
+        import re
+        jm = re.search(r'\{[\s\S]*\}', result.strip())
+        data = json.loads(jm.group()) if jm else {}
+    except Exception as e:
+        logger.error(f"AI 总结失败: {e}")
+        raise HTTPException(status_code=500, detail=f"AI 总结失败: {str(e)}")
+
+    # 生成 Word 文档
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    import io, urllib.parse
+    from datetime import datetime
+
+    doc = Document()
+    style = doc.styles['Normal']
+    style.font.name = 'Microsoft YaHei'
+    style.font.size = Pt(11)
+    style.paragraph_format.line_spacing = 1.5
+
+    # 标题
+    title_text = data.get("title", f"{room_title} - 板书总结")
+    t = doc.add_heading(title_text, level=1)
+    t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # 基本信息
+    info = doc.add_paragraph()
+    info.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = info.add_run(f"课程：{room_title}  学科：{subject}  导出时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
+    doc.add_paragraph()
+
+    # 内容概括
+    summary = data.get("summary", "")
+    if summary:
+        doc.add_heading("内容概括", level=2)
+        doc.add_paragraph(summary)
+
+    # 核心要点
+    key_points = data.get("key_points", [])
+    if key_points:
+        doc.add_heading("核心要点", level=2)
+        for i, point in enumerate(key_points):
+            p = doc.add_paragraph(style='List Bullet')
+            run = p.add_run(f"要点{i+1}：")
+            run.bold = True
+            p.add_run(str(point))
+
+    # 难点
+    difficulties = data.get("difficulties", [])
+    if difficulties:
+        doc.add_heading("重点难点", level=2)
+        for d in difficulties:
+            doc.add_paragraph(d, style='List Bullet')
+
+    # 课后作业
+    homework = data.get("homework", "")
+    if homework:
+        doc.add_heading("课后作业", level=2)
+        doc.add_paragraph(homework)
+
+    # 原始板书内容
+    doc.add_paragraph()
+    doc.add_heading("板书原始内容", level=2)
+    doc.add_paragraph(snapshot_text[:2000])
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+
+    safe_fn = urllib.parse.quote(f"板书总结_{room_title}.docx")
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_fn}"},
+    )
+
+
 @router.post("/ai/generate-quiz", summary="AI 根据板书生成随堂提问")
 async def ai_generate_quiz(request: Request):
     """随堂提问：根据白板内容生成一道选择题"""

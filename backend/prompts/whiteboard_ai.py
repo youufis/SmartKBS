@@ -356,3 +356,23 @@ MIND_MAP_PROMPT = """你是一位教学思维导图设计师。请根据白板�
 
 TLDraw 可用颜色：black/grey/blue/light-blue/green/light-green/orange/yellow/red/light-red/violet/light-violet/white
 """
+
+
+# ── AI 板书总结 ──
+
+BOARD_SUMMARY_PROMPT = """你是一位教学总结助手。请根据白板内容生成一份结构化的课堂总结报告。
+
+## 白板内容
+```
+{snapshot_text}
+```
+
+## 学科
+{subject}
+
+## 输出格式
+请输出一个 JSON 对象（不要其他文字）：
+```json
+{{"title": "课堂总结标题", "summary": "本节课的核心内容概括（200字以内）", "key_points": ["要点1", "要点2", "要点3"], "difficulties": ["难点1", "难点2"], "homework": "建议课后作业或思考题"}}
+```
+"""
