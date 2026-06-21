@@ -47,31 +47,27 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   const lastWSUpdateRef = useRef(0) // 上次 WS 收到快照的时间戳
   const containerRef = useRef<HTMLDivElement>(null) // 容器 ref，用于 ResizeObserver
 
-  // ResizeObserver 兜底：HTTPS 下 TLDraw 内部 ResizeObserver 可能失效
-  // 直接更新 viewport + 触发 window resize 事件让 TLDraw 内部机制也重新计算
+  // ResizeObserver 兜底：HTTPS 部署时 TLDraw 内部 ResizeObserver 可能不触发
+  // 在此手动监听容器尺寸变化，传入真实元素让 TLDraw 重新计算 viewport
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    let timerId: ReturnType<typeof setTimeout>
+    let rafId: number
     const ro = new ResizeObserver(() => {
-      const editor = internalEditorRef.current
-      if (!editor) return
-      // 用 setTimeout 0 代替 RAF：确保在 ResizeObserver 回调的微任务之后、
-      // 浏览器完成布局计算之后再执行，避免 getBoundingClientRect 返回中间态
-      clearTimeout(timerId)
-      timerId = setTimeout(() => {
-        try {
-          // 方法1：直接传入容器元素，TLDraw 内部会调用 getBoundingClientRect()
-          editor.updateViewportScreenBounds(el)
-        } catch { /* ignore */ }
-        try {
-          // 方法2：派发 resize 事件，触发 TLDraw 自身的 useScreenBounds 监听器
-          window.dispatchEvent(new Event('resize'))
-        } catch { /* ignore */ }
-      }, 0)
+      // 用 RAF 防抖，确保在下一帧绘制前拿到稳定的布局结果
+      cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => {
+        const editor = internalEditorRef.current
+        if (editor) {
+          try {
+            // 直接传入容器元素，TLDraw 内部会调用 getBoundingClientRect() 获取真实尺寸
+            editor.updateViewportScreenBounds(el)
+          } catch { /* ignore */ }
+        }
+      })
     })
     ro.observe(el)
-    return () => { ro.disconnect(); clearTimeout(timerId) }
+    return () => { ro.disconnect(); cancelAnimationFrame(rafId) }
   }, [])
 
   // 同步 readOnly 到 ref
