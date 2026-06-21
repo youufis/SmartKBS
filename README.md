@@ -37,7 +37,7 @@
 
 ## 🎮 演示环境
 
-> **🌐 演示地址：** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086)
+> **🌐 演示地址：** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
 >
 > **⏰ 开放时间：** 日间开放（晚间关机）
 >
