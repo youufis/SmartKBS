@@ -12,7 +12,6 @@ import {
   ExpandOutlined, CompressOutlined,
   CustomerServiceOutlined, ClearOutlined,
   UndoOutlined, RedoOutlined, DownloadOutlined,
-  ReloadOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -206,21 +205,6 @@ const WhiteboardRoomPage: React.FC = () => {
     })
   }, [])
 
-  // ── 强制刷新白板工具栏 ──
-  const handleRefreshTools = useCallback(() => {
-    const editor = editorRef.current
-    if (!editor) return
-    try {
-      const container = editor.getContainer()
-      if (container) {
-        editor.updateViewportScreenBounds(container)
-        message.success('工具栏已刷新')
-      }
-    } catch {
-      message.error('刷新失败')
-    }
-  }, [])
-
   // ── 撤销/恢复 ──
   const handleUndo = useCallback(() => {
     editorRef.current?.undo()
@@ -369,13 +353,6 @@ const WhiteboardRoomPage: React.FC = () => {
               </Button>
             </Tooltip>
           )}
-          <Tooltip title="刷新工具栏">
-            <Button
-              type="text"
-              icon={<ReloadOutlined />}
-              onClick={handleRefreshTools}
-            />
-          </Tooltip>
           {isTeacher && roomStatus === 'active' && (
             <Button danger icon={<StopOutlined />} onClick={handleEnd}>结束</Button>
           )}
