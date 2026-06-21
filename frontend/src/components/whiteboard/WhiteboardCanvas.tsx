@@ -39,7 +39,7 @@ function generateUUID(): string {
 
 export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, isBroadcaster = false, ws, externalEditorRef }) => {
   const store = useWhiteboardStore()
-  const internalEditorRef = useRef<Editor | null>(null)
+  const editorRef = useRef<Editor | null>(null)
   const [ready, setReady] = useState(false)
   const isSendingRef = useRef(false) // 防止远程变更触发本地发送
   const readOnlyRef = useRef(readOnly)  // 用 ref 追踪 readOnly，避免闭包陈旧
@@ -47,20 +47,19 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   const lastWSUpdateRef = useRef(0) // 上次 WS 收到快照的时间戳
   const containerRef = useRef<HTMLDivElement>(null) // 容器 ref，用于 ResizeObserver
 
-  // ResizeObserver 兜底：HTTPS 部署时 TLDraw 内部 ResizeObserver 可能不触发
-  // 在此手动监听容器尺寸变化，传入真实元素让 TLDraw 重新计算 viewport
+  // ResizeObserver 兜底：HTTPS 下 TLDraw 内部监听可能失效
+  // 容器尺寸变化时直接通知 TLDraw 更新视口
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     let rafId: number
     const ro = new ResizeObserver(() => {
-      // 用 RAF 防抖，确保在下一帧绘制前拿到稳定的布局结果
       cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(() => {
-        const editor = internalEditorRef.current
+        const editor = editorRef.current
         if (editor) {
           try {
-            // 直接传入容器元素，TLDraw 内部会调用 getBoundingClientRect() 获取真实尺寸
+            // 传入容器元素，TLDraw 内部会调用 getBoundingClientRect() 获取真实尺寸
             editor.updateViewportScreenBounds(el)
           } catch { /* ignore */ }
         }
@@ -84,21 +83,21 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
           const { data } = await apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`)
           if (data.granted && readOnlyRef.current && data.mode === 'interactive') {
             readOnlyRef.current = false
-            if (internalEditorRef.current) {
-              internalEditorRef.current.updateInstanceState({ isReadonly: false })
+            if (editorRef.current) {
+              editorRef.current.updateInstanceState({ isReadonly: false })
             }
           } else if (!data.granted && !readOnlyRef.current && data.mode === 'interactive') {
             readOnlyRef.current = true
-            if (internalEditorRef.current) {
-              internalEditorRef.current.updateInstanceState({ isReadonly: true })
+            if (editorRef.current) {
+              editorRef.current.updateInstanceState({ isReadonly: true })
             }
           }
           // 只有当前仍是只读状态才加载快照（防止初始 demo 定时器在切自习后覆盖学生内容）
-          if (data.snapshot && internalEditorRef.current && readOnlyRef.current) {
+          if (data.snapshot && editorRef.current && readOnlyRef.current) {
             // WS 近 5 秒内有更新则跳过（防止覆盖用户刚画的内容）
             if (Date.now() - lastWSUpdateRef.current > 5000) {
-              internalEditorRef.current.store.mergeRemoteChanges(() => {
-                try { internalEditorRef.current?.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
+              editorRef.current.store.mergeRemoteChanges(() => {
+                try { editorRef.current?.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
               })
             }
           }
@@ -108,7 +107,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     } else if (isBroadcaster) {
       // 教师端：每 500ms 广播快照（WS 方式） + 每 3s HTTP 保存
       const wsTimer = setInterval(() => {
-        const editor = internalEditorRef.current
+        const editor = editorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
@@ -122,7 +121,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
         }
       }, 500)
       const httpTimer = setInterval(async () => {
-        const editor = internalEditorRef.current
+        const editor = editorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
@@ -133,7 +132,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     } else if (store.mode === 'interactive') {
       // 互动模式已授权学生：每 1s 广播快照（WS 方式）
       const wsTimer = setInterval(() => {
-        const editor = internalEditorRef.current
+        const editor = editorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
@@ -154,7 +153,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
   const pendingSnapshots = useRef<string[]>([]) // editor 就绪前的消息缓冲
 
   const handleMount = useCallback((editor: Editor) => {
-    internalEditorRef.current = editor
+    editorRef.current = editor
     if (externalEditorRef) {
       externalEditorRef.current = editor
     }
@@ -195,7 +194,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
 
   // readOnly 变化时实时更新编辑器状态（如互动模式授权）
   useEffect(() => {
-    const editor = internalEditorRef.current
+    const editor = editorRef.current
     if (editor) {
       editor.updateInstanceState({ isReadonly: readOnly })
     }
@@ -203,7 +202,7 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
 
   useEffect(() => {
     const unsub = ws.onMessage((msg) => {
-      const editor = internalEditorRef.current
+      const editor = editorRef.current
 
       // editor 未就绪 → 缓存 op_broadcast 消息
       if (!editor) {
