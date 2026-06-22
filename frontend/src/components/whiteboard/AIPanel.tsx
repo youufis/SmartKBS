@@ -438,7 +438,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI一键板书]', err)
       message.error({ content: detail || (status ? `HTTP ${status}` : err.message || '生成失败'), key: 'aiBoard' })
     }
-  }, [editorRef, kpName, subject, grade])
+  }, [editorRef, kpName, subject, grade, getRightSidePosition])
 
   // 板书美化+自动排版
   const handleBeautify = useCallback(async () => {
@@ -584,8 +584,8 @@ export const AIPanel: React.FC<Props> = ({
             geo: 'rectangle',
             w: maxW,
             h: optH,
-            color: i === result.correct_index ? 'green' : 'grey',
-            fill: i === result.correct_index ? 'solid' : 'none',
+            color: 'grey',
+            fill: 'none',
             size: 'm',
             richText: {
               type: 'doc',
@@ -594,29 +594,6 @@ export const AIPanel: React.FC<Props> = ({
           },
         })
       })
-
-      // 答案解析
-      const explY = optStartY + ((result.options?.length || 4)) * (optH + optGap) + 10
-      if (result.explanation) {
-        shapes.push({
-          id: `shape:quiz-expl-${now}`,
-          type: 'geo',
-          x: startX,
-          y: explY,
-          props: {
-            geo: 'rectangle',
-            w: maxW,
-            h: 48,
-            color: 'orange',
-            fill: 'none',
-            size: 'm',
-            richText: {
-              type: 'doc',
-              content: [{ type: 'paragraph', content: [{ type: 'text', text: `💡 ${result.explanation}` }] }],
-            },
-          },
-        })
-      }
 
       // 写入白板
       editor.createShapes(shapes)
@@ -677,10 +654,15 @@ export const AIPanel: React.FC<Props> = ({
         okText: '收起',
       })
 
+      const correctAnswer = result.options?.[result.correct_index] || ''
+      const explanation = result.explanation || ''
       setMessages((prev) => [
         ...prev,
         { role: 'user', content: '🎯 生成随堂提问' },
-        { role: 'assistant', content: `**题目**：${result.question}\n\n**答案**：${result.options?.[result.correct_index] || ''}` },
+        {
+          role: 'assistant',
+          content: `**题目**：${result.question}\n\n**选项**：\n${result.options?.map((o: string, i: number) => `${['A','B','C','D'][i]}. ${o.replace(/^[A-D][.、\s]*/, '')}`).join('\n') || ''}\n\n**正确答案**：${correctAnswer}\n\n**解析**：${explanation}`,
+        },
       ])
     } catch (err: any) {
       const detail = err?.response?.data?.detail
@@ -688,9 +670,9 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI随堂提问]', err)
       message.error({ content: detail || (status ? `HTTP ${status}` : err.message || '生成失败'), key: 'aiQuiz' })
     }
-  }, [editorRef, roomId, subject, kpName])
+  }, [editorRef, roomId, subject, kpName, getRightSidePosition])
 
-  // 解答题目：识别白板图片中的题目并用视觉模型解析
+  // 智能分析：基于白板当前内容进行智能分析
   const handleSolveQuestion = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
@@ -698,8 +680,8 @@ export const AIPanel: React.FC<Props> = ({
       return
     }
 
-    const prompt = '请认真查看白板上的题目（包括图片和文字），逐步解答这道题，给出详细的解析过程和最终答案。如果白板上有图片，请结合图片内容一起分析。'
-    setMessages((prev) => [...prev, { role: 'user', content: '📝 解答白板上的题目' }])
+    const prompt = '请认真查看白板上的当前内容（包括图片和文字），智能分析这是什么内容。如果是题目则给出详细解析和答案；如果是知识点则进行讲解和总结；如果是图表则解读其含义。请根据白板的实际内容自动判断并给出最合适的回应。'
+    setMessages((prev) => [...prev, { role: 'user', content: '� 智能分析白板内容' }])
     setLoading(true)
     setStreamingText('')
 
@@ -860,7 +842,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI思维导图]', err)
       message.error({ content: detail || '生成失败', key: 'aiMindmap' })
     }
-  }, [editorRef, roomId, subject])
+  }, [editorRef, roomId, subject, getRightSidePosition])
 
   // 中英双语转换
   const handleGenerateBilingual = useCallback(async () => {
@@ -911,7 +893,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI双语板书]', err)
       message.error({ content: detail || '生成失败', key: 'aiBilingual' })
     }
-  }, [editorRef, roomId, subject])
+  }, [editorRef, roomId, subject, getRightSidePosition])
 
   // AI 教学建议
   const handleSuggest = useCallback(async () => {
@@ -1019,7 +1001,7 @@ export const AIPanel: React.FC<Props> = ({
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="一键板书">
+            <Tooltip title="生成板书">
               <Button size="small" icon={<FileTextOutlined />} onClick={handleGenerateBoard} />
             </Tooltip>
           )}
@@ -1054,7 +1036,7 @@ export const AIPanel: React.FC<Props> = ({
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="解答题目（识别图片中的题目并解析）">
+            <Tooltip title="智能分析">
               <Button size="small" icon={<BulbOutlined />} onClick={handleSolveQuestion} />
             </Tooltip>
           )}
