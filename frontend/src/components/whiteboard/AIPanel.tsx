@@ -14,7 +14,7 @@ import {
   FullscreenOutlined, FullscreenExitOutlined,
   CopyOutlined, BulbOutlined, HighlightOutlined,
   EditOutlined, ApartmentOutlined, TranslationOutlined,
-  RiseOutlined,
+  RiseOutlined, FormOutlined,
 } from '@ant-design/icons'
 import VoiceInput from '../VoiceInput'
 import ReactMarkdown from 'react-markdown'
@@ -22,6 +22,7 @@ import remarkMath from 'remark-math'
 import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
+import katex from 'katex'
 import * as whiteboardApi from '../../api/whiteboard'
 import { useProgressModal } from './ProgressModal'
 import type { Editor } from 'tldraw'
@@ -158,6 +159,88 @@ function fixTextShapeProps(type: string, props: Record<string, any>): Record<str
   }
   return result
 }
+
+// ── 公式渲染：将 LaTeX 公式渲染为 PNG 图片 URL（供 TLDraw 插入） ──
+function renderFormulaToImageUrl(formula: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      const html = katex.renderToString(formula, {
+        displayMode: true,
+        throwOnError: true,
+      })
+
+      // 用 SVG foreignObject 包裹公式 HTML → 转为图片
+      const svgXml = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="200">
+  <style>
+    .katex { font-size: 1.4em; line-height: 1.4; }
+    .katex * { white-space: nowrap; }
+  </style>
+  <rect x="0" y="0" width="800" height="200" fill="white" rx="8"/>
+  <foreignObject x="20" y="10" width="760" height="180">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;justify-content:center;height:100%;">
+      ${html}
+    </div>
+  </foreignObject>
+</svg>`
+
+      const blob = new Blob([svgXml], { type: 'image/svg+xml;charset=utf-8' })
+      const svgUrl = URL.createObjectURL(blob)
+
+      const img = new Image()
+      img.onload = () => {
+        // 绘制到 Canvas 上测量实际尺寸
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth || 800
+        canvas.height = img.naturalHeight || 200
+        const ctx = canvas.getContext('2d')!
+        ctx.fillStyle = 'white'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(img, 0, 0)
+        URL.revokeObjectURL(svgUrl)
+
+        // 裁剪空白区域
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const pixels = imageData.data
+        let top = canvas.height, bottom = 0, left = canvas.width, right = 0
+        for (let y = 0; y < canvas.height; y++) {
+          for (let x = 0; x < canvas.width; x++) {
+            const i = (y * canvas.width + x) * 4
+            if (pixels[i + 3] > 0) { // 非透明像素
+              top = Math.min(top, y)
+              bottom = Math.max(bottom, y)
+              left = Math.min(left, x)
+              right = Math.max(right, x)
+            }
+          }
+        }
+        const pad = 10
+        const cw = Math.max(right - left + pad * 2, 50)
+        const ch = Math.max(bottom - top + pad * 2, 30)
+        const clipped = document.createElement('canvas')
+        clipped.width = cw
+        clipped.height = ch
+        const cctx = clipped.getContext('2d')!
+        cctx.fillStyle = 'white'
+        cctx.fillRect(0, 0, cw, ch)
+        cctx.drawImage(canvas, left - pad, top - pad, cw, ch, 0, 0, cw, ch)
+
+        clipped.toBlob((blob) => {
+          if (blob) {
+            resolve(URL.createObjectURL(blob))
+          } else {
+            reject(new Error('Canvas to Blob 失败'))
+          }
+        }, 'image/png')
+      }
+      img.onerror = () => reject(new Error('公式图片加载失败'))
+      img.src = svgUrl
+    } catch (e: any) {
+      reject(new Error(e.message || '公式渲染失败'))
+    }
+  })
+}
+
 
 interface Message {
   role: 'user' | 'assistant'
@@ -942,6 +1025,82 @@ export const AIPanel: React.FC<Props> = ({
     }
   }, [editorRef, roomId, subject, progressModal])
 
+  // 插入公式：LaTeX 渲染为 PNG 插入白板
+  const handleInsertFormula = useCallback(async () => {
+    const editor = editorRef.current
+    if (!editor) {
+      message.warning('白板尚未加载')
+      return
+    }
+
+    const formula = await new Promise<string>((resolve) => {
+      Modal.confirm({
+        title: '📐 插入数学公式',
+        icon: null,
+        width: 520,
+        content: (
+          <div>
+            <div style={{ marginBottom: 8, fontSize: 13, color: '#666' }}>
+              请输入 LaTeX 公式代码，例如：
+            </div>
+            <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6, fontSize: 13, fontFamily: 'monospace', lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
+              {String.raw`E = mc^2
+\int_a^b x^2 dx
+\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}`}
+            </div>
+            <TextArea
+              id="ai-formula-input"
+              placeholder="在此输入 LaTeX 公式..."
+              rows={3}
+              style={{ fontFamily: 'monospace' }}
+            />
+          </div>
+        ),
+        okText: '插入',
+        cancelText: '取消',
+        onOk: () => {
+          const el = document.getElementById('ai-formula-input') as HTMLTextAreaElement
+          resolve(el?.value?.trim() || '')
+        },
+        onCancel: () => resolve(''),
+      })
+    })
+    if (!formula) return
+
+    progressModal.startProgress({
+      title: '渲染公式',
+      steps: [
+        { key: 'render', label: 'KaTeX 渲染公式', status: 'active' },
+        { key: 'insert', label: '插入白板', status: 'pending' },
+      ],
+      onCancel: () => {},
+    })
+
+    try {
+      progressModal.updateMessage(`正在渲染: $${formula}$`)
+      const imageUrl = await renderFormulaToImageUrl(formula)
+      progressModal.updateStep('render', 'done')
+      progressModal.updateStep('insert', 'active')
+      progressModal.updateMessage('正在插入白板...')
+
+      await editor.putExternalContent({
+        type: 'url',
+        url: imageUrl,
+      } as any)
+
+      progressModal.updateStep('insert', 'done')
+      progressModal.markSuccess()
+      setMessages((prev) => [
+        ...prev,
+        { role: 'user', content: `📐 插入公式: $${formula}$` },
+        { role: 'assistant', content: `已插入公式 \`${formula}\`` },
+      ])
+    } catch (err: any) {
+      progressModal.updateStep('render', 'error')
+      progressModal.markError(friendlyError(err, err.message || '公式渲染失败，请检查语法'))
+    }
+  }, [editorRef, progressModal])
+
   // 中英双语转换（带进度模态框）
   const handleGenerateBilingual = useCallback(async () => {
     const editor = editorRef.current
@@ -1145,6 +1304,9 @@ export const AIPanel: React.FC<Props> = ({
               <Button size="small" icon={<TranslationOutlined />} onClick={handleGenerateBilingual} />
             </Tooltip>
           )}
+          <Tooltip title="插入公式（LaTeX）">
+            <Button size="small" icon={<FormOutlined />} onClick={handleInsertFormula} />
+          </Tooltip>
           {isTeacher && (
             <Tooltip title="教学建议">
               <Button size="small" icon={<RiseOutlined />} onClick={handleSuggest} />
