@@ -23,7 +23,32 @@ import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import * as whiteboardApi from '../../api/whiteboard'
+import { useProgressModal } from './ProgressModal'
 import type { Editor } from 'tldraw'
+
+// ── 统一错误转换：把各种错误转为友好、可操作的提示 ──
+function friendlyError(err: any, defaultMsg: string = '操作失败'): string {
+  const status = err?.response?.status
+  const detail = err?.response?.data?.detail
+  const isNetwork = !err?.response && (err?.message?.includes('Network') || err?.message?.includes('network'))
+
+  if (status === 502 || status === 504 || isNetwork) {
+    return '⏳ AI 服务响应超时或网络不稳定，请稍后重试。如持续失败，请联系管理员检查 AI 服务状态。'
+  }
+  if (status === 401) {
+    return '🔒 登录已过期，请刷新页面重新登录。'
+  }
+  if (status === 403) {
+    return '🚫 权限不足，仅教师可使用此功能。'
+  }
+  if (status === 400) {
+    return detail || '⚠️ 参数错误，请检查输入。'
+  }
+  if (status === 500) {
+    return detail || '❌ 服务器内部错误，已记录日志，请联系管理员。'
+  }
+  return detail || err?.message || defaultMsg
+}
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -166,10 +191,12 @@ export const AIPanel: React.FC<Props> = ({
   const [loading, setLoading] = useState(false)
   const [streamingText, setStreamingText] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const [useVision, setUseVision] = useState(false)  // 启用视觉模型理解白板
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false)  // 防止并发发送
+  const progressModal = useProgressModal()
 
   // 计算右侧空白区域起始位置：遍历已有形状，取最右侧边界 + 间距
   const getRightSidePosition = useCallback((editor: Editor) => {
@@ -272,15 +299,16 @@ export const AIPanel: React.FC<Props> = ({
           kpName,
           subject,
           signal: abortController.signal,
+          useVision,
         },
       )
     } finally {
       sendingRef.current = false
       setLoading(false)
     }
-  }, [input, loading, roomId, kpName, subject])
+  }, [input, loading, roomId, kpName, subject, useVision])
 
-  // 一键生成图示
+  // 一键生成图示（流式进度版，防止 IIS 超时）
   const handleGenerateDiagram = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
@@ -309,58 +337,106 @@ export const AIPanel: React.FC<Props> = ({
     })
     if (!desc) return
 
-    message.loading({ content: 'AI 正在生成图示...', key: 'aiDiagram' })
+    // ── 启动流式生成（SSE 进度） ──
+    const abortController = new AbortController()
+
+    progressModal.startProgress({
+      title: 'AI 正在生成图示',
+      steps: [
+        { key: 'analyze', label: 'AI 分析需求', status: 'active' },
+        { key: 'generate', label: 'AI 生成图示内容', status: 'pending' },
+        { key: 'insert', label: '插入白板', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
-      const result = await whiteboardApi.aiGenerateDiagram(desc, subject)
+      await whiteboardApi.aiGenerateDiagramStream(
+        desc,
+        subject,
+        {
+          onProgress: (phase, message) => {
+            progressModal.updateMessage(message)
+            if (phase === 'analyzing') {
+              progressModal.updateStep('analyze', 'active')
+            } else if (phase === 'svg' || phase === 'image_gen') {
+              progressModal.updateStep('analyze', 'done')
+              progressModal.updateStep('generate', 'active')
+            }
+          },
+          onResult: async (result) => {
+            progressModal.updateStep('analyze', 'done')
+            progressModal.updateStep('generate', 'done')
+            progressModal.updateStep('insert', 'active')
+            progressModal.updateMessage('正在将内容插入白板...')
 
-      if (result.mode === 'svg' && result.svg) {
-        // ── SVG 模式：用 TLDraw 原生 svg-text 处理器插入 ──
-        await editor.putExternalContent({
-          type: 'svg-text',
-          text: result.svg,
-        } as any)
-        message.success({ content: 'SVG 图示已插入白板', key: 'aiDiagram' })
-        setMessages((prev) => [
-          ...prev,
-          { role: 'user', content: `📐 生成图示: ${desc}` },
-          { role: 'assistant', content: `已生成 SVG 图示「${result.title || ''}」并插入白板` },
-        ])
+            try {
+              if (result.mode === 'svg' && result.svg) {
+                // ── SVG 模式 ──
+                await editor.putExternalContent({
+                  type: 'svg-text',
+                  text: result.svg,
+                } as any)
+                progressModal.updateStep('insert', 'done')
+                progressModal.markSuccess()
+                setMessages((prev) => [
+                  ...prev,
+                  { role: 'user', content: `📐 生成图示: ${desc}` },
+                  { role: 'assistant', content: `已生成 SVG 图示「${result.title || ''}」并插入白板` },
+                ])
 
-      } else if (result.mode === 'image' && result.image_url) {
-        // ── 图片模式（万相生图）：直接插入图片 URL ──
-        await editor.putExternalContent({
-          type: 'url',
-          url: result.image_url,
-        } as any)
-        message.success({ content: '图片已插入白板', key: 'aiDiagram' })
-        setMessages((prev) => [
-          ...prev,
-          { role: 'user', content: `📐 生成图示: ${desc}` },
-          { role: 'assistant', content: `已生成图片「${result.title || ''}」并插入白板` },
-        ])
+              } else if (result.mode === 'image' && result.image_url) {
+                // ── 图片模式 ──
+                await editor.putExternalContent({
+                  type: 'url',
+                  url: result.image_url,
+                } as any)
+                progressModal.updateStep('insert', 'done')
+                progressModal.markSuccess()
+                setMessages((prev) => [
+                  ...prev,
+                  { role: 'user', content: `📐 生成图示: ${desc}` },
+                  { role: 'assistant', content: `已生成图片「${result.title || ''}」并插入白板` },
+                ])
 
-      } else if (result.mode === 'text') {
-        // ── 兜底：仅文字描述 ──
-        message.warning({ content: result.error || 'AI 未能生成有效图示', key: 'aiDiagram' })
-        setMessages((prev) => [
-          ...prev,
-          { role: 'user', content: `📐 生成图示: ${desc}` },
-          { role: 'assistant', content: (result as any).text || result.error || '生成失败' },
-        ])
-
-      } else {
-        message.warning({ content: result.error || 'AI 未能生成有效图示，请优化描述后重试', key: 'aiDiagram' })
-      }
+              } else {
+                progressModal.updateStep('insert', 'error')
+                progressModal.markError('AI 未能生成有效图示')
+                setMessages((prev) => [
+                  ...prev,
+                  { role: 'user', content: `📐 生成图示: ${desc}` },
+                  { role: 'assistant', content: result.error || '生成失败' },
+                ])
+              }
+            } catch (insertErr: any) {
+              progressModal.updateStep('insert', 'error')
+              progressModal.markError(friendlyError(insertErr, '插入白板失败，请重试'))
+            }
+          },
+          onError: (error) => {
+            progressModal.updateStep('generate', 'error')
+            progressModal.markError(error)
+            setMessages((prev) => [
+              ...prev,
+              { role: 'user', content: `📐 生成图示: ${desc}` },
+              { role: 'assistant', content: `生成失败: ${error}` },
+            ])
+          },
+        },
+        { signal: abortController.signal },
+      )
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      const status = err?.response?.status
-      const msg = detail || (status ? `HTTP ${status}` : err.message || '生成失败')
+      if (err.name === 'AbortError') {
+        progressModal.markError('已取消')
+        return
+      }
       console.error('[AI生成图示]', err)
-      message.error({ content: msg, key: 'aiDiagram' })
+      progressModal.updateStep('generate', 'error')
+      progressModal.markError(friendlyError(err, '图示生成失败'))
     }
-  }, [editorRef, subject])
+  }, [editorRef, subject, progressModal])
 
-  // 一键生成板书
+  // 一键生成板书（带进度模态框）
   const handleGenerateBoard = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
@@ -393,54 +469,61 @@ export const AIPanel: React.FC<Props> = ({
       if (!topic) return
     }
 
-    message.loading({ content: 'AI 正在生成板书...', key: 'aiBoard' })
+    const abortController = new AbortController()
+    progressModal.startProgress({
+      title: 'AI 正在生成板书',
+      steps: [
+        { key: 'generate', label: 'AI 生成板书内容', status: 'active' },
+        { key: 'insert', label: '插入白板', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
       const result = await whiteboardApi.aiGenerateBoard(topic, subject || '', grade || '')
+      progressModal.updateStep('generate', 'done')
+
       if (result.shapes && result.shapes.length > 0) {
-        // 清空当前白板（教师确认）
-        Modal.confirm({
-          title: `生成板书: ${result.title}`,
-          content: `将插入 ${result.shapes.length} 个形状到白板，是否继续？`,
-          okText: '插入',
-          onOk: async () => {
-            const pos = getRightSidePosition(editor)
-            const shapes = result.shapes.map((s: any, index: number) => {
-              const shapeId = `shape:ai-board-${Date.now()}-${index}`
-              const fixedType = convertTextType(s.type)
-              const finalType = fixedType === 'geo' ? 'geo' : 'geo'
-              const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
-              if (finalType === 'geo' && !shapeProps.richText) {
-                shapeProps.richText = { type: 'doc', content: [] }
-              }
-              return {
-                id: shapeId,
-                type: finalType,
-                x: (s.x || 100) + pos.x - 50,
-                y: (s.y || 100 + index * 80) + pos.y - 60,
-                props: shapeProps,
-              } as Record<string, any>
-            })
-            editor.createShapes(shapes as any)
-            message.success({ content: `板书「${result.title}」已插入`, key: 'aiBoard' })
-            setMessages((prev) => [
-              ...prev,
-              { role: 'user', content: `📝 一键生成板书: ${topic}` },
-              { role: 'assistant', content: `已生成板书「${result.title}」（${shapes.length} 个形状）` },
-            ])
-          },
+        progressModal.updateStep('insert', 'active')
+        progressModal.updateMessage(`正在插入 ${result.shapes.length} 个形状到白板...`)
+
+        // 直接插入白板，不再弹二次确认
+        const pos = getRightSidePosition(editor)
+        const shapes = result.shapes.map((s: any, index: number) => {
+          const shapeId = `shape:ai-board-${Date.now()}-${index}`
+          const fixedType = convertTextType(s.type)
+          const finalType = fixedType === 'geo' ? 'geo' : 'geo'
+          const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
+          if (finalType === 'geo' && !shapeProps.richText) {
+            shapeProps.richText = { type: 'doc', content: [] }
+          }
+          return {
+            id: shapeId,
+            type: finalType,
+            x: (s.x || 100) + pos.x - 50,
+            y: (s.y || 100 + index * 80) + pos.y - 60,
+            props: shapeProps,
+          } as Record<string, any>
         })
+        editor.createShapes(shapes as any)
+        progressModal.updateStep('insert', 'done')
+        progressModal.markSuccess()
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: `📝 一键生成板书: ${topic}` },
+          { role: 'assistant', content: `已生成板书「${result.title}」（${shapes.length} 个形状）` },
+        ])
       } else {
-        message.warning({ content: 'AI 未能生成有效板书', key: 'aiBoard' })
+        progressModal.updateStep('insert', 'error')
+        progressModal.markError('AI 未能生成有效板书')
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      const status = err?.response?.status
       console.error('[AI一键板书]', err)
-      message.error({ content: detail || (status ? `HTTP ${status}` : err.message || '生成失败'), key: 'aiBoard' })
+      progressModal.markError(friendlyError(err, '板书生成失败'))
     }
-  }, [editorRef, kpName, subject, grade])
+  }, [editorRef, kpName, subject, grade, progressModal])
 
-  // 板书美化+自动排版
+  // 板书美化+自动排版（带进度模态框）
   const handleBeautify = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
@@ -448,57 +531,66 @@ export const AIPanel: React.FC<Props> = ({
       return
     }
 
-    message.loading({ content: 'AI 正在美化排版...', key: 'aiBeautify' })
+    const abortController = new AbortController()
+    progressModal.startProgress({
+      title: 'AI 美化排版',
+      steps: [
+        { key: 'analyze', label: 'AI 分析白板内容', status: 'active' },
+        { key: 'generate', label: 'AI 生成排版方案', status: 'pending' },
+        { key: 'insert', label: '替换白板内容', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
       const result = await whiteboardApi.aiBeautifyBoard(roomId, subject)
+      progressModal.updateStep('analyze', 'done')
+      progressModal.updateStep('generate', 'done')
+
       if (result.shapes && result.shapes.length > 0) {
-        Modal.confirm({
-          title: `美化排版: ${result.title}`,
-          content: `将替换为 ${result.shapes.length} 个重新排版的形状，是否继续？`,
-          okText: '替换',
-          onOk: async () => {
-            // 删除原有形状
-            const oldIds = editor.getCurrentPageShapeIds()
-            if (oldIds.size > 0) {
-              editor.deleteShapes(Array.from(oldIds))
-            }
-            // 插入美化后的形状
-            const shapes = result.shapes.map((s: any, index: number) => {
-              const shapeId = `shape:beautify-${Date.now()}-${index}`
-              const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
-              if (!shapeProps.richText && shapeProps.text) {
-                shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
-                delete shapeProps.text
-              }
-              return {
-                id: shapeId,
-                type: 'geo',
-                x: s.x || 100,
-                y: s.y || 100 + index * 80,
-                props: shapeProps,
-              } as Record<string, any>
-            })
-            editor.createShapes(shapes as any)
-            message.success({ content: `美化排版完成`, key: 'aiBeautify' })
-            setMessages((prev) => [
-              ...prev,
-              { role: 'user', content: '🎨 美化排版' },
-              { role: 'assistant', content: `已重新排版为「${result.title}」（${shapes.length} 个形状）` },
-            ])
-          },
+        progressModal.updateStep('insert', 'active')
+        progressModal.updateMessage(`正在替换为 ${result.shapes.length} 个重新排版的形状...`)
+
+        // 删除原有形状
+        const oldIds = editor.getCurrentPageShapeIds()
+        if (oldIds.size > 0) {
+          editor.deleteShapes(Array.from(oldIds))
+        }
+        // 插入美化后的形状
+        const shapes = result.shapes.map((s: any, index: number) => {
+          const shapeId = `shape:beautify-${Date.now()}-${index}`
+          const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
+          if (!shapeProps.richText && shapeProps.text) {
+            shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
+            delete shapeProps.text
+          }
+          return {
+            id: shapeId,
+            type: 'geo',
+            x: s.x || 100,
+            y: s.y || 100 + index * 80,
+            props: shapeProps,
+          } as Record<string, any>
         })
+        editor.createShapes(shapes as any)
+        progressModal.updateStep('insert', 'done')
+        progressModal.markSuccess()
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: '🎨 美化排版' },
+          { role: 'assistant', content: `已重新排版为「${result.title}」（${shapes.length} 个形状）` },
+        ])
       } else {
-        message.warning({ content: 'AI 未能生成美化排版', key: 'aiBeautify' })
+        progressModal.updateStep('insert', 'error')
+        progressModal.markError('AI 未能生成美化排版')
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      const status = err?.response?.status
       console.error('[AI美化排版]', err)
-      message.error({ content: detail || (status ? `HTTP ${status}` : err.message || '美化失败'), key: 'aiBeautify' })
+      progressModal.markError(friendlyError(err, '美化排版失败'))
     }
-  }, [editorRef, roomId, subject])
+  }, [editorRef, roomId, subject, progressModal])
 
-  // 随堂提问
+  // 随堂提问（带进度模态框）
   const handleQuiz = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
@@ -506,17 +598,33 @@ export const AIPanel: React.FC<Props> = ({
       return
     }
 
-    message.loading({ content: 'AI 正在生成随堂提问...', key: 'aiQuiz' })
+    const abortController = new AbortController()
+    progressModal.startProgress({
+      title: 'AI 生成随堂提问',
+      steps: [
+        { key: 'analyze', label: 'AI 分析板书内容', status: 'active' },
+        { key: 'generate', label: 'AI 生成题目', status: 'pending' },
+        { key: 'insert', label: '发布题目到白板', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
       const result = await whiteboardApi.aiGenerateQuiz(roomId, subject, kpName)
+      progressModal.updateStep('analyze', 'done')
+      progressModal.updateStep('generate', 'done')
+
       if (result.error) {
-        message.warning({ content: result.error, key: 'aiQuiz' })
+        progressModal.markError(result.error)
         return
       }
       if (!result.question) {
-        message.warning({ content: 'AI 未能生成有效题目', key: 'aiQuiz' })
+        progressModal.markError('AI 未能生成有效题目')
         return
       }
+
+      progressModal.updateStep('insert', 'active')
+      progressModal.updateMessage('正在将题目发布到白板...')
 
       // ── 将题目写入白板画布，同步展示给学生 ──
       const colors = ['#ff4d4f', '#52c41a', '#1890ff', '#fa8c16']
@@ -620,62 +728,8 @@ export const AIPanel: React.FC<Props> = ({
 
       // 写入白板
       editor.createShapes(shapes)
-
-      // 弹窗展示题目供教师查看
-      Modal.info({
-        title: '🎯 随堂提问（已发布到白板）',
-        width: 520,
-        content: (
-          <div style={{ padding: '12px 0' }}>
-            <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 16, lineHeight: 1.6 }}>
-              {result.question}
-            </div>
-            {result.options?.map((opt: string, i: number) => (
-              <div
-                key={i}
-                style={{
-                  padding: '10px 14px',
-                  marginBottom: 8,
-                  borderRadius: 8,
-                  border: `1px solid ${i === result.correct_index ? colors[i % 4] : '#e8e8e8'}`,
-                  background: i === result.correct_index ? `${colors[i % 4]}10` : '#fafafa',
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                }}
-              >
-                <span style={{
-                  display: 'inline-block',
-                  width: 24, height: 24,
-                  borderRadius: 12,
-                  background: colors[i % 4],
-                  color: '#fff',
-                  textAlign: 'center',
-                  lineHeight: '24px',
-                  fontSize: 12,
-                  fontWeight: 'bold',
-                  marginRight: 10,
-                }}>{labels[i]}</span>
-                {opt.replace(/^[A-D][.、\s]*/, '')}
-                {i === result.correct_index && (
-                  <span style={{ float: 'right', color: '#52c41a', fontSize: 12 }}>✅ 正确答案</span>
-                )}
-              </div>
-            ))}
-            {result.explanation && (
-              <div style={{
-                marginTop: 12, padding: 10, background: '#fff7e6', borderRadius: 8,
-                fontSize: 13, color: '#666', lineHeight: 1.6,
-              }}>
-                💡 {result.explanation}
-              </div>
-            )}
-            <div style={{ marginTop: 12, padding: 8, background: '#f0f5ff', borderRadius: 6, fontSize: 12, color: '#1890ff', textAlign: 'center' }}>
-              ✅ 题目已同步发布到白板，所有学生可见
-            </div>
-          </div>
-        ),
-        okText: '收起',
-      })
+      progressModal.updateStep('insert', 'done')
+      progressModal.markSuccess()
 
       setMessages((prev) => [
         ...prev,
@@ -683,12 +737,10 @@ export const AIPanel: React.FC<Props> = ({
         { role: 'assistant', content: `**题目**：${result.question}\n\n**答案**：${result.options?.[result.correct_index] || ''}` },
       ])
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      const status = err?.response?.status
       console.error('[AI随堂提问]', err)
-      message.error({ content: detail || (status ? `HTTP ${status}` : err.message || '生成失败'), key: 'aiQuiz' })
+      progressModal.markError(friendlyError(err, '题目生成失败'))
     }
-  }, [editorRef, roomId, subject, kpName])
+  }, [editorRef, roomId, subject, kpName, progressModal])
 
   // 解答题目：识别白板图片中的题目并用视觉模型解析
   const handleSolveQuestion = useCallback(async () => {
@@ -748,7 +800,7 @@ export const AIPanel: React.FC<Props> = ({
     }
   }, [editorRef, roomId, kpName, subject])
 
-  // 智能批注：分析选中内容并添加标注
+  // 智能批注：分析选中内容并添加标注（带进度模态框）
   const handleSmartAnnotation = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
@@ -769,10 +821,26 @@ export const AIPanel: React.FC<Props> = ({
       return `[${s.type}] 位置(${Math.round(s.x)},${Math.round(s.y)}) 文字: ${text}`
     }).join('\n')
 
-    message.loading({ content: 'AI 正在分析...', key: 'aiAnnotation' })
+    const abortController = new AbortController()
+    progressModal.startProgress({
+      title: 'AI 智能批注',
+      steps: [
+        { key: 'analyze', label: 'AI 分析选中内容', status: 'active' },
+        { key: 'generate', label: 'AI 生成批注建议', status: 'pending' },
+        { key: 'insert', label: '添加批注到白板', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
       const result = await whiteboardApi.aiSmartAnnotation(desc)
+      progressModal.updateStep('analyze', 'done')
+      progressModal.updateStep('generate', 'done')
+
       if (result.label_text) {
+        progressModal.updateStep('insert', 'active')
+        progressModal.updateMessage('正在将批注添加到白板...')
+
         // 在选中区域旁边创建批注形状
         const selBounds = editor.getSelectionPageBounds()
         const ax = (selBounds?.x || 100) + (selBounds?.w || 200) + 20
@@ -795,125 +863,148 @@ export const AIPanel: React.FC<Props> = ({
             },
           },
         }] as any)
-        message.success({ content: '批注已添加', key: 'aiAnnotation' })
+        progressModal.updateStep('insert', 'done')
+        progressModal.markSuccess()
         setMessages((prev) => [
           ...prev,
           { role: 'user', content: '📌 智能批注' },
           { role: 'assistant', content: `**批注**：${result.label_text}\n\n**概括**：${result.summary || ''}` },
         ])
       } else {
-        message.warning({ content: result.summary || 'AI 未能生成批注', key: 'aiAnnotation' })
+        progressModal.updateStep('generate', 'error')
+        progressModal.markError(result.summary || 'AI 未能生成批注')
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
       console.error('[AI智能批注]', err)
-      message.error({ content: detail || '批注失败', key: 'aiAnnotation' })
+      progressModal.markError(friendlyError(err, '智能批注失败'))
     }
-  }, [editorRef])
+  }, [editorRef, progressModal])
 
-  // 生成思维导图
+  // 生成思维导图（带进度模态框）
   const handleGenerateMindmap = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
       message.warning('白板尚未加载')
       return
     }
-    message.loading({ content: 'AI 正在生成思维导图...', key: 'aiMindmap' })
+
+    const abortController = new AbortController()
+    progressModal.startProgress({
+      title: 'AI 生成思维导图',
+      steps: [
+        { key: 'analyze', label: 'AI 分析白板内容', status: 'active' },
+        { key: 'generate', label: 'AI 生成思维导图结构', status: 'pending' },
+        { key: 'insert', label: '插入白板', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
       const result = await whiteboardApi.aiGenerateMindmap(roomId, subject)
+      progressModal.updateStep('analyze', 'done')
+      progressModal.updateStep('generate', 'done')
+
       if (result.shapes && result.shapes.length > 0) {
-        Modal.confirm({
-          title: `思维导图: ${result.title}`,
-          content: `将插入 ${result.shapes.length} 个形状到白板，是否继续？`,
-          okText: '插入',
-          onOk: async () => {
-            const pos = getRightSidePosition(editor)
-            const shapes = result.shapes.map((s: any, index: number) => {
-              const shapeId = `shape:mindmap-${Date.now()}-${index}`
-              const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
-              if (!shapeProps.richText && shapeProps.text) {
-                shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
-                delete shapeProps.text
-              }
-              return {
-                id: shapeId,
-                type: 'geo',
-                x: (s.x || 100) + pos.x - 50,
-                y: (s.y || 100 + index * 80) + pos.y - 60,
-                props: shapeProps,
-              } as Record<string, any>
-            })
-            editor.createShapes(shapes as any)
-            message.success({ content: `思维导图已插入`, key: 'aiMindmap' })
-            setMessages((prev) => [
-              ...prev,
-              { role: 'user', content: '🧠 生成思维导图' },
-              { role: 'assistant', content: `已生成思维导图「${result.title}」（${shapes.length} 个节点）` },
-            ])
-          },
+        progressModal.updateStep('insert', 'active')
+        progressModal.updateMessage(`正在插入 ${result.shapes.length} 个节点到白板...`)
+
+        const pos = getRightSidePosition(editor)
+        const shapes = result.shapes.map((s: any, index: number) => {
+          const shapeId = `shape:mindmap-${Date.now()}-${index}`
+          const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
+          if (!shapeProps.richText && shapeProps.text) {
+            shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
+            delete shapeProps.text
+          }
+          return {
+            id: shapeId,
+            type: 'geo',
+            x: (s.x || 100) + pos.x - 50,
+            y: (s.y || 100 + index * 80) + pos.y - 60,
+            props: shapeProps,
+          } as Record<string, any>
         })
+        editor.createShapes(shapes as any)
+        progressModal.updateStep('insert', 'done')
+        progressModal.markSuccess()
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: '🧠 生成思维导图' },
+          { role: 'assistant', content: `已生成思维导图「${result.title}」（${shapes.length} 个节点）` },
+        ])
       } else {
-        message.warning({ content: 'AI 未能生成思维导图', key: 'aiMindmap' })
+        progressModal.updateStep('insert', 'error')
+        progressModal.markError('AI 未能生成思维导图')
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
       console.error('[AI思维导图]', err)
-      message.error({ content: detail || '生成失败', key: 'aiMindmap' })
+      progressModal.markError(friendlyError(err, '思维导图生成失败'))
     }
-  }, [editorRef, roomId, subject])
+  }, [editorRef, roomId, subject, progressModal])
 
-  // 中英双语转换
+  // 中英双语转换（带进度模态框）
   const handleGenerateBilingual = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
       message.warning('白板尚未加载')
       return
     }
-    message.loading({ content: 'AI 正在生成双语板书...', key: 'aiBilingual' })
+
+    const abortController = new AbortController()
+    progressModal.startProgress({
+      title: 'AI 生成双语板书',
+      steps: [
+        { key: 'analyze', label: 'AI 分析白板内容', status: 'active' },
+        { key: 'generate', label: 'AI 生成双语对照', status: 'pending' },
+        { key: 'insert', label: '插入白板', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
       const result = await whiteboardApi.aiGenerateBilingual(roomId, subject)
+      progressModal.updateStep('analyze', 'done')
+      progressModal.updateStep('generate', 'done')
+
       if (result.shapes && result.shapes.length > 0) {
-        Modal.confirm({
-          title: `双语板书: ${result.title}`,
-          content: `将插入 ${result.shapes.length} 个形状到白板，是否继续？`,
-          okText: '插入',
-          onOk: async () => {
-            const pos = getRightSidePosition(editor)
-            const shapes = result.shapes.map((s: any, index: number) => {
-              const shapeId = `shape:bilingual-${Date.now()}-${index}`
-              const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
-              if (!shapeProps.richText && shapeProps.text) {
-                shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
-                delete shapeProps.text
-              }
-              return {
-                id: shapeId,
-                type: 'geo',
-                x: (s.x || 100) + pos.x - 50,
-                y: (s.y || 100 + index * 80) + pos.y - 60,
-                props: shapeProps,
-              } as Record<string, any>
-            })
-            editor.createShapes(shapes as any)
-            message.success({ content: `双语板书已插入`, key: 'aiBilingual' })
-            setMessages((prev) => [
-              ...prev,
-              { role: 'user', content: '🌐 生成双语板书' },
-              { role: 'assistant', content: `已生成双语板书「${result.title}」（${shapes.length} 个对照项）` },
-            ])
-          },
+        progressModal.updateStep('insert', 'active')
+        progressModal.updateMessage(`正在插入 ${result.shapes.length} 个形状到白板...`)
+
+        const pos = getRightSidePosition(editor)
+        const shapes = result.shapes.map((s: any, index: number) => {
+          const shapeId = `shape:bilingual-${Date.now()}-${index}`
+          const shapeProps = { ...fixTextShapeProps(s.type, fixShapeProps(s.props || {})) }
+          if (!shapeProps.richText && shapeProps.text) {
+            shapeProps.richText = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: shapeProps.text }] }] }
+            delete shapeProps.text
+          }
+          return {
+            id: shapeId,
+            type: 'geo',
+            x: (s.x || 100) + pos.x - 50,
+            y: (s.y || 100 + index * 80) + pos.y - 60,
+            props: shapeProps,
+          } as Record<string, any>
         })
+        editor.createShapes(shapes as any)
+        progressModal.updateStep('insert', 'done')
+        progressModal.markSuccess()
+        setMessages((prev) => [
+          ...prev,
+          { role: 'user', content: '🌐 生成双语板书' },
+          { role: 'assistant', content: `已生成双语板书「${result.title}」（${shapes.length} 个对照项）` },
+        ])
       } else {
-        message.warning({ content: 'AI 未能生成双语板书', key: 'aiBilingual' })
+        progressModal.updateStep('insert', 'error')
+        progressModal.markError('AI 未能生成双语板书')
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
       console.error('[AI双语板书]', err)
-      message.error({ content: detail || '生成失败', key: 'aiBilingual' })
+      progressModal.markError(friendlyError(err, '双语板书生成失败'))
     }
-  }, [editorRef, roomId, subject])
+  }, [editorRef, roomId, subject, progressModal])
 
-  // AI 教学建议
+  // AI 教学建议（带进度模态框）
   const handleSuggest = useCallback(async () => {
     const editor = editorRef.current
     if (!editor) {
@@ -932,25 +1023,36 @@ export const AIPanel: React.FC<Props> = ({
       return
     }
 
-    message.loading({ content: 'AI 正在分析并给出建议...', key: 'aiSuggest' })
+    const abortController = new AbortController()
+    progressModal.startProgress({
+      title: 'AI 教学建议',
+      steps: [
+        { key: 'analyze', label: 'AI 分析白板内容', status: 'active' },
+        { key: 'generate', label: 'AI 生成建议', status: 'pending' },
+      ],
+      onCancel: () => abortController.abort(),
+    })
+
     try {
       const result = await whiteboardApi.aiSuggest(content, kpName)
+      progressModal.updateStep('analyze', 'done')
+      progressModal.updateStep('generate', 'done')
+
       if (result.suggestion) {
+        progressModal.markSuccess()
         setMessages((prev) => [
           ...prev,
           { role: 'user', content: '💡 请给出教学建议' },
           { role: 'assistant', content: result.suggestion },
         ])
-        message.success({ content: '建议已生成', key: 'aiSuggest' })
       } else {
-        message.warning({ content: 'AI 未能生成建议', key: 'aiSuggest' })
+        progressModal.markError('AI 未能生成建议')
       }
     } catch (err: any) {
-      const detail = err?.response?.data?.detail
       console.error('[AI教学建议]', err)
-      message.error({ content: detail || '生成失败', key: 'aiSuggest' })
+      progressModal.markError(friendlyError(err, '教学建议获取失败'))
     }
-  }, [editorRef, kpName])
+  }, [editorRef, kpName, progressModal])
 
   // 快捷键：Ctrl+Enter 发送
   const handleKeyDown = useCallback(
@@ -1058,6 +1160,16 @@ export const AIPanel: React.FC<Props> = ({
               <Button size="small" icon={<BulbOutlined />} onClick={handleSolveQuestion} />
             </Tooltip>
           )}
+          {/* 视觉理解开关（切换图标样式，放在图标行） */}
+          <Tooltip title={useVision ? '视觉理解（点击切换为文本解析）' : '文本解析（点击切换为视觉理解）'}>
+            <Button
+              size="small"
+              type={useVision ? 'primary' : 'default'}
+              icon={useVision ? <span style={{ fontSize: 14 }}>🧠</span> : <span style={{ fontSize: 14 }}>📝</span>}
+              onClick={() => setUseVision(!useVision)}
+              style={useVision ? { background: '#fa8c16', borderColor: '#fa8c16' } : {}}
+            />
+          </Tooltip>
           <div style={{ flex: 1 }} />
           <Tooltip title="复制全部对话">
             <Button
@@ -1225,6 +1337,9 @@ export const AIPanel: React.FC<Props> = ({
           支持 Ctrl+Enter 发送
         </div>
       </div>
+
+      {/* ── 进度模态框 ── */}
+      {progressModal.modal}
 
       <style>{`
         @keyframes blink {

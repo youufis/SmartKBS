@@ -119,6 +119,7 @@ export async function aiChatStream(
     kpName?: string
     subject?: string
     signal?: AbortSignal
+    useVision?: boolean
   },
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token')
@@ -134,6 +135,7 @@ export async function aiChatStream(
         room_id: roomId,
         kp_name: options?.kpName || '',
         subject: options?.subject || '',
+        use_vision: options?.useVision ?? false,
       }),
       signal: options?.signal,
     })
@@ -183,6 +185,107 @@ export async function aiChatStream(
   } catch (err: any) {
     if (err.name === 'AbortError') return
     onError(err.message || '网络错误')
+  }
+}
+
+// ── AI 图示生成的事件回调类型 ──
+
+export interface DiagramProgressEvent {
+  phase: string
+  message: string
+}
+
+export interface DiagramResultEvent {
+  mode: 'svg' | 'image' | 'text'
+  svg?: string
+  image_url?: string
+  title?: string
+  error?: string
+  width?: number
+  height?: number
+  fallback?: string
+}
+
+export interface DiagramErrorEvent {
+  message: string
+  fallback?: string
+  mode?: string
+}
+
+/**
+ * AI 图示生成（SSE 流式进度版本）
+ * 通过 EventSource 接收进度事件，防止 IIS 超时
+ */
+export async function aiGenerateDiagramStream(
+  description: string,
+  subject: string | undefined,
+  callbacks: {
+    onProgress: (phase: string, message: string) => void
+    onResult: (result: DiagramResultEvent) => void
+    onError: (error: string) => void
+  },
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  const token = localStorage.getItem('smartkb_token')
+  try {
+    const response = await fetch('/api/whiteboard/ai/generate-diagram', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ description, subject }),
+      signal: options?.signal,
+    })
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}))
+      callbacks.onError(errData.detail || `HTTP ${response.status}`)
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      callbacks.onError('无法读取响应流')
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      let currentEvent = ''
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim()
+        } else if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            switch (currentEvent) {
+              case 'progress':
+                callbacks.onProgress(data.phase, data.message)
+                break
+              case 'result':
+                callbacks.onResult(data as DiagramResultEvent)
+                return
+              case 'error':
+                callbacks.onError(data.message || '生成失败')
+                return
+            }
+          } catch { /* skip parse errors */ }
+        }
+      }
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') return
+    callbacks.onError(err.message || '网络错误')
   }
 }
 
