@@ -19,7 +19,6 @@ class ConnectionManager:
         if group_id not in self.active_connections:
             self.active_connections[group_id] = []
         self.active_connections[group_id].append(websocket)
-        logger.info(f"WebSocket 连接: 小组 #{group_id}, 当前连接数: {len(self.active_connections[group_id])}")
 
     def disconnect(self, group_id: int, websocket: WebSocket):
         if group_id in self.active_connections:
@@ -27,7 +26,6 @@ class ConnectionManager:
                 self.active_connections[group_id].remove(websocket)
                 if not self.active_connections[group_id]:
                     del self.active_connections[group_id]
-        logger.info(f"WebSocket 断开: 小组 #{group_id}")
 
     async def broadcast(self, group_id: int, message: dict[str, Any]):
         """广播消息到指定小组的所有连接"""

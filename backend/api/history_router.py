@@ -182,34 +182,21 @@ async def delete_history_file(path: str = Query(...), request: Request = None): 
             logger.error(f"删除历史记录索引失败: {e}")
             raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
-    # 记录请求的路径和实际解析的路径，帮助排查
-    logger.info(f"删除请求: path='{path}' → chat_dir='{chat_dir}' → target='{target_path}'")
-
     try:
         if os.path.isfile(target_path):
             os.remove(target_path)
-            still_exists = os.path.exists(target_path)
-            logger.info(f"os.remove 结果: file='{target_path}' still_exists={still_exists}")
-            if still_exists:
-                raise Exception(f"文件删除后仍然存在: {target_path}")
             # 删除 DB 索引
             rel = os.path.relpath(target_path, chat_dir).replace("\\", "/")
             execute_insert_update("DELETE FROM conversations WHERE username=? AND filename=?", (username, rel))
             msg = f"文件 {os.path.basename(target_path)} 已删除"
         elif os.path.isdir(target_path):
             shutil.rmtree(target_path)
-            still_exists = os.path.exists(target_path)
-            logger.info(f"shutil.rmtree 结果: dir='{target_path}' still_exists={still_exists}")
-            if still_exists:
-                raise Exception(f"目录删除后仍然存在: {target_path}")
             # 删除 DB 索引（匹配该日期目录下所有文件）
             rel_prefix = os.path.relpath(target_path, chat_dir).replace("\\", "/")
             execute_insert_update("DELETE FROM conversations WHERE username=? AND filename LIKE ?", (username, f"{rel_prefix}%"))
             msg = f"目录 {os.path.basename(target_path)} 已删除"
         else:
             raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
-
-        logger.info(f"历史记录已删除: {target_path}")
         return {"message": msg}
     except HTTPException:
         raise

@@ -106,7 +106,6 @@ async def create_room(req: CreateRoomRequest, request: Request):
            VALUES (?, 1, '第1页', 1)""",
         (room_id,),
     )
-    logger.info(f"白板房间创建: #{room_id} {room_code} by {user['username']}")
     return {"id": room_id, "room_code": room_code, "status": "ok"}
 
 
