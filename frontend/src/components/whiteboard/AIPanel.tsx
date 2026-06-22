@@ -521,7 +521,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI一键板书]', err)
       progressModal.markError(friendlyError(err, '板书生成失败'))
     }
-  }, [editorRef, kpName, subject, grade, progressModal])
+  }, [editorRef, kpName, subject, grade, progressModal, getRightSidePosition])
 
   // 板书美化+自动排版（带进度模态框）
   const handleBeautify = useCallback(async () => {
@@ -627,7 +627,6 @@ export const AIPanel: React.FC<Props> = ({
       progressModal.updateMessage('正在将题目发布到白板...')
 
       // ── 将题目写入白板画布，同步展示给学生 ──
-      const colors = ['#ff4d4f', '#52c41a', '#1890ff', '#fa8c16']
       const labels = ['A', 'B', 'C', 'D']
       const maxW = 500
 
@@ -740,7 +739,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI随堂提问]', err)
       progressModal.markError(friendlyError(err, '题目生成失败'))
     }
-  }, [editorRef, roomId, subject, kpName, progressModal])
+  }, [editorRef, roomId, subject, kpName, progressModal, getRightSidePosition])
 
   // 解答题目：识别白板图片中的题目并用视觉模型解析
   const handleSolveQuestion = useCallback(async () => {
@@ -940,7 +939,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI思维导图]', err)
       progressModal.markError(friendlyError(err, '思维导图生成失败'))
     }
-  }, [editorRef, roomId, subject, progressModal])
+  }, [editorRef, roomId, subject, progressModal, getRightSidePosition])
 
   // 中英双语转换（带进度模态框）
   const handleGenerateBilingual = useCallback(async () => {
@@ -1002,7 +1001,7 @@ export const AIPanel: React.FC<Props> = ({
       console.error('[AI双语板书]', err)
       progressModal.markError(friendlyError(err, '双语板书生成失败'))
     }
-  }, [editorRef, roomId, subject, progressModal])
+  }, [editorRef, roomId, subject, progressModal, getRightSidePosition])
 
   // AI 教学建议（带进度模态框）
   const handleSuggest = useCallback(async () => {
