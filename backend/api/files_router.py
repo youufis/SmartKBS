@@ -46,19 +46,15 @@ def _auto_cleanup_temp():
     if not TEMP_UPLOAD_DIR.exists():
         return
     cutoff = now - _TEMP_MAX_AGE
-    removed = 0
     for user_dir in TEMP_UPLOAD_DIR.iterdir():
         if not user_dir.is_dir():
             continue
         for f in user_dir.iterdir():
             if f.is_file() and f.stat().st_mtime < cutoff:
                 f.unlink()
-                removed += 1
         # 删除空目录
         if user_dir.exists() and not list(user_dir.iterdir()):
             user_dir.rmdir()
-    if removed:
-        logger.info(f"临时文件自动清理: 移除 {removed} 个过期文件")
 
 
 @router.post("/upload-temp")
@@ -89,9 +85,6 @@ async def upload_temp_file(request: Request, file: UploadFile = File(...)):
         if not save_path.exists():
             with open(save_path, "wb") as f:
                 f.write(content)
-            logger.info(f"临时文件已上传: {save_path}")
-        else:
-            logger.info(f"临时文件已存在（重复上传）: {save_path}")
 
         return {"path": str(save_path), "filename": filename, "size": len(content)}
     except HTTPException:
@@ -116,13 +109,11 @@ async def cleanup_temp_files(request: Request, all: bool = False):
         if TEMP_UPLOAD_DIR.exists():
             shutil.rmtree(TEMP_UPLOAD_DIR)
             TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info(f"所有临时文件已清理 (by: {username})")
         return {"message": "所有临时文件已清理"}
     else:
         user_dir = TEMP_UPLOAD_DIR / username
         if user_dir.exists():
             shutil.rmtree(user_dir)
-        logger.info(f"临时文件已清理: {username}")
         return {"message": "已清理"}
 
 

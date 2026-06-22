@@ -59,8 +59,6 @@ class WhiteboardManager:
             "cursor": {"x": 0, "y": 0},
             "granted": False,
         }
-        logger.info(f"白板房间 #{room_id} 用户 {username}({role}) 加入, 在线: {len(self.rooms[room_id]['connections'])}")
-
         # 如果该用户之前被授权过，自动恢复
         if username in self.rooms[room_id].get("granted_users", set()):
             self.rooms[room_id]["connections"][username]["granted"] = True

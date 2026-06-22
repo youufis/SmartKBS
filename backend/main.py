@@ -24,12 +24,12 @@ from backend.middleware import register_middleware
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version="5.7.0",
+    version="5.7",
     docs_url="/docs",
 )
 
 
-@app.on_event("startup")
+@app.on_event("startup") # type: ignore
 async def startup():
     """应用启动初始化"""
     init_db()
@@ -45,12 +45,11 @@ async def startup():
         asyncio.ensure_future(try_sync_remote_config())
     except Exception:
         pass
-    logger.info("SmartKB 后端启动完成")
 
 
-@app.on_event("shutdown")
+@app.on_event("shutdown") # type: ignore
 async def shutdown():
-    logger.info("SmartKB 后端关闭")
+    pass
 
 # CORS 配置（开发环境允许前端 dev server 跨域）
 app.add_middleware(
@@ -143,18 +142,11 @@ from backend.api.sync_service import router as sync_service_router
 app.include_router(sync_service_router, prefix="/api", tags=[])
 
 
-@app.get("/api/health")
-async def health_check():
-    """健康检查接口"""
-    return {"status": "ok", "version": "5.7.0"}
-
-
 # ── 试题多媒体静态文件服务 ──
 _question_media_dir = BASE_DIR / "question_media"
 if _question_media_dir.exists():
     from fastapi.staticfiles import StaticFiles
     app.mount("/api/files/question_media", StaticFiles(directory=str(_question_media_dir)), name="question_media")
-    logger.info(f"试题媒体文件服务已挂载: {_question_media_dir}")
 
 # ── 静态文件服务（前端构建产物） ──
 # 使用 catch-all 路由代替 mount，避免挂载点优先级高于 API 路由
@@ -168,7 +160,6 @@ if _frontend_dist.exists() and _frontend_dist.is_dir():
             return FileResponse(str(file_path))
         # SPA fallback: 所有非 API、非文件路径返回 index.html
         return FileResponse(str(_frontend_dist / "index.html"))
-    logger.info(f"前端静态文件服务已挂载: {_frontend_dist}")
 else:
     logger.warning(f"前端构建目录不存在: {_frontend_dist}，请先执行 npm run build")
 
