@@ -78,6 +78,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ENABLE_SUBJECT_TITLES": True,
     # 闯关挑战出题模式：false=AI 出题（默认）, true=从题库出题
     "QUEST_USE_BANK": False,
+    # AI 请求超时设置（秒）— 白板 AI 生成图示/板书等操作的超时时间
+    "AI_REQUEST_TIMEOUT": 300,
 }
 
 

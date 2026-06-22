@@ -2,7 +2,6 @@
 FastAPI 中间件
 - JWT 认证中间件
 - 在线用户活跃度追踪
-- CORS
 """
 from typing import Optional
 
@@ -91,5 +90,5 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 
 def register_middleware(app: FastAPI):
-    """注册所有中间件"""
+    """注册中间件"""
     app.add_middleware(AuthMiddleware)

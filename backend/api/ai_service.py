@@ -6,9 +6,17 @@ AI 服务封装：根据是否配置 APPID 自动选择调用模式
 """
 import json
 import os
+import concurrent.futures
 from typing import Any, Optional
 
 from backend.logger import logger
+
+# ── 专用线程池：隔离 AI 调用线程，防止耗尽 asyncio 默认线程池 ──
+# 限制最大 3 个并发 AI 线程，避免长时间等待的 AI 调用阻塞数据库等其他操作
+_ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
+    max_workers=3,
+    thread_name_prefix="ai_call",
+)
 
 
 def get_ai_config():
@@ -39,6 +47,24 @@ def call_ai_sync(prompt: str, api_key: str) -> str:
         return _call_agent_sync(prompt, api_key, cfg["app_id"])
     else:
         return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"])
+
+
+async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120) -> str:
+    """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
+    import asyncio
+    loop = asyncio.get_running_loop()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key),
+            timeout=timeout,
+        )
+        return result
+    except asyncio.TimeoutError:
+        logger.error(f"AI 请求超时（{timeout}秒）: prompt={prompt[:200]}")
+        raise TimeoutError(f"AI 请求超时（超过{timeout}秒），请稍后重试或简化描述")
+    except Exception as e:
+        logger.error(f"AI 请求失败: {e}")
+        raise
 
 
 def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
