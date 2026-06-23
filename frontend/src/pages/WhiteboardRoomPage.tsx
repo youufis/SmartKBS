@@ -58,8 +58,8 @@ const WhiteboardRoomPage: React.FC = () => {
         setRoomTitle(room.title)
         setModeState(room.mode as WhiteboardMode)
         setRoomStatus(room.status)
-        wb.setMode(room.mode as WhiteboardMode)
-        wb.setRoom(room)
+        setMode(room.mode as WhiteboardMode)
+        setRoom(room)
       } catch {
         message.error('房间不存在')
         navigate('/whiteboard')
@@ -68,7 +68,7 @@ const WhiteboardRoomPage: React.FC = () => {
     load()
     // 注册当前用户进入房间（HTTP 方式，WS 不通时仍能被识别）
     whiteboardApi.registerToRoom(rid).catch(() => {})
-  }, [rid, navigate, wb])
+  }, [rid, navigate])
 
   // ── 加载成员 ──
   const loadMembers = useCallback(async () => {
@@ -94,6 +94,10 @@ const WhiteboardRoomPage: React.FC = () => {
   }, [isTeacher, loadMembers])
 
   // ── WebSocket 消息 ──
+  // ★ 解构出稳定的 store setter，避免整个 wb 对象作为依赖
+  const setMode = wb.setMode
+  const setRoom = wb.setRoom
+
   useEffect(() => {
     const unsub = ws.onMessage((msg) => {
       if (msg.type === 'member_joined' || msg.type === 'member_left') {
@@ -102,7 +106,7 @@ const WhiteboardRoomPage: React.FC = () => {
       }
       if (msg.type === 'mode_changed') {
         setModeState(msg.mode as WhiteboardMode)
-        wb.setMode(msg.mode as WhiteboardMode)
+        setMode(msg.mode as WhiteboardMode)
       }
       if (msg.type === 'student_submitted') {
         message.success(`学生 ${msg.username} 已提交`)
@@ -123,14 +127,14 @@ const WhiteboardRoomPage: React.FC = () => {
       }
     })
     return unsub
-  }, [ws, isTeacher, wb, loadMembers])
+  }, [ws, isTeacher, setMode, loadMembers])
 
   // ── 操作 ──
   const handleModeChange = async (newMode: string) => {
     try {
       await whiteboardApi.updateRoom(rid, { mode: newMode })
       setModeState(newMode as WhiteboardMode)
-      wb.setMode(newMode as WhiteboardMode)
+      setMode(newMode as WhiteboardMode)
       ws.send({ type: 'mode_change', mode: newMode })
       message.success('模式已切换')
     } catch {
