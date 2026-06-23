@@ -1520,6 +1520,44 @@ async def delete_quest_bank_question(question_id: int, request: Request):
     return {"success": True, "message": "删除成功"}
 
 
+@router.post("/quest/admin/bank/ai-generate", summary="[教师] AI批量生题")
+async def ai_generate_quest_bank_questions(request: Request, body: dict):
+    """AI 批量生成题目并自动存入题库"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+
+    count = body.get("count", 1)
+    if count < 1 or count > 20:
+        raise HTTPException(status_code=400, detail="生成数量范围为 1~20")
+
+    username = user.get("username", "")
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
+
+    # 查询题库已有分类作为 used_categories
+    existing = execute_query(
+        "SELECT DISTINCT category FROM quest_question_bank"
+    )
+    used_categories = [row[0] for row in existing] if existing else []
+
+    questions = await _batch_generate(api_key, count, used_categories, 1, 0)
+
+    saved = 0
+    for q in questions:
+        if isinstance(q, Exception):
+            continue
+        try:
+            _save_question_to_bank(q)
+            saved += 1
+        except Exception:
+            continue
+
+    return {"success": True, "saved": saved, "total": len(questions)}
+
+
 # ═══════════════════════════════════════════════════════════
 # 闯关题库配图管理（教师端）
 # ═══════════════════════════════════════════════════════════
