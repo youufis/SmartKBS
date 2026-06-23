@@ -52,10 +52,13 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     readOnlyRef.current = readOnly
   }, [readOnly])
 
+  // 快照内容哈希缓存，避免无变化时重复序列化/同步
+  const snapshotHashRef = useRef('')
+
   // HTTP 轮询兜底 + 定时广播（WS 可用时也发）
   useEffect(() => {
     if (readOnly) {
-      // 只读端（演示模式学生 / 未授权的互动学生）：每 2s 拉取最新快照 + 授权状态
+      // 只读端（演示模式学生 / 未授权的互动学生）：每 5s 拉取最新快照 + 授权状态
       const interval = setInterval(async () => {
         try {
           const { data } = await apiClient.get(`/api/whiteboard/rooms/${roomId}/snapshot`)
@@ -74,46 +77,28 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
           if (data.snapshot && editorRef.current && readOnlyRef.current) {
             // WS 近 5 秒内有更新则跳过（防止覆盖用户刚画的内容）
             if (Date.now() - lastWSUpdateRef.current > 5000) {
+              // 快照未变化则跳过，减少内存分配
+              const hash = data.snapshot.length + '_' + (typeof data.snapshot === 'string' ? data.snapshot.slice(0, 200) : '')
+              if (hash === snapshotHashRef.current) return
+              snapshotHashRef.current = hash
               editorRef.current.store.mergeRemoteChanges(() => {
                 try { editorRef.current?.loadSnapshot(JSON.parse(data.snapshot)) } catch { /* 静默 */ }
               })
             }
           }
         } catch { /* 静默 */ }
-      }, 2000)
+      }, 5000)
       return () => clearInterval(interval)
     } else if (isBroadcaster) {
-      // 教师端：每 500ms 广播快照（WS 方式） + 每 3s HTTP 保存
+      // 教师端：每 1s 广播快照（仅内容变化时）+ 每 5s HTTP 保存
       const wsTimer = setInterval(() => {
         const editor = editorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
-          console.log('[白板] 广播快照, 大小:', snapshot.length)
-          ws.send({
-            type: 'op',
-            op_id: generateUUID(),
-            page: 1,
-            data: { snapshot },
-          })
-        }
-      }, 500)
-      const httpTimer = setInterval(async () => {
-        const editor = editorRef.current
-        if (!editor) return
-        const snapshot = JSON.stringify(editor.getSnapshot())
-        if (snapshot.length > 100) {
-          await apiClient.put(`/api/whiteboard/rooms/${roomId}/pages/1`, { snapshot_data: snapshot })
-        }
-      }, 3000)
-      return () => { clearInterval(wsTimer); clearInterval(httpTimer) }
-    } else if (store.mode === 'interactive') {
-      // 互动模式已授权学生：每 1s 广播快照（WS 方式）
-      const wsTimer = setInterval(() => {
-        const editor = editorRef.current
-        if (!editor) return
-        const snapshot = JSON.stringify(editor.getSnapshot())
-        if (snapshot.length > 100) {
+          // 内容未变化则跳过
+          if (snapshot === snapshotHashRef.current) return
+          snapshotHashRef.current = snapshot
           ws.send({
             type: 'op',
             op_id: generateUUID(),
@@ -122,19 +107,53 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
           })
         }
       }, 1000)
-      return () => clearInterval(wsTimer)
+      const httpTimer = setInterval(async () => {
+        const editor = editorRef.current
+        if (!editor) return
+        // 用 wsTimer 已缓存的哈希判断是否需要保存
+        if (!snapshotHashRef.current) return
+        await apiClient.put(`/api/whiteboard/rooms/${roomId}/pages/1`, { snapshot_data: snapshotHashRef.current })
+      }, 5000)
+      return () => { clearInterval(wsTimer); clearInterval(httpTimer); snapshotHashRef.current = '' }
+    } else if (store.mode === 'interactive') {
+      // 互动模式已授权学生：每 2s 广播快照（仅内容变化时）
+      const wsTimer = setInterval(() => {
+        const editor = editorRef.current
+        if (!editor) return
+        const snapshot = JSON.stringify(editor.getSnapshot())
+        if (snapshot.length > 100) {
+          if (snapshot === snapshotHashRef.current) return
+          snapshotHashRef.current = snapshot
+          ws.send({
+            type: 'op',
+            op_id: generateUUID(),
+            page: 1,
+            data: { snapshot },
+          })
+        }
+      }, 2000)
+      return () => { clearInterval(wsTimer); snapshotHashRef.current = '' }
     } else {
       // 自习模式学生：自己画自己的，不做任何同步
     }
   }, [roomId, store.mode, readOnly])
 
+  const [tldrawEditor, setTldrawEditor] = useState<Editor | null>(null)
+
+  // 将 editor 实例同步到 ref（供外部和定时器访问），避免在 useCallback 中直接修改 ref
+  useEffect(() => {
+    editorRef.current = tldrawEditor
+    return () => { editorRef.current = null }
+  }, [tldrawEditor])
+
   const handleMount = useCallback((editor: Editor) => {
-    editorRef.current = editor
     if (readOnly) {
       editor.updateInstanceState({ isReadonly: true })
     }
 
     setReady(true)
+    setTldrawEditor(editor)
+
     // 重放编辑就绪前缓存的快照
     const pending = pendingSnapshots.current
     if (pending.length > 0) {
