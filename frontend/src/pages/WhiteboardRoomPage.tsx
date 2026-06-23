@@ -298,20 +298,24 @@ const WhiteboardRoomPage: React.FC = () => {
               成员 ({onlineCount})
             </Button>
           )}
-          <Tooltip title="撤销 Ctrl+Z">
-            <Button
-              type="text"
-              icon={<UndoOutlined />}
-              onClick={handleUndo}
-            />
-          </Tooltip>
-          <Tooltip title="恢复 Ctrl+Shift+Z">
-            <Button
-              type="text"
-              icon={<RedoOutlined />}
-              onClick={handleRedo}
-            />
-          </Tooltip>
+          {isTeacher && (
+            <Tooltip title="撤销 Ctrl+Z">
+              <Button
+                type="text"
+                icon={<UndoOutlined />}
+                onClick={handleUndo}
+              />
+            </Tooltip>
+          )}
+          {isTeacher && (
+            <Tooltip title="恢复 Ctrl+Shift+Z">
+              <Button
+                type="text"
+                icon={<RedoOutlined />}
+                onClick={handleRedo}
+              />
+            </Tooltip>
+          )}
           <Tooltip title="全屏">
             <Button
               type="text"
