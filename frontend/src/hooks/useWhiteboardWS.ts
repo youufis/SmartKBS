@@ -2,7 +2,7 @@
  * 白板 WebSocket 通信 Hook
  * 复用项目现有的 WebSocket 模式（token 认证 + 自动重连）
  */
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useMemo } from 'react'
 import type { WhiteboardWSMessage } from '../types'
 
 interface UseWhiteboardWSOptions {
@@ -108,5 +108,6 @@ export function useWhiteboardWS({ roomId, enabled = true }: UseWhiteboardWSOptio
 
   const isConnected = wsRef.current?.readyState === WebSocket.OPEN
 
-  return { send, onMessage, isConnected }
+  // ★ 使用 useMemo 稳定对象引用，防止每次渲染生成新对象导致 effects 反复重跑
+  return useMemo(() => ({ send, onMessage, isConnected }), [send, onMessage, isConnected])
 }

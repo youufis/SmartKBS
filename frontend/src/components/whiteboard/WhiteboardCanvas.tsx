@@ -52,6 +52,34 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
     readOnlyRef.current = readOnly
   }, [readOnly])
 
+  // ═══════════════════════════════════════════════════════════
+  // ★ 关键修复：使用 TLDraw store.listen 事件驱动检测内容变更
+  // 替代原来每秒轮询 editor.getSnapshot() 的方式，避免无操作时
+  // 反复创建快照字符串导致的内存泄漏
+  // ═══════════════════════════════════════════════════════════
+  const pendingChangesRef = useRef(false) // TLDraw 内容是否发生实际变更
+  const didSaveRef = useRef(false)        // 快照是否有过实际变更发送（控制 HTTP 保存）
+
+  // 监听 TLDraw store 变更：仅在用户操作（非远程同步）且文档内容变化时标记
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor || !ready) return
+    // 仅在广播端（教师/互动模式已授权学生）注册监听
+    if (!isBroadcaster && store.mode !== 'interactive') {
+      pendingChangesRef.current = false
+      return
+    }
+    const cleanup = editor.store.listen(
+      () => { pendingChangesRef.current = true },
+      { source: 'user', scope: 'document' }
+    )
+    return () => {
+      cleanup()
+      pendingChangesRef.current = false
+    }
+  }, [isBroadcaster, store.mode, ready])
+  // ═══════════════════════════════════════════════════════════
+
   // 快照内容哈希缓存，避免无变化时重复序列化/同步
   const snapshotHashRef = useRef('')
 
@@ -90,15 +118,19 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
       }, 5000)
       return () => clearInterval(interval)
     } else if (isBroadcaster) {
-      // 教师端：每 1s 广播快照（仅内容变化时）+ 每 5s HTTP 保存
+      // 教师端：★ 使用 store.listen 事件驱动代替每秒轮询 ★
+      // 仅在有实际变更（pendingChangesRef）时才序列化快照并发送
       const wsTimer = setInterval(() => {
+        // ── 关键修复：无变更时跳过，避免 JSON.stringify 反复执行 ──
+        if (!pendingChangesRef.current) return
+        pendingChangesRef.current = false
+
         const editor = editorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
-          // 内容未变化则跳过
-          if (snapshot === snapshotHashRef.current) return
           snapshotHashRef.current = snapshot
+          didSaveRef.current = true
           ws.send({
             type: 'op',
             op_id: generateUUID(),
@@ -107,22 +139,24 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
           })
         }
       }, 1000)
+      // ★ HTTP 保存：降低频率至 30s，且仅在有实际变更时才提交
       const httpTimer = setInterval(async () => {
-        const editor = editorRef.current
-        if (!editor) return
-        // 用 wsTimer 已缓存的哈希判断是否需要保存
+        if (!didSaveRef.current) return
+        didSaveRef.current = false
         if (!snapshotHashRef.current) return
         await apiClient.put(`/api/whiteboard/rooms/${roomId}/pages/1`, { snapshot_data: snapshotHashRef.current })
-      }, 5000)
-      return () => { clearInterval(wsTimer); clearInterval(httpTimer); snapshotHashRef.current = '' }
+      }, 30000)
+      return () => { clearInterval(wsTimer); clearInterval(httpTimer); snapshotHashRef.current = ''; didSaveRef.current = false }
     } else if (store.mode === 'interactive') {
-      // 互动模式已授权学生：每 2s 广播快照（仅内容变化时）
+      // 互动模式已授权学生：★ 同样使用事件驱动 ★
       const wsTimer = setInterval(() => {
+        if (!pendingChangesRef.current) return
+        pendingChangesRef.current = false
+
         const editor = editorRef.current
         if (!editor) return
         const snapshot = JSON.stringify(editor.getSnapshot())
         if (snapshot.length > 100) {
-          if (snapshot === snapshotHashRef.current) return
           snapshotHashRef.current = snapshot
           ws.send({
             type: 'op',
@@ -194,6 +228,9 @@ if (readOnlyRef.current && !httpSyncedRef.current) {
 
   const pendingSnapshots = useRef<string[]>([]) // editor 就绪前的消息缓冲
 
+  // ★ 解构出稳定函数引用，避免整个 store 对象作为依赖
+  const setCurrentPage = store.setCurrentPage
+
   useEffect(() => {
     const unsub = ws.onMessage((msg) => {
       const editor = editorRef.current
@@ -229,7 +266,7 @@ if (readOnlyRef.current && !httpSyncedRef.current) {
       }
 
       if (msg.type === 'page_switched' && msg.snapshot) {
-        store.setCurrentPage(msg.page as number)
+        setCurrentPage(msg.page as number)
         try {
           const snap = JSON.parse(msg.snapshot as string) as TLStoreSnapshot
           editor.loadSnapshot(snap)
@@ -237,7 +274,7 @@ if (readOnlyRef.current && !httpSyncedRef.current) {
       }
     })
     return unsub
-  }, [ws, store])
+  }, [ws, setCurrentPage])
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
