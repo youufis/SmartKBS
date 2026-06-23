@@ -363,14 +363,9 @@ const QuestRecordsTab: React.FC = () => {
   )
 
   return (
-    <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
-      <Title level={3}>
-        <TrophyOutlined style={{ marginRight: 8 }} />
-        闯关管理
-      </Title>
-
+    <div style={{ width: '100%' }}>
       {/* ── 筛选栏 ── */}
-      <Card style={{ marginBottom: 16, borderRadius: 10 }} size="small">
+      <Card style={{ marginBottom: 8, borderRadius: 8 }} size="small">
         <Space wrap>
           <Input
             placeholder="学生姓名"
@@ -409,7 +404,7 @@ const QuestRecordsTab: React.FC = () => {
       </Card>
 
       {/* ── 表格 ── */}
-      <Card style={{ borderRadius: 10 }}>
+      <Card style={{ borderRadius: 8, marginBottom: 0 }}>
         <Table
           dataSource={records}
           columns={columns}
@@ -458,10 +453,9 @@ const QuestBankTab: React.FC = () => {
   const [editForm] = Form.useForm()
   const [saving, setSaving] = useState(false)
 
-  // 新增弹窗
-  const [addModalOpen, setAddModalOpen] = useState(false)
-  const [addForm] = Form.useForm()
-  const [adding, setAdding] = useState(false)
+  // AI 生题
+  const [aiGenerating, setAiGenerating] = useState(false)
+  const [aiCount, setAiCount] = useState(5)
 
   // ── 配图管理 ──
   const [mediaModalOpen, setMediaModalOpen] = useState(false)
@@ -649,37 +643,17 @@ const QuestBankTab: React.FC = () => {
     }
   }
 
-  // ── 新增 ──
-  const openAdd = () => {
-    addForm.resetFields()
-    setAddModalOpen(true)
-  }
-
-  const handleAddSave = async () => {
+  // ── AI 生题 ──
+  const handleAiGenerate = async () => {
+    setAiGenerating(true)
     try {
-      const values = await addForm.validateFields()
-      setAdding(true)
-      const options: Record<string, string> = {
-        A: values.option_a,
-        B: values.option_b,
-        C: values.option_c,
-        D: values.option_d,
-      }
-      await apiClient.post('/api/quest/admin/bank', {
-        category: values.category,
-        question_text: values.question_text,
-        options,
-        correct_answer: values.correct_answer,
-        explanation: values.explanation || '',
-      })
-      message.success('添加成功')
-      setAddModalOpen(false)
+      const { data } = await apiClient.post('/api/quest/admin/bank/ai-generate', { count: aiCount })
+      message.success(`AI 成功生成 ${data.saved}/${data.total} 道题目`)
       loadQuestions()
     } catch (e: any) {
-      if (e?.errorFields) return
-      message.error(e?.response?.data?.detail || '添加失败')
+      message.error(e?.response?.data?.detail || 'AI 生题失败')
     } finally {
-      setAdding(false)
+      setAiGenerating(false)
     }
   }
 
@@ -830,11 +804,18 @@ const QuestBankTab: React.FC = () => {
   return (
     <div>
       {/* ── 操作栏 ── */}
-      <Card style={{ marginBottom: 16, borderRadius: 10 }} size="small">
+      <Card style={{ marginBottom: 8, borderRadius: 8 }} size="small">
         <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>
-            添加题目
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAiGenerate} loading={aiGenerating}>
+            AI生题 {aiGenerating ? '中...' : `(${aiCount}道)`}
           </Button>
+          <Select
+            value={aiCount}
+            onChange={setAiCount}
+            style={{ width: 76 }}
+            size="small"
+            options={[1, 3, 5, 10, 15, 20].map(n => ({ label: `${n}道`, value: n }))}
+          />
           <Input
             placeholder="搜索题目"
             prefix={<SearchOutlined />}
@@ -858,7 +839,7 @@ const QuestBankTab: React.FC = () => {
       </Card>
 
       {/* ── 表格 ── */}
-      <Card style={{ borderRadius: 10 }}>
+      <Card style={{ borderRadius: 8 }}>
         <Table
           dataSource={questions}
           columns={columns}
@@ -929,51 +910,6 @@ const QuestBankTab: React.FC = () => {
         </Form>
       </Modal>
 
-      {/* ── 新增弹窗 ── */}
-      <Modal
-        title="添加闯关题目"
-        open={addModalOpen}
-        onOk={handleAddSave}
-        onCancel={() => setAddModalOpen(false)}
-        confirmLoading={adding}
-        width={700}
-      >
-        <Form form={addForm} layout="vertical">
-          <Form.Item name="category" label="分类" rules={[{ required: true }]}>
-            <Input placeholder="例如：科学、历史、地理" />
-          </Form.Item>
-          <Form.Item name="question_text" label="题目" rules={[{ required: true }]}>
-            <TextArea rows={3} placeholder="请输入题目内容" />
-          </Form.Item>
-          <Space style={{ width: '100%' }} align="start">
-            <Form.Item name="option_a" label="选项 A" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 A" />
-            </Form.Item>
-            <Form.Item name="option_b" label="选项 B" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 B" />
-            </Form.Item>
-          </Space>
-          <Space style={{ width: '100%' }} align="start">
-            <Form.Item name="option_c" label="选项 C" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 C" />
-            </Form.Item>
-            <Form.Item name="option_d" label="选项 D" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 D" />
-            </Form.Item>
-          </Space>
-          <Form.Item name="correct_answer" label="正确答案" rules={[{ required: true }]}>
-            <Select placeholder="选择正确答案">
-              <Select.Option value="A">A</Select.Option>
-              <Select.Option value="B">B</Select.Option>
-              <Select.Option value="C">C</Select.Option>
-              <Select.Option value="D">D</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="explanation" label="解析">
-            <TextArea rows={3} placeholder="题目解析（可选）" />
-          </Form.Item>
-        </Form>
-      </Modal>
 
       {/* ── 配图管理弹窗 ── */}
       <Modal
@@ -1012,11 +948,7 @@ const QuestBankTab: React.FC = () => {
 
 const QuestAdminPage: React.FC = () => {
   // 根据 URL 路径自动切换默认标签
-  // /quest → 闯关记录, /quest-records → 题库管理
-  const path = window.location.pathname
-  const [activeTab, setActiveTab] = useState(
-    path.includes('quest-records') ? 'bank' : 'records'
-  )
+  const [activeTab, setActiveTab] = useState('records')
 
   const tabItems = [
     {
@@ -1036,12 +968,12 @@ const QuestAdminPage: React.FC = () => {
   ]
 
   return (
-    <div style={{ padding: 24, maxWidth: 1400, margin: '0 auto' }}>
-      <Title level={3}>
+    <div style={{ padding: '12px 16px', width: '100%' }}>
+      <Title level={3} style={{ marginBottom: 12 }}>
         <TrophyOutlined style={{ marginRight: 8 }} />
-        闯关挑战管理
+        闯关管理
       </Title>
-      <Card style={{ borderRadius: 10 }}>
+      <Card style={{ borderRadius: 8 }}>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
     </div>
