@@ -30,6 +30,7 @@ import { useAuthStore } from '../stores/authStore'
 import apiClient from '../api/client'
 import NotificationBell from './NotificationBell'
 import TitleCelebration from './TitleCelebration'
+import ThemeSwitcher from './ThemeSwitcher'
 
 const { Header, Sider, Content } = Layout
 
@@ -265,33 +266,34 @@ const AppLayout: React.FC = () => {
       <TitleCelebration />
       <Header
         style={{
-          background: '#fff',
+          background: 'var(--bg-container)',
           padding: '0 24px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderBottom: '1px solid #f0f0f0',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+          borderBottom: '1px solid var(--border-color)',
+          boxShadow: 'var(--header-shadow)',
           position: 'sticky',
           top: 0,
           zIndex: 100,
         }}
       >
         <Space>
-          <Typography.Title level={4} style={{ margin: 0, color: '#1677ff' }}>
+          <Typography.Title level={4} style={{ margin: 0, color: 'var(--primary-color)' }}>
             🤖 SmartKB
           </Typography.Title>
           {orgName && (
-            <Typography.Text style={{ fontSize: 13, color: '#888' }}>
+            <Typography.Text style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
               {orgName}
             </Typography.Text>
           )}
-          <Typography.Text style={{ fontSize: 13, color: onlineCount > 0 ? '#52c41a' : '#999' }}>
+          <Typography.Text style={{ fontSize: 13, color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)' }}>
             🟢 在线人数: {onlineCount}
           </Typography.Text>
         </Space>
 
-        <Space size={20}>
+        <Space size={16}>
+          <ThemeSwitcher />
           <NotificationBell />
           <Dropdown menu={userMenu} placement="bottomRight">
             <Space style={{ cursor: 'pointer' }}>
@@ -313,8 +315,8 @@ const AppLayout: React.FC = () => {
           onCollapse={setCollapsed}
           trigger={null}
           style={{
-            background: '#fff',
-            borderRight: '1px solid #f0f0f0',
+            background: 'var(--bg-container)',
+            borderRight: '1px solid var(--border-color)',
             overflow: 'auto',
             height: '100%',
             position: 'sticky',
@@ -329,9 +331,9 @@ const AppLayout: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               height: 48,
-              borderBottom: collapsed ? 'none' : '1px solid #f0f0f0',
+              borderBottom: collapsed ? 'none' : '1px solid var(--border-color)',
               cursor: 'pointer',
-              color: '#666',
+              color: 'var(--text-secondary)',
               fontSize: 16,
             }}
             onClick={() => setCollapsed(!collapsed)}
@@ -350,11 +352,11 @@ const AppLayout: React.FC = () => {
           />
         </Sider>
 
-        <Content style={{ padding: '8px 0', background: '#f5f5f5', overflow: 'auto', height: '100%' }}>
+        <Content style={{ padding: '8px 0', background: 'var(--bg-layout)', overflow: 'auto', height: '100%' }}>
           {location.pathname === '/code-practice' && (
             <div style={{
               padding: '12px 24px',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              background: 'linear-gradient(135deg, var(--login-gradient-start) 0%, var(--login-gradient-end) 100%)',
               marginBottom: 8,
               display: 'flex',
               justifyContent: 'space-between',
@@ -386,7 +388,7 @@ const AppLayout: React.FC = () => {
             </div>
           )}
           <Outlet />
-          <div style={{ textAlign: 'center', padding: '16px 0 0', color: '#bbb', fontSize: 12 }}>
+          <div style={{ textAlign: 'center', padding: '16px 0 0', color: 'var(--footer-text)', fontSize: 12 }}>
             © 2026 UNET. All rights reserved.
           </div>
         </Content>

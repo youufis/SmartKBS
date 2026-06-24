@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { getOnlineCount } from '../api/auth'
 import apiClient from '../api/client'
+import ThemeSwitcher from '../components/ThemeSwitcher'
 
 const LoginPage: React.FC = () => {
   const navigate = useNavigate()
@@ -55,10 +56,22 @@ const LoginPage: React.FC = () => {
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        background: `linear-gradient(135deg, var(--login-gradient-start) 0%, var(--login-gradient-end) 100%)`,
         padding: 20,
+        position: 'relative',
       }}
     >
+      {/* 右上角主题切换 */}
+      <div style={{
+        position: 'fixed', top: 16, right: 20, zIndex: 200,
+        background: 'rgba(255,255,255,0.15)',
+        backdropFilter: 'blur(8px)',
+        borderRadius: 8,
+        padding: '2px 4px',
+      }}>
+        <ThemeSwitcher />
+      </div>
+
       <Card
         style={{ width: 420, borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}
         styles={{ body: { padding: 32 } }}
@@ -66,15 +79,15 @@ const LoginPage: React.FC = () => {
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           <div style={{ textAlign: 'center' }}>
             {orgName && (
-              <Typography.Text style={{ display: 'block', fontSize: 13, color: '#888', marginBottom: 4 }}>
+              <Typography.Text style={{ display: 'block', fontSize: 13, color: 'var(--text-tertiary)', marginBottom: 4 }}>
                 {orgName}
               </Typography.Text>
             )}
-            <Typography.Title level={3} style={{ margin: 0, color: '#1677ff' }}>
+            <Typography.Title level={3} style={{ margin: 0, color: 'var(--primary-color)' }}>
               🤖 SmartKB
             </Typography.Title>
             <Typography.Text type="secondary">{agentName}</Typography.Text>
-            <div style={{ marginTop: 8, fontSize: 13, color: onlineCount > 0 ? '#52c41a' : '#999' }}>
+            <div style={{ marginTop: 8, fontSize: 13, color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)' }}>
               🟢 在线人数: {onlineCount}
             </div>
           </div>
@@ -94,13 +107,13 @@ const LoginPage: React.FC = () => {
           </Form>
 
           {orgName && (
-            <div style={{ textAlign: 'center', fontSize: 12, color: '#bbb' }}>
+            <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--footer-text)' }}>
               {orgName}
             </div>
           )}
         </Space>
       </Card>
-      <div style={{ position: 'fixed', bottom: 16, textAlign: 'center', width: '100%', color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
+      <div style={{ position: 'fixed', bottom: 16, textAlign: 'center', width: '100%', color: 'var(--footer-text)', opacity: 0.8, fontSize: 12 }}>
         © 2026 UNET. All rights reserved.
       </div>
     </div>
