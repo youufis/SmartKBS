@@ -90,11 +90,21 @@ let abortController: AbortController | null = null;
 // ── 学伴对话自动保存到历史文件 ──
 let _companionLastSavedCount = 0
 let _companionSaveFilename: string | null = null
+let _companionLoadingHistory = false  // 加载历史标记，阻止自动保存干扰
 
 function _generateCompanionFilename(): string {
   const now = new Date()
   const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`
   return `companion_${ts}.md`
+}
+
+/** 加载学伴历史对话（不触发自动保存） */
+export function loadCompanionHistory(msgs: { role: 'user' | 'assistant'; content: string }[]) {
+  _companionLoadingHistory = true
+  _companionSaveFilename = null
+  _companionLastSavedCount = msgs.length
+  useCompanionStore.setState({ companionMessages: msgs, currentText: '' })
+  _companionLoadingHistory = false
 }
 
 export const useCompanionStore = create<CompanionStore>()((set, get) => ({
@@ -271,6 +281,7 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
   },
 
   clearMessages: () => {
+    _companionLoadingHistory = false
     _companionLastSavedCount = 0
     _companionSaveFilename = null
     set({ companionMessages: [], currentText: '' });
@@ -287,6 +298,8 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
 
 // ── 自动保存学伴对话到历史文件（与智答模式共用同一套历史系统）──
 useCompanionStore.subscribe((state) => {
+  // 加载历史记录时不触发自动保存
+  if (_companionLoadingHistory) return
   if (!state.isStreaming && state.companionMessages.length > 0
       && state.companionMessages.length !== _companionLastSavedCount) {
     // 避免空对话和仅错误消息的对话

@@ -15,7 +15,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useChatStore, fileUploadCache, loadHistoryAsNewTopic, setTaskFilename } from '../stores/chatStore'
 import { useAuthStore } from '../stores/authStore'
-import { useCompanionStore } from '../stores/companionStore'
+import { useCompanionStore, loadCompanionHistory } from '../stores/companionStore'
 import * as historyApi from '../api/history'
 import * as tasksApi from '../api/tasks'
 import * as chatApi from '../api/chat'
@@ -277,42 +277,46 @@ const ChatPage: React.FC = () => {
       message.loading({ content: '加载中...', key: 'history' });
       try {
         const result = await historyApi.readHistoryFile(key);
-        if (result) {
-          const msgs = parseHistoryContent(result.content);
-          const isCompanionFile = result.filename?.startsWith('companion_') || (node.title as string).startsWith('companion_');
+        if (!result) {
+          message.error({ content: '加载失败：文件为空', key: 'history' });
+          return;
+        }
+        const msgs = parseHistoryContent(result.content);
+        const isCompanionFile = result.filename?.startsWith('companion_') || (node.title as string).startsWith('companion_');
 
-          if (isCompanionFile) {
-            // 学伴/助手模式的对话 → 载入 companionStore
-            const companionMsgs = msgs.map(m => ({
-              role: m.role === 'user' ? 'user' as const : 'assistant' as const,
-              content: m.content,
-            }));
-            useCompanionStore.setState({ companionMessages: companionMsgs });
-            // 自动切换到学伴/助手模式
-            if (!companionMode) {
-              setCompanionMode(true);
-              if (curRole === 'student') companionLoadConfig();
-            }
-          } else {
-            // 智答模式的对话 → 载入 chatStore
-            loadHistoryAsNewTopic(msgs);
+        if (isCompanionFile) {
+          // 学伴/助手模式的对话 → 载入 companionStore（通过 loadCompanionHistory 避免重复保存）
+          const companionMsgs = msgs.map(m => ({
+            role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+            content: m.content,
+          }));
+          loadCompanionHistory(companionMsgs);
+          // 切换到智答模式时自动清理学伴消息，反之亦然
+          if (companionMode === false) {
+            useChatStore.getState().newTopic();
           }
-
-          // 自动将历史文件作为附件上传
-          if (result.filename) {
-            const file = new File([result.content], result.filename, { type: 'text/markdown' });
-            fileUploadCache.clear();
-            fileUploadCache.set(result.filename, file);
-            setFilePaths([result.filename]);
-            setImagePreviewHtml('');
-            message.info({ content: `已附加「${result.filename}」，可对该文件提问`, key: 'attach-info', duration: 3 });
+          // 自动切换到学伴/助手模式
+          if (!companionMode) {
+            setCompanionMode(true);
+          }
+        } else {
+          // 智答模式的对话 → 载入 chatStore
+          loadHistoryAsNewTopic(msgs);
+          // 切换到智答模式时自动清理学伴消息
+          if (companionMode) {
+            setCompanionMode(false);
+            useCompanionStore.getState().clearMessages();
           }
         }
-      } finally {
+
         message.success({ content: '已加载', key: 'history' });
+      } catch (e: unknown) {
+        console.error('历史文件加载失败:', e);
+        const err = e as { response?: { data?: { detail?: string } }; message?: string };
+        message.error({ content: err?.response?.data?.detail || err?.message || '加载失败', key: 'history' });
       }
     }
-  }, [parseHistoryContent, setFilePaths, companionMode, curRole, companionLoadConfig]);
+  }, [parseHistoryContent, companionMode, curRole]);
 
   // 删除历史文件或目录
   const handleHistoryDelete = useCallback(async (path: string) => {
