@@ -446,6 +446,8 @@ const ChatPage: React.FC = () => {
       sendMessage(input)
     }
     setInput('')
+    // 发送后刷新当日用量
+    chatApi.getUsage().then(setUsage).catch(() => {})
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
