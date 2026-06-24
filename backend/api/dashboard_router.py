@@ -288,11 +288,11 @@ async def dashboard_summary(request: Request):
 
         # ── 知识闯关数据（quest_records 在 smartkb.db 中，使用 _db_count）──
         quest_completed_count = _db_count(
-            "SELECT COUNT(*) FROM quest_records WHERE student_username=? AND completed=1",
+            "SELECT COUNT(*) FROM quest_records WHERE student_username=? AND completed!=0",
             (username,),
         )
         quest_score = _db_count(
-            "SELECT COALESCE(SUM(score), 0) FROM quest_records WHERE student_username=? AND completed=1",
+            "SELECT COALESCE(SUM(score), 0) FROM quest_records WHERE student_username=? AND completed!=0",
             (username,),
         )
 
@@ -431,20 +431,11 @@ async def dashboard_summary(request: Request):
             )
 
         if role == 1:
-            # 教师：只统计自己班级的学生数
-            t_grade = execute_query(
-                "SELECT grade, class FROM users WHERE username = ?", (username,)
-            )
-            if t_grade and t_grade[0][0]:
-                tg, tc = t_grade[0][0] or "", t_grade[0][1] or ""
-                total_students = _db_count(
-                    """SELECT COUNT(*) FROM users WHERE role=2
-                       AND (grade=? OR INSTR(?, grade)>0 OR INSTR(grade, ?)>0)
-                       AND (class=? OR INSTR(?, class)>0 OR INSTR(class, ?)>0)""",
-                    (tg, tg, tg, tc, tc, tc),
-                )
-            else:
-                total_students = 0
+            # 教师：基于统一权限服务统计管辖学生数
+            from backend.permission_service import get_students_in_scope
+            _teacher_students = get_students_in_scope(username)
+            _teacher_student_names = [s["username"] for s in _teacher_students]
+            total_students = len(_teacher_student_names)
         else:
             total_students = _db_count("SELECT COUNT(*) FROM users WHERE role = 2")
 
@@ -453,22 +444,14 @@ async def dashboard_summary(request: Request):
         else:
             total_teachers = 0
 
-        week_ago = (now - timedelta(days=7)).strftime("%Y-%m-%d")
-        # rollcall_history.created_at 可能只有时间没有日期，兼容两种格式
         if role == 0:
             total_rollcalls = execute_query(
-                """SELECT COUNT(*) FROM rollcall_history
-                   WHERE (length(created_at) > 10 AND created_at >= ?)
-                      OR (length(created_at) <= 10)""",
-                (week_ago,),
+                "SELECT COUNT(*) FROM rollcall_history",
             )
         else:
             total_rollcalls = execute_query(
-                """SELECT COUNT(*) FROM rollcall_history
-                   WHERE teacher_username = ?
-                   AND ((length(created_at) > 10 AND created_at >= ?)
-                        OR (length(created_at) <= 10))""",
-                (username, week_ago),
+                "SELECT COUNT(*) FROM rollcall_history WHERE teacher_username = ?",
+                (username,),
             )
         total_rollcalls = total_rollcalls[0][0] if total_rollcalls else 0
 
@@ -552,21 +535,16 @@ async def dashboard_summary(request: Request):
             quest_total_count = _db_count("SELECT COUNT(*) FROM quest_records")
             quest_completed_count_t = _db_count("SELECT COUNT(*) FROM quest_records WHERE completed=1")
         else:
-            # 教师：统计自己班级学生的闯关记录
-            t_grade2 = execute_query(
-                "SELECT grade, class FROM users WHERE username=?", (username,)
-            )
-            if t_grade2 and t_grade2[0][0]:
-                _tg, _tc = t_grade2[0][0] or "", t_grade2[0][1] or ""
+            # 教师：基于统一权限服务统计管辖学生的闯关记录
+            if _teacher_student_names:
+                ph_q = ",".join("?" for _ in _teacher_student_names)
                 quest_total_count = _db_count(
-                    """SELECT COUNT(*) FROM quest_records WHERE student_username IN
-                       (SELECT username FROM users WHERE role=2 AND grade=? AND INSTR(','||class||',', ?)>0)""",
-                    (_tg, f",{_tc},"),
+                    f"SELECT COUNT(*) FROM quest_records WHERE student_username IN ({ph_q})",
+                    tuple(_teacher_student_names),
                 )
                 quest_completed_count_t = _db_count(
-                    """SELECT COUNT(*) FROM quest_records WHERE completed=1 AND student_username IN
-                       (SELECT username FROM users WHERE role=2 AND grade=? AND INSTR(','||class||',', ?)>0)""",
-                    (_tg, f",{_tc},"),
+                    f"SELECT COUNT(*) FROM quest_records WHERE completed=1 AND student_username IN ({ph_q})",
+                    tuple(_teacher_student_names),
                 )
             else:
                 quest_total_count = 0
@@ -585,6 +563,41 @@ async def dashboard_summary(request: Request):
                 "SELECT COUNT(*) FROM quick_quiz_rooms WHERE creator_username=? AND status='ended'",
                 (username,),
             )
+
+        # ── 教师：基于统一权限统计课堂提问/回答 ──
+        if role == 1 and _teacher_student_names:
+            ph_t = ",".join("?" for _ in _teacher_student_names)
+            _teacher_q_count = _db_count(
+                f"""SELECT COUNT(*) FROM interaction_questions q
+                    JOIN users u ON q.student_username = u.username AND u.role = 2
+                    WHERE q.student_username IN ({ph_t})""",
+                tuple(_teacher_student_names),
+            )
+            _teacher_pending_q_count = _db_count(
+                f"""SELECT COUNT(*) FROM interaction_questions q
+                    JOIN users u ON q.student_username = u.username AND u.role = 2
+                    WHERE q.status = 'pending' AND q.student_username IN ({ph_t})""",
+                tuple(_teacher_student_names),
+            )
+            _teacher_answer_count = _db_count(
+                f"""SELECT COUNT(*) FROM interaction_question_answers a
+                    JOIN interaction_questions q ON a.question_id = q.id
+                    JOIN users u ON q.student_username = u.username AND u.role = 2
+                    WHERE q.student_username IN ({ph_t})""",
+                tuple(_teacher_student_names),
+            )
+            _teacher_approved_answer_count = _db_count(
+                f"""SELECT COUNT(*) FROM interaction_question_answers a
+                    JOIN interaction_questions q ON a.question_id = q.id
+                    JOIN users u ON q.student_username = u.username AND u.role = 2
+                    WHERE a.status = 'approved' AND q.student_username IN ({ph_t})""",
+                tuple(_teacher_student_names),
+            )
+        elif role == 1:
+            _teacher_q_count = 0
+            _teacher_pending_q_count = 0
+            _teacher_answer_count = 0
+            _teacher_approved_answer_count = 0
 
         result.update({
             "exam_stats": {
@@ -606,74 +619,10 @@ async def dashboard_summary(request: Request):
             "teacher_quiz_answer_count": quiz_answer_count,
             "teacher_poll_vote_count": poll_vote_count,
             # 课堂提问/回答
-            "teacher_question_count": (
-                _db_count("SELECT COUNT(*) FROM interaction_questions")
-                if role == 0 else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_questions q
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
-                    (grade, f",{cls},"),
-                ) if cls else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_questions q
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE u.grade = ?""",
-                    (grade,),
-                )
-            ),
-            "teacher_pending_question_count": (
-                _db_count("SELECT COUNT(*) FROM interaction_questions WHERE status = 'pending'")
-                if role == 0 else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_questions q
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE q.status = 'pending' AND u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
-                    (grade, f",{cls},"),
-                ) if cls else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_questions q
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE q.status = 'pending' AND u.grade = ?""",
-                    (grade,),
-                )
-            ),
-            "teacher_student_answer_count": (
-                _db_count("SELECT COUNT(*) FROM interaction_question_answers")
-                if role == 0 else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_question_answers a
-                       JOIN interaction_questions q ON a.question_id = q.id
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
-                    (grade, f",{cls},"),
-                ) if cls else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_question_answers a
-                       JOIN interaction_questions q ON a.question_id = q.id
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE u.grade = ?""",
-                    (grade,),
-                )
-            ),
-            "teacher_approved_answer_count": (
-                _db_count("SELECT COUNT(*) FROM interaction_question_answers WHERE status = 'approved'")
-                if role == 0 else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_question_answers a
-                       JOIN interaction_questions q ON a.question_id = q.id
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE a.status = 'approved' AND u.grade = ? AND INSTR(',' || u.class || ',', ?) > 0""",
-                    (grade, f",{cls},"),
-                ) if cls else
-                _db_count(
-                    """SELECT COUNT(*) FROM interaction_question_answers a
-                       JOIN interaction_questions q ON a.question_id = q.id
-                       JOIN users u ON q.student_username = u.username AND u.role = 2
-                       WHERE a.status = 'approved' AND u.grade = ?""",
-                    (grade,),
-                )
-            ),
+            "teacher_question_count": _db_count("SELECT COUNT(*) FROM interaction_questions") if role == 0 else _teacher_q_count,
+            "teacher_pending_question_count": _db_count("SELECT COUNT(*) FROM interaction_questions WHERE status = 'pending'") if role == 0 else _teacher_pending_q_count,
+            "teacher_student_answer_count": _db_count("SELECT COUNT(*) FROM interaction_question_answers") if role == 0 else _teacher_answer_count,
+            "teacher_approved_answer_count": _db_count("SELECT COUNT(*) FROM interaction_question_answers WHERE status = 'approved'") if role == 0 else _teacher_approved_answer_count,
             # 分组讨论
             "discussion_total": discussion_total,
             "discussion_active": discussion_active,
@@ -862,7 +811,7 @@ async def recent_activity(request: Request):
         quest_activities = execute_query(
             """SELECT completed_at, score, correct_count, total_questions
                FROM quest_records
-               WHERE student_username = ? AND completed = 1 AND completed_at IS NOT NULL
+               WHERE student_username = ? AND completed != 0 AND completed_at IS NOT NULL
                ORDER BY completed_at DESC LIMIT 5""",
             (username,),
         )
@@ -1213,32 +1162,27 @@ async def recent_activity(request: Request):
             })
 
         # 最近的课程练习（知识点练习）完成记录
-        if role == 0:
+        from backend.permission_service import get_students_in_scope
+        cp_students = get_students_in_scope(username)
+        cp_student_names = [s["username"] for s in cp_students]
+        ph = ",".join("?" for _ in cp_student_names) if cp_student_names else ""
+        if cp_student_names:
             cp_acts = q_execute_query(
-                """SELECT ar.submitted_at, ar.student_username, ar.score, ar.total_score, ar.accuracy
-                   FROM ai_practice_results ar
-                   WHERE ar.submitted_at IS NOT NULL
-                   ORDER BY ar.submitted_at DESC LIMIT 10""",
+                f"""SELECT ar.submitted_at, ar.student_username, ar.score, ar.total_score, ar.accuracy
+                    FROM ai_practice_results ar
+                    WHERE ar.submitted_at IS NOT NULL AND ar.student_username IN ({ph})
+                    ORDER BY ar.submitted_at DESC LIMIT 10""",
+                tuple(cp_student_names),
             )
         else:
-            # 教师：看自己班级学生的课程练习
-            cp_acts = q_execute_query(
-                """SELECT ar.submitted_at, ar.student_username, ar.score, ar.total_score, ar.accuracy
-                   FROM ai_practice_results ar
-                   JOIN users u ON u.username = ar.student_username AND u.role = 2
-                   WHERE ar.submitted_at IS NOT NULL
-                   AND (u.grade_id IN (SELECT grade_id FROM teacher_assignments WHERE teacher_username=?)
-                        OR u.grade IN (SELECT grade FROM users WHERE username=?))
-                   ORDER BY ar.submitted_at DESC LIMIT 10""",
-                (username, username),
-            )
+            cp_acts = []
         # 批量获取学生姓名
         cp_usernames = list(set(act['student_username'] for act in cp_acts))
         cp_name_map = {}
         if cp_usernames:
-            ph = ",".join("?" for _ in cp_usernames)
+            ph3 = ",".join("?" for _ in cp_usernames)
             u_rows = execute_query(
-                f"SELECT username, name FROM users WHERE username IN ({ph})",
+                f"SELECT username, name FROM users WHERE username IN ({ph3})",
                 tuple(cp_usernames),
             )
             for ur in u_rows:
@@ -1250,6 +1194,36 @@ async def recent_activity(request: Request):
                 "type": "practice",
                 "title": f"学生 {act['student_username']} {s_name} 完成了课程练习",
                 "detail": f"得分 {act['score']}/{act['total_score']} · 正确率 {act['accuracy']}%",
+            })
+
+        # 最近的知识闯关完成记录
+        if cp_student_names:
+            quest_acts = execute_query(
+                f"""SELECT qr.completed_at, qr.student_username, qr.score, qr.correct_count, qr.total_questions
+                    FROM quest_records qr
+                    WHERE qr.student_username IN ({ph}) AND qr.completed != 0 AND qr.completed_at IS NOT NULL
+                    ORDER BY qr.completed_at DESC LIMIT 10""",
+                tuple(cp_student_names),
+            )
+        else:
+            quest_acts = []
+        quest_usernames = list(set(act[1] for act in quest_acts))
+        quest_name_map = {}
+        if quest_usernames:
+            ph2 = ",".join("?" for _ in quest_usernames)
+            u_rows2 = execute_query(
+                f"SELECT username, name FROM users WHERE username IN ({ph2})",
+                tuple(quest_usernames),
+            )
+            for ur in u_rows2:
+                quest_name_map[ur[0]] = ur[1] or ur[0]
+        for act in quest_acts:
+            s_name = quest_name_map.get(act[1], act[1])
+            activities.append({
+                "time": act[0],
+                "type": "quest",
+                "title": f"学生 {act[1]} {s_name} 完成了知识闯关",
+                "detail": f"答对 {act[3]}/{act[4]} 题，得分 {act[2]} 分",
             })
 
     # 按时间排序
