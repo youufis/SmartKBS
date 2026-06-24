@@ -260,6 +260,16 @@ const DashboardPage: React.FC = () => {
                   style={{ width: 80, display: 'inline-flex', marginLeft: 8, verticalAlign: 'middle' }}
                 />
               )}
+              <Text style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>|</Text>
+              <Button
+                size="small"
+                type="text"
+                style={{ color: '#fff', padding: 0 }}
+                icon={<span>🧠</span>}
+                onClick={() => navigate('/chat?companion=1')}
+              >
+                AI学伴
+              </Button>
             </span>
           )}
           {isTeacher && summary.teacher_grades && (
@@ -280,7 +290,7 @@ const DashboardPage: React.FC = () => {
                   title="学习考试"
                   value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
                   prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考 · 错题{summary.wrong_exam_count ?? 0}场</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考 · 错题{summary.wrong_exam_count ?? 0}场{(summary.course_practice_count ?? 0) > 0 && <> · 课程练习{summary.course_practice_count}项 · {summary.course_practice_avg_accuracy ?? 0}%</>}</Text>}
                   valueStyle={{ color: '#1677ff', fontSize: 22 }}
                 />
               </Card>
@@ -319,48 +329,6 @@ const DashboardPage: React.FC = () => {
               </Card>
             </Col>
           </Row>
-
-          {/* 课程练习进度条 */}
-          {(summary.course_practice_count ?? 0) > 0 && (
-            <Card size="small" style={{ marginBottom: 16, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
-              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                <Space>
-                  <ExperimentOutlined style={{ color: '#52c41a', fontSize: 18 }} />
-                  <Text strong>课程练习</Text>
-                  <Text type="secondary" style={{ fontSize: 13 }}>
-                    已完成 <Text strong style={{ color: '#52c41a' }}>{summary.course_practice_count}</Text> 个知识点练习
-                  </Text>
-                </Space>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  平均正确率 <Text strong style={{ color: '#1677ff' }}>{summary.course_practice_avg_accuracy ?? 0}%</Text>
-                </Text>
-              </Space>
-            </Card>
-          )}
-
-          {/* 🧠 AI 学伴卡片 */}
-          <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
-            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-              <Space>
-                <span style={{ fontSize: 24 }}>🧠</span>
-                <Text strong>AI 学伴「小智」</Text>
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                  {summary.title_name ? `当前称号：${summary.title_emoji || '🏆'} ${summary.title_name}` : '你的专属学习伙伴'}
-                </Text>
-              </Space>
-              <Space>
-                {summary.total_score !== undefined && (
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {summary.total_score} 积分 · 🔥 {summary.recent_chat_count ?? 0} 次对话
-                  </Text>
-                )}
-                <Button size="small" type="primary" ghost icon={<span>🧠</span>}
-                  onClick={() => navigate('/chat?companion=1')}>
-                  找小智聊聊
-                </Button>
-              </Space>
-            </Space>
-          </Card>
         </>
       ) : (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
