@@ -33,6 +33,8 @@ from backend.companion_push import (
     mark_push_read,
     mark_all_pushes_read,
     get_unread_push_count,
+    get_push_list,
+    delete_push,
     push_morning_greeting,
 )
 from backend.logger import logger
@@ -336,6 +338,31 @@ async def unread_push_count(request: Request):
 
     count = get_unread_push_count(username)
     return {"count": count}
+
+
+@router.get("/companion/push/list", summary="获取推送消息列表（分页）")
+async def push_list(
+    request: Request,
+    page: int = 1,
+    page_size: int = 20,
+    unread_only: bool = False,
+):
+    """获取推送消息列表，支持分页和已读/未读筛选"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    items, total = get_push_list(username, page, page_size, unread_only)
+    return {"pushes": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.delete("/companion/push/{push_id}", summary="删除推送消息")
+async def delete_push_message(push_id: int, request: Request):
+    """删除一条推送消息"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    delete_push(push_id, username)
+    return {"success": True}
 
 
 @router.post("/companion/push/check-morning", summary="检查并发送早安推送")

@@ -41,6 +41,14 @@ export interface PushMessage {
   title: string;
   content: string;
   created_at: string;
+  is_read?: boolean;
+}
+
+export interface PushListResponse {
+  pushes: PushMessage[];
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 /** 获取学伴配置 */
@@ -95,6 +103,20 @@ export async function getUnreadPushCount(): Promise<{ count: number }> {
 /** 检查早安推送 */
 export async function checkMorningPush(): Promise<{ success: boolean }> {
   const { data } = await apiClient.post('/api/companion/push/check-morning');
+  return data;
+}
+
+/** 获取推送消息列表（分页） */
+export async function getPushList(page = 1, pageSize = 20, unreadOnly = false): Promise<PushListResponse> {
+  const { data } = await apiClient.get('/api/companion/push/list', {
+    params: { page, page_size: pageSize, unread_only: unreadOnly },
+  });
+  return data;
+}
+
+/** 删除推送消息 */
+export async function deletePush(pushId: number): Promise<{ success: boolean }> {
+  const { data } = await apiClient.delete(`/api/companion/push/${pushId}`);
   return data;
 }
 
