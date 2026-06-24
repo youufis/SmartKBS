@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 // 用户管理
 import {
   Layout, Card, Tabs, Form, Input, Button, message,
@@ -60,6 +60,12 @@ const UserMgmtPage: React.FC = () => {
 
   // ── 修改密码 ──
   const [pwdForm] = Form.useForm()
+  // 非管理员自动填入当前用户名
+  React.useEffect(() => {
+    if (!isAdmin && user?.username) {
+      pwdForm.setFieldsValue({ username: user.username })
+    }
+  }, [])
   const handleChangePwd = async (values: Record<string, unknown>) => {
     const v = values as Record<string, string>
     if (!v.username || !v.new_password) {
@@ -297,8 +303,30 @@ const UserMgmtPage: React.FC = () => {
       label: '修改密码',
       children: (
         <Form form={pwdForm} layout="vertical" onFinish={handleChangePwd} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input placeholder="用户名" /></Form.Item>
-          <Form.Item name="new_password" label="新密码" rules={[{ required: true }]}><Input.Password placeholder="新密码" /></Form.Item>
+          <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
+            <Input placeholder="用户名" disabled={!isAdmin} />
+          </Form.Item>
+          <Form.Item name="new_password" label="新密码" rules={[{ required: true }]}>
+            <Input.Password placeholder="新密码" />
+          </Form.Item>
+          <Form.Item
+            name="confirm_password"
+            label="确认新密码"
+            dependencies={['new_password']}
+            rules={[
+              { required: true, message: '请再次输入新密码' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('new_password') === value) {
+                    return Promise.resolve()
+                  }
+                  return Promise.reject(new Error('两次输入的密码不一致'))
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="再次输入新密码" />
+          </Form.Item>
           <Button type="primary" htmlType="submit">修改密码</Button>
         </Form>
       ),
