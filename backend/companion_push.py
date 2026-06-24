@@ -77,6 +77,52 @@ def get_unread_push_count(student_username: str) -> int:
     return rows[0][0] if rows else 0
 
 
+def get_push_list(student_username: str, page: int = 1, page_size: int = 20, unread_only: bool = False) -> tuple[list[dict[str, Any]], int]:
+    """获取推送消息列表（支持分页和已读/未读筛选）"""
+    conditions = ["student_username=?"]
+    params = [student_username]
+    if unread_only:
+        conditions.append("read_status=0")
+    where = " AND ".join(conditions)
+
+    # 总数
+    count_row = execute_query(
+        f"SELECT COUNT(*) FROM ai_companion_push_log WHERE {where}",
+        tuple(params),
+    )
+    total = count_row[0][0] if count_row else 0
+
+    # 分页查询
+    offset = (page - 1) * page_size
+    rows = execute_query(
+        f"SELECT id, push_type, title, content, created_at, read_status FROM ai_companion_push_log "
+        f"WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        tuple(params + [page_size, offset]),
+    )
+    items = [
+        {
+            "id": row[0],
+            "push_type": str(row[1]),
+            "push_type_label": PUSH_TYPES.get(str(row[1]), str(row[1])),
+            "title": str(row[2]),
+            "content": str(row[3]),
+            "created_at": str(row[4] or ""),
+            "is_read": bool(row[5]),
+        }
+        for row in rows
+    ]
+    return items, total
+
+
+def delete_push(push_id: int, student_username: str) -> bool:
+    """删除一条推送消息"""
+    execute_insert_update(
+        "DELETE FROM ai_companion_push_log WHERE id=? AND student_username=?",
+        (push_id, student_username),
+    )
+    return True
+
+
 # ═══════════════════════════════════════════════
 # 推送触发
 # ═══════════════════════════════════════════════

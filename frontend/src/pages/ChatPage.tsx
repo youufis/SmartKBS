@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import {
   Layout, Input, Button, Space, Checkbox, message, Modal,
   Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag,
+  List, Empty,
 } from 'antd'
 import {
   SendOutlined, StopOutlined, PlusOutlined,
   EyeOutlined, UploadOutlined,
-  DeleteOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
+  DeleteOutlined, CheckOutlined, RightOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
   CopyOutlined, CameraOutlined,
 } from '@ant-design/icons'
 import type { Message, TreeNode, TaskInfo } from '../types'
@@ -189,6 +190,9 @@ const ChatPage: React.FC = () => {
   const companionLoadTeacherData = useCompanionStore((s) => s.loadTeacherData)
   const companionTeacherData = useCompanionStore((s) => s.teacherData)
   const companionUnreadCount = useCompanionStore((s) => s.unreadCount)
+  const companionPushes = useCompanionStore((s) => s.pushes)
+  const companionMarkPushRead = useCompanionStore((s) => s.markPushRead)
+  const companionMarkAllPushesRead = useCompanionStore((s) => s.markAllPushesRead)
   const companionLoadPushes = useCompanionStore((s) => s.loadPushes)
 
   const [companionMode, setCompanionMode] = useState(() => {
@@ -197,6 +201,7 @@ const ChatPage: React.FC = () => {
     return params.get('companion') === '1';
   })
   const [companionSidebar, setCompanionSidebar] = useState(false)
+  const [pushModalOpen, setPushModalOpen] = useState(false)
   const navigate = useNavigate()
 
   // 组件挂载时预加载学伴配置（保证从设置页返回时 config 最新）
@@ -965,11 +970,20 @@ const ChatPage: React.FC = () => {
 
               {/* 推送消息 */}
               {companionUnreadCount > 0 && (
-                <div style={{
-                  padding: 8, background: '#fff7e6', borderRadius: 4,
-                  fontSize: 12,
-                }}>
-                  <Typography.Text style={{ color: '#fa8c16', fontWeight: 600 }}>💌 未读消息</Typography.Text>
+                <div
+                  onClick={() => { setPushModalOpen(true); companionLoadPushes(); }}
+                  style={{
+                    padding: 8, background: '#fff7e6', borderRadius: 4,
+                    fontSize: 12, cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#ffedd5'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#fff7e6'; }}
+                >
+                  <Typography.Text style={{ color: '#fa8c16', fontWeight: 600 }}>
+                    💌 未读消息
+                    <span style={{ float: 'right', fontSize: 11, fontWeight: 400, color: '#d48806' }}>查看全部 ›</span>
+                  </Typography.Text>
                   <div style={{ marginTop: 4, color: '#666' }}>
                     你有 {companionUnreadCount} 条学伴消息
                   </div>
@@ -980,6 +994,120 @@ const ChatPage: React.FC = () => {
         </div>
       )}
       </div>
+
+      {/* 推送消息弹窗 */}
+      <Modal
+        open={pushModalOpen}
+        onCancel={() => setPushModalOpen(false)}
+        footer={null}
+        width={420}
+        bodyStyle={{ padding: 0 }}
+      >
+        <div style={{ maxHeight: 420, display: 'flex', flexDirection: 'column' }}>
+          {/* 头部 */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
+          }}>
+            <Typography.Text strong style={{ fontSize: 14 }}>💌 学伴消息</Typography.Text>
+            <Space size={4}>
+              {companionPushes.length > 0 && (
+                <Button type="text" size="small" icon={<CheckOutlined />}
+                  onClick={async () => {
+                    await companionMarkAllPushesRead();
+                    setPushModalOpen(false);
+                  }}
+                >
+                  全部已读
+                </Button>
+              )}
+            </Space>
+          </div>
+          {/* 列表 */}
+          <div style={{ flex: 1, overflow: 'auto', minHeight: 100 }}>
+            {companionPushes.length === 0 ? (
+              <Empty description="暂无未读消息" style={{ padding: 24 }} />
+            ) : (
+              <List
+                dataSource={companionPushes}
+                renderItem={(item) => {
+                  const PUSH_TYPES: Record<string, { color: string; icon: string; label: string }> = {
+                    morning: { color: '#fa8c16', icon: '☀️', label: '早安提醒' },
+                    achievement: { color: '#52c41a', icon: '🏆', label: '成就通知' },
+                    encourage: { color: '#1677ff', icon: '💪', label: '鼓励消息' },
+                    reminder: { color: '#ff4d4f', icon: '📌', label: '学习提醒' },
+                    milestone: { color: '#722ed1', icon: '⭐', label: '里程碑' },
+                  }
+                  const cfg = PUSH_TYPES[item.push_type] || { color: '#999', icon: '💌', label: item.push_type_label }
+                  const isUnread = !item.is_read
+                  return (
+                    <List.Item
+                      style={{
+                        padding: '8px 12px',
+                        background: isUnread ? '#f6f8ff' : 'transparent',
+                        cursor: 'default',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = isUnread ? '#f6f8ff' : 'transparent'
+                      }}
+                      actions={[
+                        isUnread ? (
+                          <Button key="read" type="text" size="small" icon={<CheckOutlined />}
+                            onClick={async () => {
+                              await companionMarkPushRead(item.id);
+                              companionLoadPushes();
+                            }}
+                          />
+                        ) : null,
+                        <Popconfirm key="delete" title="确定删除此消息？" placement="left"
+                          onConfirm={async () => {
+                            const { deletePush } = await import('../api/companion');
+                            await deletePush(item.id);
+                            companionLoadPushes();
+                          }}
+                        >
+                          <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                        </Popconfirm>,
+                      ].filter(Boolean)}
+                    >
+                      <List.Item.Meta
+                        avatar={<span style={{ fontSize: 18, lineHeight: '36px' }}>{cfg.icon}</span>}
+                        title={
+                          <Space size={4}>
+                            <Typography.Text strong={isUnread} style={{ fontSize: 13 }}>{item.title}</Typography.Text>
+                            <Tag color={cfg.color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', border: 'none' }}>{cfg.label}</Tag>
+                            {isUnread && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>新</Tag>}
+                          </Space>
+                        }
+                        description={
+                          <div>
+                            {item.content && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.content}</Typography.Text>}
+                            <br />
+                            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                              {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
+                            </Typography.Text>
+                          </div>
+                        }
+                      />
+                    </List.Item>
+                  )
+                }}
+              />
+            )}
+          </div>
+          {/* 底部 */}
+          {companionPushes.length > 0 && (
+            <div style={{ borderTop: '1px solid #f0f0f0', padding: '6px 12px', textAlign: 'center' }}>
+              <Button type="link" size="small"
+                onClick={() => { setPushModalOpen(false); navigate('/notifications') }}
+              >
+                查看全部消息 <RightOutlined />
+              </Button>
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* 输入区域 */}
       <div style={{
