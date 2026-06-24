@@ -160,6 +160,9 @@ const NotificationsPage: React.FC = () => {
               current: page,
               pageSize: 20,
               total,
+              showSizeChanger: true,
+              showTotal: (t) => `共 ${t} 条通知`,
+              pageSizeOptions: ['10', '20', '50'],
               onChange: (p) => setPage(p),
             }}
           />
