@@ -1,0 +1,67 @@
+/* ============================
+   SmartKB Theme CSS Variables
+   由 themeStore 动态注入到 :root
+   ============================ */
+
+/* 默认值（未加载 JS 时的兜底） */
+:root {
+  --bg-layout: #f5f5f5;
+  --bg-container: #ffffff;
+  --text-primary: #1f1f1f;
+  --text-secondary: #666666;
+  --text-tertiary: #888888;
+  --border-color: #f0f0f0;
+  --border-color-secondary: #e8e8e8;
+  --primary-color: #1677ff;
+  --primary-color-hover: #4096ff;
+  --header-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  --scrollbar-thumb: #d9d9d9;
+  --scrollbar-thumb-hover: #bfbfbf;
+  --login-gradient-start: #667eea;
+  --login-gradient-end: #764ba2;
+  --footer-text: #bbb;
+  --success-color: #52c41a;
+  --warning-color: #faad14;
+  --error-color: #ff4d4f;
+}
+
+/* 主题切换平滑过渡 */
+* {
+  transition: background-color 0.25s ease,
+              color 0.25s ease,
+              border-color 0.25s ease,
+              box-shadow 0.25s ease;
+}
+
+/* 非 antd 元素使用 CSS 变量 ==================== */
+
+body {
+  background: var(--bg-layout);
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Markdown 内容 */
+.markdown-content blockquote {
+  border-left: 3px solid var(--primary-color);
+  padding-left: 12px;
+  color: var(--text-secondary);
+}
+.markdown-content th {
+  background: color-mix(in srgb, var(--bg-layout) 60%, transparent);
+}
+.markdown-content pre {
+  background: var(--bg-layout);
+}
+.markdown-content code {
+  background: var(--bg-layout);
+}
