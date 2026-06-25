@@ -1444,7 +1444,7 @@ def _ensure_default_admin():
     from backend.auth import hash_password  # 延迟导入，避免循环依赖
 
     rows = execute_query("SELECT COUNT(*) FROM users WHERE role=0")
-    if rows[0][0] == 0:
+    if not rows or rows[0][0] == 0:
         hashed = hash_password("root")
         execute_insert_update(
             "INSERT OR IGNORE INTO users (username, password, name, role) VALUES (?, ?, ?, ?)",

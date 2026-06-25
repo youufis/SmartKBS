@@ -80,7 +80,7 @@ async def get_portfolio(username: str, request: Request):
         (user_info['name'],),
     )
 
-    score_stats = {}
+    score_stats = {"total_score": 0, "teacher_count": 0, "class_count": 0, "records": [], "trend": []}
     if scores_rows:
         total_score = sum(r[3] for r in scores_rows)
         teacher_count = len(set(r[0] for r in scores_rows))
@@ -119,7 +119,7 @@ async def get_portfolio(username: str, request: Request):
         (user_info['name'],),
     )
 
-    rollcall_stats = {}
+    rollcall_stats = {"total_calls": 0, "correct_count": 0, "wrong_count": 0, "accuracy": 0, "total_points": 0}
     if rollcall_rows:
         total_calls = len(rollcall_rows)
         correct = sum(1 for r in rollcall_rows if r[3] == "1")
@@ -167,7 +167,7 @@ async def get_portfolio(username: str, request: Request):
         (username,),
     )
 
-    chat_stats = {}
+    chat_stats = {"total_days": 0, "total_chats": 0, "avg_daily": 0, "recent_days": []}
     if chat_rows:
         total_days = len(chat_rows)
         total_chats = sum(r[1] for r in chat_rows)
@@ -191,7 +191,7 @@ async def get_portfolio(username: str, request: Request):
         (username,),
     )
 
-    course_practice_stats = {}
+    course_practice_stats = {"total_count": 0, "avg_accuracy": 0, "total_score": 0, "records": []}
     if cp_rows:
         # 批量查询知识点名称
         kp_ids = list(set(r['kp_id'] for r in cp_rows))

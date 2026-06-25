@@ -114,7 +114,8 @@ async def receive_sync_report(request: Request):
 async def get_sync_nodes(request: Request, page: int = 1, page_size: int = 20):
     """返回所有同步记录（分页）"""
     offset = (page - 1) * page_size
-    total = execute_query("SELECT COUNT(*) FROM config_sync_logs")[0][0]
+    rows = execute_query("SELECT COUNT(*) FROM config_sync_logs")
+    total = rows[0][0] if rows else 0
     rows = execute_query("""
         SELECT id, node_id, hostname, caller_ip, public_ip,
                country, region, city, isp,
@@ -190,7 +191,8 @@ async def export_sync_logs():
 @router.get("/config-sync/summary")
 async def get_sync_summary(request: Request):
     """同步统计汇总"""
-    total = execute_query("SELECT COUNT(DISTINCT node_id) FROM config_sync_logs")[0][0]
+    rows = execute_query("SELECT COUNT(DISTINCT node_id) FROM config_sync_logs")
+    total = rows[0][0] if rows else 0
     today_active = execute_query(
         "SELECT COUNT(DISTINCT node_id) FROM config_sync_logs "
         "WHERE last_sync >= datetime('now', '-1 day', 'localtime')"
