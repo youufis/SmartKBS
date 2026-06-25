@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useReducer } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card, Row, Col, Statistic, Typography, Spin, Tag, Space,
@@ -7,7 +7,7 @@ import {
 } from 'antd'
 import {
   TrophyOutlined, FileAddOutlined, CheckCircleOutlined,
-  AuditOutlined, MessageOutlined, UserOutlined,
+  AuditOutlined, MessageOutlined,
   RightOutlined,
   BookOutlined, CalendarOutlined, RobotOutlined, DownloadOutlined,
   ExperimentOutlined,
@@ -56,6 +56,15 @@ interface PortfolioData {
     records: Array<{ teacher: string; grade: string; class: string; score: number; updated_at: string }>
     trend: Array<{ date: string; score: number }>
   } | null
+  reward_points: number
+  reward_history: Array<{
+    activity_type: string
+    activity_title: string
+    reward_type: string
+    points: number
+    reason: string
+    created_at: string
+  }>
   rollcall: {
     total_calls: number
     correct_count: number
@@ -97,6 +106,40 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
   practice: <ExperimentOutlined style={{ color: '#52c41a' }} />,
 }
 
+interface PortfolioState {
+  data: PortfolioData | null
+  timeline: any[]
+  loading: boolean
+  error: string
+  titleInfo: any
+}
+
+type PortfolioAction =
+  | { type: 'FETCH_START' }
+  | { type: 'FETCH_SUCCESS'; data: PortfolioData; timeline: any[]; titleInfo: any }
+  | { type: 'FETCH_ERROR'; error: string }
+
+function portfolioReducer(state: PortfolioState, action: PortfolioAction): PortfolioState {
+  switch (action.type) {
+    case 'FETCH_START':
+      return { ...state, loading: true, error: '' }
+    case 'FETCH_SUCCESS':
+      return { data: action.data, timeline: action.timeline, loading: false, error: '', titleInfo: action.titleInfo }
+    case 'FETCH_ERROR':
+      return { ...state, loading: false, error: action.error }
+    default:
+      return state
+  }
+}
+
+const initialState: PortfolioState = {
+  data: null,
+  timeline: [],
+  loading: true,
+  error: '',
+  titleInfo: null,
+}
+
 const PortfolioPage: React.FC = () => {
   const { username: paramUsername } = useParams<{ username: string }>()
   const navigate = useNavigate()
@@ -104,30 +147,28 @@ const PortfolioPage: React.FC = () => {
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
   const targetUsername = paramUsername || user?.username || ''
-  const [data, setData] = useState<PortfolioData | null>(null)
-  const [timeline, setTimeline] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [titleInfo, setTitleInfo] = useState<any>(null)
+  const [state, dispatch] = useReducer(portfolioReducer, initialState)
+  const { data, timeline, loading, error, titleInfo } = state
 
   useEffect(() => {
     if (!targetUsername) return
-    setLoading(true)
-    setError('')
+    dispatch({ type: 'FETCH_START' })
     Promise.all([
       apiClient.get(`/api/portfolio/${targetUsername}`),
       apiClient.get(`/api/portfolio/${targetUsername}/timeline`),
       apiClient.get(`/api/rewards/my-title`).catch(() => ({ data: null })),
     ])
       .then(([portfolioRes, timelineRes, titleRes]) => {
-        setData(portfolioRes.data)
-        setTimeline(timelineRes.data || [])
-        if (titleRes?.data) setTitleInfo(titleRes.data)
+        dispatch({
+          type: 'FETCH_SUCCESS',
+          data: portfolioRes.data,
+          timeline: timelineRes.data || [],
+          titleInfo: titleRes?.data,
+        })
       })
       .catch((err) => {
-        setError(err.response?.data?.detail || '加载失败')
+        dispatch({ type: 'FETCH_ERROR', error: err.response?.data?.detail || '加载失败' })
       })
-      .finally(() => setLoading(false))
   }, [targetUsername])
 
   // ── AI 学习报告 ──
@@ -174,7 +215,7 @@ const PortfolioPage: React.FC = () => {
     return <Empty description="暂无数据" />
   }
 
-  const { user: student, exams, scores, rollcall, tasks, chats, course_practice } = data
+  const { user: student, exams, scores, reward_points, reward_history, rollcall, tasks, chats, course_practice } = data
   const examStats = exams?.stats
 
   // ── 根据称号等级、性别、角色动态获取头像 emoji（成长进化主题）──
@@ -206,6 +247,7 @@ const PortfolioPage: React.FC = () => {
   const totalDataPoints = [
     { label: '考试', value: examStats?.total_exams ?? 0, icon: <FileAddOutlined />, color: '#1677ff' },
     { label: '课堂积分', value: scores?.total_score ?? 0, icon: <TrophyOutlined />, color: '#faad14' },
+    { label: '奖励积分', value: reward_points ?? 0, icon: <TrophyOutlined />, color: '#eb2f96' },
     { label: '点名次数', value: rollcall?.total_calls ?? 0, icon: <AuditOutlined />, color: '#722ed1' },
     { label: '完成任务', value: tasks?.completed ?? 0, icon: <CheckCircleOutlined />, color: '#52c41a' },
     { label: '对话天数', value: chats?.total_days ?? 0, icon: <MessageOutlined />, color: '#13c2c2' },
@@ -413,6 +455,39 @@ const PortfolioPage: React.FC = () => {
                   { title: '时间', dataIndex: 'updated_at', render: (t: string) => t ? t.slice(0, 10) : '-' },
                 ]}
               />
+            </Card>
+          )}
+
+          {/* 奖励积分（活动自动发放） */}
+          {(reward_points > 0 || reward_history?.length > 0) && (
+            <Card title={<Space><TrophyOutlined style={{ color: '#eb2f96' }} />奖励积分</Space>} style={{ marginBottom: 16 }} size="small">
+              <Row gutter={16} style={{ marginBottom: 12 }}>
+                <Col span={24}>
+                  <Statistic title="累计奖励积分" value={reward_points} valueStyle={{ color: '#eb2f96' }} prefix={<TrophyOutlined />} />
+                </Col>
+              </Row>
+              {reward_history?.length > 0 && (
+                <Table
+                  dataSource={reward_history}
+                  rowKey={(_, i) => String(i)}
+                  size="small"
+                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条记录`, pageSizeOptions: ['5', '10', '20'] }}
+                  columns={[
+                    { title: '活动类型', dataIndex: 'activity_type', width: 80 },
+                    { title: '活动', dataIndex: 'activity_title', ellipsis: true },
+                    { title: '奖励类型', dataIndex: 'reward_type', width: 80 },
+                    { title: '积分', dataIndex: 'points', width: 60 },
+                    {
+                      title: '说明', dataIndex: 'reason', ellipsis: true,
+                      render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text>,
+                    },
+                    {
+                      title: '时间', dataIndex: 'created_at',
+                      render: (t: string) => t ? t.slice(0, 10) : '-', width: 90,
+                    },
+                  ]}
+                />
+              )}
             </Card>
           )}
 

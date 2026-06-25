@@ -111,6 +111,38 @@ async def get_portfolio(username: str, request: Request):
             for k, v in sorted(score_by_date.items())
         ]
 
+    # ── 2B. 奖励积分（活动自动发放） ──
+    reward_points = 0
+    reward_history = []
+    try:
+        reward_row = execute_query(
+            "SELECT total_points FROM student_total_points WHERE student_username=?",
+            (username,),
+        )
+        if reward_row and reward_row[0][0]:
+            reward_points = reward_row[0][0]
+
+        reward_rows = execute_query(
+            """SELECT activity_type, activity_title, reward_type, points, reason, created_at
+               FROM activity_rewards
+               WHERE student_username=?
+               ORDER BY created_at DESC LIMIT 100""",
+            (username,),
+        )
+        reward_history = [
+            {
+                "activity_type": r[0],
+                "activity_title": r[1] or "",
+                "reward_type": r[2],
+                "points": r[3],
+                "reason": r[4] or "",
+                "created_at": r[5] or "",
+            }
+            for r in reward_rows
+        ]
+    except Exception:
+        pass  # student_total_points 表可能不存在
+
     # ── 3. 点名记录 ──
     rollcall_rows = execute_query(
         """SELECT teacher_username, grade, class_name, result, points, created_at
@@ -240,6 +272,10 @@ async def get_portfolio(username: str, request: Request):
         summary_parts.append(
             f"累计获得 {score_stats['total_score']} 课堂积分"
         )
+    if reward_points:
+        summary_parts.append(
+            f"获得 {reward_points} 奖励积分"
+        )
     if rollcall_stats:
         summary_parts.append(
             f"被点名 {rollcall_stats['total_calls']} 次，"
@@ -267,6 +303,8 @@ async def get_portfolio(username: str, request: Request):
             "stats": exam_stats,
         },
         "scores": score_stats,
+        "reward_points": reward_points,
+        "reward_history": reward_history,
         "rollcall": rollcall_stats,
         "tasks": task_stats,
         "chats": chat_stats,
