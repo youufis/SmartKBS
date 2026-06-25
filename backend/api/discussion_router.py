@@ -762,6 +762,8 @@ async def join_discussion(disc_id: int, request: Request):
                WHERE dg.discussion_id = ? AND dm.username = ?""",
             (disc_id, username),
         )
+        if not group_row:
+            raise HTTPException(status_code=500, detail="内部错误：无法获取分组信息")
         return {
             "status": "already_joined",
             "group_id": group_row[0][0],

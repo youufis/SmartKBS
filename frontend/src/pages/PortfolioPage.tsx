@@ -439,7 +439,7 @@ const PortfolioPage: React.FC = () => {
           )}
 
           {/* 对话活跃 */}
-          {chats && (
+          {chats?.total_days != null && (
             <Card title={<Space><MessageOutlined />AI 对话活跃度</Space>} size="small">
               <Row gutter={16}>
                 <Col span={8}><Statistic title="对话天数" value={chats.total_days} suffix="天" /></Col>
@@ -450,7 +450,7 @@ const PortfolioPage: React.FC = () => {
           )}
 
           {/* 课程练习 */}
-          {course_practice && course_practice.records.length > 0 && (
+          {course_practice?.records && course_practice.records.length > 0 && (
             <Card title={<Space><ExperimentOutlined style={{ color: '#52c41a' }} />课程练习</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={8}><Statistic title="完成数" value={course_practice.total_count} suffix="个知识点" valueStyle={{ color: '#52c41a' }} /></Col>

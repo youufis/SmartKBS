@@ -1055,7 +1055,8 @@ async def get_bank_stats(request: Request):
     user = get_current_user(request)
     _ = user  # 仅需登录
 
-    total = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")["cnt"]  # type: ignore[index]
+    total_row = execute_query_one("SELECT COUNT(*) as cnt FROM quest_question_bank")
+    total = total_row["cnt"] if total_row else 0
 
     by_category = execute_query(
         """SELECT category, COUNT(*) as cnt, SUM(used_count) as total_used
