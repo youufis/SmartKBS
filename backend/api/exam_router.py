@@ -1052,7 +1052,7 @@ async def _grade_short_with_ai(q: dict[str, Any], student_answer: str, api_key: 
 
 
 async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: str, sem: asyncio.Semaphore,
-                                 subject: str = "信息科技") -> dict[str, Any]:
+                                 subject: str = "") -> dict[str, Any]:
     """AI 多维批改主观题/作文，返回含维度评分的详细批改结果"""
     qid = str(q["id"])
     correct_answer = q["correct_answer"]
@@ -1061,7 +1061,8 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
         try:
             from backend.prompts.exam import ESSAY_GRADING_PROMPT
             question_text = str(q.get("question_text", "") or "")
-            prompt = ESSAY_GRADING_PROMPT.format(
+            ai_role = build_ai_role(subject=subject)
+            prompt = f"{ai_role}" + ESSAY_GRADING_PROMPT.format(
                 subject=subject.replace('{', '{{').replace('}', '}}'),
                 question_text=question_text.replace('{', '{{').replace('}', '}}'),
                 correct_answer=str(correct_answer or "").replace('{', '{{').replace('}', '}}'),
@@ -1215,7 +1216,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     # ── 主观题/作文：AI 多维评分（内容、结构、语言） ──
     if essay_qs and api_key:
         sem = asyncio.Semaphore(2)  # 主观题较消耗资源，并发数设小
-        subject = exam.get("subject", "信息科技")
+        subject = exam.get("subject", "")
         results = await asyncio.gather(*[
             _grade_essay_with_ai(q, req.answers.get(str(q["id"]), ""), api_key, sem, subject)
             for q in essay_qs
@@ -2027,7 +2028,8 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
     def _safe(s):
         return str(s).replace('{', '{{').replace('}', '}}')
 
-    prompt = AI_EXAM_COMPOSE_PROMPT.format(
+    ai_role = build_ai_role(subject=exam["subject"], grade=exam.get("target_grade", ""))
+    prompt = f"{ai_role}" + AI_EXAM_COMPOSE_PROMPT.format(
         exam_title=_safe(exam["title"]),
         subject=_safe(exam["subject"]),
         total_score=_safe(exam["total_score"]),

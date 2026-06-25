@@ -15,6 +15,7 @@ from backend.database import execute_query as user_query
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
+from backend.prompts import build_ai_role
 from backend.database import execute_query as db_exec, execute_insert_update as db_insert
 from backend.permission_service import (
     parse_legacy_teacher_grade_class,
@@ -599,7 +600,8 @@ async def get_review_plan(request: Request):
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
-    prompt = WRONG_BOOK_REVIEW_PROMPT.format(
+    ai_role = build_ai_role(grade=student_grade)
+    prompt = f"{ai_role}" + WRONG_BOOK_REVIEW_PROMPT.format(
         student_name=student_name,
         grade=student_grade,
         cls=student_class,
@@ -735,7 +737,8 @@ async def export_review_plan_docx(
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
-    prompt = WRONG_BOOK_REVIEW_PROMPT.format(
+    ai_role = build_ai_role(grade=student_grade)
+    prompt = f"{ai_role}" + WRONG_BOOK_REVIEW_PROMPT.format(
         student_name=student_name,
         grade=student_grade,
         cls=student_class,

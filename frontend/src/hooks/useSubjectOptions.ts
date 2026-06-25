@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react'
 import apiClient from '../api/client'
 
-const DEFAULT_SUBJECTS = ['信息科技', '通用技术']
+const DEFAULT_SUBJECTS: string[] = []
 
 export function useSubjectOptions(): {
   subjects: string[]

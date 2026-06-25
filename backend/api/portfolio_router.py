@@ -12,6 +12,7 @@ from backend.api.dependencies import get_current_user
 from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
+from backend.prompts import build_ai_role
 
 router = APIRouter()
 
@@ -559,7 +560,8 @@ async def get_learning_report(username: str, request: Request):
     def _safe(s):
         return str(s).replace('{', '{{').replace('}', '}}')
 
-    prompt = LEARNING_REPORT_PROMPT.format(
+    ai_role = build_ai_role(grade=student_grade)
+    prompt = f"{ai_role}" + LEARNING_REPORT_PROMPT.format(
         student_name=_safe(student_name),
         grade=_safe(student_grade),
         cls=_safe(student_class),
@@ -707,7 +709,8 @@ async def export_learning_report_docx(username: str, request: Request, token: st
 
     score_trend = "暂无数据"
 
-    prompt = LEARNING_REPORT_PROMPT.format(
+    ai_role = build_ai_role(grade=student_grade)
+    prompt = f"{ai_role}" + LEARNING_REPORT_PROMPT.format(
         student_name=_safe(student_name),
         grade=_safe(student_grade),
         cls=_safe(student_class),

@@ -3,7 +3,7 @@ AI 对话相关 Prompt
 - System role
 - 试题生成（题库）
 """
-AI_CHAT_SYSTEM_ROLE = "你是一位高中信息科技与通用技术教师。请用你的学科知识回答用户的问题。"
+AI_CHAT_SYSTEM_ROLE = "请用你的学科知识回答用户的问题。"
 
 QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为试题配图**以及**使用 LaTeX 公式标记**。
 
@@ -51,7 +51,7 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为
 - 简答题/填空题（short/fill）：options 设为 null，answer 为参考答案
 - 作文/主观题（essay/subjective）：options 设为 null，answer 为评分要点
 - **编程题（code）**：options 设为 null，answer 为参考解答代码，必须提供 template_code + test_cases（至少3个）
-- 题目和选项要与高中{subject}课程内容紧密相关
+- 题目和选项要与{subject}课程内容紧密相关
 """
 
 # ── 含多媒体/公式支持的增强版试题生成 Prompt ──
@@ -127,7 +127,7 @@ SVG_GENERATE_PROMPT = """你是一位 SVG 绘图专家。请根据以下描述�
 要求：
 - 中文标注
 - 配色协调，主色 #1976D2
-- 适合高中课堂教学
+- 适合课堂教学
 - 只输出 SVG 代码，不要 ```svg 标记
 - 如果是电路图，使用标准电路元件符号
 **⚠️ 安全约束（极其重要！）**：SVG 中禁止出现题目的答案、解析、解题过程、选项正误判断或任何泄露正确答案的文字和符号。只能绘制中性、客观的技术原理图示，不得标注正确/错误选项。
@@ -136,7 +136,7 @@ SVG_GENERATE_PROMPT = """你是一位 SVG 绘图专家。请根据以下描述�
 
 # ── 图片生成 Prompt（透传给通义万相） ──
 
-IMAGE_GEN_PROMPT_TEMPLATE = """为高中{subject}教学绘制一张{purpose}。
+IMAGE_GEN_PROMPT_TEMPLATE = """为{subject}教学绘制一张{purpose}。
 要求：{description}
 风格：清晰准确，适合课堂教学使用，标注关键部分。
 **重要安全规则**：图片中禁止出现任何与题目答案、解析、解题过程、选项正误判断相关的文字或符号。只能展示中性、客观的视觉内容，不得泄露正确答案、解析或解题线索。

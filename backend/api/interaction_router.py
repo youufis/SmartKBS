@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.logger import logger
+from backend.prompts import build_ai_role
 
 router = APIRouter()
 
@@ -109,7 +110,8 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
     }.get(req.question_type, "单选题")
 
     from backend.prompts.quiz import QUIZ_GENERATE_PROMPT
-    prompt = QUIZ_GENERATE_PROMPT.format(
+    ai_role = build_ai_role(subject=req.subject)
+    prompt = f"{ai_role}" + QUIZ_GENERATE_PROMPT.format(
         subject=req.subject,
         topic=req.topic,
         type_desc=type_desc,
@@ -185,8 +187,9 @@ async def ai_suggest_answer(question_id: int, request: Request):
         raise HTTPException(status_code=404, detail="问题不存在")
 
     content = rows[0][0]
+    ai_role = build_ai_role()
     prompt = (
-        '你是一位高中教师。学生在课堂上提出了以下问题，请给出专业、清晰的回答。\n\n'
+        f'{ai_role}学生在课堂上提出了以下问题，请给出专业、清晰的回答。\n\n'
         '学生问题：' + content + '\n\n'
         '请用中文回答，语气亲切，条理清晰。'
     )
@@ -2003,9 +2006,10 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
         def _safe(s):
             return str(s).replace('{', '{{').replace('}', '}}')
 
-        prompt = QUIZ_ANALYSIS_PROMPT.format(
+        ai_role = build_ai_role()
+        prompt = f"{ai_role}" + QUIZ_ANALYSIS_PROMPT.format(
             quiz_title=_safe(quiz_data[2] or ""),
-            subject=_safe("信息科技"),
+            subject=_safe(""),
             participant_count=_safe(participant_count),
             question_stats=_safe(stats_text),
         )
@@ -2317,7 +2321,7 @@ async def export_class_summary_docx(
         return str(s).replace('{', '{{').replace('}', '}}')
 
     prompt = CLASS_SUMMARY_PROMPT.format(
-        subject=_safe(subject or "信息科技"),
+        subject=_safe(subject or ""),
         time_range=_safe("本堂课"),
         student_count=_safe(student_count),
         quiz_data=_safe(quiz_data),

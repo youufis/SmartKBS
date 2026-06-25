@@ -195,7 +195,7 @@ const WrongBookPage: React.FC = () => {
       try {
         const { data: gen } = await apiClient.post('/api/wrong-book/practice/generate', {
           count: practiceCount,
-          subjects: ['信息科技'],
+          subjects: [],
           knowledge_points: kps.join('，'),
           student_username: selectedStudent,
         })

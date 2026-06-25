@@ -385,7 +385,7 @@ const QuickQuizPage: React.FC = () => {
             scoring_mode: 'speed',
             min_players: 2,
             max_players: 50,
-            subject: '信息科技',
+            subject: '',
             difficulty: 'medium',
           }}
         >

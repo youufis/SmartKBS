@@ -73,7 +73,7 @@ def get_subject_list() -> list[str]:
         return get_subjects()
     except Exception:
         pass
-    return ["信息科技", "通用技术"]
+    return ["人工智能"]
 
 
 def _load_system_config() -> dict[str, Any]:

@@ -676,6 +676,10 @@ async def dashboard_summary(request: Request):
             if rows:
                 result["teacher_grades"] = rows[0][0] or ""
                 result["teacher_classes"] = rows[0][1] or ""
+            # 获取教师任教学科
+            from backend.permission_service import get_teacher_subjects
+            subjects = get_teacher_subjects(username)
+            result["teacher_subjects"] = subjects
 
     # 写入缓存
     _set_cache(cache_key, result)

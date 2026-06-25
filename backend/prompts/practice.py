@@ -2,7 +2,7 @@
 自适应出题 Prompt
 基于学生薄弱知识点生成针对性练习题
 """
-PRACTICE_GENERATE_PROMPT = """你是一位经验丰富的高中{subject}教师。请根据以下要求生成针对性练习题。
+PRACTICE_GENERATE_PROMPT = """请根据以下要求生成针对性练习题。
 
 ## 目标知识点
 {knowledge_points}

@@ -304,7 +304,8 @@ async def _select_questions_by_ai(
     def _safe(s):
         return str(s).replace('{', '{{').replace('}', '}}')
 
-    prompt = AI_PAPER_COMPOSE_PROMPT.format(
+    ai_role = build_ai_role(subject=exam_info.get("subject", ""), grade=exam_info.get("target_grade", ""))
+    prompt = f"{ai_role}" + AI_PAPER_COMPOSE_PROMPT.format(
         subject=_safe(exam_info.get("subject", "")),
         exam_title=_safe(exam_info.get("title", "")),
         total_score=_safe(exam_info.get("total_score", 100)),

@@ -48,6 +48,8 @@ export interface UserItem {
   role: string;
   /** 年级：学生为 "高一" 或 "高二"，教师可用 "高一|高二" 格式（| 分隔多个年级） */
   grade: string;
+  /** 教师任教学科列表 */
+  subjects?: string[];
 }
 
 // 历史记录 - 树节点

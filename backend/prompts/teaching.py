@@ -3,7 +3,7 @@
 学生查看错题时，AI 生成针对性的知识点讲解
 """
 
-KNOWLEDGE_EXPLAIN_PROMPT = """你是一位经验丰富的高中信息科技与通用技术教师，请根据以下信息为学生提供详细的知识点讲解。
+KNOWLEDGE_EXPLAIN_PROMPT = """请根据以下信息为学生提供详细的知识点讲解。
 
 ## 题目信息
 - 题目：{question_text}
@@ -38,14 +38,14 @@ KNOWLEDGE_EXPLAIN_PROMPT = """你是一位经验丰富的高中信息科技与�
 """
 
 
-LESSON_PLAN_PROMPT = """你是一位经验丰富的高中信息科技与通用技术教师，请根据以下课程信息生成一份完整的教案。
+LESSON_PLAN_PROMPT = """请根据以下课程信息生成一份完整的教案。
 
 ## 课程信息
 - 课程名称：{course_name}
 - 章节名称：{chapter_name}
 - 知识点：{knowledge_point}
 - 年级：{grade}
-- 学科：信息科技 / 通用技术
+- 学科：{subject}
 
 ## 教案要求
 请按以下结构输出 Markdown 格式的教案：
@@ -98,12 +98,12 @@ LESSON_PLAN_PROMPT = """你是一位经验丰富的高中信息科技与通用�
 ## 注意事项
 - 教案要符合新课标要求
 - 体现以学生为中心的教学理念
-- 结合信息科技/通用技术学科特点
+- 结合{subject}学科特点
 - 适当融入课程思政元素
 """
 
 
-SHORT_ANSWER_GRADING_PROMPT = """你是一位严谨的高中信息科技与通用技术教师，请对学生的简答题答案进行评分。
+SHORT_ANSWER_GRADING_PROMPT = """请对学生的简答题答案进行评分。
 
 ## 题目信息
 - 题目：{question_text}
@@ -134,7 +134,7 @@ SHORT_ANSWER_GRADING_PROMPT = """你是一位严谨的高中信息科技与通�
 - 0 分：答案完全错误、空白或与问题无关
 """
 
-COURSEWARE_GENERATE_PROMPT = """你是一位经验丰富的高中{subject}教师，擅长制作精美的HTML教学课件。请根据以下知识点信息，生成一份可直接在浏览器中打开的HTML课件。
+COURSEWARE_GENERATE_PROMPT = """擅长制作精美的HTML教学课件。请根据以下知识点信息，生成一份可直接在浏览器中打开的HTML课件。
 
 ## 课程信息
 - 课程名称：{course_name}
@@ -167,7 +167,7 @@ COURSEWARE_GENERATE_PROMPT = """你是一位经验丰富的高中{subject}教师
 请生成完整的HTML代码："""
 
 
-PRACTICE_SINGLE_CHOICE_PROMPT = """你是一位经验丰富的高中{subject}教师，请根据以下知识点，生成10道单项选择题（每题4个选项），用于学生课后练习巩固。
+PRACTICE_SINGLE_CHOICE_PROMPT = """请根据以下知识点，生成10道单项选择题（每题4个选项），用于学生课后练习巩固。
 
 ## 课程信息
 - 课程名称：{course_name}

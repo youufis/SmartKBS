@@ -18,7 +18,7 @@ const { Title, Text } = Typography
 const GLOBAL_CONFIG_FIELDS = [
   // 品牌信息
   { key: 'AGENT_EDITION', label: '平台版本', type: 'text', group: 'brand',
-    desc: '显示在登录页面 "智慧教学平台-" 之后的版本名称，如 "高中信通版"、"高中数学版"等' },
+    desc: '显示在登录页面 "智慧教学平台-" 之后的版本名称，留空则只显示"智慧教学平台"。例如可设为"数学版"、"生物版"等' },
   { key: 'ORG_NAME', label: '单位名称', type: 'text', group: 'brand', required: false,
     desc: '显示在登录页面和界面顶部的单位/学校名称，为空则不显示' },
   // API 密钥
@@ -51,7 +51,7 @@ const GLOBAL_CONFIG_FIELDS = [
     desc: '每位教师下载中心的最大存储空间' },
   // 课程设置
   { key: 'SUBJECTS', label: '课程名称列表', type: 'tags', group: 'subjects',
-    desc: '系统中使用的课程名称，多个用逗号分隔，如 信息科技,通用技术。修改后需重启服务生效' },
+    desc: '系统中使用的课程名称，多个用逗号分隔（示例：数学,语文,英语）。修改后需重启服务生效' },
   // 题型设置
   { key: 'QUESTION_TYPES', label: '试题题型列表', type: 'question_types', group: 'subjects',
     desc: '每行一个题型，格式为 "key:标签"，如 single:单选题。增删改后刷新页面即可生效，无需重启' },
@@ -144,10 +144,10 @@ const SystemConfigPage: React.FC = () => {
       setSaving(true)
       // 使用 getFieldsValue 确保所有字段（包括空值）都被提交
       const allValues = form.getFieldsValue()
-      // 将 Tags 输入框的逗号分隔字符串转回数组
+      // 将 Tags 输入框的逗号分隔字符串转回数组（支持中英文逗号）
       for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS', 'SUBJECTS']) {
         if (typeof allValues[key] === 'string') {
-          allValues[key] = allValues[key].split(',').map((s: string) => s.trim()).filter(Boolean)
+          allValues[key] = allValues[key].replace(/，/g, ',').split(',').map((s: string) => s.trim()).filter(Boolean)
         }
       }
       // 题型多行文本 key:label → [{key,label}]
@@ -327,10 +327,10 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={field.label}
                   rules={field.required !== false ? [{ required: true, message: `请输入${field.label}` }] : undefined}
-                  extra={field.key === 'AGENT_EDITION' ? '填写版本名称即可，系统会自动拼接为完整名称（如 "智慧教学平台-高中信通版"）' : field.desc}
+                  extra={field.key === 'AGENT_EDITION' ? '填写版本名称即可，系统会自动拼接为完整名称（如 "数学版"、"生物版"），留空则只显示"智慧教学平台"' : field.desc}
                 >
                   {field.key === 'AGENT_EDITION' ? (
-                    <Input placeholder="例如：高中信通版" />
+                    <Input placeholder="例如：通用版" />
                   ) : (
                     <Input />
                   )}

@@ -57,7 +57,7 @@ const ClassSummaryPage: React.FC = () => {
     setClassSummaryData(null)
     try {
       const { data } = await apiClient.get('/api/interaction/class-summary', {
-        params: { grade, cls, subject: '信息科技', teacher_username: user?.username },
+        params: { grade, cls, subject: '', teacher_username: user?.username },
       })
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
@@ -125,7 +125,7 @@ const ClassSummaryPage: React.FC = () => {
                   const params = new URLSearchParams({
                       grade,
                       cls,
-                    subject: '信息科技',
+                    subject: '',
                     teacher_username: user?.username || '',
                     token: token || '',
                   })

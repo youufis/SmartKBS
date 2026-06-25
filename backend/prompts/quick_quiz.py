@@ -3,7 +3,7 @@
 - 题目类型：单选题
 """
 
-QUICK_QUIZ_GENERATE_PROMPT = """你是一位高中{subject}教师，正在组织班级知识抢答活动。
+QUICK_QUIZ_GENERATE_PROMPT = """正在组织班级知识抢答活动。
 请根据以下要求生成一道单选题。
 
 【出题范围】

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from backend.api.dependencies import get_current_user
 from backend.auth import can_create_task, is_teacher, is_admin
 from backend.api.chat_router import get_api_keys, upload_file_to_dashscope
+from backend.prompts import build_ai_role
 from backend.api.config_router import get_config_value
 from backend.config import (
     SUMMARY_DIR_NAME,
@@ -571,8 +572,9 @@ async def ai_grade_task(task_id: str, request: Request):
 
     # 5. 构建批改 prompt
     from backend.prompts.homework_grade import TASK_GRADING_PROMPT
-    prompt = TASK_GRADING_PROMPT.format(
-        subject="信息科技",
+    ai_role = build_ai_role()
+    prompt = f"{ai_role}" + TASK_GRADING_PROMPT.format(
+        subject="",
         task_name=task_name,
         task_description=task_desc,
     )
@@ -586,7 +588,7 @@ async def ai_grade_task(task_id: str, request: Request):
                 json={
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": "你是一位严谨的高中教师，正在批改学生提交的作业对话记录。"},
+                        {"role": "system", "content": f"{build_ai_role()}正在批改学生提交的作业对话记录。"},
                         {"role": "system", "content": f"fileid://{file_id}"},
                         {"role": "user", "content": prompt},
                     ],

@@ -3,7 +3,7 @@ AI 批改 - 任务/作业对话记录评分 Prompt
 读取 summary 汇总文件，让 AI 分析每位学生的对话记录并打分
 """
 
-TASK_GRADING_PROMPT = """你是一位严谨的高中{subject}教师，现在需要批改学生提交的作业。
+TASK_GRADING_PROMPT = """现在需要批改学生提交的作业。
 
 ## 作业信息
 - **任务名称**：{task_name}

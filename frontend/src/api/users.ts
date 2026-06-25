@@ -10,6 +10,7 @@ export interface RegisterParams {
   gender?: number;
   role?: number;
   grade?: string;
+  subjects?: string[];
 }
 
 export async function registerUser(params: RegisterParams): Promise<string> {
@@ -17,8 +18,8 @@ export async function registerUser(params: RegisterParams): Promise<string> {
   return data.message;
 }
 
-export async function updateUserInfo(username: string, class_val?: string, name?: string, gender?: number, grade?: string): Promise<string> {
-  const { data } = await apiClient.put('/api/users/update', { username, class_val, name, gender, grade });
+export async function updateUserInfo(username: string, class_val?: string, name?: string, gender?: number, grade?: string, subjects?: string[]): Promise<string> {
+  const { data } = await apiClient.put('/api/users/update', { username, class_val, name, gender, grade, subjects });
   return data.message;
 }
 

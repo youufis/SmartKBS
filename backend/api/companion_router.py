@@ -152,11 +152,17 @@ def _build_companion_prompt_with_profile(user_prompt: str, username: str, role: 
     elif role in (0, 1):
         # 教师/管理员 → 使用教学助手提示词
         from backend.prompts.companion import TEACHER_COMPANION_PROMPT
+        from backend.prompts import build_ai_role
+        from backend.permission_service import get_teacher_subjects
         from backend.database import execute_query
+        # 获取教师任教学科，构建动态角色
+        teacher_subjects = get_teacher_subjects(username)
+        ai_role = build_ai_role(subjects=teacher_subjects, role_type="assistant")
         name_row = execute_query("SELECT name FROM users WHERE username=?", (username,))
         teacher_name = name_row[0][0] if name_row and name_row[0][0] else username
         role_label = "管理员" if role == 0 else "老师"
-        return f"{TEACHER_COMPANION_PROMPT.format(teacher_name=teacher_name)}\n\n---\n\n{role_label}说：{user_prompt}"
+        role_header = f"{ai_role}，你是{teacher_name}的教学助手。" if teacher_subjects else ""
+        return f"{role_header}{TEACHER_COMPANION_PROMPT.format(teacher_name=teacher_name)}\n\n---\n\n{role_label}说：{user_prompt}"
 
 
 def _companion_event_generator(

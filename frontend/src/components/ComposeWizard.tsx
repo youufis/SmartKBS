@@ -48,7 +48,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   const formInitialValues = {
     school_name: '',
     semester: '',
-    subject: subjects[0] || '信息科技',
+    subject: subjects[0] || '',
     target_grade: [],
     duration: 45,
     type_configs: [

@@ -3,7 +3,7 @@
 升级版：支持题型配置、难度分布、知识点覆盖的精细化控制
 """
 
-AI_PAPER_COMPOSE_PROMPT = """你是一位经验丰富的高中{subject}教师，正在为一场考试设计试卷。请根据以下要求，从候选试题中挑选最合适的题目组成一份优质试卷。
+AI_PAPER_COMPOSE_PROMPT = """正在为一场考试设计试卷。请根据以下要求，从候选试题中挑选最合适的题目组成一份优质试卷。
 
 ## 考试信息
 - 考试名称：{exam_title}
@@ -53,7 +53,7 @@ AI_PAPER_COMPOSE_PROMPT = """你是一位经验丰富的高中{subject}教师，
 """
 
 # ── 智能选题引擎 Prompt（不需要 AI 推理，纯规则 + AI 辅助） ──
-AI_QUESTION_SELECTION_PROMPT = """你是一位高中{subject}教师，需要从以下候选题目中为一套试卷挑选合适的题目。
+AI_QUESTION_SELECTION_PROMPT = """需要从以下候选题目中为一套试卷挑选合适的题目。
 
 ## 试卷配置
 - 需要挑选的题型和数量：{type_requirements}

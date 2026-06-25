@@ -32,7 +32,7 @@ const DIFFICULTY_LABELS: Record<string, string> = {
   hard: '困难',
 }
 
-let subjectOptions = ['信息科技', '通用技术']
+let subjectOptions: string[] = []
 
 const QuestionBankPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
@@ -598,7 +598,7 @@ const QuestionBankPage: React.FC = () => {
                         form={generateForm}
                         layout="vertical"
                         initialValues={{
-                          subject: extractSubject || subjectOptions[0] || '信息科技',
+                          subject: extractSubject || subjectOptions[0] || '',
                           question_type: 'single',
                           count: 5,
                           difficulty: 'medium',
@@ -783,7 +783,7 @@ const QuestionBankPage: React.FC = () => {
                             beforeUpload={async (file) => {
                               const fd = new FormData()
                               fd.append('file', file)
-                              fd.append('subject', extractSubject || subjectOptions[0] || '信息科技')
+                              fd.append('subject', extractSubject || subjectOptions[0] || '')
                               fd.append('difficulty', extractDifficulty)
                               setExtracting(true)
                               setExtractError(null)
