@@ -18,6 +18,7 @@ from backend.api.dependencies import get_current_user
 from backend.auth import is_admin, is_teacher
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
+from backend.prompts import build_ai_role
 
 router = APIRouter()
 
@@ -1808,7 +1809,8 @@ async def ai_lesson_plan(
     def _safe(s):
         return str(s).replace('{', '{{').replace('}', '}}')
 
-    prompt = LESSON_PLAN_PROMPT.format(
+    ai_role = build_ai_role(subject=kp.get("course_name", ""), grade=kp.get("grade", ""))
+    prompt = f"{ai_role}" + LESSON_PLAN_PROMPT.format(
         course_name=_safe(kp["course_name"]),
         chapter_name=_safe(kp["chapter_name"]),
         knowledge_point=_safe(kp["name"]),
@@ -1898,7 +1900,8 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
     def _safe(s):
         return str(s).replace('{', '{{').replace('}', '}}')
 
-    prompt = LESSON_PLAN_PROMPT.format(
+    ai_role = build_ai_role(subject=kp.get("course_name", ""), grade=kp.get("grade", ""))
+    prompt = f"{ai_role}" + LESSON_PLAN_PROMPT.format(
         course_name=_safe(kp["course_name"]),
         chapter_name=_safe(kp["chapter_name"]),
         knowledge_point=_safe(kp["name"]),
@@ -2014,7 +2017,7 @@ async def ai_generate_courseware(kp_id: int, request: Request):
     from backend.api.ai_service import call_ai_async
     from backend.utils import get_account_html_dir
 
-    subject = kp["course_name"] or "信息科技"
+    subject = kp["course_name"] or ""
 
     def _safe(s):
         return str(s or "").replace('{', '{{').replace('}', '}}')
@@ -2171,7 +2174,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
     from backend.question_db import execute_insert as q_insert, execute_update as q_update
     from backend.config import BASE_DIR
 
-    subject = kp.get("subject") or kp["course_name"] or "信息科技"
+    subject = kp.get("subject") or kp["course_name"] or ""
     difficulty_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
     difficulty_desc = difficulty_map.get(kp.get("difficulty", "medium"), "中等")
 
@@ -3052,7 +3055,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         raise HTTPException(status_code=404, detail="知识点不存在")
     kp = kp_rows[0]
 
-    subject = kp.get("subject") or kp["course_name"] or "信息科技"
+    subject = kp.get("subject") or kp["course_name"] or ""
     kp_name = kp["name"]
 
     # ── 第1步：多渠道搜索题库 ──
@@ -3144,7 +3147,8 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
                 if gap <= 0:
                     break
 
-                smart_prompt = f"""你是一位经验丰富的高中{_safe(subject)}教师。请根据以下知识点，生成{gap}道单项选择题（每题4个选项），用于学生课后练习巩固。
+                ai_role = build_ai_role(subject=subject, grade=kp.get('grade', ''), role_type="expert")
+                smart_prompt = f"""{ai_role}请根据以下知识点，生成{gap}道单项选择题（每题4个选项），用于学生课后练习巩固。
 
 ## 课程信息
 - 课程名称：{_safe(kp['course_name'])}
@@ -3446,7 +3450,7 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
     # 创建练习任务
     from datetime import datetime
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    subject = kp.get("subject") or kp["course_name"] or "信息科技"
+    subject = kp.get("subject") or kp["course_name"] or ""
     title = f"{kp['name']} 练习"
     session_id = q_insert(
         """INSERT INTO practice_sessions

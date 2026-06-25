@@ -42,7 +42,7 @@ const InteractionPage: React.FC = () => {
   // 列表分页
   const [quizPage, setQuizPage] = useState(1)
   const [quizPageSize, setQuizPageSize] = useState(10)
-  const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
+  const [subjectOptions, setSubjectOptions] = useState<string[]>([])
 
   // 从系统配置加载课程列表
   useEffect(() => {
@@ -504,9 +504,9 @@ const InteractionPage: React.FC = () => {
         ] : null}>
         <Form form={aiQuizForm} layout="vertical" onFinish={handleAiGenerateQuiz}>
           <Form.Item name="topic" label="输入主题" rules={[{ required: true, message: '请输入主题' }]}>
-            <Input placeholder="例如：信息科技的发展历程、通用技术中的设计原则" />
+            <Input placeholder="例如：输入课程主题或知识点名称" />
           </Form.Item>
-          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || '信息科技'}>
+          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || ''}>
             <Select>
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>

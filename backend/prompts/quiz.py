@@ -2,7 +2,7 @@
 课堂互动相关 Prompt
 - 随堂测验生成
 """
-QUIZ_GENERATE_PROMPT = """你是一位高中{subject}教师。请根据以下要求生成随堂测验题目。
+QUIZ_GENERATE_PROMPT = """请根据以下要求生成随堂测验题目。
 
 主题：{topic}
 题型：{type_desc}

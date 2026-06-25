@@ -23,6 +23,7 @@ from backend.database import execute_query as db_query, execute_query_dict as db
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
+from backend.prompts import build_ai_role
 from backend.code_runner import run_python, run_javascript, get_supported_languages
 from backend.code_grader import grade_submission
 
@@ -45,7 +46,7 @@ class CodeSubmitRequest(BaseModel):
 class CodeProblemCreate(BaseModel):
     title: str
     description: str = ""
-    subject: str = "信息科技"
+    subject: str = ""
     knowledge_points: str = ""
     difficulty: str = "medium"
     language: str = "python"
@@ -174,7 +175,9 @@ async def ai_code_review(submission_id: int, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
     from backend.prompts.code_review import CODE_REVIEW_PROMPT
-    prompt = CODE_REVIEW_PROMPT.format(problem_title=sub["problem_title"], language=sub["language"], source_code=sub["source_code"])
+    from backend.prompts import build_ai_role
+    ai_role = build_ai_role()
+    prompt = f"{ai_role}" + CODE_REVIEW_PROMPT.format(problem_title=sub["problem_title"], language=sub["language"], source_code=sub["source_code"])
 
     async def _do() -> dict[str, Any]:
         try:
@@ -410,7 +413,7 @@ async def get_problem_submission_detail(problem_id: int, request: Request):
 
 class AiGenerateCodeProblem(BaseModel):
     topic: str
-    subject: str = "信息科技"
+    subject: str = ""
     language: str = "python"
     difficulty: str = "medium"
 
@@ -427,7 +430,8 @@ async def ai_generate_code_problem(req: AiGenerateCodeProblem, request: Request)
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
     dd = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
-    prompt = (f"你是一位高中{req.subject}教师。根据主题生成编程题。\n主题：{req.topic}\n语言：{req.language}\n难度：{dd}\n\n"
+    ai_role = build_ai_role(subject=req.subject)
+    prompt = (f"{ai_role}根据主题生成编程题。\n主题：{req.topic}\n语言：{req.language}\n难度：{dd}\n\n"
               "JSON格式：{\"title\":\"...\",\"description\":\"...\",\"template_code\":\"...\",\"starter_code\":\"...\","
               "\"reference_solution\":\"...\",\"knowledge_points\":\"...\","
               "\"test_cases\":[{\"input\":\"...\",\"expected_output\":\"...\",\"description\":\"...\",\"is_sample\":true,\"score\":1}]}"

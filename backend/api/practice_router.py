@@ -39,7 +39,7 @@ TYPE_DESC_MAP = {
 class PracticeGenerateRequest(BaseModel):
     """教师：AI 出题"""
     knowledge_points: str
-    subject: str = "信息科技"
+    subject: str = ""
     question_type: str = "mixed"
     count: int = 1
     difficulty: str = "medium"
@@ -54,7 +54,7 @@ class PracticeCreateSession(BaseModel):
     target_grade: str = ""
     target_class: str = ""
     target_students: list[str] = []
-    subject: str = "信息科技"
+    subject: str = ""
 
 
 class PracticeSubmitRequest(BaseModel):
@@ -87,7 +87,8 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
     from backend.prompts.practice import PRACTICE_GENERATE_PROMPT
     type_desc = TYPE_DESC_MAP.get(req.question_type, "混合题型")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
-    prompt = PRACTICE_GENERATE_PROMPT.format(
+    ai_role = build_ai_role(subject=req.subject)
+    prompt = f"{ai_role}" + PRACTICE_GENERATE_PROMPT.format(
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
@@ -195,7 +196,8 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
     from backend.prompts.practice import PRACTICE_GENERATE_PROMPT
     type_desc = TYPE_DESC_MAP.get(req.question_type, "混合题型")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
-    prompt = PRACTICE_GENERATE_PROMPT.format(
+    ai_role = build_ai_role(subject=req.subject)
+    prompt = f"{ai_role}" + PRACTICE_GENERATE_PROMPT.format(
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )

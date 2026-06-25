@@ -15,6 +15,7 @@ from backend.logger import logger
 from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
 from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
+from backend.prompts import build_ai_role
 
 # ── 辅助：将 TEXT 年级/班级名解析为 ID ──
 def _resolve_grade_id(grade_name: str) -> int | None:
@@ -254,7 +255,8 @@ async def class_overview(
         f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}"
         for e in data_summary['exams']
     )
-    prompt = CLASS_ANALYSIS_PROMPT.format(
+    ai_role = build_ai_role(grade=grade)
+    prompt = f"{ai_role}" + CLASS_ANALYSIS_PROMPT.format(
         grade=grade, cls=cls, total_students=total_students,
         score_count=data_summary['score_count'],
         score_total=data_summary['score_total'],
@@ -342,7 +344,8 @@ async def student_analytics(target_username: str, request: Request):
     for e in exam_results:
         exam_text += f"- 《{e['title']}》({e['subject']}): {e['score']}/{e['total_score']}分 ({'通过' if e['score'] >= e['pass_score'] else '未通过'})\n"
 
-    prompt = f"""你是一位高中信息科技教师。请根据以下学生数据，生成一份个性化的学情分析报告。
+    ai_role = build_ai_role(grade=student_grade)
+    prompt = f"""{ai_role}请根据以下学生数据，生成一份个性化的学情分析报告。
 
 学生：{student_name}
 班级：{student_grade}{student_class}
@@ -441,7 +444,8 @@ async def exam_analytics(exam_id: int, request: Request):
     # 找出最薄弱的知识点
     weak_points = [q for q in q_accuracy if q['correct_rate'] < 60]
 
-    prompt = f"""你是一位高中{exam['subject']}教师。请根据以下考试数据，生成专业的考试分析报告。
+    ai_role = build_ai_role(subject=exam['subject'], grade=exam.get('grade', ''))
+    prompt = f"""{ai_role}请根据以下考试数据，生成专业的考试分析报告。
 
 考试名称：{exam['title']}
 科目：{exam['subject']}
@@ -579,7 +583,8 @@ async def teaching_suggestions(
     # ── 构建 Prompt ──
     from backend.prompts.analytics import TEACHING_SUGGESTIONS_PROMPT
 
-    prompt = TEACHING_SUGGESTIONS_PROMPT.format(
+    ai_role = build_ai_role(grade=grade)
+    prompt = f"{ai_role}" + TEACHING_SUGGESTIONS_PROMPT.format(
         grade=grade,
         cls=cls_display,
         total_students=total_students,
@@ -756,7 +761,8 @@ async def export_class_overview_docx(
         f"- 《{e['title']}》({e['subject']}): 参考{e['attempts']}人, 平均分{e['avg_score']}/{e['total_score']}"
         for e in data_summary['exams']
     )
-    prompt = CLASS_ANALYSIS_PROMPT.format(
+    ai_role = build_ai_role(grade=grade)
+    prompt = f"{ai_role}" + CLASS_ANALYSIS_PROMPT.format(
         grade=grade, cls=cls, total_students=total_students,
         score_count=data_summary['score_count'],
         score_total=data_summary['score_total'],
@@ -894,7 +900,8 @@ async def export_teaching_suggestions_docx(
     for e in exam_stats:
         exam_text += f"- 《{e['title']}》({e['subject']}): 参考{e['attempt_count']}人, 平均分{round(_safe_float(e['avg_score']), 1)}/{e['total_score']}\n"
 
-    prompt = f"""你是一位高中信息科技教师。请根据以下教学数据，为{grade}{class_num}班生成具体的教学建议。
+    ai_role = build_ai_role(grade=grade)
+    prompt = f"""{ai_role}请根据以下教学数据，为{grade}{class_num}班生成具体的教学建议。
 
 【班级概况】
 年级：{grade}
@@ -1045,7 +1052,8 @@ async def export_exam_report_docx(
 
     weak_points = [q for q in q_accuracy if q['correct_rate'] < 60]
 
-    prompt = f"""你是一位高中{exam['subject']}教师。请根据以下考试数据，生成专业的考试分析报告。
+    ai_role = build_ai_role(subject=exam['subject'], grade=exam.get('grade', ''))
+    prompt = f"""{ai_role}请根据以下考试数据，生成专业的考试分析报告。
 
 考试名称：{exam['title']}
 科目：{exam['subject']}

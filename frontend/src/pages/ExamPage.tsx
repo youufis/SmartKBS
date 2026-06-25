@@ -40,7 +40,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 // 课程列表将从后端动态加载
-let subjectOptions: string[] = ['信息科技', '通用技术']
+let subjectOptions: string[] = []
 
 const ExamPage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
@@ -49,7 +49,7 @@ const ExamPage: React.FC = () => {
   const isStudent = user?.role === 'student'
 
   // 从后端加载课程列表
-  const [subjects, setSubjects] = useState<string[]>(['信息科技', '通用技术'])
+  const [subjects, setSubjects] = useState<string[]>([])
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) {
@@ -784,7 +784,7 @@ const ExamPage: React.FC = () => {
 
   // ── 创建表单初始值 ──
   const createInitialValues = {
-    subject: subjects[0] || '信息科技',
+    subject: subjects[0] || '',
     duration: 45,
     total_score: 100,
     pass_score: 60,

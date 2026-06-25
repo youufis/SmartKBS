@@ -21,7 +21,7 @@ CONFIG_FILE = Path(__file__).resolve().parent.parent / "system_config.json"
 # ── 默认配置（与 config.py 保持一致） ──
 DEFAULT_CONFIG: dict[str, Any] = {
     # 品牌信息（AGENT_NAME 由 "智慧教学平台-" + AGENT_EDITION 自动拼接，不再单独保存）
-    "AGENT_EDITION": "高中信通版",
+    "AGENT_EDITION": "通用版",
     "ORG_NAME": "",
     # API 密钥（全局兜底）
     "dashscope_api_key": "",
@@ -56,7 +56,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         '.json', '.html', '.htm',
     ],
     # 课程名称列表
-    "SUBJECTS": ["信息科技", "通用技术"],
+    "SUBJECTS": ["人工智能"],
     # 启用的试题题型（可在此增删，前端自动同步）
     "QUESTION_TYPES": [
         {"key": "single", "label": "单选题"},
@@ -156,7 +156,7 @@ async def update_config(req: ConfigUpdate, request: Request):
 async def get_public_config():
     """公开配置（无需登录）— 用于登录页面等展示品牌信息"""
     cfg = load_config()
-    edition = cfg.get("AGENT_EDITION", "高中信通版")
+    edition = cfg.get("AGENT_EDITION", "通用版")
     full_name = f"智慧教学平台-{edition}" if edition else "智慧教学平台"
     return {
         "AGENT_NAME": full_name,

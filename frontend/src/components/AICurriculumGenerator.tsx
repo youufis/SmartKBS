@@ -73,7 +73,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [saveDone, setSaveDone] = useState(false)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [subjects, setSubjects] = useState<string[]>(['信息科技', '通用技术'])
+  const [subjects, setSubjects] = useState<string[]>([])
   const [gradeOptions, setGradeOptions] = useState<string[]>([])
 
   // 从后端加载课程列表和年级列表
@@ -223,7 +223,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     try {
       const formData = new FormData()
       formData.append('file', uploadFile!)
-      formData.append('subject', values.subject || subjects[0] || '信息科技')
+      formData.append('subject', values.subject || subjects[0] || '')
       formData.append('grade', values.grade || '')
       formData.append('course_name', values.course_name || '')
       formData.append('auto_save', 'true')

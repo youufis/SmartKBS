@@ -16,6 +16,7 @@ from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_insert_update
 from backend.logger import logger
 from backend.ws_manager import manager as ws_manager
+from backend.prompts import build_ai_role
 
 router = APIRouter()
 
@@ -223,7 +224,8 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
     }.get(req.ai_role, "引导者")
 
     from backend.prompts.discussion import DISCUSSION_PLAN_PROMPT
-    prompt = DISCUSSION_PLAN_PROMPT.format(
+    ai_role = build_ai_role(subject=req.subject)
+    prompt = f"{ai_role}" + DISCUSSION_PLAN_PROMPT.format(
         subject=req.subject,
         topic=req.topic,
         ai_role_desc=ai_role_desc,
@@ -625,8 +627,9 @@ async def _auto_generate_report(disc_id: int):
 
                 from backend.prompts.discussion import DISCUSSION_AI_SUMMARY_PROMPT
                 group_name = g[2] or f"第{g[1]}组"
-                prompt = DISCUSSION_AI_SUMMARY_PROMPT.format(
-                    subject=disc.get("subject") or "信息科技",
+                ai_role = build_ai_role(subject=disc.get("subject", ""))
+                prompt = f"{ai_role}" + DISCUSSION_AI_SUMMARY_PROMPT.format(
+                    subject=disc.get("subject") or "",
                     title=disc["title"],
                     group_name=group_name,
                     description=disc.get("description") or "",
@@ -1012,7 +1015,8 @@ async def ai_suggest(group_id: int, request: Request):
         "judge": "作为辩论裁判，分析各方论点",
     }.get(ai_role, "适时引导讨论")
 
-    prompt = f"""你是一位高中课堂讨论的AI助教，角色是：{role_desc}
+    ai_role_text = build_ai_role()
+    prompt = f"""{ai_role_text}你是一位课堂讨论的AI助教，角色是：{role_desc}
 
 讨论主题：{title}
 讨论说明：{description}
@@ -1089,7 +1093,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
     disc_id = disc_row[0][0]
     title = disc_row[0][1]
     description = disc_row[0][2] or ""
-    subject = disc_row[0][3] or "信息科技"
+    subject = disc_row[0][3] or ""
     group_name = disc_row[0][5] or f"第{disc_row[0][4]}组"
 
     # 获取该小组所有消息
@@ -1120,7 +1124,8 @@ async def generate_group_ai_summary(group_id: int, request: Request):
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
     from backend.prompts.discussion import DISCUSSION_AI_SUMMARY_PROMPT
-    prompt = DISCUSSION_AI_SUMMARY_PROMPT.format(
+    ai_role = build_ai_role(subject=subject)
+    prompt = f"{ai_role}" + DISCUSSION_AI_SUMMARY_PROMPT.format(
         subject=subject,
         title=title,
         group_name=group_name,
@@ -1262,7 +1267,7 @@ async def export_group_summary_docx(
 
     disc_id = disc_row[0][0]
     disc_title = disc_row[0][1]
-    subject = disc_row[0][3] or "信息科技"
+    subject = disc_row[0][3] or ""
     group_name = disc_row[0][4] or f"第{disc_row[0][4]}组"
 
     # 获取已有总结
@@ -1640,7 +1645,8 @@ async def auto_trigger_ai(disc_id: int, request: Request):
             [f"{m[0] or 'AI助教'}: {m[1][:200]}" for m in reversed(recent)]
         )
 
-        prompt = f"""你是一位高中课堂讨论的AI助教。
+        ai_role_text = build_ai_role()
+        prompt = f"""{ai_role_text}你是一位课堂讨论的AI助教。
 请根据以下讨论内容给出一个简短的引导问题或总结（30-50字），目的是推动讨论继续深入：
 
 讨论内容：

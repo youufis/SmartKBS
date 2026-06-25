@@ -326,7 +326,7 @@ const CurriculumPage: React.FC = () => {
     try {
       const { data } = await apiClient.post('/api/practice/generate', {
         knowledge_points: selectedKp.name,
-        subject: activeCourse?.subject || '信息科技',
+        subject: activeCourse?.subject || '',
         question_type: 'single',
         count: mixedAiCount,
         difficulty: selectedKp.difficulty || 'medium',

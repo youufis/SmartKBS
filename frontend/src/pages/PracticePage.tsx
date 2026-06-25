@@ -209,8 +209,8 @@ const StudentView: React.FC = () => {
 const TeacherView: React.FC = () => {
   const [tab, setTab] = useState<'generate' | 'sessions'>('generate')
   const [kpInput, setKpInput] = useState('')
-  const [subject, setSubject] = useState('信息科技')
-  const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
+  const [subject, setSubject] = useState('')
+  const [subjectOptions, setSubjectOptions] = useState<string[]>([])
   const [difficulty, setDifficulty] = useState('medium')
   const [qType, setQType] = useState('mixed')
   const [count, setCount] = useState(5)

@@ -48,6 +48,7 @@ class RegisterRequest(BaseModel):
     gender: Optional[int] = 0
     role: Optional[int] = 2  # 默认普通用户
     grade: Optional[str] = ""  # 年级：高一/高二
+    subjects: Optional[list[str]] = []  # 教师任教学科
 
 
 class UpdateUserRequest(BaseModel):
@@ -56,6 +57,7 @@ class UpdateUserRequest(BaseModel):
     name: Optional[str] = ""
     gender: Optional[int] = 0
     grade: Optional[str] = ""
+    subjects: Optional[list[str]] = []  # 教师任教学科
 
 
 
@@ -157,8 +159,7 @@ def _delete_user_completely(username: str):
         ("DELETE FROM student_badges WHERE student_username=?", (username,)),
         ("DELETE FROM login_logs WHERE username=?", (username,)),
         # 以 username 为创建者/拥有者的表
-        # 先清理共享资源关联的课程绑定和 AI 练习成绩
-        ("DELETE FROM ai_practice_results WHERE kp_id IN (SELECT knowledge_point_id FROM curriculum_bindings WHERE resource_type='html' AND resource_id IN (SELECT id FROM shared_resources WHERE owner_username=?))", (username,)),
+        # 先清理共享资源关联的课程绑定
         ("DELETE FROM curriculum_bindings WHERE resource_id IN (SELECT id FROM shared_resources WHERE owner_username=?)", (username,)),
         ("DELETE FROM shared_resources WHERE owner_username=?", (username,)),
         ("DELETE FROM tasks WHERE creator_username=?", (username,)),
@@ -195,7 +196,12 @@ def _delete_user_completely(username: str):
     # 最后删除用户本身
     delete_ops.append(("DELETE FROM users WHERE username=?", (username,)))
 
-    execute_batch(delete_ops)
+    # 逐条执行删除操作，单条失败仅记录日志不影响后续
+    for sql, params in delete_ops:
+        try:
+            execute_batch([(sql, params)])
+        except Exception as e:
+            logger.warning(f"删除操作跳过（表或列不存在）: {sql[:80]}... - {e}")
 
     # 4. 删除 questions.db 中的考试答题记录和代码练习记录
     try:
@@ -222,10 +228,10 @@ def _delete_user_completely(username: str):
 
 @router.post("/register")
 async def register_user(req: RegisterRequest, request: Request):
-    """注册新用户（仅管理员）"""
+    """注册新用户（管理员和教师均可）"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以注册用户")
+    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以注册用户")
 
     username = req.username.strip()
     password = req.password.strip()
@@ -264,18 +270,20 @@ async def register_user(req: RegisterRequest, request: Request):
 
         # 教师：解析多年级多班级并写入 teacher_assignments
         if role_num == 1 and grade_val:
+            subj_list = req.subjects or []
             gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
             for g_name, cls_names in gcm.items():
                 gid = upsert_grade(g_name)
                 assert gid is not None
-                if not cls_names:
-                    assign_teacher(username, gid, None)  # type: ignore[arg-type]
-                else:
-                    for cn in cls_names:
-                        if "班" not in cn:
-                            cn = f"{cn}班"
-                        cid = upsert_class(gid, cn)
-                        assign_teacher(username, gid, cid)
+                for subj in subj_list:
+                    if not cls_names:
+                        assign_teacher(username, gid, None, subj)  # type: ignore[arg-type]
+                    else:
+                        for cn in cls_names:
+                            if "班" not in cn:
+                                cn = f"{cn}班"
+                            cid = upsert_class(gid, cn)
+                            assign_teacher(username, gid, cid, subj)
 
         logger.info(f"用户注册成功: {username}")
         return {"message": f"用户 '{username}' 注册成功"}
@@ -286,10 +294,10 @@ async def register_user(req: RegisterRequest, request: Request):
 
 @router.put("/update")
 async def update_user_info(req: UpdateUserRequest, request: Request):
-    """更新用户信息（仅管理员）"""
+    """更新用户信息（管理员和教师均可）"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以更新用户信息")
+    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以更新用户信息")
 
     username = req.username.strip()
     if not username:
@@ -326,18 +334,20 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
         if role_num == 1 and grade_val:
             from backend.permission_service import clear_teacher_assignments, assign_teacher
             clear_teacher_assignments(username)
+            subj_list = req.subjects or []
             gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
             for g_name, cls_names in gcm.items():
                 gid = upsert_grade(g_name)
                 assert gid is not None
-                if not cls_names:
-                    assign_teacher(username, gid, None)  # type: ignore[arg-type]
-                else:
-                    for cn in cls_names:
-                        if "班" not in cn:
-                            cn = f"{cn}班"
-                        cid = upsert_class(gid, cn)
-                        assign_teacher(username, gid, cid)
+                for subj in subj_list:
+                    if not cls_names:
+                        assign_teacher(username, gid, None, subj)  # type: ignore[arg-type]
+                    else:
+                        for cn in cls_names:
+                            if "班" not in cn:
+                                cn = f"{cn}班"
+                            cid = upsert_class(gid, cn)
+                            assign_teacher(username, gid, cid, subj)
 
         logger.info(f"用户信息已更新: {username}")
         return {"message": f"用户 '{username}' 信息已更新"}
@@ -378,10 +388,10 @@ async def change_password(req: ChangePasswordRequest, request: Request):
 
 @router.delete("/{username}")
 async def delete_user(username: str, request: Request):
-    """彻底删除用户及其所有相关数据（仅管理员）"""
+    """彻底删除用户及其所有相关数据（管理员和教师均可）"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以删除用户")
+    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以删除用户")
 
     # 检查用户是否存在并获取角色
     rows = execute_query("SELECT username, role FROM users WHERE username=?", (username,))
@@ -419,6 +429,12 @@ async def get_user_info(username: str, request: Request):
     role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
     gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
 
+    # 获取教师/管理员的任教学科
+    subjects = []
+    if role_val in (0, 1):
+        from backend.permission_service import get_teacher_subjects
+        subjects = get_teacher_subjects(username)
+
     return {
         "username": username,
         "class": class_val,
@@ -427,6 +443,7 @@ async def get_user_info(username: str, request: Request):
         "role": role_val,
         "role_name": role_name,
         "grade": grade_val or "",
+        "subjects": subjects,
     }
 
 
@@ -449,6 +466,11 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
     for username, class_val, name_val, gender_val, role_val, grade_val in rows:
         role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
         gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
+        # 获取教师/管理员的任教学科
+        subjects = []
+        if role_val in (0, 1):
+            from backend.permission_service import get_teacher_subjects
+            subjects = get_teacher_subjects(username)
         users.append({
             "username": username,
             "class": class_val,
@@ -456,6 +478,7 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
             "gender": gender_name,
             "role": role_name,
             "grade": grade_val or "",
+            "subjects": subjects,
         })
 
     return {"users": users, "total": len(users)}
@@ -465,8 +488,8 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
 async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
     """批量彻底删除用户（按用户名模式匹配，跳过管理员账号）"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以批量删除")
+    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以批量删除")
 
     pattern = req.pattern.strip()
     if not pattern:
@@ -603,30 +626,64 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
                         (username, hashed, class_val, name_val, gender_val, role_val, grade_val, grade_id, class_id),
                     )
 
+                    # 解析任教学科（CSV 中逗号分隔，如 "信息科技,通用技术"）
+                    subjects_str = row.get("subjects", "").strip()
+                    subject_list = [s.strip() for s in subjects_str.replace("，", ",").split(",") if s.strip()] if subjects_str else []
+                    # 校验学科是否在系统配置中，不在则发出警告
+                    if subject_list:
+                        from backend.subject_config import get_subjects
+                        valid_subjects = get_subjects()
+                        invalid = [s for s in subject_list if s not in valid_subjects]
+                        if invalid:
+                            valid_str = "、".join(valid_subjects) if valid_subjects else "（未配置）"
+                            logger.warning(f"导入用户 '{username}' 学科 {','.join(invalid)} 不在系统配置 SUBJECTS 中（当前配置: {valid_str}），已跳过非法学科")
+                            subject_list = [s for s in subject_list if s in valid_subjects]
+
                     # 教师：写入 teacher_assignments
                     if role_val == 1 and grade_val:
                         gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
                         for g_name, cls_names in gcm.items():
                             gid = grade_cache.get(g_name) or upsert_grade(g_name)
                             grade_cache[g_name] = gid
-                            if not cls_names:
-                                # 该年级全部班级
-                                cursor.execute(
-                                    "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, NULL)",
-                                    (username, gid),
-                                )
+                            # 如果有指定学科，为每个学科创建一条记录；否则创建一条无学科记录
+                            if subject_list:
+                                for subj in subject_list:
+                                    if not cls_names:
+                                        cursor.execute(
+                                            "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id, subject) VALUES (?, ?, NULL, ?)",
+                                            (username, gid, subj),
+                                        )
+                                    else:
+                                        for cn in cls_names:
+                                            if "班" not in cn:
+                                                cn = f"{cn}班"
+                                            cache_key = (gid, cn)
+                                            if cache_key not in class_cache:
+                                                class_cache[cache_key] = upsert_class(gid, cn)
+                                            cid = class_cache[cache_key]
+                                            cursor.execute(
+                                                "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id, subject) VALUES (?, ?, ?, ?)",
+                                                (username, gid, cid, subj),
+                                            )
                             else:
-                                for cn in cls_names:
-                                    if "班" not in cn:
-                                        cn = f"{cn}班"
-                                    cache_key = (gid, cn)
-                                    if cache_key not in class_cache:
-                                        class_cache[cache_key] = upsert_class(gid, cn)
-                                    cid = class_cache[cache_key]
+                                # 未指定学科，保持向后兼容
+                                if not cls_names:
                                     cursor.execute(
-                                        "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, ?)",
-                                        (username, gid, cid),
+                                        "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, NULL)",
+                                        (username, gid),
                                     )
+                                else:
+                                    for cn in cls_names:
+                                        if "班" not in cn:
+                                            cn = f"{cn}班"
+                                        cache_key = (gid, cn)
+                                        if cache_key not in class_cache:
+                                            class_cache[cache_key] = upsert_class(gid, cn)
+                                        cid = class_cache[cache_key]
+                                        cursor.execute(
+                                            "INSERT OR IGNORE INTO teacher_assignments (teacher_username, grade_id, class_id) VALUES (?, ?, ?)",
+                                            (username, gid, cid),
+                                        )
 
                     imported += 1
                 except Exception as e:
@@ -665,16 +722,18 @@ async def download_import_template():
     """下载用户导入 CSV 模板"""
     import tempfile
 
-    csv_content = "username,password,class,name,gender,role,grade\n"
+    csv_content = "username,password,class,name,gender,role,grade,subjects\n"
     csv_content += "# === 学生示例（class 自动去\"班\"后缀，按年级名匹配主数据） ===\n"
-    csv_content += "s11001,123456,1班,张三,男,2,一年级\n"
-    csv_content += "s11002,123456,2班,李四,女,2,一年级\n"
-    csv_content += "s21001,123456,3班,王五,男,2,初一\n"
-    csv_content += "s31001,123456,1班,赵六,女,2,高一\n"
+    csv_content += "s11001,123456,1班,张三,男,2,一年级,\n"
+    csv_content += "s11002,123456,2班,李四,女,2,一年级,\n"
+    csv_content += "s21001,123456,3班,王五,男,2,初一,\n"
+    csv_content += "s31001,123456,1班,赵六,女,2,高一,\n"
     csv_content += "# === 教师示例（用 | 分隔多年级，用 , 分隔多班级） ===\n"
-    csv_content += "t001,123456,\"1班,2班|1班\",王老师,男,1,一年级|初一\n"
-    csv_content += "t002,123456,\"1班,2班,3班\",李老师,女,1,高一\n"
-    csv_content += "# 说明: grade 列支持 \"一年级\"~\"高三\" 等任意年级名，class 列数字自动补\"班\"后缀并映射到 classes 表"
+    csv_content += "t001,123456,\"1班,2班|1班\",王老师,男,1,一年级|初一,信息科技\n"
+    csv_content += "t002,123456,\"1班,2班,3班\",李老师,女,1,高一,通用技术\n"
+    csv_content += "# === 教师多学科示例（subjects 列多个学科用逗号分隔，需用英文双引号包裹） ===\n"
+    csv_content += "t003,123456,\"1班,2班\",陈老师,女,1,高一,\"信息科技,通用技术\"\n"
+    csv_content += "# 说明: grade 列支持 \"一年级\"~\"高三\" 等任意年级名，class 列数字自动补\"班\"后缀并映射到 classes 表。subjects 列为教师任教学科，多个用英文逗号分隔并用英文双引号包裹"
 
     # 创建临时文件
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", encoding="utf-8-sig")

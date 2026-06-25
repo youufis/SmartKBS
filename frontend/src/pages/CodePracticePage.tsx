@@ -244,7 +244,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   const [supportedLangs, setSupportedLangs] = useState<{value:string;label:string;available:boolean}[]>([])
 
   // 科目列表（从系统配置动态加载）
-  const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
+  const [subjectOptions, setSubjectOptions] = useState<string[]>([])
 
   // ── 教师端：创建题目 ──
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -274,7 +274,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   const [createForm, setCreateForm] = useState({
     title: '',
     description: '',
-    subject: '信息科技',
+    subject: '',
     knowledge_points: '',
     difficulty: 'medium' as string,
     language: 'python',
@@ -290,7 +290,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   const [editLoading, setEditLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({
-    title: '', description: '', subject: '信息科技', knowledge_points: '',
+    title: '', description: '', subject: '', knowledge_points: '',
     difficulty: 'medium' as string, language: 'python' as string,
     template_code: '', starter_code: '', time_limit: 5,
   })
@@ -330,7 +330,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       message.success('题目创建成功')
       setCreateModalOpen(false)
       setCreateForm({
-        title: '', description: '', subject: '信息科技', knowledge_points: '',
+        title: '', description: '', subject: '', knowledge_points: '',
         difficulty: 'medium', language: 'python',
         template_code: '# 在此编写你的代码\n\ndef solution():\n    pass\n',
         starter_code: '', time_limit: 5, test_cases: [],
@@ -355,7 +355,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       setEditForm({
         title: data.title || '',
         description: data.description || '',
-        subject: data.subject || '信息科技',
+        subject: data.subject || '',
         knowledge_points: data.knowledge_points || '',
         difficulty: data.difficulty || 'medium',
         language: data.language || 'python',
@@ -437,7 +437,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   // ── AI 生成题目（教师端） ──
   const [aiGenModal, setAiGenModal] = useState(false)
   const [aiGenTopic, setAiGenTopic] = useState('')
-  const [aiGenSubject, setAiGenSubject] = useState('信息科技')
+  const [aiGenSubject, setAiGenSubject] = useState('')
   const [aiGenLoading, setAiGenLoading] = useState(false)
   const [aiGenResult, setAiGenResult] = useState<any>(null)
   const [, setAiGenTaskId] = useState<string | null>(null)

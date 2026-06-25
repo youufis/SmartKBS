@@ -79,6 +79,7 @@ interface DashboardSummary {
   today_chat_count?: number
   teacher_grades?: string
   teacher_classes?: string
+  teacher_subjects?: string[]
   // 教师/管理员 - 课堂互动
   teacher_quiz_count?: number
   teacher_active_quiz_count?: number
@@ -275,6 +276,12 @@ const DashboardPage: React.FC = () => {
           {isTeacher && summary.teacher_grades && (
             <span style={{ marginLeft: 'auto', fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
               <TeamOutlined /> {summary.teacher_grades} · {summary.teacher_classes}班
+            </span>
+          )}
+          {isTeacher && summary.teacher_subjects && summary.teacher_subjects.length > 0 && (
+            <span style={{ marginLeft: 12, fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
+              <ExperimentOutlined style={{ marginRight: 4 }} />
+              任教：{summary.teacher_subjects.join('、')}
             </span>
           )}
         </div>

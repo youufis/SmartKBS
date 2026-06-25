@@ -181,6 +181,19 @@ def get_teacher_assignments(teacher_username: str) -> list[dict[str, Any]]:
     )
 
 
+def get_teacher_subjects(teacher_username: str) -> list[str]:
+    """获取教师的任教学科列表（去重），管理员返回系统全部学科"""
+    from backend.auth import is_admin
+    if is_admin(teacher_username):
+        from backend.subject_config import get_subjects
+        return get_subjects()
+    rows = execute_query_dict(
+        "SELECT DISTINCT subject FROM teacher_assignments WHERE teacher_username=? AND subject!=''",
+        (teacher_username,),
+    )
+    return [r['subject'] for r in rows]
+
+
 def get_teacher_grades(teacher_username: str) -> list[dict[str, Any]]:
     """教师任教的年级列表（去重），管理员返回全部"""
     from backend.auth import is_admin

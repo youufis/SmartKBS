@@ -107,7 +107,7 @@ const LoginPage: React.FC = () => {
   const login = useAuthStore((s) => s.login)
   const [loading, setLoading] = useState(false)
   const [onlineCount, setOnlineCount] = useState(0)
-  const [agentName, setAgentName] = useState('智慧教学平台-高中信通版')
+  const [agentName, setAgentName] = useState('智慧教学平台')
   const [orgName, setOrgName] = useState('')
 
   // 随机选一条名言（仅在组件挂载时确定）

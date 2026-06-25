@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react'
 // 用户管理
 import {
   Layout, Card, Tabs, Form, Input, Button, message,
-  Modal, Progress, Table, Upload, Space, Radio, Typography, Popconfirm,
+  Modal, Progress, Table, Upload, Space, Radio, Select, Typography, Popconfirm,
 } from 'antd'
 import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
 import type { UserItem } from '../types'
 import type { ImportProgressEvent } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
+import { useSubjectOptions } from '../hooks/useSubjectOptions'
 
 interface ApiError {
   response?: { data?: { detail?: string } }
@@ -19,12 +20,12 @@ const UserMgmtPage: React.FC = () => {
   const isAdmin = user?.role === 'admin'
   const isTeacher = user?.role === 'teacher'
   const isRoot = user?.username === 'root'
-  const canImport = isAdmin || isTeacher
+  const { subjects } = useSubjectOptions()
 
   // ── 注册 ──
   const [regForm] = Form.useForm()
   const handleRegister = async (values: Record<string, unknown>) => {
-    const v = values as Record<string, string>
+    const v = values as Record<string, string> & { subjects?: string[] }
     try {
       const msg = await usersApi.registerUser({
         username: v.username,
@@ -34,6 +35,7 @@ const UserMgmtPage: React.FC = () => {
         gender: v.gender === '男' ? 1 : 0,
         role: v.role === '管理员' ? 0 : v.role === '教师' ? 1 : 2,
         grade: v.grade || '',
+        subjects: v.subjects || [],
       })
       message.success(msg)
       regForm.resetFields()
@@ -44,13 +46,32 @@ const UserMgmtPage: React.FC = () => {
 
   // ── 更新信息 ──
   const [updForm] = Form.useForm()
+  const handleUpdateUsernameBlur = async (e: React.FocusEvent<HTMLInputElement>) => {
+    const username = e.target.value?.trim()
+    if (!username) return
+    try {
+      const data = await usersApi.getUserInfo(username)
+      updForm.setFieldsValue({
+        name: data.name || '',
+        grade: data.grade || '',
+        class_val: data.class || '',
+        gender: data.gender === '男' ? '男' : '女',
+        role: data.role_name || '普通用户',
+        subjects: data.subjects || [],
+      })
+      // 管理员默认全部学科
+      if (data.role_name === '管理员') {
+        updForm.setFieldsValue({ subjects })
+      }
+    } catch { /* 用户不存在 */ }
+  }
   const handleUpdate = async (values: Record<string, unknown>) => {
-    const v = values as Record<string, string>
+    const v = values as Record<string, string> & { subjects?: string[] }
     try {
       const msg = await usersApi.updateUserInfo(
         v.username, v.class_val || '',
         v.name || '', v.gender === '男' ? 1 : 0,
-        v.grade || '',
+        v.grade || '', v.subjects || [],
       )
       message.success(msg)
     } catch (err: unknown) {
@@ -90,7 +111,6 @@ const UserMgmtPage: React.FC = () => {
   const [delForm] = Form.useForm()
   const handleDelete = async (values: Record<string, unknown>) => {
     const v = values as Record<string, string>
-    if (!isRoot) { message.error('权限不足'); return }
     try {
       const msg = await usersApi.deleteUser(v.username)
       message.success(msg)
@@ -127,7 +147,6 @@ const UserMgmtPage: React.FC = () => {
   const [allUsers, setAllUsers] = useState<UserItem[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
   const handleListUsers = async () => {
-    if (!isAdmin) { message.warning('仅管理员可查看'); return }
     setUsersLoading(true)
     try {
       const { users } = await usersApi.getAllUsers()
@@ -142,7 +161,6 @@ const UserMgmtPage: React.FC = () => {
   // ── 批量删除 ──
   const [bulkPattern, setBulkPattern] = useState('')
   const handleBulkDelete = async () => {
-    if (!isRoot) { message.error('权限不足'); return }
     if (!bulkPattern.trim()) { message.warning('请输入模式'); return }
     try {
       const msg = await usersApi.bulkDeleteUsers(bulkPattern)
@@ -160,6 +178,7 @@ const UserMgmtPage: React.FC = () => {
     total: number
     imported: number
     errorCount: number
+    errors: string[]
     message: string
     done: boolean
   }>({
@@ -169,6 +188,7 @@ const UserMgmtPage: React.FC = () => {
     total: 0,
     imported: 0,
     errorCount: 0,
+    errors: [],
     message: '',
     done: false,
   })
@@ -181,6 +201,7 @@ const UserMgmtPage: React.FC = () => {
       total: 0,
       imported: 0,
       errorCount: 0,
+      errors: [],
       message: '正在解析文件…',
       done: false,
     })
@@ -204,11 +225,13 @@ const UserMgmtPage: React.FC = () => {
             message: `正在导入 ${event.current}/${event.total}…`,
           }))
         } else if (event.type === 'done') {
+          const errList = event.errors || []
           setImportProgress(prev => ({
             ...prev,
             percent: 100,
             imported: event.imported || 0,
             errorCount: event.error_count || 0,
+            errors: errList,
             message: event.message || '导入完成',
             done: true,
           }))
@@ -250,16 +273,39 @@ const UserMgmtPage: React.FC = () => {
     { title: '班级', dataIndex: 'class', key: 'class', width: 80 },
     { title: '性别', dataIndex: 'gender', key: 'gender', width: 60 },
     { title: '角色', dataIndex: 'role', key: 'role', width: 80 },
+    {
+      title: '任教科目',
+      dataIndex: 'subjects',
+      key: 'subjects',
+      width: 180,
+      render: (_: any, record: any) => {
+        if (record.role === '管理员') return '全部学科'
+        if (record.role !== '教师' || !record.subjects?.length) return '-'
+        return record.subjects.join('、')
+      },
+    },
   ]
 
   // 学生只能看到修改密码
   const isStudent = user?.role === 'student'
 
+  // 定义各标签页的可见权限
+  // 教师和管理员拥有相同的用户管理权限
+  const tabPermissions: Record<string, boolean> = {
+    register: isAdmin || isTeacher,
+    update: isAdmin || isTeacher,
+    password: true,            // 所有人可用
+    delete: isAdmin || isTeacher,
+    search: isAdmin || isTeacher,
+    list: isAdmin || isTeacher,
+    import: isAdmin || isTeacher,
+  }
+
   const tabItems = [
     {
       key: 'register',
       label: '注册用户',
-      children: isAdmin ? (
+      children: (
         <Form form={regForm} layout="vertical" onFinish={handleRegister} style={{ maxWidth: 400 }}>
           <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
             <Input placeholder="用户名/学号" />
@@ -276,16 +322,49 @@ const UserMgmtPage: React.FC = () => {
           <Form.Item name="name" label="姓名"><Input placeholder="姓名" /></Form.Item>
           <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
           <Form.Item name="role" label="角色" initialValue="普通用户"><Radio.Group options={roleRadios} /></Form.Item>
+          <Form.Item shouldUpdate={(prev, cur) => prev.role !== cur.role} noStyle>
+            {({ getFieldValue }) => {
+              const role = getFieldValue('role')
+              const isTeacherOrAdmin = role === '教师' || role === '管理员'
+              return (
+                <Form.Item name="subjects" label="任教科目" hidden={!isTeacherOrAdmin}
+                  initialValue={role === '管理员' ? [...subjects] : undefined}
+                  extra={<>请在「系统配置」中先设置课程名称列表，此处才会显示可选学科。如列表为空，<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>前往配置</Button></>}>
+                  <Select mode="multiple" placeholder="选择任教学科（可多选）" allowClear
+                    options={subjects.map(s => ({ label: s, value: s }))} />
+                </Form.Item>
+              )
+            }}
+          </Form.Item>
           <Button type="primary" htmlType="submit">注册</Button>
         </Form>
-      ) : <Typography.Text type="secondary">仅管理员可注册用户</Typography.Text>,
+      ),
     },
     {
       key: 'update',
       label: '更新信息',
       children: (
         <Form form={updForm} layout="vertical" onFinish={handleUpdate} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input placeholder="要更新的用户名" /></Form.Item>
+          <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
+            <Input placeholder="输入用户名后移出焦点自动加载" onBlur={handleUpdateUsernameBlur} />
+          </Form.Item>
+          <Form.Item name="role" label="角色">
+            <Radio.Group options={roleRadios} />
+          </Form.Item>
+          <Form.Item shouldUpdate={(prev, cur) => prev.role !== cur.role} noStyle>
+            {({ getFieldValue }) => {
+              const role = getFieldValue('role')
+              const isTeacherOrAdmin = role === '教师' || role === '管理员'
+              return (
+                <Form.Item name="subjects" label="任教科目" hidden={!isTeacherOrAdmin}
+                  initialValue={role === '管理员' ? [...subjects] : undefined}
+                  extra={<>请在「系统配置」中先设置课程名称列表，此处才会显示可选学科。<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>前往配置</Button></>}>
+                  <Select mode="multiple" placeholder="选择任教学科（可多选）" allowClear
+                    options={subjects.map(s => ({ label: s, value: s }))} />
+                </Form.Item>
+              )
+            }}
+          </Form.Item>
           <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
             <Input placeholder="如：高一 或 高一|高二" />
           </Form.Item>
@@ -334,12 +413,12 @@ const UserMgmtPage: React.FC = () => {
     {
       key: 'delete',
       label: '删除用户',
-      children: isRoot ? (
+      children: (
         <Form form={delForm} layout="vertical" onFinish={handleDelete} style={{ maxWidth: 400 }}>
           <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input placeholder="要删除的用户名" /></Form.Item>
           <Button type="primary" danger htmlType="submit">删除用户</Button>
         </Form>
-      ) : <Typography.Text type="secondary">仅管理员可删除用户</Typography.Text>,
+      ),
     },
     {
       key: 'search',
@@ -370,9 +449,7 @@ const UserMgmtPage: React.FC = () => {
       label: '用户列表',
       children: (
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>
-            {isAdmin ? '刷新列表' : '仅管理员可查看'}
-          </Button>
+          <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>刷新列表</Button>
           {allUsers.length > 0 && (
             <Table dataSource={allUsers} columns={userColumns} rowKey="username"
               size="small" pagination={{ pageSize: 30 }} scroll={{ y: 400 }} />
@@ -383,7 +460,7 @@ const UserMgmtPage: React.FC = () => {
     {
       key: 'import',
       label: '批量操作',
-      children: canImport ? (
+      children: (
         <Space direction="vertical" style={{ width: '100%' }}>
           <Card size="small" title="导入用户">
             <Space>
@@ -408,7 +485,7 @@ const UserMgmtPage: React.FC = () => {
               onCancel={handleImportDone}
             >
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                <Progress percent={importProgress.percent} status={importProgress.done ? 'success' : 'active'} />
+                <Progress percent={importProgress.percent} status={importProgress.done ? (importProgress.errorCount > 0 ? 'exception' : 'success') : 'active'} />
                 <Typography.Text>{importProgress.message}</Typography.Text>
                 {importProgress.total > 0 && (
                   <Typography.Text type="secondary">
@@ -417,27 +494,38 @@ const UserMgmtPage: React.FC = () => {
                     ｜ 失败 {importProgress.errorCount} 条
                   </Typography.Text>
                 )}
+                {importProgress.errors.length > 0 && (
+                  <div style={{ maxHeight: 200, overflow: 'auto', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4, padding: '8px 12px' }}>
+                    <Typography.Text type="danger" strong>错误详情：</Typography.Text>
+                    {importProgress.errors.map((err, i) => (
+                      <Typography.Text key={i} type="danger" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{err}</Typography.Text>
+                    ))}
+                  </div>
+                )}
               </Space>
             </Modal>
           </Card>
           <Card size="small" title="批量删除">
             <Space>
-              <Input placeholder="用户名关键词，如 s11" value={bulkPattern}
-                onChange={(e) => setBulkPattern(e.target.value)} style={{ width: 240 }} />
-              <Popconfirm title="确认批量删除？" onConfirm={handleBulkDelete}>
-                <Button danger>批量删除</Button>
-              </Popconfirm>
-            </Space>
-          </Card>
+                <Input placeholder="用户名关键词，如 s11" value={bulkPattern}
+                  onChange={(e) => setBulkPattern(e.target.value)} style={{ width: 240 }} />
+                <Popconfirm title="确认批量删除？" onConfirm={handleBulkDelete}>
+                  <Button danger>批量删除</Button>
+                </Popconfirm>
+              </Space>
+            </Card>
         </Space>
-      ) : <Typography.Text type="secondary">仅管理员或教师可批量操作</Typography.Text>,
+      ),
     },
   ]
+
+  // 按权限过滤可见的标签页
+  const visibleTabs = tabItems.filter(t => tabPermissions[t.key])
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Typography.Title level={4} style={{ marginTop: 0 }}>👥 用户管理</Typography.Title>
-      <Tabs items={isStudent ? tabItems.filter(t => t.key === 'password') : tabItems} />
+      <Tabs items={visibleTabs} />
     </Layout>
   )
 }

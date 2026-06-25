@@ -333,8 +333,14 @@ def _chat_event_generator(
             from backend.rag import retrieve_knowledge
             rag_context = retrieve_knowledge(prompt, username)
             if rag_context:
-                from backend.prompts.chat import AI_CHAT_SYSTEM_ROLE
-                system_role = AI_CHAT_SYSTEM_ROLE
+                from backend.prompts import build_ai_role
+                from backend.permission_service import get_teacher_subjects
+                from backend.auth import get_user_role
+                # 教师/管理员：使用其任教学科；学生：使用通用角色
+                user_role = get_user_role(username)
+                teacher_subjects = get_teacher_subjects(username) if user_role in (0, 1) else []
+                ai_role = build_ai_role(subjects=teacher_subjects) if teacher_subjects else build_ai_role()
+                system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
                 if "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
                     rag_context = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
                 enhanced_prompt = f"{system_role}\n\n{rag_context}\n\n用户问题：{enhanced_prompt}"

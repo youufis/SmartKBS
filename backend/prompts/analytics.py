@@ -2,14 +2,14 @@
 学情分析相关 Prompt
 """
 
-TEACHING_SUGGESTIONS_PROMPT = """你是一位经验丰富的高中信息科技与通用技术教学专家。请根据以下班级的多维度数据，生成具体可操作的教学建议。
+TEACHING_SUGGESTIONS_PROMPT = """请根据以下班级的多维度数据，生成具体可操作的教学建议。
 
 ## 班级数据
 
 ### 基本信息
 - 年级/班级：{grade}{cls}班
 - 学生人数：{total_students}人
-- 学科：信息科技 / 通用技术
+- 学科：{subject}
 
 ### 课堂积分
 - 有积分记录的学生数：{score_count}人
@@ -53,13 +53,13 @@ TEACHING_SUGGESTIONS_PROMPT = """你是一位经验丰富的高中信息科技�
 
 ## 注意事项
 1. 建议必须具体、可执行，不要泛泛而谈
-2. 结合信息科技/通用技术学科特点
+2. 结合{subject}学科特点
 3. 语气专业、务实
 4. 直接以内容开头，不要出现"根据提供的数据"等冗余表述
 """
 
 # ── 班级学情分析报告 ──
-CLASS_ANALYSIS_PROMPT = """你是一位经验丰富的高中信息科技/通用技术教师。请根据以下班级数据，生成一份专业的学情分析报告。
+CLASS_ANALYSIS_PROMPT = """请根据以下班级数据，生成一份专业的学情分析报告。
 
 班级：{grade}{cls}班
 学生人数：{total_students}
@@ -90,7 +90,7 @@ CLASS_ANALYSIS_PROMPT = """你是一位经验丰富的高中信息科技/通用�
 """
 
 # ── 学生个人学情分析 ──
-STUDENT_ANALYSIS_PROMPT = """你是一位高中信息科技教师。请根据以下学生数据，生成一份个性化的学情分析报告。
+STUDENT_ANALYSIS_PROMPT = """请根据以下学生数据，生成一份个性化的学情分析报告。
 
 学生：{student_name}
 班级：{student_grade}{student_class}
@@ -111,7 +111,7 @@ STUDENT_ANALYSIS_PROMPT = """你是一位高中信息科技教师。请根据以
 """
 
 # ── 教学建议（简化版，用于教师端建议表格） ──
-TEACHING_ADVICE_PROMPT = """你是一位高中信息科技教师。请根据以下教学数据，为{grade}{class_num}班生成具体的教学建议。
+TEACHING_ADVICE_PROMPT = """请根据以下教学数据，为{grade}{class_num}班生成具体的教学建议。
 
 【班级概况】
 年级：{grade}

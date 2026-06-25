@@ -25,7 +25,7 @@ const ExamComposePage: React.FC = () => {
 
   const [exam, setExam] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [subjects, setSubjects] = useState<string[]>(['信息科技', '通用技术'])
+  const [subjects, setSubjects] = useState<string[]>([])
   const [grades, setGrades] = useState<string[]>([])
   const [wizardVisible, setWizardVisible] = useState(false)
 

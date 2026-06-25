@@ -47,7 +47,7 @@ const DiscussionPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('all')
   const [createForm] = Form.useForm()
   const [aiForm] = Form.useForm()
-  const [subjectOptions, setSubjectOptions] = useState<string[]>(['信息科技', '通用技术'])
+  const [subjectOptions, setSubjectOptions] = useState<string[]>([])
 
   // 从系统配置加载课程列表
   useEffect(() => {
@@ -578,7 +578,7 @@ const DiscussionPage: React.FC = () => {
           <Form.Item name="topic" label="讨论主题" rules={[{ required: true, message: '请输入讨论主题' }]}>
             <Input placeholder="如：人工智能的伦理困境" />
           </Form.Item>
-          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || '信息科技'}>
+          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || ''}>
             <Select>
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
