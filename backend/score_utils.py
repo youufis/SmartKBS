@@ -20,18 +20,46 @@ def load_teacher_scores(teacher):
 
 
 def save_teacher_scores(scores_data, teacher):
-    """保存教师的积分数据到数据库（全量替换）"""
+    """保存教师的积分数据到数据库（增量更新，保留原有 updated_at）"""
     with get_connection() as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM scores WHERE teacher_username=?", (teacher,))
-        for key, score in scores_data.items():
+        # 获取当前已有的记录，用于判断哪些需要删除
+        existing_rows = c.execute(
+            "SELECT grade, class_name, student_name FROM scores WHERE teacher_username=?",
+            (teacher,),
+        ).fetchall()
+        existing_keys = set()
+        for row in existing_rows:
+            existing_keys.add(teacher_score_key(teacher, row[0], row[1], row[2]))
+
+        new_keys = set(scores_data.keys())
+
+        # 删除已移除的记录
+        for key in existing_keys - new_keys:
             parts = key.split("|")
             if len(parts) == 4:
                 _, grade, cls, name = parts
                 c.execute(
-                    "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
-                    (teacher, grade, cls, name, score),
+                    "DELETE FROM scores WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=?",
+                    (teacher, grade, cls, name),
                 )
+
+        # 新增或更新记录
+        for key, score in scores_data.items():
+            parts = key.split("|")
+            if len(parts) == 4:
+                _, grade, cls, name = parts
+                if key in existing_keys:
+                    c.execute(
+                        "UPDATE scores SET score=?, updated_at=datetime('now') WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=?",
+                        (score, teacher, grade, cls, name),
+                    )
+                else:
+                    c.execute(
+                        "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                        (teacher, grade, cls, name, score),
+                    )
+
         conn.commit()
 
 
