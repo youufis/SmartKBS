@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { Spin, message } from 'antd'
 import { useAuthStore } from './stores/authStore'
 import LoginPage from './pages/LoginPage'
+
 import AppLayout from './components/AppLayout'
 import DashboardPage from './pages/DashboardPage'
 import ChatPage from './pages/ChatPage'
@@ -61,7 +62,6 @@ function App() {
   const sessionRestoring = useAuthStore((s) => s.sessionRestoring)
   const user = useAuthStore((s) => s.user)
   const forceLogout = useAuthStore((s) => s.forceLogout)
-
   useEffect(() => {
     restoreSession()
   }, [restoreSession])

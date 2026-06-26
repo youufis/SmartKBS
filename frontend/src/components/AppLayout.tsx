@@ -24,6 +24,7 @@ import {
   StarOutlined,
   RobotOutlined,
   EditOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -31,6 +32,7 @@ import apiClient from '../api/client'
 import NotificationBell from './NotificationBell'
 import TitleCelebration from './TitleCelebration'
 import ThemeSwitcher from './ThemeSwitcher'
+import SecuritySetupModal from './SecuritySetupModal'
 
 const { Header, Sider, Content } = Layout
 
@@ -198,6 +200,25 @@ const AppLayout: React.FC = () => {
     }
   }, [location.pathname, isStudent])
 
+  // ── 代码练习页随机名言（仅在挂载时计算一次） ──
+  const codeQuotes = [
+    'Talk is cheap. Show me the code.',
+    '代码如诗，简洁为美',
+    '写好每一行代码，解决每一个问题',
+    '编程是思考的艺术',
+    'Debug 是一种修行',
+    '用代码改变世界',
+    '每一次提交，都是进步',
+    'Clear code, clear mind',
+    'Code. Eat. Sleep. Repeat.',
+    '键盘敲烂，月入过万 💪',
+    '编译器不会骗你，但 debug 会 🐛',
+    '先跑起来，再优化',
+    'Programming is the art of logic',
+    '简单的代码最优雅',
+  ]
+  const [codeQuote] = useState(() => codeQuotes[Math.floor(Math.random() * codeQuotes.length)])
+
   // ── 加载当前用户称号等级（用于顶栏头像） ──
   const [userTitleLevel, setUserTitleLevel] = useState(1)
   const [userTitleColor, setUserTitleColor] = useState('#1677ff')
@@ -219,7 +240,7 @@ const AppLayout: React.FC = () => {
   }, [isLoggedIn])
 
   // ── 等级头像 emoji 映射（与 PortfolioPage 保持一致） ──
-  const getTitleEmoji = (level: number, role: string, gender: string): string => {
+  const getTitleEmoji = (level: number, role: string): string => {
     if (role === 'admin') return '⚜️'
     if (role === 'teacher') return '🎓'
     if (level <= 1) return '🪴'
@@ -235,7 +256,7 @@ const AppLayout: React.FC = () => {
     if (level <= 11) return '👑'
     return '💎'
   }
-  const avatarEmoji = getTitleEmoji(userTitleLevel, user?.role || 'student', user?.gender || '')
+  const avatarEmoji = getTitleEmoji(userTitleLevel, user?.role || 'student')
   const avatarBg = isAdmin ? '#f5222d' : isTeacher ? '#722ed1' : userTitleColor
 
   React.useEffect(() => {
@@ -243,6 +264,8 @@ const AppLayout: React.FC = () => {
     const timer = setInterval(fetchOnlineCount, 30000)
     return () => clearInterval(timer)
   }, [fetchOnlineCount])
+
+  const [securitySetupOpen, setSecuritySetupOpen] = useState(false)
 
   const handleLogout = async () => {
     await logout()
@@ -253,10 +276,13 @@ const AppLayout: React.FC = () => {
     items: [
       { key: 'info', label: `${user?.name || user?.username} (${user?.role})`, disabled: true },
       { type: 'divider' as const },
+      { key: 'security', icon: <SafetyCertificateOutlined />, label: '安全设置' },
+      { type: 'divider' as const },
       { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
     ],
     onClick: ({ key }: { key: string }) => {
       if (key === 'logout') handleLogout()
+      else if (key === 'security') setSecuritySetupOpen(true)
     },
   }
 
@@ -364,22 +390,7 @@ const AppLayout: React.FC = () => {
             }}>
               <div style={{ color: '#fff' }}>
                 <span style={{ fontSize: 15, fontWeight: 500, opacity: 0.95 }}>
-                  {[
-                    'Talk is cheap. Show me the code.',
-                    '代码如诗，简洁为美',
-                    '写好每一行代码，解决每一个问题',
-                    '编程是思考的艺术',
-                    'Debug 是一种修行',
-                    '用代码改变世界',
-                    '每一次提交，都是进步',
-                    'Clear code, clear mind',
-                    'Code. Eat. Sleep. Repeat.',
-                    '键盘敲烂，月入过万 💪',
-                    '编译器不会骗你，但 debug 会 🐛',
-                    '先跑起来，再优化',
-                    'Programming is the art of logic',
-                    '简单的代码最优雅',
-                  ][Math.floor(Math.random() * 14)]}
+                  {codeQuote}
                 </span>
               </div>
               <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>
@@ -393,6 +404,13 @@ const AppLayout: React.FC = () => {
           </div>
         </Content>
       </Layout>
+
+      {/* 密保设置弹窗 */}
+      <SecuritySetupModal
+        open={securitySetupOpen}
+        onClose={() => setSecuritySetupOpen(false)}
+        onSkip={() => setSecuritySetupOpen(false)}
+      />
     </Layout>
   )
 }
