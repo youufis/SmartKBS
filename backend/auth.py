@@ -123,6 +123,11 @@ def verify_token_version(payload: dict[str, Any]) -> bool:
     return token_version == db_version
 
 
+# ── 角色常量（统一入口，禁止硬编码数字） ──
+ROLE_ADMIN = 0
+ROLE_TEACHER = 1
+ROLE_STUDENT = 2
+
 # ── 角色判断 ──
 
 def get_user_role(username: str) -> Optional[int]:
