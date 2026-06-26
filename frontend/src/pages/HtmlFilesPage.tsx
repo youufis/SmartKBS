@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm } from 'antd'
-import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
 import type { ResourceFile } from '../types'
@@ -24,6 +24,9 @@ const HtmlFilesPage: React.FC = () => {
   const PAGE_SIZE = 24
   const [minePage, setMinePage] = useState(1)
   const [sharedPage, setSharedPage] = useState(1)
+
+  // ── 搜索 ──
+  const [searchText, setSearchText] = useState('')
 
   // ── 分组状态 ──
   const [groups, setGroups] = useState<resourcesApi.ResourceGroup[]>([])
@@ -109,9 +112,11 @@ const HtmlFilesPage: React.FC = () => {
 
   // ── 根据当前分组过滤文件 ──
   const groupedPaths = getAllGroupedPaths()
-  const filteredFiles = activeGroup === null
+  const kw = searchText.trim().toLowerCase()
+  const filteredFiles = (activeGroup === null
     ? files.filter(f => !groupedPaths.has(f.url_path || f.name))  // 全部 = 未分组的
     : files.filter(f => getGroupFilePaths(activeGroup).has(f.url_path || f.name))
+  ).filter(f => !kw || (f.display_name || f.name).toLowerCase().includes(kw))
 
   // ── 分组管理 ──
   const openCreateGroup = () => {
@@ -288,20 +293,32 @@ const HtmlFilesPage: React.FC = () => {
     </Card>
   )
 
-  const sharedItems = receivedShares.map(s => ({
-    name: s.file_name,
-    urlPath: s.url_path || s.file_path,
-    owner: s.owner_username,
-  }))
+  const sharedItems = receivedShares
+    .filter(s => !kw || (s.file_name || '').toLowerCase().includes(kw))
+    .map(s => ({
+      name: s.file_name,
+      urlPath: s.url_path || s.file_path,
+      owner: s.owner_username,
+    }))
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 20, fontSize: 14 }}>
       <Space direction="vertical" style={{ width: '100%' }} size={14}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
             {isAdminOrTeacher ? '📄 资源中心' : '📄 共享资源'}
           </Typography.Title>
-          <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>
+          <Space>
+            <Input
+              placeholder="搜索资源名称..."
+              prefix={<SearchOutlined />}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+              style={{ width: 220 }}
+            />
+            <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>
+          </Space>
         </div>
 
         {isAdminOrTeacher ? (
