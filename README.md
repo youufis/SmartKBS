@@ -1,6 +1,6 @@
 # 智慧教学平台 (SmartKBS)
 
-> **版本 V6.4.0** | 更新于 2026-06-25
+> **版本 V6.5.0** | 更新于 2026-06-26
 >
 > 全学段全学科通用 AI 智慧教学管理平台（任何学科、任何学段均可使用）
 > 集成流式 AI 对话、资源管理、试题库、在线考试、智能组卷 & Word 导出、
@@ -8,16 +8,17 @@
 > 智能点名、考勤统计、错题巩固、智能练习、课程练习、AI 资源推荐、学情分析、成长档案、AI 学伴等功能。
 > 基于 **FastAPI + React** 构建。
 
-![版本](https://img.shields.io/badge/版本-6.4.0-blue)
+![版本](https://img.shields.io/badge/版本-6.5.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope-orange)
 ![许可证](https://img.shields.io/badge/许可证-AGPL--3.0-red)
 
-> **V6.4.0 更新亮点**：
-> 🎨 新增多主题外观系统，5 套精美主题自由切换；
-> 登录页与系统界面全面支持主题联动；
-> 界面 UI/UX 细节优化；主题切换即时生效，持久化保存
+> **V6.5.0 更新亮点**：
+> 🤖 AI 生成 HTML 资源 — 资源中心支持 AI 自动生成动画讲解、互动答题、章节练习、自定义 HTML；
+> 17 种动画主题 + 20 种答题主题 + 5 种练习主题自由选择；
+> 题库 + AI 混合出题，新题自动入库；
+> 一键生成并保存，打开即预览
 
 ---
 
@@ -36,7 +37,8 @@
 
 ## 🎮 演示环境
 
-> **🌐 演示地址：** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
+> **🌐 演示地址：** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086)
+> / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
 >
 > **⏰ 开放时间：** 日间开放（晚间关机）
 >

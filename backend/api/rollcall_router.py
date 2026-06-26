@@ -71,26 +71,27 @@ def _is_teacher_allowed(username: str, grade: str, cls: str) -> bool:
     if not grade_info:
         return False
 
-    if not cls:
-        return can_access_grade(username, grade_info["id"])
-
-    # 班级匹配：从 "高一1班" 提取数字，精确匹配 "1班"
-    import re
-    cls_match = re.search(r'\d+', cls)
-    cls_num = cls_match.group() if cls_match else cls
-    class_rows = execute_query_dict(
-        "SELECT id FROM classes WHERE grade_id=? AND name=?",
-        (grade_info["id"], f"{cls_num}班")
-    )
-    if not class_rows:
-        # 兼容班级名不含"班"的情况
+    # 先通过统一权限检查
+    if can_access_grade(username, grade_info["id"]):
+        if not cls:
+            return True
         class_rows = execute_query_dict(
-            "SELECT id FROM classes WHERE grade_id=? AND name=?",
-            (grade_info["id"], cls_num)
+            "SELECT id FROM classes WHERE grade_id=? AND name LIKE ?",
+            (grade_info["id"], f"%{cls.replace('班', '')}%")
         )
-    if class_rows:
-        return can_access_class(username, grade_info["id"], class_rows[0]["id"])
-    return can_access_grade(username, grade_info["id"])
+        if class_rows:
+            return can_access_class(username, grade_info["id"], class_rows[0]["id"])
+        # 班级名精确匹配失败时，允许访问（降级）
+        return True
+
+    # 降级：teacher_assignments 无数据时，检查 users 表是否有该年级的学生
+    rows = execute_query(
+        "SELECT 1 FROM users WHERE role=2 AND grade=? LIMIT 1",
+        (grade,),
+    )
+    if rows:
+        return True
+    return False
 
 
 def _load_history(teacher, grade, cls):
@@ -249,7 +250,13 @@ async def api_grades(request: Request):
         return [row[0] for row in old_rows]
     # 教师：从 teacher_assignments → grades 表获取任教年级
     grades = get_teacher_grades(user["username"])
-    return [g["name"] for g in grades]
+    if grades:
+        return [g["name"] for g in grades]
+    # 降级：如果教师未配置任教记录，从有学生数据的年级中获取
+    rows = execute_query(
+        "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+    )
+    return [row[0] for row in rows]
 
 
 async def api_classes(request: Request):
