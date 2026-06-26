@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from backend.database import execute_query, execute_insert_update, get_connection, execute_query_dict
 from backend.logger import logger
+from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -366,6 +367,216 @@ def get_students_in_scope(username: str, grade_id: int | None = None, class_id: 
 # ═══════════════════════════════════════════════════════════════
 # 旧格式兼容（迁移期使用）
 # ═══════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════
+# 共享资源权限检查（统一入口）
+# ═══════════════════════════════════════════════════════════════
+
+def _resolve_class_id_flexible(grade_id: int, class_name: str) -> int | None:
+    """灵活解析班级名称到 class_id，支持 name/display_name/纯数字 三种格式"""
+    if not class_name:
+        return None
+    # 1) 精确匹配 name
+    row = execute_query_dict(
+        "SELECT id FROM classes WHERE grade_id=? AND name=?", (grade_id, class_name)
+    )
+    if row:
+        return row[0]["id"]
+    # 2) 精确匹配 display_name
+    row = execute_query_dict(
+        "SELECT id FROM classes WHERE grade_id=? AND display_name=?", (grade_id, class_name)
+    )
+    if row:
+        return row[0]["id"]
+    # 3) 提取数字匹配 name 为 "X班"
+    import re
+    nums = re.findall(r'\d+', class_name)
+    if nums:
+        name_candidate = f"{nums[0]}班"
+        row = execute_query_dict(
+            "SELECT id FROM classes WHERE grade_id=? AND name=?", (grade_id, name_candidate)
+        )
+        if row:
+            return row[0]["id"]
+    return None
+
+
+def _teacher_can_access_scope(
+    teacher_username: str,
+    target_grades: list[str],
+    target_classes: list[str],
+) -> bool:
+    """检查教师是否有权限看到某个年级/班级范围的共享资源
+
+    教师如果任教该年级（或该年级下的具体班级），则对该范围的资源共享可见。
+    班级名称支持 name/display_name/纯数字 三种格式的匹配。
+    """
+    assignments = get_teacher_assignments(teacher_username)
+    if not assignments:
+        return False
+
+    # 收集教师任教的年级ID集合和 年级→班级 映射
+    teacher_grade_ids = set()
+    teacher_grade_classes: dict[int, set[int | None]] = {}
+    for a in assignments:
+        gid = a["grade_id"]
+        teacher_grade_ids.add(gid)
+        cid = a.get("class_id")  # None 表示整个年级
+        if gid not in teacher_grade_classes:
+            teacher_grade_classes[gid] = set()
+        teacher_grade_classes[gid].add(cid)
+
+    for g_name in target_grades:
+        grade_info = get_grade_by_name(g_name)
+        if not grade_info:
+            continue
+        gid = grade_info["id"]
+        # 教师不任教该年级
+        if gid not in teacher_grade_ids:
+            continue
+        # 没有指定班级 → 教师任教该年级（整个年级或部分班级都算）
+        if not target_classes:
+            return True
+        # 有指定班级：检查教师是否任教这些班级
+        for c_name in target_classes:
+            # 教师在该年级有全部班级权限
+            if None in teacher_grade_classes.get(gid, set()):
+                return True
+            class_id = _resolve_class_id_flexible(gid, c_name)
+            if class_id and class_id in teacher_grade_classes.get(gid, set()):
+                return True
+    return False
+
+
+def check_share_visibility(
+    viewer_username: str,
+    share_scope: str,
+    target_users_csv: str = "",
+    target_grade_csv: str = "",
+    target_class_csv: str = "",
+) -> bool:
+    """
+    统一检查共享资源对用户的可见性
+
+    这是共享权限的统一入口函数，所有共享资源的可见性判断都应通过此函数。
+    替代 sharing_router 中分散的 _check_share_scope 逻辑。
+
+    参数:
+        viewer_username: 查看共享资源的用户名
+        share_scope: 共享范围 ('all', 'staff', 'teacher', 'class')
+        target_users_csv: 逗号分隔的目标用户名列表
+        target_grade_csv: 逗号分隔的目标年级名称列表
+        target_class_csv: 逗号分隔的目标班级名称列表
+
+    返回:
+        True 表示用户对该资源可见
+    """
+    from backend.auth import is_admin
+
+    # ── scope='all': 所有人可见 ──
+    if share_scope == 'all':
+        return True
+
+    # 获取查看者信息
+    viewer_rows = execute_query_dict(
+        "SELECT username, grade, class, role, grade_id, class_id FROM users WHERE username=?",
+        (viewer_username,),
+    )
+    if not viewer_rows:
+        return False
+    v = viewer_rows[0]
+    viewer_role = v["role"]
+    viewer_grade_str = str(v["grade"] or "")
+    viewer_class_str = str(v["class"] or "")
+    viewer_grade_id = v.get("grade_id")
+    viewer_class_id = v.get("class_id")
+
+    # ── scope='staff': 管理员和教师可见 ──
+    if share_scope == 'staff':
+        return viewer_role in (ROLE_ADMIN, ROLE_TEACHER)
+
+    # 解析 CSV 为目标列表
+    target_users = [u.strip() for u in target_users_csv.split(",") if u.strip()] if target_users_csv else []
+    target_grades = [g.strip() for g in target_grade_csv.split(",") if g.strip()] if target_grade_csv else []
+    target_classes = [c.strip() for c in target_class_csv.split(",") if c.strip()] if target_class_csv else []
+
+    # ── scope='teacher': 检查 target_users 或年级/班级匹配 ──
+    if share_scope == 'teacher':
+        # 直接用户匹配
+        if viewer_username in target_users:
+            return True
+        # 组合共享: 同时指定了年级和班级时匹配学生
+        if viewer_role == ROLE_STUDENT and target_grades and target_classes:
+            return _match_grade_class(
+                viewer_grade_str, viewer_class_str,
+                viewer_grade_id, viewer_class_id,
+                target_grades, target_classes,
+            )
+        return False
+
+    # ── scope='class': 年级/班级匹配 ──
+    if share_scope == 'class':
+        if not target_grades:
+            return False
+
+        # 管理员：可见所有按年级/班级共享的资源
+        if viewer_role == ROLE_ADMIN:
+            return True
+
+        # 教师：检查是否任教该年级/班级
+        if viewer_role == ROLE_TEACHER:
+            return _teacher_can_access_scope(
+                viewer_username, target_grades, target_classes
+            )
+
+        # 学生：按年级/班级匹配
+        return _match_grade_class(
+            viewer_grade_str, viewer_class_str,
+            viewer_grade_id, viewer_class_id,
+            target_grades, target_classes,
+        )
+
+    return False
+
+
+def _match_grade_class(
+    viewer_grade_str: str,
+    viewer_class_str: str,
+    viewer_grade_id: int | None,
+    viewer_class_id: int | None,
+    target_grades: list[str],
+    target_classes: list[str],
+) -> bool:
+    """匹配用户的年级/班级是否在目标列表中（支持名称和 ID 双重匹配）"""
+    # 年级匹配（名称）
+    grade_ok = viewer_grade_str in target_grades
+    # 年级匹配（ID）
+    if not grade_ok and viewer_grade_id:
+        for g_name in target_grades:
+            grade_info = get_grade_by_name(g_name)
+            if grade_info and grade_info["id"] == viewer_grade_id:
+                grade_ok = True
+                break
+
+    if not grade_ok:
+        return False
+
+    # 如果未指定班级，表示该年级所有班级可见
+    if not target_classes:
+        return True
+
+    # 班级匹配（名称）
+    class_ok = viewer_class_str in target_classes
+    # 班级匹配（ID，支持 name/display_name/纯数字）
+    if not class_ok and viewer_class_id and viewer_grade_id:
+        for c_name in target_classes:
+            resolved_id = _resolve_class_id_flexible(viewer_grade_id, c_name)
+            if resolved_id and resolved_id == viewer_class_id:
+                class_ok = True
+                break
+
+    return class_ok
+
 
 def parse_legacy_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:
     """

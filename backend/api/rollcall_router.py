@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request, HTTPException
 
 from backend.config import BASE_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
-from backend.auth import is_admin, get_online_usernames
+from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, is_admin, get_online_usernames
 from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
 from backend.permission_service import (
@@ -228,20 +228,32 @@ def _save_to_student_chat(student_name, cls, content):
 # ── API 处理器 ──
 
 async def api_grades(request: Request):
-    """获取年级列表 - 管理员基于实际学生数据，教师基于任教范围"""
+    """获取年级列表 - 只返回有实际学生的年级"""
     user = get_current_user(request)
     role = user.get("role", 2)
-    if role == 0:
-        rows = execute_query(
+    if role == ROLE_ADMIN:
+        # 管理员：仅返回有学生数据的年级（通过 grade_id 关联 grades 表）
+        rows = execute_query_dict(
+            """SELECT DISTINCT g.name
+               FROM users u
+               JOIN grades g ON u.grade_id = g.id
+               WHERE u.role=2 AND g.is_active=1
+               ORDER BY g.sort_order"""
+        )
+        if rows:
+            return [r["name"] for r in rows]
+        # 降级：从 users 表旧字段获取
+        old_rows = execute_query(
             "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
         )
-        return [row[0] for row in rows]
+        return [row[0] for row in old_rows]
+    # 教师：从 teacher_assignments → grades 表获取任教年级
     grades = get_teacher_grades(user["username"])
     return [g["name"] for g in grades]
 
 
 async def api_classes(request: Request):
-    """获取班级列表 - 管理员看到全部，教师只看到自己的班级"""
+    """获取班级列表 - 统一使用 classes 表，与 permission_service 同源"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -250,23 +262,36 @@ async def api_classes(request: Request):
     if not grade:
         return []
 
-    if role == 0:
-        # 管理员：该年级全部班级
+    # 统一通过 grades 表解析 grade_id
+    grade_info = get_grade_by_name(grade)
+
+    if role == ROLE_ADMIN:
+        # 管理员：仅返回该年级有学生数据的班级（通过 class_id 关联 classes 表）
+        if grade_info:
+            rows = execute_query_dict(
+                """SELECT DISTINCT c.display_name, c.sort_order
+                   FROM users u
+                   JOIN classes c ON u.class_id = c.id
+                   WHERE u.role=2 AND u.grade_id=? AND c.grade_id=?
+                   ORDER BY c.sort_order""",
+                (grade_info["id"], grade_info["id"]),
+            )
+            if rows:
+                return [r["display_name"] for r in rows]
+        # 降级：从 users 表旧字段获取
         students = _load_students(grade)
         return sorted(set(s.get("class", "") for s in students if s.get("class")))
 
-    # 教师：优先使用新表 teacher_assignments
-    grade_info = get_grade_by_name(grade)
+    # 教师：从 teacher_assignments → classes 表获取任教班级
     if grade_info:
         classes = get_teacher_classes(username, grade_info["id"])
         if classes:
             return [c["display_name"] for c in classes]
         # 新表无数据，降级查旧格式
-        if not classes:
-            students = _load_students(grade)
-            return sorted(set(s.get("class", "") for s in students if s.get("class")))
+        students = _load_students(grade)
+        return sorted(set(s.get("class", "") for s in students if s.get("class")))
 
-    # 降级：旧格式
+    # 降级：旧格式（users 表的 grade/class 字段，管道符分隔）
     t_rows = execute_query(
         "SELECT grade, class FROM users WHERE username=?", (username,)
     )
@@ -296,7 +321,7 @@ async def api_students(request: Request):
     cls = request.query_params.get("class", "")
 
     # 教师只能查看自己任教班级的学生
-    if role != 0:
+    if role != ROLE_ADMIN:
         if not _is_teacher_allowed(username, grade, cls):
             return []
 

@@ -11,11 +11,12 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
-from backend.auth import is_admin, is_teacher
+from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT
 from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.logger import logger
 from backend.api.config_router import get_config_value
 from backend.config import STU_DIR, ROOT_DIR, BASE_DIR
+from backend.permission_service import check_share_visibility
 
 router = APIRouter()
 
@@ -28,6 +29,8 @@ class ShareRequest(BaseModel):
     target_users: list[str] = []
     target_grades: list[str] = []
     target_classes: list[str] = []
+    mode: str = "replace"  # 'replace' 覆盖 / 'append' 追加 / 'remove' 移除
+
 
 
 def _list_to_csv(items: list[str]) -> str:
@@ -103,7 +106,7 @@ async def share_resource(request: Request, body: ShareRequest):
     username = user["username"]
     role = user["role"]
 
-    if role not in (0, 1):
+    if role not in (ROLE_ADMIN, ROLE_TEACHER):
         raise HTTPException(status_code=403, detail="仅管理员和教师可以共享资源")
 
     if body.resource_type not in ("html", "download"):
@@ -112,8 +115,17 @@ async def share_resource(request: Request, body: ShareRequest):
     if body.share_scope not in _VALID_SCOPES:
         raise HTTPException(status_code=400, detail=f"无效的共享范围: {body.share_scope}")
 
+    if body.mode not in ("replace", "append", "remove"):
+        raise HTTPException(status_code=400, detail=f"无效的操作模式: {body.mode}，必须为 replace/append/remove")
+
+    # 参数完整性校验
+    if body.share_scope == "class" and not body.target_grades:
+        raise HTTPException(status_code=400, detail="指定年级/班级时必须至少选择一个年级")
+    if body.share_scope == "teacher" and not body.target_users:
+        raise HTTPException(status_code=400, detail="指定教师时必须至少选择一个用户")
+
     # 权限校验
-    if role == 1:  # 教师
+    if role == ROLE_TEACHER:
         if body.share_scope == "all":
             raise HTTPException(status_code=403, detail="教师不能选择「所有人」范围")
         if body.share_scope == "class":
@@ -133,7 +145,7 @@ async def share_resource(request: Request, body: ShareRequest):
     target_classes_csv = _list_to_csv(body.target_classes)
 
     # 如果是教师 scope='class' 但未指定，自动填充教师的年级/班级
-    if role == 1 and body.share_scope == 'class' and not target_grades_csv and not target_classes_csv:
+    if role == ROLE_TEACHER and body.share_scope == 'class' and not target_grades_csv and not target_classes_csv:
         rows = execute_query(
             "SELECT grade, class FROM users WHERE username=?",
             (username,),
@@ -145,76 +157,192 @@ async def share_resource(request: Request, body: ShareRequest):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     try:
+        if body.mode == "append":
+            # 追加模式：合并现有目标
+            existing = execute_query(
+                """SELECT target_users, target_grade, target_class, share_scope
+                   FROM shared_resources
+                   WHERE owner_username=? AND file_path=? AND resource_type=?""",
+                (username, body.file_path, body.resource_type),
+            )
+            if existing:
+                exist_users = existing[0][0] or ""
+                exist_grades = existing[0][1] or ""
+                exist_classes = existing[0][2] or ""
+                exist_scope = existing[0][3]
+
+                # 合并目标用户
+                merged_users = set(exist_users.split(",")) if exist_users else set()
+                merged_users.update(body.target_users)
+                merged_users.discard("")
+                target_users_csv = _list_to_csv(sorted(merged_users))
+
+                # 合并年级
+                merged_grades = set(exist_grades.split(",")) if exist_grades else set()
+                merged_grades.update(body.target_grades)
+                merged_grades.discard("")
+                target_grades_csv = _list_to_csv(sorted(merged_grades))
+
+                # 合并班级
+                merged_classes = set(exist_classes.split(",")) if exist_classes else set()
+                merged_classes.update(body.target_classes)
+                merged_classes.discard("")
+                target_classes_csv = _list_to_csv(sorted(merged_classes))
+
+                # 保留原来的 scope（追加不改变 scope）
+                actual_scope = exist_scope
+            else:
+                actual_scope = body.share_scope
+        elif body.mode == "remove":
+            # 移除模式：从现有目标中移除指定项
+            existing = execute_query(
+                """SELECT target_users, target_grade, target_class, share_scope
+                   FROM shared_resources
+                   WHERE owner_username=? AND file_path=? AND resource_type=?""",
+                (username, body.file_path, body.resource_type),
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="未找到现有共享记录，无法移除")
+
+            exist_users = set(existing[0][0].split(",")) if existing[0][0] else set()
+            exist_grades = set(existing[0][1].split(",")) if existing[0][1] else set()
+            exist_classes = set(existing[0][2].split(",")) if existing[0][2] else set()
+            actual_scope = existing[0][3]
+
+            remove_users_set = set(body.target_users)
+            remove_grades_set = set(body.target_grades)
+            remove_classes_set = set(body.target_classes)
+
+            merged_users = exist_users - remove_users_set
+            merged_grades = exist_grades - remove_grades_set
+            merged_classes = exist_classes - remove_classes_set
+
+            merged_users.discard("")
+            merged_grades.discard("")
+            merged_classes.discard("")
+
+            target_users_csv = _list_to_csv(sorted(merged_users))
+            target_grades_csv = _list_to_csv(sorted(merged_grades))
+            target_classes_csv = _list_to_csv(sorted(merged_classes))
+
+            # 如果所有目标都被移除了，自动删除共享记录
+            if not merged_users and not merged_grades and not merged_classes:
+                execute_insert_update(
+                    "DELETE FROM shared_resources WHERE owner_username=? AND file_path=? AND resource_type=?",
+                    (username, body.file_path, body.resource_type),
+                )
+                logger.info(f"共享所有目标已移除，自动删除共享: {username} -> {body.file_path}")
+                return {"message": "共享目标已全部移除，共享已取消", "file_path": body.file_path}
+        else:
+            # replace 模式（默认）：直接覆盖
+            actual_scope = body.share_scope
+
         execute_insert_update(
             """INSERT OR REPLACE INTO shared_resources
                (owner_username, file_path, file_name, resource_type, share_scope,
                 target_users, target_grade, target_class, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (username, body.file_path, body.file_name, body.resource_type,
-             body.share_scope, target_users_csv, target_grades_csv, target_classes_csv, now, now),
+             actual_scope, target_users_csv, target_grades_csv, target_classes_csv, now, now),
         )
-        logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={body.share_scope})")
+        logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={actual_scope})")
 
         # 共享后清理空目录共享记录（如果共享的是空目录，会自动删除）
         cleanup_empty_dir_shares(username)
 
-        # ── 后台批量发送通知（不阻塞共享操作） ──
-        def _send_notifications_sync():
-            """同步执行通知发送，在后台线程中运行"""
-            try:
-                # 检查分享通知类型是否启用
-                enabled = set(get_config_value("enabled_notification_types", ["exam"]))
-                if "share" not in enabled:
-                    return
-                resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # ── 后台批量发送通知（仅 replace/新建时发送，追加/移除模式跳过） ──
+        if body.mode != "append" and body.mode != "remove":
+            def _send_notifications_sync():
+                """同步执行通知发送，在后台线程中运行"""
+                try:
+                    # 检查分享通知类型是否启用
+                    enabled = set(get_config_value("enabled_notification_types", ["exam"]))
+                    if "share" not in enabled:
+                        return
+                    resource_label = "HTML 资源" if body.resource_type == "html" else "下载文件"
+                    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # 确定收件人列表
-                recipients: list[str] = []
-                link = "/html-files" if body.resource_type == "html" else "/downloads"
-                title = f"新的{resource_label}已分享"
-                content = ""
-                if body.share_scope == "all":
-                    rows = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
-                    recipients = [r[0] for r in rows]
-                    content = f"{username} 分享了「{body.file_name}」"
-                elif body.share_scope == "staff":
-                    rows = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
-                    recipients = [r[0] for r in rows]
-                    content = f"{username} 分享了「{body.file_name}」（教师共享）"
-                elif body.share_scope == "teacher" and body.target_users:
-                    recipients = body.target_users
-                    content = f"{username} 分享了「{body.file_name}」给您"
-                elif body.share_scope == "class":
-                    conds, params = ["role = 2"], []
-                    if body.target_grades:
-                        ph = ",".join(["?"] * len(body.target_grades))
-                        conds.append(f"grade IN ({ph})")
-                        params.extend(body.target_grades)
-                    if body.target_classes:
-                        ph = ",".join(["?"] * len(body.target_classes))
-                        conds.append(f"class IN ({ph})")
-                        params.extend(body.target_classes)
-                    if conds:
-                        rows = execute_query(
-                            f"SELECT username FROM users WHERE {' AND '.join(conds)}", tuple(params))
+                    # 确定收件人列表
+                    recipients: list[str] = []
+                    link = "/html-files" if body.resource_type == "html" else "/downloads"
+                    title = f"新的{resource_label}已分享"
+                    content = ""
+                    if body.share_scope == "all":
+                        rows = execute_query("SELECT username FROM users WHERE role IN (0, 1, 2)")
                         recipients = [r[0] for r in rows]
-                    content = f"「{body.file_name}」可供您所在班级使用"
+                        content = f"{username} 分享了「{body.file_name}」"
+                    elif body.share_scope == "staff":
+                        rows = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
+                        recipients = [r[0] for r in rows]
+                        content = f"{username} 分享了「{body.file_name}」（教师共享）"
+                    elif body.share_scope == "teacher" and body.target_users:
+                        recipients = body.target_users
+                        content = f"{username} 分享了「{body.file_name}」给您"
+                    elif body.share_scope == "class":
+                        # 通知目标年级/班级的学生（使用 class_id + classes.display_name 匹配）
+                        _student_params: list[str] = []
+                        if body.target_grades:
+                            ph = ",".join(["?"] * len(body.target_grades))
+                            grade_cond = f"u.grade IN ({ph})"
+                            _student_params.extend(body.target_grades)
+                        else:
+                            grade_cond = "1=1"
+                        class_cond = "1=1"
+                        if body.target_classes:
+                            ph = ",".join(["?"] * len(body.target_classes))
+                            class_cond = (
+                                f"(u.class_id IN (SELECT id FROM classes WHERE display_name IN ({ph}))"
+                                f" OR u.class IN ({ph}))"
+                            )
+                            _student_params.extend(body.target_classes * 2)
+                        if _student_params:
+                            rows = execute_query(
+                                f"""SELECT u.username FROM users u
+                                    WHERE u.role=2 AND {grade_cond} AND {class_cond}""",
+                                tuple(_student_params),
+                            )
+                            recipients = [r[0] for r in rows]
+                        # 也通知任教这些年级/班级的教师和管理员（使用 class_id 匹配）
+                        _t_params: list[str] = []
+                        if body.target_grades:
+                            ph = ",".join(["?"] * len(body.target_grades))
+                            t_grade_cond = f"u.grade IN ({ph})"
+                            _t_params.extend(body.target_grades)
+                        else:
+                            t_grade_cond = "1=1"
+                        t_class_cond = "1=1"
+                        if body.target_classes:
+                            ph = ",".join(["?"] * len(body.target_classes))
+                            t_class_cond = (
+                                f"(u.class_id IN (SELECT id FROM classes WHERE display_name IN ({ph}))"
+                                f" OR u.class IN ({ph}))"
+                            )
+                            _t_params.extend(body.target_classes * 2)
+                        if _t_params:
+                            t_rows = execute_query(
+                                f"""SELECT u.username FROM users u
+                                    WHERE u.role IN (0,1) AND {t_grade_cond} AND {t_class_cond}""",
+                                tuple(_t_params),
+                            )
+                            for tr in t_rows:
+                                if tr[0] not in recipients:
+                                    recipients.append(tr[0])
+                        content = f"「{body.file_name}」可供您所在班级使用"
 
-                # 批量插入通知（单条 SQL 替代逐条循环）
-                if recipients:
-                    sql = """INSERT INTO notifications
-                             (recipient_username, type, title, content, related_link, is_read, created_at)
-                             VALUES (?, 'share', ?, ?, ?, 0, ?)"""
-                    ops = [(sql, (r, title, content, link, now)) for r in recipients]
-                    execute_batch(ops)
-                    logger.info(f"已发送 {len(recipients)} 条共享通知")
-            except Exception as notify_err:
-                logger.warning(f"发送共享通知失败: {notify_err}")
+                    # 批量插入通知
+                    if recipients:
+                        sql = """INSERT INTO notifications
+                                 (recipient_username, type, title, content, related_link, is_read, created_at)
+                                 VALUES (?, 'share', ?, ?, ?, 0, ?)"""
+                        ops = [(sql, (r, title, content, link, now)) for r in recipients]
+                        execute_batch(ops)
+                        logger.info(f"已发送 {len(recipients)} 条共享通知")
+                except Exception as notify_err:
+                    logger.warning(f"发送共享通知失败: {notify_err}")
 
-        # 在线程池中运行，不阻塞事件循环
-        loop = asyncio.get_event_loop()
-        loop.run_in_executor(None, _send_notifications_sync)
+            # 在线程池中运行，不阻塞事件循环
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, _send_notifications_sync)
 
         return {"message": "共享成功", "file_path": body.file_path}
     except Exception as e:
@@ -244,7 +372,7 @@ async def unshare_resource(request: Request, id: int = Query(...)):
     (owner, file_path, file_name, resource_type,
      share_scope, target_users_csv, target_grade_csv, target_class_csv) = rows[0]
 
-    if username != owner and role != 0:
+    if username != owner and role != ROLE_ADMIN:
         raise HTTPException(status_code=403, detail="无权取消此共享")
 
     try:
@@ -312,7 +440,7 @@ def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
         title = f"{resource_label}共享已取消"
         content = ""
         if share_scope == "all":
-            rows = execute_query("SELECT username FROM users WHERE role IN (1, 2)")
+            rows = execute_query("SELECT username FROM users WHERE role IN (0, 1, 2)")
             recipients = [r[0] for r in rows]
             content = f"{owner} 已取消对「{file_name}」的共享"
         elif share_scope == "staff":
@@ -323,19 +451,54 @@ def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
             recipients = target_users
             content = f"{owner} 已取消对「{file_name}」的共享"
         elif share_scope == "class":
-            conds, params = ["role = 2"], []
+            # 通知目标年级/班级的学生（使用 class_id + classes.display_name 匹配）
+            unshare_params: list[str] = []
             if target_grades:
                 ph = ",".join(["?"] * len(target_grades))
-                conds.append(f"grade IN ({ph})")
-                params.extend(target_grades)
+                g_cond = f"u.grade IN ({ph})"
+                unshare_params.extend(target_grades)
+            else:
+                g_cond = "1=1"
+            c_cond = "1=1"
             if target_classes:
                 ph = ",".join(["?"] * len(target_classes))
-                conds.append(f"class IN ({ph})")
-                params.extend(target_classes)
-            if conds:
+                c_cond = (
+                    f"(u.class_id IN (SELECT id FROM classes WHERE display_name IN ({ph}))"
+                    f" OR u.class IN ({ph}))"
+                )
+                unshare_params.extend(target_classes * 2)
+            if unshare_params:
                 rows = execute_query(
-                    f"SELECT username FROM users WHERE {' AND '.join(conds)}", tuple(params))
+                    f"""SELECT u.username FROM users u
+                        WHERE u.role=2 AND {g_cond} AND {c_cond}""",
+                    tuple(unshare_params),
+                )
                 recipients = [r[0] for r in rows]
+            # 也通知任教这些年级/班级的教师和管理员
+            t_params: list[str] = []
+            if target_grades:
+                ph = ",".join(["?"] * len(target_grades))
+                tg_cond = f"u.grade IN ({ph})"
+                t_params.extend(target_grades)
+            else:
+                tg_cond = "1=1"
+            tc_cond = "1=1"
+            if target_classes:
+                ph = ",".join(["?"] * len(target_classes))
+                tc_cond = (
+                    f"(u.class_id IN (SELECT id FROM classes WHERE display_name IN ({ph}))"
+                    f" OR u.class IN ({ph}))"
+                )
+                t_params.extend(target_classes * 2)
+            if t_params:
+                t_rows = execute_query(
+                    f"""SELECT u.username FROM users u
+                        WHERE u.role IN (0,1) AND {tg_cond} AND {tc_cond}""",
+                    tuple(t_params),
+                )
+                for tr in t_rows:
+                    if tr[0] not in recipients:
+                        recipients.append(tr[0])
             content = f"「{file_name}」已不再对您所在班级共享"
 
         if recipients:
@@ -396,39 +559,89 @@ async def received_shares(request: Request):
     # 构建可见条件：
     #   scope='all'       → 所有人可见
     #   scope='staff'     → 管理员(role=0)和教师(role=1)可见
-    #   scope='teacher'   → 在 target_users 列表中的用户可见（若同时有 grade/class，也匹配学生）
-    #   scope='class'     → 仅匹配年级/班级的学生可见（管理员/教师不通过此范围看到）
+    #   scope='teacher'   → 在 target_users 列表中，或匹配年级/班级
+    #   scope='class'     → 学生按年级/班级匹配；管理员可见全部；教师按任教范围匹配
     seen_conditions = ["s.share_scope='all'"]
-    if role in (0, 1):
+    if role in (ROLE_ADMIN, ROLE_TEACHER):
         seen_conditions.append("s.share_scope='staff'")
-    # scope='teacher' → target_users 精确匹配（仅被选中的用户可见，不含空匹配）
-    seen_conditions.append(
-        f"(s.share_scope='teacher' AND s.target_users!=''"
-        f" AND ',' || s.target_users || ',' LIKE '%,' || '{username}' || ',%')"
+    # scope='teacher' → target_users 精确匹配（使用参数化查询防SQL注入）
+    teacher_user_cond = (
+        "(s.share_scope='teacher' AND s.target_users!=''"
+        " AND (',' || s.target_users || ',') LIKE ('%,' || ? || ',%'))"
     )
+    seen_conditions.append(teacher_user_cond)
 
-    if role == 2:
-        # 学生：匹配 scope='class'（target_grade 必填，target_class 可选）
-        # 或 scope='teacher' 含班级的组合共享（target_grade 和 target_class 都必须非空）
+    if role == ROLE_ADMIN:
+        # 管理员：可见所有 class 范围共享
+        seen_conditions.append("(s.share_scope='class' AND s.target_grade != '')")
+        # 管理员也可见 teacher+grade/class 组合共享
+        seen_conditions.append(
+            """(s.share_scope='teacher' AND s.target_grade != '' AND s.target_class != '')"""
+        )
+    elif role == ROLE_TEACHER:
+        # 教师：通过 teacher_assignments 匹配 class 范围共享
+        seen_conditions.append(
+            """(s.share_scope='class' AND s.target_grade != ''
+                AND EXISTS (
+                    SELECT 1 FROM teacher_assignments ta
+                    JOIN grades g ON ta.grade_id = g.id
+                    WHERE ta.teacher_username=?
+                    AND (s.target_grade=g.name
+                         OR ',' || s.target_grade || ',' LIKE '%,' || g.name || ',%')
+                    AND (s.target_class='' OR EXISTS (
+                        SELECT 1 FROM classes c
+                        WHERE c.grade_id = g.id
+                        AND (c.display_name=s.target_class
+                             OR ',' || s.target_class || ',' LIKE '%,' || c.display_name || ',%')
+                        AND (ta.class_id IS NULL OR ta.class_id = c.id)
+                    ))
+                )
+            )"""
+        )
+        # 教师也可见 teacher+grade/class 组合共享（匹配任教范围）
+        seen_conditions.append(
+            """(s.share_scope='teacher' AND s.target_grade != '' AND s.target_class != ''
+                AND EXISTS (
+                    SELECT 1 FROM teacher_assignments ta
+                    JOIN grades g ON ta.grade_id = g.id
+                    JOIN classes c ON c.grade_id = g.id
+                    WHERE ta.teacher_username=?
+                    AND (s.target_grade=g.name
+                         OR ',' || s.target_grade || ',' LIKE '%,' || g.name || ',%')
+                    AND (s.target_class=c.display_name
+                         OR ',' || s.target_class || ',' LIKE '%,' || c.display_name || ',%')
+                    AND (ta.class_id IS NULL OR ta.class_id = c.id)
+                )
+            )"""
+        )
+    elif role == ROLE_STUDENT:
+        # 学生：匹配 scope='class'（仅匹配年级，班级由 Python 层精确过滤）
         seen_conditions.append(
             """(s.share_scope='class'
                 AND s.target_grade != ''
                 AND (s.target_grade=u.grade
-                     OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
-                AND (s.target_class='' OR s.target_class=u.class
-                     OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))"""
+                     OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%'))"""
         )
+        # 学生：匹配 teacher+grade/class 组合共享（仅匹配年级，班级由 Python 层过滤）
         seen_conditions.append(
             """(s.share_scope='teacher' AND s.target_grade != '' AND s.target_class != ''
                 AND (s.target_grade=u.grade
-                     OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%')
-                AND (s.target_class=u.class
-                     OR ',' || s.target_class || ',' LIKE '%,' || CAST(u.class AS TEXT) || ',%'))"""
+                     OR ',' || s.target_grade || ',' LIKE '%,' || CAST(u.grade AS TEXT) || ',%'))"""
         )
 
     where_clause = " OR ".join(seen_conditions)
 
-    if role == 2:
+    if role == ROLE_TEACHER:
+        # 教师：需要额外参数用于 EXISTS 子查询 + teacher_user_cond 的 ?
+        rows = execute_query(
+            f"""SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
+                       s.share_scope, s.target_users, s.target_grade, s.target_class, s.created_at
+                FROM shared_resources s
+                WHERE {where_clause}
+                ORDER BY s.created_at DESC""",
+            (username, username, username),
+        )
+    elif role == ROLE_STUDENT:
         rows = execute_query(
             f"""SELECT s.id, s.owner_username, s.file_path, s.file_name, s.resource_type,
                        s.share_scope, s.target_users, s.target_grade, s.target_class, s.created_at
@@ -436,7 +649,7 @@ async def received_shares(request: Request):
                 LEFT JOIN users u ON u.username=?
                 WHERE {where_clause}
                 ORDER BY s.created_at DESC""",
-            (username,),
+            (username, username),
         )
     else:
         rows = execute_query(
@@ -445,7 +658,17 @@ async def received_shares(request: Request):
                 FROM shared_resources s
                 WHERE {where_clause}
                 ORDER BY s.created_at DESC""",
+            (username,),
         )
+
+    # 对所有角色的结果再做一次精确的 Python 层权限过滤
+    # （弥补 SQL 复杂匹配因数据格式差异（如 "高一1班" vs "1"）可能存在的偏差）
+    filtered = []
+    for r in rows:
+        row_data = (r[5], r[6] or "", r[7] or "", r[8] or "")
+        if _check_share_scope(row_data, username):
+            filtered.append(r)
+    rows = filtered
 
     return {
         "shares": [
@@ -520,69 +743,15 @@ def is_file_shared_with_user(file_rel_path: str, resource_type: str,
 
 
 def _check_share_scope(row, viewer_username: str) -> bool:
-    """检查共享范围是否对 viewer_username 可见"""
+    """检查共享范围是否对 viewer_username 可见
+
+    统一委托给 permission_service.check_share_visibility
+    """
     share_scope, target_users, target_grade, target_class = row
-
-    # scope='all'：所有人可见
-    if share_scope == 'all':
-        return True
-
-    viewer_rows = execute_query(
-        "SELECT grade, class, role FROM users WHERE username=?",
-        (viewer_username,),
+    return check_share_visibility(
+        viewer_username=viewer_username,
+        share_scope=share_scope,
+        target_users_csv=target_users or "",
+        target_grade_csv=target_grade or "",
+        target_class_csv=target_class or "",
     )
-    if not viewer_rows:
-        return False
-
-    viewer_role = viewer_rows[0][2]
-
-    # scope='staff'：管理员和教师可见
-    if share_scope == 'staff':
-        return viewer_role in (0, 1)
-
-    # scope='teacher'：检查是否在 target_users 列表中，或者匹配年级/班级（组合共享）
-    if share_scope == 'teacher':
-        # 检查是否在 target_users 中
-        if target_users and (
-            viewer_username == target_users
-            or f',{target_users},'.find(f',{viewer_username},') != -1
-        ):
-            return True
-        # 如果同时指定了年级/班级，也匹配学生（需要 grade 和 class 都非空）
-        if viewer_role == 2 and target_grade and target_class:
-            viewer_grade = str(viewer_rows[0][0] or "")
-            viewer_class = str(viewer_rows[0][1] or "")
-            grade_ok = (
-                viewer_grade == target_grade
-                or f',{target_grade},'.find(f',{viewer_grade},') != -1
-            )
-            if not grade_ok:
-                return False
-            class_ok = not target_class or (
-                viewer_class == target_class
-                or f',{target_class},'.find(f',{viewer_class},') != -1
-            )
-            return class_ok
-        return False
-
-    # scope='class'：需要年级/班级匹配（target_grade 必须非空）
-    if viewer_role in (0, 1):
-        return False
-    if not target_grade:
-        return False
-
-    viewer_grade = str(viewer_rows[0][0] or "")
-    viewer_class = str(viewer_rows[0][1] or "")
-
-    grade_ok = (
-        viewer_grade == target_grade
-        or f',{target_grade},'.find(f',{viewer_grade},') != -1
-    )
-    if not grade_ok:
-        return False
-
-    class_ok = not target_class or (
-        viewer_class == target_class
-        or f',{target_class},'.find(f',{viewer_class},') != -1
-    )
-    return class_ok

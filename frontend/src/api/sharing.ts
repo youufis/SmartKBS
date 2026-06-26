@@ -23,6 +23,8 @@ export interface ShareRequest {
   target_users?: string[];
   target_grades?: string[];
   target_classes?: string[];
+  /** 'replace' 覆盖 / 'append' 追加 / 'remove' 移除 */
+  mode?: 'replace' | 'append' | 'remove';
 }
 
 export interface UserItem {
