@@ -174,10 +174,24 @@ export async function reorderNodes(items: ReorderItem[]): Promise<{ message: str
 
 /** ── AI 练习 ── */
 
+/** AI 练习主题 */
+export interface AiPracticeTheme {
+  id: string;
+  name: string;
+  icon: string;
+  desc: string;
+}
+
 /** AI 生成练习（异步任务） */
-export async function generateAiPractice(kpId: number): Promise<{ task_id: string; message: string }> {
-  const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`);
+export async function generateAiPractice(kpId: number, theme?: string): Promise<{ task_id: string; message: string }> {
+  const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`, { theme });
   return data;
+}
+
+/** 获取 AI 练习视觉主题列表 */
+export async function getAiPracticeThemes(): Promise<AiPracticeTheme[]> {
+  const { data } = await apiClient.get('/api/resources/ai-themes', { params: { type: 'practice' } });
+  return data.themes;
 }
 
 /** 预览AI练习HTML页面 */

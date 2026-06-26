@@ -2154,6 +2154,10 @@ async def ai_generate_practice(kp_id: int, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
+    # 读取请求体（可选主题）
+    body = await request.json() if request.headers.get("content-type") else {}
+    theme = (body.get("theme", "") or "").strip()
+
     # 获取知识点信息
     kp_rows = execute_query(
         """SELECT kp.id, kp.name, kp.description, kp.learning_objectives, kp.difficulty,
@@ -2412,7 +2416,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
                     q["svg_code"] = q.get("svg_content") or ""
 
             # 生成 HTML 答题页面（AI练习独立存储，不创建 practice_sessions）
-            html_content = _generate_practice_html(kp, final_questions, session_id=0, subject=subject, kp_id=kp_id)
+            html_content = _generate_practice_html(kp, final_questions, session_id=0, subject=subject, kp_id=kp_id, theme=theme)
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
             safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
@@ -2425,61 +2429,6 @@ async def ai_generate_practice(kp_id: int, request: Request):
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
-            # ── 自动共享到 shared_resources（按角色设置共享范围） ──
-            binding_id = None
-            try:
-                from backend.database import execute_insert_update as db_insert
-                from backend.permission_service import get_teacher_assignments
-
-                user_role = user.get("role", 2)
-                if user_role == 0:
-                    # 管理员：共享给所有人
-                    share_scope = "all"
-                    target_grade = ""
-                    target_class = ""
-                else:
-                    # 教师：共享给自己任教的年级/班级
-                    share_scope = "teacher"
-                    assignments = get_teacher_assignments(username)
-                    grades = sorted(set(a["grade_name"] for a in assignments if a.get("grade_name")))
-                    classes = sorted(set(
-                        a["class_display_name"] or a["class_name"]
-                        for a in assignments if a.get("class_name")
-                    ))
-                    target_grade = ",".join(grades) if grades else ""
-                    target_class = ",".join(classes) if classes else ""
-
-                share_id = db_insert(
-                    """INSERT OR IGNORE INTO shared_resources
-                       (owner_username, file_path, file_name, resource_type, share_scope,
-                        target_grade, target_class, created_at, updated_at)
-                       VALUES (?, ?, ?, 'html', ?, ?, ?, ?, ?)""",
-                    (username, rel_path, filename, share_scope, target_grade, target_class, now, now),
-                )
-                if not share_id:
-                    # 可能已存在同名记录，查询现有 ID
-                    existing = execute_query(
-                        "SELECT id FROM shared_resources WHERE owner_username=? AND file_path=? AND resource_type='html'",
-                        (username, rel_path),
-                    )
-                    share_id = existing[0]["id"] if existing else None
-
-                if share_id:
-                    # ── 自动绑定到当前知识点 ──
-                    # 清空旧作答记录
-                    from backend.question_db import execute_insert as q_clear
-                    q_clear("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
-                    # 创建绑定
-                    binding_id = db_insert(
-                        """INSERT INTO curriculum_bindings
-                           (knowledge_point_id, resource_type, resource_id, sort_order, created_at)
-                           VALUES (?, 'html', ?, 0, ?)""",
-                        (kp_id, share_id, now),
-                    )
-                    logger.info(f"AI 练习已自动共享并绑定: share_id={share_id}, binding_id={binding_id}")
-            except Exception as share_err:
-                logger.warning(f"自动共享/绑定失败: {share_err}")
-
             logger.info(f"AI 练习已生成: file={filepath}, 题库={bank_count}, AI={len(ai_question_ids)}, 总计={len(all_question_ids)}")
             return {
                 "file_url": file_url,
@@ -2489,7 +2438,6 @@ async def ai_generate_practice(kp_id: int, request: Request):
                 "kp_name": kp["name"],
                 "bank_count": bank_count,
                 "ai_count": len(ai_question_ids),
-                "binding_id": binding_id,
                 "message": f"AI 练习已生成（题库 {bank_count} 题 + AI 生成 {len(ai_question_ids)} 题，共 {len(all_question_ids)} 题）",
             }
         except Exception as e:
@@ -2500,7 +2448,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
     return {"task_id": task_id, "message": "AI 练习生成已开始，请稍候..."}
 
 
-def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int = 0, subject: str = "", kp_id: int = 0) -> str:
+def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int = 0, subject: str = "", kp_id: int = 0, theme: str = "") -> str:
     """生成自包含的 HTML 答题页面"""
     import html as html_mod
 
@@ -2508,6 +2456,21 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
     chapter_name = html_mod.escape(kp.get("chapter_name", ""))
     course_name = html_mod.escape(kp.get("course_name", ""))
     subject_esc = html_mod.escape(subject)
+
+    # 主题颜色方案
+    theme_colors = {
+        "dark-tech":      {"bg": "linear-gradient(135deg, #0f0c29, #302b63, #24243e)", "header": "linear-gradient(135deg, #1a1a2e, #16213e, #0f3460)", "primary": "#0f3460", "accent": "#e94560", "card_border": "#e94560", "shadow": "rgba(233,69,96,0.3)"},
+        "white-card":     {"bg": "linear-gradient(135deg, #f0f2f5, #e8ecf1)", "header": "linear-gradient(135deg, #1e3a5f, #2d5a87)", "primary": "#1e3a5f", "accent": "#2d5a87", "card_border": "#2d5a87", "shadow": "rgba(30,58,95,0.2)"},
+        "cyber-neon":     {"bg": "linear-gradient(135deg, #0a0a0a, #1a1a2e)", "header": "linear-gradient(135deg, #00f5d4, #00b8ff)", "primary": "#00f5d4", "accent": "#00b8ff", "card_border": "#00f5d4", "shadow": "rgba(0,245,212,0.3)"},
+        "purple-grad":    {"bg": "linear-gradient(135deg, #f5f0ff, #ede5f5)", "header": "linear-gradient(135deg, #7c3aed, #a855f7)", "primary": "#7c3aed", "accent": "#a855f7", "card_border": "#7c3aed", "shadow": "rgba(124,58,237,0.3)"},
+        "ai-smart":       {"bg": "linear-gradient(135deg, #f0f4ff, #e8ecf8)", "header": "linear-gradient(135deg, #2563eb, #7c3aed)", "primary": "#2563eb", "accent": "#7c3aed", "card_border": "#2563eb", "shadow": "rgba(37,99,235,0.3)"},
+        "green-forest":   {"bg": "linear-gradient(135deg, #f0f7f0, #dce8dc)", "header": "linear-gradient(135deg, #166534, #22c55e)", "primary": "#166534", "accent": "#22c55e", "card_border": "#166534", "shadow": "rgba(22,101,52,0.3)"},
+        "ocean-blue":     {"bg": "linear-gradient(135deg, #f0f8ff, #dceefb)", "header": "linear-gradient(135deg, #0c4a6e, #0ea5e9)", "primary": "#0c4a6e", "accent": "#0ea5e9", "card_border": "#0ea5e9", "shadow": "rgba(14,165,233,0.3)"},
+        "sunset-warm":    {"bg": "linear-gradient(135deg, #fff8f0, #fde8d0)", "header": "linear-gradient(135deg, #c2410c, #f97316)", "primary": "#c2410c", "accent": "#f97316", "card_border": "#ea580c", "shadow": "rgba(194,65,12,0.25)"},
+        "minimal-paper":  {"bg": "linear-gradient(135deg, #fafafa, #f0f0f0)", "header": "linear-gradient(135deg, #333333, #555555)", "primary": "#333333", "accent": "#000000", "card_border": "#999999", "shadow": "rgba(0,0,0,0.1)"},
+        "galaxy-night":   {"bg": "linear-gradient(135deg, #0f0a2a, #1a0a3e, #0f0a2a)", "header": "linear-gradient(135deg, #6d28d9, #d946ef)", "primary": "#6d28d9", "accent": "#d946ef", "card_border": "#a855f7", "shadow": "rgba(168,85,247,0.3)"},
+    }
+    tc = theme_colors.get(theme, theme_colors["ai-smart"])
 
     questions_json = json.dumps(questions, ensure_ascii=False)
 
@@ -2524,7 +2487,7 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: {tc["bg"]};
     min-height: 100vh;
     padding: 20px;
 }}
@@ -2533,12 +2496,12 @@ body {{
     margin: 0 auto;
 }}
 .header {{
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: {tc["header"]};
     border-radius: 16px;
     padding: 32px 40px;
     color: white;
     margin-bottom: 24px;
-    box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+    box-shadow: 0 8px 32px {tc["shadow"]};
 }}
 .header h1 {{ font-size: 24px; margin-bottom: 8px; }}
 .header .meta {{ font-size: 14px; opacity: 0.9; }}
@@ -2601,12 +2564,12 @@ body {{
 .submit-area {{ text-align: center; margin: 32px 0; }}
 .btn-submit {{
     padding: 14px 48px; font-size: 18px; border: none; border-radius: 12px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: {tc["header"]};
     color: #fff; cursor: pointer; font-weight: 600;
-    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 4px 16px {tc["shadow"]};
     transition: all 0.2s;
 }}
-.btn-submit:hover {{ transform: translateY(-2px); box-shadow: 0 6px 24px rgba(102, 126, 234, 0.5); }}
+.btn-submit:hover {{ transform: translateY(-2px); box-shadow: 0 6px 24px {tc["shadow"]}; }}
 .btn-submit:disabled {{ opacity: 0.5; cursor: not-allowed; transform: none; }}
 .result-area {{
     display: none; background: #fff; border-radius: 16px; padding: 32px;
