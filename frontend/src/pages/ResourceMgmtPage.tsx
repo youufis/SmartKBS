@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented } from 'antd'
-import { UploadOutlined, DeleteOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined, CodeOutlined, FilePdfOutlined, FileImageOutlined, FileZipOutlined, FileUnknownOutlined } from '@ant-design/icons'
+import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio } from 'antd'
+import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined, CodeOutlined, FilePdfOutlined, FileImageOutlined, FileZipOutlined, FileUnknownOutlined, BulbOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
 import type { TreeNode } from '../types'
@@ -74,7 +74,19 @@ const ResourceMgmtPage: React.FC = () => {
     }
   }
 
-  useEffect(() => { loadTree() }, [])
+  useEffect(() => {
+    (async () => {
+      setLoading(true)
+      try {
+        const res = await resourcesApi.getResourceTree()
+        setTreeData(res.tree)
+      } catch {
+        message.error('加载失败')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [])
 
   // 上传单文件/多文件
   const uploadFiles = async (fileList: FileList | File[], basePath = '') => {
@@ -156,6 +168,109 @@ const ResourceMgmtPage: React.FC = () => {
     setRenameOld(oldName)
     setRenameNew(oldName)
     setRenameModal(true)
+  }
+
+  // ── AI 生成 HTML ──
+  const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [aiGenType, setAiGenType] = useState<'animation' | 'quiz' | 'practice' | 'custom'>('animation')
+  const [aiTopic, setAiTopic] = useState('')
+  const [aiSubject, setAiSubject] = useState('')
+  const [aiGrade, setAiGrade] = useState('')
+  const [aiCustomPrompt, setAiCustomPrompt] = useState('')
+  const [aiWorking, setAiWorking] = useState(false)  // 生成+保存中
+  const [aiDone, setAiDone] = useState<{ fileUrl: string; fileName: string } | null>(null)
+  // ── 主题选择 ──
+  const [aiThemes, setAiThemes] = useState<resourcesApi.AiTheme[]>([])
+  const [aiTheme, setAiTheme] = useState('')
+  // ── 学科/年级动态选项 ──
+  const [aiSubjectOptions, setAiSubjectOptions] = useState<string[]>([])
+  const [aiGradeOptions, setAiGradeOptions] = useState<string[]>([])
+
+  // 打开弹窗时加载学科、年级、主题
+  useEffect(() => {
+    if (!aiModalOpen) return
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) setAiSubjectOptions(data.subjects)
+    }).catch(() => {})
+    apiClient.get('/api/scores/my-grades').then(({ data }) => {
+      // 返回格式: string[]，如 ["高一", "高二"]
+      if (Array.isArray(data) && data.length > 0) {
+        setAiGradeOptions(data)
+      }
+    }).catch(() => {})
+    // 加载当前类型的主题
+    if (aiGenType !== 'custom') {
+      resourcesApi.getAiThemes(aiGenType).then(themes => {
+        setAiThemes(themes)
+        if (themes.length > 0) setAiTheme(themes[0].id)
+      }).catch(() => {})
+    }
+  }, [aiModalOpen])
+
+  // 切换类型时加载主题
+  const handleAiTypeChange = (type: 'animation' | 'quiz' | 'practice' | 'custom') => {
+    setAiGenType(type)
+    if (type === 'custom') {
+      setAiThemes([])
+      setAiTheme('')
+      return
+    }
+    resourcesApi.getAiThemes(type).then(themes => {
+      setAiThemes(themes)
+      if (themes.length > 0) setAiTheme(themes[0].id)
+    }).catch(() => {})
+  }
+
+  // ── AI 生成+保存（一步完成）──
+  const handleAiGenerate = async () => {
+    setAiWorking(true)
+    setAiDone(null)
+    try {
+      // 1. AI 生成
+      const genResult = await resourcesApi.aiPreviewHtml({
+        type: aiGenType,
+        topic: aiTopic,
+        subject: aiSubject || undefined,
+        grade: aiGrade || undefined,
+        custom_prompt: aiGenType === 'custom' ? aiCustomPrompt : undefined,
+        theme: aiTheme || undefined,
+      })
+      if (!genResult.html_content || genResult.html_content.length < 50) {
+        message.error('AI 返回内容为空或过短，请重试')
+        return
+      }
+      // 显示题目入库提示
+      if (genResult.db_saved && genResult.db_saved > 0) {
+        message.success(`📚 ${genResult.db_saved} 道新题目已存入题库`)
+      }
+      // 2. 自动保存
+      const fileName = genResult.suggested_name.replace(/\.html$/i, '')
+      const saveResult = await resourcesApi.aiSaveHtml(genResult.html_content, fileName)
+      // 3. 显示结果
+      const fileUrl = `/api/files/${saveResult.url_path}`
+      setAiDone({ fileUrl, fileName: saveResult.file_name })
+      message.success(`✅ 资源已生成并保存`)
+      loadTree()
+    } catch (err: any) {
+      console.error('[AI生成+保存] 失败', err)
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail || ''
+      if (status === 400 && detail.includes('API Key')) {
+        message.error('⚠️ API Key 未配置，请在系统设置中填写')
+      } else if (status === 504) {
+        message.error('⚠️ AI 生成超时，请简化描述或稍后重试')
+      } else if (status === 502) {
+        message.error('⚠️ AI 服务调用失败: ' + (detail.replace('AI 生成失败: ', '') || '请稍后重试'))
+      } else if (status === 401) {
+        message.error('⚠️ 登录已过期，请刷新页面重新登录')
+      } else if (detail) {
+        message.error('⚠️ ' + detail)
+      } else {
+        message.error('⚠️ 请求失败，请检查后端服务是否正常')
+      }
+    } finally {
+      setAiWorking(false)
+    }
   }
 
   // ── 视图切换 & 搜索 ──
@@ -245,6 +360,10 @@ const ResourceMgmtPage: React.FC = () => {
                     }}
                     onClick={() => fileInputRef.current?.click()}
                   >上传文件</Dropdown.Button>
+                  <Button type="primary" ghost icon={<BulbOutlined />}
+                    onClick={() => { setAiModalOpen(true); setAiDone(null); }}>
+                    🤖 AI 生成
+                  </Button>
                 </Space>
               </Card>
 
@@ -329,6 +448,125 @@ const ResourceMgmtPage: React.FC = () => {
         },
       ]} />
 
+      {/* ── AI 生成 HTML 弹窗 ── */}
+      <Modal title="🤖 AI 生成 HTML 资源" open={aiModalOpen}
+        onCancel={() => setAiModalOpen(false)}
+        width={600}
+        footer={null}
+        destroyOnClose>
+        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          {/* 类型选择 */}
+          <div>
+            <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>资源类型</Typography.Text>
+              <Radio.Group value={aiGenType} onChange={(e) => handleAiTypeChange(e.target.value)}
+              className="ai-gen-type-group">
+              <Radio.Button value="animation">🎬 动画讲解</Radio.Button>
+              <Radio.Button value="quiz">🎮 互动答题</Radio.Button>
+              <Radio.Button value="practice">📝 章节练习</Radio.Button>
+              <Radio.Button value="custom">🎨 自定义 HTML</Radio.Button>
+            </Radio.Group>
+          </div>
+
+          {/* 知识点/主题 */}
+          {aiGenType !== 'custom' ? (
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                知识点/主题 <span style={{ color: '#ff4d4f' }}>*</span>
+              </Typography.Text>
+              <Input
+                placeholder="例如：技术的性质、设计的一般原则、技术世界中的设计"
+                value={aiTopic}
+                onChange={(e) => setAiTopic(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                自定义需求 <span style={{ color: '#ff4d4f' }}>*</span>
+              </Typography.Text>
+              <Input.TextArea
+                rows={5}
+                placeholder="请描述你想要的 HTML 页面内容和功能..."
+                value={aiCustomPrompt}
+                onChange={(e) => setAiCustomPrompt(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* 学科 & 年级 */}
+          <Space>
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>学科</Typography.Text>
+              <Select
+                value={aiSubject || undefined}
+                onChange={(v) => setAiSubject(v || '')}
+                allowClear
+                placeholder="选择学科（可选）"
+                style={{ width: 180 }}
+                loading={aiSubjectOptions.length === 0}
+                options={aiSubjectOptions.map(s => ({ value: s, label: s }))}
+              />
+            </div>
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>年级</Typography.Text>
+              <Select
+                value={aiGrade || undefined}
+                onChange={(v) => setAiGrade(v || '')}
+                allowClear
+                placeholder="选择年级（可选）"
+                style={{ width: 140 }}
+                loading={aiGradeOptions.length === 0}
+                options={aiGradeOptions.map(g => ({ value: g, label: g }))}
+              />
+            </div>
+          </Space>
+
+          {/* 主题选择 */}
+          {aiThemes.length > 0 && (
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>视觉主题</Typography.Text>
+              <Select
+                value={aiTheme || undefined}
+                onChange={(v) => setAiTheme(v || '')}
+                style={{ width: '100%' }}
+                placeholder="选择视觉主题"
+                options={aiThemes.map(t => ({
+                  value: t.id,
+                  label: `${t.icon} ${t.name} — ${t.desc}`,
+                }))}
+              />
+            </div>
+          )}
+
+          {/* 生成按钮 / 完成状态 */}
+          {aiDone ? (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <Typography.Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 16 }}>
+                ✅ 资源已生成并保存
+              </Typography.Text>
+              <Button type="primary" size="large" icon={<EyeOutlined />}
+                href={aiDone.fileUrl} target="_blank" rel="noopener noreferrer"
+                style={{ marginBottom: 12 }}>
+                打开预览
+              </Button>
+              <br />
+              <Button onClick={() => { setAiModalOpen(false); setAiDone(null) }}>
+                完成
+              </Button>
+            </div>
+          ) : (
+            <Button type="primary" block size="large"
+              icon={aiWorking ? <LoadingOutlined /> : <BulbOutlined />}
+              loading={aiWorking}
+              disabled={aiWorking || (aiGenType === 'custom' ? !aiCustomPrompt : !aiTopic)}
+              onClick={handleAiGenerate}
+            >
+              {aiWorking ? 'AI 生成中...（约 30-180 秒）' : '🚀 生成并保存'}
+            </Button>
+          )}
+        </Space>
+      </Modal>
+
       {/* 重命名弹窗 */}
       <Modal title="重命名" open={renameModal}
         onOk={handleRename} onCancel={() => setRenameModal(false)}
@@ -357,6 +595,22 @@ const ResourceMgmtPage: React.FC = () => {
         .guide-markdown-content img { max-width: 100%; }
         .resource-tree-node:hover .resource-tree-actions {
           opacity: 1 !important;
+        }
+        .ai-gen-type-group .ant-radio-button-wrapper {
+          flex: 1;
+          text-align: center;
+          height: 48px;
+          line-height: 48px;
+          padding: 0 8px;
+          white-space: nowrap;
+        }
+        .ai-gen-type-group {
+          display: flex;
+          width: 100%;
+          gap: 8px;
+        }
+        .ai-gen-type-group .ant-radio-button-wrapper:not(:first-child)::before {
+          display: none !important;
         }
       `}</style>
     </Layout>

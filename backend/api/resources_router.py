@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files, is_admin, is_teacher
 from backend.config import ROOT_DIR, DEFAULT_LOGGED_IN_NAME
+from backend.prompts.html_generator import build_html_prompt
 from backend.utils import (
     get_account_html_dir,
     get_user_base_dir,
@@ -612,3 +613,416 @@ async def remove_from_group(group_id: int, request: Request):
     )
     logger.info(f"资源移出分组: {username}/group={group_id}, file={file_path}")
     return {"message": "已从分组移除"}
+
+
+# ═══════════════════════════════════════════════
+# AI 生成 HTML 资源（预览 + 保存）
+# ═══════════════════════════════════════════════
+
+def _sanitize_filename(name: str) -> str:
+    """清理文件名，移除不安全字符"""
+    name = re.sub(r'[\\/:*?"<>|]', '_', name)
+    name = re.sub(r'\s+', '', name)
+    return name[:80]
+
+
+def _extract_html_title(html_content: str) -> str:
+    """从 HTML 中提取 <title> 内容"""
+    m = re.search(r'<title[^>]*>(.*?)</title>', html_content, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
+@router.get("/ai-themes")
+async def get_ai_themes(type: str = Query("animation", description="资源类型: animation/quiz/practice")):
+    """获取指定资源类型的可选视觉主题列表"""
+    from backend.prompts.html_generator import get_themes_for_type
+    themes = get_themes_for_type(type)
+    return {"themes": themes, "type": type}
+
+
+# ── 题库取题 ──
+
+def _fetch_matching_questions(topic: str, subject: str = "",
+                               limit: int = 15,
+                               need_types: tuple[str, ...] = ('single', 'true_false')) -> list[dict]:
+    """从 question_bank 检索与主题匹配的试题，按知识点匹配优先"""
+    try:
+        from backend.question_db import execute_query
+        keywords = _extract_keywords(topic)
+        if subject:
+            keywords.append(subject)
+
+        seen = set()
+        results = []
+        for kw in keywords[:5]:
+            like = f"%{kw}%"
+            rows = execute_query(
+                """SELECT id, type, question_text, options, correct_answer,
+                          explanation, knowledge_points, difficulty,
+                          svg_content, has_svg, media_files
+                   FROM question_bank
+                   WHERE (question_text LIKE ? OR knowledge_points LIKE ? OR subject LIKE ?)
+                   AND status = 'active'
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (like, like, like, limit * 2),
+            )
+            for r in rows:
+                qid = r["id"]
+                if qid not in seen and r["type"] in need_types:
+                    seen.add(qid)
+                    # 解析 options JSON
+                    opts = r.get("options")
+                    if opts and isinstance(opts, str):
+                        try:
+                            r["options"] = json.loads(opts)
+                        except (json.JSONDecodeError, TypeError):
+                            r["options"] = {}
+                    results.append(r)
+                    if len(results) >= limit:
+                        return results
+        return results
+    except Exception as e:
+        logger.warning(f"题库检索失败: {e}")
+        return []
+
+
+def _extract_keywords(text: str) -> list[str]:
+    """从文本中提取关键词"""
+    import re
+    stop_words = {"的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
+                  "一", "一个", "上", "也", "很", "到", "说", "要", "去", "你",
+                  "会", "着", "没有", "看", "好", "自己", "这", "他", "她", "它",
+                  "们", "那", "些", "能", "下", "过", "出", "来", "么", "个",
+                  "里", "后", "前", "从", "被", "把", "让", "对", "与", "为",
+                  "以", "及", "但", "而", "或", "如果", "因为", "所以", "可以",
+                  "什么", "怎么", "如何", "哪些", "为何", "怎样", "啥"}
+    # 按中英文标点/空格拆分
+    tokens = re.split(r'[\s,，。；：、！？（）()【】\[\]{}""""''\/\\+＝=#@&*%]', text)
+    result = []
+    for t in tokens:
+        t = t.strip()
+        if len(t) >= 2 and t not in stop_words:
+            result.append(t)
+    if not result:
+        result = [text.strip()] if text.strip() else []
+    return result
+
+
+def _save_questions_to_db(questions: list[dict], username: str, name: str = "") -> int:
+    """将题目列表保存到 question_bank，返回保存数量"""
+    import time
+    from backend.question_db import execute_insert
+    saved = 0
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    for q in questions:
+        try:
+            qid = execute_insert(
+                """INSERT INTO question_bank
+                   (type, question_text, options, correct_answer, explanation,
+                    knowledge_points, subject, difficulty, creator_username, creator_name,
+                    source, svg_content, has_svg, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai', ?, ?, 'active', ?, ?)""",
+                (
+                    q.get("type", "single"),
+                    q.get("question_text", ""),
+                    json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else "",
+                    q.get("correct_answer", ""),
+                    q.get("explanation", ""),
+                    q.get("knowledge_points", ""),
+                    q.get("subject", ""),
+                    q.get("difficulty", "medium"),
+                    username,
+                    name,
+                    q.get("svg_content", ""),
+                    1 if q.get("svg_content") else 0,
+                    now, now,
+                ),
+            )
+            if qid:
+                saved += 1
+        except Exception as e:
+            logger.warning(f"保存题目到题库失败: {e}")
+    return saved
+
+
+@router.post("/ai-preview")
+async def ai_preview_html(request: Request):
+    """AI 生成 HTML 资源预览（不保存，返回 HTML 内容）
+    
+    题目来源策略（quiz/practice 类型）：
+    1. 优先从 question_bank 检索匹配的试题
+    2. 检索到的试题直接嵌入 HTML
+    3. 若试题不够，AI 补充生成缺少的题目
+    4. AI 新生成的题目自动存入 question_bank
+    """
+    user = get_current_user(request)
+    username = user["username"]
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员和教师可以生成资源")
+
+    body = await request.json()
+    gen_type = body.get("type", "custom")  # animation / quiz / practice / custom
+    topic = body.get("topic", "").strip()
+    subject = body.get("subject", "").strip()
+    grade = body.get("grade", "").strip()
+    custom_prompt = body.get("custom_prompt", "").strip()
+    theme = body.get("theme", "").strip()
+
+    # 校验
+    if gen_type == "custom":
+        if not custom_prompt:
+            raise HTTPException(status_code=400, detail="自定义类型需要提供 custom_prompt")
+    elif not topic:
+        raise HTTPException(status_code=400, detail="请输入知识点/主题")
+
+    # 获取 API Key
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
+
+    # RAG 检索相关知识
+    rag_context = ""
+    try:
+        from backend.rag import retrieve_knowledge
+        rag_context = retrieve_knowledge(topic, username)
+    except Exception as e:
+        logger.warning(f"RAG 检索失败（不影响生成）: {e}")
+        rag_context = ""
+
+    # ── 题库取题（仅 quiz/practice 类型）──
+    real_questions = []
+    user_name = user.get("name", "")
+    if gen_type in ("quiz", "practice"):
+        need_types = ('single', 'true_false', 'multiple')
+        q_limit = 15 if gen_type == "practice" else 10
+        real_questions = _fetch_matching_questions(topic, subject, limit=q_limit, need_types=need_types)
+        logger.info(f"从题库检索到 {len(real_questions)} 道与「{topic}」相关的题目")
+
+    # 构建 Prompt（含真实题目数据）
+    prompt = build_html_prompt(
+        prompt_type=gen_type,
+        topic=topic,
+        rag_context=rag_context,
+        subject=subject,
+        grade=grade,
+        custom_prompt=custom_prompt,
+        theme=theme,
+        real_questions=real_questions,  # 传入真实题目
+    )
+
+    # 调用 AI
+    try:
+        from backend.api.ai_service import call_ai_sync_with_timeout
+        logger.info(f"开始 AI 生成 HTML, 类型={gen_type}, 主题={topic}, prompt长度={len(prompt)}")
+        html_content = await call_ai_sync_with_timeout(prompt, api_key, timeout=300)
+        logger.info(f"AI 生成完成, 内容长度={len(html_content) if html_content else 0}")
+    except TimeoutError as e:
+        logger.error(f"AI 生成超时: {e}")
+        raise HTTPException(status_code=504, detail=f"AI 生成超时，请简化描述或稍后重试")
+    except Exception as e:
+        logger.error(f"AI 生成 HTML 失败: {e}")
+        raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
+
+    if not html_content or len(html_content.strip()) < 50:
+        raise HTTPException(status_code=502, detail="AI 返回内容为空或过短，请重试")
+
+    # 提取纯 HTML
+    html_match = re.search(r'```(?:html)?\s*(\<!DOCTYPE html\>.*?)\s*```', html_content, re.DOTALL | re.IGNORECASE)
+    if html_match:
+        html_content = html_match.group(1).strip()
+    else:
+        doctype_match = re.search(r'(\<!DOCTYPE html\>.*)', html_content, re.DOTALL | re.IGNORECASE)
+        if doctype_match:
+            html_content = doctype_match.group(1).strip()
+
+    # ── 保存 AI 新生成的题目到题库 ──
+    new_saved = 0
+    if gen_type in ("quiz", "practice"):
+        try:
+            # 从 HTML 中提取 AI 生成的新题目
+            new_questions = _extract_questions_from_html(html_content, real_questions, topic, subject)
+            if new_questions:
+                new_saved = _save_questions_to_db(new_questions, username, user_name)
+                if new_saved:
+                    logger.info(f"AI 生成的 {new_saved} 道新题目已保存到题库")
+        except Exception as e:
+            logger.warning(f"保存 AI 题目到题库失败（不影响结果）: {e}")
+
+    # 生成建议文件名
+    title = _extract_html_title(html_content)
+    type_labels = {"animation": "动画讲解", "quiz": "互动答题", "practice": "练习题", "custom": "自定义"}
+    type_label = type_labels.get(gen_type, "HTML资源")
+    if title:
+        suggested_name = f"{_sanitize_filename(title)}_{type_label}.html"
+    elif topic:
+        suggested_name = f"{_sanitize_filename(topic)}_{type_label}.html"
+    else:
+        suggested_name = f"AI生成_{type_label}_{int(time.time())}.html"
+
+    result = {
+        "html_content": html_content,
+        "suggested_name": suggested_name,
+        "type_label": type_label,
+    }
+    if new_saved:
+        result["db_saved"] = new_saved
+
+    return result
+
+
+def _extract_questions_from_html(html_content: str,
+                                  existing_questions: list[dict],
+                                  topic: str, subject: str) -> list[dict]:
+    """从生成的 HTML 中提取 AI 新增的题目（排除已有题库题目）
+    
+    通过解析 HTML 中的 JavaScript 题目数据（QUESTION_BANK / questions 数组）
+    与已有的题库题目对比，找出 AI 新生成的题目。
+    """
+    # 跳过 animation 和 custom 类型
+    if not html_content or "<!DOCTYPE" not in html_content:
+        return []
+
+    # 构建已有题目的指纹集合（用于去重）
+    existing_fingerprints = set()
+    for q in existing_questions:
+        text = q.get("question_text", "")[:50]
+        ans = q.get("correct_answer", "")
+        existing_fingerprints.add(f"{text}|{ans}")
+
+    new_questions = []
+
+    # 尝试匹配 quiz 格式: const QUESTION_BANK = [...] 或 const questions = [...]
+    import json as _json
+    qb_match = re.search(
+        r'(?:const|let|var)\s+(?:QUESTION_BANK|questions)\s*=\s*(\[)',
+        html_content,
+    )
+    if qb_match:
+        try:
+            # 手动查找匹配的闭合 ]（处理嵌套 []）
+            start = qb_match.start(1)
+            depth = 0
+            end = start
+            for i in range(start, len(html_content)):
+                ch = html_content[i]
+                if ch == '[':
+                    depth += 1
+                elif ch == ']':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+                elif ch == '"' or ch == "'":
+                    # 跳过字符串中的内容
+                    quote = ch
+                    i += 1
+                    while i < len(html_content):
+                        if html_content[i] == '\\':
+                            i += 2
+                            continue
+                        if html_content[i] == quote:
+                            break
+                        i += 1
+            raw = html_content[start:end]
+            parsed = _json.loads(raw)
+            for item in parsed:
+                qtext = item.get("question", item.get("text", ""))[:50]
+                qans = str(item.get("answer", item.get("correctAnswer", "")))
+                fingerprint = f"{qtext}|{qans}"
+                if fingerprint not in existing_fingerprints and len(qtext) > 5:
+                    # 转换为 question_bank 格式
+                    opts = item.get("options", {})
+                    # 如果是数组格式（练习题的 options），转为 dict
+                    if isinstance(opts, list):
+                        opt_dict = {}
+                        for o in opts:
+                            if isinstance(o, dict):
+                                k = o.get("value", "")
+                                v = o.get("text", "")
+                                if k and v:
+                                    opt_dict[k] = v
+                        opts = opt_dict
+                    new_q = {
+                        "type": "single",
+                        "question_text": item.get("question", item.get("text", "")),
+                        "options": opts,
+                        "correct_answer": str(item.get("answer", item.get("correctAnswer", ""))),
+                        "explanation": item.get("explanation", ""),
+                        "knowledge_points": topic,
+                        "subject": subject,
+                        "difficulty": "medium",
+                        "svg_content": item.get("svg_code", item.get("svg_content", "")),
+                    }
+                    # 处理 principle 字段作为知识点
+                    if "principle" in item:
+                        new_q["knowledge_points"] = item["principle"]
+                    new_questions.append(new_q)
+        except Exception as e:
+            logger.warning(f"解析 HTML 题目数据失败: {e}")
+
+    return new_questions
+
+
+@router.post("/ai-save")
+async def ai_save_html(request: Request):
+    """保存 AI 生成的 HTML 到用户目录"""
+    user = get_current_user(request)
+    username = user["username"]
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员和教师可以保存资源")
+
+    body = await request.json()
+    html_content = body.get("html_content", "").strip()
+    filename = body.get("filename", "").strip()
+
+    if not html_content:
+        raise HTTPException(status_code=400, detail="HTML 内容不能为空")
+    if not filename:
+        raise HTTPException(status_code=400, detail="文件名不能为空")
+    if not filename.lower().endswith(".html"):
+        filename += ".html"
+
+    # 清理文件名
+    filename = _sanitize_filename(filename)
+    if not filename.lower().endswith(".html"):
+        filename += ".html"
+
+    # 目标目录
+    html_dir = get_account_html_dir(username)
+    os.makedirs(html_dir, exist_ok=True)
+
+    target_path = os.path.join(html_dir, filename)
+
+    # 处理重名
+    if os.path.exists(target_path):
+        name, ext = os.path.splitext(filename)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"{name}_{timestamp}{ext}"
+        target_path = os.path.join(html_dir, filename)
+
+    try:
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        logger.info(f"AI 生成 HTML 已保存: {target_path}")
+    except Exception as e:
+        logger.error(f"保存 HTML 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
+
+    # 刷新教师同步
+    ensure_teacher_html_files(username)
+
+    from backend.config import BASE_DIR
+    rel_path = os.path.relpath(target_path, str(BASE_DIR)).replace("\\", "/")
+
+    return {
+        "message": f"✅ HTML 资源已保存为 {filename}",
+        "file_name": filename,
+        "file_path": rel_path,
+        "url_path": rel_path,
+    }
