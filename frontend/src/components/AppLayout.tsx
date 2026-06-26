@@ -40,6 +40,7 @@ const { Header, Sider, Content } = Layout
 const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
   { icon: <HomeOutlined />, label: '首页概览', key: 'overview', children: [
     { key: '/dashboard', icon: <HomeOutlined />, label: '系统首页' },
+    { key: '/task-todo', icon: <CheckCircleOutlined />, label: '任务清单' },
   ]},
   { icon: <BookOutlined />, label: '学习中心', key: 'learn', children: [
     { key: '/curriculum', icon: <BookOutlined />, label: '课程导学' },

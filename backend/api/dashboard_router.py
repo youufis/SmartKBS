@@ -1240,3 +1240,687 @@ async def recent_activity(request: Request):
     return activities[:20]
 
 
+# ══════════════════════════════════════════════════════════════════
+# 学生任务清单 API（待办聚合）
+# ══════════════════════════════════════════════════════════════════
+
+
+@router.get("/task-todo", summary="获取学生任务清单（待办聚合）")
+async def get_task_todo(request: Request):
+    """聚合所有待办事项，按类型分组排序返回"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role != 2:
+        # 目前仅对学生开放，教师/管理员返回空
+        return {"items": [], "counts": {}, "stats": {}}
+
+    # 尝试缓存
+    cache_key = f"todo:{username}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    items: list[dict[str, Any]] = []
+
+    # 获取学生年级班级信息
+    grade, cls = _get_user_grade_class(username)
+    grade_row = execute_query("SELECT grade_id FROM users WHERE username=?", (username,))
+    grade_id = grade_row[0][0] if grade_row else None
+
+    # ── 1. 待考试 ──
+    try:
+        pending_exams = q_execute_query(
+            """SELECT e.id, e.title, e.subject, e.duration, e.total_score,
+                      e.pass_score, e.start_time, e.end_time
+               FROM exams e
+               WHERE e.status = 'published'
+               AND (e.start_time IS NULL OR e.start_time <= ?)
+               AND (e.end_time IS NULL OR e.end_time >= ?)
+               AND e.id NOT IN (
+                   SELECT exam_id FROM exam_attempts
+                   WHERE student_username = ? AND status IN ('submitted', 'graded')
+               )
+               ORDER BY e.end_time IS NULL, e.end_time ASC""",
+            (today_str, today_str, username),
+        )
+        for ex in pending_exams:
+            deadline = ex.get("end_time") or ex.get("start_time")
+            items.append({
+                "id": f"exam-{ex['id']}",
+                "type": "exam",
+                "title": ex["title"],
+                "description": f"{ex.get('subject','')} · {ex['duration']}分钟 · {ex['total_score']}分",
+                "subject": ex.get("subject", ""),
+                "status": "pending",
+                "priority": 90 if deadline and deadline <= today_str else 70,
+                "deadline": deadline,
+                "url": f"/exam-take/{ex['id']}",
+                "action_label": "开始考试",
+                "meta": {"duration": ex["duration"], "total_score": ex["total_score"]},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询考试失败: {e}")
+
+    # ── 2. 待提交任务 ──
+    try:
+        from backend.api.tasks_router import get_all_tasks, get_user_relevant_tasks
+        all_active = get_all_tasks()
+        relevant = get_user_relevant_tasks(username, all_active)
+        for tk in relevant:
+            has_submitted = _db_count(
+                "SELECT COUNT(*) FROM task_submissions WHERE task_id=? AND student_username=?",
+                (tk["id"], username),
+            )
+            if has_submitted == 0:
+                items.append({
+                    "id": f"task-{tk['id']}",
+                    "type": "task",
+                    "title": tk["name"],
+                    "description": tk.get("description", "") or "教师布置的任务",
+                    "subject": "",
+                    "status": "pending",
+                    "priority": 65,
+                    "deadline": None,
+                    "url": "/tasks",
+                    "action_label": "去提交",
+                    "meta": {},
+                })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询任务失败: {e}")
+
+    # ── 3. 待完成智能练习 ──
+    try:
+        pending_practices = q_execute_query(
+            """SELECT ps.id, ps.title, ps.subject, ps.question_count, ps.total_score
+               FROM practice_sessions ps
+               WHERE ps.status='active'
+                 AND ps.id NOT IN (
+                   SELECT session_id FROM practice_attempts WHERE student_username=?
+                 )
+               ORDER BY ps.created_at DESC""",
+            (username,),
+        )
+        for pp in pending_practices:
+            items.append({
+                "id": f"practice-{pp['id']}",
+                "type": "practice",
+                "title": pp["title"],
+                "description": f"{pp.get('subject','信息科技')} · {pp['question_count']}题 · {pp['total_score']}分",
+                "subject": pp.get("subject", ""),
+                "status": "pending",
+                "priority": 60,
+                "deadline": None,
+                "url": "/practice",
+                "action_label": "开始练习",
+                "meta": {"question_count": pp["question_count"]},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询练习失败: {e}")
+
+    # ── 4. 待完成代码练习 ──
+    try:
+        from backend.permission_service import is_student_in_teacher_scope
+        si = execute_query("SELECT grade,class FROM users WHERE username=?", (username,))
+        if si:
+            tu = execute_query("SELECT username FROM users WHERE role=1")
+            at = []
+            for t in tu:
+                tn = str(t[0])
+                if is_student_in_teacher_scope(username, tn):
+                    at.append(tn)
+            au = execute_query("SELECT username FROM users WHERE role=0")
+            an = [str(a[0]) for a in au] if au else []
+            aa = an + at
+            if aa:
+                ph = ",".join("?" for _ in aa)
+                pending_codes = q_execute_query(
+                    f"""SELECT cp.id, cp.title, cp.subject, cp.difficulty, cp.language
+                        FROM code_problems cp
+                        WHERE cp.status='active'
+                          AND cp.creator_username IN ({ph})
+                          AND cp.id NOT IN (
+                            SELECT cs.problem_id FROM code_submissions cs
+                            WHERE cs.student_username=? AND cs.is_best=1 AND cs.status='accepted'
+                          )
+                        ORDER BY cp.id DESC""",
+                    tuple(aa + [username]),
+                )
+                for pc in pending_codes:
+                    items.append({
+                        "id": f"code-{pc['id']}",
+                        "type": "code",
+                        "title": pc["title"],
+                        "description": f"{pc.get('subject','')} · {pc.get('language','')} · {pc.get('difficulty','')}",
+                        "subject": pc.get("subject", ""),
+                        "status": "pending",
+                        "priority": 55,
+                        "deadline": None,
+                        "url": "/code-practice",
+                        "action_label": "去练习",
+                        "meta": {"difficulty": pc.get("difficulty")},
+                    })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询代码练习失败: {e}")
+
+    # ── 5/6. 课程学习：统计未完成的 AI 练习资源（_练习.html） ──
+    # 先用 SQL 查出年级匹配的 HTML 绑定 + 文件路径，再到 Python 端过滤：
+    #   1) 文件名含 _练习.html 的
+    #   2) 排除已在 ai_practice_results 中完成的
+    try:
+        # 先查 question_db：该学生已完成的练习（按知识点）
+        done_kp_ids = set(
+            row['kp_id'] for row in q_execute_query(
+                "SELECT DISTINCT kp_id FROM ai_practice_results WHERE student_username=?",
+                (username,),
+            )
+        )
+        # 再查 smartkb.db：年级匹配的所有 HTML 绑定
+        if grade:
+            raw = execute_query(
+                """SELECT cb.id, cb.knowledge_point_id, kp.name, c.name,
+                          COALESCE(sr.file_path, '') as fp,
+                          COALESCE(sr.file_name, '') as fn
+                   FROM curriculum_bindings cb
+                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                   JOIN chapters ch ON kp.chapter_id = ch.id
+                   JOIN courses c ON ch.course_id = c.id
+                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+                   WHERE cb.resource_type='html'
+                     AND c.status='active'
+                     AND (c.grade = '' OR INSTR(c.grade, ?) > 0)
+                   ORDER BY c.sort_order, ch.sort_order, kp.sort_order, cb.id
+                   LIMIT 50""",
+                (grade,),
+            )
+        else:
+            raw = execute_query(
+                """SELECT cb.id, cb.knowledge_point_id, kp.name, c.name,
+                          COALESCE(sr.file_path, '') as fp,
+                          COALESCE(sr.file_name, '') as fn
+                   FROM curriculum_bindings cb
+                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                   JOIN chapters ch ON kp.chapter_id = ch.id
+                   JOIN courses c ON ch.course_id = c.id
+                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+                   WHERE cb.resource_type='html' AND c.status='active' AND c.grade=''
+                   ORDER BY c.sort_order, ch.sort_order, kp.sort_order, cb.id
+                   LIMIT 50""",
+            )
+        for b in raw:
+            kp_id = b[1]          # knowledge_point_id
+            fn = str(b[5] or '')  # file_name
+            fp = str(b[4] or '')  # file_path
+            # 条件1：文件名含 _练习.html
+            if '_练习.html' not in fn and '_练习.html' not in fp:
+                continue
+            # 条件2：该知识点未完成练习
+            if kp_id in done_kp_ids:
+                continue
+            file_path = fp.lstrip('/')
+            resource_url = f"/api/files/{file_path}" if file_path else "/curriculum"
+            items.append({
+                "id": f"course_practice-{b[0]}",
+                "type": "course_practice",
+                "title": f"{b[3] or ''} - {b[2]}",
+                "description": "知识点练习 · HTML 资源",
+                "subject": "",
+                "status": "pending",
+                "priority": 45,
+                "deadline": None,
+                "url": resource_url,
+                "action_label": "去练习",
+                "meta": {"resource_url": resource_url},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询课程练习资源失败: {e}")
+
+    # ── 7. 活跃随堂测验 ──
+    try:
+        active_quizzes = []
+        if grade_id:
+            cls_param = "," + cls + "," if cls else ""
+            cls_cond = "AND (u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)" if cls else ""
+            sql = (
+                "SELECT q.id, q.title, q.description FROM interaction_quizzes q "
+                "JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1) "
+                "WHERE q.status = 'active' "
+                "AND (u.role = 0 OR u.grade_id = ?) "
+                + cls_cond + " "
+                "AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)"
+            )
+            quiz_rows = execute_query(
+                sql,
+                (grade_id, cls_param, username) if cls else (grade_id, username),
+            )
+            for qr in quiz_rows:
+                active_quizzes.append({"id": qr[0], "title": qr[1], "description": qr[2] or ""})
+        for aq in active_quizzes:
+            items.append({
+                "id": f"quiz-{aq['id']}",
+                "type": "quiz",
+                "title": aq["title"],
+                "description": aq["description"] or "随堂测验",
+                "subject": "",
+                "status": "pending",
+                "priority": 60,
+                "deadline": None,
+                "url": "/interaction",
+                "action_label": "去作答",
+                "meta": {},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询随堂测验失败: {e}")
+
+    # ── 8. 活跃投票 ──
+    try:
+        voted_poll_ids = set(
+            row[0] for row in execute_query(
+                "SELECT DISTINCT poll_id FROM interaction_poll_votes WHERE student_username=?",
+                (username,),
+            )
+        )
+        active_polls = execute_query(
+            """SELECT id, question FROM interaction_polls
+               WHERE status='active' ORDER BY created_at DESC""",
+        )
+        for ap in active_polls:
+            if ap[0] not in voted_poll_ids:
+                items.append({
+                    "id": f"poll-{ap[0]}",
+                    "type": "poll",
+                    "title": ap[1],
+                    "description": "课堂投票 · 进行中",
+                    "subject": "",
+                    "status": "pending",
+                    "priority": 55,
+                    "deadline": None,
+                    "url": "/quick-poll",
+                    "action_label": "去投票",
+                    "meta": {},
+                })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询投票失败: {e}")
+
+    # ── 9. 活跃分组讨论 ──
+    try:
+        my_group_ids = set(
+            row[0] for row in execute_query(
+                """SELECT dg.discussion_id FROM discussion_members dm
+                   JOIN discussion_groups dg ON dm.group_id = dg.id
+                   WHERE dm.username=?""",
+                (username,),
+            )
+        )
+        active_discussions = execute_query(
+            """SELECT id, title, description FROM discussions
+               WHERE status='active' ORDER BY created_at DESC""",
+        )
+        for ad in active_discussions:
+            if ad[0] not in my_group_ids:
+                items.append({
+                    "id": f"discussion-{ad[0]}",
+                    "type": "discussion",
+                    "title": ad[1],
+                    "description": ad[2] or "分组讨论 · 进行中",
+                    "subject": "",
+                    "status": "pending",
+                    "priority": 60,
+                    "deadline": None,
+                    "url": f"/discussion-room/{ad[0]}",
+                    "action_label": "加入讨论",
+                    "meta": {},
+                })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询讨论失败: {e}")
+
+    # ── 10. 抢答竞赛（进行中的） ──
+    try:
+        joined_rooms = set(
+            row[0] for row in execute_query(
+                "SELECT DISTINCT room_id FROM quick_quiz_players WHERE student_username=?",
+                (username,),
+            )
+        )
+        active_rooms = execute_query(
+            """SELECT id, title FROM quick_quiz_rooms
+               WHERE status IN ('waiting','active')
+               ORDER BY created_at DESC""",
+        )
+        for ar in active_rooms:
+            if ar[0] not in joined_rooms:
+                items.append({
+                    "id": f"quick_quiz-{ar[0]}",
+                    "type": "quick_quiz",
+                    "title": ar[1],
+                    "description": "抢答竞赛 · 进行中",
+                    "subject": "",
+                    "status": "pending",
+                    "priority": 70,
+                    "deadline": None,
+                    "url": f"/quick-quiz/lobby/{ar[0]}",
+                    "action_label": "去参与",
+                    "meta": {},
+                })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询抢答失败: {e}")
+
+    # ── 11. 活跃白板活动 ──
+    try:
+        joined_whiteboards = set(
+            row[0] for row in execute_query(
+                "SELECT DISTINCT room_id FROM whiteboard_room_members WHERE username=? AND leave_time IS NULL",
+                (username,),
+            )
+        )
+        active_whiteboards = execute_query(
+            """SELECT id, title FROM whiteboard_rooms
+               WHERE status='active' ORDER BY created_at DESC""",
+        )
+        for aw in active_whiteboards:
+            if aw[0] not in joined_whiteboards:
+                items.append({
+                    "id": f"whiteboard-{aw[0]}",
+                    "type": "whiteboard",
+                    "title": aw[1],
+                    "description": "白板互动 · 进行中",
+                    "subject": "",
+                    "status": "pending",
+                    "priority": 50,
+                    "deadline": None,
+                    "url": f"/whiteboard-room/{aw[0]}",
+                    "action_label": "加入白板",
+                    "meta": {},
+                })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询白板失败: {e}")
+
+    # ── 12. 我提出的待回答问题 ──
+    try:
+        my_pending_qs = execute_query(
+            """SELECT id, content FROM interaction_questions
+               WHERE student_username=? AND status='pending'
+               ORDER BY created_at DESC""",
+            (username,),
+        )
+        for pq in my_pending_qs:
+            items.append({
+                "id": f"question_waiting-{pq[0]}",
+                "type": "question_waiting",
+                "title": f"等待回答：{pq[1][:60]}{'...' if len(pq[1])>60 else ''}",
+                "description": "你提出的问题等待老师回答",
+                "subject": "",
+                "status": "pending",
+                "priority": 75,
+                "deadline": None,
+                "url": "/student-questions",
+                "action_label": "查看",
+                "meta": {},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询待回答问题失败: {e}")
+
+    # ── 13. 可回答的同学提问 ──
+    try:
+        my_answered = set(
+            row[0] for row in execute_query(
+                "SELECT DISTINCT question_id FROM interaction_question_answers WHERE student_username=?",
+                (username,),
+            )
+        )
+        peer_questions = execute_query(
+            """SELECT id, content, student_username FROM interaction_questions
+               WHERE status='pending' AND student_username!=?
+               ORDER BY created_at DESC LIMIT 10""",
+            (username,),
+        )
+        for pqq in peer_questions:
+            if pqq[0] not in my_answered:
+                items.append({
+                    "id": f"question_can_answer-{pqq[0]}",
+                    "type": "question_can_answer",
+                    "title": f"可回答：{pqq[2]} 提问「{pqq[1][:60]}{'...' if len(pqq[1])>60 else ''}」",
+                    "description": "同学提问，你可以帮助回答",
+                    "subject": "",
+                    "status": "pending",
+                    "priority": 35,
+                    "deadline": None,
+                    "url": "/student-questions",
+                    "action_label": "去回答",
+                    "meta": {},
+                })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询可回答问题失败: {e}")
+
+    # ── 14. 进行中的知识闯关 ──
+    try:
+        ongoing_quest = execute_query(
+            """SELECT id, score, current_question_index, total_questions
+               FROM quest_records
+               WHERE student_username=? AND completed=0
+               ORDER BY created_at DESC LIMIT 1""",
+            (username,),
+        )
+        if ongoing_quest and ongoing_quest[0]:
+            oq = ongoing_quest[0]
+            items.append({
+                "id": f"quest-{oq[0]}",
+                "type": "quest",
+                "title": "知识闯关",
+                "description": f"进行中 · 第{oq[2]+1}/{oq[3]}题 · 当前{oq[1]}分",
+                "subject": "",
+                "status": "in_progress",
+                "priority": 65,
+                "deadline": None,
+                "url": "/quest",
+                "action_label": "继续闯关",
+                "meta": {"progress": f"{oq[2]}/{oq[3]}", "score": oq[1]},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询闯关失败: {e}")
+
+    # ── 15. 待巩固错题 ──
+    try:
+        wrong_count = _db_count(
+            "SELECT COUNT(*) FROM wrong_book WHERE student_username=? AND status='pending'",
+            (username,),
+        )
+        if wrong_count > 0:
+            items.append({
+                "id": "wrong_book",
+                "type": "wrong_book",
+                "title": f"错题巩固（{wrong_count} 道待巩固）",
+                "description": f"有 {wrong_count} 道错题需要复习巩固",
+                "subject": "",
+                "status": "pending",
+                "priority": 70,
+                "deadline": None,
+                "url": "/wrong-book",
+                "action_label": "去巩固",
+                "meta": {"count": wrong_count},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询错题失败: {e}")
+
+    # ── 16. 未读通知 ──
+    try:
+        unread_count = _db_count(
+            "SELECT COUNT(*) FROM notifications WHERE recipient_username=? AND is_read=0",
+            (username,),
+        )
+        if unread_count > 0:
+            items.append({
+                "id": "notification",
+                "type": "notification",
+                "title": f"未读通知（{unread_count} 条）",
+                "description": f"有 {unread_count} 条未读通知等待查看",
+                "subject": "",
+                "status": "pending",
+                "priority": 40,
+                "deadline": None,
+                "url": "/notifications",
+                "action_label": "查看",
+                "meta": {"count": unread_count},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询通知失败: {e}")
+
+    # ── 16. 共享资源（列表形式，带访问链接） ──
+    try:
+        if grade:
+            shared_items = execute_query(
+                """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type
+                   FROM shared_resources sr
+                   WHERE (sr.share_scope='all'
+                        OR (sr.share_scope='class' AND (sr.target_grade=? OR INSTR(sr.target_grade, ?)>0) AND (sr.target_class=? OR INSTR(sr.target_class, ?)>0))
+                        OR (sr.share_scope='teacher' AND INSTR(sr.target_users, ?)>0))
+                   ORDER BY sr.created_at DESC
+                   LIMIT 30""",
+                (grade, grade, cls, cls, username),
+            )
+        else:
+            shared_items = execute_query(
+                """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type
+                   FROM shared_resources sr
+                   WHERE sr.share_scope='all'
+                   ORDER BY sr.created_at DESC
+                   LIMIT 30""",
+            )
+        for si in shared_items:
+            file_path = str(si[2] or '').lstrip('/')
+            resource_url = f"/api/files/{file_path}" if file_path else "/shared-center"
+            items.append({
+                "id": f"shared_resource-{si[0]}",
+                "type": "shared_resource",
+                "title": str(si[1] or si[2] or f'资源#{si[0]}'),
+                "description": f"共享资源 · {str(si[3] or '')}",
+                "subject": "",
+                "status": "pending",
+                "priority": 30,
+                "deadline": None,
+                "url": resource_url,
+                "action_label": "查看",
+                "meta": {"resource_url": resource_url},
+            })
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询共享资源失败: {e}")
+
+    # ── 排序：按优先级降序，同优先级按 deadline 升序 ──
+    items.sort(key=lambda x: (
+        -x["priority"],
+        x["deadline"] or "9999-99-99",
+    ))
+
+    # ── 统计分类（与导航菜单保持一致） ──
+    # 📝 考核测评 | 📖 课程学习 | 🎯 互动课堂 | 🎮 趣味挑战 | 📂 系统服务
+    counts: dict[str, int] = {
+        "exam": 0, "curriculum": 0, "interactive": 0,
+        "challenge": 0, "service": 0,
+    }
+    type_category: dict[str, str] = {
+        "exam": "exam",
+        "task": "exam",
+        "practice": "exam",
+        "code": "exam",
+        "course_practice": "curriculum",
+        "quiz": "interactive",
+        "poll": "interactive",
+        "discussion": "interactive",
+        "whiteboard": "interactive",
+        "quick_quiz": "interactive",
+        "question_waiting": "interactive",
+        "question_can_answer": "interactive",
+        "quest": "exam",
+        "wrong_book": "exam",
+        "shared_resource": "challenge",
+        "notification": "service",
+    }
+    for it in items:
+        cat = type_category.get(it["type"], "other")
+        counts[cat] = counts.get(cat, 0) + 1
+
+    # ── 学习统计 ──
+    stats: dict[str, Any] = {
+        "course_progress": 0,
+        "completion_rate": 0,
+        "accuracy_rate": 0,
+        "streak_days": 0,
+    }
+    try:
+        # 课程进度：已完成课程练习数 / 总课程练习数
+        # 总练习数 = curriculum_bindings 中匹配学生年级的 html 资源数
+        # 已完成数 = ai_practice_results 中学生已完成记录数
+        if grade:
+            total_kp = _db_count(
+                """SELECT COUNT(*) FROM curriculum_bindings cb
+                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                   JOIN chapters ch ON kp.chapter_id = ch.id
+                   JOIN courses c ON ch.course_id = c.id
+                   WHERE cb.resource_type='html'
+                     AND c.status='active'
+                     AND (c.grade = '' OR INSTR(c.grade, ?) > 0)""",
+                (grade,),
+            )
+        else:
+            total_kp = _db_count(
+                """SELECT COUNT(*) FROM curriculum_bindings cb
+                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                   JOIN chapters ch ON kp.chapter_id = ch.id
+                   JOIN courses c ON ch.course_id = c.id
+                   WHERE cb.resource_type='html' AND c.status='active' AND c.grade=''""",
+            )
+        done_kp = _q_count(
+            "SELECT COUNT(*) FROM ai_practice_results WHERE student_username=?",
+            (username,),
+        )
+        stats["course_progress"] = round(done_kp / total_kp * 100) if total_kp > 0 else 0
+
+        # 总体完成率：已提交考试 / (已提交+待考试)
+        # 注意 counts["exam"] 包含考核测评全部分类，不能直接用
+        # 需要从 items 中只筛选 type='exam' 的待考试数量
+        exam_submitted = _q_count(
+            "SELECT COUNT(*) FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
+            (username,),
+        )
+        exam_pending = sum(1 for it in items if it["type"] == "exam")
+        stats["completion_rate"] = round(exam_submitted / (exam_submitted + exam_pending) * 100) if (exam_submitted + exam_pending) > 0 else 0
+
+        # 总体正确率
+        acc_row = q_execute_query(
+            """SELECT COALESCE(AVG(accuracy), 0) FROM ai_practice_results WHERE student_username=?""",
+            (username,),
+        )
+        stats["accuracy_rate"] = round(acc_row[0]["COALESCE(AVG(accuracy), 0)"], 1) if acc_row else 0
+
+        # 连续学习天数（从 login_logs 计算）
+        streak = execute_query(
+            """SELECT DISTINCT DATE(login_time) as d FROM login_logs
+               WHERE username=? ORDER BY d DESC LIMIT 60""",
+            (username,),
+        )
+        if streak:
+            streak_days = 0
+            from datetime import date, timedelta
+            check_date = date.today()
+            for row in streak:
+                log_date_str = str(row[0]) if row[0] else ""
+                if log_date_str:
+                    try:
+                        log_date = datetime.strptime(log_date_str[:10], "%Y-%m-%d").date()
+                        if log_date == check_date:
+                            streak_days += 1
+                            check_date -= timedelta(days=1)
+                        elif log_date < check_date:
+                            break
+                    except ValueError:
+                        continue
+            stats["streak_days"] = streak_days
+    except Exception as e:
+        logger.warning(f"[task-todo] 查询学习统计失败: {e}")
+
+    result = {"items": items, "counts": counts, "stats": stats}
+    _set_cache(cache_key, result)
+    return result

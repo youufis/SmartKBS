@@ -266,6 +266,19 @@ const DashboardPage: React.FC = () => {
                 size="small"
                 type="text"
                 style={{ color: '#fff', padding: 0 }}
+                icon={<span>📋</span>}
+                onClick={() => navigate('/task-todo')}
+              >
+                任务清单
+                <Tag style={{ marginLeft: 4, fontSize: 10, borderRadius: 8, background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', lineHeight: '16px' }}>
+                  {(summary.pending_exam_count ?? 0) + (summary.active_task_count ?? 0) + (summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
+                </Tag>
+              </Button>
+              <Text style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>|</Text>
+              <Button
+                size="small"
+                type="text"
+                style={{ color: '#fff', padding: 0 }}
                 icon={<span>🧠</span>}
                 onClick={() => navigate('/chat?companion=1')}
               >
