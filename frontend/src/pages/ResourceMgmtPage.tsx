@@ -199,22 +199,15 @@ const ResourceMgmtPage: React.FC = () => {
       }
     }).catch(() => {})
     // 加载当前类型的主题
-    if (aiGenType !== 'custom') {
-      resourcesApi.getAiThemes(aiGenType).then(themes => {
-        setAiThemes(themes)
-        if (themes.length > 0) setAiTheme(themes[0].id)
-      }).catch(() => {})
-    }
+    resourcesApi.getAiThemes(aiGenType).then(themes => {
+      setAiThemes(themes)
+      if (themes.length > 0) setAiTheme(themes[0].id)
+    }).catch(() => {})
   }, [aiModalOpen])
 
   // 切换类型时加载主题
   const handleAiTypeChange = (type: 'animation' | 'quiz' | 'practice' | 'custom') => {
     setAiGenType(type)
-    if (type === 'custom') {
-      setAiThemes([])
-      setAiTheme('')
-      return
-    }
     resourcesApi.getAiThemes(type).then(themes => {
       setAiThemes(themes)
       if (themes.length > 0) setAiTheme(themes[0].id)

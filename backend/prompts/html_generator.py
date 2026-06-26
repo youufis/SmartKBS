@@ -6,6 +6,7 @@ AI 生成 HTML 资源 Prompt 模板
 - practice: 章节练习（练习题 + 统计图表）
 - custom: 自定义 HTML（按用户需求生成）
 """
+from typing import Any
 
 ANIMATION_HTML_PROMPT = """你是一位专业的教育 HTML 内容设计师。请根据以下知识点，生成一个**杂志风格的动画讲解 HTML 页面**。
 
@@ -466,7 +467,7 @@ const QUESTION_BANK = [
 ### 1. 获取教师标识（从 URL 路径解析）
 ```javascript
 // 从页面 URL 中提取教师用户名（所有互动答题文件通用）
-const pathMatch = window.location.pathname.match(/\/api\/files\/([^\/]+)\/html\//);
+const pathMatch = window.location.pathname.match(/\\/api\\/files\\/([^\\/]+)\\/html\\//);
 const TEACHER = (pathMatch ? pathMatch[1] : '') || '';
 ```
 
@@ -732,15 +733,69 @@ CUSTOM_HTML_PROMPT = """你是一位专业的 HTML 设计师。请根据以下�
 
 ## ◈ 通用设计要求
 
-### 风格参考（根据需求选择合适风格）
-可参考项目中的多种风格模板：
-- **杂志编辑风**：黑白配色、serif 标题、滚动动画、卡片布局
-- **太空科幻风**：深色背景、霓虹色、玻璃态效果、星空 Canvas
-- **波普漫画风**：高饱和色、粗边框、漫画网点背景、阴影偏移
-- **蒸汽波风**：霓虹渐变、复古 80s、棕榈树装饰、故障效果
-- **科技蓝风**：深蓝渐变、毛玻璃卡片、霓虹蓝点缀、现代扁平
-- **知识森林风**：自然绿调、柔和卡片、圆润友好
-- **极简风**：大量留白、细线条、克制配色
+### 可选视觉主题（共 10 种，根据需求选择最合适的主题使用）
+
+**重要**：严格遵循所选主题的配色方案、视觉特征和装饰元素。如果用户指定了主题，必须使用该主题风格。
+
+### 1. 💀 赛博朋克 2077（Cyberpunk）
+```css
+:root{--neon-cyan:#00f0ff;--neon-magenta:#ff00aa;--neon-yellow:#ffe600;--dark-bg:#0a0a0f;--card-bg:rgba(10,10,20,0.7);--text:#c0c0d0}
+```
+特点：Canvas 粒子网络背景、霓虹渐变（青/品/黄）、60px 网格脉冲动画、扫描线覆盖层、故障效果
+
+### 2. 🪟 玻璃拟态（Glassmorphism）
+```css
+:root{--glass-bg:rgba(255,255,255,0.12);--glass-border:rgba(255,255,255,0.2);--glass-shadow:rgba(31,38,135,0.12);--text-primary:#1a1a2e;--text-secondary:rgba(26,26,46,0.7);--accent-1:#667eea;--accent-2:#f093fb;--accent-3:#4facfe}
+```
+特点：毛玻璃卡片（backdrop-filter:blur(20px)）、浮动光晕渐变球体（blur(80px)）、深色渐变背景、弹性动画
+
+### 3. 🌅 合成波日落（Synthwave Sunset）
+```css
+:root{--sunset-top:#ff6b35;--sunset-mid:#ff2060;--sunset-bot:#7b2d8e;--neon-pink:#ff2a7a;--neon-blue:#00d4ff;--grid-color:rgba(255,42,122,0.15);--text:#e0d0ff}
+```
+特点：Canvas 透视网格、日落放射线渐变、霓虹文字发光（drop-shadow）、标题浮动动画、80s 复古
+
+### 4. 📜 暗黑学院（Dark Academia）
+```css
+:root{--parchment:#f4e8c1;--parchment-dark:#e6d5a8;--ink:#2c1810;--ink-light:#5c3a28;--accent:#8b4513;--accent-gold:#b8860b;--fabric:#3a2a1a;--text-body:#3a2a1a}
+```
+特点：羊皮纸底色+SVG 噪点纹理、Georgia/Noto Serif SC 衬线字体、首字下沉 dropcap、装饰性分隔线、复古学术
+
+### 5. 🌌 宇宙星云（Cosmic Nebula）
+```css
+:root{--deep-space:#05050a;--nebula-purple:#6b21a8;--nebula-blue:#1e3a8a;--nebula-pink:#ec4899;--star-white:rgba(255,255,255,0.9);--text-primary:rgba(255,255,255,0.9);--text-secondary:rgba(255,255,255,0.55);--glow:rgba(107,33,168,0.3)}
+```
+特点：Canvas 闪烁星系粒子、星云光晕漂移（blur(120px)）、渐变文字、鼠标视差效果、深空背景
+
+### 6. 🌿 植物自然（Botanic Nature）
+```css
+:root{--moss:#2d4a22;--leaf:#4a7c3f;--sage:#8a9a6c;--cream:#f5f0e8;--earth:#8b7355;--sky:#c8d8c0;--text-dark:#1a2e15;--text-light:#4a5a3a}
+```
+特点：SVG 有机曲线浮动、植物柔和色系（苔绿/叶绿/鼠尾草）、叶片装饰摇摆动画、温暖自然
+
+### 7. ☯️ 极简禅意（Minimal Zen）
+```css
+:root{--white:#fafaf7;--off-white:#f2f0eb;--light-gray:#e2dfd8;--ink:#2c2a28;--ink-light:#6b6864;--accent:#c73e3a;--gold:#b8860b;--charcoal:#3a3835}
+```
+特点：Enso 禅圆 SVG 呼吸动画、极致留白、侘寂美学、Noto Serif SC 衬线、细线分隔、克制优雅
+
+### 8. 🏙️ 新东京（Neo Tokyo）
+```css
+:root{--night:#0a0a14;--night2:#12121e;--red:#ff1a4a;--cyan:#00e5ff;--yellow:#ffd600;--pink:#ff2d78;--text:#d0d0e0;--text-dim:rgba(208,208,224,0.5)}
+```
+特点：CSS 生成建筑群剪影、霓虹色块、窗户闪烁动画、滚动驱动视差条纹、都市夜景
+
+### 9. 👑 奢华金（Luxury Gold）
+```css
+:root{--obsidian:#0c0a08;--charcoal:#1a1816;--gold:#c9a84c;--gold-light:#e8d48b;--gold-dark:#8a7028;--cream:#f5f0e0;--text:rgba(255,255,255,0.85);--text-dim:rgba(255,255,255,0.45)}
+```
+特点：暗黑曜石底+噪点纹理、金色光晕球体（blur(100px)）、金色竖线装饰、Georgia serif 字体、奢华高级
+
+### 10. 🏗️ 数字粗野（Digital Brutalist）
+```css
+:root{--bg:#f5f5f0;--black:#111;--red:#d42;--blue:#2266ff;--yellow:#ffdd00;--gray:#888;--light-gray:#ddd;--accent:var(--red)}
+```
+特点：40px 裸露网格叠加、Impact/Arial Black 重型字体、粗野边框 4px solid red、黑底红边顶栏、极简粗暴
 
 ### 技术要求
 - 使用现代 CSS 布局（Flexbox / Grid）
@@ -815,7 +870,21 @@ PRACTICE_THEMES = [
 ]
 
 
-def get_themes_for_type(prompt_type: str) -> list[dict]:
+CUSTOM_THEMES = [
+    {"id": "cyberpunk", "name": "赛博朋克 2077", "icon": "💀", "desc": "Canvas粒子网络+霓虹渐变+扫描线"},
+    {"id": "glassmorphism", "name": "玻璃拟态", "icon": "🪟", "desc": "backdrop-filter毛玻璃+浮动光晕"},
+    {"id": "synthwave", "name": "合成波日落", "icon": "🌅", "desc": "Canvas透视网格+日落放射线"},
+    {"id": "dark-academia", "name": "暗黑学院", "icon": "📜", "desc": "SVG噪点纹理+衬线排版+dropcap"},
+    {"id": "cosmic-nebula", "name": "宇宙星云", "icon": "🌌", "desc": "闪烁星系粒子+星云漂移+鼠标视差"},
+    {"id": "botanic", "name": "植物自然", "icon": "🌿", "desc": "SVG有机曲线+植物柔和色系"},
+    {"id": "minimal-zen", "name": "极简禅意", "icon": "☯️", "desc": "Enso禅圆+极致留白+侘寂美学"},
+    {"id": "neo-tokyo", "name": "新东京", "icon": "🏙️", "desc": "CSS生成建筑群+霓虹色块风格"},
+    {"id": "luxury-gold", "name": "奢华金", "icon": "👑", "desc": "暗金配色+噪点纹理+金色呼吸光晕"},
+    {"id": "digital-brutalist", "name": "数字粗野", "icon": "🏗️", "desc": "粗野边框+重型字体+裸露网格"},
+]
+
+
+def get_themes_for_type(prompt_type: str) -> list[dict[str, Any]]:
     """获取指定类型可选的主题列表"""
     if prompt_type == "animation":
         return ANIMATION_THEMES
@@ -823,6 +892,8 @@ def get_themes_for_type(prompt_type: str) -> list[dict]:
         return QUIZ_THEMES
     elif prompt_type == "practice":
         return PRACTICE_THEMES
+    elif prompt_type == "custom":
+        return CUSTOM_THEMES
     else:
         return []
 
@@ -840,7 +911,7 @@ def _prompt_format(template: str, **kwargs) -> str:
 def build_html_prompt(prompt_type: str, topic: str = "",
                        rag_context: str = "", subject: str = "",
                        grade: str = "", custom_prompt: str = "",
-                       theme: str = "", real_questions: list[dict] = None) -> str:
+                       theme: str = "", real_questions: list[dict[str, Any]] | None = None) -> str:
     """根据类型构建完整的 AI Prompt
 
     Args:
@@ -858,7 +929,7 @@ def build_html_prompt(prompt_type: str, topic: str = "",
     # 添加主题选择指令
     theme_instruction = ""
     if theme:
-        all_themes = ANIMATION_THEMES + QUIZ_THEMES + PRACTICE_THEMES
+        all_themes = ANIMATION_THEMES + QUIZ_THEMES + PRACTICE_THEMES + CUSTOM_THEMES
         theme_name = theme
         for t in all_themes:
             if t["id"] == theme:
