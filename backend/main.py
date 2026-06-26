@@ -24,7 +24,7 @@ from backend.middleware import register_middleware
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version="6.4",
+    version="6.5",
     docs_url="/docs",
 )
 
