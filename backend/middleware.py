@@ -28,6 +28,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         public_paths = [
             "/api/auth/login",
             "/api/auth/logout",
+            "/api/auth/security-questions",
+            "/api/auth/security-check/",
+            "/api/auth/verify-security",
+            "/api/auth/reset-password-by-security",
             "/api/resources/nav",
             "/api/scores/",
             "/api/rollcall/",

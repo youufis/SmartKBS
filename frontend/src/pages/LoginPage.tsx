@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/authStore'
 import { getOnlineCount } from '../api/auth'
 import apiClient from '../api/client'
 import ThemeSwitcher from '../components/ThemeSwitcher'
+import ForgotPasswordModal from '../components/ForgotPasswordModal'
 
 const { Text, Title, Paragraph } = Typography
 
@@ -109,6 +110,7 @@ const LoginPage: React.FC = () => {
   const [onlineCount, setOnlineCount] = useState(0)
   const [agentName, setAgentName] = useState('智慧教学平台')
   const [orgName, setOrgName] = useState('')
+  const [forgotModalOpen, setForgotModalOpen] = useState(false)
 
   // 随机选一条名言（仅在组件挂载时确定）
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)])
@@ -281,7 +283,7 @@ const LoginPage: React.FC = () => {
                 <Form.Item
                   name="password"
                   rules={[{ required: true, message: '请输入密码' }]}
-                  style={{ marginBottom: 28 }}
+                  style={{ marginBottom: 8 }}
                 >
                   <Input.Password
                     prefix={<LockOutlined style={{ color: 'var(--text-tertiary)' }} />}
@@ -289,6 +291,15 @@ const LoginPage: React.FC = () => {
                     style={{ borderRadius: 10 }}
                   />
                 </Form.Item>
+                <div style={{ textAlign: 'right', marginBottom: 20 }}>
+                  <Button
+                    type="link"
+                    style={{ padding: 0, fontSize: 13 }}
+                    onClick={() => setForgotModalOpen(true)}
+                  >
+                    忘记密码？
+                  </Button>
+                </div>
                 <Form.Item style={{ marginBottom: 0 }}>
                   <Button
                     type="primary"
@@ -311,6 +322,12 @@ const LoginPage: React.FC = () => {
           </div>
         </Col>
       </Row>
+
+      {/* 忘记密码弹窗 */}
+      <ForgotPasswordModal
+        open={forgotModalOpen}
+        onClose={() => setForgotModalOpen(false)}
+      />
     </div>
   )
 }

@@ -72,6 +72,32 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 兼容旧表：添加密保问题/答案字段（忘记密码用）──
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN security_question TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN security_answer_hash BLOB DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN security_question2 TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN security_answer_hash2 BLOB DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN security_failed_attempts INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN security_locked_until TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 年级主数据表（全学段：小学/初中/高中）──
             c.execute("""CREATE TABLE IF NOT EXISTS grades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

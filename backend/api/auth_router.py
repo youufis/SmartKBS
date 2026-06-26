@@ -15,6 +15,15 @@ from backend.auth import (
     remove_active_token,
     remove_active_token_by_username,
     get_online_count,
+    hash_password,
+    has_security_configured,
+    get_security_questions,
+    set_security_questions,
+    verify_security_answer,
+    check_security_locked,
+    increment_failed_attempts,
+    reset_failed_attempts,
+    SECURITY_QUESTIONS,
 )
 from backend.api.config_router import get_config_value
 from backend.logger import logger
@@ -243,3 +252,170 @@ async def get_current_user(request: Request):
 async def online_count():
     """获取在线用户数"""
     return {"count": get_online_count()}
+
+
+# ── 密保问题（双问题验证 + 频率限制）──
+
+class SetSecurityRequest(BaseModel):
+    question1: str
+    answer1: str
+    question2: str
+    answer2: str
+
+
+class VerifySecurityRequest(BaseModel):
+    username: str
+    answer: str
+    question_index: int = 0  # 0=第一题, 1=第二题
+
+
+class ResetPasswordBySecurityRequest(BaseModel):
+    username: str
+    answer1: str
+    answer2: str
+    new_password: str
+
+
+@router.get("/security-questions")
+async def list_security_questions():
+    """获取预设密保问题列表（公开接口）"""
+    return {"questions": SECURITY_QUESTIONS}
+
+
+@router.get("/security-check/{username}")
+async def security_check(username: str):
+    """检查用户是否存在且已设置双密保问题（公开接口）"""
+    rows = execute_query(
+        "SELECT username, security_question, security_question2 FROM users WHERE username=?",
+        (username.strip(),),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    q1 = rows[0][1] or ""
+    q2 = rows[0][2] or ""
+    if not q1 or not q2:
+        raise HTTPException(status_code=400, detail="该用户未设置密保问题，请联系管理员重置密码")
+    return {"username": rows[0][0], "question1": q1, "question2": q2}
+
+
+@router.get("/security-status")
+async def security_status(request: Request):
+    """检查当前登录用户是否已设置双密保问题"""
+    user = request.state.user
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录")
+    username = user.get("username", "")
+    q1, q2 = get_security_questions(username)
+    configured = bool(q1 and q2)
+    return {"configured": configured, "question1": q1, "question2": q2}
+
+
+@router.put("/security-question")
+async def set_security(req: SetSecurityRequest, request: Request):
+    """设置或修改双密保问题（需登录，需选2个不同的问题）"""
+    user = request.state.user
+    if not user:
+        raise HTTPException(status_code=401, detail="未登录")
+    username = user.get("username", "")
+
+    if not req.question1 or not req.answer1 or not req.question2 or not req.answer2:
+        raise HTTPException(status_code=400, detail="两个问题和答案都不能为空")
+    if req.question1 == req.question2:
+        raise HTTPException(status_code=400, detail="两个密保问题不能相同")
+    if len(req.answer1) < 2 or len(req.answer2) < 2:
+        raise HTTPException(status_code=400, detail="答案至少需要2个字符")
+    if req.question1 not in SECURITY_QUESTIONS or req.question2 not in SECURITY_QUESTIONS:
+        raise HTTPException(status_code=400, detail="无效的密保问题")
+
+    set_security_questions(username, req.question1, req.answer1, req.question2, req.answer2)
+    logger.info(f"用户 {username} 设置了双密保问题")
+    return {"message": "密保问题设置成功"}
+
+
+@router.post("/verify-security")
+async def verify_security(req: VerifySecurityRequest):
+    """验证指定索引的密保答案（公开接口，带频率限制）"""
+    username = req.username.strip()
+    if not username or not req.answer:
+        raise HTTPException(status_code=400, detail="用户名和答案不能为空")
+
+    # 检查用户存在
+    rows = execute_query("SELECT username FROM users WHERE username=?", (username,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if not has_security_configured(username):
+        raise HTTPException(status_code=400, detail="该用户未设置密保问题")
+
+    # 频率限制检查
+    locked, lock_msg = check_security_locked(username)
+    if locked:
+        raise HTTPException(status_code=429, detail=lock_msg)
+
+    if verify_security_answer(username, req.answer, req.question_index):
+        return {"verified": True, "message": "答案正确"}
+    else:
+        # 记录失败次数
+        attempts = increment_failed_attempts(username)
+        remaining = 5 - attempts
+        if remaining > 0:
+            raise HTTPException(status_code=403, detail=f"答案错误，还剩{remaining}次机会")
+        else:
+            raise HTTPException(
+                status_code=429,
+                detail=f"密保验证失败次数过多，账号已锁定30分钟",
+            )
+
+
+@router.post("/reset-password-by-security")
+async def reset_password_by_security(req: ResetPasswordBySecurityRequest):
+    """通过双密保答案重置密码（公开接口，需同时验证两个答案）"""
+    username = req.username.strip()
+    if not username or not req.answer1 or not req.answer2 or not req.new_password:
+        raise HTTPException(status_code=400, detail="用户名、两个答案和新密码不能为空")
+    if len(req.new_password) < 4:
+        raise HTTPException(status_code=400, detail="新密码至少需要4个字符")
+
+    # 验证用户存在
+    rows = execute_query("SELECT username FROM users WHERE username=?", (username,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if not has_security_configured(username):
+        raise HTTPException(status_code=400, detail="该用户未设置密保问题")
+
+    # 频率限制检查
+    locked, lock_msg = check_security_locked(username)
+    if locked:
+        raise HTTPException(status_code=429, detail=lock_msg)
+
+    # 验证两个答案
+    if not verify_security_answer(username, req.answer1, 0):
+        attempts = increment_failed_attempts(username)
+        remaining = 5 - attempts
+        if remaining > 0:
+            raise HTTPException(status_code=403, detail=f"第一题答案错误，还剩{remaining}次机会")
+        else:
+            raise HTTPException(status_code=429, detail="密保验证失败次数过多，账号已锁定30分钟")
+
+    if not verify_security_answer(username, req.answer2, 1):
+        attempts = increment_failed_attempts(username)
+        remaining = 5 - attempts
+        if remaining > 0:
+            raise HTTPException(status_code=403, detail=f"第二题答案错误，还剩{remaining}次机会")
+        else:
+            raise HTTPException(status_code=429, detail="密保验证失败次数过多，账号已锁定30分钟")
+
+    # 验证通过，重置失败次数
+    reset_failed_attempts(username)
+
+    # 重置密码
+    hashed = hash_password(req.new_password)
+    execute_insert_update(
+        "UPDATE users SET password=? WHERE username=?",
+        (hashed, username),
+    )
+    # 使所有 token 失效
+    increment_token_version(username)
+    logger.info(f"用户 {username} 通过双密保问题重置了密码")
+    return {"message": "密码重置成功，请使用新密码登录"}
