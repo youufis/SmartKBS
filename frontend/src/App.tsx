@@ -54,6 +54,7 @@ import AuthorPanelPage from './pages/AuthorPanelPage'
 import CompanionSettings from './pages/CompanionSettings'
 import WhiteboardPage from './pages/WhiteboardPage'
 import WhiteboardRoomPage from './pages/WhiteboardRoomPage'
+import TaskTodoPage from './pages/TaskTodoPage'
 
 function App() {
   const navigate = useNavigate()
@@ -104,6 +105,7 @@ function App() {
           <Route path="/" element={isLoggedIn ? <AppLayout /> : <Navigate to="/login" />}>
             <Route index element={<DashboardPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="task-todo" element={user?.role === 'student' ? <TaskTodoPage /> : <Navigate to="/dashboard" />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="html-files" element={<HtmlFilesPage />} />
             <Route path="shared-center" element={<SharedCenterPage />} />
