@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined } from '@ant-design/icons'
+import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List, Input } from 'antd'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined, SearchOutlined } from '@ant-design/icons'
 import * as sharingApi from '../api/sharing'
 import ShareDialog from '../components/ShareDialog'
 import apiClient from '../api/client'
@@ -25,6 +25,9 @@ const DownloadsPage: React.FC = () => {
   const [uploadDir, setUploadDir] = useState('')
   const dirInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── 搜索 ──
+  const [searchText, setSearchText] = useState('')
 
   // ── 共享 ──
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
@@ -320,9 +323,19 @@ const DownloadsPage: React.FC = () => {
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space direction="vertical" style={{ width: '100%' }} size={16}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Typography.Title level={4} style={{ margin: 0 }}>📥 文件中心</Typography.Title>
-          <Button icon={<ReloadOutlined />} onClick={loadFiles} loading={loading}>刷新</Button>
+          <Space>
+            <Input
+              placeholder="搜索文件名..."
+              prefix={<SearchOutlined />}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              allowClear
+              style={{ width: 220 }}
+            />
+            <Button icon={<ReloadOutlined />} onClick={loadFiles} loading={loading}>刷新</Button>
+          </Space>
         </div>
 
         {!isStudent ? (
@@ -359,7 +372,12 @@ const DownloadsPage: React.FC = () => {
             </Card>
 
             <Table
-              dataSource={files.filter(f => f.name !== 'index.html')}
+              dataSource={files.filter(f => {
+                if (f.name === 'index.html') return false
+                if (!searchText.trim()) return true
+                const kw = searchText.trim().toLowerCase()
+                return f.name.toLowerCase().includes(kw) || f.path.toLowerCase().includes(kw)
+              })}
               columns={columns}
               rowKey="path"
               loading={loading}
@@ -381,7 +399,10 @@ const DownloadsPage: React.FC = () => {
 
         {/* 共享文件列表 */}
         {(() => {
-          const downloadShares = receivedShares.filter(s => s.resource_type === 'download')
+          const kw = searchText.trim().toLowerCase()
+          const downloadShares = receivedShares
+            .filter(s => s.resource_type === 'download')
+            .filter(s => !kw || (s.file_name || '').toLowerCase().includes(kw))
           // 检测是否为目录共享（file_path 不含扩展名且接收方看不到精确匹配的文件时视为目录）
           const dirShares = downloadShares.filter(s => {
             const hasExt = /\.[a-zA-Z0-9]+$/.test(s.file_path)
