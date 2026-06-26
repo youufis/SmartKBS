@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
-  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
+  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress, Radio,
 } from 'antd'
 
 const { Sider, Content } = Layout
@@ -14,6 +14,7 @@ import {
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
   RightOutlined, DownOutlined, SettingOutlined,
+  EyeOutlined, BulbOutlined, LoadingOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import * as curriculumApi from '../api/curriculum'
@@ -121,6 +122,7 @@ const CurriculumPage: React.FC = () => {
   const [practiceModal, setPracticeModal] = useState(false)
   const [practiceLoading, setPracticeLoading] = useState(false)
   const [practiceHtmlUrl, setPracticeHtmlUrl] = useState('')
+  const [practiceDone, setPracticeDone] = useState<{ fileUrl: string; fileName: string } | null>(null)
   const [practiceMode, setPracticeMode] = useState<'ai' | 'bank' | 'mixed'>('ai')
   // 题库选取模式
   const [bankKeyword, setBankKeyword] = useState('')
@@ -135,6 +137,16 @@ const CurriculumPage: React.FC = () => {
   const [mixedBankSearch, setMixedBankSearch] = useState('')
   const [mixedBankResults, setMixedBankResults] = useState<any[]>([])
   const [mixedBankLoading, setMixedBankLoading] = useState(false)
+  // 主题选择
+  const [practiceThemes, setPracticeThemes] = useState<curriculumApi.AiPracticeTheme[]>([])
+  const [practiceTheme, setPracticeTheme] = useState('')
+  // 学科/年级
+  const [practiceSubjectOptions, setPracticeSubjectOptions] = useState<string[]>([])
+  const [practiceGradeOptions, setPracticeGradeOptions] = useState<string[]>([])
+  const [practiceSubject, setPracticeSubject] = useState('')
+  const [practiceGrade, setPracticeGrade] = useState('')
+  // 可编辑的知识点名称
+  const [practiceTopic, setPracticeTopic] = useState('')
 
   // ── 章节/知识点管理 ──
   const [chapterModal, setChapterModal] = useState(false)
@@ -247,32 +259,61 @@ const CurriculumPage: React.FC = () => {
   }
 
   // ── AI 练习生成 ──
-  const handleAiPractice = async (kpId: number) => {
-    setPracticeLoading(true)
+  // 打开弹窗时加载主题、学科、年级选项
+  useEffect(() => {
+    if (!practiceModal) return
+    setPracticeDone(null)
     setPracticeHtmlUrl('')
+    setPracticeTheme('')
+    setPracticeTopic(selectedKp?.name || '')
+    // 加载主题
+    curriculumApi.getAiPracticeThemes().then(themes => {
+      setPracticeThemes(themes)
+      if (themes.length > 0) setPracticeTheme(themes[0].id)
+    }).catch(() => {})
+    // 加载学科
+    apiClient.get('/api/config/subjects').then(({ data }) => {
+      if (data?.subjects?.length > 0) setPracticeSubjectOptions(data.subjects)
+    }).catch(() => {})
+    // 加载年级
+    apiClient.get('/api/scores/my-grades').then(({ data }) => {
+      if (Array.isArray(data) && data.length > 0) setPracticeGradeOptions(data)
+    }).catch(() => {})
+    if (activeCourse?.subject) setPracticeSubject(activeCourse.subject)
+  }, [practiceModal])
+
+  // 点击 AI 练习按钮：打开配置弹窗
+  const handleAiPractice = async (kpId: number) => {
+    setPracticeLoading(false)
+    setPracticeHtmlUrl('')
+    setPracticeDone(null)
     setPracticeModal(true)
-    setPracticeMode('ai')
+  }
+
+  // 执行 AI 练习生成
+  const handleAiPracticeGenerate = async () => {
+    if (!selectedKp) return
+    setPracticeLoading(true)
+    setPracticeDone(null)
+    setPracticeHtmlUrl('')
     try {
-      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`)
+      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${selectedKp.id}`, {
+        theme: practiceTheme || undefined,
+      })
       message.info('AI 正在生成练习题，请稍候...')
       const result = await pollAiTask(data.task_id, 180000)
       if (result && result.file_url) {
-        setPracticeHtmlUrl(result.file_url)
+        const fileUrl = result.file_url
+        setPracticeHtmlUrl(fileUrl)
+        setPracticeDone({ fileUrl, fileName: result.filename || '' })
         message.success(`已生成 ${result.total || 10} 道练习题`)
-        // 自动刷新资源列表，显示刚共享绑定的练习
-        curriculumApi.getKpResources(kpId).then((res) => {
-          setKpResources(res.resources)
-        }).catch(() => {})
       } else if (result && result.error) {
         message.error(result.error)
-        setPracticeModal(false)
       } else {
         message.error('AI 练习生成失败（超时或未知错误）')
-        setPracticeModal(false)
       }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'AI 练习生成失败')
-      setPracticeModal(false)
     } finally {
       setPracticeLoading(false)
     }
@@ -1799,70 +1840,101 @@ const CurriculumPage: React.FC = () => {
         ) : null}
       </Modal>
 
-      {/* ── AI 练习弹窗 ── */}
+      {/* ── AI 练习弹窗（参考资源中心 AI 生成样式） ── */}
       <Modal
-        title={<><FormOutlined style={{ color: '#1677ff' }} /> AI 练习 - {selectedKp?.name || '生成中...'}</>}
+        title={<><FormOutlined style={{ color: '#1677ff' }} /> 🤖 AI 生成练习 - {selectedKp?.name || ''}</>}
         open={practiceModal}
-        onCancel={() => { if (practiceLoading) return; setPracticeModal(false); setPracticeMode('ai'); setSelectedBankIds([]); setBankQuestions([]); setMixedAiQuestions([]); setMixedBankIds([]); }}
-        width={960}
-        footer={
-          practiceLoading ? null : practiceHtmlUrl ? (
-            <Space style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
-              <Button icon={<DownloadOutlined />}
-                onClick={() => { if (practiceHtmlUrl) window.open(practiceHtmlUrl, '_blank') }}>
-                  新标签页打开
-              </Button>
-              <Button onClick={() => { setPracticeModal(false); setPracticeHtmlUrl(''); setPracticeMode('ai'); }}>关闭</Button>
-            </Space>
-          ) : null
-        }
+        onCancel={() => { if (practiceLoading) return; setPracticeModal(false); setPracticeDone(null); setPracticeHtmlUrl(''); }}
+        width={620}
+        footer={null}
+        destroyOnClose
       >
         {practiceLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
             <div style={{ marginTop: 16, color: '#666' }}>
-              {practiceMode === 'ai' ? 'AI 正在生成练习题，请稍候...'
-               : practiceMode === 'bank' ? '正在生成练习...'
-               : '🧠 智能策略分析中（先搜题库 → AI 补全 → 自动组合）...'}
-              <br /><span style={{ fontSize: 13 }}>自动生成HTML答题页面</span>
+              AI 正在生成练习题，请稍候...（约 30-180 秒）
+              <br /><span style={{ fontSize: 13 }}>自动生成 HTML 答题页面</span>
             </div>
           </div>
-        ) : practiceHtmlUrl ? (
-          <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
-            <iframe src={practiceHtmlUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="练习预览" />
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <Space direction="vertical" size="large" style={{ width: '100%' }}>
-              <div>
-                <Button type="primary" size="large" icon={<RobotOutlined />}
-                  onClick={() => handleSmartPractice(selectedKp?.id || 0)}
-                  style={{ height: 48, padding: '0 32px', fontSize: 16 }}>
-                  🧠 智能生成练习
-                </Button>
-                <div style={{ marginTop: 8, color: '#999', fontSize: 13 }}>
-                  增强混合模式 · 先搜题库 → AI补全差额 → 自动去重组合
-                </div>
-              </div>
-              <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 20 }}>
-                <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>其他方式：</Typography.Text>
-                <Space>
-                  <Button icon={<RobotOutlined />}
-                    onClick={() => { setPracticeMode('ai'); handleAiPractice(selectedKp?.id || 0) }}>
-                    仅 AI 生成
-                  </Button>
-                  <Button icon={<QuestionCircleOutlined />}
-                    onClick={() => {
-                      setPracticeMode('bank'); setSelectedBankIds([]);
-                      setBankKeyword(selectedKp?.name || '');
-                      setTimeout(() => searchBankQuestions(), 100);
-                    }}>
-                    从题库选取
-                  </Button>
-                </Space>
-              </div>
+        ) : practiceDone ? (
+          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+            <Typography.Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 16 }}>
+              ✅ 练习已生成
+            </Typography.Text>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Button type="primary" size="large" icon={<EyeOutlined />}
+                href={practiceDone.fileUrl} target="_blank" rel="noopener noreferrer"
+                block>
+                打开预览
+              </Button>
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                提示：生成的文件保存在您的个人目录中，可前往「资源中心」共享并绑定到知识点
+              </Typography.Text>
+              <Button onClick={() => { setPracticeModal(false); setPracticeDone(null); setPracticeHtmlUrl(''); }} block>
+                完成
+              </Button>
             </Space>
           </div>
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            {/* 知识点 */}
+            <div>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>知识点 <span style={{ color: '#ff4d4f' }}>*</span></Typography.Text>
+              <Input value={practiceTopic} onChange={(e) => setPracticeTopic(e.target.value)} placeholder="请输入知识点名称" />
+            </div>
+
+            {/* 学科 & 年级 */}
+            <Space>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>学科</Typography.Text>
+                <Select
+                  value={practiceSubject || undefined}
+                  onChange={(v) => setPracticeSubject(v || '')}
+                  allowClear
+                  placeholder="选择学科（可选）"
+                  style={{ width: 180 }}
+                  options={practiceSubjectOptions.map(s => ({ value: s, label: s }))}
+                />
+              </div>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>年级</Typography.Text>
+                <Select
+                  value={practiceGrade || undefined}
+                  onChange={(v) => setPracticeGrade(v || '')}
+                  allowClear
+                  placeholder="选择年级（可选）"
+                  style={{ width: 140 }}
+                  options={practiceGradeOptions.map(g => ({ value: g, label: g }))}
+                />
+              </div>
+            </Space>
+
+            {/* 视觉主题选择 */}
+            {practiceThemes.length > 0 && (
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>视觉主题</Typography.Text>
+                <Select
+                  value={practiceTheme || undefined}
+                  onChange={(v) => setPracticeTheme(v || '')}
+                  style={{ width: '100%' }}
+                  placeholder="选择视觉主题"
+                  options={practiceThemes.map(t => ({
+                    value: t.id,
+                    label: `${t.icon} ${t.name} — ${t.desc}`,
+                  }))}
+                />
+              </div>
+            )}
+
+            {/* 生成按钮 */}
+            <Button type="primary" block size="large"
+              icon={<BulbOutlined />}
+              onClick={handleAiPracticeGenerate}
+            >
+              🚀 生成练习
+            </Button>
+          </Space>
         )}
       </Modal>
     </Layout>

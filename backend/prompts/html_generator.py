@@ -867,6 +867,11 @@ PRACTICE_THEMES = [
     {"id": "cyber-neon", "name": "赛博霓虹", "icon": "💠", "desc": "深色背景+青色发光+科技边框"},
     {"id": "purple-grad", "name": "紫色渐变", "icon": "🔮", "desc": "紫蓝渐变+白色圆角+柔和阴影"},
     {"id": "ai-smart", "name": "AI 智能", "icon": "🤖", "desc": "浅灰渐变+紫蓝header+公式支持"},
+    {"id": "green-forest", "name": "森林绿意", "icon": "🌲", "desc": "深绿渐变+暖白卡片+自然柔和阴影"},
+    {"id": "ocean-blue", "name": "海洋蓝调", "icon": "🌊", "desc": "蓝青渐变+波浪纹理+清爽透明卡片"},
+    {"id": "sunset-warm", "name": "日落暖阳", "icon": "🌅", "desc": "橙红渐变+暖白底色+圆润柔和卡片"},
+    {"id": "minimal-paper", "name": "极简白纸", "icon": "📄", "desc": "纯白底色+极细描边+无彩色强调"},
+    {"id": "galaxy-night", "name": "星河夜幕", "icon": "🌃", "desc": "深紫星空+发光星星粒子+半透明卡片"},
 ]
 
 

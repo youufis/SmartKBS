@@ -244,20 +244,21 @@ async def delete_resource(path: str = Query(...), request: Request = None):  # t
             # 同步清理共享记录和关联的课程绑定
             try:
                 from backend.database import execute_insert_update, execute_query_dict
-                # 匹配所有指向该文件的共享记录（统一用正斜杠匹配）
+                basename = os.path.basename(target_path)
+                # 尝试多种路径格式匹配，确保能找到共享记录
                 share_rows = execute_query_dict(
                     """SELECT id FROM shared_resources
                        WHERE owner_username=? AND resource_type='html'
-                       AND (file_path=? OR file_path LIKE ?)""",
-                    (username, db_path, f"%/{db_path}"),
+                       AND (file_path=? OR file_path=? OR file_path LIKE ? OR file_path LIKE ?)""",
+                    (username, db_path, basename, f"%/{db_path}", f"%/{basename}"),
                 )
-                # 额外尝试一次：如果 path 是绝对路径（来自卡片视图），也用相对路径再查一次
-                if not share_rows and os.path.isabs(path):
+                if not share_rows:
+                    # 再试一次：用文件名后缀匹配（兼容路径格式差异）
                     share_rows = execute_query_dict(
                         """SELECT id FROM shared_resources
                            WHERE owner_username=? AND resource_type='html'
-                           AND (file_path=? OR file_path LIKE ?)""",
-                        (username, os.path.basename(path), f"%/{os.path.basename(path)}"),
+                           AND file_path LIKE ?""",
+                        (username, f"%{basename}"),
                     )
                 for row in share_rows:
                     sid = row["id"]
@@ -273,6 +274,14 @@ async def delete_resource(path: str = Query(...), request: Request = None):  # t
                     )
                 if share_rows:
                     logger.info(f"已同步清理 {len(share_rows)} 条共享记录及关联绑定")
+
+                # ── 额外清理：如果文件名匹配 AI 练习模式 {kp_id}_*_练习.html，清理练习成绩 ──
+                practice_match = re.match(r'^(\d+)_.*_练习\.html$', basename)
+                if practice_match:
+                    kp_id = int(practice_match.group(1))
+                    from backend.question_db import execute_insert as q_exec_i
+                    q_exec_i("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
+                    logger.info(f"已清理知识点 {kp_id} 的 AI 练习成绩记录")
             except Exception as cleanup_err:
                 logger.warning(f"清理共享记录失败: {cleanup_err}")
 
