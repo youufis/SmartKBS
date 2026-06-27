@@ -165,7 +165,7 @@ const PortraitPage: React.FC = () => {
             year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
           })}
         </Title>
-        <Text type="secondary">每天一次，记录成长的每一个瞬间</Text>
+        <Text type="secondary">每周一次，记录成长的每一步</Text>
       </Card>
 
       {loading ? (
@@ -178,8 +178,8 @@ const PortraitPage: React.FC = () => {
           <Card style={{ borderRadius: 12, textAlign: 'center', padding: '40px 0' }}>
             <Title level={4} type="secondary"><WarningOutlined /> 今日画像已删除</Title>
             <Paragraph type="secondary">
-              你今天已经生成过画像并删除了。每日仅限生成一次，<br />
-              明天 {new Date(new Date().setDate(new Date().getDate() + 1)).toLocaleDateString('zh-CN')} 后可再次创作。
+              你本周已经生成过画像并删除了。每周仅限生成一次，<br />
+              下周一后可再次创作。
             </Paragraph>
           </Card>
         ) : (
@@ -355,7 +355,7 @@ const PortraitPage: React.FC = () => {
 
               <Divider />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                ⏰ 每天仅可生成一次，明天 {new Date(new Date().setDate(new Date().getDate() + 1)).toLocaleDateString('zh-CN')} 后可再次创作
+                ⏰ 每周仅可生成一次，下周一后可再次创作
               </Text>
             </>
         </Card>

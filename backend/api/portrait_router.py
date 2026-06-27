@@ -3,7 +3,7 @@
 每日生成一张 AI 画像 + 创意寄语，支持画廊、分享与点赞
 """
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +152,14 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
 
 # ── 获取 AI API Key ──
 
+def _get_week_range() -> tuple[str, str]:
+    """获取当前周的起止日期 (周一, 周日)"""
+    today = datetime.now()
+    monday = today - timedelta(days=today.weekday())
+    sunday = monday + timedelta(days=6)
+    return monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d")
+
+
 def _get_api_key() -> str:
     """获取可用的 API Key"""
     key = (os.environ.get("DASHSCOPE_API_KEY", "")
@@ -212,17 +220,17 @@ async def serve_portrait_image(portrait_id: int, request: Request):
 
 @router.get("/today")
 async def get_today_portrait(request: Request):
-    """获取今日画像（如果已生成）"""
+    """获取本周画像（如果已生成）"""
     user = get_current_user(request)
     username = user["username"]
-    today = datetime.now().strftime("%Y-%m-%d")
+    week_start, week_end = _get_week_range()
 
     rows = execute_query(
         """SELECT id, username, created_date, style, image_path, ai_comment,
                   prompt, generated_at, view_count, is_shared, share_scope, like_count
            FROM student_portraits
-           WHERE username=? AND created_date=?""",
-        (username, today),
+           WHERE username=? AND created_date BETWEEN ? AND ?""",
+        (username, week_start, week_end),
     )
     if not rows:
         return {"exists": False}
@@ -257,19 +265,19 @@ async def get_portrait_styles():
 
 @router.post("/generate")
 async def generate_portrait(request: Request, body: GenerateRequest):
-    """生成今日画像（每天一次）"""
+    """生成本周画像（每周一次）"""
     user = get_current_user(request)
     username = user["username"]
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    week_start, week_end = _get_week_range()
 
-    # 检查今日是否已生成
+    # 检查本周是否已生成
     existing = execute_query(
-        "SELECT id FROM student_portraits WHERE username=? AND created_date=?",
-        (username, today),
+        "SELECT id FROM student_portraits WHERE username=? AND created_date BETWEEN ? AND ?",
+        (username, week_start, week_end),
     )
     if existing:
-        raise HTTPException(status_code=400, detail="今日画像已生成，明天再来吧 ✨")
+        raise HTTPException(status_code=400, detail="本周画像已生成，下周再来吧 ✨")
 
     # 检查 API Key
     api_key = _get_api_key()
@@ -343,8 +351,8 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     rows = execute_query(
         """SELECT id, username, created_date, style, image_path, ai_comment,
                   prompt, generated_at, view_count, is_shared, share_scope, like_count
-           FROM student_portraits WHERE username=? AND created_date=?""",
-        (username, today),
+           FROM student_portraits WHERE username=? AND created_date BETWEEN ? AND ?""",
+        (username, week_start, week_end),
     )
     portrait = _format_portrait_row(rows[0]) if rows else {}
     portrait["liked"] = False
