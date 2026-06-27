@@ -107,6 +107,7 @@ from backend.api.companion_router import router as companion_router
 from backend.api.whiteboard_router import router as whiteboard_router
 from backend.api.portrait_router import router as portrait_router
 from backend.api.tracking_router import router as tracking_router
+from backend.api.upgrade_router import router as upgrade_router
 
 app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
 app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
@@ -141,6 +142,7 @@ app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
 app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
 app.include_router(portrait_router, prefix="/api/portrait", tags=["自我画像"])
 app.include_router(tracking_router, prefix="/api", tags=["资源追踪"])
+app.include_router(upgrade_router, prefix="/api/system/upgrade", tags=["系统升级"])
 # 配置同步服务接口（不出现在文档中）
 from backend.api.sync_service import router as sync_service_router
 app.include_router(sync_service_router, prefix="/api", tags=[])

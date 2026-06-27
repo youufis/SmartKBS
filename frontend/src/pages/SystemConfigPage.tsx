@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
@@ -6,10 +6,16 @@ import {
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
+  SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined,
 } from '@ant-design/icons'
-import { Modal } from 'antd'
+import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import {
+  checkVersion, startUpgrade, getUpgradeStatus,
+  rollback as apiRollback, getHistory,
+  type VersionInfo, type UpgradeProgress,
+} from '../api/upgrade'
 
 const { Title, Text } = Typography
 
@@ -343,6 +349,217 @@ const SystemConfigPage: React.FC = () => {
     )
   }
 
+  // ═══════════════════════════════════════════════
+  //  升级管理 Tab 组件
+  // ═══════════════════════════════════════════════
+
+  const UpgradePanel: React.FC = () => {
+    const [verInfo, setVerInfo] = useState<VersionInfo | null>(null)
+    const [verLoading, setVerLoading] = useState(false)
+    const [upgrading, setUpgrading] = useState(false)
+    const [upgradeProg, setUpgradeProg] = useState<UpgradeProgress | null>(null)
+    const [histList, setHistList] = useState<any[]>([])
+    const pollRef = useRef<number | undefined>(undefined)
+
+    const loadVersion = useCallback(async () => {
+      setVerLoading(true)
+      try {
+        const info = await checkVersion()
+        setVerInfo(info)
+      } catch (e: any) {
+        message.error('版本检测失败: ' + (e?.response?.data?.detail || e.message))
+      }
+      setVerLoading(false)
+    }, [])
+
+    const loadHistory = useCallback(async () => {
+      try {
+        const { history } = await getHistory()
+        setHistList(history || [])
+      } catch { /* ignore */ }
+    }, [])
+
+    const handleUpgrade = () => {
+      Modal.confirm({
+        title: '确认执行增量升级?',
+        icon: <WarningOutlined />,
+        content: (
+          <div>
+            <p>升级过程将自动完成以下步骤：</p>
+            <ol>
+              <li>自动备份当前源码和数据库</li>
+              <li>从 GitHub 增量拉取最新代码（仅传输差异）</li>
+              <li>执行数据库迁移</li>
+              <li>增量安装 Python 依赖</li>
+              <li>重启服务（短暂离线后自动恢复）</li>
+            </ol>
+            <p style={{ color: 'red' }}>⚠️ 升级期间系统可能短暂不可用（通常 1-3 分钟）</p>
+          </div>
+        ),
+        okText: '确认升级',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            const { task_id } = await startUpgrade()
+            setUpgrading(true)
+            pollRef.current = setInterval(async () => {
+              try {
+                const st = await getUpgradeStatus()
+                setUpgradeProg(st)
+                if (!st.running) {
+                  clearInterval(pollRef.current)
+                  setUpgrading(false)
+                  if (st.error) {
+                    message.error('升级失败: ' + st.error)
+                  } else if (st.step === 'done') {
+                    message.success('🎉 升级完成！请刷新页面')
+                  } else {
+                    // 服务重启后 _state 重置，显示升级完成
+                    message.success('🎉 服务已重启，升级完成！请刷新页面')
+                  }
+                  loadHistory()
+                }
+              } catch {
+                // 服务重启中，HTTP 请求会暂时失败，静默等待重试
+              }
+            }, 2000)
+          } catch (e: any) {
+            message.error('启动升级失败: ' + (e?.response?.data?.detail || e.message))
+          }
+        },
+      })
+    }
+
+    const handleRollback = () => {
+      Modal.confirm({
+        title: '确认回滚到升级前状态?',
+        icon: <ExclamationCircleOutlined />,
+        content: '将使用最近的备份恢复代码和数据，并重启服务。此操作可撤销一次不成功的升级。',
+        okText: '确认回滚',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            await apiRollback()
+            message.success('回滚完成，请刷新页面')
+            loadHistory()
+          } catch (e: any) {
+            message.error('回滚失败: ' + (e?.response?.data?.detail || e.message))
+          }
+        },
+      })
+    }
+
+    useEffect(() => {
+      loadVersion()
+      loadHistory()
+      return () => { if (pollRef.current) clearInterval(pollRef.current) }
+    }, [loadVersion, loadHistory])
+
+    return (
+      <Spin spinning={verLoading}>
+        {/* 版本信息 */}
+        {verInfo && (
+          <Card style={{ marginBottom: 16 }}>
+            <Descriptions column={1} bordered size="small">
+              <Descriptions.Item label="当前版本">
+                <Tag color="blue">{verInfo.current_version}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="最新版本">
+                <Tag color={verInfo.has_update ? 'green' : 'default'}>{verInfo.latest_version}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {verInfo.has_update
+                  ? <Tag color="green">📥 有新版本可用（落后 {verInfo.behind_commits} 个提交）</Tag>
+                  : <Tag>✅ 已是最新版本</Tag>}
+              </Descriptions.Item>
+              {verInfo.release_date && (
+                <Descriptions.Item label="发布日期">{verInfo.release_date}</Descriptions.Item>
+              )}
+            </Descriptions>
+
+            {/* 更新日志 */}
+            {verInfo.changelog && verInfo.changelog.length > 0 && (
+              <>
+                <Divider />
+                <Title level={5}>📋 更新日志</Title>
+                <Timeline items={verInfo.changelog.map((c: string) => ({ children: c }))} />
+              </>
+            )}
+
+            {/* 不兼容变更警告 */}
+            {verInfo.breaking_changes && verInfo.breaking_changes.length > 0 && (
+              <Alert
+                type="warning"
+                message="⚠️ 不兼容变更"
+                description={verInfo.breaking_changes.join('；')}
+                showIcon
+                style={{ marginTop: 16 }}
+              />
+            )}
+
+            <Divider />
+            <Space>
+              <Button icon={<SearchOutlined />} onClick={loadVersion}>
+                检测更新
+              </Button>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                disabled={!verInfo?.has_update || upgrading}
+                loading={upgrading}
+                onClick={handleUpgrade}
+              >
+                {upgrading ? '升级中...' : '📥 增量升级'}
+              </Button>
+              <Button icon={<RollbackOutlined />} onClick={handleRollback}>
+                回滚
+              </Button>
+            </Space>
+          </Card>
+        )}
+
+        {/* 升级进度 */}
+        {upgradeProg && upgradeProg.running && (
+          <Card title="🔄 升级进度" style={{ marginBottom: 16 }}>
+            <Progress percent={Math.max(0, upgradeProg.progress)} />
+            <p style={{ marginTop: 8 }}>{upgradeProg.message}</p>
+            {upgradeProg.error && (
+              <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
+            )}
+          </Card>
+        )}
+
+        {/* 升级历史 */}
+        <Card title="📜 升级历史">
+          <Table
+            dataSource={histList}
+            columns={[
+              { title: '时间', dataIndex: 'timestamp', key: 'ts', width: 180 },
+              {
+                title: '版本变化', key: 'ver',
+                render: (_: any, r: any) => `${r.from_version || '-'} → ${r.to_version || '-'}`,
+              },
+              { title: '执行人', dataIndex: 'admin', key: 'admin', width: 120 },
+              {
+                title: '状态', dataIndex: 'status', key: 'status', width: 120,
+                render: (s: string) => {
+                  const color = s === 'success' || s === 'rolled_back' ? 'green' : 'red'
+                  return <Tag color={color}>{s}</Tag>
+                },
+              },
+              { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
+            ]}
+            pagination={false}
+            size="small"
+            rowKey="task_id"
+            locale={{ emptyText: '暂无升级记录' }}
+          />
+        </Card>
+      </Spin>
+    )
+  }
+
   return (
     <div>
       <Card>
@@ -455,6 +672,14 @@ const SystemConfigPage: React.FC = () => {
                 </div>
               </Form>
             </Spin>
+          </Tabs.TabPane>
+
+          {/* ── 版本管理 Tab ── */}
+          <Tabs.TabPane
+            tab={<span><SyncOutlined /> 版本管理</span>}
+            key="upgrade"
+          >
+            <UpgradePanel />
           </Tabs.TabPane>
 
         </Tabs>

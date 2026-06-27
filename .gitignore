@@ -40,6 +40,10 @@ coverage.xml
 *.cov
 *.lcov
 
+# ── 在线升级备份 ──
+.upgrade_backups/
+.upgrade_state.json
+
 # ── 运行时数据 ──
 **/ChatHistory/
 **/Summary/
