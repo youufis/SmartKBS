@@ -386,6 +386,11 @@ export interface CurriculumResource {
   resource_url: string;
   sort_order: number;
   created_at: string;
+  view_stats?: {
+    total_views: number;
+    unique_viewers: number;
+  };
+  viewed?: boolean;
 }
 
 // ── 协作白板类型 ──

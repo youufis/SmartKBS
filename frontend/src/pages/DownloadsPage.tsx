@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List, Input } from 'antd'
+import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List, Input, Pagination } from 'antd'
 import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined, SearchOutlined } from '@ant-design/icons'
 import * as sharingApi from '../api/sharing'
 import ShareDialog from '../components/ShareDialog'
@@ -26,15 +26,23 @@ const DownloadsPage: React.FC = () => {
   const dirInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // ── 搜索 ──
-  const [searchText, setSearchText] = useState('')
-
   // ── 共享 ──
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [shareFile, setShareFile] = useState<{ path: string; name: string }>({ path: '', name: '' })
   const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
   const [shareInherited, setShareInherited] = useState(false)
   const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
+  const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
+  const [sharedPage, setSharedPage] = useState(1)
+  const SHARED_PAGE_SIZE = 20
+
+  // ── 搜索 ──
+  const [searchText, setSearchText] = useState('')
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchText(e.target.value)
+    setSharedPage(1)
+  }
 
   // ── 浏览共享目录 ──
   const [browseDirOpen, setBrowseDirOpen] = useState(false)
@@ -62,7 +70,6 @@ const DownloadsPage: React.FC = () => {
       setBrowseDirLoading(false)
     }
   }
-  const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
   const loadShares = async () => {
     try {
       const res = await sharingApi.getMyShares()
@@ -330,7 +337,7 @@ const DownloadsPage: React.FC = () => {
               placeholder="搜索文件名..."
               prefix={<SearchOutlined />}
               value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
+              onChange={handleSearchChange}
               allowClear
               style={{ width: 220 }}
             />
@@ -409,10 +416,20 @@ const DownloadsPage: React.FC = () => {
             return !hasExt
           })
           const fileShares = downloadShares.filter(s => !dirShares.includes(s))
+          // 合并分页（目录优先，文件其次），按页码偏移
+          const totalShares = dirShares.length + fileShares.length
+          const skipCount = (sharedPage - 1) * SHARED_PAGE_SIZE
+          const allShares: { type: string; item: sharingApi.ShareItem }[] = [
+            ...dirShares.map(s => ({ type: 'dir', item: s })),
+            ...fileShares.map(s => ({ type: 'file', item: s })),
+          ]
+          const pagedAll = allShares.slice(skipCount, skipCount + SHARED_PAGE_SIZE)
+          const pagedDir = pagedAll.filter(x => x.type === 'dir').map(x => x.item)
+          const pagedFile = pagedAll.filter(x => x.type === 'file').map(x => x.item)
           return downloadShares.length > 0 ? (
             <Card size="small" title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> 共享文件 ({downloadShares.length})</>}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                {dirShares.map((s) => (
+                {pagedDir.map((s) => (
                   <Card key={s.id} size="small" hoverable
                     onClick={() => openBrowseDir(s.owner_username, s.file_path, s.file_name)}
                     style={{ cursor: 'pointer' }}>
@@ -428,7 +445,7 @@ const DownloadsPage: React.FC = () => {
                     />
                   </Card>
                 ))}
-                {fileShares.map((s) => {
+                {pagedFile.map((s) => {
                   const fullPath = s.url_path || s.file_path
                   const fileUrl = `/api/files/${fullPath}`
                   return (
@@ -447,6 +464,19 @@ const DownloadsPage: React.FC = () => {
                   )
                 })}
               </div>
+              {totalShares > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                  <Pagination
+                    current={sharedPage}
+                    total={totalShares}
+                    pageSize={SHARED_PAGE_SIZE}
+                    showSizeChanger
+                    showTotal={(t) => `共 ${t} 个文件`}
+                    pageSizeOptions={['10', '20', '50']}
+                    onChange={(p) => setSharedPage(p)}
+                  />
+                </div>
+              )}
             </Card>
           ) : null;
         })()}

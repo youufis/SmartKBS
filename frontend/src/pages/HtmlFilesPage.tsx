@@ -22,11 +22,26 @@ const HtmlFilesPage: React.FC = () => {
 
   // ── 分页状态 ──
   const PAGE_SIZE = 24
-  const [minePage, setMinePage] = useState(1)
+  const [groupPages, setGroupPages] = useState<Record<string, number>>({})
   const [sharedPage, setSharedPage] = useState(1)
+
+  const getGroupPage = (groupId: number | null) => {
+    const key = groupId === null ? '__ungrouped__' : `g${groupId}`
+    return groupPages[key] || 1
+  }
+
+  const setGroupPage = (groupId: number | null, page: number) => {
+    const key = groupId === null ? '__ungrouped__' : `g${groupId}`
+    setGroupPages(prev => ({ ...prev, [key]: page }))
+  }
 
   // ── 搜索 ──
   const [searchText, setSearchText] = useState('')
+
+  // 搜索时重置分页
+  useEffect(() => {
+    setSharedPage(1)
+  }, [searchText])
 
   // ── 分组状态 ──
   const [groups, setGroups] = useState<resourcesApi.ResourceGroup[]>([])
@@ -245,26 +260,42 @@ const HtmlFilesPage: React.FC = () => {
     }
   }
 
-  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false, showGroupActions = false) => (
+  const isStudent = user?.role === 'student'
+
+  const handleOpenResource = (urlPath: string, name: string, owner?: string, resourceId?: number) => {
+    // 学生查看时记录追踪事件
+    if (isStudent) {
+      import('../api/tracking').then(mod => {
+        mod.logResourceView({
+          resource_type: name.endsWith('.html') || name.endsWith('.htm') ? 'html' : 'download',
+          resource_id: resourceId || 0,
+          source: 'sharing',
+          file_path: urlPath,
+          owner_username: owner || '',
+        });
+      });
+    }
+    window.open(`/api/files/${urlPath}`, '_blank');
+  }
+
+  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false, showGroupActions = false, resourceId?: number) => (
     <Card
       key={urlPath}
       size="small"
       hoverable
       draggable
       onDragStart={(e) => handleDragStart(e, urlPath)}
-      style={{ fontSize: 14, cursor: 'grab' }}
+      style={{ fontSize: 14, cursor: isShared ? 'pointer' : 'grab' }}
       className="resource-file-card"
+      onClick={() => isShared && handleOpenResource(urlPath, name, owner, resourceId)}
     >
       <Card.Meta
         avatar={<FileOutlined style={{ fontSize: 16, color: isShared ? '#ff4d4f' : undefined }} />}
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
-            <a href={`/api/files/${urlPath}`}
-              target="_blank" rel="noreferrer"
-              title={name}
-              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, fontSize: 14 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, fontSize: 14, color: isShared ? '#1677ff' : undefined }}>
               {name}
-            </a>
+            </span>
             {showShareBtn && (
               <Tooltip title={isFileShared(urlPath) ? '已共享 - 点击取消共享' : '点击共享'}>
                 <ShareAltOutlined
@@ -296,6 +327,7 @@ const HtmlFilesPage: React.FC = () => {
   const sharedItems = receivedShares
     .filter(s => !kw || (s.file_name || '').toLowerCase().includes(kw))
     .map(s => ({
+      id: s.id,
       name: s.file_name,
       urlPath: s.url_path || s.file_path,
       owner: s.owner_username,
@@ -322,7 +354,7 @@ const HtmlFilesPage: React.FC = () => {
         </div>
 
         {isAdminOrTeacher ? (
-          <Tabs defaultActiveKey="mine" onChange={() => { setMinePage(1); setSharedPage(1); setActiveGroup(null); }} items={[
+          <Tabs defaultActiveKey="mine" onChange={() => { setGroupPages({}); setSharedPage(1); setActiveGroup(null); }} items={[
             {
               key: 'mine',
               label: <span><FileOutlined /> 我的资源</span>,
@@ -432,27 +464,34 @@ const HtmlFilesPage: React.FC = () => {
                   {/* 右侧资源卡片 */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
-                      {filteredFiles.slice((minePage - 1) * PAGE_SIZE, minePage * PAGE_SIZE).map((f) =>
-                        renderFileCard(f.display_name, f.url_path || f.name, false, undefined, true, true)
-                      )}
+                      {(() => {
+                        const currentPage = getGroupPage(activeGroup)
+                        return filteredFiles.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((f) =>
+                          renderFileCard(f.display_name, f.url_path || f.name, false, undefined, true, true)
+                        )
+                      })()}
                       {filteredFiles.length === 0 && (
                         <Typography.Text type="secondary">
                           {activeGroup !== null ? '该分组暂无资源，拖动资源到左侧分组名称上即可归类' : '暂无资源文件'}
                         </Typography.Text>
                       )}
                     </div>
-                    {filteredFiles.length > PAGE_SIZE && (
-                      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
-                        <Pagination
-                          current={minePage}
-                          total={filteredFiles.length}
-                          pageSize={PAGE_SIZE}
-                          onChange={(p) => setMinePage(p)}
-                          showSizeChanger={false}
-                          showTotal={(t) => `共 ${t} 个资源`}
-                        />
-                      </div>
-                    )}
+                    {(() => {
+                      const currentPage = getGroupPage(activeGroup)
+                      return (
+                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                          <Pagination
+                            current={currentPage}
+                            total={filteredFiles.length}
+                            pageSize={PAGE_SIZE}
+                            onChange={(p) => setGroupPage(activeGroup, p)}
+                            showSizeChanger
+                            showTotal={(t) => `共 ${t} 个资源`}
+                            pageSizeOptions={['10', '20', '50']}
+                          />
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               ),
@@ -463,7 +502,7 @@ const HtmlFilesPage: React.FC = () => {
               children: (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                    {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner))}
+                      {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id))}
                     {sharedItems.length === 0 && <Typography.Text type="secondary">暂无共享资源</Typography.Text>}
                   </div>
                   {sharedItems.length > PAGE_SIZE && (
@@ -483,10 +522,25 @@ const HtmlFilesPage: React.FC = () => {
             },
           ]} />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-            {sharedItems.map((item) => renderFileCard(item.name, item.urlPath, true, item.owner))}
-            {sharedItems.length === 0 && <Typography.Text type="secondary">暂无共享资源</Typography.Text>}
-          </div>
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+              {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id))}
+              {sharedItems.length === 0 && <Typography.Text type="secondary">暂无共享资源</Typography.Text>}
+            </div>
+            {sharedItems.length > PAGE_SIZE && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                <Pagination
+                  current={sharedPage}
+                  total={sharedItems.length}
+                  pageSize={PAGE_SIZE}
+                  showSizeChanger
+                  showTotal={(t) => `共 ${t} 个资源`}
+                  pageSizeOptions={['10', '20', '50']}
+                  onChange={(p) => setSharedPage(p)}
+                />
+              </div>
+            )}
+          </>
         )}
 
         {/* 共享弹窗 */}

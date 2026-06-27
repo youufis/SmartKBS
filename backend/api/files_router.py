@@ -16,6 +16,7 @@ from backend.config import BASE_DIR
 from backend.api.config_router import get_config_value
 from backend.config import ROOT_DIR, STU_DIR
 from backend.api.sharing_router import is_file_shared_with_user
+from backend.database import execute_insert_update
 from backend.logger import logger
 
 router = APIRouter()
@@ -220,4 +221,79 @@ async def serve_static_file(path: str, request: Request):
     if not allowed:
         raise HTTPException(status_code=403, detail="无权访问该资源")
     
+    # ── 学生访问 HTML/下载文件时记录查看日志 ──
+    if role == 2 and (path_parts[-1].endswith('.html') or path_parts[-1].endswith('.htm') or "downloads" in path_parts):
+        try:
+            _log_resource_access(rel_path, username, role, path_parts, request)
+        except Exception:
+            pass  # 日志记录失败不影响文件访问
+    
     return FileResponse(requested_path)
+
+
+def _log_resource_access(rel_path: str, username: str, role: int, path_parts: list[str], request: Request):
+    """记录学生访问 HTML 资源的日志（后端兜底记录）"""
+    from datetime import datetime
+
+    # 只记录学生
+    if role != 2:
+        return
+
+    # 推断资源类型
+    if "html" in path_parts:
+        dir_type = "html"
+    elif "downloads" in path_parts:
+        dir_type = "download"
+    else:
+        return
+
+    # 尝试从共享记录中查找 resource_id
+    resource_id = 0
+    owner_username = ""
+    try:
+        # 解析所有者
+        if len(path_parts) >= 3:
+            if path_parts[0] == "stu":
+                owner_username = path_parts[1]
+            else:
+                owner_username = path_parts[0]
+
+        # 通过文件路径查询共享记录中的资源 ID
+        file_rel = "/".join(path_parts[path_parts.index(dir_type) + 1:])
+        from backend.database import execute_query_one
+        share = execute_query_one(
+            "SELECT id, owner_username FROM shared_resources WHERE resource_type=? AND (file_path=? OR file_path LIKE ?) LIMIT 1",
+            (dir_type, file_rel, f"%/{file_rel}"),
+        )
+        if share:
+            resource_id = share["id"]
+            owner_username = share["owner_username"]
+    except Exception:
+        pass
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    client_ip = request.client.host if request.client else ""
+
+    try:
+        execute_insert_update(
+            """INSERT INTO resource_view_logs
+               (student_username, resource_type, resource_id, knowledge_point_id,
+                binding_id, source, file_path, owner_username, viewed_at, ip_address)
+               VALUES (?, ?, ?, NULL, NULL, 'direct', ?, ?, ?, ?)""",
+            (username, dir_type, resource_id, rel_path, owner_username, now, client_ip),
+        )
+
+        # 首次浏览共享资源奖励 1 分（幂等，不重复累计）
+        if resource_id > 0:
+            try:
+                from backend.reward_engine import award_participation
+                award_participation(
+                    student_username=username,
+                    activity_type="resource_view",
+                    activity_id=str(resource_id),
+                    activity_title=rel_path.split("/")[-1] or "共享资源",
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass

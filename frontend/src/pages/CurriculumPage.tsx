@@ -1517,18 +1517,35 @@ const CurriculumPage: React.FC = () => {
                         <Space direction="vertical" style={{ width: '100%' }}>
                           {kpResources.map((r) => {
                             const isFileType = r.resource_type === 'html' || r.resource_type === 'download'
-                            const cardProps = r.resource_url
-                              ? isFileType
-                                ? { onClick: () => window.open(r.resource_url, '_blank') }
-                                : { onClick: () => window.location.href = r.resource_url }
-                              : {}
+                            const handleClick = () => {
+                              // 如果是学生点击文件资源，记录查看事件
+                              if (isStudent && isFileType && r.resource_url) {
+                                import('../api/tracking').then(mod => {
+                                  mod.logResourceView({
+                                    resource_type: r.resource_type,
+                                    resource_id: r.resource_id,
+                                    knowledge_point_id: selectedKp?.id,
+                                    binding_id: r.binding_id,
+                                    source: 'curriculum',
+                                    file_path: r.resource_url.replace('/api/files/', ''),
+                                  });
+                                });
+                              }
+                              if (r.resource_url) {
+                                if (isFileType) {
+                                  window.open(r.resource_url, '_blank');
+                                } else {
+                                  window.location.href = r.resource_url;
+                                }
+                              }
+                            };
                             return (
                               <Card
                                 key={r.binding_id}
                                 size="small"
                                 hoverable
                                 style={{ cursor: r.resource_url ? 'pointer' : 'default' }}
-                                {...cardProps}
+                                onClick={handleClick}
                               >
                                 <Space>
                                   {RESOURCE_ICONS[r.resource_type] || <FileOutlined />}
@@ -1536,6 +1553,18 @@ const CurriculumPage: React.FC = () => {
                                     {r.resource_name || `[${r.resource_type}:${r.resource_id}]`}
                                   </Typography.Text>
                                   <Tag>{RESOURCE_LABELS[r.resource_type] || r.resource_type}</Tag>
+                                  {/* 教师端显示浏览统计 */}
+                                  {isTeacherOrAdmin && r.view_stats && (
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                      👁️ {r.view_stats.unique_viewers}人/{r.view_stats.total_views}次
+                                    </Typography.Text>
+                                  )}
+                                  {/* 学生端显示是否已查看 */}
+                                  {isStudent && r.viewed !== undefined && (
+                                    <Tag color={r.viewed ? 'success' : 'default'} style={{ fontSize: 11 }}>
+                                      {r.viewed ? '✅ 已查看' : '👁️ 未查看'}
+                                    </Tag>
+                                  )}
                                 </Space>
                               </Card>
                             )

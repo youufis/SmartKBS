@@ -12,6 +12,7 @@ _ACTIVITY_NAMES = {
     "rollcall": "点名签到", "chat": "AI对话", "task": "任务",
     "learning": "学习进度", "login": "每日登录", "code": "代码练习",
     "quest": "知识闯关", "quick_quiz": "知识抢答", "course_practice": "课程练习",
+    "resource_view": "资源浏览",
 }
 
 
@@ -334,7 +335,14 @@ def build_portrait_comment_prompt(
                 sparkles.append(f"面对{s['wrong_count']}道错题毫不退缩，正在逐个击破")
             elif s.get("wrong_count", 0) > 0:
                 sparkles.append(f"认真对待每一道错题，从中汲取养分")
-            # 闪光点6：最热爱的活动
+            # 闪光点6：资源探索
+            if s.get("week_resource_views", 0) >= 10:
+                sparkles.append(f"本周探索了{s['week_resource_views']}个学习资源，知识面不断拓展")
+            elif s.get("total_resource_views", 0) >= 10:
+                sparkles.append(f"已浏览{s['total_resource_views']}个学习资源，主动获取知识")
+            elif s.get("total_resource_views", 0) > 0:
+                sparkles.append(f"积极浏览学习资源，开阔视野")
+            # 闪光点7：最热爱的活动
             act_detail = s.get("activity_detail", {})
             if act_detail:
                 top_act = sorted(act_detail.items(), key=lambda x: -x[1])[0]

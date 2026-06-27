@@ -248,8 +248,11 @@ def _inject_progress(kps: list[dict[str, Any]], username: str):
             kp["progress_score"] = 0
 
 
-def _get_resource_info(resource_type: str, resource_id: int) -> dict[str, Any]:
-    """根据资源类型和 ID 获取资源名称和访问路径"""
+def _get_resource_info(resource_type: str, resource_id: int, include_stats: bool = False, student_username: str | None = None) -> dict[str, Any]:
+    """根据资源类型和 ID 获取资源名称和访问路径
+    如果 include_stats=True，还会查询 HTML/下载资源的浏览统计
+    如果 student_username 指定，还会查询该学生是否已查看
+    """
     result = {"name": "", "url": ""}
     try:
         if resource_type in ("html", "download"):
@@ -260,6 +263,33 @@ def _get_resource_info(resource_type: str, resource_id: int) -> dict[str, Any]:
             if rows:
                 result["name"] = rows[0]["file_name"]
                 result["url"] = "/api/files/" + rows[0]["file_path"].lstrip("/")
+                # 查询该学生是否已查看
+                if student_username:
+                    try:
+                        viewed_row = execute_query(
+                            "SELECT COUNT(*) as cnt FROM resource_view_logs WHERE student_username=? AND resource_type=? AND resource_id=?",
+                            (student_username, resource_type, resource_id),
+                        )
+                        result["viewed"] = viewed_row[0]["cnt"] > 0 if viewed_row else False
+                    except Exception:
+                        result["viewed"] = False
+                # 教师/管理员查看时注入浏览统计
+                if include_stats:
+                    try:
+                        stats = execute_query(
+                            """SELECT COUNT(*) as total_views,
+                                      COUNT(DISTINCT student_username) as unique_viewers
+                               FROM resource_view_logs
+                               WHERE resource_type=? AND resource_id=?""",
+                            (resource_type, resource_id),
+                        )
+                        if stats:
+                            result["view_stats"] = {
+                                "total_views": stats[0]["total_views"],
+                                "unique_viewers": stats[0]["unique_viewers"],
+                            }
+                    except Exception:
+                        result["view_stats"] = {"total_views": 0, "unique_viewers": 0}
         elif resource_type == "question":
             rows = q_execute_query(
                 "SELECT question_text FROM question_bank WHERE id=? AND status='active'",
@@ -1093,9 +1123,11 @@ async def get_knowledge_point(kp_id: int, request: Request):
            WHERE cb.knowledge_point_id=? ORDER BY cb.sort_order, cb.id""",
         (kp_id,),
     )
+    is_teacher_or_admin = user.get("role") in (0, 1)
+    student_username = user.get("username") if user.get("role") == 2 else None
     resources = []
     for b in bindings:
-        info = _get_resource_info(b["resource_type"], b["resource_id"])
+        info = _get_resource_info(b["resource_type"], b["resource_id"], include_stats=is_teacher_or_admin, student_username=student_username)
         resources.append({
             "binding_id": b["id"],
             "resource_type": b["resource_type"],
@@ -1104,6 +1136,8 @@ async def get_knowledge_point(kp_id: int, request: Request):
             "resource_url": info["url"],
             "sort_order": b["sort_order"],
             "created_at": b["created_at"],
+            "view_stats": info.get("view_stats"),
+            "viewed": info.get("viewed"),
         })
     kp_dict["resources"] = resources
 
@@ -1225,6 +1259,8 @@ async def get_kp_resources(kp_id: int, request: Request):
            WHERE cb.knowledge_point_id=? ORDER BY cb.sort_order, cb.id""",
         (kp_id,),
     )
+    is_teacher_or_admin = not is_student
+    student_username = user.get("username") if is_student else None
     resources = []
     for b in bindings:
         # 学生访问 html/download 资源时，检查共享范围
@@ -1255,7 +1291,7 @@ async def get_kp_resources(kp_id: int, request: Request):
             if not can_access:
                 continue
 
-        info = _get_resource_info(b["resource_type"], b["resource_id"])
+        info = _get_resource_info(b["resource_type"], b["resource_id"], include_stats=is_teacher_or_admin, student_username=student_username)
         resources.append({
             "binding_id": b["id"],
             "knowledge_point_id": b["knowledge_point_id"],
@@ -1265,6 +1301,8 @@ async def get_kp_resources(kp_id: int, request: Request):
             "resource_url": info["url"],
             "sort_order": b["sort_order"],
             "created_at": b["created_at"],
+            "view_stats": info.get("view_stats"),
+            "viewed": info.get("viewed"),
         })
     return {"resources": resources, "total": len(resources)}
 

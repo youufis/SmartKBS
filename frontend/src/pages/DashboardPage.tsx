@@ -10,13 +10,14 @@ import {
   ClockCircleOutlined, ThunderboltOutlined,
   AuditOutlined, BarChartOutlined, ReloadOutlined,
   RightOutlined, ExperimentOutlined, BellOutlined,
-  FireOutlined, CustomerServiceOutlined,
+  FireOutlined, CustomerServiceOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useCompanionStore } from '../stores/companionStore'
 import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
+import { getTaskTodo } from '../api/taskTodo'
 
 const { Text, Paragraph } = Typography
 
@@ -130,7 +131,7 @@ interface DashboardSummary {
 
 interface Activity {
   time: string
-  type: 'exam' | 'score' | 'task' | 'rollcall' | 'quiz' | 'poll'
+  type: string
   title: string
   detail: string
 }
@@ -146,6 +147,7 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   quest: { color: '#ff4d4f', icon: <FireOutlined /> },
   quick_quiz: { color: '#722ed1', icon: <CustomerServiceOutlined /> },
   practice: { color: '#52c41a', icon: <ExperimentOutlined /> },
+  resource_view: { color: '#1677ff', icon: <EyeOutlined /> },
 }
 
 const DashboardPage: React.FC = () => {
@@ -156,6 +158,7 @@ const DashboardPage: React.FC = () => {
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
   const [loading, setLoading] = useState(true)
   const [activityLoading, setActivityLoading] = useState(true)
+  const [todoTotal, setTodoTotal] = useState(0)
 
   const isStudent = user?.role === 'student'
   const isTeacher = user?.role === 'teacher'
@@ -183,6 +186,13 @@ const DashboardPage: React.FC = () => {
         if (cancelled) return
         setSummary(sumRes.data)
         setActivities(Array.isArray(actRes.data) ? actRes.data : [])
+        // 学生端获取任务清单总数作为徽标
+        if (user?.role === 'student') {
+          getTaskTodo().then(todo => {
+            const total = Object.values(todo.counts).reduce((a, b) => a + b, 0)
+            setTodoTotal(total)
+          }).catch(() => {})
+        }
       } catch { /* ignore */ }
       if (!cancelled) {
         setLoading(false)
@@ -271,7 +281,7 @@ const DashboardPage: React.FC = () => {
               >
                 任务清单
                 <Tag style={{ marginLeft: 4, fontSize: 10, borderRadius: 8, background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', lineHeight: '16px' }}>
-                  {(summary.pending_exam_count ?? 0) + (summary.active_task_count ?? 0) + (summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
+                  {todoTotal || (summary.pending_exam_count ?? 0) + (summary.active_task_count ?? 0) + (summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0) + (summary.shared_files_count ?? 0)}
                 </Tag>
               </Button>
               <Text style={{ color: 'rgba(255,255,255,0.3)', margin: '0 8px' }}>|</Text>
@@ -310,7 +320,7 @@ const DashboardPage: React.FC = () => {
                   title="学习考试"
                   value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
                   prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成/待考 · 错题{summary.wrong_exam_count ?? 0}场{(summary.course_practice_count ?? 0) > 0 && <> · 课程练习{summary.course_practice_count}项 · {summary.course_practice_avg_accuracy ?? 0}%</>}</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成 · 待考{summary.pending_exam_count ?? 0}场 · 错题{summary.wrong_exam_count ?? 0}场</Text>}
                   valueStyle={{ color: '#1677ff', fontSize: 22 }}
                 />
               </Card>
@@ -321,7 +331,7 @@ const DashboardPage: React.FC = () => {
                   title="积分任务"
                   value={summary.total_score ?? 0}
                   prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名{summary.rank ?? '-'} · 活跃任务{summary.active_task_count ?? 0}个</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名{summary.rank ?? '-'} · 任务{summary.active_task_count ?? 0}个</Text>}
                   valueStyle={{ color: '#faad14', fontSize: 22 }}
                 />
               </Card>
@@ -332,7 +342,7 @@ const DashboardPage: React.FC = () => {
                   title="课堂互动"
                   value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
                   prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0} · 练习{summary.pending_practice_count ?? 0} · 提问{summary.my_questions_count ?? 0} · 回答{summary.my_answers_count ?? 0}</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0}次 · 练习{summary.pending_practice_count ?? 0}项</Text>}
                   valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
                 />
               </Card>
@@ -343,7 +353,7 @@ const DashboardPage: React.FC = () => {
                   title="趣味挑战"
                   value={summary.quest_completed_count ?? 0}
                   prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关{summary.quest_completed_count ?? 0}关 · {summary.quest_score ?? 0}分 · 抢答参与{summary.quick_quiz_participated ?? 0}次</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关{summary.quest_completed_count ?? 0}关 · 抢答{summary.quick_quiz_participated ?? 0}次</Text>}
                   valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
                 />
               </Card>

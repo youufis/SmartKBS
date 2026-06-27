@@ -370,10 +370,17 @@ async def dashboard_summary(request: Request):
             "course_practice_avg_accuracy": course_practice_avg_accuracy,
             # 共享资源
             "shared_files_count": _db_count(
-                """SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'
-                   OR (share_scope='class' AND (target_grade=? OR INSTR(target_grade, ?)>0) AND (target_class=? OR INSTR(target_class, ?)>0))
-                   OR (share_scope='teacher' AND INSTR(target_users, ?)>0)""",
-                (grade, grade, cls, cls, username) if grade else ("", "", "", "", username),
+                """SELECT COUNT(*) FROM shared_resources sr
+                   WHERE (sr.share_scope='all'
+                        OR (sr.share_scope='class' AND (sr.target_grade=? OR INSTR(sr.target_grade, ?)>0) AND (sr.target_class='' OR sr.target_class IS NULL OR sr.target_class=? OR INSTR(sr.target_class, ?)>0))
+                        OR (sr.share_scope='teacher' AND INSTR(sr.target_users, ?)>0))
+                     AND NOT EXISTS (
+                       SELECT 1 FROM resource_view_logs rvl
+                       WHERE rvl.student_username=?
+                         AND rvl.resource_type=sr.resource_type
+                         AND rvl.resource_id=sr.id
+                     )""",
+                (grade, grade, cls, cls, username, username) if grade else ("", "", "", "", "", username),
             ) if grade else _db_count("SELECT COUNT(*) FROM shared_resources WHERE share_scope='all'"),
         })
         # 称号系统（使用 reward_engine 的活动积分）
@@ -890,6 +897,28 @@ async def recent_activity(request: Request):
                     "detail": f"得分 {act['score']}/{act['total_score']} · 正确率 {act['accuracy']}%",
                 })
 
+        # 最近的资源浏览记录
+        try:
+            rv_acts = execute_query(
+                """SELECT rvl.viewed_at, rvl.resource_type,
+                          COALESCE(sr.file_name, rvl.file_path) as resource_name
+                   FROM resource_view_logs rvl
+                   LEFT JOIN shared_resources sr ON rvl.resource_id=sr.id AND rvl.resource_type=sr.resource_type
+                   WHERE rvl.student_username=?
+                   ORDER BY rvl.viewed_at DESC LIMIT 5""",
+                (username,),
+            )
+            for act in rv_acts:
+                res_type_label = "HTML 资源" if act[1] == "html" else "下载文件"
+                activities.append({
+                    "time": act[0],
+                    "type": "resource_view",
+                    "title": f"浏览了{res_type_label}",
+                    "detail": f"「{act[2][:40]}{'...' if len(act[2]) > 40 else ''}」",
+                })
+        except Exception as e:
+            logger.warning(f"[recent-activity] 查询资源浏览记录失败: {e}")
+
     else:  # 教师/管理员
         # 最近的任务提交
         if role == 0:
@@ -1229,6 +1258,42 @@ async def recent_activity(request: Request):
                 "title": f"学生 {act[1]} {s_name} 完成了知识闯关",
                 "detail": f"答对 {act[3]}/{act[4]} 题，得分 {act[2]} 分",
             })
+
+        # 最近的资源浏览记录
+        try:
+            if cp_student_names:
+                rv_acts = execute_query(
+                    f"""SELECT rvl.viewed_at, rvl.student_username, rvl.resource_type,
+                               COALESCE(sr.file_name, rvl.file_path) as resource_name
+                        FROM resource_view_logs rvl
+                        LEFT JOIN shared_resources sr ON rvl.resource_id=sr.id AND rvl.resource_type=sr.resource_type
+                        WHERE rvl.student_username IN ({ph})
+                        ORDER BY rvl.viewed_at DESC LIMIT 10""",
+                    tuple(cp_student_names),
+                )
+            else:
+                rv_acts = []
+            rv_usernames = list(set(act[1] for act in rv_acts))
+            rv_name_map = {}
+            if rv_usernames:
+                ph4 = ",".join("?" for _ in rv_usernames)
+                u_rows3 = execute_query(
+                    f"SELECT username, name FROM users WHERE username IN ({ph4})",
+                    tuple(rv_usernames),
+                )
+                for ur in u_rows3:
+                    rv_name_map[ur[0]] = ur[1] or ur[0]
+            for act in rv_acts:
+                s_name = rv_name_map.get(act[1], act[1])
+                res_type_label = "HTML 资源" if act[2] == "html" else "下载文件"
+                activities.append({
+                    "time": act[0],
+                    "type": "resource_view",
+                    "title": f"学生 {act[1]} {s_name} 浏览了{res_type_label}",
+                    "detail": f"「{act[3][:40]}{'...' if len(act[3]) > 40 else ''}」",
+                })
+        except Exception as e:
+            logger.warning(f"[recent-activity] 查询资源浏览记录失败: {e}")
 
     # 按时间排序
     # 修复时间格式：如果只有时间没有日期，跳过（无法确定真实日期）
@@ -1768,26 +1833,39 @@ async def get_task_todo(request: Request):
     except Exception as e:
         logger.warning(f"[task-todo] 查询通知失败: {e}")
 
-    # ── 16. 共享资源（列表形式，带访问链接） ──
+    # ── 16. 共享资源（仅未浏览过的，已浏览的不再显示） ──
     try:
         if grade:
             shared_items = execute_query(
                 """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type
                    FROM shared_resources sr
                    WHERE (sr.share_scope='all'
-                        OR (sr.share_scope='class' AND (sr.target_grade=? OR INSTR(sr.target_grade, ?)>0) AND (sr.target_class=? OR INSTR(sr.target_class, ?)>0))
+                        OR (sr.share_scope='class' AND (sr.target_grade=? OR INSTR(sr.target_grade, ?)>0) AND (sr.target_class='' OR sr.target_class IS NULL OR sr.target_class=? OR INSTR(sr.target_class, ?)>0))
                         OR (sr.share_scope='teacher' AND INSTR(sr.target_users, ?)>0))
+                     AND NOT EXISTS (
+                       SELECT 1 FROM resource_view_logs rvl
+                       WHERE rvl.student_username=?
+                         AND rvl.resource_type=sr.resource_type
+                         AND rvl.resource_id=sr.id
+                     )
                    ORDER BY sr.created_at DESC
                    LIMIT 30""",
-                (grade, grade, cls, cls, username),
+                (grade, grade, cls, cls, username, username),
             )
         else:
             shared_items = execute_query(
                 """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type
                    FROM shared_resources sr
                    WHERE sr.share_scope='all'
+                     AND NOT EXISTS (
+                       SELECT 1 FROM resource_view_logs rvl
+                       WHERE rvl.student_username=?
+                         AND rvl.resource_type=sr.resource_type
+                         AND rvl.resource_id=sr.id
+                     )
                    ORDER BY sr.created_at DESC
                    LIMIT 30""",
+                (username,),
             )
         for si in shared_items:
             file_path = str(si[2] or '').lstrip('/')
@@ -1796,7 +1874,7 @@ async def get_task_todo(request: Request):
                 "id": f"shared_resource-{si[0]}",
                 "type": "shared_resource",
                 "title": str(si[1] or si[2] or f'资源#{si[0]}'),
-                "description": f"共享资源 · {str(si[3] or '')}",
+                "description": f"{'HTML 资源' if si[3]=='html' else '共享文件'} · 点击查看",
                 "subject": "",
                 "status": "pending",
                 "priority": 30,

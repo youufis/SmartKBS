@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Table, Select, Input, Tag, Space, Typography, Row, Col,
-  Statistic, message, Button, Radio, Empty, Spin,
+  Statistic, message, Button, Radio, Empty, Spin, Tabs,
 } from 'antd';
 import {
   ReloadOutlined, FileTextOutlined,
   CheckCircleOutlined, CloseCircleOutlined, BarChartOutlined,
   ExperimentOutlined, ThunderboltOutlined,
   CheckSquareOutlined, QuestionCircleOutlined, CodeOutlined,
-  TeamOutlined, HighlightOutlined, BookOutlined,
+  TeamOutlined, HighlightOutlined, BookOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import * as activityMonitorApi from '../api/activityMonitor';
@@ -16,6 +16,7 @@ import type {
   ActivityItem, StudentStatus, ActivityStatusDetail,
 } from '../api/activityMonitor';
 import { useAuthStore } from '../stores/authStore';
+import ResourceViewStatsPage from './ResourceViewStatsPage';
 
 const { Title, Text } = Typography;
 
@@ -367,6 +368,11 @@ const ActivityMonitorPage: React.FC = () => {
 
   return (
     <div>
+      <Tabs defaultActiveKey="activity" items={[
+        {
+          key: 'activity',
+          label: <span><BarChartOutlined /> 活动监控</span>,
+          children: (<>
       <Title level={4} style={{ marginBottom: 16 }}>
         <BarChartOutlined /> 活动完成监控
       </Title>
@@ -532,6 +538,14 @@ const ActivityMonitorPage: React.FC = () => {
           ) : null}
         </Card>
       )}
+        </>),
+        },
+        {
+          key: 'resource-views',
+          label: <span><EyeOutlined /> 浏览统计</span>,
+          children: <ResourceViewStatsPage />,
+        },
+      ]} />
     </div>
   );
 };

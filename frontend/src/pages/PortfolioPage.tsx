@@ -10,11 +10,12 @@ import {
   AuditOutlined, MessageOutlined,
   RightOutlined,
   BookOutlined, CalendarOutlined, RobotOutlined, DownloadOutlined,
-  ExperimentOutlined,
+  ExperimentOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
+import * as trackingApi from '../api/tracking'
 import { useAuthStore } from '../stores/authStore'
 
 const { Title, Text } = Typography
@@ -176,6 +177,11 @@ const PortfolioPage: React.FC = () => {
   const [reportLoading, setReportLoading] = useState(false)
   const [reportData, setReportData] = useState<{ report: string; period: string; data?: any } | null>(null)
   const [reportDays, setReportDays] = useState<number>(30)
+  const [viewStats, setViewStats] = useState<{ total_views: number; unique_html: number; unique_download: number; total_reward_points: number }>({ total_views: 0, unique_html: 0, unique_download: 0, total_reward_points: 0 })
+
+  useEffect(() => {
+    trackingApi.getMyViewStats().then(setViewStats).catch(() => {})
+  }, [])
 
   const handleGenerateReport = async () => {
     setReportLoading(true)
@@ -252,6 +258,7 @@ const PortfolioPage: React.FC = () => {
     { label: '完成任务', value: tasks?.completed ?? 0, icon: <CheckCircleOutlined />, color: '#52c41a' },
     { label: '对话天数', value: chats?.total_days ?? 0, icon: <MessageOutlined />, color: '#13c2c2' },
     { label: '课程练习', value: course_practice?.total_count ?? 0, icon: <ExperimentOutlined />, color: '#52c41a' },
+    { label: '资源浏览', value: viewStats.total_views, icon: <EyeOutlined />, color: '#1677ff' },
   ]
 
   return (

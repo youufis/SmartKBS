@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio } from 'antd'
+import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Pagination } from 'antd'
 import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined, CodeOutlined, FilePdfOutlined, FileImageOutlined, FileZipOutlined, FileUnknownOutlined, BulbOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
@@ -269,6 +269,13 @@ const ResourceMgmtPage: React.FC = () => {
   // ── 视图切换 & 搜索 ──
   const [viewMode, setViewMode] = useState<'tree' | 'grid'>('tree')
   const [searchText, setSearchText] = useState('')
+  const [gridPage, setGridPage] = useState(1)
+  const GRID_PAGE_SIZE = 30
+
+  // 搜索时重置分页
+  useEffect(() => {
+    setGridPage(1)
+  }, [searchText])
 
   // 展平所有文件用于 grid 视图
   const allFiles = useMemo(() => {
@@ -405,33 +412,46 @@ const ResourceMgmtPage: React.FC = () => {
               {/* 网格视图 */}
               {viewMode === 'grid' && (
                 allFiles.length > 0 ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-                    {allFiles.map((file) => (
-                      <Card
-                        key={file.path}
-                        size="small"
-                        hoverable
-                        styles={{ body: { padding: 16, textAlign: 'center' as const } }}
-                        actions={[
-                          <Tooltip title="重命名" key="rename">
-                            <EditOutlined onClick={() => openRename(file.path, file.name)} />
-                          </Tooltip>,
-                          <Tooltip title="删除" key="delete">
-                            <DeleteOutlined style={{ color: '#ff4d4f' }} onClick={() => handleDelete(file.path)} />
-                          </Tooltip>,
-                        ]}
-                      >
-                        <div style={{ fontSize: 36, lineHeight: 1, marginBottom: 8 }}>
-                          {getFileIcon(file.name)}
-                        </div>
-                        <Tooltip title={file.name}>
-                          <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {file.name}
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
+                      {allFiles.slice((gridPage - 1) * GRID_PAGE_SIZE, gridPage * GRID_PAGE_SIZE).map((file) => (
+                        <Card
+                          key={file.path}
+                          size="small"
+                          hoverable
+                          styles={{ body: { padding: 16, textAlign: 'center' as const } }}
+                          actions={[
+                            <Tooltip title="重命名" key="rename">
+                              <EditOutlined onClick={() => openRename(file.path, file.name)} />
+                            </Tooltip>,
+                            <Tooltip title="删除" key="delete">
+                              <DeleteOutlined style={{ color: '#ff4d4f' }} onClick={() => handleDelete(file.path)} />
+                            </Tooltip>,
+                          ]}
+                        >
+                          <div style={{ fontSize: 36, lineHeight: 1, marginBottom: 8 }}>
+                            {getFileIcon(file.name)}
                           </div>
-                        </Tooltip>
-                      </Card>
-                    ))}
-                  </div>
+                          <Tooltip title={file.name}>
+                            <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {file.name}
+                            </div>
+                          </Tooltip>
+                        </Card>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+                      <Pagination
+                        current={gridPage}
+                        total={allFiles.length}
+                        pageSize={GRID_PAGE_SIZE}
+                        showSizeChanger
+                        showTotal={(t) => `共 ${t} 个文件`}
+                        pageSizeOptions={['10', '20', '30', '50']}
+                        onChange={(p) => setGridPage(p)}
+                      />
+                    </div>
+                  </>
                 ) : (
                   <Empty description={searchText ? '未找到匹配的文件' : '暂无文件'} />
                 )

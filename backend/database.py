@@ -735,6 +735,33 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 资源查看日志表（v6.7）
+            # ═══════════════════════════════════════════════
+
+            c.execute("""CREATE TABLE IF NOT EXISTS resource_view_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL,
+                resource_type TEXT NOT NULL,
+                resource_id INTEGER DEFAULT 0,
+                knowledge_point_id INTEGER DEFAULT NULL,
+                binding_id INTEGER DEFAULT NULL,
+                source TEXT DEFAULT 'curriculum',
+                file_path TEXT NOT NULL,
+                owner_username TEXT DEFAULT '',
+                viewed_at TEXT NOT NULL,
+                ip_address TEXT DEFAULT ''
+            )""")
+
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rvl_student ON resource_view_logs(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rvl_resource ON resource_view_logs(resource_type, resource_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rvl_kp ON resource_view_logs(knowledge_point_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rvl_time ON resource_view_logs(viewed_at)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_rvl_owner ON resource_view_logs(owner_username)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 智能练习：练习任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS practice_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -267,23 +267,25 @@ const pointsToTitle = (points: number, config: MainTitle[]): MainTitle => {
 const TeacherMyPoints: React.FC = () => {
   const [tMyPoints, setTMyPoints] = useState(0)
   const [tMyHistory, setTMyHistory] = useState<any[]>([])
-  const [tLoading, setTLoading] = useState(false)
   useEffect(() => {
     let ignore = false
-    setTLoading(true)
-    Promise.all([
-      apiClient.get('/api/rewards/my-points'),
-      apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
-    ]).then(([p, h]) => {
-      if (!ignore) {
-        setTMyPoints(p.data.total_points || 0)
-        setTMyHistory(Array.isArray(h.data) ? h.data : [])
-      }
-    }).catch(() => {}).finally(() => { if (!ignore) setTLoading(false) })
+    const load = async () => {
+      try {
+        const [p, h] = await Promise.all([
+          apiClient.get('/api/rewards/my-points'),
+          apiClient.get('/api/rewards/my-history', { params: { limit: 100 } }),
+        ])
+        if (!ignore) {
+          setTMyPoints(p.data.total_points || 0)
+          setTMyHistory(Array.isArray(h.data) ? h.data : [])
+        }
+      } catch { /* ignore */ }
+    }
+    load()
     return () => { ignore = true }
   }, [])
   return (
-    <Spin spinning={tLoading}>
+    <>
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={8}>
           <Card>
@@ -301,7 +303,7 @@ const TeacherMyPoints: React.FC = () => {
           { title: '说明', dataIndex: 'reason', ellipsis: true },
         ]}
       />
-    </Spin>
+    </>
   )
 }
 
@@ -468,9 +470,21 @@ const RewardPage: React.FC = () => {
   useEffect(() => {
     if (!isStudent) return
     const ignore = { current: false }
-    fetchTitleInfo(ignore)
+    const load = async () => {
+      try {
+        const [titleRes, configRes] = await Promise.all([
+          apiClient.get('/api/rewards/my-title'),
+          apiClient.get('/api/rewards/title-config'),
+        ])
+        if (!ignore.current) {
+          setTitleInfo(titleRes.data)
+          if (configRes.data?.main_titles) setTitleConfig(configRes.data.main_titles)
+        }
+      } catch { /* 忽略 */ }
+    }
+    load()
     return () => { ignore.current = true }
-  }, [isStudent, fetchTitleInfo])
+  }, [isStudent])
 
   // 学生视图：称号 + 积分
   // ── 积分规则弹窗 ──
@@ -502,6 +516,7 @@ const RewardPage: React.FC = () => {
       {/* 三维成长 Tabs */}
       <Card style={{ marginBottom: 16 }} size="small">
         <Tabs defaultActiveKey="main" size="small"
+          tabBarStyle={{ display: 'flex', justifyContent: 'space-around' }}
           items={[
             {
               key: 'main',

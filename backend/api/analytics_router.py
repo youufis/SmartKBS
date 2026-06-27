@@ -339,6 +339,13 @@ async def student_analytics(target_username: str, request: Request):
     )
     chat_count = chat_rows[0][0] if chat_rows else 0
 
+    # 资源浏览
+    rv_rows = execute_query(
+        "SELECT COUNT(*) FROM resource_view_logs WHERE student_username = ?",
+        (target_username,),
+    )
+    rv_count = rv_rows[0][0] if rv_rows else 0
+
     # 构建数据
     exam_text = ""
     for e in exam_results:
@@ -357,6 +364,7 @@ async def student_analytics(target_username: str, request: Request):
 【点名情况】共被点名 {rc_total} 次，回答正确 {rc_correct} 次
 【任务完成】已提交 {task_count} 个任务
 【AI 对话】共 {chat_count} 次
+【资源浏览】已浏览 {rv_count} 个学习资源
 
 请生成（Markdown 格式）：
 1. 📊 **学习概况**

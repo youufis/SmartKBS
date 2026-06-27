@@ -28,6 +28,7 @@ REWARD_CONFIG = {
     "quest":      {"participation": 1,  "has_grade": True},
     "quick_quiz": {"participation": 2,  "has_grade": True},
     "course_practice": {"participation": 2, "has_grade": True},
+    "resource_view": {"participation": 1, "has_grade": False},  # 浏览共享资源（不重复）
 }
 
 GRADE_POINTS = {
@@ -51,8 +52,7 @@ ACTIVITY_TYPE_NAMES = {
     "code":       "代码练习",
     "quest":      "知识闯关",
     "quick_quiz": "知识抢答",
-    "course_practice": "课程练习",
-}
+    "course_practice": "课程练习",    "resource_view":  "资源浏览",}
 
 REWARD_TYPE_NAMES = {
     "participation": "参与基础分",

@@ -404,6 +404,16 @@ async def unshare_resource(request: Request, id: int = Query(...)):
         except Exception as e2:
             logger.warning(f"清理关联记录时出错: {e2}")
 
+        # 清理资源查看日志
+        try:
+            execute_insert_update(
+                "DELETE FROM resource_view_logs WHERE resource_type=? AND resource_id=?",
+                (resource_type, id),
+            )
+            logger.info(f"已清理 resource_view_logs: type={resource_type}, id={id}")
+        except Exception as e3:
+            logger.warning(f"清理资源查看日志失败: {e3}")
+
         # 取消共享后清理空目录共享
         cleanup_empty_dir_shares(owner)
 

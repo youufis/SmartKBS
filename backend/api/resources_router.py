@@ -267,6 +267,14 @@ async def delete_resource(path: str = Query(...), request: Request = None):  # t
                         "DELETE FROM curriculum_bindings WHERE resource_type='html' AND resource_id=?",
                         (sid,),
                     )
+                    # 清理资源查看日志
+                    try:
+                        execute_insert_update(
+                            "DELETE FROM resource_view_logs WHERE resource_id=? AND resource_type='html'",
+                            (sid,),
+                        )
+                    except Exception:
+                        pass
                     # 清理共享记录
                     execute_insert_update(
                         "DELETE FROM shared_resources WHERE id=?",

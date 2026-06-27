@@ -158,6 +158,9 @@ def _delete_user_completely(username: str):
         ("DELETE FROM student_subject_titles WHERE student_username=?", (username,)),
         ("DELETE FROM student_badges WHERE student_username=?", (username,)),
         ("DELETE FROM login_logs WHERE username=?", (username,)),
+        # 资源查看日志
+        ("DELETE FROM resource_view_logs WHERE student_username=?", (username,)),
+        ("DELETE FROM resource_view_logs WHERE owner_username=?", (username,)),
         # 以 username 为创建者/拥有者的表
         # 先清理共享资源关联的课程绑定
         ("DELETE FROM curriculum_bindings WHERE resource_id IN (SELECT id FROM shared_resources WHERE owner_username=?)", (username,)),
