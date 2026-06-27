@@ -37,7 +37,7 @@ def get_student_profile(username: str) -> dict[str, Any]:
     """
     # 基本信息
     user_rows = execute_query(
-        "SELECT name, class, grade FROM users WHERE username=?",
+        "SELECT name, class, grade, gender FROM users WHERE username=?",
         (username,),
     )
     if not user_rows:
@@ -46,12 +46,21 @@ def get_student_profile(username: str) -> dict[str, Any]:
     name = user_rows[0][0] or username
     cls = user_rows[0][1] or ""
     grade = user_rows[0][2] or ""
+    gender_raw = user_rows[0][3]
+    # 转换性别：1=男，2=女
+    if gender_raw == 1:
+        gender = "male"
+    elif gender_raw == 2:
+        gender = "female"
+    else:
+        gender = ""
 
     profile: dict[str, Any] = {
         "username": username,
         "name": name,
         "grade": grade,
         "class": cls,
+        "gender": gender,
     }
 
     # 薄弱知识点分析

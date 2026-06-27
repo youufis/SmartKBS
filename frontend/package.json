@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "6.5.0",
+  "version": "6.6.0",
   "description": "SmartKBS 智慧教学平台 - 全学段通用 AI 教学管理系统",
   "type": "module",
   "scripts": {

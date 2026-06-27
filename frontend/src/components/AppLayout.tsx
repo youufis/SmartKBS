@@ -25,6 +25,7 @@ import {
   RobotOutlined,
   EditOutlined,
   SafetyCertificateOutlined,
+  PictureOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -68,6 +69,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
   { icon: <TrophyOutlined />, label: '成长档案', key: 'growth', children: [
     { key: '/score', icon: <StarOutlined />, label: '积分中心' },
     { key: '/portfolio', icon: <UserOutlined />, label: '个人档案' },
+    { key: '/portrait', icon: <PictureOutlined />, label: '每日画像' },
   ]},
   { icon: <SettingOutlined />, label: '系统服务', key: 'sys', children: [
     { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
@@ -126,6 +128,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/announcements', icon: <BellOutlined />, label: '公告管理' },
       { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
       { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
+      { key: '/portrait', icon: <PictureOutlined />, label: '每日画像' },
       { key: '/about', icon: <InfoCircleOutlined />, label: '关于系统' },
     ]},
   ]

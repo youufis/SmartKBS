@@ -55,6 +55,7 @@ import CompanionSettings from './pages/CompanionSettings'
 import WhiteboardPage from './pages/WhiteboardPage'
 import WhiteboardRoomPage from './pages/WhiteboardRoomPage'
 import TaskTodoPage from './pages/TaskTodoPage'
+import PortraitPage from './pages/PortraitPage'
 
 function App() {
   const navigate = useNavigate()
@@ -149,6 +150,7 @@ function App() {
             <Route path="companion-settings" element={<CompanionSettings />} />
             <Route path="whiteboard" element={<WhiteboardPage />} />
             <Route path="whiteboard-room/:roomId" element={<WhiteboardRoomPage />} />
+            <Route path="portrait" element={<PortraitPage />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="console" element={<AuthorPanelPage />} />
           </Route>

@@ -24,7 +24,7 @@ from backend.middleware import register_middleware
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version="6.5",
+    version="6.6",
     docs_url="/docs",
 )
 
@@ -105,6 +105,7 @@ from backend.api.quick_quiz_router import router as quick_quiz_router
 from backend.api.activity_monitor_router import router as activity_monitor_router
 from backend.api.companion_router import router as companion_router
 from backend.api.whiteboard_router import router as whiteboard_router
+from backend.api.portrait_router import router as portrait_router
 
 app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
 app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
@@ -137,6 +138,7 @@ app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
 app.include_router(code_router, prefix="/api", tags=["代码练习"])
 app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
 app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
+app.include_router(portrait_router, prefix="/api/portrait", tags=["自我画像"])
 # 配置同步服务接口（不出现在文档中）
 from backend.api.sync_service import router as sync_service_router
 app.include_router(sync_service_router, prefix="/api", tags=[])

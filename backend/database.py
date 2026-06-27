@@ -1327,6 +1327,51 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 学生自我画像模块（v6.6）
+            # ═══════════════════════════════════════════════
+
+            # ── 学生画像主表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS student_portraits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                created_date TEXT NOT NULL,
+                style TEXT NOT NULL DEFAULT 'random',
+                image_path TEXT NOT NULL DEFAULT '',
+                image_url TEXT DEFAULT '',
+                ai_comment TEXT NOT NULL DEFAULT '',
+                prompt TEXT DEFAULT '',
+                generated_at TEXT DEFAULT '',
+                view_count INTEGER DEFAULT 0,
+                is_shared INTEGER DEFAULT 0,
+                share_scope TEXT DEFAULT 'private',
+                like_count INTEGER DEFAULT 0,
+                UNIQUE(username, created_date)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_portrait_user ON student_portraits(username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_portrait_shared ON student_portraits(is_shared, share_scope)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 画像点赞表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS portrait_likes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                portrait_id INTEGER NOT NULL,
+                username TEXT NOT NULL,
+                created_at TEXT DEFAULT '',
+                UNIQUE(portrait_id, username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_pl_portrait ON portrait_likes(portrait_id)")
+            except sqlite3.OperationalError:
+                pass
+            # 兼容旧表：添加 status 列（软删除用）
+            try:
+                c.execute("ALTER TABLE student_portraits ADD COLUMN status TEXT DEFAULT 'active'")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
             logger.debug("数据库初始化完成")
 
