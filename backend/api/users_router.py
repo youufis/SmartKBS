@@ -188,6 +188,9 @@ def _delete_user_completely(username: str):
         ("DELETE FROM scores WHERE student_name=?", (student_name,)),
         ("DELETE FROM rollcall_weights WHERE student_name=?", (student_name,)),
         ("DELETE FROM rollcall_history WHERE student_name=?", (student_name,)),
+        # 自我画像数据
+        ("DELETE FROM portrait_likes WHERE portrait_id IN (SELECT id FROM student_portraits WHERE username=?)", (username,)),
+        ("DELETE FROM student_portraits WHERE username=?", (username,)),
     ]
     # 删除资源分组项
     for gid in group_id_list:
