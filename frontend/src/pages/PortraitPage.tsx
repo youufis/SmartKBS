@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   Card, Row, Col, Typography, Spin, Button, Tag, Space, Tabs,
   Select, message, Modal, Empty, Tooltip, Divider,
-  Radio, Badge, Alert,
+  Radio, Badge, Alert, Pagination, Input,
 } from 'antd'
 import {
   EditOutlined, HeartOutlined, HeartFilled, ShareAltOutlined,
@@ -68,6 +68,14 @@ const PortraitPage: React.FC = () => {
   const [detailPortrait, setDetailPortrait] = useState<PortraitData | null>(null)
   const [galleryTab, setGalleryTab] = useState('public')
   const [commentColor] = useState(() => COMMENT_COLORS[Math.floor(Math.random() * COMMENT_COLORS.length)])
+  // 分页状态
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(12)
+  const [galleryPage, setGalleryPage] = useState(1)
+  const [galleryPageSize, setGalleryPageSize] = useState(12)
+  // 搜索状态
+  const [historySearch, setHistorySearch] = useState('')
+  const [gallerySearch, setGallerySearch] = useState('')
 
   useEffect(() => {
     fetchStyles()
@@ -366,16 +374,35 @@ const PortraitPage: React.FC = () => {
   // ─────────────────────────────────────────
   // Tab 2: 个人画展
   // ─────────────────────────────────────────
-  const renderGalleryTab = () => (
+  const renderGalleryTab = () => {
+    const filtered = historySearch
+      ? historyList.filter((p) =>
+          [p.created_date, p.style, p.ai_comment, ...(p.student_name ? [p.student_name] : [])]
+            .some((v) => v.toLowerCase().includes(historySearch.toLowerCase()))
+        )
+      : historyList
+    const start = (historyPage - 1) * historyPageSize
+    const end = start + historyPageSize
+    const paged = filtered.slice(start, end)
+    return (
     <div>
-      <div style={{ marginBottom: 16 }}>
-        <Title level={4}><StarOutlined /> 我的画展 · 共 {historyList.length} 幅</Title>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level={4} style={{ margin: 0 }}><StarOutlined /> 我的画展 · 共 {filtered.length} 幅</Title>
+        <Input.Search
+          placeholder="搜索日期、风格、寄语…"
+          allowClear
+          style={{ width: 240 }}
+          value={historySearch}
+          onChange={(e) => { setHistorySearch(e.target.value); setHistoryPage(1) }}
+          onSearch={(v) => { setHistorySearch(v); setHistoryPage(1) }}
+        />
       </div>
       {historyList.length === 0 ? (
         <Empty description="还没有画像，去生成第一幅吧！" />
       ) : (
+        <>
         <Row gutter={[16, 16]}>
-          {historyList.map((portrait) => (
+          {paged.map((portrait) => (
             <Col xs={24} sm={12} md={8} lg={6} key={portrait.id}>
               <Badge.Ribbon
                 text={
@@ -453,21 +480,43 @@ const PortraitPage: React.FC = () => {
             </Col>
           ))}
         </Row>
+        <div style={{ textAlign: 'center', marginTop: 24 }}>
+          <Pagination
+            current={historyPage}
+            pageSize={historyPageSize}
+            total={filtered.length}
+            onChange={(p, ps) => { setHistoryPage(p); setHistoryPageSize(ps) }}
+            showSizeChanger
+            pageSizeOptions={['12', '24', '48']}
+            showTotal={(t) => `共 ${t} 幅`}
+          />
+        </div>
+        </>
       )}
     </div>
   )
+  }
 
   // ─────────────────────────────────────────
   // Tab 3: 分享画廊
   // ─────────────────────────────────────────
   const renderPublicTab = () => {
-    const data = galleryTab === 'public' ? publicGallery
+    const rawData = galleryTab === 'public' ? publicGallery
       : galleryTab === 'class' ? classGallery
       : hotGallery
+    const filtered = gallerySearch
+      ? rawData.filter((p) =>
+          [p.created_date, p.style, p.ai_comment, p.student_name || p.username]
+            .some((v) => v.toLowerCase().includes(gallerySearch.toLowerCase()))
+        )
+      : rawData
+    const start = (galleryPage - 1) * galleryPageSize
+    const end = start + galleryPageSize
+    const data = filtered.slice(start, end)
 
     return (
       <div>
-        <Space style={{ marginBottom: 16 }}>
+        <Space style={{ marginBottom: 16 }} wrap>
           <Radio.Group
             value={galleryTab}
             onChange={(e) => setGalleryTab(e.target.value)}
@@ -478,9 +527,19 @@ const PortraitPage: React.FC = () => {
             <Radio.Button value="class"><TeamOutlined /> 本班画廊</Radio.Button>
             <Radio.Button value="hot"><FireOutlined /> 热门推荐</Radio.Button>
           </Radio.Group>
+          <Input.Search
+            placeholder="搜索姓名、风格、寄语…"
+            allowClear
+            style={{ width: 220 }}
+            value={gallerySearch}
+            onChange={(e) => { setGallerySearch(e.target.value); setGalleryPage(1) }}
+            onSearch={(v) => { setGallerySearch(v); setGalleryPage(1) }}
+          />
         </Space>
 
-        {data.length === 0 ? (
+        {(filtered.length === 0 && gallerySearch) ? (
+          <Empty description="未找到匹配的画像" />
+        ) : data.length === 0 ? (
           <Empty description={galleryTab === 'class' ? '同班同学还没有分享画像' : '还没有公开的画像'}>
             {!todayExists && (
               <Button type="primary" onClick={() => setActiveTab('today')}>
@@ -489,6 +548,7 @@ const PortraitPage: React.FC = () => {
             )}
           </Empty>
         ) : (
+          <>
           <Row gutter={[16, 16]}>
             {data.map((portrait) => (
               <Col xs={24} sm={12} md={8} lg={6} key={portrait.id}>
@@ -561,6 +621,18 @@ const PortraitPage: React.FC = () => {
               </Col>
             ))}
           </Row>
+          <div style={{ textAlign: 'center', marginTop: 24 }}>
+            <Pagination
+              current={galleryPage}
+              pageSize={galleryPageSize}
+            total={filtered.length}
+              onChange={(p, ps) => { setGalleryPage(p); setGalleryPageSize(ps) }}
+              showSizeChanger
+              pageSizeOptions={['12', '24', '48']}
+              showTotal={(t) => `共 ${t} 张`}
+            />
+          </div>
+          </>
         )}
       </div>
     )
