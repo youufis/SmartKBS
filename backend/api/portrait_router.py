@@ -433,7 +433,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     # 4. 通义万相生图
     logger.info(f"开始生成图片: username={username}")
     save_dir = _get_portrait_dir(username)
-    style_key = style if style != "random" else "creative"
+    style_key = style
     filename = f"{today}_{style_key}"
 
     try:
@@ -686,7 +686,8 @@ async def get_class_gallery(request: Request):
                   sp.ai_comment, sp.like_count, sp.view_count
            FROM student_portraits sp
            JOIN users u ON sp.username = u.username
-           WHERE sp.is_shared=1 AND sp.share_scope='class' AND sp.status='active'
+           WHERE sp.is_shared=1 AND sp.status='active'
+             AND sp.share_scope IN ('public', 'class')
              AND u.grade=? AND u.class=?
            ORDER BY sp.created_date DESC""",
         (grade, cls),
