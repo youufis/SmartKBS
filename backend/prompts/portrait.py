@@ -284,7 +284,7 @@ def build_portrait_comment_prompt(
         profile_section = f"【学生数据】\n- 姓名：{name}\n- 年级/班级：{grade} {cls}\n- 当前称号：{main_title}（{points}积分）"
         role_instruction = "- 以学生身份来写，语气亲切、有活力\n- 称呼「你」即可"
 
-    prompt = f"""你是一个创意写作大师。根据以下用户数据，写一段有趣、温暖、有创意、激励人的"今日寄语"。
+    prompt = f"""你是一个创意写作大师。根据以下用户数据，写一段有趣、温暖、有创意、激励人的"本周寄语"。
 
 {profile_section}
 - 连续学习：{streak}天
@@ -295,7 +295,7 @@ def build_portrait_comment_prompt(
 - {activity_str}
 - 角色身份：{identity_desc}
 
-【今日画像风格】
+【本周画像风格】
 {style_name}
 
 【写作要求】
