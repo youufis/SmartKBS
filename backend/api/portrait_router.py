@@ -109,20 +109,90 @@ def _check_liked(portrait_id: int, username: str) -> bool:
 
 
 def _enrich_role_data(profile: dict[str, Any]) -> None:
-    """根据角色补充平台特有数据"""
+    """根据角色补充累计动态数据"""
     role = profile.get("role", 2)
     username = profile.get("username", "")
-    if role == 2:
-        return  # 学生无需额外补充
 
     try:
-        if role == 1:  # 教师
+        if role == 2:  # 学生累计数据
+            week_start, week_end = _get_week_range()
+
+            # 累计考试数
+            q_rows = execute_query(
+                "SELECT COUNT(*) FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
+                (username,),
+            )
+            total_exams = q_rows[0][0] if q_rows else 0
+
+            # 本周新增积分
+            pt_rows = execute_query(
+                "SELECT COALESCE(SUM(points),0) FROM reward_history WHERE student_username=? AND created_date BETWEEN ? AND ?",
+                (username, week_start, week_end),
+            )
+            week_points = pt_rows[0][0] if pt_rows else 0
+
+            # 累计总积分
+            total_pts = execute_query(
+                "SELECT COALESCE(SUM(points),0) FROM reward_history WHERE student_username=?",
+                (username,),
+            )
+            total_points_all = total_pts[0][0] if total_pts else 0
+
+            # 全部活动类型的累计次数（15种）
+            act_rows = execute_query(
+                """SELECT activity_type, COUNT(*) as cnt
+                   FROM reward_history
+                   WHERE student_username=?
+                   GROUP BY activity_type
+                   ORDER BY cnt DESC""",
+                (username,),
+            )
+            activity_detail = {}
+            total_activities = 0
+            for r in act_rows:
+                activity_detail[str(r[0])] = r[1]
+                total_activities += r[1]
+
+            # 错题总数
+            wb_rows = execute_query(
+                "SELECT COUNT(*) FROM wrong_book WHERE student_username=? AND status IN ('active','reviewing')",
+                (username,),
+            )
+            wrong_count = wb_rows[0][0] if wb_rows else 0
+
+            # AI 对话次数
+            chat_count = execute_query(
+                "SELECT COUNT(*) FROM conversations WHERE username=?",
+                (username,),
+            )
+            total_chats = chat_count[0][0] if chat_count else 0
+
+            # 讨论参与次数
+            disc_count = execute_query(
+                "SELECT COUNT(*) FROM discussion_messages WHERE username=?",
+                (username,),
+            )
+            total_discussions = disc_count[0][0] if disc_count else 0
+
+            profile["student_stats"] = {
+                "total_exams": total_exams,
+                "week_points": week_points,
+                "total_points": total_points_all,
+                "total_activities": total_activities,
+                "activity_detail": activity_detail,
+                "wrong_count": wrong_count,
+                "total_chats": total_chats,
+                "total_discussions": total_discussions,
+            }
+
+        elif role == 1:  # 教师累计数据
+            week_start, week_end = _get_week_range()
             # 任教班级数
-            rows = execute_query(
+            class_rows = execute_query(
                 "SELECT COUNT(DISTINCT grade||class) FROM users WHERE username=?",
                 (username,),
             )
-            # 创建的活动数量
+            # 累计创建的活动数量
             quiz_count = execute_query(
                 "SELECT COUNT(*) FROM interaction_quizzes WHERE creator_username=?",
                 (username,),
@@ -131,20 +201,61 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
                 "SELECT COUNT(*) FROM exams WHERE creator_username=?",
                 (username,),
             )
+            # 本周新创建活动
+            week_quiz = execute_query(
+                "SELECT COUNT(*) FROM interaction_quizzes WHERE creator_username=? AND created_at >= ?",
+                (username, week_start),
+            )
+            week_exam = execute_query(
+                "SELECT COUNT(*) FROM exams WHERE creator_username=? AND created_at >= ?",
+                (username, week_start),
+            )
+            # 批阅任务数
+            try:
+                task_count = execute_query(
+                    "SELECT COUNT(*) FROM task_grades WHERE teacher_username=?",
+                    (username,),
+                )
+                if task_count and task_count[0][0] > 0:
+                    profile["teach_stats"] += f"，批阅{task_count[0][0]}份任务"
+            except Exception:
+                pass
+
             profile["teach_stats"] = (
-                f"任教{rows[0][0] if rows else 0}个班级，"
-                f"创建{quiz_count[0][0] if quiz_count else 0}个测验、"
+                f"任教{class_rows[0][0] if class_rows else 0}个班级，"
+                f"累计创建{quiz_count[0][0] if quiz_count else 0}个测验、"
                 f"{exam_count[0][0] if exam_count else 0}场考试"
             )
-        elif role == 0:  # 管理员
-            user_count = execute_query("SELECT COUNT(*) FROM users", ())
-            active_count = execute_query(
+            week_extra = []
+            if week_quiz[0][0] > 0:
+                week_extra.append(f"本周新增{week_quiz[0][0]}个测验")
+            if week_exam[0][0] > 0:
+                week_extra.append(f"本周新增{week_exam[0][0]}场考试")
+            if week_extra:
+                profile["teach_stats"] += "，" + "、".join(week_extra)
+
+        elif role == 0:  # 管理员累计数据
+            total_users = execute_query("SELECT COUNT(*) FROM users", ())
+            week_start, week_end = _get_week_range()
+            new_this_week = execute_query(
+                "SELECT COUNT(*) FROM users WHERE rowid IN (SELECT rowid FROM users ORDER BY rowid DESC LIMIT 100) AND username NOT IN ('root','admin')",
+                (),
+            )
+            active_users = execute_query(
                 "SELECT COUNT(DISTINCT username) FROM login_logs WHERE login_time >= date('now', '-7 days')",
                 (),
             )
+            total_portraits = execute_query(
+                "SELECT COUNT(*) FROM student_portraits WHERE status='active'",
+                (),
+            )
+            total_exams = execute_query("SELECT COUNT(*) FROM exams", ())
+
             profile["admin_stats"] = (
-                f"平台共{user_count[0][0] if user_count else 0}名用户，"
-                f"近7日{active_count[0][0] if active_count else 0}人活跃"
+                f"平台共{total_users[0][0] if total_users else 0}名用户，"
+                f"近7日{active_users[0][0] if active_users else 0}人活跃，"
+                f"累计{total_exams[0][0] if total_exams else 0}场考试、"
+                f"{total_portraits[0][0] if total_portraits else 0}幅画像"
             )
     except Exception as e:
         logger.warning(f"补充角色数据失败: {e}")

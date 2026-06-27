@@ -5,6 +5,15 @@
 import random
 from typing import Any
 
+# 活动类型名称映射（供学生数据展示用）
+_ACTIVITY_NAMES = {
+    "quiz": "随堂测验", "poll": "快速投票", "question": "课堂提问",
+    "exam": "考试", "practice": "智能练习", "discussion": "分组讨论",
+    "rollcall": "点名签到", "chat": "AI对话", "task": "任务",
+    "learning": "学习进度", "login": "每日登录", "code": "代码练习",
+    "quest": "知识闯关", "quick_quiz": "知识抢答", "course_practice": "课程练习",
+}
+
 
 # ── 预定义风格列表（含中英文描述） ──
 
@@ -91,25 +100,7 @@ PORTRAIT_STYLES = {
     },
 }
 
-# ── 评论体裁列表 ──
 
-COMMENT_GENRES = [
-    "武侠风格——以武林侠客的口吻描述学生的学习进境，使用「内力」「招式」「功法」等武侠术语",
-    "星际史诗——以太空歌剧的叙事风格，将学习比作探索未知星域", 
-    "古风诗赋——用文言文或诗词的形式，典雅地评价学生的表现",
-    "马戏表演——以马戏团主持人的热烈口吻，夸张地赞美学生的「表演」",
-    "奇幻冒险——以 RPG 游戏旁白的风格，描述「勇者」的成长之旅",
-    "电影预告——用电影预告片的磁性嗓音和镜头语言，预告「大片」的上映",
-    "治愈系——温柔的治愈风格，像春日暖阳般温暖鼓励学生",
-    "体育解说——以激情澎湃的体育解说员口吻，解说学生的「精彩表现」",
-    "歌词改编——改编热门歌曲的歌词，把学习历程唱出来",
-    "AI 观察报告——以 AI 系统检测报告的格式，一本正经地分析学生数据",
-    "童话故事——用「从前有个…」的童话叙事风格，讲述学生的成长故事",
-    "网络热梗——用轻松幽默的网络流行语和梗，吐槽中带着鼓励",
-    "内心独白——以学生的内心 OS 形式，展现自信乐观的自我对话",
-    "侦探推理——化身为名侦探，推理出「学霸养成的真相」",
-    "天气预报——以天气预报的形式播报「学习气象」，幽默比喻学习状态",
-]
 
 
 def build_portrait_image_prompt(
@@ -176,10 +167,22 @@ def build_portrait_image_prompt(
     prompt_parts.append(f"Title: '{main_title}', achievement points: {points}.")
     teach_stats = profile.get("teach_stats", "")
     admin_stats = profile.get("admin_stats", "")
+    student_stats = profile.get("student_stats", {})
     if teach_stats:
         prompt_parts.append(f"Teaching responsibilities: {teach_stats}.")
     if admin_stats:
         prompt_parts.append(f"Administration scope: {admin_stats}.")
+    if student_stats:
+        s = student_stats
+        parts = []
+        if s.get("total_exams", 0) > 0:
+            parts.append(f"{s['total_exams']} exams")
+        if s.get("total_activities", 0) > 0:
+            parts.append(f"{s['total_activities']} total activities")
+        if s.get("total_chats", 0) > 0:
+            parts.append(f"{s['total_chats']} AI conversations")
+        if parts:
+            prompt_parts.append("Active learner with " + ", ".join(parts) + ".")
 
     if streak > 0:
         prompt_parts.append(f"Continuous study streak: {streak} days.")
@@ -195,10 +198,33 @@ def build_portrait_image_prompt(
     if extra_requirements:
         prompt_parts.append(extra_requirements)
 
+    # 随机化摄影/艺术参数，让每张画像观感不同
+    _lighting = random.choice([
+        "cinematic lighting, dramatic shadows",
+        "soft golden hour light, warm atmosphere",
+        "studio softbox lighting, clean and bright",
+        "moody low-key lighting, mysterious vibe",
+        "natural daylight, fresh and vibrant",
+        "rim lighting, ethereal glow effect",
+    ])
+    _mood = random.choice([
+        "confident smile, bright eyes looking at viewer",
+        "thoughtful gaze, gentle expression",
+        "energetic and cheerful, big smile",
+        "calm and determined, steady eyes",
+        "curious and playful, slight smirk",
+        "warm and friendly, approachable look",
+    ])
+    _quality = random.choice([
+        "professional portrait photography, 8K, highly detailed skin texture",
+        "award-winning portrait shot, razor sharp focus, 4K",
+        "editorial photography style, crisp details, perfect exposure",
+        "high-end magazine cover portrait, flawless lighting",
+    ])
+
     prompt_parts.append(
-        "Friendly, confident expression, bright eyes looking at viewer. "
-        "Cinematic lighting, professional portrait photography, soft focus background, 8K quality. "
-        "NO text, NO letters, NO words, NO watermark, NO signature, NO calligraphy in the image."
+        f"{_mood}. {_lighting}. {_quality}. "
+        "NO text, NO letters, NO words, NO watermark, NO signature, NO calligraphy."
     )
 
     return ". ".join(prompt_parts)
@@ -207,14 +233,12 @@ def build_portrait_image_prompt(
 def build_portrait_comment_prompt(
     profile: dict[str, Any],
     style: str = "random",
-    genre_hint: str = "",
 ) -> str:
     """构建 AI 创意寄语 Prompt
 
     Args:
         profile: 用户画像数据
         style: 风格 key
-        genre_hint: 指定体裁，留空随机
 
     Returns:
         LLM 调用 Prompt
@@ -257,10 +281,6 @@ def build_portrait_comment_prompt(
     # 活动数据
     activity_str = _get_activity_summary(profile.get("username", ""))
 
-    # 随机选择体裁（如果未指定）
-    if not genre_hint:
-        genre_hint = random.choice(COMMENT_GENRES)
-
     # 风格名称
     style_info = PORTRAIT_STYLES.get(style, PORTRAIT_STYLES["random"])
     style_name = style_info["name"]
@@ -269,46 +289,86 @@ def build_portrait_comment_prompt(
     teach_stats = profile.get("teach_stats", "")
     admin_stats = profile.get("admin_stats", "")
 
+    # 累计统计数据
+    student_stats = profile.get("student_stats", {})
+
     if role == 1:
         identity_desc = "一位辛勤耕耘的人民教师"
         extra = f"\n- {teach_stats}" if teach_stats else ""
         profile_section = f"【教师数据】\n- 姓名：{name}\n- 任教：{grade} {cls}\n- 当前称号：{main_title}（{points}积分）{extra}"
-        role_instruction = "- 以教师身份来写，语气可以更成熟、从容，体现教育工作者的风范\n- 称呼「你」即可"
+        role_instruction = "语气成熟从容，体现教育工作者的风范与温度"
     elif role == 0:
         identity_desc = "一位运筹帷幄的教育管理者"
         extra = f"\n- {admin_stats}" if admin_stats else ""
         profile_section = f"【管理员数据】\n- 姓名：{name}\n- 管理领域：{grade} {cls}\n- 当前称号：{main_title}（{points}积分）{extra}"
-        role_instruction = "- 以管理员身份来写，语气稳重、有格局，体现管理者的视野\n- 称呼「你」即可"
+        role_instruction = "语气稳重有格局，体现管理者的视野与温度"
     else:
         identity_desc = "一位努力学习的同学"
-        profile_section = f"【学生数据】\n- 姓名：{name}\n- 年级/班级：{grade} {cls}\n- 当前称号：{main_title}（{points}积分）"
-        role_instruction = "- 以学生身份来写，语气亲切、有活力\n- 称呼「你」即可"
+        # 聚焦闪光点——把数据变成积极、有温度的描述
+        extra_stats = ""
+        if student_stats:
+            sparkles = []
+            s = student_stats
+            # 闪光点1：坚持不懈
+            if s.get("total_exams", 0) >= 3:
+                sparkles.append(f"经历了{s['total_exams']}场考试的打磨，越战越勇")
+            elif s.get("total_exams", 0) > 0:
+                sparkles.append(f"勇敢地接受了{s['total_exams']}场考试的挑战")
+            # 闪光点2：本周积极性
+            if s.get("week_points", 0) >= 10:
+                sparkles.append(f"本周火力全开，拿下{s['week_points']}积分")
+            elif s.get("week_points", 0) > 0:
+                sparkles.append(f"本周有{s['week_points']}积分入账，稳步前进")
+            # 闪光点3：求知欲
+            if s.get("total_chats", 0) >= 10:
+                sparkles.append(f"求知欲爆棚，和AI聊了{s['total_chats']}个回合")
+            elif s.get("total_chats", 0) > 0:
+                sparkles.append(f"善于提问，主动与AI对话{s['total_chats']}次")
+            # 闪光点4：团队协作
+            if s.get("total_discussions", 0) >= 5:
+                sparkles.append(f"乐于分享，在{s['total_discussions']}次讨论中发光发热")
+            elif s.get("total_discussions", 0) > 0:
+                sparkles.append(f"积极参与讨论，碰撞思维火花")
+            # 闪光点5：迎难而上（改错题的积极面）
+            if s.get("wrong_count", 0) >= 5:
+                sparkles.append(f"面对{s['wrong_count']}道错题毫不退缩，正在逐个击破")
+            elif s.get("wrong_count", 0) > 0:
+                sparkles.append(f"认真对待每一道错题，从中汲取养分")
+            # 闪光点6：最热爱的活动
+            act_detail = s.get("activity_detail", {})
+            if act_detail:
+                top_act = sorted(act_detail.items(), key=lambda x: -x[1])[0]
+                name_cn = _ACTIVITY_NAMES.get(top_act[0], top_act[0])
+                sparkles.append(f"最爱{name_cn}，已打卡{top_act[1]}次")
+            if sparkles:
+                extra_stats = "✨ " + "\n✨ ".join(sparkles[:4])
+        if extra_stats:
+            profile_section = f"【学生数据】\n🌟 {name} · {grade} {cls} · 称号「{main_title}」\n{extra_stats}"
+        else:
+            profile_section = f"【学生数据】\n🌟 {name} · {grade} {cls} · 称号「{main_title}」"
+        role_instruction = "语气亲切有活力，像好朋友在聊天"
 
-    prompt = f"""你是一个创意写作大师。根据以下用户数据，写一段有趣、温暖、有创意、激励人的"本周寄语"。
+    prompt = f"""你是一位创意作家。根据以下用户数据，为ta创作一段"本周画像寄语"。
 
+【关于ta】
 {profile_section}
-- 连续学习：{streak}天
-- {exam_str}
-- {weak_str}
-- {strong_str}
-- 近期成就：{milestone_str}
-- {activity_str}
-- 角色身份：{identity_desc}
+{exam_str}
+{weak_str}
+{strong_str}
+{milestone_str}
+{activity_str}
+连续{streak}天在路上 · {identity_desc}
 
-【本周画像风格】
-{style_name}
+画像风格：{style_name}
 
-【写作要求】
-- 体裁：{genre_hint}
-- 融入以上真实的个人数据，让用户感到"这是专门写给我的"
-- 要有具体的数字和细节，不要空洞的鼓励
-- 语气真诚、生动、有画面感、有创意
-- 长度 100-250 字
-- 适当使用 emoji 增加趣味
+【创作方向】
+- 你可以用任何形式来写——一段故事、一首小诗、一段内心独白、幻想场景、对话片段……都可以
+- 重点是从ta的数据中找到**最特别的发光点**，围绕它展开
+- 让ta的独特之处成为作品的灵魂，而不是简单罗列数字
+- 温暖真诚，让人读完觉得被看见、被肯定
 - {role_instruction}
-- 如果使用了武侠/星际等体裁，要保持一致性
 
-直接返回寄语内容，不要有任何解释或前缀。"""
+100-250字。直接写，不要前缀。"""
 
     return prompt
 
