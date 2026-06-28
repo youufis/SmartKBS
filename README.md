@@ -373,12 +373,11 @@ Copyright © 2026 youufis
    pip install -r requirements.txt
    ```
 
-4. 启动服务（二选一）：
+4. 启动服务：
 
    ```bash
-   # 直接启动
    python backend/main.py
-
+   ```
 
 ### 方式二：Git 克隆部署（推荐，支持在线升级）
 
@@ -512,7 +511,6 @@ SmartKBS/
 ├── USER_MANUAL.md          # 系统帮助文档
 ├── package.json            # 项目配置
 ├── requirements.txt        # Python 依赖
-├── web.config              # IIS 部署配置
 └── README.md
 ```
 
