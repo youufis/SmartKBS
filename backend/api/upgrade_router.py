@@ -30,6 +30,39 @@ BACKUP_DIR = BASE_DIR / ".upgrade_backups"
 STATE_FILE = BASE_DIR / ".upgrade_state.json"
 MIGRATIONS_DIR = BASE_DIR / "backend" / "migrations"
 GIT_DOWNLOAD_URL = "https://git-scm.com/downloads/win"
+REMOTE_REPO_URL = "https://github.com/youufis/SmartKBS.git"
+
+# Git 常见错误 → 中文解决方案
+GIT_ERROR_TIPS: dict[str, str] = {
+    "not a git repository": (
+        "部署目录没有 Git 仓库，无法执行升级。\n"
+        "请先在服务器上执行以下命令初始化：\n"
+        f"  cd {BASE_DIR}\n"
+        "  git init\n"
+        f"  git remote add origin {REMOTE_REPO_URL}\n"
+        "  git fetch origin master\n"
+        "  git reset --hard origin/master"
+    ),
+    "does not appear to be a git repository": (
+        "Git 远程仓库 (origin) 未配置。请执行：\n"
+        f"  git remote add origin {REMOTE_REPO_URL}"
+    ),
+    "Could not read from remote repository": "无法连接 GitHub，服务器网络可能被防火墙拦截。",
+    "Connection refused": "连接 GitHub 被拒绝（端口 443），请检查防火墙设置。",
+    "Could not connect to server": "无法连接到 GitHub.com，请检查服务器网络。",
+    "Failed to connect": "无法连接到 GitHub.com，请检查服务器网络或代理设置。",
+    "Timeout": "连接 GitHub 超时，请检查网络或稍后重试。",
+    "Permission denied (publickey)": (
+        "SSH 密钥认证失败。请改用 HTTPS 远程地址：\n"
+        f"  git remote set-url origin {REMOTE_REPO_URL}"
+    ),
+    "Authentication failed": "Git 身份验证失败。请检查凭据配置。",
+    "filename too long": (
+        "文件名过长。请执行一次以下命令后重试：\n"
+        "  git config --system core.longpaths true"
+    ),
+    "Connection was reset": "连接被重置，可能是网络不稳定或防火墙中断了连接。",
+}
 
 
 def _check_git_installed() -> bool:
@@ -43,6 +76,52 @@ def _check_git_installed() -> bool:
         return result.returncode == 0
     except Exception:
         return False
+
+
+def _check_git_env() -> list[str]:
+    """预检 Git 环境，返回所有问题（空列表=一切正常）"""
+    issues: list[str] = []
+
+    # 1. Git 是否安装
+    if not _check_git_installed():
+        issues.append(
+            "未检测到 Git 命令。请先安装 Git：\n"
+            f"  下载地址：{GIT_DOWNLOAD_URL}\n"
+            "  安装后需回收 IIS 应用池使 PATH 生效。"
+        )
+        return issues  # 后续检查依赖 git，直接返回
+
+    # 2. .git 目录是否存在
+    git_dir = BASE_DIR / ".git"
+    if not git_dir.exists():
+        issues.append(
+            "部署目录没有 Git 仓库，无法执行升级。\n"
+            "请先在服务器上执行以下命令初始化：\n"
+            f"  cd {BASE_DIR}\n"
+            "  git init\n"
+            f"  git remote add origin {REMOTE_REPO_URL}\n"
+            "  git fetch origin master\n"
+            "  git reset --hard origin/master"
+        )
+        return issues
+
+    # 3. remote origin 是否配置
+    try:
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, timeout=5, stdin=subprocess.DEVNULL,
+            cwd=str(BASE_DIR),
+        )
+        if r.returncode != 0:
+            issues.append(
+                "Git 远程仓库 (origin) 未配置。请执行：\n"
+                f"  cd {BASE_DIR}\n"
+                f"  git remote add origin {REMOTE_REPO_URL}"
+            )
+    except Exception as e:
+        issues.append(f"无法检查 Git 远程配置: {e}")
+
+    return issues
 
 # 所有运行时数据（数据库、配置、上传文件等）已在 .gitignore 中，
 # git reset --hard 不会影响它们，无需额外保护
@@ -74,6 +153,7 @@ class VersionCheckResult(BaseModel):
     last_checked: str = ""
     git_available: bool = True
     git_download_url: str = ""  # Git 未安装时提供下载链接
+    git_issues: list[str] = []  # Git 环境问题列表（中文提示）
 
 
 class UpgradeProgress(BaseModel):
@@ -134,8 +214,15 @@ def _run_subprocess(
     result = subprocess.run(cmd, **kw)
     if result.returncode != 0:
         msg = result.stderr.decode().strip() if result.stderr else "未知错误"
-        raise RuntimeError(f"{' '.join(cmd)} 失败: {msg}")
+        error_msg = f"{' '.join(cmd)} 失败: {msg}"
+        # 翻译常见 Git 错误为用户友好的中文提示
+        for keyword, tip in GIT_ERROR_TIPS.items():
+            if keyword.lower() in msg.lower():
+                error_msg += f"\n\n💡 {tip}"
+                break
+        raise RuntimeError(error_msg)
     return result.stdout.decode().strip() if result.stdout else ""
+
 
 
 async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
@@ -304,6 +391,7 @@ async def check_version(request: Request) -> VersionCheckResult:
     require_admin(user)
 
     git_ok = _check_git_installed()
+    git_issues = _check_git_env() if git_ok else []
     remote = await _fetch_remote_version()
     current = APP_VERSION
 
@@ -334,6 +422,7 @@ async def check_version(request: Request) -> VersionCheckResult:
         last_checked=datetime.now(timezone.utc).isoformat(),
         git_available=git_ok,
         git_download_url="https://git-scm.com/downloads/win" if not git_ok else "",
+        git_issues=git_issues,
     )
 
 
@@ -392,8 +481,10 @@ async def start_upgrade(request: Request):
     if _state["running"]:
         raise HTTPException(status_code=409, detail="已有升级任务运行中")
 
-    if not _check_git_installed():
-        raise HTTPException(status_code=400, detail=f"未检测到 Git，请先安装 Git ({GIT_DOWNLOAD_URL}) 后重试")
+    # 预检 Git 环境
+    issues = _check_git_env()
+    if issues:
+        raise HTTPException(status_code=400, detail="\n\n".join(issues))
 
     # 先检查远程版本
     remote = await _fetch_remote_version()

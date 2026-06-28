@@ -14,6 +14,7 @@ export interface VersionInfo {
   last_checked: string
   git_available: boolean
   git_download_url: string
+  git_issues: string[]
 }
 
 export interface UpgradeProgress {

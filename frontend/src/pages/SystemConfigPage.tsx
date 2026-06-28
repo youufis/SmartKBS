@@ -484,20 +484,32 @@ const SystemConfigPage: React.FC = () => {
 
     return (
       <Spin spinning={verLoading}>
-        {/* Git 未安装警告 */}
-        {verInfo && !verInfo.git_available && (
+        {/* Git 环境问题警告 */}
+        {verInfo && (!verInfo.git_available || verInfo.git_issues.length > 0) && (
           <Alert
             type="error"
             showIcon
-            message="🛠️ 缺少 Git，无法在线升级"
+            message="🛠️ Git 环境异常，无法在线升级"
             description={
-              <span>
-                在线升级依赖 Git 从 GitHub 增量拉取代码。请安装 Git 后重试。<br />
-                <a href={verInfo.git_download_url} target="_blank" rel="noopener noreferrer">
-                  点击下载 Git for Windows ⏬
-                </a>
-                &nbsp;（安装后需重启 IIS 或回收应用池使 PATH 生效）
-              </span>
+              <div>
+                {!verInfo.git_available ? (
+                  <span>
+                    未检测到 Git 命令。请安装 Git 后重试。<br />
+                    <a href={verInfo.git_download_url} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 'bold' }}>
+                      点击下载 Git for Windows ⏬
+                    </a>
+                    &nbsp;（安装后需回收 IIS 应用池使 PATH 生效）
+                  </span>
+                ) : (
+                  <div>
+                    {verInfo.git_issues.map((issue, i) => (
+                      <div key={i} style={{ whiteSpace: 'pre-wrap', marginBottom: i < verInfo.git_issues.length - 1 ? 12 : 0 }}>
+                        {issue.split('\n').map((line, j) => <div key={j}>{line || '\u00a0'}</div>)}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             }
             style={{ marginBottom: 16 }}
           />
