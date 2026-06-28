@@ -388,20 +388,20 @@ const SystemConfigPage: React.FC = () => {
 
     const handleUpgrade = () => {
       Modal.confirm({
-        title: '确认执行增量升级?',
+        title: '确认执行升级?',
         icon: <WarningOutlined />,
         content: (
           <div>
-            <p>升级过程将自动完成以下步骤：</p>
+            <p>系统将自动完成以下操作：</p>
             <ol>
-              <li>从 GitHub 增量拉取最新代码（仅传输差异）</li>
-              <li>同步到 origin/master</li>
-              <li>执行数据库迁移</li>
-              <li>增量安装 Python 依赖</li>
-              <li>重启服务（短暂离线后自动恢复）</li>
+              <li>从 GitHub 下载最新代码</li>
+              <li>更新本地文件</li>
+              <li>更新数据库结构（如有需要）</li>
+              <li>安装新增的依赖包</li>
+              <li>重启服务使新代码生效</li>
             </ol>
-            <p style={{ color: 'red' }}>⚠️ 升级期间系统可能短暂不可用（通常 1-3 分钟）</p>
-            <p>💡 回滚机制：升级失败自动通过 git reflog 回滚，无需手动备份</p>
+            <p style={{ color: 'red' }}>⚠️ 升级期间系统会短暂离线（约 1-3 分钟）</p>
+            <p>💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理</p>
           </div>
         ),
         okText: '确认升级',
