@@ -199,6 +199,7 @@ class VersionCheckResult(BaseModel):
     git_available: bool = True
     git_download_url: str = ""  # Git 未安装时提供下载链接
     git_issues: list[str] = []  # Git 环境问题列表（中文提示）
+    prefetched: bool = False  # 是否已预缓存代码到本地（升级可跳过网络拉取）
 
 
 class UpgradeProgress(BaseModel):
@@ -502,6 +503,19 @@ async def check_version(request: Request) -> VersionCheckResult:
     version_changed = latest != current
     has_update = version_changed or (behind > 0)
 
+    # 检查是否有预缓存
+    prefetched = False
+    try:
+        state = _load_state()
+        cached_ver = state.get(_AUTO_PREFETCH_KEY, "")
+        if cached_ver:
+            # 验证预缓存的版本是否与当前检测到的一致
+            expected_key = f"{latest}:{behind}"
+            if cached_ver == expected_key:
+                prefetched = True
+    except Exception:
+        pass
+
     return VersionCheckResult(
         current_version=current,
         latest_version=latest,
@@ -514,6 +528,7 @@ async def check_version(request: Request) -> VersionCheckResult:
         git_available=git_ok,
         git_download_url="https://git-scm.com/downloads/win" if not git_ok else "",
         git_issues=git_issues,
+        prefetched=prefetched,
     )
 
 
@@ -617,11 +632,22 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
     to_version = remote.get("latest_version", "unknown")
     behind = 0
     try:
-        # ── Step 1: git fetch 增量拉取 ──
-        _set_progress("fetch", "正在获取远程更新（增量传输差异代码）...", 10)
-        logger.info(f"[upgrade] Step 1/7: git fetch --all")
-        await _run_git(["fetch", "--all"], timeout=180)
-        logger.info(f"[upgrade] Step 1/7: fetch 完成")
+        # ── Step 1: git fetch 增量拉取（如果已预缓存则跳过网络传输）──
+        s_check = _load_state()
+        cached_ver = s_check.get(_AUTO_PREFETCH_KEY, "")
+
+        if cached_ver:
+            _set_progress("fetch", "检测到已预缓存代码，跳过网络拉取...", 12)
+            logger.info(f"[upgrade] Step 1/7: 使用预缓存数据，跳过 git fetch")
+            # 清除预缓存标记，避免下次误用
+            if _AUTO_PREFETCH_KEY in s_check:
+                del s_check[_AUTO_PREFETCH_KEY]
+                _save_state(s_check)
+        else:
+            _set_progress("fetch", "正在获取远程更新（增量传输差异代码）...", 10)
+            logger.info(f"[upgrade] Step 1/7: git fetch --all")
+            await _run_git(["fetch", "--all"], timeout=180)
+            logger.info(f"[upgrade] Step 1/7: fetch 完成")
 
         # Step 1b: 计算 commit 数
         behind = int(await _run_git(
@@ -779,6 +805,15 @@ async def cancel_upgrade(request: Request):
     _state["error"] = None
     _state["started_at"] = None
 
+    # 清除预缓存状态
+    try:
+        s = _load_state()
+        if _AUTO_PREFETCH_KEY in s:
+            del s[_AUTO_PREFETCH_KEY]
+            _save_state(s)
+    except Exception:
+        pass
+
     logger.warning(f"管理员 {user['username']} 强制重置了升级状态 (之前: running={was_running}, step={old_step})")
 
     return {
@@ -855,6 +890,7 @@ async def delete_history_item(task_id: str, request: Request):
 
 _AUTO_CHECK_INTERVAL = 6 * 3600  # 每 6 小时检测一次
 _AUTO_CHECK_STATE_KEY = "_auto_check_last_notified"
+_AUTO_PREFETCH_KEY = "_prefetched_version"  # 预缓存标记：记录已预拉取的版本
 
 
 async def _auto_check_worker():
@@ -904,40 +940,49 @@ async def _perform_version_check():
     s = _load_state()
     last_notified = s.get(_AUTO_CHECK_STATE_KEY, "")
     notify_key = f"{latest}:{behind}"
-    if last_notified == notify_key:
-        return  # 已通知过相同版本
+    already_notified = (last_notified == notify_key)
 
-    # 通知所有管理员
-    try:
-        from backend.database import execute_query
-        rows = execute_query("SELECT username FROM users WHERE role=0")
-        admins = [row[0] for row in rows] if rows else []
-    except Exception:
-        admins = []
+    if not already_notified:
+        # 通知所有管理员
+        try:
+            from backend.database import execute_query
+            rows = execute_query("SELECT username FROM users WHERE role=0")
+            admins = [row[0] for row in rows] if rows else []
+        except Exception:
+            admins = []
 
-    if not admins:
-        return
+        if admins:
+            version_info = f"{current} → {latest}" if has_new_version else f"{current}（{behind} 个新提交）"
+            title = f"📥 新版本可用：{version_info}"
 
-    version_info = f"{current} → {latest}" if has_new_version else f"{current}（{behind} 个新提交）"
-    title = f"📥 新版本可用：{version_info}"
+            changelog = remote.get("changelog", [])
+            content = "更新内容：\n" + "\n".join(f"• {item}" for item in changelog) if changelog else "有新的代码更新可用，请前往「系统配置 → 版本管理」查看并升级。"
 
-    changelog = remote.get("changelog", [])
-    content = "更新内容：\n" + "\n".join(f"• {item}" for item in changelog) if changelog else "有新的代码更新可用，请前往「系统配置 → 版本管理」查看并升级。"
+            # 导入 notify_users 发送通知
+            from backend.api.notification_router import notify_users
+            notify_users(
+                usernames=admins,
+                type_="system",
+                title=title,
+                content=content,
+                related_link="/admin/system-config",
+            )
+            logger.info(f"[auto-upgrade] 已通知 {len(admins)} 位管理员: {title}")
 
-    # 导入 notify_users 发送通知
-    from backend.api.notification_router import notify_users
-    notify_users(
-        usernames=admins,
-        type_="system",
-        title=title,
-        content=content,
-        related_link="/admin/system-config",
-    )
-    logger.info(f"[auto-upgrade] 已通知 {len(admins)} 位管理员: {title}")
+        # 记录已通知过的版本
+        s[_AUTO_CHECK_STATE_KEY] = notify_key
+        _save_state(s)
 
-    # 记录已通知过的版本
-    s[_AUTO_CHECK_STATE_KEY] = notify_key
-    _save_state(s)
+    # ── 预缓存标记：上面已执行过 git fetch，数据已在 .git/objects/ 中 ──
+    # 记录当前版本已预缓存，升级流水线可跳过 fetch 步骤直接应用
+    if _check_git_installed():
+        git_issues = _check_git_env()
+        if not git_issues:
+            cached_ver = s.get(_AUTO_PREFETCH_KEY, "")
+            if cached_ver != notify_key:
+                s[_AUTO_PREFETCH_KEY] = notify_key
+                _save_state(s)
+                logger.info(f"[auto-upgrade] 已标记版本 {notify_key} 为预缓存状态，下次升级可直接应用")
 
 
 def start_auto_version_check():

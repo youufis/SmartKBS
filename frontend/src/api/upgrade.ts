@@ -15,6 +15,7 @@ export interface VersionInfo {
   git_available: boolean
   git_download_url: string
   git_issues: string[]
+  prefetched: boolean
 }
 
 export interface UpgradeProgress {

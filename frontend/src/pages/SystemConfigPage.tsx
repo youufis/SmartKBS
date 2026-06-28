@@ -15,7 +15,7 @@ import { useAuthStore } from '../stores/authStore'
 import {
   checkVersion, startUpgrade, getUpgradeStatus,
   rollback as apiRollback, getHistory, deleteHistory,
-  cancelUpgrade,
+  cancelUpgrade, createBackup,
   type VersionInfo, type UpgradeProgress,
 } from '../api/upgrade'
 
@@ -94,6 +94,435 @@ const GROUP_LABELS: Record<string, string> = {
   filetype: '📁 文件类型白名单',
   imagegen: '🎨 图片生成',
   quest: '⚡ 闯关挑战',
+}
+
+// ═══════════════════════════════════════════════
+//  升级管理 Tab 组件（必须定义在组件外部，避免渲染时重复创建）
+// ═══════════════════════════════════════════════
+
+const UpgradePanel: React.FC = () => {
+  const [verInfo, setVerInfo] = useState<VersionInfo | null>(null)
+  const [verLoading, setVerLoading] = useState(true) // 初始为 true，首次挂载即加载
+  const [upgrading, setUpgrading] = useState(false)
+  const [backingUp, setBackingUp] = useState(false)
+  const [upgradeProg, setUpgradeProg] = useState<UpgradeProgress | null>(null)
+  const [histList, setHistList] = useState<any[]>([])
+  const [histTotal, setHistTotal] = useState(0)
+  const [histPage, setHistPage] = useState(1)
+  const [histPageSize, setHistPageSize] = useState(10)
+  const pollRef = useRef<number | undefined>(undefined)
+
+  const loadVersion = useCallback(async () => {
+    setVerLoading(true)
+    try {
+      const info = await checkVersion()
+      setVerInfo(info)
+    } catch (e: any) {
+      message.error('版本检测失败: ' + (e?.response?.data?.detail || e.message))
+    }
+    setVerLoading(false)
+  }, [])
+
+  const loadHistory = useCallback(async (page = 1, pageSize = 10) => {
+    try {
+      const res = await getHistory(page, pageSize)
+      setHistList(res.history || [])
+      setHistTotal(res.total)
+      setHistPage(res.page)
+    } catch { /* ignore */ }
+  }, [])
+
+  const handleUpgrade = () => {
+    const isPrefetched = verInfo?.prefetched
+    Modal.confirm({
+      title: '确认执行升级?',
+      icon: <WarningOutlined />,
+      content: (
+        <div>
+          {isPrefetched && (
+            <Alert type="success" showIcon icon={<DownloadOutlined />}
+              message="代码已预缓存到本地"
+              description="后台已自动将更新代码下载到服务器本地缓存，升级过程无需网络拉取，速度更快。"
+              style={{ marginBottom: 12 }}
+            />
+          )}
+          <p>系统将自动完成以下操作：</p>
+          <ol>
+            <li>{isPrefetched ? '应用本地缓存的代码（无需网络拉取）' : '从 GitHub 下载最新代码'}</li>
+            <li>更新本地文件</li>
+            <li>更新数据库结构（如有需要）</li>
+            <li>安装新增的依赖包</li>
+            <li>重启服务使新代码生效</li>
+          </ol>
+          <p style={{ color: 'red' }}>⚠️ 升级期间系统会短暂离线（约 1-3 分钟）</p>
+          <p>💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理</p>
+        </div>
+      ),
+      okText: '确认升级',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await startUpgrade()
+          setUpgrading(true)
+          pollRef.current = setInterval(async () => {
+            try {
+              const st = await getUpgradeStatus()
+              setUpgradeProg(st)
+              if (!st.running) {
+                clearInterval(pollRef.current)
+                setUpgrading(false)
+                if (st.error) {
+                  message.error('升级失败: ' + st.error)
+                } else {
+                  message.success('🎉 升级完成！请刷新页面')
+                }
+                loadHistory()
+              }
+            } catch {
+              // 服务重启中，HTTP 请求会暂时失败，静默等待重试
+            }
+          }, 2000)
+        } catch (e: any) {
+          message.error('启动升级失败: ' + (e?.response?.data?.detail || e.message))
+        }
+      },
+    })
+  }
+
+  const handleRollback = () => {
+    Modal.confirm({
+      title: '⚠️ 确认执行回滚操作?',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '12px 16px', marginBottom: 12 }}>
+            <Text strong style={{ color: '#cf1322' }}>回滚操作将执行以下步骤：</Text>
+            <ol style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#555' }}>
+              <li>将代码回退到最近一次升级前的版本（git reset --hard HEAD@{'{'}1{'}'}）</li>
+              <li>重启系统服务使旧代码生效</li>
+              <li>升级历史中将新增一条回滚记录</li>
+            </ol>
+          </div>
+          <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '12px 16px' }}>
+            <Text strong style={{ color: '#d48806' }}>请注意：</Text>
+            <ul style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#555' }}>
+              <li>回滚仅恢复代码文件，<strong>数据库和用户数据不受影响</strong></li>
+              <li>回滚后最近一次升级的新功能将不可用</li>
+              <li>如需再次升级，可重新点击「增量升级」按钮</li>
+            </ul>
+          </div>
+        </div>
+      ),
+      okText: '确认回滚',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await apiRollback()
+          message.success('🎉 回滚完成，请刷新页面')
+          loadHistory()
+          loadVersion()
+        } catch (e: any) {
+          message.error('回滚失败: ' + (e?.response?.data?.detail || e.message))
+        }
+      },
+    })
+  }
+
+  const handleBackup = () => {
+    Modal.confirm({
+      title: '确认创建备份?',
+      icon: <ExclamationCircleOutlined />,
+      content: '系统将备份当前代码（git archive）以及数据库和配置文件，备份文件保存在服务器 .upgrade_backups 目录中。',
+      okText: '创建备份',
+      cancelText: '取消',
+      onOk: async () => {
+        setBackingUp(true)
+        try {
+          const res = await createBackup()
+          message.success(`✅ 备份创建成功（版本 ${res.version}）`)
+          loadHistory()
+        } catch (e: any) {
+          message.error('备份失败: ' + (e?.response?.data?.detail || e.message))
+        }
+        setBackingUp(false)
+      },
+    })
+  }
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const info = await checkVersion()
+        setVerInfo(info)
+      } catch (e: any) {
+        message.error('版本检测失败: ' + (e?.response?.data?.detail || e.message))
+      }
+      try {
+        const res = await getHistory()
+        setHistList(res.history || [])
+        setHistTotal(res.total)
+        setHistPage(res.page)
+      } catch { /* ignore */ }
+      setVerLoading(false)
+    }
+    init()
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
+
+  const handleDeleteHistory = (task_id: string) => {
+    Modal.confirm({
+      title: '确认删除该条升级记录?',
+      icon: <ExclamationCircleOutlined />,
+      content: '删除后不可恢复。',
+      okText: '确认删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteHistory(task_id)
+          message.success('已删除')
+          loadHistory(histPage, histPageSize)
+        } catch (e: any) {
+          message.error('删除失败: ' + (e?.response?.data?.detail || e.message))
+        }
+      },
+    })
+  }
+
+  return (
+    <Spin spinning={verLoading}>
+      {/* Git 环境问题警告 */}
+      {verInfo && (!verInfo.git_available || verInfo.git_issues.length > 0) && (
+        <Alert
+          type="error"
+          showIcon
+          message="🛠️ Git 环境异常，无法在线升级"
+          description={
+            <div>
+              {!verInfo.git_available ? (
+                <span>
+                  未检测到 Git 命令。请安装 Git 后重试。<br />
+                  <a href={verInfo.git_download_url} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 'bold' }}>
+                    点击下载 Git for Windows ⏬
+                  </a>
+                  &nbsp;（安装后需回收 IIS 应用池使 PATH 生效）
+                </span>
+              ) : (
+                <div>
+                  {verInfo.git_issues.map((issue, i) => (
+                    <div key={i} style={{ whiteSpace: 'pre-wrap', marginBottom: i < verInfo.git_issues.length - 1 ? 12 : 0 }}>
+                      {issue.split('\n').map((line, j) => <div key={j}>{line || '\u00a0'}</div>)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {/* 版本信息 */}
+      {verInfo && (
+        <Card style={{ marginBottom: 16 }}>
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="当前版本">
+              <Tag color="blue">{verInfo.current_version}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="最新版本">
+              <Tag color={verInfo.has_update ? 'green' : 'default'}>{verInfo.latest_version}</Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="状态">
+              {verInfo.has_update
+                ? <Tag color="green">📥 {verInfo.latest_version !== verInfo.current_version
+                    ? `新版本 ${verInfo.latest_version} 可用`
+                    : `有 ${verInfo.behind_commits} 个新提交可更新`}（落后 {verInfo.behind_commits} 个提交）</Tag>
+                : <Tag>✅ 已是最新版本</Tag>}
+              {verInfo.prefetched && (
+                <Tag color="cyan" style={{ marginLeft: 8 }}>📦 代码已预缓存到本地，升级无需网络拉取</Tag>
+              )}
+            </Descriptions.Item>
+            {verInfo.release_date && (
+              <Descriptions.Item label="发布日期">{verInfo.release_date}</Descriptions.Item>
+            )}
+          </Descriptions>
+
+          {/* 更新日志 */}
+          {verInfo.changelog && verInfo.changelog.length > 0 && (
+            <>
+              <Divider />
+              <Title level={5}>📋 更新日志</Title>
+              <Timeline items={verInfo.changelog.map((c: string) => ({ children: c }))} />
+            </>
+          )}
+
+          {/* 不兼容变更警告 */}
+          {verInfo.breaking_changes && verInfo.breaking_changes.length > 0 && (
+            <Alert
+              type="warning"
+              message="⚠️ 不兼容变更"
+              description={verInfo.breaking_changes.join('；')}
+              showIcon
+              style={{ marginTop: 16 }}
+            />
+          )}
+
+          <Divider />
+          <Space>
+            <Button icon={<SearchOutlined />} onClick={loadVersion}>
+              检测更新
+            </Button>
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              disabled={!verInfo?.has_update || upgrading || !verInfo?.git_available}
+              loading={upgrading}
+              title={
+                !verInfo?.git_available ? '请先安装 Git'
+                : verInfo?.prefetched ? '代码已预缓存到本地，升级速度更快'
+                : ''
+              }
+              onClick={handleUpgrade}
+            >
+              {upgrading ? '升级中...' : verInfo?.prefetched ? '📥 快速升级（已缓存）' : '📥 增量升级'}
+            </Button>
+            <Button icon={<RollbackOutlined />} onClick={handleRollback} disabled={!verInfo?.git_available}>
+              回滚
+            </Button>
+            <Button icon={<SaveOutlined />} onClick={handleBackup} loading={backingUp} disabled={!verInfo?.git_available}>
+              创建备份
+            </Button>
+          </Space>
+        </Card>
+      )}
+
+      {/* 升级进度 */}
+      {(upgradeProg && upgradeProg.running) && (
+        <Card title="🔄 升级进度" style={{ marginBottom: 16 }}
+          extra={
+            <Button size="small" danger
+              onClick={async () => {
+                try {
+                  await cancelUpgrade()
+                  message.warning('升级已取消')
+                  setUpgrading(false)
+                  setUpgradeProg(null)
+                  if (pollRef.current) clearInterval(pollRef.current)
+                  loadVersion()
+                  loadHistory()
+                } catch (e: any) {
+                  message.error('取消失败: ' + (e?.response?.data?.detail || e.message))
+                }
+              }}
+            >
+              取消升级
+            </Button>
+          }
+        >
+          <Progress percent={Math.max(0, upgradeProg.progress)} />
+          <p style={{ marginTop: 8 }}>{upgradeProg.message}</p>
+          <p style={{ fontSize: 12, color: '#999' }}>如长时间无响应可点击右上角「取消升级」</p>
+          {upgradeProg.error && (
+            <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
+          )}
+        </Card>
+      )}
+
+      {/* 升级历史 */}
+      <Card title="📜 升级历史">
+        <Table
+          dataSource={histList}
+          columns={[
+            { title: '时间', dataIndex: 'timestamp', key: 'ts', width: 170 },
+            {
+              title: '版本变化', key: 'ver',
+              render: (_: any, r: any) => `${r.from_version || '-'} → ${r.to_version || '-'}`,
+            },
+            { title: '执行人', dataIndex: 'admin', key: 'admin', width: 100 },
+            {
+              title: '状态', dataIndex: 'status', key: 'status', width: 120,
+              render: (s: string) => {
+                const map: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+                  success: { color: 'green', icon: <CheckCircleOutlined />, label: '成功' },
+                  failed: { color: 'red', icon: <CloseCircleOutlined />, label: '失败' },
+                  rolled_back: { color: 'orange', icon: <RollbackOutlined />, label: '已回滚' },
+                }
+                const item = map[s] || { color: 'default', icon: null, label: s }
+                return <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
+              },
+            },
+            { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
+            {
+              title: '操作', key: 'action', width: 90,
+              render: (_: any, r: any) => (
+                <Space size={0}>
+                  <Button type="link" size="small"
+                    icon={<EyeOutlined />}
+                    onClick={() => {
+                      const fileList = r.changed_files
+                      Modal.info({
+                        title: `📋 升级详情 — ${r.from_version || ''} → ${r.to_version || ''}`,
+                        width: 560,
+                        content: (
+                          <div style={{ marginTop: 8 }}>
+                            <p style={{ color: '#888', marginBottom: 8 }}>
+                              执行人：{r.admin} ｜ 时间：{r.timestamp}
+                            </p>
+                            {r.commits !== undefined && (
+                              <p style={{ color: '#888', marginBottom: 12 }}>
+                                提交数：{r.commits}
+                              </p>
+                            )}
+                            {fileList && fileList.length > 0 ? (
+                              <div>
+                                <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                                  📄 变更文件（{fileList.length} 个）
+                                </div>
+                                <div style={{
+                                  maxHeight: 300, overflow: 'auto',
+                                  background: '#f6f8fa', borderRadius: 6, padding: '8px 12px',
+                                  fontSize: 13, fontFamily: 'monospace',
+                                }}>
+                                  {fileList.map((f: string, i: number) => (
+                                    <div key={i} style={{ lineHeight: '24px' }}>{f}</div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ),
+                        okText: '关闭',
+                      })
+                    }}
+                  />
+                  <Button type="link" size="small" danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteHistory(r.task_id)}
+                  />
+                </Space>
+              ),
+            },
+          ]}
+          pagination={{
+            current: histPage,
+            pageSize: histPageSize,
+            total: histTotal,
+            showSizeChanger: true,
+            pageSizeOptions: ['5', '10', '20', '50'],
+            onChange: (p, ps) => {
+              setHistPage(p)
+              setHistPageSize(ps)
+              loadHistory(p, ps)
+            },
+            showTotal: (t) => `共 ${t} 条`,
+          }}
+          size="small"
+          rowKey="task_id"
+          locale={{ emptyText: '暂无升级记录' }}
+        />
+      </Card>
+    </Spin>
+  )
 }
 
 const SystemConfigPage: React.FC = () => {
@@ -348,361 +777,6 @@ const SystemConfigPage: React.FC = () => {
           ))}
         </div>
       </div>
-    )
-  }
-
-  // ═══════════════════════════════════════════════
-  //  升级管理 Tab 组件
-  // ═══════════════════════════════════════════════
-
-  const UpgradePanel: React.FC = () => {
-    const [verInfo, setVerInfo] = useState<VersionInfo | null>(null)
-    const [verLoading, setVerLoading] = useState(false)
-    const [upgrading, setUpgrading] = useState(false)
-    const [upgradeProg, setUpgradeProg] = useState<UpgradeProgress | null>(null)
-    const [histList, setHistList] = useState<any[]>([])
-    const [histTotal, setHistTotal] = useState(0)
-    const [histPage, setHistPage] = useState(1)
-    const [histPageSize, setHistPageSize] = useState(10)
-    const pollRef = useRef<number | undefined>(undefined)
-
-    const loadVersion = useCallback(async () => {
-      setVerLoading(true)
-      try {
-        const info = await checkVersion()
-        setVerInfo(info)
-      } catch (e: any) {
-        message.error('版本检测失败: ' + (e?.response?.data?.detail || e.message))
-      }
-      setVerLoading(false)
-    }, [])
-
-    const loadHistory = useCallback(async (page = 1, pageSize = 10) => {
-      try {
-        const res = await getHistory(page, pageSize)
-        setHistList(res.history || [])
-        setHistTotal(res.total)
-        setHistPage(res.page)
-      } catch { /* ignore */ }
-    }, [])
-
-    const handleUpgrade = () => {
-      Modal.confirm({
-        title: '确认执行升级?',
-        icon: <WarningOutlined />,
-        content: (
-          <div>
-            <p>系统将自动完成以下操作：</p>
-            <ol>
-              <li>从 GitHub 下载最新代码</li>
-              <li>更新本地文件</li>
-              <li>更新数据库结构（如有需要）</li>
-              <li>安装新增的依赖包</li>
-              <li>重启服务使新代码生效</li>
-            </ol>
-            <p style={{ color: 'red' }}>⚠️ 升级期间系统会短暂离线（约 1-3 分钟）</p>
-            <p>💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理</p>
-          </div>
-        ),
-        okText: '确认升级',
-        cancelText: '取消',
-        onOk: async () => {
-          try {
-            const { task_id } = await startUpgrade()
-            setUpgrading(true)
-            pollRef.current = setInterval(async () => {
-              try {
-                const st = await getUpgradeStatus()
-                setUpgradeProg(st)
-                if (!st.running) {
-                  clearInterval(pollRef.current)
-                  setUpgrading(false)
-                  if (st.error) {
-                    message.error('升级失败: ' + st.error)
-                  } else {
-                    message.success('🎉 升级完成！请刷新页面')
-                  }
-                  loadHistory()
-                }
-              } catch {
-                // 服务重启中，HTTP 请求会暂时失败，静默等待重试
-              }
-            }, 2000)
-          } catch (e: any) {
-            message.error('启动升级失败: ' + (e?.response?.data?.detail || e.message))
-          }
-        },
-      })
-    }
-
-    const handleRollback = () => {
-      Modal.confirm({
-        title: '确认回滚到升级前状态?',
-        icon: <ExclamationCircleOutlined />,
-        content: '将使用最近的备份恢复代码和数据，并重启服务。此操作可撤销一次不成功的升级。',
-        okText: '确认回滚',
-        okType: 'danger',
-        cancelText: '取消',
-        onOk: async () => {
-          try {
-            await apiRollback()
-            message.success('回滚完成，请刷新页面')
-            loadHistory()
-          } catch (e: any) {
-            message.error('回滚失败: ' + (e?.response?.data?.detail || e.message))
-          }
-        },
-      })
-    }
-
-    useEffect(() => {
-      loadVersion()
-      loadHistory()
-      return () => { if (pollRef.current) clearInterval(pollRef.current) }
-    }, [loadVersion, loadHistory])
-
-    const handleDeleteHistory = (task_id: string) => {
-      Modal.confirm({
-        title: '确认删除该条升级记录?',
-        icon: <ExclamationCircleOutlined />,
-        content: '删除后不可恢复。',
-        okText: '确认删除',
-        okType: 'danger',
-        cancelText: '取消',
-        onOk: async () => {
-          try {
-            await deleteHistory(task_id)
-            message.success('已删除')
-            loadHistory(histPage, histPageSize)
-          } catch (e: any) {
-            message.error('删除失败: ' + (e?.response?.data?.detail || e.message))
-          }
-        },
-      })
-    }
-
-    return (
-      <Spin spinning={verLoading}>
-        {/* Git 环境问题警告 */}
-        {verInfo && (!verInfo.git_available || verInfo.git_issues.length > 0) && (
-          <Alert
-            type="error"
-            showIcon
-            message="🛠️ Git 环境异常，无法在线升级"
-            description={
-              <div>
-                {!verInfo.git_available ? (
-                  <span>
-                    未检测到 Git 命令。请安装 Git 后重试。<br />
-                    <a href={verInfo.git_download_url} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 'bold' }}>
-                      点击下载 Git for Windows ⏬
-                    </a>
-                    &nbsp;（安装后需回收 IIS 应用池使 PATH 生效）
-                  </span>
-                ) : (
-                  <div>
-                    {verInfo.git_issues.map((issue, i) => (
-                      <div key={i} style={{ whiteSpace: 'pre-wrap', marginBottom: i < verInfo.git_issues.length - 1 ? 12 : 0 }}>
-                        {issue.split('\n').map((line, j) => <div key={j}>{line || '\u00a0'}</div>)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            }
-            style={{ marginBottom: 16 }}
-          />
-        )}
-        {/* 版本信息 */}
-        {verInfo && (
-          <Card style={{ marginBottom: 16 }}>
-            <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="当前版本">
-                <Tag color="blue">{verInfo.current_version}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="最新版本">
-                <Tag color={verInfo.has_update ? 'green' : 'default'}>{verInfo.latest_version}</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="状态">
-                {verInfo.has_update
-                  ? <Tag color="green">📥 {verInfo.latest_version !== verInfo.current_version
-                      ? `新版本 ${verInfo.latest_version} 可用`
-                      : `有 ${verInfo.behind_commits} 个新提交可更新`}（落后 {verInfo.behind_commits} 个提交）</Tag>
-                  : <Tag>✅ 已是最新版本</Tag>}
-              </Descriptions.Item>
-              {verInfo.release_date && (
-                <Descriptions.Item label="发布日期">{verInfo.release_date}</Descriptions.Item>
-              )}
-            </Descriptions>
-
-            {/* 更新日志 */}
-            {verInfo.changelog && verInfo.changelog.length > 0 && (
-              <>
-                <Divider />
-                <Title level={5}>📋 更新日志</Title>
-                <Timeline items={verInfo.changelog.map((c: string) => ({ children: c }))} />
-              </>
-            )}
-
-            {/* 不兼容变更警告 */}
-            {verInfo.breaking_changes && verInfo.breaking_changes.length > 0 && (
-              <Alert
-                type="warning"
-                message="⚠️ 不兼容变更"
-                description={verInfo.breaking_changes.join('；')}
-                showIcon
-                style={{ marginTop: 16 }}
-              />
-            )}
-
-            <Divider />
-            <Space>
-              <Button icon={<SearchOutlined />} onClick={loadVersion}>
-                检测更新
-              </Button>
-              <Button
-                type="primary"
-                icon={<DownloadOutlined />}
-                disabled={!verInfo?.has_update || upgrading || !verInfo?.git_available}
-                loading={upgrading}
-                title={!verInfo?.git_available ? '请先安装 Git' : ''}
-                onClick={handleUpgrade}
-              >
-                {upgrading ? '升级中...' : '📥 增量升级'}
-              </Button>
-              <Button icon={<RollbackOutlined />} onClick={handleRollback} disabled={!verInfo?.git_available}>
-                回滚
-              </Button>
-            </Space>
-          </Card>
-        )}
-
-        {/* 升级进度 */}
-        {(upgradeProg && upgradeProg.running) && (
-          <Card title="🔄 升级进度" style={{ marginBottom: 16 }}
-            extra={
-              <Button size="small" danger
-                onClick={async () => {
-                  try {
-                    await cancelUpgrade()
-                    message.warning('升级已取消')
-                    setUpgrading(false)
-                    setUpgradeProg(null)
-                    if (pollRef.current) clearInterval(pollRef.current)
-                    loadVersion()
-                    loadHistory()
-                  } catch (e: any) {
-                    message.error('取消失败: ' + (e?.response?.data?.detail || e.message))
-                  }
-                }}
-              >
-                取消升级
-              </Button>
-            }
-          >
-            <Progress percent={Math.max(0, upgradeProg.progress)} />
-            <p style={{ marginTop: 8 }}>{upgradeProg.message}</p>
-            <p style={{ fontSize: 12, color: '#999' }}>如长时间无响应可点击右上角「取消升级」</p>
-            {upgradeProg.error && (
-              <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
-            )}
-          </Card>
-        )}
-
-        {/* 升级历史 */}
-        <Card title="📜 升级历史">
-          <Table
-            dataSource={histList}
-            columns={[
-              { title: '时间', dataIndex: 'timestamp', key: 'ts', width: 170 },
-              {
-                title: '版本变化', key: 'ver',
-                render: (_: any, r: any) => `${r.from_version || '-'} → ${r.to_version || '-'}`,
-              },
-              { title: '执行人', dataIndex: 'admin', key: 'admin', width: 100 },
-              {
-                title: '状态', dataIndex: 'status', key: 'status', width: 120,
-                render: (s: string) => {
-                  const map: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-                    success: { color: 'green', icon: <CheckCircleOutlined />, label: '成功' },
-                    failed: { color: 'red', icon: <CloseCircleOutlined />, label: '失败' },
-                    rolled_back: { color: 'orange', icon: <RollbackOutlined />, label: '已回滚' },
-                  }
-                  const item = map[s] || { color: 'default', icon: null, label: s }
-                  return <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
-                },
-              },
-              { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
-              {
-                title: '操作', key: 'action', width: 90,
-                render: (_: any, r: any) => (
-                  <Space size={0}>
-                    <Button type="link" size="small"
-                      icon={<EyeOutlined />}
-                      onClick={() => {
-                        const fileList = r.changed_files
-                        Modal.info({
-                          title: `📋 升级详情 — ${r.from_version || ''} → ${r.to_version || ''}`,
-                          width: 560,
-                          content: (
-                            <div style={{ marginTop: 8 }}>
-                              <p style={{ color: '#888', marginBottom: 8 }}>
-                                执行人：{r.admin} ｜ 时间：{r.timestamp}
-                              </p>
-                              {r.commits !== undefined && (
-                                <p style={{ color: '#888', marginBottom: 12 }}>
-                                  提交数：{r.commits}
-                                </p>
-                              )}
-                              {fileList && fileList.length > 0 ? (
-                                <div>
-                                  <div style={{ fontWeight: 600, marginBottom: 8 }}>
-                                    📄 变更文件（{fileList.length} 个）
-                                  </div>
-                                  <div style={{
-                                    maxHeight: 300, overflow: 'auto',
-                                    background: '#f6f8fa', borderRadius: 6, padding: '8px 12px',
-                                    fontSize: 13, fontFamily: 'monospace',
-                                  }}>
-                                    {fileList.map((f: string, i: number) => (
-                                      <div key={i} style={{ lineHeight: '24px' }}>{f}</div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          ),
-                          okText: '关闭',
-                        })
-                      }}
-                    />
-                    <Button type="link" size="small" danger
-                      icon={<DeleteOutlined />}
-                      onClick={() => handleDeleteHistory(r.task_id)}
-                    />
-                  </Space>
-                ),
-              },
-            ]}
-            pagination={{
-              current: histPage,
-              pageSize: histPageSize,
-              total: histTotal,
-              showSizeChanger: true,
-              pageSizeOptions: ['5', '10', '20', '50'],
-              onChange: (p, ps) => {
-                setHistPage(p)
-                setHistPageSize(ps)
-                loadHistory(p, ps)
-              },
-              showTotal: (t) => `共 ${t} 条`,
-            }}
-            size="small"
-            rowKey="task_id"
-            locale={{ emptyText: '暂无升级记录' }}
-          />
-        </Card>
-      </Spin>
     )
   }
 
