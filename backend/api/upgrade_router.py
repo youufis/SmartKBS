@@ -411,8 +411,11 @@ async def check_version(request: Request) -> VersionCheckResult:
         )
 
     latest = remote.get("latest_version", current)
-    has_update = latest != current
-    behind = await _count_behind() if (has_update and git_ok) else 0
+    behind = await _count_behind() if git_ok else 0
+
+    # 有更新条件：版本号不同 或 同版本内有新提交（热修复）
+    version_changed = latest != current
+    has_update = version_changed or (behind > 0)
 
     return VersionCheckResult(
         current_version=current,

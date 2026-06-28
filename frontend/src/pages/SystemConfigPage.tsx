@@ -527,7 +527,9 @@ const SystemConfigPage: React.FC = () => {
               </Descriptions.Item>
               <Descriptions.Item label="状态">
                 {verInfo.has_update
-                  ? <Tag color="green">📥 有新版本可用（落后 {verInfo.behind_commits} 个提交）</Tag>
+                  ? <Tag color="green">📥 {verInfo.latest_version !== verInfo.current_version
+                      ? `新版本 ${verInfo.latest_version} 可用`
+                      : `有 ${verInfo.behind_commits} 个新提交可更新`}（落后 {verInfo.behind_commits} 个提交）</Tag>
                   : <Tag>✅ 已是最新版本</Tag>}
               </Descriptions.Item>
               {verInfo.release_date && (
