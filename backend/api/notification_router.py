@@ -53,8 +53,8 @@ class AiGenerateAnnouncement(BaseModel):
 # ── 通知类型黑白名单 ──
 
 def _get_enabled_notification_types() -> set[str]:
-    """获取系统当前启用的通知类型，默认只启用考试通知"""
-    types = get_config_value("enabled_notification_types", ["exam"])
+    """获取系统当前启用的通知类型，默认启用考试和系统通知"""
+    types = get_config_value("enabled_notification_types", ["exam", "system"])
     return set(types)
 
 

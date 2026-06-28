@@ -45,6 +45,12 @@ async def startup():
         asyncio.ensure_future(try_sync_remote_config())
     except Exception:
         pass
+    try:
+        from backend.api.upgrade_router import start_auto_version_check
+        start_auto_version_check()
+    except Exception as e:
+        import sys
+        print(f"[main] 启动后台版本检测失败: {e}", file=sys.stderr)
 
 
 @app.on_event("shutdown") # type: ignore

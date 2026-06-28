@@ -834,3 +834,106 @@ async def delete_history_item(task_id: str, request: Request):
     s["history"] = new_history
     _save_state(s)
     return {"status": "ok", "message": "已删除"}
+
+
+# ═══════════════════════════════════════════════════════
+#  后台自动检测新版本
+# ═══════════════════════════════════════════════════════
+
+_AUTO_CHECK_INTERVAL = 6 * 3600  # 每 6 小时检测一次
+_AUTO_CHECK_STATE_KEY = "_auto_check_last_notified"
+
+
+async def _auto_check_worker():
+    """后台循环：定期检测远程是否有新版本，发现更新时通知所有管理员"""
+    logger.info("[auto-upgrade] 后台版本检测任务已启动")
+
+    while True:
+        try:
+            await _perform_version_check()
+        except Exception as e:
+            logger.warning(f"[auto-upgrade] 版本检测异常: {e}")
+
+        await asyncio.sleep(_AUTO_CHECK_INTERVAL)
+
+
+async def _perform_version_check():
+    """执行一次版本检测，发现新版本则通知管理员"""
+    remote = await _fetch_remote_version()
+    if remote is None:
+        return  # 网络不可达，跳过本次检测
+
+    latest = remote.get("latest_version", "")
+    current = APP_VERSION
+
+    # 检查是否有版本变化
+    has_new_version = latest != current
+
+    # 也检查同版本内的新提交
+    behind = 0
+    if _check_git_installed():
+        git_issues = _check_git_env()
+        if not git_issues:
+            try:
+                await _run_git(["fetch", "--all"], timeout=120)
+                out = await _run_git(
+                    ["rev-list", "--count", "HEAD..origin/master"], timeout=30
+                )
+                behind = int(out) if out else 0
+            except Exception:
+                behind = -1
+
+    has_update = has_new_version or (behind > 0)
+    if not has_update:
+        return
+
+    # 检查是否已经通知过这个版本，避免重复通知
+    s = _load_state()
+    last_notified = s.get(_AUTO_CHECK_STATE_KEY, "")
+    notify_key = f"{latest}:{behind}"
+    if last_notified == notify_key:
+        return  # 已通知过相同版本
+
+    # 通知所有管理员
+    try:
+        from backend.database import execute_query
+        rows = execute_query("SELECT username FROM users WHERE role=0")
+        admins = [row[0] for row in rows] if rows else []
+    except Exception:
+        admins = []
+
+    if not admins:
+        return
+
+    version_info = f"{current} → {latest}" if has_new_version else f"{current}（{behind} 个新提交）"
+    title = f"📥 新版本可用：{version_info}"
+
+    changelog = remote.get("changelog", [])
+    content = "更新内容：\n" + "\n".join(f"• {item}" for item in changelog) if changelog else "有新的代码更新可用，请前往「系统配置 → 版本管理」查看并升级。"
+
+    # 导入 notify_users 发送通知
+    from backend.api.notification_router import notify_users
+    notify_users(
+        usernames=admins,
+        type_="system",
+        title=title,
+        content=content,
+        related_link="/admin/system-config",
+    )
+    logger.info(f"[auto-upgrade] 已通知 {len(admins)} 位管理员: {title}")
+
+    # 记录已通知过的版本
+    s[_AUTO_CHECK_STATE_KEY] = notify_key
+    _save_state(s)
+
+
+def start_auto_version_check():
+    """在应用启动时调用，启动后台版本检测任务"""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(_auto_check_worker())
+        else:
+            loop.create_task(_auto_check_worker())
+    except Exception as e:
+        logger.error(f"[auto-upgrade] 启动后台检测失败: {e}")
