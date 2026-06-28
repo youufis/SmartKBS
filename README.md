@@ -406,7 +406,7 @@ python backend/main.py
 
 4. 升级失败自动回滚，进度实时显示
 
-> **💡 ZIP 部署也能用？** 首次点击「增量升级」时，系统会自动执行 `git init` + `git remote add` 初始化本地仓库，无需手动配置即可享受在线升级。
+> **💡** 首次点击「增量升级」时，系统会自动执行 `git init` + `git remote add` 初始化本地仓库，无需手动配置即可享受在线升级。
 
 ### PIP 国内镜像加速
 
@@ -416,7 +416,7 @@ pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
 ---
 
-## �🚀 快速开始
+## 🚀 快速开始
 
 ### 环境要求
 
