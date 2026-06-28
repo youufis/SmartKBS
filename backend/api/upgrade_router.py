@@ -5,7 +5,9 @@
 import asyncio
 import json
 import os
+import platform
 import shutil
+import subprocess
 import sys
 import tarfile
 import uuid
@@ -73,41 +75,59 @@ class UpgradeProgress(BaseModel):
 #  内部工具函数
 # ═══════════════════════════════════════════════════════
 
-async def _run_git(args: list[str], timeout: int = 120) -> str:
-    """执行 Git 命令，返回 stdout
-    设置环境变量 GIT_TERMINAL_PROMPT=0 防止 git 因需要认证而挂起等待输入
+async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
+    """执行 Git 命令
+
+    - capture_output=True: 返回 stdout（用于 fetch、rev-list 等需要输出的命令）
+    - capture_output=False: stdout/stderr 指向 DEVNULL（用于 archive -o 等写入文件的命令）
+    设置 GIT_TERMINAL_PROMPT=0 防止 git 因需要认证而挂起等待输入
     """
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
-    proc = await asyncio.create_subprocess_exec(
-        "git", *args,
+    kw: dict[str, Any] = dict(
         cwd=str(BASE_DIR),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
         env=env,
     )
+    if platform.system() == "Windows":
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    if capture_output:
+        kw["stdout"] = asyncio.subprocess.PIPE
+        kw["stderr"] = asyncio.subprocess.PIPE
+    else:
+        kw["stdout"] = asyncio.subprocess.DEVNULL
+        kw["stderr"] = asyncio.subprocess.DEVNULL
+    proc = await asyncio.create_subprocess_exec("git", *args, **kw)
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         if proc.returncode != 0:
-            raise RuntimeError(f"git {' '.join(args)} 失败: {stderr.decode()}")
-        return stdout.decode().strip()
+            msg = stderr.decode().strip() if stderr else "未知错误"
+            raise RuntimeError(f"git {' '.join(args)} 失败: {msg}")
+        return stdout.decode().strip() if stdout else ""
     except asyncio.TimeoutError:
         proc.kill()
         raise RuntimeError(f"Git 命令超时 ({timeout}s): {' '.join(args)}")
 
 
-async def _run_cmd(cmd: list[str], cwd: str, timeout: int = 120) -> str:
-    """执行任意 shell 命令"""
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+async def _run_cmd(cmd: list[str], cwd: str, timeout: int = 120, capture_output: bool = True) -> str:
+    """执行任意 shell 命令
+    capture_output=False 时 stdout/stderr 指向 DEVNULL（用于不需要输出的命令）
+    """
+    kw: dict[str, Any] = dict(cwd=cwd)
+    if platform.system() == "Windows":
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    if capture_output:
+        kw["stdout"] = asyncio.subprocess.PIPE
+        kw["stderr"] = asyncio.subprocess.PIPE
+    else:
+        kw["stdout"] = asyncio.subprocess.DEVNULL
+        kw["stderr"] = asyncio.subprocess.DEVNULL
+    proc = await asyncio.create_subprocess_exec(*cmd, **kw)
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         if proc.returncode != 0:
-            raise RuntimeError(f"{' '.join(cmd)} 失败: {stderr.decode()}")
-        return stdout.decode().strip()
+            msg = stderr.decode().strip() if stderr else "未知错误"
+            raise RuntimeError(f"{' '.join(cmd)} 失败: {msg}")
+        return stdout.decode().strip() if stdout else ""
     except asyncio.TimeoutError:
         proc.kill()
         raise RuntimeError(f"命令超时 ({timeout}s): {' '.join(cmd)}")
@@ -136,12 +156,12 @@ def _set_progress(step: str, message: str, progress: int):
 
 
 async def _restart_service():
-    """重启服务：优先 IIS appcmd，备选 taskkill"""
+    """重启服务：优先 IIS appcmd，备选 taskkill（均无需捕获输出）"""
     appcmd = os.path.expandvars("%windir%\\system32\\inetsrv\\appcmd.exe")
     try:
         await _run_cmd(
             [appcmd, "recycle", "apppool", "/apppool.name:SmartKBS"],
-            cwd=str(BASE_DIR), timeout=15,
+            cwd=str(BASE_DIR), timeout=15, capture_output=False,
         )
         logger.info("IIS 应用池已回收，服务重启完成")
     except Exception:
@@ -149,7 +169,7 @@ async def _restart_service():
         try:
             await _run_cmd(
                 ["taskkill", "/f", "/im", "python.exe"],
-                cwd=str(BASE_DIR), timeout=10,
+                cwd=str(BASE_DIR), timeout=10, capture_output=False,
             )
         except Exception:
             logger.warning("taskkill 未找到 python 进程（可能已退出）")
@@ -283,9 +303,9 @@ async def create_backup(request: Request):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
     try:
-        # 用 git archive 备份跟踪的文件（轻量、快速）
+        # 用 git archive 备份跟踪的文件（轻量、快速，输出到文件无需捕获）
         tar_path = backup_path.with_suffix(".tar")
-        await _run_git(["archive", "-o", str(tar_path), "HEAD"], timeout=30)
+        await _run_git(["archive", "-o", str(tar_path), "HEAD"], timeout=30, capture_output=False)
 
         # 额外备份数据库和配置（虽在 .gitignore 中，但很重要）
         prot_dir = backup_path / "protected"
@@ -293,7 +313,10 @@ async def create_backup(request: Request):
         for rel in ["backend/smartkb.db", "backend/system_config.json", "backend/.node_id"]:
             src = BASE_DIR / rel
             if src.exists():
-                shutil.copy2(src, prot_dir / src.name)
+                try:
+                    shutil.copy2(src, prot_dir / src.name)
+                except Exception as copy_err:
+                    logger.warning(f"备份 {rel} 跳过: {copy_err}")
 
         s = _load_state()
         s["current_backup"] = {
@@ -334,13 +357,18 @@ async def start_upgrade(request: Request):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     try:
         tar_path = backup_path.with_suffix(".tar")
-        await _run_git(["archive", "-o", str(tar_path), "HEAD"], timeout=30)
+        # archive 输出到文件，无需捕获 stdout
+        await _run_git(["archive", "-o", str(tar_path), "HEAD"], timeout=30, capture_output=False)
         prot_dir = backup_path / "protected"
         prot_dir.mkdir(parents=True, exist_ok=True)
+        # 数据库可能在运行中被锁定，尝试复制但不阻塞升级
         for rel in ["backend/smartkb.db", "backend/system_config.json"]:
             src = BASE_DIR / rel
             if src.exists():
-                shutil.copy2(src, prot_dir / src.name)
+                try:
+                    shutil.copy2(src, prot_dir / src.name)
+                except Exception as copy_err:
+                    logger.warning(f"备份 {rel} 跳过（文件可能被锁定）: {copy_err}")
         s = _load_state()
         s["current_backup"] = {"path": str(backup_path), "version": APP_VERSION}
         _save_state(s)
