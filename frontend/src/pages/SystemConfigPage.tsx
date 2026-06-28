@@ -387,13 +387,14 @@ const SystemConfigPage: React.FC = () => {
           <div>
             <p>升级过程将自动完成以下步骤：</p>
             <ol>
-              <li>自动备份当前源码和数据库</li>
               <li>从 GitHub 增量拉取最新代码（仅传输差异）</li>
+              <li>同步到 origin/master</li>
               <li>执行数据库迁移</li>
               <li>增量安装 Python 依赖</li>
               <li>重启服务（短暂离线后自动恢复）</li>
             </ol>
             <p style={{ color: 'red' }}>⚠️ 升级期间系统可能短暂不可用（通常 1-3 分钟）</p>
+            <p>💡 回滚机制：升级失败自动通过 git reflog 回滚，无需手动备份</p>
           </div>
         ),
         okText: '确认升级',

@@ -9,7 +9,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import tarfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -351,30 +350,6 @@ async def start_upgrade(request: Request):
     if remote.get("latest_version") == APP_VERSION:
         raise HTTPException(status_code=400, detail="已是最新版本，无需升级")
 
-    # 自动备份
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = BACKUP_DIR / f"pre_upgrade_{timestamp}"
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        tar_path = backup_path.with_suffix(".tar")
-        # archive 输出到文件，无需捕获 stdout
-        await _run_git(["archive", "-o", str(tar_path), "HEAD"], timeout=30, capture_output=False)
-        prot_dir = backup_path / "protected"
-        prot_dir.mkdir(parents=True, exist_ok=True)
-        # 数据库可能在运行中被锁定，尝试复制但不阻塞升级
-        for rel in ["backend/smartkb.db", "backend/system_config.json"]:
-            src = BASE_DIR / rel
-            if src.exists():
-                try:
-                    shutil.copy2(src, prot_dir / src.name)
-                except Exception as copy_err:
-                    logger.warning(f"备份 {rel} 跳过（文件可能被锁定）: {copy_err}")
-        s = _load_state()
-        s["current_backup"] = {"path": str(backup_path), "version": APP_VERSION}
-        _save_state(s)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"预升级备份失败: {str(e)}")
-
     task_id = uuid.uuid4().hex[:12]
     _state["running"] = True
     _state["task_id"] = task_id
@@ -452,17 +427,15 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
         _state["running"] = False
         _set_progress("failed", f"❌ 升级失败: {e}", -1)
 
-        # 自动回滚
-        s = _load_state()
-        backup = s.get("current_backup")
-        if backup:
-            logger.warning("升级失败，自动执行回滚...")
-            try:
-                await _rollback_to(Path(backup["path"]))
-                _set_progress("rolled_back", "已自动回滚到升级前状态", -2)
-            except Exception as rb_e:
-                logger.error(f"自动回滚失败: {rb_e}")
-                _set_progress("rollback_failed", f"回滚也失败，请手动处理: {rb_e}", -3)
+        # 自动回滚：利用 git reflog 回到升级前的 HEAD
+        logger.warning("升级失败，自动执行 git reflog 回滚...")
+        try:
+            await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=30)
+            logger.info("git reflog 回滚成功")
+            _set_progress("rolled_back", "已自动回滚到升级前状态", -2)
+        except Exception as rb_e:
+            logger.error(f"自动回滚失败: {rb_e}")
+            _set_progress("rollback_failed", f"回滚也失败，请手动处理: {rb_e}", -3)
 
         s = _load_state()
         s["history"].append({
@@ -487,26 +460,19 @@ async def get_status(request: Request) -> UpgradeProgress:
 
 @router.post("/rollback")
 async def rollback(request: Request):
-    """⑤ 回滚到最近的备份"""
+    """⑤ 回滚：利用 git reflog 回到升级前的 HEAD"""
     user = get_current_user(request)
     require_admin(user)
 
-    s = _load_state()
-    backup = s.get("current_backup")
-    if not backup:
-        raise HTTPException(status_code=404, detail="没有可用的备份")
-
-    backup_path = Path(backup["path"])
-    if not backup_path.exists():
-        raise HTTPException(status_code=404, detail="备份目录不存在")
-
     try:
-        await _rollback_to(backup_path)
+        # HEAD@{1} 是执行 git reset --hard origin/master 之前的位置
+        await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=30)
+        await _restart_service()
 
+        s = _load_state()
         s["history"].append({
             "task_id": f"rollback_{uuid.uuid4().hex[:8]}",
             "action": "rollback",
-            "from_backup": str(backup_path),
             "timestamp": datetime.now().isoformat(),
             "admin": user["username"],
             "status": "rolled_back",
@@ -516,29 +482,6 @@ async def rollback(request: Request):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"回滚失败: {str(e)}")
-
-
-async def _rollback_to(backup_path: Path):
-    """执行回滚：恢复源码 + 数据库 + 重启"""
-    tar_file = backup_path.with_suffix(".tar")
-
-    if tar_file.exists():
-        # 从 tar 恢复 git 跟踪的文件
-        await _run_git(["checkout", "--force", "HEAD"], timeout=15)
-        # 用 Python tarfile 模块解压（兼容 Windows，不依赖系统 tar 命令）
-        with tarfile.open(str(tar_file), "r") as _tar:
-            _tar.extractall(path=str(BASE_DIR))
-    else:
-        logger.warning("备份 tar 不存在，尝试 git reflog 回退")
-        await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=15)
-
-    # 恢复数据库和配置
-    prot_dir = backup_path / "protected"
-    if prot_dir.exists():
-        for f in prot_dir.iterdir():
-            shutil.copy2(f, BASE_DIR / "backend" / f.name)
-
-    await _restart_service()
 
 
 @router.get("/history")
