@@ -297,7 +297,7 @@ async def _run_cmd(cmd: list[str], cwd: str, timeout: int = 120, capture_output:
         raise RuntimeError(f"命令超时 ({timeout}s): {' '.join(cmd)}")
 
 
-def _load_state() -> dict:
+def _load_state() -> dict[str, Any]:
     if STATE_FILE.exists():
         try:
             return json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -306,7 +306,7 @@ def _load_state() -> dict:
     return {"history": [], "current_backup": None}
 
 
-def _save_state(s: dict):
+def _save_state(s: dict[str, Any]):
     STATE_FILE.write_text(
         json.dumps(s, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -343,7 +343,13 @@ async def _restart_service():
             logger.info("IIS 应用池已回收，服务重启完成")
             return
         except Exception as e:
-            logger.warning(f"IIS appcmd 回收失败: {e}")
+            hint = (
+                f"IIS 应用池回收失败，请检查应用池名称。\n"
+                f"如需自定义应用池名称，请设置环境变量 "
+                f"SMARTKB_APP_POOL=你的应用池名称"
+            )
+            _state["message"] = hint
+            logger.warning(f"IIS appcmd 回收失败: {e}\n💡 {hint}")
 
     # uvicorn 模式
     # 检查是否启用了 --reload (文件变动自动重启)
@@ -367,7 +373,9 @@ async def _restart_service():
         await _run_cmd(ps_cmd, cwd=str(BASE_DIR), timeout=10, capture_output=False)
         logger.info(f"已终止占用端口 {port} 的进程（uvicorn 将自动退出）")
     except Exception:
-        logger.warning("无法自动重启服务，请手动重启 uvicorn 使新代码生效")
+        msg = "无法自动重启服务，请手动重启 uvicorn 使新代码生效"
+        _state["message"] = msg
+        logger.warning(msg)
 
 
 async def _fetch_remote_version() -> dict[str, Any] | None:
@@ -421,6 +429,8 @@ def _run_migrations(from_version: str, to_version: str) -> list[str]:
                 spec = importlib.util.spec_from_file_location(
                     f"migrations.{mig.stem}", mig
                 )
+                if spec is None or spec.loader is None:
+                    raise RuntimeError(f"无法加载迁移脚本 {mig.name}")
                 mod = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(mod)
                 if hasattr(mod, "migrate"):
@@ -559,7 +569,9 @@ async def create_backup(request: Request):
                 try:
                     shutil.copy2(src, prot_dir / src.name)
                 except Exception as copy_err:
-                    logger.warning(f"备份 {rel} 跳过: {copy_err}")
+                    msg = f"备份 {rel} 跳过: {copy_err}"
+                    logger.warning(msg)
+                    _state["message"] = msg
 
         s = _load_state()
         s["current_backup"] = {
@@ -627,7 +639,7 @@ async def start_upgrade(request: Request):
     return {"status": "started", "task_id": task_id}
 
 
-async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
+async def _upgrade_pipeline(task_id: str, admin: str, remote: dict[str, Any]):
     """升级流水线：全部增量操作（每步单独 try/except 以便精确定位错误）"""
     to_version = remote.get("latest_version", "unknown")
     behind = 0
@@ -733,6 +745,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
         _set_progress("failed", f"❌ 升级失败: {e}", -1)
 
         # 自动回滚：利用 git reflog 回到升级前的 HEAD
+        _set_progress("rollback", "升级失败，正在自动回滚...", -1)
         logger.warning("升级失败，自动执行 git reflog 回滚...")
         try:
             await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=60)
