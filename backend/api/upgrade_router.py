@@ -145,7 +145,12 @@ async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = T
     def _run() -> str:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
-        # 通过 GIT_DIR / GIT_WORK_TREE 环境变量指定仓库和工作目录（比命令行参数更稳定）
+        # IIS 下 APPPOOL 身份可能缺少 HOME/USERPROFILE，
+        # 导致 git 无法创建临时文件。显式设置到 Temp 目录
+        temp_dir = str(BASE_DIR / "Temp")
+        env.setdefault("HOME", temp_dir)
+        env.setdefault("USERPROFILE", temp_dir)
+        # 通过 GIT_DIR / GIT_WORK_TREE 指定仓库
         env["GIT_DIR"] = str(BASE_DIR / ".git")
         env["GIT_WORK_TREE"] = str(BASE_DIR)
         return _run_subprocess(
