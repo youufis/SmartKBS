@@ -635,6 +635,18 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
         await _run_git(["reset", "--hard", "origin/master"], timeout=60)
         logger.info(f"[upgrade] Step 2/7: reset 完成")
 
+        # Step 2b: 获取变更文件列表
+        changed_files = []
+        try:
+            files_out = await _run_git(
+                ["diff", "--name-only", "HEAD@{1}", "HEAD"], timeout=30
+            )
+            if files_out:
+                changed_files = [f.strip() for f in files_out.split("\n") if f.strip()]
+        except Exception:
+            pass
+        logger.info(f"[upgrade] 变更文件: {len(changed_files)} 个")
+
         # ── Step 3: 数据库迁移 ──
         _set_progress("migrate", "执行数据库迁移...", 50)
         logger.info(f"[upgrade] Step 3/7: 数据库迁移")
@@ -673,6 +685,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
             "admin": admin,
             "status": "success",
             "commits": behind,
+            "changed_files": changed_files,
             "changelog": remote.get("changelog", []),
         })
         _save_state(s)
