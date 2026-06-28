@@ -162,7 +162,7 @@ const PortraitPage: React.FC = () => {
   const canGenerate = !todayExists && !generating
 
   // ─────────────────────────────────────────
-  // Tab 1: 今日创作
+  // Tab 1: 本周创作
   // ─────────────────────────────────────────
   const renderTodayTab = () => (
     <div>
@@ -271,7 +271,7 @@ const PortraitPage: React.FC = () => {
                 minHeight: 300,
                 borderLeft: `4px solid ${commentColor}`,
               }}
-              title={<Space><EditOutlined style={{ color: commentColor }} /><Text strong>AI 今日寄语</Text></Space>}
+              title={<Space><EditOutlined style={{ color: commentColor }} /><Text strong>AI 本周寄语</Text></Space>}
             >
               <Paragraph
                 style={{
@@ -836,7 +836,7 @@ const PortraitPage: React.FC = () => {
         items={[
           {
             key: 'today',
-            label: <span><PictureOutlined /> 今日创作</span>,
+            label: <span><PictureOutlined /> 本周创作</span>,
             children: renderTodayTab(),
           },
           {
