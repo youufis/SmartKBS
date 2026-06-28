@@ -40,6 +40,9 @@ coverage.xml
 *.cov
 *.lcov
 
+# ── IIS 部署配置（各环境不同，不参与版本管理）──
+web.config
+
 # ── 在线升级备份 ──
 .upgrade_backups/
 .upgrade_state.json
