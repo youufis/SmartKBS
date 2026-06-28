@@ -35,17 +35,11 @@ REMOTE_REPO_URL = "https://github.com/youufis/SmartKBS.git"
 # Git 常见错误 → 中文解决方案
 GIT_ERROR_TIPS: dict[str, str] = {
     "not a git repository": (
-        "部署目录没有 Git 仓库，无法执行升级。\n"
-        "请先在服务器上执行以下命令初始化：\n"
-        f"  cd {BASE_DIR}\n"
-        "  git init\n"
-        f"  git remote add origin {REMOTE_REPO_URL}\n"
-        "  git fetch origin master\n"
-        "  git reset --hard origin/master"
+        "部署目录没有 Git 仓库。重新点击「增量升级」系统将自动初始化。\n"
+        "（仅创建 .git 目录和配置远程，不会修改当前运行的文件）"
     ),
     "does not appear to be a git repository": (
-        "Git 远程仓库 (origin) 未配置。请执行：\n"
-        f"  git remote add origin {REMOTE_REPO_URL}"
+        "Git 远程仓库未配置。重新点击「增量升级」系统将自动修复。"
     ),
     "Could not read from remote repository": "无法连接 GitHub，服务器网络可能被防火墙拦截。",
     "Connection refused": "连接 GitHub 被拒绝（端口 443），请检查防火墙设置。",
@@ -63,6 +57,54 @@ GIT_ERROR_TIPS: dict[str, str] = {
     ),
     "Connection was reset": "连接被重置，可能是网络不稳定或防火墙中断了连接。",
 }
+
+
+def _git_setup_repo() -> None:
+    """仅初始化 .git 目录 + 配置远程仓库，不修改任何工作文件"""
+    git_dir = BASE_DIR / ".git"
+    if not git_dir.exists():
+        _run_subprocess_sync(["git", "init"], cwd=str(BASE_DIR), timeout=10)
+
+    # 检查并配置 remote（仅当缺失时添加）
+    env = os.environ.copy()
+    env["GIT_DIR"] = str(git_dir)
+    env["GIT_WORK_TREE"] = str(BASE_DIR)
+    r = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        capture_output=True, timeout=5, stdin=subprocess.DEVNULL,
+        cwd=str(BASE_DIR), env=env,
+    )
+    if r.returncode != 0:
+        _run_subprocess_sync(
+            ["git", "remote", "add", "origin", REMOTE_REPO_URL],
+            cwd=str(BASE_DIR), timeout=10, env=env,
+        )
+
+
+def _run_subprocess_sync(
+    cmd: list[str],
+    *,
+    cwd: str = str(BASE_DIR),
+    timeout: int = 120,
+    env: dict[str, str] | None = None,
+) -> str:
+    """同步执行子进程（不在线程池，用于预检和初始化场景）"""
+    kw: dict[str, Any] = dict(
+        cwd=cwd, timeout=timeout,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        startupinfo=_make_startupinfo(),
+    )
+    if platform.system() == "Windows":
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    if env:
+        kw["env"] = env
+    result = subprocess.run(cmd, **kw)
+    if result.returncode != 0:
+        msg = result.stderr.decode().strip() if result.stderr else "未知错误"
+        raise RuntimeError(f"{' '.join(cmd)} 失败: {msg}")
+    return result.stdout.decode().strip() if result.stdout else ""
 
 
 def _check_git_installed() -> bool:
@@ -229,26 +271,14 @@ def _run_subprocess(
 
 
 async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
-    """执行 Git 命令（subprocess.run + asyncio.to_thread）
-    显式指定 --git-dir 和 --work-tree，避免 IIS 下当前目录环境不一致导致找不到 .git
-    """
+    """执行 Git 命令（subprocess.run + asyncio.to_thread）"""
     def _run() -> str:
-        env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
-        # IIS 下 APPPOOL 身份可能缺少 HOME/USERPROFILE，
-        # 导致 git 无法创建临时文件。显式设置到 Temp 目录
-        temp_dir = str(BASE_DIR / "Temp")
-        env.setdefault("HOME", temp_dir)
-        env.setdefault("USERPROFILE", temp_dir)
-        # 通过 GIT_DIR / GIT_WORK_TREE 指定仓库
-        env["GIT_DIR"] = str(BASE_DIR / ".git")
-        env["GIT_WORK_TREE"] = str(BASE_DIR)
         return _run_subprocess(
             ["git", *args],
             cwd=str(BASE_DIR),
             timeout=timeout,
             capture_output=capture_output,
-            env=env,
+            env=_make_git_env(),
         )
     try:
         return await asyncio.to_thread(_run)
@@ -304,7 +334,9 @@ async def _restart_service():
         appcmd = os.path.expandvars("%windir%\\system32\\inetsrv\\appcmd.exe")
         try:
             await _run_cmd(
-                [appcmd, "recycle", "apppool", "/apppool.name:SmartKBS"],
+                # IIS 应用池名称可通过环境变量 SMARTKB_APP_POOL 自定义，默认 SmartKBS
+                [appcmd, "recycle", "apppool",
+                 f"/apppool.name:{os.environ.get('SMARTKB_APP_POOL', 'SmartKBS')}"],
                 cwd=str(BASE_DIR), timeout=15, capture_output=False,
             )
             logger.info("IIS 应用池已回收，服务重启完成")
@@ -350,7 +382,7 @@ async def _fetch_remote_version() -> dict[str, Any] | None:
 
 
 async def _count_behind() -> int:
-    """计算本地落后 origin/master 的 commit 数"""
+    """获取远程最新并计算落后 commit 数（用于升级前确认）"""
     try:
         await _run_git(["fetch", "--all"], timeout=120)
         out = await _run_git(
@@ -359,6 +391,32 @@ async def _count_behind() -> int:
         return int(out)
     except Exception:
         return -1
+
+
+def _count_local_behind() -> int:
+    """仅基于本地 ref 计算落后 commit 数（无网络请求，用于版本检测）"""
+    try:
+        env = _make_git_env()
+        r = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD..origin/master"],
+            capture_output=True, timeout=15, stdin=subprocess.DEVNULL,
+            cwd=str(BASE_DIR), env=env,
+        )
+        return int(r.stdout.decode().strip()) if r.returncode == 0 else -1
+    except Exception:
+        return -1
+
+
+def _make_git_env() -> dict[str, str]:
+    """构建统一的 Git 环境变量"""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    temp_dir = str(BASE_DIR / "Temp")
+    env.setdefault("HOME", temp_dir)
+    env.setdefault("USERPROFILE", temp_dir)
+    env["GIT_DIR"] = str(BASE_DIR / ".git")
+    env["GIT_WORK_TREE"] = str(BASE_DIR)
+    return env
 
 
 def _run_migrations(from_version: str, to_version: str) -> list[str]:
@@ -424,6 +482,7 @@ async def check_version(request: Request) -> VersionCheckResult:
 
     git_ok = _check_git_installed()
     git_issues = _check_git_env() if git_ok else []
+    auto_setup = _can_auto_setup() if git_ok else False
     remote = await _fetch_remote_version()
     current = APP_VERSION
 
@@ -440,7 +499,7 @@ async def check_version(request: Request) -> VersionCheckResult:
         )
 
     latest = remote.get("latest_version", current)
-    behind = await _count_behind() if git_ok else 0
+    behind = _count_local_behind() if git_ok else 0
 
     # 有更新条件：版本号不同 或 同版本内有新提交（热修复）
     version_changed = latest != current
@@ -516,10 +575,17 @@ async def start_upgrade(request: Request):
     if _state["running"]:
         raise HTTPException(status_code=409, detail="已有升级任务运行中")
 
-    # 预检 Git 环境
-    issues = _check_git_env()
-    if issues:
-        raise HTTPException(status_code=400, detail="\n\n".join(issues))
+    # 预检 Git 环境，缺失时自动初始化（仅创建 .git + 配置 remote，不影响运行文件）
+    git_issues = _check_git_env()
+    if git_issues:
+        if _can_auto_setup():
+            try:
+                _git_setup_repo()
+                logger.info("Git 仓库已自动初始化")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Git 自动初始化失败: {e}")
+        else:
+            raise HTTPException(status_code=400, detail="\n\n".join(git_issues))
 
     # 检查是否有可更新的内容（版本不同 或 同版本内有新提交）
     remote = await _fetch_remote_version()
@@ -702,6 +768,27 @@ async def cancel_upgrade(request: Request):
         "message": "升级状态已重置",
         "was_running": was_running,
     }
+
+
+def _can_auto_setup() -> bool:
+    """判断是否可以一键初始化 Git 仓库（Git 已安装，但 .git 或 remote 缺失）"""
+    if not _check_git_installed():
+        return False
+    git_dir = BASE_DIR / ".git"
+    if not git_dir.exists():
+        return True
+    # .git 存在但 remote 缺失
+    try:
+        env = os.environ.copy()
+        env["GIT_DIR"] = str(git_dir)
+        r = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, timeout=5, stdin=subprocess.DEVNULL,
+            cwd=str(BASE_DIR), env=env,
+        )
+        return r.returncode != 0
+    except Exception:
+        return False
 
 
 @router.get("/history")
