@@ -651,38 +651,22 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
 
         # ── Step 4: pip install ──
         _set_progress("pip", "正在增量安装 Python 依赖...", 65)
-        logger.info(f"[upgrade] Step 4/8: pip install")
+        logger.info(f"[upgrade] Step 4/7: pip install")
         await _run_cmd(
             [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
             cwd=str(BASE_DIR), timeout=600,
         )
-        logger.info(f"[upgrade] Step 4/8: pip 完成")
+        logger.info(f"[upgrade] Step 4/7: pip 完成")
 
-        # ── Step 5: 构建前端 ──
-        _set_progress("frontend_build", "正在构建前端（npm run build）...", 75)
-        logger.info(f"[upgrade] Step 5/8: npm run build (前端)")
-        _npm = shutil.which("npm")
-        if _npm:
-            try:
-                await _run_cmd(
-                    [_npm, "run", "build"],
-                    cwd=str(BASE_DIR / "frontend"), timeout=120,
-                )
-                logger.info(f"[upgrade] Step 5/8: 前端构建完成")
-            except Exception as e:
-                logger.warning(f"前端构建失败（跳过，不影响服务运行）: {e}")
-        else:
-            logger.warning("npm 未安装，跳过前端构建（请手动执行 npm run build）")
-
-        # ── Step 6: 重载模块版本 ──
+        # ── Step 5: 重载模块版本 ──
         try:
             import backend.config as cfg
             cfg.APP_VERSION = to_version
         except Exception:
             pass
-        logger.info(f"[upgrade] Step 6/8: 版本号已更新")
+        logger.info(f"[upgrade] Step 5/7: 版本号已更新")
 
-        # ── Step 7: 记录历史 ──
+        # ── Step 6: 记录历史 ──
         s = _load_state()
         s["history"].append({
             "task_id": task_id,
@@ -695,11 +679,11 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
             "changelog": remote.get("changelog", []),
         })
         _save_state(s)
-        logger.info(f"[upgrade] Step 7/8: 历史已记录")
+        logger.info(f"[upgrade] Step 6/7: 历史已记录")
 
-        # ── Step 8: 重启服务 ──
+        # ── Step 7: 重启服务 ──
         _set_progress("restart", "正在重启服务（短暂离线）...", 95)
-        logger.info(f"[upgrade] Step 8/8: 重启服务")
+        logger.info(f"[upgrade] Step 7/7: 重启服务")
         await _restart_service()
 
         _set_progress("done", f"✅ 升级完成！{APP_VERSION} → {to_version}（{behind} 个提交）", 100)
