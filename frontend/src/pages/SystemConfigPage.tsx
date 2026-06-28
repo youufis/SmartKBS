@@ -640,7 +640,6 @@ const SystemConfigPage: React.FC = () => {
                     <Button type="link" size="small"
                       icon={<EyeOutlined />}
                       onClick={() => {
-                        const changelog = r.changelog
                         const fileList = r.changed_files
                         Modal.info({
                           title: `📋 升级详情 — ${r.from_version || ''} → ${r.to_version || ''}`,
@@ -655,19 +654,13 @@ const SystemConfigPage: React.FC = () => {
                                   提交数：{r.commits}
                                 </p>
                               )}
-                              {changelog && changelog.length > 0 && (
-                                <>
-                                  <div style={{ fontWeight: 600, marginBottom: 8 }}>📋 更新日志</div>
-                                  <Timeline items={changelog.map((c: string) => ({ children: c }))} />
-                                </>
-                              )}
-                              {fileList && fileList.length > 0 && (
-                                <div style={{ marginTop: 16 }}>
+                              {fileList && fileList.length > 0 ? (
+                                <div>
                                   <div style={{ fontWeight: 600, marginBottom: 8 }}>
                                     📄 变更文件（{fileList.length} 个）
                                   </div>
                                   <div style={{
-                                    maxHeight: 200, overflow: 'auto',
+                                    maxHeight: 300, overflow: 'auto',
                                     background: '#f6f8fa', borderRadius: 6, padding: '8px 12px',
                                     fontSize: 13, fontFamily: 'monospace',
                                   }}>
@@ -676,8 +669,7 @@ const SystemConfigPage: React.FC = () => {
                                     ))}
                                   </div>
                                 </div>
-                              )}
-                              {(!changelog || changelog.length === 0) && (!fileList || fileList.length === 0) && (
+                              ) : (
                                 <p style={{ color: '#999', marginTop: 12 }}>本次升级无详细更新日志</p>
                               )}
                             </div>
