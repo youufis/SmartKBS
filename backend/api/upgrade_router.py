@@ -393,20 +393,6 @@ async def _count_behind() -> int:
         return -1
 
 
-def _count_local_behind() -> int:
-    """仅基于本地 ref 计算落后 commit 数（无网络请求，用于版本检测）"""
-    try:
-        env = _make_git_env()
-        r = subprocess.run(
-            ["git", "rev-list", "--count", "HEAD..origin/master"],
-            capture_output=True, timeout=15, stdin=subprocess.DEVNULL,
-            cwd=str(BASE_DIR), env=env,
-        )
-        return int(r.stdout.decode().strip()) if r.returncode == 0 else -1
-    except Exception:
-        return -1
-
-
 def _make_git_env() -> dict[str, str]:
     """构建统一的 Git 环境变量"""
     env = os.environ.copy()
@@ -499,7 +485,18 @@ async def check_version(request: Request) -> VersionCheckResult:
         )
 
     latest = remote.get("latest_version", current)
-    behind = _count_local_behind() if git_ok else 0
+
+    # 先执行 git fetch 刷新本地 ref，确保能检测到同版本内的新提交
+    behind = 0
+    if git_ok and not git_issues:
+        try:
+            await _run_git(["fetch", "--all"], timeout=120)
+            out = await _run_git(
+                ["rev-list", "--count", "HEAD..origin/master"], timeout=30
+            )
+            behind = int(out) if out else 0
+        except Exception:
+            behind = -1
 
     # 有更新条件：版本号不同 或 同版本内有新提交（热修复）
     version_changed = latest != current
