@@ -9,6 +9,12 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
+# ── pip 缓存（升级时可能产生）──
+pip/
+.pip/
+**/pip/
+**/.pip/
+
 # ── Node ──
 node_modules/
 
