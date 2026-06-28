@@ -14,6 +14,7 @@ import { useAuthStore } from '../stores/authStore'
 import {
   checkVersion, startUpgrade, getUpgradeStatus,
   rollback as apiRollback, getHistory, deleteHistory,
+  cancelUpgrade,
   type VersionInfo, type UpgradeProgress,
 } from '../api/upgrade'
 
@@ -577,10 +578,31 @@ const SystemConfigPage: React.FC = () => {
         )}
 
         {/* 升级进度 */}
-        {upgradeProg && upgradeProg.running && (
-          <Card title="🔄 升级进度" style={{ marginBottom: 16 }}>
+        {(upgradeProg && upgradeProg.running) && (
+          <Card title="🔄 升级进度" style={{ marginBottom: 16 }}
+            extra={
+              <Button size="small" danger
+                onClick={async () => {
+                  try {
+                    await cancelUpgrade()
+                    message.warning('升级已取消')
+                    setUpgrading(false)
+                    setUpgradeProg(null)
+                    if (pollRef.current) clearInterval(pollRef.current)
+                    loadVersion()
+                    loadHistory()
+                  } catch (e: any) {
+                    message.error('取消失败: ' + (e?.response?.data?.detail || e.message))
+                  }
+                }}
+              >
+                取消升级
+              </Button>
+            }
+          >
             <Progress percent={Math.max(0, upgradeProg.progress)} />
             <p style={{ marginTop: 8 }}>{upgradeProg.message}</p>
+            <p style={{ fontSize: 12, color: '#999' }}>如长时间无响应可点击右上角「取消升级」</p>
             {upgradeProg.error && (
               <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
             )}

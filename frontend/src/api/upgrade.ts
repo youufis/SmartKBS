@@ -67,6 +67,12 @@ export async function rollback(): Promise<{ status: string; message: string }> {
   return data
 }
 
+/** 取消/重置升级状态（当升级卡死时使用） */
+export async function cancelUpgrade(): Promise<{ status: string; message: string }> {
+  const { data } = await apiClient.post('/api/system/upgrade/cancel')
+  return data
+}
+
 /** 获取升级历史（分页） */
 export async function getHistory(page = 1, pageSize = 10): Promise<{
   history: UpgradeHistoryItem[]

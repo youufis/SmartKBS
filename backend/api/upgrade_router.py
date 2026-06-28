@@ -644,6 +644,31 @@ async def rollback(request: Request):
         raise HTTPException(status_code=500, detail=f"回滚失败: {str(e)}")
 
 
+@router.post("/cancel")
+async def cancel_upgrade(request: Request):
+    """强制重置升级状态（当升级卡死时使用）"""
+    user = get_current_user(request)
+    require_admin(user)
+
+    was_running = _state["running"]
+    old_step = _state["step"]
+    _state["running"] = False
+    _state["task_id"] = None
+    _state["step"] = ""
+    _state["progress"] = 0
+    _state["message"] = ""
+    _state["error"] = None
+    _state["started_at"] = None
+
+    logger.warning(f"管理员 {user['username']} 强制重置了升级状态 (之前: running={was_running}, step={old_step})")
+
+    return {
+        "status": "ok",
+        "message": "升级状态已重置",
+        "was_running": was_running,
+    }
+
+
 @router.get("/history")
 async def get_upgrade_history(
     request: Request,
