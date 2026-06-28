@@ -1,5 +1,0 @@
-{
-  "typescript.tsdk": "frontend/node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true,
-  "python-envs.defaultEnvManager": "ms-python.python:system"
-}

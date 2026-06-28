@@ -3,6 +3,9 @@ backend/system_config.json
 .env
 **/.env
 
+# ── VS Code（每台机器独立，不共享）──
+.vscode/
+
 # ── Python ──
 .venv/
 __pycache__/
