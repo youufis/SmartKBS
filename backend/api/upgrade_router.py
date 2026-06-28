@@ -74,34 +74,65 @@ class UpgradeProgress(BaseModel):
 #  内部工具函数
 # ═══════════════════════════════════════════════════════
 
-async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
-    """执行 Git 命令（同步 subprocess.run 跑在 asyncio.to_thread 中，
-    避免 Windows + IIS 下 asyncio.create_subprocess_exec + PIPE 的 [WinError 6] 问题）
+def _make_startupinfo() -> subprocess.STARTUPINFO | None:
+    """Windows 下创建隐藏窗口的 startupinfo（避免弹控制台窗口）"""
+    if platform.system() == "Windows":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = subprocess.SW_HIDE
+        return si
+    return None
 
-    - capture_output=True: 返回 stdout（用于 fetch、rev-list 等）
-    - capture_output=False: stdout/stderr 指向 DEVNULL（用于 archive -o 等）
+
+def _run_subprocess(
+    cmd: list[str],
+    *,
+    cwd: str = str(BASE_DIR),
+    timeout: int = 120,
+    capture_output: bool = True,
+    env: dict[str, str] | None = None,
+) -> str:
+    """同步执行子进程（统一入口）
+
+    - 始终设置 stdin=DEVNULL，避免 IIS 下父进程 stdin 句柄无效导致 [WinError 6]
+    - Windows 下使用 STARTUPINFO 隐藏控制台窗口
+    - capture_output=True 时用 PIPE 捕获输出，否则用 DEVNULL
     """
+    kw: dict[str, Any] = dict(
+        cwd=cwd,
+        timeout=timeout,
+        stdin=subprocess.DEVNULL,  # ← 关键：不继承父进程可能无效的 stdin
+        startupinfo=_make_startupinfo(),
+    )
+    if platform.system() == "Windows":
+        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+    if capture_output:
+        kw["stdout"] = subprocess.PIPE
+        kw["stderr"] = subprocess.PIPE
+    else:
+        kw["stdout"] = subprocess.DEVNULL
+        kw["stderr"] = subprocess.DEVNULL
+    if env:
+        kw["env"] = env
+
+    result = subprocess.run(cmd, **kw)
+    if result.returncode != 0:
+        msg = result.stderr.decode().strip() if result.stderr else "未知错误"
+        raise RuntimeError(f"{' '.join(cmd)} 失败: {msg}")
+    return result.stdout.decode().strip() if result.stdout else ""
+
+
+async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
+    """执行 Git 命令（subprocess.run + asyncio.to_thread）"""
     def _run() -> str:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
-        kw: dict[str, Any] = dict(
-            cwd=str(BASE_DIR),
-            env=env,
+        return _run_subprocess(
+            ["git", *args],
             timeout=timeout,
+            capture_output=capture_output,
+            env=env,
         )
-        if platform.system() == "Windows":
-            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-        if capture_output:
-            kw["stdout"] = subprocess.PIPE
-            kw["stderr"] = subprocess.PIPE
-        else:
-            kw["stdout"] = subprocess.DEVNULL
-            kw["stderr"] = subprocess.DEVNULL
-        result = subprocess.run(["git", *args], **kw)
-        if result.returncode != 0:
-            msg = result.stderr.decode().strip() if result.stderr else "未知错误"
-            raise RuntimeError(f"git {' '.join(args)} 失败: {msg}")
-        return result.stdout.decode().strip() if result.stdout else ""
     try:
         return await asyncio.to_thread(_run)
     except subprocess.TimeoutExpired:
@@ -109,22 +140,9 @@ async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = T
 
 
 async def _run_cmd(cmd: list[str], cwd: str, timeout: int = 120, capture_output: bool = True) -> str:
-    """执行任意 shell 命令（同步 subprocess.run + asyncio.to_thread）"""
+    """执行任意 shell 命令（subprocess.run + asyncio.to_thread）"""
     def _run() -> str:
-        kw: dict[str, Any] = dict(cwd=cwd, timeout=timeout)
-        if platform.system() == "Windows":
-            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-        if capture_output:
-            kw["stdout"] = subprocess.PIPE
-            kw["stderr"] = subprocess.PIPE
-        else:
-            kw["stdout"] = subprocess.DEVNULL
-            kw["stderr"] = subprocess.DEVNULL
-        result = subprocess.run(cmd, **kw)
-        if result.returncode != 0:
-            msg = result.stderr.decode().strip() if result.stderr else "未知错误"
-            raise RuntimeError(f"{' '.join(cmd)} 失败: {msg}")
-        return result.stdout.decode().strip() if result.stdout else ""
+        return _run_subprocess(cmd, cwd=cwd, timeout=timeout, capture_output=capture_output)
     try:
         return await asyncio.to_thread(_run)
     except subprocess.TimeoutExpired:
@@ -361,43 +379,55 @@ async def start_upgrade(request: Request):
 
 
 async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
-    """升级流水线：全部增量操作"""
+    """升级流水线：全部增量操作（每步单独 try/except 以便精确定位错误）"""
     to_version = remote.get("latest_version", "unknown")
+    behind = 0
     try:
         # ── Step 1: git fetch 增量拉取 ──
         _set_progress("fetch", "正在获取远程更新（增量传输差异代码）...", 10)
+        logger.info(f"[upgrade] Step 1/7: git fetch --all")
         await _run_git(["fetch", "--all"], timeout=60)
+        logger.info(f"[upgrade] Step 1/7: fetch 完成")
+
+        # Step 1b: 计算 commit 数
         behind = int(await _run_git(
             ["rev-list", "--count", "HEAD..origin/master"], timeout=15
         ))
-        logger.info(f"检测到落后 {behind} 个提交，开始增量同步")
+        logger.info(f"[upgrade] 落后 {behind} 个提交")
 
         # ── Step 2: git reset 快速同步 ──
         _set_progress("sync", f"正在同步 {behind} 个提交的变更到本地...", 30)
+        logger.info(f"[upgrade] Step 2/7: git reset --hard origin/master")
         await _run_git(["reset", "--hard", "origin/master"], timeout=30)
+        logger.info(f"[upgrade] Step 2/7: reset 完成")
 
         # ── Step 3: 数据库迁移 ──
         _set_progress("migrate", "执行数据库迁移...", 50)
+        logger.info(f"[upgrade] Step 3/7: 数据库迁移")
         try:
             applied = _run_migrations(APP_VERSION, to_version)
             if applied:
-                logger.info(f"数据库迁移完成: {', '.join(applied)}")
+                logger.info(f"[upgrade] 数据库迁移完成: {', '.join(applied)}")
         except RuntimeError as e:
             raise RuntimeError(f"数据库迁移失败，将自动回滚: {e}")
+        logger.info(f"[upgrade] Step 3/7: 迁移完成")
 
         # ── Step 4: pip install ──
         _set_progress("pip", "正在增量安装 Python 依赖...", 65)
+        logger.info(f"[upgrade] Step 4/7: pip install")
         await _run_cmd(
             [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
             cwd=str(BASE_DIR), timeout=300,
         )
+        logger.info(f"[upgrade] Step 4/7: pip 完成")
 
-        # ── Step 5: 重载模块版本（不重启进程） ──
+        # ── Step 5: 重载模块版本 ──
         try:
             import backend.config as cfg
-            cfg.APP_VERSION = to_version  # 热更新版本号
+            cfg.APP_VERSION = to_version
         except Exception:
             pass
+        logger.info(f"[upgrade] Step 5/7: 版本号已更新")
 
         # ── Step 6: 记录历史 ──
         s = _load_state()
@@ -411,14 +441,16 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
             "commits": behind,
         })
         _save_state(s)
+        logger.info(f"[upgrade] Step 6/7: 历史已记录")
 
         # ── Step 7: 重启服务 ──
         _set_progress("restart", "正在重启服务（短暂离线）...", 95)
+        logger.info(f"[upgrade] Step 7/7: 重启服务")
         await _restart_service()
 
         _set_progress("done", f"✅ 升级完成！{APP_VERSION} → {to_version}（{behind} 个提交）", 100)
         _state["running"] = False
-        logger.info(f"在线增量升级成功: {APP_VERSION} → {to_version}")
+        logger.info(f"[upgrade] 在线增量升级成功: {APP_VERSION} → {to_version}")
 
     except Exception as e:
         logger.error(f"升级失败: {e}")
