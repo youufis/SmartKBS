@@ -15,6 +15,7 @@ node_modules/
 # ── 运行时 ──
 LogFiles/
 temp_uploads/
+-w
 
 # ── 数据库 ──
 backend/smartkb.db
