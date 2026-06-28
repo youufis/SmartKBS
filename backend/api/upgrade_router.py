@@ -575,16 +575,24 @@ async def start_upgrade(request: Request):
     if _state["running"]:
         raise HTTPException(status_code=409, detail="已有升级任务运行中")
 
-    # 预检 Git 环境，缺失时自动初始化（仅创建 .git + 配置 remote，不影响运行文件）
+    # ── 预检并自动修复 Git 环境 ──
     git_issues = _check_git_env()
     if git_issues:
         if _can_auto_setup():
             try:
                 _git_setup_repo()
-                logger.info("Git 仓库已自动初始化")
+                logger.info("Git 仓库已自动初始化（git init + remote add）")
+                # 修复后重新验证
+                remaining = _check_git_env()
+                if remaining:
+                    raise HTTPException(status_code=500,
+                        detail="Git 环境自动修复后仍存在问题，请手动处理：\n" + "\n".join(remaining))
+            except HTTPException:
+                raise
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Git 自动初始化失败: {e}")
         else:
+            # 不可自动修复（如 Git 未安装），给用户明确指引
             raise HTTPException(status_code=400, detail="\n\n".join(git_issues))
 
     # 检查是否有可更新的内容（版本不同 或 同版本内有新提交）
