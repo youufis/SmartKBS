@@ -452,7 +452,7 @@ npm run dev
 
 ### 4️⃣ 配置 AI 服务
 
-在 _系统配置_ 页面设置 DashScope API Key 或 DeepSeek API Key，
+在 _系统配置_ 页面设置 DashScope API Key
 
 ---
 
