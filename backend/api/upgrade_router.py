@@ -288,24 +288,53 @@ def _set_progress(step: str, message: str, progress: int):
     _state["progress"] = progress
 
 
-async def _restart_service():
-    """重启服务：优先 IIS appcmd，备选 taskkill（均无需捕获输出）"""
+def _is_running_under_iis() -> bool:
+    """检测是否运行在 IIS httpPlatform 下"""
+    # IIS httpPlatform 会设置 HTTP_PLATFORM_PORT 环境变量
+    if os.environ.get("HTTP_PLATFORM_PORT"):
+        return True
+    # 检查 appcmd.exe 是否存在（IIS 管理工具）
     appcmd = os.path.expandvars("%windir%\\system32\\inetsrv\\appcmd.exe")
-    try:
-        await _run_cmd(
-            [appcmd, "recycle", "apppool", "/apppool.name:SmartKBS"],
-            cwd=str(BASE_DIR), timeout=15, capture_output=False,
-        )
-        logger.info("IIS 应用池已回收，服务重启完成")
-    except Exception:
-        logger.warning("appcmd 回收失败，尝试 taskkill 重启 uvicorn")
+    return os.path.isfile(appcmd)
+
+
+async def _restart_service():
+    """重启服务：自动检测 IIS 或 uvicorn 模式"""
+    if _is_running_under_iis():
+        appcmd = os.path.expandvars("%windir%\\system32\\inetsrv\\appcmd.exe")
         try:
             await _run_cmd(
-                ["taskkill", "/f", "/im", "python.exe"],
-                cwd=str(BASE_DIR), timeout=10, capture_output=False,
+                [appcmd, "recycle", "apppool", "/apppool.name:SmartKBS"],
+                cwd=str(BASE_DIR), timeout=15, capture_output=False,
             )
-        except Exception:
-            logger.warning("taskkill 未找到 python 进程（可能已退出）")
+            logger.info("IIS 应用池已回收，服务重启完成")
+            return
+        except Exception as e:
+            logger.warning(f"IIS appcmd 回收失败: {e}")
+
+    # uvicorn 模式
+    # 检查是否启用了 --reload (文件变动自动重启)
+    import sys as _sys
+    has_reload = any("--reload" in a for a in _sys.argv)
+    if has_reload:
+        logger.info("检测到 uvicorn --reload 模式，服务将自动检测文件变更重启")
+        return
+
+    # 尝试通过 taskkill 仅杀当前端口的 uvicorn 进程
+    try:
+        from backend.config import SERVER_PORT
+        port = SERVER_PORT
+        # 用 PowerShell 查找占用指定端口的进程并终止
+        ps_cmd = [
+            "powershell", "-Command",
+            f"Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue "
+            f"| Select-Object -ExpandProperty OwningProcess "
+            f"| ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }}"
+        ]
+        await _run_cmd(ps_cmd, cwd=str(BASE_DIR), timeout=10, capture_output=False)
+        logger.info(f"已终止占用端口 {port} 的进程（uvicorn 将自动退出）")
+    except Exception:
+        logger.warning("无法自动重启服务，请手动重启 uvicorn 使新代码生效")
 
 
 async def _fetch_remote_version() -> dict[str, Any] | None:
