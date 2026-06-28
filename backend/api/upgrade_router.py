@@ -105,12 +105,15 @@ def _check_git_env() -> list[str]:
         )
         return issues
 
-    # 3. remote origin 是否配置
+    # 3. remote origin 是否配置（和 _run_git 一样设置 GIT_DIR/GIT_WORK_TREE）
     try:
+        env = os.environ.copy()
+        env["GIT_DIR"] = str(BASE_DIR / ".git")
+        env["GIT_WORK_TREE"] = str(BASE_DIR)
         r = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             capture_output=True, timeout=5, stdin=subprocess.DEVNULL,
-            cwd=str(BASE_DIR),
+            cwd=str(BASE_DIR), env=env,
         )
         if r.returncode != 0:
             issues.append(
