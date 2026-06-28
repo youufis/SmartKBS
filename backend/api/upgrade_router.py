@@ -311,7 +311,7 @@ async def _restart_service():
 async def _fetch_remote_version() -> dict[str, Any] | None:
     """从 GitHub 获取 version.json 元数据"""
     try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
             resp = await c.get(REMOTE_VERSION_URL)
             if resp.status_code == 200:
                 return resp.json()
@@ -323,9 +323,9 @@ async def _fetch_remote_version() -> dict[str, Any] | None:
 async def _count_behind() -> int:
     """计算本地落后 origin/master 的 commit 数"""
     try:
-        await _run_git(["fetch", "--all"], timeout=30)
+        await _run_git(["fetch", "--all"], timeout=120)
         out = await _run_git(
-            ["rev-list", "--count", "HEAD..origin/master"], timeout=15
+            ["rev-list", "--count", "HEAD..origin/master"], timeout=30
         )
         return int(out)
     except Exception:
@@ -515,19 +515,19 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
         # ── Step 1: git fetch 增量拉取 ──
         _set_progress("fetch", "正在获取远程更新（增量传输差异代码）...", 10)
         logger.info(f"[upgrade] Step 1/7: git fetch --all")
-        await _run_git(["fetch", "--all"], timeout=60)
+        await _run_git(["fetch", "--all"], timeout=180)
         logger.info(f"[upgrade] Step 1/7: fetch 完成")
 
         # Step 1b: 计算 commit 数
         behind = int(await _run_git(
-            ["rev-list", "--count", "HEAD..origin/master"], timeout=15
+            ["rev-list", "--count", "HEAD..origin/master"], timeout=30
         ))
         logger.info(f"[upgrade] 落后 {behind} 个提交")
 
         # ── Step 2: git reset 快速同步 ──
         _set_progress("sync", f"正在同步 {behind} 个提交的变更到本地...", 30)
         logger.info(f"[upgrade] Step 2/7: git reset --hard origin/master")
-        await _run_git(["reset", "--hard", "origin/master"], timeout=30)
+        await _run_git(["reset", "--hard", "origin/master"], timeout=60)
         logger.info(f"[upgrade] Step 2/7: reset 完成")
 
         # ── Step 3: 数据库迁移 ──
@@ -546,7 +546,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
         logger.info(f"[upgrade] Step 4/7: pip install")
         await _run_cmd(
             [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
-            cwd=str(BASE_DIR), timeout=300,
+            cwd=str(BASE_DIR), timeout=600,
         )
         logger.info(f"[upgrade] Step 4/7: pip 完成")
 
@@ -590,7 +590,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
         # 自动回滚：利用 git reflog 回到升级前的 HEAD
         logger.warning("升级失败，自动执行 git reflog 回滚...")
         try:
-            await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=30)
+            await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=60)
             logger.info("git reflog 回滚成功")
             _set_progress("rolled_back", "已自动回滚到升级前状态", -2)
         except Exception as rb_e:
@@ -626,7 +626,7 @@ async def rollback(request: Request):
 
     try:
         # HEAD@{1} 是执行 git reset --hard origin/master 之前的位置
-        await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=30)
+        await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=60)
         await _restart_service()
 
         s = _load_state()
