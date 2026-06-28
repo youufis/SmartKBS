@@ -139,12 +139,21 @@ def _run_subprocess(
 
 
 async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
-    """执行 Git 命令（subprocess.run + asyncio.to_thread）"""
+    """执行 Git 命令（subprocess.run + asyncio.to_thread）
+    显式指定 --git-dir 和 --work-tree，避免 IIS 下当前目录环境不一致导致找不到 .git
+    """
     def _run() -> str:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
+        # 显式传 git 目录和工作树，不依赖 cwd
+        git_args = [
+            "--git-dir", str(BASE_DIR / ".git"),
+            "--work-tree", str(BASE_DIR),
+            *args,
+        ]
         return _run_subprocess(
-            ["git", *args],
+            ["git", *git_args],
+            cwd=str(BASE_DIR),
             timeout=timeout,
             capture_output=capture_output,
             env=env,
