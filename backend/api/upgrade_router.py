@@ -145,14 +145,11 @@ async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = T
     def _run() -> str:
         env = os.environ.copy()
         env["GIT_TERMINAL_PROMPT"] = "0"
-        # 显式传 git 目录和工作树，不依赖 cwd
-        git_args = [
-            "--git-dir", str(BASE_DIR / ".git"),
-            "--work-tree", str(BASE_DIR),
-            *args,
-        ]
+        # 通过 GIT_DIR / GIT_WORK_TREE 环境变量指定仓库和工作目录（比命令行参数更稳定）
+        env["GIT_DIR"] = str(BASE_DIR / ".git")
+        env["GIT_WORK_TREE"] = str(BASE_DIR)
         return _run_subprocess(
-            ["git", *git_args],
+            ["git", *args],
             cwd=str(BASE_DIR),
             timeout=timeout,
             capture_output=capture_output,
