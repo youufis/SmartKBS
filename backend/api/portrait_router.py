@@ -33,6 +33,7 @@ router = APIRouter()
 
 class GenerateRequest(BaseModel):
     style: str = "random"
+    use_points: bool = False  # 是否消耗 50 积分兑换额外生成机会
 
 
 class ShareRequest(BaseModel):
@@ -390,7 +391,7 @@ async def get_portrait_styles():
 
 @router.post("/generate")
 async def generate_portrait(request: Request, body: GenerateRequest):
-    """生成本周画像（每周一次）"""
+    """生成本周画像（每周一次免费，可用 100 积分兑换额外机会）"""
     user = get_current_user(request)
     username = user["username"]
 
@@ -402,7 +403,16 @@ async def generate_portrait(request: Request, body: GenerateRequest):
         (username, week_start, week_end),
     )
     if existing:
-        raise HTTPException(status_code=400, detail="本周画像已生成，下周再来吧 ✨")
+        if body.use_points:
+            # 尝试用 100 积分兑换额外生成机会
+            from backend.reward_engine import deduct_points, get_student_total
+            total = get_student_total(username)
+            if total < 100:
+                raise HTTPException(status_code=400, detail=f"积分不足，当前仅有 {total} 积分，需要 100 积分才能兑换额外生成机会 📉")
+            deduct_points(username, "消耗100积分兑换画像生成", 100)
+            logger.info(f"学生 {username} 消耗 100 积分兑换了本周额外画像生成")
+        else:
+            raise HTTPException(status_code=400, detail="本周画像已生成，消耗 100 积分可再生成一次 ✨")
 
     # 检查 API Key
     api_key = _get_api_key()
@@ -411,6 +421,9 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     style = body.style or "random"
     if style not in PORTRAIT_STYLES:
         style = "random"
+
+    # 当前日期字符串
+    today_str = datetime.now().strftime("%Y-%m-%d")
 
     # 1. 聚合用户数据
     profile = get_student_profile(username)
@@ -448,7 +461,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     logger.info(f"开始生成图片: username={username}")
     save_dir = _get_portrait_dir(username)
     style_key = style
-    filename = f"{today}_{style_key}"
+    filename = f"{today_str}_{style_key}"
 
     try:
         image_path = await generate_and_save_image(
@@ -469,7 +482,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
         """INSERT INTO student_portraits
            (username, created_date, style, image_path, ai_comment, prompt, generated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (username, today, style_key, image_path, comment, img_prompt, now_str),
+        (username, today_str, style_key, image_path, comment, img_prompt, now_str),
     )
 
     # 重新查询

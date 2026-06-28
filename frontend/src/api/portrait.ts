@@ -70,8 +70,8 @@ export async function getPortraitStyles(): Promise<StylesResponse> {
 }
 
 /** 生成今日画像（超时 300 秒，因需调用 LLM + 通义万相） */
-export async function generatePortrait(style: string = 'random'): Promise<GenerateResponse> {
-  const { data } = await apiClient.post('/api/portrait/generate', { style }, { timeout: 300000 });
+export async function generatePortrait(style: string = 'random', usePoints: boolean = false): Promise<GenerateResponse> {
+  const { data } = await apiClient.post('/api/portrait/generate', { style, use_points: usePoints }, { timeout: 300000 });
   return data;
 }
 

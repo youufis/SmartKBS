@@ -24,7 +24,7 @@ interface PortraitStore {
   fetchToday: () => Promise<void>;
   fetchHistory: () => Promise<void>;
   fetchStyles: () => Promise<void>;
-  generate: (style?: string) => Promise<PortraitData | null>;
+  generate: (style?: string, usePoints?: boolean) => Promise<PortraitData | null>;
   toggleLike: (id: number) => Promise<{ action: string; count: number } | null>;
   share: (id: number, scope: string) => Promise<void>;
   unshare: (id: number) => Promise<void>;
@@ -78,10 +78,10 @@ export const usePortraitStore = create<PortraitStore>()((set, get) => ({
     }
   },
 
-  generate: async (style = 'random') => {
+  generate: async (style = 'random', usePoints = false) => {
     set({ generating: true, error: null });
     try {
-      const res = await portraitApi.generatePortrait(style);
+      const res = await portraitApi.generatePortrait(style, usePoints);
       set({
         todayPortrait: res.portrait,
         todayExists: true,

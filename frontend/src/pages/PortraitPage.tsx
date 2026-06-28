@@ -10,6 +10,7 @@ import {
   DownloadOutlined, EyeOutlined, CalendarOutlined,
   ThunderboltOutlined, StarOutlined,
   FireOutlined, PictureOutlined, WarningOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { usePortraitStore } from '../stores/portraitStore'
@@ -92,6 +93,28 @@ const PortraitPage: React.FC = () => {
   }, [activeTab, fetchPublicGallery, fetchClassGallery, fetchHotGallery])
 
   const handleGenerate = async () => {
+    if (todayExists) {
+      // 本周已生成过 → 确认是否消耗 100 积分
+      Modal.confirm({
+        title: '消耗 100 积分再生成一次？',
+        icon: <ExclamationCircleOutlined />,
+        content: (
+          <div>
+            <p>本周画像已生成，消耗 <Text strong style={{ color: '#faad14', fontSize: 18 }}>100</Text> 积分可再生成一次。</p>
+            <p style={{ color: '#888', fontSize: 13 }}>积分不足？参与课堂活动、完成练习等均可获得积分。</p>
+          </div>
+        ),
+        okText: '消耗 100 积分生成',
+        cancelText: '算了',
+        onOk: async () => {
+          const result = await generate(selectedStyle, true)
+          if (result) {
+            message.success('🎉 画像生成成功！已扣除 50 积分')
+          }
+        },
+      })
+      return
+    }
     const result = await generate(selectedStyle)
     if (result) {
       message.success('🎉 今日画像生成成功！')
@@ -159,7 +182,7 @@ const PortraitPage: React.FC = () => {
     setDetailModalVisible(true)
   }
 
-  const canGenerate = !todayExists && !generating
+  const canGenerate = !generating
 
   // ─────────────────────────────────────────
   // Tab 1: 本周创作
@@ -181,8 +204,8 @@ const PortraitPage: React.FC = () => {
           <Spin size="large" tip="加载中..." />
         </div>
       ) : todayExists && todayPortrait ? (
-        /* 今日已生成 */
-        todayPortrait.deleted ? (
+        <>
+        {todayPortrait.deleted ? (
           <Card style={{ borderRadius: 12, textAlign: 'center', padding: '40px 0' }}>
             <Title level={4} type="secondary"><WarningOutlined /> 今日画像已删除</Title>
             <Paragraph type="secondary">
@@ -287,7 +310,33 @@ const PortraitPage: React.FC = () => {
             </Card>
           </Col>
         </Row>
-        )
+        )}
+
+        {/* 本周已生成 → 提供积分兑换额外机会 */}
+        {todayExists && todayPortrait && !todayPortrait.deleted && (
+          <div style={{ textAlign: 'center', marginTop: 24 }}>
+            <Divider />
+            <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+              ⏰ 每周免费一次，消耗 100 积分可再生成一次
+            </Text>
+            <Button
+              icon={<ThunderboltOutlined />}
+              onClick={handleGenerate}
+              loading={generating}
+              disabled={!canGenerate}
+              style={{ height: 40, borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
+            >
+              {generating ? '✨ AI 创意中...' : '🔥 消耗 100 积分再生成'}
+            </Button>
+            {error && (
+              <Alert type="error" message={error} showIcon closable
+                onClose={() => usePortraitStore.setState({ error: null })}
+                style={{ marginTop: 12, maxWidth: 400, margin: '12px auto 0' }}
+              />
+            )}
+          </div>
+        )}
+        </>
       ) : (
         /* 今日未生成 - 可生成 */
         <Card style={{ borderRadius: 12, textAlign: 'center', padding: '20px 0' }}>
@@ -348,7 +397,7 @@ const PortraitPage: React.FC = () => {
                   fontSize: 16,
                 }}
               >
-                {generating ? '✨ AI 创意中...' : '✨ 生成今日画像'}
+                {generating ? '✨ AI 创意中...' : todayExists ? '🔥 消耗积分再生成' : '✨ 生成今日画像'}
               </Button>
 
               {error && (
@@ -363,7 +412,7 @@ const PortraitPage: React.FC = () => {
 
               <Divider />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                ⏰ 每周仅可生成一次，下周一后可再次创作
+                ⏰ 每周免费生成一次{todayExists ? '，或消耗 100 积分额外生成' : '，下周一后可再次创作'}
               </Text>
             </>
         </Card>
