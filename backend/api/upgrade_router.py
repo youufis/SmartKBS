@@ -29,6 +29,20 @@ REMOTE_VERSION_URL = "https://raw.githubusercontent.com/youufis/SmartKBS/master/
 BACKUP_DIR = BASE_DIR / ".upgrade_backups"
 STATE_FILE = BASE_DIR / ".upgrade_state.json"
 MIGRATIONS_DIR = BASE_DIR / "backend" / "migrations"
+GIT_DOWNLOAD_URL = "https://git-scm.com/downloads/win"
+
+
+def _check_git_installed() -> bool:
+    """检测 Git 是否已安装（在 PATH 中可找到）"""
+    try:
+        result = subprocess.run(
+            ["git", "--version"],
+            capture_output=True, timeout=5,
+            stdin=subprocess.DEVNULL,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 # 所有运行时数据（数据库、配置、上传文件等）已在 .gitignore 中，
 # git reset --hard 不会影响它们，无需额外保护
@@ -58,6 +72,8 @@ class VersionCheckResult(BaseModel):
     release_date: str
     behind_commits: int = 0
     last_checked: str = ""
+    git_available: bool = True
+    git_download_url: str = ""  # Git 未安装时提供下载链接
 
 
 class UpgradeProgress(BaseModel):
@@ -276,6 +292,7 @@ async def check_version(request: Request) -> VersionCheckResult:
     user = get_current_user(request)
     require_admin(user)
 
+    git_ok = _check_git_installed()
     remote = await _fetch_remote_version()
     current = APP_VERSION
 
@@ -287,11 +304,13 @@ async def check_version(request: Request) -> VersionCheckResult:
             changelog=[],
             breaking_changes=[],
             release_date="",
+            git_available=git_ok,
+            git_download_url="https://git-scm.com/downloads/win" if not git_ok else "",
         )
 
     latest = remote.get("latest_version", current)
     has_update = latest != current
-    behind = await _count_behind() if has_update else 0
+    behind = await _count_behind() if (has_update and git_ok) else 0
 
     return VersionCheckResult(
         current_version=current,
@@ -302,6 +321,8 @@ async def check_version(request: Request) -> VersionCheckResult:
         release_date=remote.get("release_date", ""),
         behind_commits=behind,
         last_checked=datetime.now(timezone.utc).isoformat(),
+        git_available=git_ok,
+        git_download_url="https://git-scm.com/downloads/win" if not git_ok else "",
     )
 
 
@@ -359,6 +380,9 @@ async def start_upgrade(request: Request):
 
     if _state["running"]:
         raise HTTPException(status_code=409, detail="已有升级任务运行中")
+
+    if not _check_git_installed():
+        raise HTTPException(status_code=400, detail=f"未检测到 Git，请先安装 Git ({GIT_DOWNLOAD_URL}) 后重试")
 
     # 先检查远程版本
     remote = await _fetch_remote_version()

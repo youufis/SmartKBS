@@ -459,6 +459,24 @@ const SystemConfigPage: React.FC = () => {
 
     return (
       <Spin spinning={verLoading}>
+        {/* Git 未安装警告 */}
+        {verInfo && !verInfo.git_available && (
+          <Alert
+            type="error"
+            showIcon
+            message="🛠️ 缺少 Git，无法在线升级"
+            description={
+              <span>
+                在线升级依赖 Git 从 GitHub 增量拉取代码。请安装 Git 后重试。<br />
+                <a href={verInfo.git_download_url} target="_blank" rel="noopener noreferrer">
+                  点击下载 Git for Windows ⏬
+                </a>
+                &nbsp;（安装后需重启 IIS 或回收应用池使 PATH 生效）
+              </span>
+            }
+            style={{ marginBottom: 16 }}
+          />
+        )}
         {/* 版本信息 */}
         {verInfo && (
           <Card style={{ marginBottom: 16 }}>
@@ -507,13 +525,14 @@ const SystemConfigPage: React.FC = () => {
               <Button
                 type="primary"
                 icon={<DownloadOutlined />}
-                disabled={!verInfo?.has_update || upgrading}
+                disabled={!verInfo?.has_update || upgrading || !verInfo?.git_available}
                 loading={upgrading}
+                title={!verInfo?.git_available ? '请先安装 Git' : ''}
                 onClick={handleUpgrade}
               >
                 {upgrading ? '升级中...' : '📥 增量升级'}
               </Button>
-              <Button icon={<RollbackOutlined />} onClick={handleRollback}>
+              <Button icon={<RollbackOutlined />} onClick={handleRollback} disabled={!verInfo?.git_available}>
                 回滚
               </Button>
             </Space>

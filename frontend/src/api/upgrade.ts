@@ -12,6 +12,8 @@ export interface VersionInfo {
   release_date: string
   behind_commits: number
   last_checked: string
+  git_available: boolean
+  git_download_url: string
 }
 
 export interface UpgradeProgress {
