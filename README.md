@@ -379,8 +379,6 @@ Copyright © 2026 youufis
    # 直接启动
    python backend/main.py
 
-   # 或 IIS 部署（见下方 IIS 说明）
-   ```
 
 ### 方式二：Git 克隆部署（推荐，支持在线升级）
 

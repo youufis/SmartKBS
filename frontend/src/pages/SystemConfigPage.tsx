@@ -7,6 +7,7 @@ import {
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
+  CheckCircleOutlined, CloseCircleOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
@@ -620,10 +621,15 @@ const SystemConfigPage: React.FC = () => {
               },
               { title: '执行人', dataIndex: 'admin', key: 'admin', width: 100 },
               {
-                title: '状态', dataIndex: 'status', key: 'status', width: 100,
+                title: '状态', dataIndex: 'status', key: 'status', width: 120,
                 render: (s: string) => {
-                  const color = s === 'success' || s === 'rolled_back' ? 'green' : 'red'
-                  return <Tag color={color}>{s}</Tag>
+                  const map: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+                    success: { color: 'green', icon: <CheckCircleOutlined />, label: '成功' },
+                    failed: { color: 'red', icon: <CloseCircleOutlined />, label: '失败' },
+                    rolled_back: { color: 'orange', icon: <RollbackOutlined />, label: '已回滚' },
+                  }
+                  const item = map[s] || { color: 'default', icon: null, label: s }
+                  return <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
                 },
               },
               { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
