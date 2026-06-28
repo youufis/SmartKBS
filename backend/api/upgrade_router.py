@@ -540,9 +540,40 @@ async def rollback(request: Request):
 
 
 @router.get("/history")
-async def get_upgrade_history(request: Request):
-    """⑥ 升级历史记录"""
+async def get_upgrade_history(
+    request: Request,
+    page: int = 1,
+    page_size: int = 10,
+):
+    """⑥ 升级历史记录（支持分页）"""
     user = get_current_user(request)
     require_admin(user)
     s = _load_state()
-    return {"history": s.get("history", [])}
+    all_history = s.get("history", [])
+    total = len(all_history)
+    # 倒序排列（最新的在前）
+    all_history.reverse()
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = all_history[start:end]
+    return {
+        "history": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.delete("/history/{task_id}")
+async def delete_history_item(task_id: str, request: Request):
+    """删除单条升级历史记录"""
+    user = get_current_user(request)
+    require_admin(user)
+    s = _load_state()
+    history = s.get("history", [])
+    new_history = [h for h in history if h.get("task_id") != task_id]
+    if len(new_history) == len(history):
+        raise HTTPException(status_code=404, detail="记录不存在")
+    s["history"] = new_history
+    _save_state(s)
+    return {"status": "ok", "message": "已删除"}

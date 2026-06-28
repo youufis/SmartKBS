@@ -66,8 +66,20 @@ export async function rollback(): Promise<{ status: string; message: string }> {
   return data
 }
 
-/** 获取升级历史 */
-export async function getHistory(): Promise<{ history: UpgradeHistoryItem[] }> {
-  const { data } = await apiClient.get('/api/system/upgrade/history')
+/** 获取升级历史（分页） */
+export async function getHistory(page = 1, pageSize = 10): Promise<{
+  history: UpgradeHistoryItem[]
+  total: number
+  page: number
+  page_size: number
+}> {
+  const { data } = await apiClient.get('/api/system/upgrade/history', {
+    params: { page, page_size: pageSize },
+  })
   return data
+}
+
+/** 删除单条升级历史 */
+export async function deleteHistory(task_id: string): Promise<void> {
+  await apiClient.delete(`/api/system/upgrade/history/${task_id}`)
 }

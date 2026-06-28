@@ -6,14 +6,14 @@ import {
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
-  SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined,
+  SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import {
   checkVersion, startUpgrade, getUpgradeStatus,
-  rollback as apiRollback, getHistory,
+  rollback as apiRollback, getHistory, deleteHistory,
   type VersionInfo, type UpgradeProgress,
 } from '../api/upgrade'
 
@@ -359,6 +359,9 @@ const SystemConfigPage: React.FC = () => {
     const [upgrading, setUpgrading] = useState(false)
     const [upgradeProg, setUpgradeProg] = useState<UpgradeProgress | null>(null)
     const [histList, setHistList] = useState<any[]>([])
+    const [histTotal, setHistTotal] = useState(0)
+    const [histPage, setHistPage] = useState(1)
+    const [histPageSize, setHistPageSize] = useState(10)
     const pollRef = useRef<number | undefined>(undefined)
 
     const loadVersion = useCallback(async () => {
@@ -372,10 +375,12 @@ const SystemConfigPage: React.FC = () => {
       setVerLoading(false)
     }, [])
 
-    const loadHistory = useCallback(async () => {
+    const loadHistory = useCallback(async (page = 1, pageSize = 10) => {
       try {
-        const { history } = await getHistory()
-        setHistList(history || [])
+        const res = await getHistory(page, pageSize)
+        setHistList(res.history || [])
+        setHistTotal(res.total)
+        setHistPage(res.page)
       } catch { /* ignore */ }
     }, [])
 
@@ -456,6 +461,26 @@ const SystemConfigPage: React.FC = () => {
       loadHistory()
       return () => { if (pollRef.current) clearInterval(pollRef.current) }
     }, [loadVersion, loadHistory])
+
+    const handleDeleteHistory = (task_id: string) => {
+      Modal.confirm({
+        title: '确认删除该条升级记录?',
+        icon: <ExclamationCircleOutlined />,
+        content: '删除后不可恢复。',
+        okText: '确认删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            await deleteHistory(task_id)
+            message.success('已删除')
+            loadHistory(histPage, histPageSize)
+          } catch (e: any) {
+            message.error('删除失败: ' + (e?.response?.data?.detail || e.message))
+          }
+        },
+      })
+    }
 
     return (
       <Spin spinning={verLoading}>
@@ -555,22 +580,43 @@ const SystemConfigPage: React.FC = () => {
           <Table
             dataSource={histList}
             columns={[
-              { title: '时间', dataIndex: 'timestamp', key: 'ts', width: 180 },
+              { title: '时间', dataIndex: 'timestamp', key: 'ts', width: 170 },
               {
                 title: '版本变化', key: 'ver',
                 render: (_: any, r: any) => `${r.from_version || '-'} → ${r.to_version || '-'}`,
               },
-              { title: '执行人', dataIndex: 'admin', key: 'admin', width: 120 },
+              { title: '执行人', dataIndex: 'admin', key: 'admin', width: 100 },
               {
-                title: '状态', dataIndex: 'status', key: 'status', width: 120,
+                title: '状态', dataIndex: 'status', key: 'status', width: 100,
                 render: (s: string) => {
                   const color = s === 'success' || s === 'rolled_back' ? 'green' : 'red'
                   return <Tag color={color}>{s}</Tag>
                 },
               },
               { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
+              {
+                title: '操作', key: 'action', width: 60,
+                render: (_: any, r: any) => (
+                  <Button type="link" size="small" danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteHistory(r.task_id)}
+                  />
+                ),
+              },
             ]}
-            pagination={false}
+            pagination={{
+              current: histPage,
+              pageSize: histPageSize,
+              total: histTotal,
+              showSizeChanger: true,
+              pageSizeOptions: ['5', '10', '20', '50'],
+              onChange: (p, ps) => {
+                setHistPage(p)
+                setHistPageSize(ps)
+                loadHistory(p, ps)
+              },
+              showTotal: (t) => `共 ${t} 条`,
+            }}
             size="small"
             rowKey="task_id"
             locale={{ emptyText: '暂无升级记录' }}
