@@ -492,11 +492,13 @@ async def start_upgrade(request: Request):
     if issues:
         raise HTTPException(status_code=400, detail="\n\n".join(issues))
 
-    # 先检查远程版本
+    # 检查是否有可更新的内容（版本不同 或 同版本内有新提交）
     remote = await _fetch_remote_version()
     if remote is None:
         raise HTTPException(status_code=503, detail="无法连接 GitHub，请稍后重试")
-    if remote.get("latest_version") == APP_VERSION:
+    behind = await _count_behind()
+    version_changed = remote.get("latest_version") != APP_VERSION
+    if not version_changed and behind <= 0:
         raise HTTPException(status_code=400, detail="已是最新版本，无需升级")
 
     task_id = uuid.uuid4().hex[:12]
