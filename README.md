@@ -398,31 +398,15 @@ python backend/main.py
 1. 管理员登录 → 系统配置 → **版本管理**
 2. 点击「检测更新」，系统自动对比 GitHub 最新版本
 3. 点击「增量升级」，自动执行：
-   ```
+
+   ```text
    git fetch（增量拉取差异代码）→ git reset（同步文件）
    → 数据库迁移 → pip 增量安装 → 重启服务
    ```
+
 4. 升级失败自动回滚，进度实时显示
 
 > **💡 ZIP 部署也能用？** 首次点击「增量升级」时，系统会自动执行 `git init` + `git remote add` 初始化本地仓库，无需手动配置即可享受在线升级。
-
-### IIS 部署（Windows Server）
-
-项目已提供 `web.config`，配置了 IIS `httpPlatform` 反向代理：
-
-| 配置项 | 说明 |
-|--------|------|
-| Python | `C:\Program Files\Python311\python.exe` |
-| 入口 | `-m uvicorn backend.main:app --host 127.0.0.1 --port %HTTP_PLATFORM_PORT%` |
-| 日志 | `D:\SmartKBS\LogFiles\stdout.log` |
-| 超时 | 启动等待 300s，请求超时 15 分钟 |
-
-部署步骤：
-
-1. 在 IIS 中创建网站或应用程序，物理路径指向项目根目录
-2. 确保应用程序池**已启用**（会自动通过 `httpPlatform` 启动 Python）
-3. 设置文件权限：IIS 应用池身份需要对项目目录有读取/写入权限
-4. 如需自定义 IIS 应用池名称，可通过环境变量 `SMARTKB_APP_POOL` 配置
 
 ### PIP 国内镜像加速
 
