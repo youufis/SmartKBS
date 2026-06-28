@@ -8,7 +8,6 @@ backend/system_config.json
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
 
 # ── Node ──
 node_modules/
