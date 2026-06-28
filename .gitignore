@@ -12,7 +12,6 @@ dist/
 
 # ── Node ──
 node_modules/
-frontend/dist/
 
 # ── 运行时 ──
 LogFiles/
