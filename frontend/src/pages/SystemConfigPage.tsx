@@ -669,9 +669,7 @@ const SystemConfigPage: React.FC = () => {
                                     ))}
                                   </div>
                                 </div>
-                              ) : (
-                                <p style={{ color: '#999', marginTop: 12 }}>本次升级无详细更新日志</p>
-                              )}
+                              ) : null}
                             </div>
                           ),
                           okText: '关闭',
