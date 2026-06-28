@@ -75,60 +75,59 @@ class UpgradeProgress(BaseModel):
 # ═══════════════════════════════════════════════════════
 
 async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
-    """执行 Git 命令
+    """执行 Git 命令（同步 subprocess.run 跑在 asyncio.to_thread 中，
+    避免 Windows + IIS 下 asyncio.create_subprocess_exec + PIPE 的 [WinError 6] 问题）
 
-    - capture_output=True: 返回 stdout（用于 fetch、rev-list 等需要输出的命令）
-    - capture_output=False: stdout/stderr 指向 DEVNULL（用于 archive -o 等写入文件的命令）
-    设置 GIT_TERMINAL_PROMPT=0 防止 git 因需要认证而挂起等待输入
+    - capture_output=True: 返回 stdout（用于 fetch、rev-list 等）
+    - capture_output=False: stdout/stderr 指向 DEVNULL（用于 archive -o 等）
     """
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
-    kw: dict[str, Any] = dict(
-        cwd=str(BASE_DIR),
-        env=env,
-    )
-    if platform.system() == "Windows":
-        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-    if capture_output:
-        kw["stdout"] = asyncio.subprocess.PIPE
-        kw["stderr"] = asyncio.subprocess.PIPE
-    else:
-        kw["stdout"] = asyncio.subprocess.DEVNULL
-        kw["stderr"] = asyncio.subprocess.DEVNULL
-    proc = await asyncio.create_subprocess_exec("git", *args, **kw)
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        if proc.returncode != 0:
-            msg = stderr.decode().strip() if stderr else "未知错误"
+    def _run() -> str:
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        kw: dict[str, Any] = dict(
+            cwd=str(BASE_DIR),
+            env=env,
+            timeout=timeout,
+        )
+        if platform.system() == "Windows":
+            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+        if capture_output:
+            kw["stdout"] = subprocess.PIPE
+            kw["stderr"] = subprocess.PIPE
+        else:
+            kw["stdout"] = subprocess.DEVNULL
+            kw["stderr"] = subprocess.DEVNULL
+        result = subprocess.run(["git", *args], **kw)
+        if result.returncode != 0:
+            msg = result.stderr.decode().strip() if result.stderr else "未知错误"
             raise RuntimeError(f"git {' '.join(args)} 失败: {msg}")
-        return stdout.decode().strip() if stdout else ""
-    except asyncio.TimeoutError:
-        proc.kill()
+        return result.stdout.decode().strip() if result.stdout else ""
+    try:
+        return await asyncio.to_thread(_run)
+    except subprocess.TimeoutExpired:
         raise RuntimeError(f"Git 命令超时 ({timeout}s): {' '.join(args)}")
 
 
 async def _run_cmd(cmd: list[str], cwd: str, timeout: int = 120, capture_output: bool = True) -> str:
-    """执行任意 shell 命令
-    capture_output=False 时 stdout/stderr 指向 DEVNULL（用于不需要输出的命令）
-    """
-    kw: dict[str, Any] = dict(cwd=cwd)
-    if platform.system() == "Windows":
-        kw["creationflags"] = subprocess.CREATE_NO_WINDOW
-    if capture_output:
-        kw["stdout"] = asyncio.subprocess.PIPE
-        kw["stderr"] = asyncio.subprocess.PIPE
-    else:
-        kw["stdout"] = asyncio.subprocess.DEVNULL
-        kw["stderr"] = asyncio.subprocess.DEVNULL
-    proc = await asyncio.create_subprocess_exec(*cmd, **kw)
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        if proc.returncode != 0:
-            msg = stderr.decode().strip() if stderr else "未知错误"
+    """执行任意 shell 命令（同步 subprocess.run + asyncio.to_thread）"""
+    def _run() -> str:
+        kw: dict[str, Any] = dict(cwd=cwd, timeout=timeout)
+        if platform.system() == "Windows":
+            kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+        if capture_output:
+            kw["stdout"] = subprocess.PIPE
+            kw["stderr"] = subprocess.PIPE
+        else:
+            kw["stdout"] = subprocess.DEVNULL
+            kw["stderr"] = subprocess.DEVNULL
+        result = subprocess.run(cmd, **kw)
+        if result.returncode != 0:
+            msg = result.stderr.decode().strip() if result.stderr else "未知错误"
             raise RuntimeError(f"{' '.join(cmd)} 失败: {msg}")
-        return stdout.decode().strip() if stdout else ""
-    except asyncio.TimeoutError:
-        proc.kill()
+        return result.stdout.decode().strip() if result.stdout else ""
+    try:
+        return await asyncio.to_thread(_run)
+    except subprocess.TimeoutExpired:
         raise RuntimeError(f"命令超时 ({timeout}s): {' '.join(cmd)}")
 
 
