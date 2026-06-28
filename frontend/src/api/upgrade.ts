@@ -35,6 +35,7 @@ export interface UpgradeHistoryItem {
   admin: string
   status: string
   error?: string
+  changelog?: string[]
 }
 
 /** 检测最新版本 */

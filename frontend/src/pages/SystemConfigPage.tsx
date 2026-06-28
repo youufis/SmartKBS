@@ -6,7 +6,7 @@ import {
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
-  SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined,
+  SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
@@ -418,11 +418,8 @@ const SystemConfigPage: React.FC = () => {
                   setUpgrading(false)
                   if (st.error) {
                     message.error('升级失败: ' + st.error)
-                  } else if (st.step === 'done') {
-                    message.success('🎉 升级完成！请刷新页面')
                   } else {
-                    // 服务重启后 _state 重置，显示升级完成
-                    message.success('🎉 服务已重启，升级完成！请刷新页面')
+                    message.success('🎉 升级完成！请刷新页面')
                   }
                   loadHistory()
                 }
@@ -631,12 +628,51 @@ const SystemConfigPage: React.FC = () => {
               },
               { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
               {
-                title: '操作', key: 'action', width: 60,
+                title: '操作', key: 'action', width: 90,
                 render: (_: any, r: any) => (
-                  <Button type="link" size="small" danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => handleDeleteHistory(r.task_id)}
-                  />
+                  <Space size={0}>
+                    <Button type="link" size="small"
+                      icon={<EyeOutlined />}
+                      onClick={() => {
+                        const changelog = r.changelog
+                        if (changelog && changelog.length > 0) {
+                          Modal.info({
+                            title: `📋 升级详情 — ${r.from_version || ''} → ${r.to_version || ''}`,
+                            width: 480,
+                            content: (
+                              <div style={{ marginTop: 8 }}>
+                                <p style={{ color: '#888', marginBottom: 12 }}>
+                                  执行人：{r.admin} ｜ 时间：{r.timestamp}
+                                </p>
+                                {r.commits !== undefined && (
+                                  <p style={{ color: '#888', marginBottom: 12 }}>
+                                    提交数：{r.commits}
+                                  </p>
+                                )}
+                                <Timeline items={changelog.map((c: string) => ({ children: c }))} />
+                              </div>
+                            ),
+                            okText: '关闭',
+                          })
+                        } else {
+                          Modal.info({
+                            title: `📋 升级详情 — ${r.from_version || ''} → ${r.to_version || ''}`,
+                            content: (
+                              <div style={{ marginTop: 8 }}>
+                                <p>执行人：{r.admin} ｜ 时间：{r.timestamp}</p>
+                                <p style={{ color: '#999', marginTop: 12 }}>本次升级无详细更新日志</p>
+                              </div>
+                            ),
+                            okText: '关闭',
+                          })
+                        }
+                      }}
+                    />
+                    <Button type="link" size="small" danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleDeleteHistory(r.task_id)}
+                    />
+                  </Space>
                 ),
               },
             ]}

@@ -602,6 +602,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict):
             "admin": admin,
             "status": "success",
             "commits": behind,
+            "changelog": remote.get("changelog", []),
         })
         _save_state(s)
         logger.info(f"[upgrade] Step 6/7: 历史已记录")
