@@ -930,6 +930,14 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             "status": "failed",
             "error": str(e),
         })
+        # 持久化失败状态，重启后仍可看到错误消息
+        s["_last_upgrade_result"] = {
+            "status": "failed",
+            "from_version": APP_VERSION,
+            "to_version": to_version,
+            "error": str(e),
+            "completed_at": datetime.now().isoformat(),
+        }
         _save_state(s)
     finally:
         _release_lock()
@@ -959,23 +967,34 @@ async def get_status(request: Request) -> UpgradeProgress:
     try:
         s = _load_state()
         last_result = s.get("_last_upgrade_result")
-        if last_result and last_result.get("status") == "success":
-            return UpgradeProgress(
-                running=False,
-                task_id=None,
-                step="done",
-                progress=100,
-                message=(
-                    f"✅ 升级完成！{last_result.get('from_version', '?')} "
-                    f"→ {last_result.get('to_version', '?')} "
-                    f"（{last_result.get('commits', 0)} 个提交）"
-                ),
-                error=None,
-                started_at=last_result.get("completed_at"),
-            )
-        # 清除过期的持久化标记，避免下次重复显示
-        s.pop("_last_upgrade_result", None)
-        _save_state(s)
+        if last_result:
+            status = last_result.get("status", "")
+            if status == "success":
+                return UpgradeProgress(
+                    running=False,
+                    task_id=None,
+                    step="done",
+                    progress=100,
+                    message=(
+                        f"✅ 升级完成！{last_result.get('from_version', '?')} "
+                        f"→ {last_result.get('to_version', '?')} "
+                        f"（{last_result.get('commits', 0)} 个提交）"
+                    ),
+                    error=None,
+                    started_at=last_result.get("completed_at"),
+                )
+            else:
+                return UpgradeProgress(
+                    running=False,
+                    task_id=None,
+                    step="failed",
+                    progress=-1,
+                    message=f"❌ 升级失败: {last_result.get('error', '未知错误')}",
+                    error=last_result.get("error"),
+                    started_at=last_result.get("completed_at"),
+                )
+        # _last_upgrade_result 持久保留，直到下次升级完成才会被覆盖
+        # 这样重启成功/失败的消息不会"闪一下就没"
     except Exception:
         pass
 
