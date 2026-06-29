@@ -29,7 +29,7 @@ const ThemeSwitcher: React.FC = () => {
                   flexShrink: 0,
                 }}
               />
-              {t.icon && <Text style={{ fontSize: 13 }}>{t.icon}</Text>}
+              <Text style={{ fontSize: 13 }}>{t.icon}</Text>
               <Text style={{ fontSize: 13 }}>{t.label}</Text>
             </Space>
           ),
