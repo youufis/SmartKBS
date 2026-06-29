@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 // 用户管理
 import {
   Layout, Card, Tabs, Form, Input, Button, message,
   Modal, Progress, Table, Upload, Space, Radio, Select, Typography, Popconfirm,
+  Tag, Checkbox,
 } from 'antd'
-import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, RollbackOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
 import type { UserItem } from '../types'
-import type { ImportProgressEvent } from '../api/users'
+import type { ImportProgressEvent, GradePromotionPreview, GradePromotionResult } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
 
@@ -19,7 +20,7 @@ const UserMgmtPage: React.FC = () => {
   const user = useAuthStore((s: { user: { username: string; role: string } | null }) => s.user)
   const isAdmin = user?.role === 'admin'
   const isTeacher = user?.role === 'teacher'
-  const isRoot = user?.username === 'root'
+
   const { subjects } = useSubjectOptions()
 
   // ── 注册 ──
@@ -86,7 +87,7 @@ const UserMgmtPage: React.FC = () => {
     if (!isAdmin && user?.username) {
       pwdForm.setFieldsValue({ username: user.username })
     }
-  }, [])
+  }, [isAdmin, user?.username, pwdForm])
   const handleChangePwd = async (values: Record<string, unknown>) => {
     const v = values as Record<string, string>
     if (!v.username || !v.new_password) {
@@ -168,6 +169,133 @@ const UserMgmtPage: React.FC = () => {
     } catch (err: unknown) {
       message.error((err as ApiError)?.response?.data?.detail || '批量删除失败')
     }
+  }
+
+  // ── 批量升年级 ──
+  const [promotePreview, setPromotePreview] = useState<GradePromotionPreview | null>(null)
+  const [promoteLoading, setPromoteLoading] = useState(false)
+  const [promoteExecuting, setPromoteExecuting] = useState(false)
+  const [promoteResult, setPromoteResult] = useState<GradePromotionResult | null>(null)
+  const [promoteOptions, setPromoteOptions] = useState({
+    sync_scores: true,
+    sync_rollcall: true,
+    match_class: true,
+  })
+  const [promoteReversing, setPromoteReversing] = useState(false)
+
+  const handlePreviewPromote = async () => {
+    setPromoteLoading(true)
+    setPromoteResult(null)
+    try {
+      const preview = await usersApi.previewPromoteGrades()
+      setPromotePreview(preview)
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || '获取预览失败')
+    } finally {
+      setPromoteLoading(false)
+    }
+  }
+
+  const handleExecutePromote = async () => {
+    // 动态构建升级描述
+    const promoteDesc = promotePreview?.grade_details
+      ?.filter(d => d.next_grade)
+      .map(d => `${d.grade}→${d.next_grade}`)
+      ?.join('，') || '按学段自动升级'
+    const graduateDesc = promotePreview?.grade_details
+      ?.filter(d => !d.next_grade && d.count > 0)
+      .map(d => `${d.grade}（${d.count}人）`)
+      ?.join('、')
+
+    Modal.confirm({
+      title: '⚠️ 确认执行批量升年级？',
+      icon: <WarningOutlined />,
+      width: 520,
+      content: (
+        <div>
+          <p style={{ marginBottom: 12 }}>此操作将执行以下变更：</p>
+          <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
+            <li>更新所有学生的年级（{promoteDesc}）</li>
+            {graduateDesc && <li>毕业年级学生保持现状：{graduateDesc}</li>}
+            {promoteOptions.sync_scores && <li>同步更新课堂积分的年级归属</li>}
+            {promoteOptions.sync_rollcall && <li>同步更新点名数据的年级归属</li>}
+            {promoteOptions.match_class && <li>按同名班级自动匹配新年级班级</li>}
+          </ul>
+          <p style={{ color: '#fa8c16', marginTop: 8 }}>此操作不可撤销，请确认已备份数据。</p>
+        </div>
+      ),
+      okText: '确认执行',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setPromoteExecuting(true)
+        try {
+          const result = await usersApi.executePromoteGrades({
+            ...promoteOptions,
+            confirm: true,
+          })
+          setPromoteResult(result)
+          if (result.success) {
+            message.success('批量升年级执行完成')
+            // 刷新预览
+            handlePreviewPromote()
+          }
+        } catch (err: unknown) {
+          message.error((err as ApiError)?.response?.data?.detail || '执行升年级失败')
+        } finally {
+          setPromoteExecuting(false)
+        }
+      },
+    })
+  }
+
+  const handleReversePromote = async () => {
+    // 构建降级描述
+    const reverseDesc = promotePreview?.grade_details
+      ?.filter(d => d.next_grade)
+      .map(d => `${d.next_grade}→${d.grade}`)
+      ?.join('，') || ''
+
+    Modal.confirm({
+      title: '⚠️ 确认执行批量降级？',
+      icon: <WarningOutlined />,
+      width: 520,
+      content: (
+        <div>
+          <p style={{ marginBottom: 12 }}>降级是升年级的逆操作，将执行以下变更：</p>
+          <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
+            <li>{reverseDesc || '按升年级映射反向降级'}</li>
+            {promoteOptions.sync_scores && <li>同步降级课堂积分的年级归属</li>}
+            {promoteOptions.sync_rollcall && <li>同步降级点名数据的年级归属</li>}
+            {promoteOptions.match_class && <li>按同名班级自动匹配</li>}
+          </ul>
+          <p style={{ color: '#fa8c16', marginTop: 8 }}>毕业年级学生不受影响。降级可多次执行，每次都是升年级的逆操作。</p>
+        </div>
+      ),
+      okText: '确认降级',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setPromoteReversing(true)
+        try {
+          const result = await usersApi.reversePromoteGrades({
+            ...promoteOptions,
+            confirm: true,
+          })
+          if (result.success) {
+            message.success('🎉 批量降级完成！')
+            setPromotePreview(null)
+            setPromoteResult(result)
+            // 刷新预览
+            handlePreviewPromote()
+          }
+        } catch (err: unknown) {
+          message.error((err as ApiError)?.response?.data?.detail || '降级失败')
+        } finally {
+          setPromoteReversing(false)
+        }
+      },
+    })
   }
 
   // ── CSV 导入（含进度提示） ──
@@ -285,9 +413,6 @@ const UserMgmtPage: React.FC = () => {
       },
     },
   ]
-
-  // 学生只能看到修改密码
-  const isStudent = user?.role === 'student'
 
   // 定义各标签页的可见权限
   // 教师和管理员拥有相同的用户管理权限
@@ -514,6 +639,141 @@ const UserMgmtPage: React.FC = () => {
                 </Popconfirm>
               </Space>
             </Card>
+
+          {/* ── 批量升年级 ── */}
+          <Card size="small" title={<span><RiseOutlined /> 批量升年级</span>}
+            extra={isAdmin ? null : <Typography.Text type="warning">仅管理员可用</Typography.Text>}>
+            {isAdmin ? (
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Typography.Text type="secondary">
+                  按学段自动升级：一年级→二年级→…→六年级→（毕业），初一→初二→初三→（毕业），高一→高二→高三→（毕业）。
+                  毕业年级学生保留账号但不再升级。
+                </Typography.Text>
+
+                {/* 预览区域 */}
+                <Space>
+                  <Button icon={<RiseOutlined />} onClick={handlePreviewPromote} loading={promoteLoading}>
+                    预览升年级
+                  </Button>
+                  {promotePreview && (
+                    <span style={{ color: '#888', fontSize: 13 }}>
+                      共 {promotePreview.total_students} 名学生
+                    </span>
+                  )}
+                </Space>
+
+                {promotePreview && (
+                  <>
+                    <Table
+                      dataSource={promotePreview.grade_details}
+                      columns={[
+                        { title: '当前年级', dataIndex: 'grade', key: 'grade', width: 100 },
+                        { title: '人数', dataIndex: 'count', key: 'count', width: 60 },
+                        {
+                          title: '升入年级', dataIndex: 'next_grade', key: 'next_grade', width: 120,
+                          render: (val: string | null) => val
+                            ? <Tag color="blue">{val}</Tag>
+                            : <Tag color="orange">🎓 毕业</Tag>,
+                        },
+                        {
+                          title: '班级', dataIndex: 'classes', key: 'classes',
+                          render: (val: string[]) => val?.length ? val.join('、') : '-',
+                        },
+                      ]}
+                      rowKey="grade"
+                      size="small"
+                      pagination={false}
+                      style={{ marginBottom: 12 }}
+                    />
+
+                    {/* 选项 */}
+                    <Card size="small" type="inner" title="升级选项" style={{ marginBottom: 12 }}>
+                      <Space direction="vertical">
+                        <Checkbox
+                          checked={promoteOptions.sync_scores}
+                          onChange={(e) => setPromoteOptions(prev => ({ ...prev, sync_scores: e.target.checked }))}
+                        >
+                          同步更新课堂积分（scores）的年级归属
+                        </Checkbox>
+                        <Checkbox
+                          checked={promoteOptions.sync_rollcall}
+                          onChange={(e) => setPromoteOptions(prev => ({ ...prev, sync_rollcall: e.target.checked }))}
+                        >
+                          同步更新点名数据（rollcall）的年级归属
+                        </Checkbox>
+                        <Checkbox
+                          checked={promoteOptions.match_class}
+                          onChange={(e) => setPromoteOptions(prev => ({ ...prev, match_class: e.target.checked }))}
+                        >
+                          按同名班级自动匹配新年级班级（如 1班 → 1班）
+                        </Checkbox>
+                      </Space>
+                    </Card>
+
+                    {/* 执行按钮 */}
+                    <Space>
+                      <Button type="primary" icon={<RiseOutlined />}
+                        loading={promoteExecuting} onClick={handleExecutePromote}>
+                        执行升年级
+                      </Button>
+                      <Button icon={<RollbackOutlined />}
+                        loading={promoteReversing} onClick={handleReversePromote}>
+                        反向降级
+                      </Button>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        升/降级可反复执行，互逆操作
+                      </Typography.Text>
+                    </Space>
+                  </>
+                )}
+
+                {/* 执行结果 */}
+                {promoteResult && (
+                  <Card size="small" type="inner"
+                    title={
+                      <span>
+                        {promoteResult.success
+                          ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                          : <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+                        }
+                        {' '}执行结果
+                      </span>
+                    }
+                    style={{ marginTop: 12, background: promoteResult.success ? '#f6ffed' : '#fff2f0' }}>
+                    <Space direction="vertical">
+                      {!promoteResult.success && (
+                        <Typography.Text type="danger">❌ 升年级失败，数据已全部回滚</Typography.Text>
+                      )}
+                      {promoteResult.errors?.map((e, i) => (
+                        <Typography.Text key={i} type="danger" style={{ fontSize: 12 }}>{e}</Typography.Text>
+                      ))}
+                      {promoteResult.success && (
+                        <>
+                          <Typography.Text>✅ {promoteResult.direction === 'up' ? '已升级' : '已降级'}学生：{Object.entries(promoteResult.promoted).map(([g, c]) => `${g}→${c}人`).join('、')}</Typography.Text>
+                          {Object.keys(promoteResult.not_moved).length > 0 && (
+                            <Typography.Text>
+                              {promoteResult.direction === 'up' ? '🎓 毕业学生：' : '⏸ 已是最低年级：'}
+                              {Object.entries(promoteResult.not_moved).map(([g, c]) => `${g} ${c}人`).join('、')}
+                            </Typography.Text>
+                          )}
+                          {promoteResult.skipped && promoteResult.skipped.length > 0 && (
+                            <Typography.Text type="warning">⚠️ 跳过 {promoteResult.skipped.length} 个无年级信息的学生</Typography.Text>
+                          )}
+                          <Typography.Text type="secondary">
+                            更新 users 表 {promoteResult.updated_users} 条
+                            ｜ 更新 scores 表 {promoteResult.updated_scores} 条
+                            ｜ 更新 rollcall 表 {promoteResult.updated_rollcall} 条
+                          </Typography.Text>
+                        </>
+                      )}
+                    </Space>
+                  </Card>
+                )}
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">升年级操作仅限管理员使用</Typography.Text>
+            )}
+          </Card>
         </Space>
       ),
     },

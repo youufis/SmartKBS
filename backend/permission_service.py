@@ -7,9 +7,10 @@
 - 教师 (role=1): 查 teacher_assignments 表
 - 学生 (role=2): 查自身 grade_id/class_id 与教师匹配
 """
+import sqlite3
 from typing import Any, Optional
 
-from backend.database import execute_query, execute_insert_update, get_connection, execute_query_dict
+from backend.database import execute_query, execute_insert_update, get_connection, execute_query_dict, DB_PATH
 from backend.logger import logger
 from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT
 
@@ -576,6 +577,379 @@ def _match_grade_class(
                 break
 
     return class_ok
+
+
+# ═══════════════════════════════════════════════════════════════
+# 批量升年级
+# ═══════════════════════════════════════════════════════════════
+
+def build_grade_promotion_map() -> dict[int, dict[str, Any] | None]:
+    """构建年级升迁映射
+
+    按学段分组，按 sort_order 排序，相邻年级互为升迁关系。
+    返回 {grade_id: next_grade_info | None}
+    - next_grade_info: dict {id, name, stage, sort_order} 升级目标年级
+    - None: 该年级已是本学段最高级（毕业年级）
+    """
+    from collections import defaultdict
+
+    rows = execute_query_dict(
+        "SELECT id, name, stage, sort_order FROM grades WHERE is_active=1 ORDER BY stage, sort_order"
+    )
+    stage_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        stage_groups[r["stage"]].append(r)
+
+    promotion_map: dict[int, dict[str, Any] | None] = {}
+    for stage, group in stage_groups.items():
+        group.sort(key=lambda x: x["sort_order"])
+        for i, g in enumerate(group):
+            if i + 1 < len(group):
+                promotion_map[g["id"]] = group[i + 1]
+            else:
+                promotion_map[g["id"]] = None  # 毕业年级
+    return promotion_map
+
+
+def _resolve_grade_name(grade_id: int | None, grade_text: str | None) -> str:
+    """根据 grade_id 或 grade 文本解析年级名称，兜底返回未知"""
+    if grade_id:
+        row = execute_query("SELECT name FROM grades WHERE id=?", (grade_id,))
+        if row:
+            return row[0][0]
+    if grade_text:
+        return grade_text
+    return "未知"
+
+
+def preview_grade_promotion() -> dict[str, Any]:
+    """预览升年级影响
+
+    返回:
+    {
+        "promotion_map": {grade_name: next_grade_name | "(毕业)"},
+        "grade_details": [{grade, count, classes, next_grade, next_grade_id}],
+        "total_students": int,
+    }
+    """
+    prom_map = build_grade_promotion_map()
+
+    # 查出所有学生（role=2），包括 grade_id 为 NULL 的
+    students = execute_query_dict(
+        "SELECT u.grade_id, u.grade, u.class, COUNT(*) as cnt FROM users u WHERE u.role=2 GROUP BY u.grade_id, u.grade, u.class"
+    )
+
+    # 按 grade_id 聚合（grade_id 为 NULL 的按 grade 文本聚合）
+    from collections import defaultdict
+    grade_agg: dict[str, dict[str, Any]] = {}
+    for s in students:
+        gid = s["grade_id"]
+        # 用 resolve 拿到统一的年级名
+        g_name = _resolve_grade_name(gid, s["grade"])
+        if g_name not in grade_agg:
+            grade_agg[g_name] = {
+                "grade": g_name,
+                "grade_id": gid,
+                "count": 0,
+                "classes": set(),
+            }
+        grade_agg[g_name]["count"] += s["cnt"]
+        cls_val = s["class"]
+        if cls_val is not None and cls_val != "":
+            grade_agg[g_name]["classes"].add(str(cls_val))
+
+    # 构建可读的映射
+    readable_map: dict[str, str | None] = {}
+    grade_details = []
+    for g_name, info in grade_agg.items():
+        gid = info["grade_id"]
+        next_info = prom_map.get(gid) if gid else None
+        if next_info is not None:
+            next_name = next_info["name"]
+            next_id = next_info["id"]
+        else:
+            next_name = None  # 毕业
+            next_id = None
+        readable_map[g_name] = next_name
+        grade_details.append({
+            "grade": g_name,
+            "grade_id": gid,
+            "count": info["count"],
+            "classes": sorted(info["classes"]),
+            "next_grade": next_name,
+            "next_grade_id": next_id,
+        })
+
+    # 排序：按 sort_order
+    grade_order = {
+        r["name"]: r["sort_order"]
+        for r in execute_query_dict("SELECT name, sort_order FROM grades")
+    }
+    grade_details.sort(key=lambda x: grade_order.get(x["grade"], 999))
+
+    total_students = sum(d["count"] for d in grade_details)
+
+    return {
+        "promotion_map": readable_map,
+        "grade_details": grade_details,
+        "total_students": total_students,
+    }
+
+
+def build_reverse_grade_promotion_map() -> dict[int, dict[str, Any] | None]:
+    """构建降级映射（升级的逆操作）
+
+    将 build_grade_promotion_map 的映射倒转，并补齐各学段最低年级（不可再降）：
+    - 原映射 {旧年级ID: 新年级信息}
+    - 反映射 {新年级ID: 旧年级信息}
+    - 毕业年级（原映射值为 None）不参与降级
+    - 起点年级（无更低年级可降）映射为 None
+    """
+    forward = build_grade_promotion_map()
+    reverse: dict[int, dict[str, Any] | None] = {}
+
+    # 第一步：翻转映射（新年级→旧年级）
+    for old_gid, next_info in forward.items():
+        if next_info is None:
+            continue  # 毕业年级本身不可降
+        old_name = _resolve_grade_name(old_gid, None)
+        reverse[next_info["id"]] = {
+            "id": old_gid,           # 降级后的目标 grade_id
+            "name": old_name,         # 降级后的目标年级名称
+            "stage": next_info.get("stage", ""),
+            "sort_order": next_info.get("sort_order", 0) - 2,
+        }
+
+    # 第二步：补齐起点年级（不在 reverse keys 中且 forward 值非 None 的）→ None
+    # 这些年级（如一年级、初一、高一）无法再降
+    for gid, next_info in forward.items():
+        if next_info is not None and gid not in reverse:
+            reverse[gid] = None  # 已是最低年级，不可再降
+
+    return reverse
+
+
+def execute_grade_promotion(
+    sync_scores: bool = True,
+    sync_rollcall: bool = True,
+    match_class: bool = True,
+    dry_run: bool = False,
+    prom_map: dict[int, dict[str, Any] | None] | None = None,
+    direction: str = "up",
+) -> dict[str, Any]:
+    """执行批量升/降年级
+
+    参数:
+        sync_scores: 是否同步更新 scores 表
+        sync_rollcall: 是否同步更新 rollcall_weights/rollcall_meta 表
+        match_class: 是否按同名班级自动匹配新年级的 class_id
+        dry_run: 仅预览不执行
+        prom_map: 年级映射，None 则自动构建升年级映射（默认）；传入反向映射则为降级
+        direction: "up" 升年级 / "down" 降级（影响返回标签）
+
+    返回:
+        {
+            "success": bool,
+            "direction": "up" | "down",
+            "promoted": {grade_name: promoted_count},
+            "not_moved": {grade_name: not_moved_count},
+            "updated_users": int,
+            "updated_scores": int,
+            "updated_rollcall": int,
+            "errors": [str]
+        }
+    """
+    if prom_map is None:
+        prom_map = build_grade_promotion_map()
+    errors = []
+
+    # ── 查出所有学生（role=2）──
+    # 优先用 grade_id，若无则尝试通过 grade 名称反查
+    students = execute_query_dict(
+        """SELECT u.username, u.grade, u.grade_id, u.class, u.class_id
+           FROM users u WHERE u.role=2"""
+    )
+
+    # 预加载 grade 名称→ID 映射（用于反查 grade_id 为 NULL 的学生）
+    grade_name_to_id = {
+        r["name"]: r["id"]
+        for r in execute_query_dict("SELECT id, name FROM grades WHERE is_active=1")
+    }
+
+    # 分类统计
+    promoted: dict[str, int] = {}
+    not_moved: dict[str, int] = {}
+    skipped: list[str] = []
+
+    # ── 事务：所有 users 更新在一个事务中完成 ──
+    if not dry_run:
+        conn_outer = sqlite3.connect(str(DB_PATH), timeout=30)
+        conn_outer.execute("PRAGMA journal_mode=WAL")
+        conn_outer.execute("PRAGMA busy_timeout=30000")
+        conn_outer.execute("BEGIN IMMEDIATE")
+    else:
+        conn_outer = None
+
+    try:
+        for stu in students:
+            username = stu["username"]
+            gid = stu["grade_id"]
+            g_name_text = stu["grade"]
+
+            # 若 grade_id 为空，尝试通过 grade 名称反查
+            if not gid and g_name_text:
+                g_name_str = str(g_name_text).strip()
+                gid = grade_name_to_id.get(g_name_str)
+                # 更新 users.grade_id 以便后续关联
+                if gid and not dry_run:
+                    assert conn_outer is not None
+                    c = conn_outer.cursor()
+                    c.execute(
+                        "UPDATE users SET grade_id=? WHERE username=?",
+                        (gid, username),
+                    )
+
+            # 仍然没有 grade_id → 无法处理
+            if not gid:
+                skipped.append(username)
+                continue
+
+            next_info = prom_map.get(gid)
+            if next_info is None:
+                # 不可移动：升年级时是毕业年级，降级时是最低年级
+                display_name = _resolve_grade_name(gid, g_name_text)
+                not_moved[display_name] = not_moved.get(display_name, 0) + 1
+                continue
+
+            next_name = next_info["name"]
+            next_id = next_info["id"]
+            display_name = _resolve_grade_name(gid, g_name_text)
+            promoted[display_name] = promoted.get(display_name, 0) + 1
+
+            if dry_run:
+                continue
+
+            # 计算新班级 ID
+            new_class_id = stu["class_id"]
+            if match_class and stu["class"]:
+                cls_name = str(stu["class"])
+                if "班" not in cls_name:
+                    cls_name = f"{cls_name}班"
+                c = conn_outer.cursor()
+                c.execute(
+                    "SELECT id FROM classes WHERE grade_id=? AND name=?",
+                    (next_id, cls_name),
+                )
+                row = c.fetchone()
+                if row:
+                    new_class_id = row[0]
+                else:
+                    new_class_id = None  # 新年级无同名班级
+            elif not match_class:
+                new_class_id = stu["class_id"]  # 保留原值
+
+            c = conn_outer.cursor()
+            c.execute(
+                "UPDATE users SET grade=?, grade_id=?, class_id=? WHERE username=?",
+                (next_name, next_id, new_class_id, username),
+            )
+
+        # 同步更新 scores
+        updated_scores = 0
+        if sync_scores and not dry_run:
+            assert conn_outer is not None
+            c = conn_outer.cursor()
+            for old_gid, next_info in prom_map.items():
+                if next_info is None:
+                    continue
+                next_name = next_info["name"]
+                next_id = next_info["id"]
+                # 通过 grade_id 匹配
+                c.execute(
+                    "SELECT COUNT(*) FROM scores WHERE grade_id=? AND grade_id IS NOT NULL",
+                    (old_gid,),
+                )
+                updated_scores += c.fetchone()[0]
+                c.execute(
+                    "UPDATE scores SET grade=?, grade_id=? WHERE grade_id=? AND grade_id IS NOT NULL",
+                    (next_name, next_id, old_gid),
+                )
+                # 兼容：grade 名称匹配（grade_id 为 NULL 的旧数据）
+                old_name_row = c.execute(
+                    "SELECT name FROM grades WHERE id=?", (old_gid,)
+                ).fetchone()
+                if old_name_row:
+                    old_name = old_name_row[0]
+                    c.execute(
+                        "SELECT COUNT(*) FROM scores WHERE grade=? AND (grade_id IS NULL OR grade_id='')",
+                        (old_name,),
+                    )
+                    updated_scores += c.fetchone()[0]
+                    c.execute(
+                        "UPDATE scores SET grade=? WHERE grade=? AND (grade_id IS NULL OR grade_id='')",
+                        (next_name, old_name),
+                    )
+
+        # 同步更新 rollcall
+        updated_rollcall = 0
+        if sync_rollcall and not dry_run:
+            assert conn_outer is not None
+            c = conn_outer.cursor()
+            for table in ["rollcall_weights", "rollcall_meta"]:
+                for old_gid, next_info in prom_map.items():
+                    if next_info is None:
+                        continue
+                    next_name = next_info["name"]
+                    next_id = next_info["id"]
+                    c.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE grade_id=? AND grade_id IS NOT NULL",
+                        (old_gid,),
+                    )
+                    updated_rollcall += c.fetchone()[0]
+                    c.execute(
+                        f"UPDATE {table} SET grade=?, grade_id=? WHERE grade_id=? AND grade_id IS NOT NULL",
+                        (next_name, next_id, old_gid),
+                    )
+
+        # 提交事务
+        if not dry_run:
+            assert conn_outer is not None
+            conn_outer.commit()
+
+    except Exception as e:
+        if conn_outer:
+            conn_outer.rollback()
+        logger.error(f"升年级事务失败，已回滚: {e}")
+        return {
+            "success": False,
+            "direction": direction,
+            "promoted": {},
+            "not_moved": {},
+            "updated_users": 0,
+            "updated_scores": 0,
+            "updated_rollcall": 0,
+            "errors": [f"升年级失败，已全部回滚: {str(e)}"],
+        }
+    finally:
+        if conn_outer:
+            conn_outer.close()
+
+    promoted_count = sum(promoted.values())
+
+    result = {
+        "success": True,
+        "direction": direction,
+        "promoted": promoted,
+        "not_moved": not_moved,
+        "updated_users": promoted_count,
+        "updated_scores": updated_scores if sync_scores and not dry_run else 0,
+        "updated_rollcall": updated_rollcall if sync_rollcall and not dry_run else 0,
+        "errors": errors,
+    }
+    if skipped:
+        result["skipped"] = skipped
+        logger.warning(f"升年级跳过 {len(skipped)} 个无年级信息的学生: {skipped[:10]}...")
+    return result
 
 
 def parse_legacy_teacher_grade_class(grade: str, class_str: str) -> dict[str, list[str]]:

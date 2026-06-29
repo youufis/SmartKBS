@@ -751,3 +751,89 @@ async def download_import_template():
         media_type="text/csv",
         filename="user_import_template.csv",
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 批量升年级
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/promote-grades/preview")
+async def preview_promote_grades(request: Request):
+    """预览升年级影响范围"""
+    current_user = get_current_user(request)
+    from backend.auth import is_admin
+    if not is_admin(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以执行升年级操作")
+
+    try:
+        from backend.permission_service import preview_grade_promotion
+        return preview_grade_promotion()
+    except Exception as e:
+        logger.error(f"预览升年级失败: {e}")
+        raise HTTPException(status_code=500, detail=f"预览失败: {str(e)}")
+
+
+class GradePromotionRequest(BaseModel):
+    sync_scores: bool = True
+    sync_rollcall: bool = True
+    match_class: bool = True
+    confirm: bool = False
+
+
+@router.post("/promote-grades")
+async def execute_promote_grades(req: GradePromotionRequest, request: Request):
+    """执行批量升年级"""
+    current_user = get_current_user(request)
+    from backend.auth import is_admin
+    if not is_admin(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以执行升年级操作")
+
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="请先确认执行升年级操作（confirm=true）")
+
+    try:
+        from backend.permission_service import execute_grade_promotion
+        result = execute_grade_promotion(
+            sync_scores=req.sync_scores,
+            sync_rollcall=req.sync_rollcall,
+            match_class=req.match_class,
+            direction="up",
+        )
+        logger.info(f"批量升年级完成: promoted={result['promoted']}")
+        return result
+    except Exception as e:
+        logger.error(f"执行升年级失败: {e}")
+        raise HTTPException(status_code=500, detail=f"升年级失败: {str(e)}")
+
+
+# ═══════════════════════════════════════════════════════════════
+# 反向降级（升年级的逆操作）
+# ═══════════════════════════════════════════════════════════════
+
+@router.post("/promote-grades/reverse")
+async def reverse_promote_grades(req: GradePromotionRequest, request: Request):
+    """反向降级：高二→高一、高三→高二（升年级的逆操作）"""
+    current_user = get_current_user(request)
+    from backend.auth import is_admin
+    if not is_admin(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员")
+
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="请先确认执行降级操作（confirm=true）")
+
+    try:
+        from backend.permission_service import execute_grade_promotion, build_reverse_grade_promotion_map
+        reverse_map = build_reverse_grade_promotion_map()
+        result = execute_grade_promotion(
+            sync_scores=req.sync_scores,
+            sync_rollcall=req.sync_rollcall,
+            match_class=req.match_class,
+            prom_map=reverse_map,
+            direction="down",
+        )
+        if result["success"]:
+            logger.info(f"批量降级完成: promoted={result['promoted']}, already_min={result['not_moved']}")
+        return result
+    except Exception as e:
+        logger.error(f"执行降级失败: {e}")
+        raise HTTPException(status_code=500, detail=f"降级失败: {str(e)}")

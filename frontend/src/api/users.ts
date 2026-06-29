@@ -118,3 +118,58 @@ export async function importUsersStream(
 
   return readStream();
 }
+
+// ── 批量升年级 ──
+
+export interface GradePromotionPreview {
+  promotion_map: Record<string, string | null>;
+  grade_details: Array<{
+    grade: string;
+    grade_id: number;
+    count: number;
+    classes: string[];
+    next_grade: string | null;
+    next_grade_id: number | null;
+  }>;
+  total_students: number;
+}
+
+export interface GradePromotionResult {
+  success: boolean;
+  direction: 'up' | 'down';
+  promoted: Record<string, number>;
+  not_moved: Record<string, number>;
+  updated_users: number;
+  updated_scores: number;
+  updated_rollcall: number;
+  errors: string[];
+  skipped?: string[];
+}
+
+/** 预览升年级影响范围 */
+export async function previewPromoteGrades(): Promise<GradePromotionPreview> {
+  const { data } = await apiClient.get('/api/users/promote-grades/preview');
+  return data;
+}
+
+/** 执行批量升年级 */
+export async function executePromoteGrades(params: {
+  sync_scores?: boolean;
+  sync_rollcall?: boolean;
+  match_class?: boolean;
+  confirm: boolean;
+}): Promise<GradePromotionResult> {
+  const { data } = await apiClient.post('/api/users/promote-grades', params);
+  return data;
+}
+
+/** 反向降级（升年级的逆操作） */
+export async function reversePromoteGrades(params: {
+  sync_scores?: boolean;
+  sync_rollcall?: boolean;
+  match_class?: boolean;
+  confirm: boolean;
+}): Promise<GradePromotionResult> {
+  const { data } = await apiClient.post('/api/users/promote-grades/reverse', params);
+  return data;
+}
