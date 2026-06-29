@@ -460,7 +460,9 @@ const UpgradePanel: React.FC = () => {
               title: '版本变化', key: 'ver',
               render: (_: any, r: any) => `${r.from_version || '-'} → ${r.to_version || '-'}`,
             },
-            { title: '执行人', dataIndex: 'admin', key: 'admin', width: 100 },
+            { title: '执行人', dataIndex: 'admin', key: 'admin', width: 90 },
+            { title: '来源 IP', dataIndex: 'client_ip', key: 'client_ip', width: 130,
+              render: (ip: string) => ip || '-' },
             {
               title: '状态', dataIndex: 'status', key: 'status', width: 120,
               render: (s: string) => {
@@ -488,7 +490,7 @@ const UpgradePanel: React.FC = () => {
                         content: (
                           <div style={{ marginTop: 8 }}>
                             <p style={{ color: '#888', marginBottom: 8 }}>
-                              执行人：{r.admin} ｜ 时间：{r.timestamp}
+                              执行人：{r.admin} ｜ 来源 IP：{r.client_ip || '未知'} ｜ 时间：{r.timestamp}
                             </p>
                             {r.commits !== undefined && (
                               <p style={{ color: '#888', marginBottom: 12 }}>
