@@ -475,7 +475,6 @@ const UpgradePanel: React.FC = () => {
                 return <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
               },
             },
-            { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
             {
               title: '操作', key: 'action', width: 90,
               render: (_: any, r: any) => (
@@ -484,6 +483,7 @@ const UpgradePanel: React.FC = () => {
                     icon={<EyeOutlined />}
                     onClick={() => {
                       const fileList = r.changed_files
+                      const isError = r.status === 'failed' && r.error
                       Modal.info({
                         title: `📋 升级详情 — ${r.from_version || ''} → ${r.to_version || ''}`,
                         width: 560,
@@ -496,6 +496,19 @@ const UpgradePanel: React.FC = () => {
                               <p style={{ color: '#888', marginBottom: 12 }}>
                                 提交数：{r.commits}
                               </p>
+                            )}
+                            {isError && (
+                              <div style={{
+                                background: '#fff2f0', border: '1px solid #ffccc7',
+                                borderRadius: 6, padding: '12px 16px', marginBottom: 12,
+                              }}>
+                                <Text strong style={{ color: '#cf1322' }}>❌ 错误信息</Text>
+                                <pre style={{
+                                  marginTop: 8, marginBottom: 0, whiteSpace: 'pre-wrap',
+                                  wordBreak: 'break-word', fontSize: 13,
+                                  fontFamily: 'monospace', color: '#555',
+                                }}>{r.error}</pre>
+                              </div>
                             )}
                             {fileList && fileList.length > 0 ? (
                               <div>
