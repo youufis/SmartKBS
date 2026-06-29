@@ -782,6 +782,7 @@ const SystemConfigPage: React.FC = () => {
                     <Checkbox value="score">🏆 积分变动通知</Checkbox>
                     <Checkbox value="task">✅ 任务提交通知</Checkbox>
                     <Checkbox value="rollcall">📋 点名通知</Checkbox>
+                    <Checkbox value="system">🔄 版本更新通知</Checkbox>
                     <Checkbox value="info">ℹ️ 系统信息通知</Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
