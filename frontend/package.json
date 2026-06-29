@@ -24,6 +24,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tldraw": "^5.1.1",
+    "twemoji": "^14.0.2",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

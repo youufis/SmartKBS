@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Form, Input, Button, Typography, message, Row, Col } from 'antd'
 import {
-  UserOutlined, LockOutlined,
+  RobotOutlined, UserOutlined, LockOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -222,7 +222,9 @@ const LoginPage: React.FC = () => {
             }}>
               {/* 品牌标识 */}
               <div style={{ textAlign: 'center', marginBottom: 28 }}>
-                <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 4 }}>🤖</div>
+                <div style={{ fontSize: 40, lineHeight: 1, marginBottom: 4 }}>
+                  <RobotOutlined />
+                </div>
                 <Title level={3} style={{ margin: 0, color: 'var(--primary-color)', fontWeight: 700 }}>
                   SmartKB
                 </Title>
@@ -243,7 +245,8 @@ const LoginPage: React.FC = () => {
                 fontSize: 12,
                 color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)',
               }}>
-                🟢 当前在线: {onlineCount} 人
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: 'var(--success-color)', marginRight: 6, verticalAlign: 'middle' }} />
+                当前在线: {onlineCount} 人
               </div>
 
               {/* 名言 */}
