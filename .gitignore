@@ -20,6 +20,7 @@ pip/
 
 # ── Node ──
 node_modules/
+frontend/dist/
 
 # ── 运行时 ──
 LogFiles/
@@ -59,7 +60,6 @@ web.config
 **/ChatHistory/
 **/Summary/
 stu/
-backend/stu/
 root/
 youufis/
 Temp/
