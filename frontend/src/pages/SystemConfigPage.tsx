@@ -462,7 +462,7 @@ const UpgradePanel: React.FC = () => {
             },
             { title: '执行人', dataIndex: 'admin', key: 'admin', width: 90 },
             { title: '来源 IP', dataIndex: 'client_ip', key: 'client_ip', width: 130,
-              render: (ip: string) => ip || '-' },
+              render: (ip: string) => ip ? <Tag>{ip}</Tag> : '-' },
             {
               title: '状态', dataIndex: 'status', key: 'status', width: 120,
               render: (s: string) => {

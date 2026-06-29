@@ -471,7 +471,7 @@ def _release_lock():
 
 def _get_client_ip(request: Request) -> str:
     """从请求中提取客户端真实 IP"""
-    # 优先取 X-Forwarded-For（经过代理时）
+    # 优先取 X-Forwarded-For（经过代理，如 IIS ARR / nginx 时）
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -479,11 +479,23 @@ def _get_client_ip(request: Request) -> str:
     real_ip = request.headers.get("X-Real-IP", "")
     if real_ip:
         return real_ip.strip()
-    # 最后直接取客户端地址
-    client = request.client
-    if client:
-        return client.host
-    return "unknown"
+    # FastAPI/Starlette 的 request.client 属性
+    try:
+        client = request.client
+        if client is not None and client.host:
+            return client.host
+    except Exception:
+        pass
+    # 直接读取 ASGI scope 中的 client（兜底：某些 ASGI 服务器可能不填充 request.client）
+    try:
+        scope = getattr(request, "scope", None) or {}
+        scope_client = scope.get("client")
+        if scope_client and isinstance(scope_client, (list, tuple)) and len(scope_client) >= 2:
+            return str(scope_client[0])
+    except Exception:
+        pass
+    logger.debug(f"[upgrade] 无法获取客户端 IP（headers={dict(request.headers)}）")
+    return ""
 
 
 def _make_git_env() -> dict[str, str]:

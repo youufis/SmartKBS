@@ -28,6 +28,11 @@ temp_uploads/
 
 # ── 数据库 ──
 backend/smartkb.db
+
+# ── 在线升级运行时文件 ──
+.upgrade_lock
+.upgrade_state.json
+.upgrade_backups/
 backend/smartkb.db-shm
 backend/smartkb.db-wal
 backend/questions.db
