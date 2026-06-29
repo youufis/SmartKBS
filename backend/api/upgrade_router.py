@@ -386,8 +386,8 @@ async def _fetch_remote_version() -> dict[str, Any] | None:
             resp = await c.get(REMOTE_VERSION_URL)
             if resp.status_code == 200:
                 return resp.json()
-    except Exception as e:
-        print(f"[auto-upgrade] 获取远程版本信息失败: {e}")
+    except Exception:
+        pass
     return None
 
 
@@ -1121,13 +1121,11 @@ _AUTO_PREFETCH_KEY = "_prefetched_version"  # 预缓存标记：记录已预拉�
 
 async def _auto_check_worker():
     """后台循环：定期检测远程是否有新版本，发现更新时通知所有管理员"""
-    print("[auto-upgrade] 后台版本检测任务已启动")
-
     while True:
         try:
             await _perform_version_check()
-        except Exception as e:
-            print(f"[auto-upgrade] 版本检测异常: {e}")
+        except Exception:
+            pass
 
         await asyncio.sleep(_AUTO_CHECK_INTERVAL)
 
@@ -1147,8 +1145,8 @@ async def _perform_version_check():
         # 自动初始化 Git 仓库（.git 缺失时 git init + remote add）
         try:
             _git_setup_repo()
-        except Exception as e:
-            print(f"[auto-upgrade] Git 仓库自动初始化失败: {e}")
+        except Exception:
+            pass
 
         git_issues = _check_git_env()
         if not git_issues:
@@ -1158,8 +1156,8 @@ async def _perform_version_check():
                     ["rev-list", "--count", "HEAD..origin/master"], timeout=30
                 )
                 behind = int(out) if out else 0
-            except Exception as e:
-                print(f"[auto-upgrade] Git fetch/计数失败（网络异常），跳过本次: {e}")
+            except Exception:
+                pass
                 # 网络异常不阻止后续，behind 保持为 0
 
     has_update = has_new_version or (behind > 0)
@@ -1205,9 +1203,9 @@ async def _perform_version_check():
                 content=content,
                 related_link="/admin/system-config",
             )
-            print(f"[auto-upgrade] 已通知 {len(admins)} 位管理员: {title}")
-        except Exception as e:
-            print(f"[auto-upgrade] 发送通知失败: {e}")
+            pass
+        except Exception:
+            pass
 
     # 记录已通知过的版本
     s[_AUTO_CHECK_STATE_KEY] = notify_key
@@ -1231,7 +1229,7 @@ def _update_prefetch_flag(s: dict[str, Any], notify_key: str):
     if cached_ver != notify_key:
         s[_AUTO_PREFETCH_KEY] = notify_key
         _save_state(s)
-        print(f"[auto-upgrade] 已标记版本 {notify_key} 为预缓存状态，下次升级可直接应用")
+        pass
 
 
 def start_auto_version_check():
@@ -1242,5 +1240,5 @@ def start_auto_version_check():
             asyncio.ensure_future(_auto_check_worker())
         else:
             loop.create_task(_auto_check_worker())
-    except Exception as e:
-        print(f"[auto-upgrade] 启动后台检测失败: {e}")
+    except Exception:
+        pass
