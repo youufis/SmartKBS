@@ -111,6 +111,7 @@ const UpgradePanel: React.FC = () => {
   const [histPage, setHistPage] = useState(1)
   const [histPageSize, setHistPageSize] = useState(10)
   const pollRef = useRef<number | undefined>(undefined)
+  const [restarting, setRestarting] = useState(false)  // 服务重启中标记
 
   const loadVersion = useCallback(async () => {
     setVerLoading(true)
@@ -155,6 +156,7 @@ const UpgradePanel: React.FC = () => {
             <li>重启服务使新代码生效</li>
           </ol>
           <p style={{ color: 'red' }}>⚠️ 升级期间系统会短暂离线（约 1-3 分钟）</p>
+          <p style={{ color: '#fa8c16' }}>🖥️ 如果您不是在服务器本机操作，升级过程中页面会短暂断连，服务重启后会自动恢复</p>
           <p>💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理</p>
         </div>
       ),
@@ -164,9 +166,12 @@ const UpgradePanel: React.FC = () => {
         try {
           await startUpgrade()
           setUpgrading(true)
+          setRestarting(false)
           pollRef.current = setInterval(async () => {
             try {
               const st = await getUpgradeStatus()
+              // 服务恢复后重置重启标记（使用函数式更新避免闭包陷阱）
+              setRestarting(false)
               setUpgradeProg(st)
               if (!st.running) {
                 clearInterval(pollRef.current)
@@ -179,7 +184,9 @@ const UpgradePanel: React.FC = () => {
                 loadHistory()
               }
             } catch {
-              // 服务重启中，HTTP 请求会暂时失败，静默等待重试
+              // 服务重启中，HTTP 请求会暂时失败
+              // 首次进入断连状态时提示用户
+              setRestarting(true)
             }
           }, 2000)
         } catch (e: any) {
@@ -267,7 +274,9 @@ const UpgradePanel: React.FC = () => {
       setVerLoading(false)
     }
     init()
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
   }, [])
 
   const handleDeleteHistory = (task_id: string) => {
@@ -407,6 +416,7 @@ const UpgradePanel: React.FC = () => {
                   message.warning('升级已取消')
                   setUpgrading(false)
                   setUpgradeProg(null)
+                  setRestarting(false)
                   if (pollRef.current) clearInterval(pollRef.current)
                   loadVersion()
                   loadHistory()
@@ -421,7 +431,19 @@ const UpgradePanel: React.FC = () => {
         >
           <Progress percent={Math.max(0, upgradeProg.progress)} />
           <p style={{ marginTop: 8 }}>{upgradeProg.message}</p>
-          <p style={{ fontSize: 12, color: '#999' }}>如长时间无响应可点击右上角「取消升级」</p>
+          {restarting && (
+            <Alert
+              type="warning"
+              showIcon
+              icon={<SyncOutlined spin />}
+              message="⏳ 服务正在重启..."
+              description="服务重启中，连接暂时中断。这是正常现象，请耐心等待约 1-3 分钟，系统将自动恢复。如果您正在远程操作，切勿关闭此页面。"
+              style={{ marginTop: 8, marginBottom: 8 }}
+            />
+          )}
+          <p style={{ fontSize: 12, color: '#999' }}>
+            {restarting ? '正在等待服务重启完成...' : '如长时间无响应可点击右上角「取消升级」'}
+          </p>
           {upgradeProg.error && (
             <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
           )}

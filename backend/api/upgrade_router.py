@@ -28,6 +28,7 @@ router = APIRouter()
 REMOTE_VERSION_URL = "https://raw.githubusercontent.com/youufis/SmartKBS/master/version.json"
 BACKUP_DIR = BASE_DIR / ".upgrade_backups"
 STATE_FILE = BASE_DIR / ".upgrade_state.json"
+LOCK_FILE = BASE_DIR / ".upgrade_lock"  # 文件锁，防止多 IIS worker 并发升级
 MIGRATIONS_DIR = BASE_DIR / "backend" / "migrations"
 GIT_DOWNLOAD_URL = "https://git-scm.com/downloads/win"
 REMOTE_REPO_URL = "https://github.com/youufis/SmartKBS.git"
@@ -402,6 +403,89 @@ async def _count_behind() -> int:
         return -1
 
 
+# ── 文件锁 ──
+
+
+LOCK_TIMEOUT_SECONDS = 1800  # 锁超时：30 分钟（升级不可能超过此时间）
+
+
+def _acquire_lock() -> bool:
+    """尝试获取升级锁（原子操作）。返回 True 表示获取成功。"""
+    try:
+        # 先检查是否存在过期锁
+        if LOCK_FILE.exists():
+            try:
+                data = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+                lock_time = data.get("time", "")
+                lock_pid = data.get("pid", 0)
+                # 情况 1：锁文件超过超时时间 → 视为过期
+                if lock_time:
+                    elapsed = (datetime.now() - datetime.fromisoformat(lock_time)).total_seconds()
+                    if elapsed > LOCK_TIMEOUT_SECONDS:
+                        logger.warning(f"[lock] 发现过期锁文件（{elapsed:.0f}秒前，PID={lock_pid}），已清理")
+                        LOCK_FILE.unlink()
+                    else:
+                        return False  # 锁未过期，已被占用
+                else:
+                    return False
+            except (json.JSONDecodeError, ValueError, OSError):
+                # 锁文件损坏 → 清理后重新获取
+                try:
+                    LOCK_FILE.unlink()
+                except Exception:
+                    return False
+
+        # 用 os.open 的 O_CREAT|O_EXCL 实现原子创建
+        fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        os.close(fd)
+        LOCK_FILE.write_text(
+            json.dumps({
+                "pid": os.getpid(),
+                "host": platform.node(),
+                "time": datetime.now().isoformat(),
+            }),
+            encoding="utf-8",
+        )
+        return True
+    except FileExistsError:
+        return False
+    except Exception:
+        return False
+
+
+def _release_lock():
+    """释放升级锁"""
+    try:
+        if LOCK_FILE.exists():
+            # 只删除自己持有的锁（检查 PID 匹配），避免误删其他 worker 的锁
+            try:
+                data = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+                if data.get("pid") == os.getpid():
+                    LOCK_FILE.unlink()
+                # 如果 PID 不匹配，说明是其他 worker 的锁，不删除
+            except (json.JSONDecodeError, OSError):
+                LOCK_FILE.unlink()  # 损坏的锁文件直接清理
+    except Exception:
+        pass
+
+
+def _get_client_ip(request: Request) -> str:
+    """从请求中提取客户端真实 IP"""
+    # 优先取 X-Forwarded-For（经过代理时）
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    # 其次取 X-Real-IP
+    real_ip = request.headers.get("X-Real-IP", "")
+    if real_ip:
+        return real_ip.strip()
+    # 最后直接取客户端地址
+    client = request.client
+    if client:
+        return client.host
+    return "unknown"
+
+
 def _make_git_env() -> dict[str, str]:
     """构建统一的 Git 环境变量"""
     env = os.environ.copy()
@@ -485,7 +569,6 @@ async def check_version(request: Request) -> VersionCheckResult:
         except Exception:
             pass
     git_issues = _check_git_env() if git_ok else []
-    auto_setup = _can_auto_setup() if git_ok else False
     remote = await _fetch_remote_version()
     current = APP_VERSION
 
@@ -553,6 +636,7 @@ async def create_backup(request: Request):
     """② 升级前备份源码和关键数据"""
     user = get_current_user(request)
     require_admin(user)
+    client_ip = _get_client_ip(request)
 
     if _state["running"]:
         raise HTTPException(status_code=409, detail="已有升级任务运行中")
@@ -586,6 +670,7 @@ async def create_backup(request: Request):
             "version": APP_VERSION,
             "created_at": timestamp,
             "admin": user["username"],
+            "client_ip": client_ip,
         }
         _save_state(s)
 
@@ -601,11 +686,13 @@ async def start_upgrade(request: Request):
     """③ 启动增量升级（后台异步执行）"""
     user = get_current_user(request)
     require_admin(user)
+    client_ip = _get_client_ip(request)
 
+    # ── 内存状态检查 ──
     if _state["running"]:
         raise HTTPException(status_code=409, detail="已有升级任务运行中")
 
-    # ── 预检并自动修复 Git 环境 ──
+    # ── 预检 Git 环境（先不获取锁，预检是快速操作） ──
     git_issues = _check_git_env()
     if git_issues:
         if _can_auto_setup():
@@ -634,6 +721,12 @@ async def start_upgrade(request: Request):
     if not version_changed and behind <= 0:
         raise HTTPException(status_code=400, detail="已是最新版本，无需升级")
 
+    # ── 文件锁检查（防止 IIS 多 worker 并发升级） ──
+    # 所有预检通过后再获取锁，避免锁持有时间过长
+    if not _acquire_lock():
+        raise HTTPException(status_code=409,
+            detail="检测到有其他升级任务正在执行（文件锁被占用），请稍后重试")
+
     task_id = uuid.uuid4().hex[:12]
     _state["running"] = True
     _state["task_id"] = task_id
@@ -641,14 +734,19 @@ async def start_upgrade(request: Request):
     _state["error"] = None
     _set_progress("init", "初始化...", 5)
 
-    asyncio.create_task(_upgrade_pipeline(task_id, user["username"], remote))
+    # 传入 behind 避免 pipeline 中再次 _count_behind 导致二次 fetch
+    asyncio.create_task(_upgrade_pipeline(task_id, user["username"], client_ip, remote, behind))
     return {"status": "started", "task_id": task_id}
 
 
-async def _upgrade_pipeline(task_id: str, admin: str, remote: dict[str, Any]):
-    """升级流水线：全部增量操作（每步单独 try/except 以便精确定位错误）"""
+async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
+                            remote: dict[str, Any], behind: int = 0):
+    """升级流水线：全部增量操作（每步单独 try/except 以便精确定位错误）
+
+    Args:
+        behind: 预先计算的落后 commit 数（由 start_upgrade 传入，避免二次 fetch）
+    """
     to_version = remote.get("latest_version", "unknown")
-    behind = 0
     try:
         # ── Step 1: git fetch 增量拉取（如果已预缓存则跳过网络传输）──
         s_check = _load_state()
@@ -667,10 +765,11 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict[str, Any]):
             await _run_git(["fetch", "--all"], timeout=180)
             logger.info(f"[upgrade] Step 1/7: fetch 完成")
 
-        # Step 1b: 计算 commit 数
-        behind = int(await _run_git(
-            ["rev-list", "--count", "HEAD..origin/master"], timeout=30
-        ))
+        # Step 1b: 如果 start_upgrade 未传入 behind，则重新计算
+        if behind <= 0:
+            behind = int(await _run_git(
+                ["rev-list", "--count", "HEAD..origin/master"], timeout=30
+            ))
         logger.info(f"[upgrade] 落后 {behind} 个提交")
 
         # ── Step 2: git reset 快速同步 ──
@@ -691,11 +790,14 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict[str, Any]):
             pass
         logger.info(f"[upgrade] 变更文件: {len(changed_files)} 个")
 
-        # ── Step 3: 数据库迁移 ──
+        # ── Step 3: 数据库迁移（在线程池执行，避免阻塞事件循环） ──
         _set_progress("migrate", "执行数据库迁移...", 50)
         logger.info(f"[upgrade] Step 3/7: 数据库迁移")
         try:
-            applied = _run_migrations(APP_VERSION, to_version)
+            loop = asyncio.get_running_loop()
+            applied = await loop.run_in_executor(
+                None, _run_migrations, APP_VERSION, to_version
+            )
             if applied:
                 logger.info(f"[upgrade] 数据库迁移完成: {', '.join(applied)}")
         except RuntimeError as e:
@@ -727,6 +829,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict[str, Any]):
             "to_version": to_version,
             "timestamp": datetime.now().isoformat(),
             "admin": admin,
+            "client_ip": client_ip,  # 记录来源 IP
             "status": "success",
             "commits": behind,
             "changed_files": changed_files,
@@ -735,11 +838,37 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict[str, Any]):
         _save_state(s)
         logger.info(f"[upgrade] Step 6/7: 历史已记录")
 
+        # ── Step 6b: 重启前持久化完成状态 ──
+        # 将升级完成标记写入状态文件，新进程启动后可读取
+        s["_last_upgrade_result"] = {
+            "status": "success",
+            "from_version": APP_VERSION,
+            "to_version": to_version,
+            "commits": behind,
+            "admin": admin,
+            "client_ip": client_ip,
+            "completed_at": datetime.now().isoformat(),
+        }
+        _save_state(s)
+        logger.info(f"[upgrade] Step 6b/7: 完成状态已持久化")
+
         # ── Step 7: 重启服务 ──
         _set_progress("restart", "正在重启服务（短暂离线）...", 95)
         logger.info(f"[upgrade] Step 7/7: 重启服务")
+
+        # 先将最终进度写入 _state（重启前保留现场）
+        _state["step"] = "restart"
+        _state["message"] = f"✅ 升级完成！{APP_VERSION} → {to_version}（{behind} 个提交），正在重启服务..."
+        _state["progress"] = 99
+
+        # 重启前主动释放锁 —— 避免进程被回收后锁文件残留
+        # 注：服务重启期间不可能有新的升级请求，提前释放是安全的
+        _release_lock()
+
         await _restart_service()
 
+        # ── 注意：以下代码在 IIS 模式下可能不会执行（进程被回收）──
+        # 但 uvicorn 模式下会执行到
         _set_progress("done", f"✅ 升级完成！{APP_VERSION} → {to_version}（{behind} 个提交）", 100)
         _state["running"] = False
         logger.info(f"[upgrade] 在线增量升级成功: {APP_VERSION} → {to_version}")
@@ -768,17 +897,59 @@ async def _upgrade_pipeline(task_id: str, admin: str, remote: dict[str, Any]):
             "to_version": to_version,
             "timestamp": datetime.now().isoformat(),
             "admin": admin,
+            "client_ip": client_ip,  # 记录来源 IP
             "status": "failed",
             "error": str(e),
         })
         _save_state(s)
+    finally:
+        _release_lock()
 
 
 @router.get("/status")
 async def get_status(request: Request) -> UpgradeProgress:
-    """④ 轮询升级进度"""
+    """④ 轮询升级进度
+    说明：
+    - 升级进行中时返回实时进度（从内存 _state 读取）
+    - 服务重启后 _state 被重置，但会从持久化文件读取最近一次升级结果
+      让前端仍能展示完成状态，而不是空白
+    """
     user = get_current_user(request)
     require_admin(user)
+
+    # 如果升级正在运行，返回实时进度
+    if _state["running"]:
+        return UpgradeProgress(**_state)
+
+    # 如果内存中有错误或完成状态，直接返回
+    if _state["error"] or _state["step"]:
+        return UpgradeProgress(**_state)
+
+    # 内存状态为空（可能是服务重启后 _state 丢失）
+    # 尝试从持久化文件读取最近一次升级结果
+    try:
+        s = _load_state()
+        last_result = s.get("_last_upgrade_result")
+        if last_result and last_result.get("status") == "success":
+            return UpgradeProgress(
+                running=False,
+                task_id=None,
+                step="done",
+                progress=100,
+                message=(
+                    f"✅ 升级完成！{last_result.get('from_version', '?')} "
+                    f"→ {last_result.get('to_version', '?')} "
+                    f"（{last_result.get('commits', 0)} 个提交）"
+                ),
+                error=None,
+                started_at=last_result.get("completed_at"),
+            )
+        # 清除过期的持久化标记，避免下次重复显示
+        s.pop("_last_upgrade_result", None)
+        _save_state(s)
+    except Exception:
+        pass
+
     return UpgradeProgress(**_state)
 
 
@@ -787,6 +958,7 @@ async def rollback(request: Request):
     """⑤ 回滚：利用 git reflog 回到升级前的 HEAD"""
     user = get_current_user(request)
     require_admin(user)
+    client_ip = _get_client_ip(request)
 
     try:
         # HEAD@{1} 是执行 git reset --hard origin/master 之前的位置
@@ -799,6 +971,7 @@ async def rollback(request: Request):
             "action": "rollback",
             "timestamp": datetime.now().isoformat(),
             "admin": user["username"],
+            "client_ip": client_ip,
             "status": "rolled_back",
         })
         _save_state(s)
@@ -824,12 +997,17 @@ async def cancel_upgrade(request: Request):
     _state["error"] = None
     _state["started_at"] = None
 
+    # 释放文件锁
+    _release_lock()
+
     # 清除预缓存状态
     try:
         s = _load_state()
         if _AUTO_PREFETCH_KEY in s:
             del s[_AUTO_PREFETCH_KEY]
-            _save_state(s)
+        # 也清除持久化升级结果标记
+        s.pop("_last_upgrade_result", None)
+        _save_state(s)
     except Exception:
         pass
 
