@@ -85,5 +85,10 @@ def setup_logger(name: str = "smartkb") -> logging.Logger:
     return logger
 
 
+# 屏蔽 uvicorn 的 HTTP 访问日志（如 "POST /api/xxx HTTP/1.1" 200 OK）
+# 这些日志对调试无帮助且刷屏严重，设为 WARNING 级别仅显示错误
+uvicorn_access = logging.getLogger("uvicorn.access")
+uvicorn_access.setLevel(logging.WARNING)
+
 # 全局默认 logger
 logger = setup_logger()
