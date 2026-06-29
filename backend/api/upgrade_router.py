@@ -478,6 +478,12 @@ async def check_version(request: Request) -> VersionCheckResult:
     require_admin(user)
 
     git_ok = _check_git_installed()
+    if git_ok:
+        # 自动初始化 Git 仓库（.git 缺失时 git init + remote add），确保能检测到同版本内新提交
+        try:
+            _git_setup_repo()
+        except Exception:
+            pass
     git_issues = _check_git_env() if git_ok else []
     auto_setup = _can_auto_setup() if git_ok else False
     remote = await _fetch_remote_version()
@@ -506,8 +512,8 @@ async def check_version(request: Request) -> VersionCheckResult:
                 ["rev-list", "--count", "HEAD..origin/master"], timeout=30
             )
             behind = int(out) if out else 0
-        except Exception:
-            behind = -1
+        except Exception as e:
+            logger.warning(f"[version-check] Git fetch/计数失败: {e}")
 
     # 有更新条件：版本号不同 或 同版本内有新提交（热修复）
     version_changed = latest != current
@@ -921,19 +927,22 @@ async def _auto_check_worker():
 
 async def _perform_version_check():
     """执行一次版本检测，发现新版本则通知管理员"""
+    # 先获取远程版本信息，失败不阻断，后续仍尝试 git 检测
     remote = await _fetch_remote_version()
-    if remote is None:
-        return  # 网络不可达，跳过本次检测
 
-    latest = remote.get("latest_version", "")
+    latest = remote.get("latest_version", "") if remote else ""
     current = APP_VERSION
+    has_new_version = bool(remote) and (latest != current)
 
-    # 检查是否有版本变化
-    has_new_version = latest != current
-
-    # 也检查同版本内的新提交
+    # 也检查同版本内的新提交（热修复检测）
     behind = 0
     if _check_git_installed():
+        # 自动初始化 Git 仓库（.git 缺失时 git init + remote add）
+        try:
+            _git_setup_repo()
+        except Exception as e:
+            logger.warning(f"[auto-upgrade] Git 仓库自动初始化失败: {e}")
+
         git_issues = _check_git_env()
         if not git_issues:
             try:
@@ -942,36 +951,45 @@ async def _perform_version_check():
                     ["rev-list", "--count", "HEAD..origin/master"], timeout=30
                 )
                 behind = int(out) if out else 0
-            except Exception:
-                behind = -1
+            except Exception as e:
+                logger.warning(f"[auto-upgrade] Git fetch/计数失败（网络异常），跳过本次: {e}")
+                # 网络异常不阻止后续，behind 保持为 0
 
     has_update = has_new_version or (behind > 0)
     if not has_update:
         return
 
-    # 检查是否已经通知过这个版本，避免重复通知
+    # 构建通知所需信息
+    if remote:
+        changelog = remote.get("changelog", [])
+        version_label = f"{current} → {latest}" if has_new_version else f"{current}（{behind} 个新提交）"
+        content_lines = ["更新内容："] + [f"• {item}" for item in changelog] if changelog else ["有新的代码更新可用，请前往「系统配置 → 版本管理」查看并升级。"]
+    else:
+        # 远程 version.json 不可达，但 git 检测到有新提交
+        version_label = f"{current}（{behind} 个新提交）"
+        content_lines = ["检测到有新的代码提交，请前往「系统配置 → 版本管理」查看并升级。"]
+
+    title = f"📥 新版本可用：{version_label}"
+    content = "\n".join(content_lines)
+
+    # 检查是否已经通知过，避免重复
     s = _load_state()
-    last_notified = s.get(_AUTO_CHECK_STATE_KEY, "")
-    notify_key = f"{latest}:{behind}"
-    already_notified = (last_notified == notify_key)
+    notify_key = f"{latest or 'unknown'}:{behind}"
+    if s.get(_AUTO_CHECK_STATE_KEY, "") == notify_key:
+        # 已通知过，只更新预缓存标记
+        _update_prefetch_flag(s, notify_key)
+        return
 
-    if not already_notified:
-        # 通知所有管理员
+    # 通知所有管理员
+    try:
+        from backend.database import execute_query
+        rows = execute_query("SELECT username FROM users WHERE role=0")
+        admins = [row[0] for row in rows] if rows else []
+    except Exception:
+        admins = []
+
+    if admins:
         try:
-            from backend.database import execute_query
-            rows = execute_query("SELECT username FROM users WHERE role=0")
-            admins = [row[0] for row in rows] if rows else []
-        except Exception:
-            admins = []
-
-        if admins:
-            version_info = f"{current} → {latest}" if has_new_version else f"{current}（{behind} 个新提交）"
-            title = f"📥 新版本可用：{version_info}"
-
-            changelog = remote.get("changelog", [])
-            content = "更新内容：\n" + "\n".join(f"• {item}" for item in changelog) if changelog else "有新的代码更新可用，请前往「系统配置 → 版本管理」查看并升级。"
-
-            # 导入 notify_users 发送通知
             from backend.api.notification_router import notify_users
             notify_users(
                 usernames=admins,
@@ -981,21 +999,32 @@ async def _perform_version_check():
                 related_link="/admin/system-config",
             )
             logger.info(f"[auto-upgrade] 已通知 {len(admins)} 位管理员: {title}")
+        except Exception as e:
+            logger.error(f"[auto-upgrade] 发送通知失败: {e}")
 
-        # 记录已通知过的版本
-        s[_AUTO_CHECK_STATE_KEY] = notify_key
-        _save_state(s)
+    # 记录已通知过的版本
+    s[_AUTO_CHECK_STATE_KEY] = notify_key
+    _save_state(s)
 
-    # ── 预缓存标记：上面已执行过 git fetch，数据已在 .git/objects/ 中 ──
-    # 记录当前版本已预缓存，升级流水线可跳过 fetch 步骤直接应用
-    if _check_git_installed():
+    # ── 预缓存标记 ──
+    _update_prefetch_flag(s, notify_key)
+
+
+def _update_prefetch_flag(s: dict[str, Any], notify_key: str):
+    """标记当前版本已预缓存（git fetch 数据已在 .git/objects/ 中）"""
+    if not _check_git_installed():
+        return
+    try:
         git_issues = _check_git_env()
-        if not git_issues:
-            cached_ver = s.get(_AUTO_PREFETCH_KEY, "")
-            if cached_ver != notify_key:
-                s[_AUTO_PREFETCH_KEY] = notify_key
-                _save_state(s)
-                logger.info(f"[auto-upgrade] 已标记版本 {notify_key} 为预缓存状态，下次升级可直接应用")
+        if git_issues:
+            return
+    except Exception:
+        return
+    cached_ver = s.get(_AUTO_PREFETCH_KEY, "")
+    if cached_ver != notify_key:
+        s[_AUTO_PREFETCH_KEY] = notify_key
+        _save_state(s)
+        logger.info(f"[auto-upgrade] 已标记版本 {notify_key} 为预缓存状态，下次升级可直接应用")
 
 
 def start_auto_version_check():
