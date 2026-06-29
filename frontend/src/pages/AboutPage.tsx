@@ -25,7 +25,7 @@ const AboutPage: React.FC = () => {
   }
 
   useEffect(() => {
-    fetch('/api/files/USER_MANUAL.md')
+    fetch('/api/files/README.md')
       .then((r) => r.text())
       .then(setContent)
       .catch(() => setContent('# 关于与帮助\n\n系统帮助文档加载失败。'))
