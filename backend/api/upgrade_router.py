@@ -682,7 +682,7 @@ async def create_backup(request: Request):
         # 额外备份数据库和配置（虽在 .gitignore 中，但很重要）
         prot_dir = backup_path / "protected"
         prot_dir.mkdir(parents=True, exist_ok=True)
-        for rel in ["backend/smartkb.db", "backend/system_config.json", "backend/.node_id"]:
+        for rel in ["backend/smartkb.db", "backend/questions.db", "backend/system_config.json", "backend/.node_id"]:
             src = BASE_DIR / rel
             if src.exists():
                 try:
