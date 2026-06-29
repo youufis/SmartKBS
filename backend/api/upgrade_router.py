@@ -470,31 +470,48 @@ def _release_lock():
 
 
 def _get_client_ip(request: Request) -> str:
-    """从请求中提取客户端真实 IP"""
-    # 优先取 X-Forwarded-For（经过代理，如 IIS ARR / nginx 时）
+    """从请求中提取客户端真实 IP（多层兜底）"""
+    # ── 优先级 1：标准代理头 ──
+    # X-Forwarded-For: client, proxy1, proxy2
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
-        return forwarded.split(",")[0].strip()
-    # 其次取 X-Real-IP
-    real_ip = request.headers.get("X-Real-IP", "")
-    if real_ip:
-        return real_ip.strip()
-    # FastAPI/Starlette 的 request.client 属性
+        ip = forwarded.split(",")[0].strip()
+        if ip and ip != "127.0.0.1" and ip != "::1":
+            return ip
+        # 如果只有 127.0.0.1 说明代理在本地，继续尝试其他方式获取真实 IP
+
+    # ── 优先级 2：其他常见的代理头 ──
+    for header in ["X-Real-IP", "CF-Connecting-IP", "True-Client-IP", "Client-IP"]:
+        ip = request.headers.get(header, "")
+        if ip:
+            return ip.strip()
+
+    # ── 优先级 3：FastAPI/Starlette 的 request.client ──
     try:
         client = request.client
         if client is not None and client.host:
+            # IIS httpPlatform 场景：request.client 返回的是 127.0.0.1
+            # 此时如果 X-Forwarded-For 有值但也是 127.0.0.1，说明没有真实代理头，只能返回这个
             return client.host
     except Exception:
         pass
-    # 直接读取 ASGI scope 中的 client（兜底：某些 ASGI 服务器可能不填充 request.client）
+
+    # ── 优先级 4：直接读取 ASGI scope ──
     try:
         scope = getattr(request, "scope", None) or {}
         scope_client = scope.get("client")
         if scope_client and isinstance(scope_client, (list, tuple)) and len(scope_client) >= 2:
-            return str(scope_client[0])
+            ip = str(scope_client[0])
+            if ip:
+                return ip
     except Exception:
         pass
-    logger.debug(f"[upgrade] 无法获取客户端 IP（headers={dict(request.headers)}）")
+
+    # ── 兜底：记录所有请求头便于排查 ──
+    logger.warning(
+        f"[upgrade] 无法获取客户端 IP！请求头: {dict(request.headers)}, "
+        f"scope.client: {getattr(request, 'scope', {}).get('client')}"
+    )
     return ""
 
 
@@ -1091,6 +1108,28 @@ async def delete_history_item(task_id: str, request: Request):
     s["history"] = new_history
     _save_state(s)
     return {"status": "ok", "message": "已删除"}
+
+
+# ═══════════════════════════════════════════════════════
+#  诊断工具
+# ═══════════════════════════════════════════════════════
+
+@router.get("/debug-ip")
+async def debug_client_ip(request: Request):
+    """调试：查看服务器检测到的客户端 IP 及所有请求头（仅管理员可用）"""
+    user = get_current_user(request)
+    require_admin(user)
+
+    client = request.client
+    scope = getattr(request, "scope", {})
+    scope_client = scope.get("client")
+
+    return {
+        "detected_ip": _get_client_ip(request),
+        "request_client": str(client) if client else None,
+        "scope_client": scope_client,
+        "headers": dict(request.headers),
+    }
 
 
 # ═══════════════════════════════════════════════════════
