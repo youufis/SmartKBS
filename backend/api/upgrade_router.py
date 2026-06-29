@@ -1111,28 +1111,6 @@ async def delete_history_item(task_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════
-#  诊断工具
-# ═══════════════════════════════════════════════════════
-
-@router.get("/debug-ip")
-async def debug_client_ip(request: Request):
-    """调试：查看服务器检测到的客户端 IP 及所有请求头（仅管理员可用）"""
-    user = get_current_user(request)
-    require_admin(user)
-
-    client = request.client
-    scope = getattr(request, "scope", {})
-    scope_client = scope.get("client")
-
-    return {
-        "detected_ip": _get_client_ip(request),
-        "request_client": str(client) if client else None,
-        "scope_client": scope_client,
-        "headers": dict(request.headers),
-    }
-
-
-# ═══════════════════════════════════════════════════════
 #  后台自动检测新版本
 # ═══════════════════════════════════════════════════════
 
