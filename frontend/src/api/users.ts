@@ -119,6 +119,35 @@ export async function importUsersStream(
   return readStream();
 }
 
+/** 导出用户为 CSV 文件 */
+export function exportUsersCsv(keyword?: string) {
+  const token = localStorage.getItem('smartkb_token');
+  const params = keyword ? `?keyword=${encodeURIComponent(keyword)}` : '';
+  // 直接用 fetch 处理文件下载
+  const url = `/api/users/export${params}`;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  fetch(url, { headers })
+    .then(res => {
+      if (!res.ok) throw new Error('导出失败');
+      return res.blob();
+    })
+    .then(blob => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'users_export.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    })
+    .catch(err => {
+      console.error('导出用户失败:', err);
+    });
+}
+
 // ── 批量升年级 ──
 
 export interface GradePromotionPreview {
