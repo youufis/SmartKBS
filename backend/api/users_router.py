@@ -454,12 +454,12 @@ async def export_users(request: Request, keyword: Optional[str] = None):
                 subjects_str = "、".join(subjects)
         writer.writerow([username, name_val or "", gender_name, role_name, grade_val or "", class_val or "", subjects_str])
 
-    csv_content = output.getvalue()
+    csv_bytes = output.getvalue().encode('utf-8-sig')
     output.close()
 
     return StreamingResponse(
-        iter([csv_content]),
-        media_type="text/csv; charset=utf-8-sig",
+        iter([csv_bytes]),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=users_export.csv"},
     )
 
