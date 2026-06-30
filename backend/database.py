@@ -151,7 +151,7 @@ def init_db():
                 grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
                 class_id INTEGER,
                 subject TEXT DEFAULT '',
-                UNIQUE(teacher_username, grade_id, class_id)
+                UNIQUE(teacher_username, grade_id, class_id, subject)
             )""")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ta_teacher ON teacher_assignments(teacher_username)")
@@ -159,6 +159,33 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ta_class ON teacher_assignments(class_id)")
             except sqlite3.OperationalError:
                 pass
+
+            # 兼容旧表：迁移 teacher_assignments 的唯一约束（旧表 UNIQUE 不含 subject）
+            try:
+                c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='teacher_assignments'")
+                tbl_sql = (c.fetchone() or [None])[0] or ''
+                if 'UNIQUE(teacher_username, grade_id, class_id)' in tbl_sql and 'UNIQUE(teacher_username, grade_id, class_id, subject)' not in tbl_sql:
+                    logger.info("检测到旧版 teacher_assignments 约束，正在迁移至含 subject 的唯一约束...")
+                    c.execute("PRAGMA table_info(teacher_assignments)")
+                    columns = [row[1] for row in c.fetchall()]
+                    if 'subject' in columns:
+                        c.execute("""CREATE TABLE IF NOT EXISTS teacher_assignments_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            teacher_username TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+                            grade_id INTEGER NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+                            class_id INTEGER,
+                            subject TEXT DEFAULT '',
+                            UNIQUE(teacher_username, grade_id, class_id, subject)
+                        )""")
+                        c.execute("INSERT OR IGNORE INTO teacher_assignments_new SELECT * FROM teacher_assignments")
+                        c.execute("DROP TABLE teacher_assignments")
+                        c.execute("ALTER TABLE teacher_assignments_new RENAME TO teacher_assignments")
+                        c.execute("CREATE INDEX IF NOT EXISTS idx_ta_teacher ON teacher_assignments(teacher_username)")
+                        c.execute("CREATE INDEX IF NOT EXISTS idx_ta_grade ON teacher_assignments(grade_id)")
+                        c.execute("CREATE INDEX IF NOT EXISTS idx_ta_class ON teacher_assignments(class_id)")
+                        logger.info("teacher_assignments 表约束迁移完成")
+            except Exception as e:
+                logger.warning(f"teacher_assignments 约束迁移跳过（首次创建或无变化）: {e}")
 
             # ── 每日使用量统计表（限流用，与日志解耦） ──
             c.execute(

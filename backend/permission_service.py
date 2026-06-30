@@ -225,7 +225,7 @@ def get_teacher_classes(teacher_username: str, grade_id: int) -> list[dict[str, 
         return get_all_classes(grade_id)
 
     return execute_query_dict(
-        """SELECT c.id, c.grade_id, c.name, c.display_name, c.sort_order
+        """SELECT DISTINCT c.id, c.grade_id, c.name, c.display_name, c.sort_order
            FROM teacher_assignments ta
            JOIN classes c ON ta.class_id = c.id
            WHERE ta.teacher_username = ? AND ta.grade_id = ?

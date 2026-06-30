@@ -75,17 +75,17 @@ async def api_teacher_info(request: Request):
     # 优先使用新表
     assignments = get_teacher_assignments(teacher)
     if assignments:
-        grade_map: dict[str, list[str]] = {}
+        grade_map: dict[str, set[str]] = {}
         for a in assignments:
             gn = a["grade_name"]
             if gn not in grade_map:
-                grade_map[gn] = []
+                grade_map[gn] = set()
             if a.get("class_name"):
-                grade_map[gn].append(a["class_name"])
+                grade_map[gn].add(a["class_name"])
         parts = []
         for g, classes in grade_map.items():
             if classes:
-                parts.append(f"{g}{','.join(classes)}")
+                parts.append(f"{g}{','.join(sorted(classes))}")
             else:
                 parts.append(f"{g}（全部班级）")
         return {"username": teacher, "teaching": " | ".join(parts)}
