@@ -59,7 +59,7 @@ def _score_key(teacher, grade, cls, name):
 
 
 def _is_teacher_allowed(username: str, grade: str, cls: str) -> bool:
-    """检查教师是否有权限访问该年级/班级（统一使用 permission_service）"""
+    """检查教师是否有权限访问该年级/班级（严格走统一权限 permission_service）"""
     if not grade and not cls:
         return True
     if is_admin(username):
@@ -71,27 +71,23 @@ def _is_teacher_allowed(username: str, grade: str, cls: str) -> bool:
     if not grade_info:
         return False
 
-    # 先通过统一权限检查
-    if can_access_grade(username, grade_info["id"]):
-        if not cls:
-            return True
-        class_rows = execute_query_dict(
-            "SELECT id FROM classes WHERE grade_id=? AND name LIKE ?",
-            (grade_info["id"], f"%{cls.replace('班', '')}%")
-        )
-        if class_rows:
-            return can_access_class(username, grade_info["id"], class_rows[0]["id"])
-        # 班级名精确匹配失败时，允许访问（降级）
+    # 必须通过年级权限检查（无降级）
+    if not can_access_grade(username, grade_info["id"]):
+        return False
+
+    # 未指定班级时，有年级权限即通过
+    if not cls:
         return True
 
-    # 降级：teacher_assignments 无数据时，检查 users 表是否有该年级的学生
-    rows = execute_query(
-        "SELECT 1 FROM users WHERE role=2 AND grade=? LIMIT 1",
-        (grade,),
+    # 通过 classes 表查找班级名
+    class_rows = execute_query_dict(
+        "SELECT id FROM classes WHERE grade_id=? AND (name LIKE ? OR display_name LIKE ?)",
+        (grade_info["id"], f"%{cls.replace('班', '')}%", f"%{cls.replace('班', '')}%")
     )
-    if rows:
-        return True
-    return False
+    if not class_rows:
+        return False
+
+    return can_access_class(username, grade_info["id"], class_rows[0]["id"])
 
 
 def _load_history(teacher, grade, cls):
@@ -815,6 +811,8 @@ async def attendance_summary(request: Request):
         student_list.append({
             "name": s["name"],
             "username": uname,
+            "grade": grade,
+            "class": s.get("class", ""),
             "gender": s.get("gender", ""),
             "has_logged_in": uname in online_usernames,
             "last_login_time": login_info.get("login_time", ""),
@@ -864,3 +862,77 @@ async def attendance_logs(request: Request):
     )
 
     return {"logs": logs, "total": len(logs)}
+
+
+@router.get("/attendance/online-students", summary="获取全部在线学生信息（含年级班级）")
+async def attendance_online_students(request: Request):
+    """获取当前所有在线学生信息（含年级、班级、登录信息），默认展示用"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    online_usernames = get_online_usernames()
+    if not online_usernames:
+        return {"students": [], "total": 0}
+
+    # 只筛选 role=2 的学生
+    placeholders = ",".join(["?"] * len(online_usernames))
+    rows = execute_query_dict(
+        f"""SELECT u.name, u.username, u.grade as old_grade, u.class as old_class,
+                   g.name as grade_name, COALESCE(c.display_name, u.class) as class_display,
+                   u.gender
+            FROM users u
+            LEFT JOIN grades g ON u.grade_id = g.id
+            LEFT JOIN classes c ON u.class_id = c.id
+            WHERE u.role=2 AND u.username IN ({placeholders})""",
+        tuple(online_usernames),
+    )
+
+    # 非管理员按权限过滤
+    if role != 0:
+        allowed_rows = []
+        for r in rows:
+            s_grade = r.get("grade_name", r.get("old_grade", ""))
+            s_class = r.get("class_display", r.get("old_class", ""))
+            if _is_teacher_allowed(username, s_grade or "", s_class or ""):
+                allowed_rows.append(r)
+        rows = allowed_rows
+
+    # 获取每位学生最新登录信息
+    student_usernames = [r["username"] for r in rows]
+    latest_logins = {}
+    if student_usernames:
+        ph = ",".join(["?"] * len(student_usernames))
+        latest_rows = execute_query_dict(
+            f"""SELECT username, login_time, login_ip FROM login_logs
+                WHERE username IN ({ph})
+                AND login_time = (
+                    SELECT MAX(login_time) FROM login_logs sub
+                    WHERE sub.username = login_logs.username
+                )
+                ORDER BY login_time DESC""",
+            tuple(student_usernames),
+        )
+        for lr in latest_rows:
+            latest_logins[lr["username"]] = {
+                "login_time": lr["login_time"],
+                "login_ip": lr["login_ip"],
+            }
+
+    student_list = []
+    for r in rows:
+        login_info = latest_logins.get(r["username"], {})
+        grade_val = r.get("grade_name", r.get("old_grade", ""))
+        class_val = r.get("class_display", r.get("old_class", ""))
+        student_list.append({
+            "name": r["name"],
+            "username": r["username"],
+            "grade": grade_val or "",
+            "class": class_val or "",
+            "gender": "男" if r.get("gender") in (1, "1", "男") else "女" if r.get("gender") in (2, "0", "女", 0) else "",
+            "has_logged_in": True,
+            "last_login_time": login_info.get("login_time", ""),
+            "last_login_ip": login_info.get("login_ip", ""),
+        })
+
+    return {"students": student_list, "total": len(student_list)}
