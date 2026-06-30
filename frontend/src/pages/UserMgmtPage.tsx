@@ -603,7 +603,16 @@ const UserMgmtPage: React.FC = () => {
                   message.success('用户导出成功')
                 } catch (err: unknown) {
                   hide()
-                  message.error((err as ApiError)?.response?.data?.detail || '导出失败，请确认服务已重启')
+                  const ae = err as ApiError
+                  // responseType=arraybuffer 时错误 data 也是 ArrayBuffer，需转文本
+                  let detail = ae?.response?.data?.detail
+                  if (!detail && ae?.response?.data instanceof ArrayBuffer) {
+                    try {
+                      const text = new TextDecoder().decode(ae.response.data)
+                      detail = JSON.parse(text).detail
+                    } catch { /* ignore */ }
+                  }
+                  message.error(detail || '导出失败，请检查后端服务是否正常')
                 }
               }}>导出用户</Button>
             </Space>

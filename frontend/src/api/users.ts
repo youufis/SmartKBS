@@ -122,14 +122,14 @@ export async function importUsersStream(
 /** 导出用户为 CSV 文件 */
 export async function exportUsersCsv(keyword?: string): Promise<void> {
   const params = keyword ? `?keyword=${encodeURIComponent(keyword)}` : '';
-  const { data, headers: respHeaders } = await apiClient.get(`/api/users/export${params}`, {
-    responseType: 'blob',
+  // 先用默认 responseType 请求，成功再转 blob 下载
+  const response = await apiClient.get(`/api/users/export${params}`, {
+    responseType: 'arraybuffer',
   });
-  // 从 Content-Disposition 中提取文件名，fallback 到默认名
-  const disp = respHeaders['content-disposition'] || '';
+  const disp = response.headers['content-disposition'] || '';
   const match = disp.match(/filename\*?=(?:UTF-8'')?([^;\s]+)/i);
   const filename = match ? decodeURIComponent(match[1]) : 'users_export.csv';
-  const blob = new Blob([data], { type: 'text/csv;charset=utf-8-sig' });
+  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8-sig' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = filename;
