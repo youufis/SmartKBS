@@ -798,6 +798,8 @@ const SessionsManager: React.FC = () => {
 interface AttendanceStudent {
   name: string
   username: string
+  grade: string
+  class: string
   gender: string
   has_logged_in: boolean
   last_login_time: string
@@ -827,6 +829,25 @@ const AttendanceStats: React.FC = () => {
   const [logRecords, setLogRecords] = useState<any[]>([])
   const [logLoading, setLogLoading] = useState(false)
   const [logModalVisible, setLogModalVisible] = useState(false)
+  const [onlineStudents, setOnlineStudents] = useState<AttendanceStudent[]>([])
+  const [onlineLoading, setOnlineLoading] = useState(false)
+
+  // 默认加载全部在线学生
+  useEffect(() => {
+    loadOnlineStudents()
+  }, [])
+
+  const loadOnlineStudents = async () => {
+    setOnlineLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/rollcall/attendance/online-students')
+      setOnlineStudents(data.students || [])
+    } catch {
+      // ignore
+    } finally {
+      setOnlineLoading(false)
+    }
+  }
 
   // 加载年级
   useEffect(() => {
@@ -840,7 +861,10 @@ const AttendanceStats: React.FC = () => {
     setCls('')
     setClasses([])
     setSummary(null)
-    if (!val) return
+    if (!val) {
+      loadOnlineStudents()
+      return
+    }
     try {
       const { data } = await apiClient.get('/api/rollcall/attendance/classes', {
         params: { grade: val },
@@ -854,7 +878,10 @@ const AttendanceStats: React.FC = () => {
   const handleClassChange = async (val: string) => {
     setCls(val)
     setSummary(null)
-    if (!grade || !val) return
+    if (!grade || !val) {
+      if (!val) loadOnlineStudents()
+      return
+    }
     setLoading(true)
     try {
       const { data } = await apiClient.get('/api/rollcall/attendance/summary', {
@@ -904,6 +931,14 @@ const AttendanceStats: React.FC = () => {
       ),
     },
     {
+      title: '年级', dataIndex: 'grade', key: 'grade',
+      render: (g: string) => g || <Text type="secondary">-</Text>,
+    },
+    {
+      title: '班级', dataIndex: 'class', key: 'class',
+      render: (c: string) => c || <Text type="secondary">-</Text>,
+    },
+    {
       title: '用户名', dataIndex: 'username', key: 'username',
       render: (u: string) => u ? <Text copyable={{ text: u }} style={{ fontSize: 12 }}>{u}</Text> : <Text type="secondary">-</Text>,
     },
@@ -943,9 +978,23 @@ const AttendanceStats: React.FC = () => {
           </Space>
         }
         extra={
-          <Button icon={<ReloadOutlined />} onClick={() => handleClassChange(cls)} loading={loading}>
-            刷新数据
-          </Button>
+          <Space>
+            {summary && (
+              <Tag color="blue" style={{ fontSize: 13 }}>
+                {summary.grade} · {summary.class}
+              </Tag>
+            )}
+            {!grade && !cls && onlineStudents.length > 0 && (
+              <Tag icon={<LoginOutlined />} color="success" style={{ fontSize: 13 }}>
+                全部在线 · {onlineStudents.length} 人
+              </Tag>
+            )}
+            <Button icon={<ReloadOutlined />}
+              onClick={() => grade && cls ? handleClassChange(cls) : loadOnlineStudents()}
+              loading={loading || onlineLoading}>
+              刷新数据
+            </Button>
+          </Space>
         }
         style={{ marginBottom: 16 }}
       >
@@ -959,6 +1008,7 @@ const AttendanceStats: React.FC = () => {
               options={grades.map(g => ({ label: g, value: g }))}
               style={{ width: 160 }}
               size="large"
+              allowClear
             />
             <Select
               placeholder="— 选择班级 —"
@@ -968,10 +1018,14 @@ const AttendanceStats: React.FC = () => {
               style={{ width: 180 }}
               size="large"
               disabled={!grade}
+              allowClear
             />
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              （默认显示全部在线学生，选择年级/班级可查看班级详情）
+            </Text>
           </Space>
 
-          {/* 统计概览 */}
+          {/* 统计概览 - 班级模式 */}
           {summary && (
             <>
               <Row gutter={24}>
@@ -1014,11 +1068,26 @@ const AttendanceStats: React.FC = () => {
             </>
           )}
 
-          {!summary && !loading && (
-            <Empty description="请选择年级和班级查看考勤统计" />
+          {/* 全部在线学生模式（默认） */}
+          {!summary && onlineStudents.length > 0 && (
+            <>
+              <Divider>📋 当前全部在线学生</Divider>
+              <Table
+                dataSource={onlineStudents}
+                columns={columns}
+                rowKey={(r) => r.username || r.name}
+                loading={onlineLoading}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名在线学生` }}
+                size="middle"
+              />
+            </>
           )}
 
-          {loading && (
+          {!summary && onlineStudents.length === 0 && !onlineLoading && !loading && (
+            <Empty description={grade || cls ? '请先选择年级和班级查看考勤统计' : '当前没有在线学生'} />
+          )}
+
+          {(loading || onlineLoading) && (
             <div style={{ textAlign: 'center', padding: 40 }}>
               <Spin tip="加载考勤数据..." />
             </div>
