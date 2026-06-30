@@ -883,8 +883,8 @@ async def ai_preview_html(request: Request):
         except Exception as e:
             logger.warning(f"保存 AI 题目到题库失败（不影响结果）: {e}")
 
-    # ── SVG + 图片配图增强 ──
-    if enable_media:
+    # ── SVG + 图片配图增强（仅交互/自定义类型需要，简单资源跳过） ──
+    if enable_media and gen_type in ("interactive", "custom"):
         try:
             from backend.api.image_gen_service import plan_and_generate_media
             html_dir = get_account_html_dir(username)

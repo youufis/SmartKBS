@@ -55,8 +55,9 @@ function getFileIcon(name: string) {
 
 
 const ResourceMgmtPage: React.FC = () => {
-  const user = useAuthStore((s: { user: { role: string } | null }) => s.user)
+  const user = useAuthStore((s: { user: { role: string; username: string } | null }) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
+  const username = user?.username || ''
   const [treeData, setTreeData] = useState<TreeNode[]>([])
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -187,7 +188,6 @@ const ResourceMgmtPage: React.FC = () => {
   const [aiGradeOptions, setAiGradeOptions] = useState<string[]>([])
   // ── 交互式实验专用状态 ──
   const [aiExpCategory, setAiExpCategory] = useState<string>('algorithm')
-  const [aiExpParams, setAiExpParams] = useState('')
   // ── 配图增强开关 ──
   const [enableMediaGen, setEnableMediaGen] = useState(true)
 
@@ -208,7 +208,7 @@ const ResourceMgmtPage: React.FC = () => {
       setAiThemes(themes)
       if (themes.length > 0) setAiTheme(themes[0].id)
     }).catch(() => {})
-  }, [aiModalOpen])
+  }, [aiModalOpen, aiGenType])
 
   // 切换类型时加载主题
   const handleAiTypeChange = (type: 'animation' | 'quiz' | 'practice' | 'custom' | 'interactive') => {
@@ -237,11 +237,11 @@ const ResourceMgmtPage: React.FC = () => {
       if (aiGenType === 'interactive') {
         params.experiment_params = {
           实验分类: resourcesApi.EXPERIMENT_CATEGORIES.find(c => c.value === aiExpCategory)?.label || aiExpCategory,
-          参数要求: aiExpParams,
+          参数要求: aiCustomPrompt,
         }
       }
 
-      // 交互式/复杂资源 → 异步生成（支持多文件子目录）
+      // 交互式/复杂资源 → 异步生成（默认单文件，AI 自动决定是否拆分为多文件）
       if (aiGenType === 'interactive' || aiGenType === 'custom') {
         // 启动异步任务
         const task = await resourcesApi.aiGenerateAsync(params)
@@ -498,6 +498,12 @@ const ResourceMgmtPage: React.FC = () => {
                           </span>
                         </div>
                       )}
+                      onSelect={(keys: any, info: any) => {
+                        if (info?.node?.isLeaf) {
+                          const path = info.node.key || info.node.title
+                          window.open(`/api/files/${username}/html/${path}`, '_blank')
+                        }
+                      }}
                     />
                   </Card>
                 ) : (
@@ -513,6 +519,7 @@ const ResourceMgmtPage: React.FC = () => {
                       {allFiles.slice((gridPage - 1) * GRID_PAGE_SIZE, gridPage * GRID_PAGE_SIZE).map((file) => (
                         <Card
                           key={file.path}
+                          onClick={() => window.open(`/api/files/${username}/html/${file.path}`, '_blank')}
                           size="small"
                           hoverable
                           styles={{ body: { padding: 16, textAlign: 'center' as const } }}
@@ -581,27 +588,19 @@ const ResourceMgmtPage: React.FC = () => {
           {aiGenType === 'interactive' && (
             <>
               <div>
-                <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
                   实验分类 <span style={{ color: '#ff4d4f' }}>*</span>
                 </Typography.Text>
-                <Radio.Group value={aiExpCategory} onChange={(e) => setAiExpCategory(e.target.value)}
-                  style={{ width: '100%' }}>
-                  <Space direction="vertical" style={{ width: '100%' }} size={4}>
-                    {resourcesApi.EXPERIMENT_CATEGORIES.map(cat => (
-                      <Radio.Button key={cat.value} value={cat.value}
-                        style={{
-                          display: 'flex', alignItems: 'center', height: 'auto', padding: '8px 12px',
-                          whiteSpace: 'normal', width: '100%', borderRadius: 6, margin: 0,
-                          border: aiExpCategory === cat.value ? '1px solid #1677ff' : '1px solid #d9d9d9',
-                        }}>
-                        <div>
-                          <div style={{ fontWeight: 500, fontSize: 14 }}>{cat.label}</div>
-                          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{cat.desc}</div>
-                        </div>
-                      </Radio.Button>
-                    ))}
-                  </Space>
-                </Radio.Group>
+                <Select
+                  value={aiExpCategory}
+                  onChange={(v) => setAiExpCategory(v)}
+                  style={{ width: '100%' }}
+                  placeholder="选择实验分类"
+                  options={resourcesApi.EXPERIMENT_CATEGORIES.map(cat => ({
+                    value: cat.value,
+                    label: `${cat.label} — ${cat.desc}`,
+                  }))}
+                />
               </div>
               <div>
                 <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
