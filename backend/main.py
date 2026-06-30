@@ -2,6 +2,7 @@
 SmartKB 后端入口
 纯 FastAPI 应用，替代 Gradio 启动
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -19,12 +20,24 @@ from backend.question_db import init_question_db
 from backend.logger import logger
 from backend.middleware import register_middleware
 
+# 从 version.json 读取版本号
+_VERSION_FILE = Path(__file__).resolve().parent.parent / "version.json"
+
+def _get_app_version() -> str:
+    try:
+        with open(_VERSION_FILE, encoding="utf-8") as _f:
+            return json.load(_f).get("latest_version", "0.0.0")
+    except Exception:
+        logger.warning(f"无法读取版本文件: {_VERSION_FILE}")
+        return "0.0.0"
+
+APP_VERSION = _get_app_version()
 
 # 创建 FastAPI 应用
 app = FastAPI(
     title="SmartKBS - 智慧教学平台 API",
     description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version="6.8",
+    version=APP_VERSION,
     docs_url="/docs",
 )
 
