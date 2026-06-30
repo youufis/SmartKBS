@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
-import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Pagination } from 'antd'
+import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Switch, Pagination } from 'antd'
 import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined, CodeOutlined, FilePdfOutlined, FileImageOutlined, FileZipOutlined, FileUnknownOutlined, BulbOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
@@ -172,7 +172,7 @@ const ResourceMgmtPage: React.FC = () => {
 
   // ── AI 生成 HTML ──
   const [aiModalOpen, setAiModalOpen] = useState(false)
-  const [aiGenType, setAiGenType] = useState<'animation' | 'quiz' | 'practice' | 'custom'>('animation')
+  const [aiGenType, setAiGenType] = useState<'animation' | 'quiz' | 'practice' | 'custom' | 'interactive'>('animation')
   const [aiTopic, setAiTopic] = useState('')
   const [aiSubject, setAiSubject] = useState('')
   const [aiGrade, setAiGrade] = useState('')
@@ -185,6 +185,11 @@ const ResourceMgmtPage: React.FC = () => {
   // ── 学科/年级动态选项 ──
   const [aiSubjectOptions, setAiSubjectOptions] = useState<string[]>([])
   const [aiGradeOptions, setAiGradeOptions] = useState<string[]>([])
+  // ── 交互式实验专用状态 ──
+  const [aiExpCategory, setAiExpCategory] = useState<string>('algorithm')
+  const [aiExpParams, setAiExpParams] = useState('')
+  // ── 配图增强开关 ──
+  const [enableMediaGen, setEnableMediaGen] = useState(true)
 
   // 打开弹窗时加载学科、年级、主题
   useEffect(() => {
@@ -206,7 +211,7 @@ const ResourceMgmtPage: React.FC = () => {
   }, [aiModalOpen])
 
   // 切换类型时加载主题
-  const handleAiTypeChange = (type: 'animation' | 'quiz' | 'practice' | 'custom') => {
+  const handleAiTypeChange = (type: 'animation' | 'quiz' | 'practice' | 'custom' | 'interactive') => {
     setAiGenType(type)
     resourcesApi.getAiThemes(type).then(themes => {
       setAiThemes(themes)
@@ -219,39 +224,130 @@ const ResourceMgmtPage: React.FC = () => {
     setAiWorking(true)
     setAiDone(null)
     try {
-      // 1. AI 生成
-      const genResult = await resourcesApi.aiPreviewHtml({
+      // 构建通用参数
+      const params: resourcesApi.AiPreviewParams = {
         type: aiGenType,
         topic: aiTopic,
         subject: aiSubject || undefined,
         grade: aiGrade || undefined,
-        custom_prompt: aiGenType === 'custom' ? aiCustomPrompt : undefined,
+        custom_prompt: aiGenType === 'custom' || aiGenType === 'interactive' ? aiCustomPrompt : undefined,
         theme: aiTheme || undefined,
-      })
+        enable_media: enableMediaGen,
+      }
+      if (aiGenType === 'interactive') {
+        params.experiment_params = {
+          实验分类: resourcesApi.EXPERIMENT_CATEGORIES.find(c => c.value === aiExpCategory)?.label || aiExpCategory,
+          参数要求: aiExpParams,
+        }
+      }
+
+      // 交互式/复杂资源 → 异步生成（支持多文件子目录）
+      if (aiGenType === 'interactive' || aiGenType === 'custom') {
+        // 启动异步任务
+        const task = await resourcesApi.aiGenerateAsync(params)
+        const startTime = Date.now()
+        const maxWaitMs = 20 * 60 * 1000  // 最多等 20 分钟
+        let lastStage = ''
+
+        message.loading({
+          content: '🚀 AI 生成中（第一阶段：AI 构思内容...）',
+          key: 'ai_async', duration: 0,
+        })
+
+        // 轮询任务状态
+        let taskResult: resourcesApi.AsyncGenResult
+        while (true) {
+          await new Promise(r => setTimeout(r, 3000))  // 每 3 秒轮询
+          taskResult = await resourcesApi.getAiTaskStatus(task.task_id)
+
+          // 显示进展阶段
+          const elapsed = Math.round((Date.now() - startTime) / 1000)
+          const stage = taskResult.status === 'running'
+            ? elapsed < 60
+              ? '第一阶段：AI 构思内容...'
+              : elapsed < 180
+                ? '第二阶段：生成 HTML 代码...'
+                : '第三阶段：保存文件 + 生成配图...'
+            : ''
+          if (stage && stage !== lastStage) {
+            lastStage = stage
+            message.loading({
+              content: `⏳ ${stage}（已等待 ${Math.round(elapsed / 60)} 分钟）`,
+              key: 'ai_async', duration: 0,
+            })
+          }
+
+          if (taskResult.status === 'completed' || taskResult.status === 'failed') break
+
+          // 超时保护：超过 20 分钟强制终止
+          if (Date.now() - startTime > maxWaitMs) {
+            message.destroy('ai_async')
+            message.error('⏰ 生成超时（超过 20 分钟），请简化描述后重试')
+            return
+          }
+        }
+        message.destroy('ai_async')
+
+        // 检查错误（兼容 status='failed' 和 result.error 两种情况）
+        const errMsg = taskResult.error || taskResult.result?.error
+        if (taskResult.status === 'failed' || errMsg) {
+          message.error(errMsg || 'AI 生成失败')
+          return
+        }
+
+        const saved = taskResult.result?.saved
+        if (!saved) {
+          message.error('生成结果异常：未获取到保存信息')
+          return
+        }
+
+        // 显示结果
+        if (saved.is_subdir) {
+          const fileUrl = `/api/files/${saved.url_path}`
+          setAiDone({ fileUrl, fileName: saved.main_entry || 'index.html' })
+          message.success(`✅ 资源已生成 — 包含 ${saved.file_count} 个文件，保存在 ${saved.dir_name}/ 目录`)
+        } else {
+          const fileUrl = `/api/files/${saved.url_path}`
+          setAiDone({ fileUrl, fileName: saved.file_name || '' })
+          message.success('✅ 资源已生成并保存')
+        }
+        loadTree()
+        return
+      }
+
+      // 简单资源 → 同步生成（原有逻辑）
+      const genResult = await resourcesApi.aiPreviewHtml(params)
       if (!genResult.html_content || genResult.html_content.length < 50) {
         message.error('AI 返回内容为空或过短，请重试')
         return
       }
-      // 显示题目入库提示
       if (genResult.db_saved && genResult.db_saved > 0) {
         message.success(`📚 ${genResult.db_saved} 道新题目已存入题库`)
       }
-      // 2. 自动保存
+      // 尝试解析多文件格式保存
       const fileName = genResult.suggested_name.replace(/\.html$/i, '')
-      const saveResult = await resourcesApi.aiSaveHtml(genResult.html_content, fileName)
-      // 3. 显示结果
-      const fileUrl = `/api/files/${saveResult.url_path}`
-      setAiDone({ fileUrl, fileName: saveResult.file_name })
-      message.success(`✅ 资源已生成并保存`)
+      const saveResult = await resourcesApi.aiSaveMultiHtml(
+        genResult.html_content, fileName, genResult.html_content,
+      )
+      if (saveResult.is_subdir) {
+        const fileUrl = `/api/files/${saveResult.url_path}`
+        setAiDone({ fileUrl, fileName: saveResult.main_entry || 'index.html' })
+        message.success(`✅ 资源已生成 — ${saveResult.file_count} 个文件，保存在 ${saveResult.dir_name}/`)
+      } else {
+        const fileUrl = `/api/files/${saveResult.url_path}`
+        setAiDone({ fileUrl, fileName: saveResult.file_name || fileName })
+        message.success('✅ 资源已生成并保存')
+      }
       loadTree()
     } catch (err: any) {
       console.error('[AI生成+保存] 失败', err)
+      message.destroy('ai_async')
       const status = err?.response?.status
       const detail = err?.response?.data?.detail || ''
       if (status === 400 && detail.includes('API Key')) {
         message.error('⚠️ API Key 未配置，请在系统设置中填写')
       } else if (status === 504) {
-        message.error('⚠️ AI 生成超时，请简化描述或稍后重试')
+        message.error('⚠️ AI 生成超时（复杂资源已改为异步模式，请重试）')
       } else if (status === 502) {
         message.error('⚠️ AI 服务调用失败: ' + (detail.replace('AI 生成失败: ', '') || '请稍后重试'))
       } else if (status === 401) {
@@ -464,7 +560,7 @@ const ResourceMgmtPage: React.FC = () => {
       {/* ── AI 生成 HTML 弹窗 ── */}
       <Modal title="🤖 AI 生成 HTML 资源" open={aiModalOpen}
         onCancel={() => setAiModalOpen(false)}
-        width={600}
+        width={640}
         footer={null}
         destroyOnClose>
         <Space direction="vertical" style={{ width: '100%' }} size={16}>
@@ -476,12 +572,63 @@ const ResourceMgmtPage: React.FC = () => {
               <Radio.Button value="animation">🎬 动画讲解</Radio.Button>
               <Radio.Button value="quiz">🎮 互动答题</Radio.Button>
               <Radio.Button value="practice">📝 章节练习</Radio.Button>
-              <Radio.Button value="custom">🎨 自定义 HTML</Radio.Button>
+              <Radio.Button value="interactive">🧪 实验交互</Radio.Button>
+              <Radio.Button value="custom">🎨 自定义</Radio.Button>
             </Radio.Group>
           </div>
 
-          {/* 知识点/主题 */}
-          {aiGenType !== 'custom' ? (
+          {/* 交互式实验 - 实验分类选择 */}
+          {aiGenType === 'interactive' && (
+            <>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>
+                  实验分类 <span style={{ color: '#ff4d4f' }}>*</span>
+                </Typography.Text>
+                <Radio.Group value={aiExpCategory} onChange={(e) => setAiExpCategory(e.target.value)}
+                  style={{ width: '100%' }}>
+                  <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                    {resourcesApi.EXPERIMENT_CATEGORIES.map(cat => (
+                      <Radio.Button key={cat.value} value={cat.value}
+                        style={{
+                          display: 'flex', alignItems: 'center', height: 'auto', padding: '8px 12px',
+                          whiteSpace: 'normal', width: '100%', borderRadius: 6, margin: 0,
+                          border: aiExpCategory === cat.value ? '1px solid #1677ff' : '1px solid #d9d9d9',
+                        }}>
+                        <div>
+                          <div style={{ fontWeight: 500, fontSize: 14 }}>{cat.label}</div>
+                          <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>{cat.desc}</div>
+                        </div>
+                      </Radio.Button>
+                    ))}
+                  </Space>
+                </Radio.Group>
+              </div>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                  实验主题/具体内容 <span style={{ color: '#ff4d4f' }}>*</span>
+                </Typography.Text>
+                <Input
+                  placeholder="例如：冒泡排序算法可视化、光的折射仿真、CNN 卷积过程演示"
+                  value={aiTopic}
+                  onChange={(e) => setAiTopic(e.target.value)}
+                />
+              </div>
+              <div>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
+                  参数要求/自定义需求 <span style={{ color: '#888', fontWeight: 400 }}>（可选）</span>
+                </Typography.Text>
+                <Input.TextArea
+                  rows={3}
+                  placeholder="例如：数据量可在 10-100 调节、速度可调、需要显示当前步骤说明。如无特殊要求可留空，AI 将自动设计。"
+                  value={aiCustomPrompt}
+                  onChange={(e) => setAiCustomPrompt(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
+          {/* 知识点/主题（非交互式且非自定义） */}
+          {aiGenType !== 'custom' && aiGenType !== 'interactive' ? (
             <div>
               <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
                 知识点/主题 <span style={{ color: '#ff4d4f' }}>*</span>
@@ -492,7 +639,10 @@ const ResourceMgmtPage: React.FC = () => {
                 onChange={(e) => setAiTopic(e.target.value)}
               />
             </div>
-          ) : (
+          ) : null}
+
+          {/* 自定义 HTML */}
+          {aiGenType === 'custom' ? (
             <div>
               <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
                 自定义需求 <span style={{ color: '#ff4d4f' }}>*</span>
@@ -504,7 +654,7 @@ const ResourceMgmtPage: React.FC = () => {
                 onChange={(e) => setAiCustomPrompt(e.target.value)}
               />
             </div>
-          )}
+          ) : null}
 
           {/* 学科 & 年级 */}
           <Space>
@@ -551,12 +701,29 @@ const ResourceMgmtPage: React.FC = () => {
             </div>
           )}
 
+          {/* ── 配图增强开关 ── */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 14px', background: '#f6f8fa', borderRadius: 8, border: '1px solid #e8ecf0' }}>
+            <div>
+              <Typography.Text strong style={{ fontSize: 13 }}>🎨 自动配图增强</Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+                开启后 AI 会自动生成 SVG 示意图和配图，丰富页面视觉效果
+              </Typography.Text>
+            </div>
+            <Switch checked={enableMediaGen} onChange={setEnableMediaGen} size="small" />
+          </div>
+
           {/* 生成按钮 / 完成状态 */}
           {aiDone ? (
             <div style={{ textAlign: 'center', padding: '16px 0' }}>
-              <Typography.Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 16 }}>
+              <Typography.Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 8 }}>
                 ✅ 资源已生成并保存
               </Typography.Text>
+              {aiDone.fileName && aiDone.fileName !== 'index.html' && (
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
+                  文件：{aiDone.fileName}
+                </Typography.Text>
+              )}
               <Button type="primary" size="large" icon={<EyeOutlined />}
                 href={aiDone.fileUrl} target="_blank" rel="noopener noreferrer"
                 style={{ marginBottom: 12 }}>
@@ -571,7 +738,7 @@ const ResourceMgmtPage: React.FC = () => {
             <Button type="primary" block size="large"
               icon={aiWorking ? <LoadingOutlined /> : <BulbOutlined />}
               loading={aiWorking}
-              disabled={aiWorking || (aiGenType === 'custom' ? !aiCustomPrompt : !aiTopic)}
+              disabled={aiWorking || (aiGenType === 'custom' ? !aiCustomPrompt : aiGenType === 'interactive' ? !aiTopic : !aiTopic)}
               onClick={handleAiGenerate}
             >
               {aiWorking ? 'AI 生成中...（约 30-180 秒）' : '🚀 生成并保存'}
