@@ -120,32 +120,23 @@ export async function importUsersStream(
 }
 
 /** 导出用户为 CSV 文件 */
-export function exportUsersCsv(keyword?: string) {
-  const token = localStorage.getItem('smartkb_token');
+export async function exportUsersCsv(keyword?: string): Promise<void> {
   const params = keyword ? `?keyword=${encodeURIComponent(keyword)}` : '';
-  // 直接用 fetch 处理文件下载
-  const url = `/api/users/export${params}`;
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  fetch(url, { headers })
-    .then(res => {
-      if (!res.ok) throw new Error('导出失败');
-      return res.blob();
-    })
-    .then(blob => {
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = 'users_export.csv';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(link.href);
-    })
-    .catch(err => {
-      console.error('导出用户失败:', err);
-    });
+  const { data, headers: respHeaders } = await apiClient.get(`/api/users/export${params}`, {
+    responseType: 'blob',
+  });
+  // 从 Content-Disposition 中提取文件名，fallback 到默认名
+  const disp = respHeaders['content-disposition'] || '';
+  const match = disp.match(/filename\*?=(?:UTF-8'')?([^;\s]+)/i);
+  const filename = match ? decodeURIComponent(match[1]) : 'users_export.csv';
+  const blob = new Blob([data], { type: 'text/csv;charset=utf-8-sig' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
 }
 
 // ── 批量升年级 ──
