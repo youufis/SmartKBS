@@ -419,6 +419,51 @@ async def delete_user(username: str, request: Request):
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
 
+@router.get("/export")
+async def export_users(request: Request, keyword: Optional[str] = None):
+    """导出用户为 CSV 文件"""
+    current_user = get_current_user(request)
+    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以导出用户")
+
+    if keyword and keyword.strip():
+        kw = f"%{keyword.strip()}%"
+        rows = execute_query(
+            "SELECT username, class, name, gender, role, grade FROM users WHERE username LIKE ? OR name LIKE ? ORDER BY username",
+            (kw, kw),
+        )
+    else:
+        rows = execute_query(
+            "SELECT username, class, name, gender, role, grade FROM users ORDER BY username"
+        )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["用户名", "姓名", "性别", "角色", "年级", "班级", "任教学科"])
+
+    for username, class_val, name_val, gender_val, role_val, grade_val in rows:
+        role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
+        gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
+        subjects_str = ""
+        if role_val in (0, 1):
+            from backend.permission_service import get_teacher_subjects
+            subjects = get_teacher_subjects(username)
+            if role_val == 0:
+                subjects_str = "全部学科"
+            elif subjects:
+                subjects_str = "、".join(subjects)
+        writer.writerow([username, name_val or "", gender_name, role_name, grade_val or "", class_val or "", subjects_str])
+
+    csv_content = output.getvalue()
+    output.close()
+
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": "attachment; filename=users_export.csv"},
+    )
+
+
 @router.get("/{username}")
 async def get_user_info(username: str, request: Request):
     """查询用户信息"""
@@ -488,51 +533,6 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
         })
 
     return {"users": users, "total": len(users)}
-
-
-@router.get("/export")
-async def export_users(request: Request, keyword: Optional[str] = None):
-    """导出用户为 CSV 文件"""
-    current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以导出用户")
-
-    if keyword and keyword.strip():
-        kw = f"%{keyword.strip()}%"
-        rows = execute_query(
-            "SELECT username, class, name, gender, role, grade FROM users WHERE username LIKE ? OR name LIKE ? ORDER BY username",
-            (kw, kw),
-        )
-    else:
-        rows = execute_query(
-            "SELECT username, class, name, gender, role, grade FROM users ORDER BY username"
-        )
-
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["用户名", "姓名", "性别", "角色", "年级", "班级", "任教学科"])
-
-    for username, class_val, name_val, gender_val, role_val, grade_val in rows:
-        role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
-        gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
-        subjects_str = ""
-        if role_val in (0, 1):
-            from backend.permission_service import get_teacher_subjects
-            subjects = get_teacher_subjects(username)
-            if role_val == 0:
-                subjects_str = "全部学科"
-            elif subjects:
-                subjects_str = "、".join(subjects)
-        writer.writerow([username, name_val or "", gender_name, role_name, grade_val or "", class_val or "", subjects_str])
-
-    csv_content = output.getvalue()
-    output.close()
-
-    return StreamingResponse(
-        iter([csv_content]),
-        media_type="text/csv; charset=utf-8-sig",
-        headers={"Content-Disposition": "attachment; filename=users_export.csv"},
-    )
 
 
 @router.post("/bulk-delete")
