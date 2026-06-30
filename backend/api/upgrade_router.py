@@ -333,27 +333,27 @@ def _is_running_under_iis() -> bool:
 async def _restart_service():
     """重启服务：自动检测 IIS 或 uvicorn 模式"""
     if _is_running_under_iis():
-        pool_name = os.environ.get('SMARTKB_APP_POOL', 'SmartKBS')
         try:
-            # 使用 PowerShell WebAdministration 模块回收应用池
-            # 相比 appcmd.exe，此方式不需要管理员权限
-            ps_cmd = [
-                "powershell", "-Command",
-                f"Import-Module WebAdministration; "
-                f"Restart-WebAppPool -Name '{pool_name}'"
-            ]
-            await _run_cmd(
-                ps_cmd,
-                cwd=str(BASE_DIR), timeout=15, capture_output=False,
-            )
-            logger.info("IIS 应用池已回收，服务重启完成")
+            # 触碰 web.config 触发 IIS 自动回收应用池
+            # IIS 内建机制：检测到 web.config 变更时自动回收所属应用池
+            # 此方式不需要任何管理员权限
+            web_config = BASE_DIR / "web.config"
+            if web_config.exists():
+                # 追加换行 → IIS 必定检测到文件内容 + 时间变更 → 触发应用回收
+                web_config.write_bytes(web_config.read_bytes() + b"\n")
+                await asyncio.sleep(1)
+                # 还原文件（去掉末尾多余的换行）
+                content = web_config.read_bytes()
+                if content.endswith(b"\n"):
+                    web_config.write_bytes(content[:-1])
+                logger.info("已触发 web.config 变更，IIS 将自动回收应用池...")
+                await asyncio.sleep(2)
+                logger.info("IIS 应用池自动回收触发完成")
+            else:
+                logger.warning("web.config 不存在，无法通过触碰文件触发 IIS 回收")
             return
         except Exception as e:
-            hint = (
-                f"IIS 应用池回收失败，请检查应用池名称。\n"
-                f"如需自定义应用池名称，请设置环境变量 "
-                f"SMARTKB_APP_POOL=你的应用池名称"
-            )
+            hint = "IIS 应用池回收失败（触碰 web.config 方式）"
             _state["message"] = hint
             logger.warning(f"IIS 应用池回收失败: {e}\n💡 {hint}")
 
