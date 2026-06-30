@@ -355,6 +355,21 @@ def init_db():
                 c.execute("ALTER TABLE tasks ADD COLUMN ai_summary TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass  # 列已存在
+            # ── 字段迁移：tasks 新增目标范围字段 ──
+            for col_def in [
+                ("target_scope", "TEXT DEFAULT 'teacher_classes'"),
+                ("target_grade", "TEXT DEFAULT ''"),
+                ("target_class", "TEXT DEFAULT ''"),
+                ("target_users", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE tasks ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_target ON tasks(target_scope, target_grade, target_class)")
+            except sqlite3.OperationalError:
+                pass
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_username)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
@@ -462,6 +477,21 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_iq_creator ON interaction_quizzes(creator_username)")
             except sqlite3.OperationalError:
                 pass
+            # ── 字段迁移：interaction_quizzes 新增目标范围字段 ──
+            for col_def in [
+                ("target_scope", "TEXT DEFAULT 'teacher_classes'"),
+                ("target_grade", "TEXT DEFAULT ''"),
+                ("target_class", "TEXT DEFAULT ''"),
+                ("target_users", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE interaction_quizzes ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_iq_target ON interaction_quizzes(target_scope, target_grade, target_class)")
+            except sqlite3.OperationalError:
+                pass
 
             # ── 课堂互动：随堂测验答案表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS interaction_quiz_answers (
@@ -483,6 +513,21 @@ def init_db():
                 status TEXT DEFAULT 'active',
                 created_at TEXT NOT NULL
             )""")
+            # ── 字段迁移：interaction_polls 新增目标范围字段 ──
+            for col_def in [
+                ("target_scope", "TEXT DEFAULT 'teacher_classes'"),
+                ("target_grade", "TEXT DEFAULT ''"),
+                ("target_class", "TEXT DEFAULT ''"),
+                ("target_users", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE interaction_polls ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ip_target ON interaction_polls(target_scope, target_grade, target_class)")
+            except sqlite3.OperationalError:
+                pass
 
             # ── 课堂互动：投票记录表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS interaction_poll_votes (

@@ -19,6 +19,7 @@ from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.api.config_router import get_config_value
 from backend.logger import logger
+from backend.prompts import build_ai_role
 
 router = APIRouter()
 

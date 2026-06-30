@@ -15,6 +15,8 @@ import {
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -40,6 +42,12 @@ const QuickPollPage: React.FC = () => {
   const [aiPollForm] = Form.useForm()
   const [editPollModal, setEditPollModal] = useState<any>(null)
   const [editPollForm] = Form.useForm()
+  const [pollScope, setPollScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes',
+    target_grade: '',
+    target_class: '',
+    target_users: '',
+  })
 
   // 列表分页
   const [pollPage, setPollPage] = useState(1)
@@ -103,10 +111,15 @@ const QuickPollPage: React.FC = () => {
         question: values.question,
         options,
         poll_type: values.poll_type || 'single',
+        target_scope: pollScope.target_scope,
+        target_grade: pollScope.target_grade,
+        target_class: pollScope.target_class,
+        target_users: pollScope.target_users,
       })
       message.success('投票创建成功')
       setPollModal(false)
       pollForm.resetFields()
+      setPollScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       await loadPolls()
     } catch (err: any) {
       message.error(err.response?.data?.detail || '创建失败')
@@ -387,8 +400,10 @@ const QuickPollPage: React.FC = () => {
       </Modal>
 
       {/* ── 创建投票弹窗 ── */}
-      <Modal title="创建快速投票" open={pollModal} onCancel={() => setPollModal(false)}
-        footer={null}>
+      <Modal title="创建快速投票" open={pollModal}
+        onCancel={() => { setPollModal(false); setPollScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
+        footer={null}
+        width={640}>
         <Form form={pollForm} layout="vertical" onFinish={handleCreatePoll}>
           <Form.Item name="question" label="投票问题" rules={[{ required: true }]}>
             <Input placeholder="例如：你更喜欢哪种编程语言？" />
@@ -401,6 +416,9 @@ const QuickPollPage: React.FC = () => {
           </Form.Item>
           <Form.Item name="options" label="选项（每行一个）" rules={[{ required: true }]}>
             <TextArea rows={4} placeholder="每行一个选项&#10;例如：&#10;Python&#10;JavaScript&#10;C++" />
+          </Form.Item>
+          <Form.Item label="目标范围">
+            <ActivityScopeSelector value={pollScope} onChange={setPollScope} />
           </Form.Item>
           <Button type="primary" htmlType="submit" block>创建投票</Button>
         </Form>

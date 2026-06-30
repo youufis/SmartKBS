@@ -53,6 +53,10 @@ class CodeProblemCreate(BaseModel):
     template_code: str = ""
     starter_code: str = ""
     time_limit: int = 5
+    target_scope: str = "teacher_classes"
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
     test_cases: list[dict[str, Any]] = []
 
 
@@ -243,37 +247,58 @@ async def list_code_problems(
         where += " AND cp.creator_username=?"
         params.append(username)
     else:
-        from backend.permission_service import is_student_in_teacher_scope
-        si = db_query_dict("SELECT grade,class FROM users WHERE username=?", (username,))
-        if si:
-            tu = db_query_dict("SELECT username FROM users WHERE role=1")
-            at = []
-            for t in tu:
-                tn = t["username"]
-                if is_student_in_teacher_scope(username, tn):
-                    at.append(tn)
-            au = db_query_dict("SELECT username FROM users WHERE role=0")
-            an = [a["username"] for a in au] if au else []
-            aa = an + at
-            if aa:
-                where += f" AND cp.creator_username IN ({','.join('?' for _ in aa)})"
-                params.extend(aa)
-            else:
-                where += " AND 1=0"
+        # 学生：获取后按目标范围过滤
+        pass
 
-    total = (q_one(f"SELECT COUNT(*) as cnt FROM code_problems cp WHERE {where}", tuple(params)) or {}).get("cnt", 0)
-    rows = q_query(
-        f"SELECT cp.id as problem_id,cp.title,cp.subject,cp.knowledge_points,cp.difficulty,cp.created_at,cp.creator_username,cp.creator_name,cp.language,cp.time_limit,cp.starter_code FROM code_problems cp WHERE {where} ORDER BY cp.id DESC LIMIT ? OFFSET ?",
-        tuple(params + [page_size, (page - 1) * page_size]))
+    # 对于学生，先不限制 creator，获取所有活跃题目再过滤
+    if role == 2:
+        student_where = "1=1" if status == "all" else "cp.status='active'"
+        student_params: list[Any] = []
+        if subject:
+            student_where += " AND cp.subject=?"
+            student_params.append(subject)
+        all_rows = q_query(
+            f"SELECT cp.* FROM code_problems cp WHERE {student_where} ORDER BY cp.id DESC",
+            tuple(student_params),
+        )
+        from backend.permission_service import check_activity_visibility
+        si = db_query_dict("SELECT grade,class FROM users WHERE username=?", (username,))
+        s_grade = str(si[0]["grade"] or "") if si else ""
+        s_class = str(si[0]["class"] or "") if si else ""
+        filtered = []
+        for r in all_rows:
+            if check_activity_visibility(
+                student_username=username,
+                student_grade=s_grade,
+                student_class=s_class,
+                creator_username=r["creator_username"],
+                target_scope=r.get("target_scope", "teacher_classes"),
+                target_grade=r.get("target_grade", ""),
+                target_class=r.get("target_class", ""),
+                target_users=r.get("target_users", ""),
+            ):
+                filtered.append(r)
+        total = len(filtered)
+        offset_idx = (page - 1) * page_size
+        rows = filtered[offset_idx:offset_idx + page_size]
+        # 转换为 dict
+        rows = [dict(r) for r in rows]
+    else:
+        total = (q_one(f"SELECT COUNT(*) as cnt FROM code_problems cp WHERE {where}", tuple(params)) or {}).get("cnt", 0)
+        rows = q_query(
+            f"SELECT cp.id as problem_id,cp.title,cp.subject,cp.knowledge_points,cp.difficulty,cp.created_at,cp.creator_username,cp.creator_name,cp.language,cp.time_limit,cp.starter_code FROM code_problems cp WHERE {where} ORDER BY cp.id DESC LIMIT ? OFFSET ?",
+            tuple(params + [page_size, (page - 1) * page_size]))
+
     for r in rows:
-        b = q_one("SELECT status,score,id as submission_id FROM code_submissions WHERE problem_id=? AND student_username=? AND is_best=1", (r["problem_id"], username))
+        pid = r.get("problem_id") or r.get("id")
+        b = q_one("SELECT status,score,id as submission_id FROM code_submissions WHERE problem_id=? AND student_username=? AND is_best=1", (pid, username))
         r["my_status"] = b["status"] if b else None
         r["my_score"] = b["score"] if b else None
         r["my_submission_id"] = b["submission_id"] if b else None
         if not r.get("creator_name"):
             r["creator_name"] = r.get("creator_username", "")
         if role in (0, 1):
-            s = q_one("SELECT COALESCE(COUNT(*),0) as total_submissions, COALESCE(SUM(CASE WHEN status='accepted' THEN 1 ELSE 0 END),0) as accepted_count FROM code_submissions WHERE problem_id=?", (r["problem_id"],))
+            s = q_one("SELECT COALESCE(COUNT(*),0) as total_submissions, COALESCE(SUM(CASE WHEN status='accepted' THEN 1 ELSE 0 END),0) as accepted_count FROM code_submissions WHERE problem_id=?", (pid,))
             r["total_submissions"] = s["total_submissions"] if s else 0
             r["accepted_count"] = s["accepted_count"] if s else 0
     return {"items": rows, "total": total, "page": page, "page_size": page_size}
@@ -282,9 +307,28 @@ async def list_code_problems(
 @router.get("/code/problems/{problem_id}", summary="获取代码题详情")
 async def get_code_problem(problem_id: int, request: Request):
     user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
     p = q_one("SELECT * FROM code_problems WHERE id=?", (problem_id,))
     if not p:
         raise HTTPException(status_code=404, detail="不存在")
+    # 学生需检查活动范围
+    if role == 2:
+        from backend.permission_service import check_activity_visibility
+        si = db_query_dict("SELECT grade,class FROM users WHERE username=?", (username,))
+        s_grade = str(si[0]["grade"] or "") if si else ""
+        s_class = str(si[0]["class"] or "") if si else ""
+        if not check_activity_visibility(
+            student_username=username,
+            student_grade=s_grade,
+            student_class=s_class,
+            creator_username=p["creator_username"],
+            target_scope=p.get("target_scope", "teacher_classes"),
+            target_grade=p.get("target_grade", ""),
+            target_class=p.get("target_class", ""),
+            target_users=p.get("target_users", ""),
+        ):
+            raise HTTPException(status_code=403, detail="无权查看该题目")
     p["sample_cases"] = q_query("SELECT id,input,expected_output,description,score FROM code_test_cases WHERE problem_id=? AND is_sample=1 ORDER BY sort_order", (problem_id,))
     b = q_one("SELECT id,status,score,passed_cases,total_cases,execution_time,source_code,created_at FROM code_submissions WHERE problem_id=? AND student_username=? AND is_best=1", (problem_id, user["username"]))
     p["best_submission"] = b
@@ -313,8 +357,9 @@ async def create_code_problem(req: CodeProblemCreate, request: Request):
     now = _now()
     uname = user.get("name") or user["username"]
     pid = q_insert(
-        "INSERT INTO code_problems (title,description,subject,knowledge_points,difficulty,creator_username,creator_name,language,template_code,starter_code,time_limit,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'active',?,?)",
-        (req.title, req.description, req.subject, req.knowledge_points, req.difficulty, user["username"], uname, req.language, req.template_code, req.starter_code, req.time_limit, now, now))
+        "INSERT INTO code_problems (title,description,subject,knowledge_points,difficulty,creator_username,creator_name,language,template_code,starter_code,time_limit,status,created_at,updated_at,target_scope,target_grade,target_class,target_users) VALUES (?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?)",
+        (req.title, req.description, req.subject, req.knowledge_points, req.difficulty, user["username"], uname, req.language, req.template_code, req.starter_code, req.time_limit, now, now,
+         req.target_scope, req.target_grade, req.target_class, req.target_users))
     for i, tc in enumerate(req.test_cases):
         q_insert("INSERT INTO code_test_cases (problem_id,input,expected_output,is_sample,score,sort_order,description,created_at) VALUES (?,?,?,?,?,?,?,?)",
                  (pid, tc.get("input", ""), tc["expected_output"], 1 if tc.get("is_sample") else 0, tc.get("score", 1), i, tc.get("description", ""), now))

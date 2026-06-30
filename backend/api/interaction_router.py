@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
-from backend.database import execute_query, execute_insert_update, execute_batch
+from backend.database import execute_query, execute_insert_update, execute_batch, execute_query_dict
 from backend.logger import logger
 from backend.prompts import build_ai_role
 
@@ -37,6 +37,10 @@ class QuizCreate(BaseModel):
     title: str
     description: str = ""
     questions: str  # JSON 字符串 [{type, question, options, answer, score}]
+    target_scope: str = "teacher_classes"
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
 
 
 class QuizAnswerSubmit(BaseModel):
@@ -47,6 +51,10 @@ class PollCreate(BaseModel):
     question: str
     options: list[str]
     poll_type: str = "single"  # single / multiple
+    target_scope: str = "teacher_classes"
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
 
 
 class QuestionCreate(BaseModel):
@@ -236,9 +244,11 @@ async def create_quiz(req: QuizCreate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     quiz_id = execute_insert_update(
         """INSERT INTO interaction_quizzes
-           (creator_username, title, description, questions, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'active', ?, ?)""",
-        (user["username"], req.title, req.description, json.dumps(questions, ensure_ascii=False), now, now),
+           (creator_username, title, description, questions, status, created_at, updated_at,
+            target_scope, target_grade, target_class, target_users)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+        (user["username"], req.title, req.description, json.dumps(questions, ensure_ascii=False), now, now,
+         req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
     logger.info(f"用户 {user['username']} 创建随堂测验: {req.title} (id={quiz_id})")
@@ -246,31 +256,20 @@ async def create_quiz(req: QuizCreate, request: Request):
     # ── 异步通知学生（不阻塞创建操作） ──
     async def _notify_quiz():
         try:
-            from backend.api.notification_router import notify_users
-            from backend.database import execute_query as db_query
-            creator = user["username"]
-            role_u = user.get("role", 2)
-            if role_u == 0:
-                students = db_query("SELECT username FROM users WHERE role = 2")
-            else:
-                grade, cls = _get_user_grade_class(creator)
-                if grade:
-                    students = db_query(
-                        f"SELECT username FROM users WHERE role = 2 AND grade = ?"
-                        + (" AND INSTR(',' || ? || ',', ',' || class || ',') > 0" if cls else ""),
-                        (grade, cls) if cls else (grade,),
-                    )
-                else:
-                    students = []
-            if students:
-                notify_users(
-                    [r[0] for r in students], "info",
-                    f"新随堂测验「{req.title}」已发布",
-                    f"共 {len(questions)} 题，请及时完成",
-                    "/interaction",
-                )
+            from backend.api.notification_router import notify_users_by_scope
+            notify_users_by_scope(
+                creator_username=user["username"],
+                type_="info",
+                title=f"新随堂测验「{req.title}」已发布",
+                content=f"共 {len(questions)} 题，请及时完成",
+                related_link="/interaction",
+                target_scope=req.target_scope,
+                target_grade=req.target_grade,
+                target_class=req.target_class,
+                target_users=req.target_users,
+            )
         except Exception as e:
-            logger.warning(f"发送测验通知失败: {e}")
+            logger.warning(f"发送随堂测验通知失败: {e}")
     asyncio.create_task(_notify_quiz())
 
     return {"message": "测验创建成功", "quiz_id": quiz_id}
@@ -450,21 +449,14 @@ async def delete_question(question_id: int, request: Request):
         execute_insert_update("DELETE FROM interaction_questions WHERE id = ?", (question_id,))
     elif role == 1:
         # 教师：只能删除自己班级学生的提问
-        grade, cls = _get_user_grade_class(username)
-        if cls:
-            deleted = execute_insert_update(
-                """DELETE FROM interaction_questions WHERE id = ? AND student_username IN (
-                    SELECT username FROM users WHERE role = 2 AND grade = ? AND INSTR(',' || ? || ',', ',' || class || ',') > 0
-                )""",
-                (question_id, grade, cls),
-            )
-        else:
-            deleted = execute_insert_update(
-                """DELETE FROM interaction_questions WHERE id = ? AND student_username IN (
-                    SELECT username FROM users WHERE role = 2 AND grade = ?
-                )""",
-                (question_id, grade),
-            )
+        from backend.permission_service import check_teacher_access_to_student
+        # 先查出提问者
+        q_row = execute_query("SELECT student_username FROM interaction_questions WHERE id=?", (question_id,))
+        if not q_row:
+            raise HTTPException(status_code=404, detail="提问不存在")
+        if not check_teacher_access_to_student(username, q_row[0][0]):
+            raise HTTPException(status_code=403, detail="无权删除非本班学生的提问")
+        deleted = execute_insert_update("DELETE FROM interaction_questions WHERE id=?", (question_id,))
     else:
         # 学生：只能删除自己的提问
         execute_insert_update(
@@ -508,17 +500,8 @@ async def list_quizzes(
     params: list[Any] = []
 
     if role == 2:
-        # 学生：看自己班级的测验（管理员创建的全体可见，教师创建的需匹配班级）
-        grade, cls = _get_user_grade_class(username)
+        # 学生：获取所有活跃测验后按目标范围过滤
         conditions.append("q.status = 'active'")
-        if grade:
-            conditions.append("(u.role = 0 OR u.grade = ?)")
-            params.append(grade)
-        if cls:
-            # 教师 class 可能是 "1" 或 "1,2,3,4"，用 INSTR 匹配
-            cls_param = f",{cls},"
-            conditions.append("(u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)")
-            params.append(cls_param)
     elif role == 1:
         conditions.append("q.creator_username = ?")
         params.append(username)
@@ -534,16 +517,37 @@ async def list_quizzes(
     offset = (page - 1) * page_size
 
     if role == 2:
-        # 学生：JOIN users 表筛选同班教师的测验（包括管理员创建的内容）
-        rows = execute_query(
-            f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at,
-                        COALESCE(u.name, u.username) AS creator_name
+        # 学生：获取所有活跃测验后按目标范围过滤
+        from backend.permission_service import check_activity_visibility
+        s_grade, s_class = _get_user_grade_class(username)
+        # 注意：列顺序必须与后续索引访问一致
+        all_rows = execute_query(
+            f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status,
+                      q.created_at, q.updated_at,
+                      q.target_scope, q.target_grade, q.target_class, q.target_users,
+                      COALESCE(u.name, u.username) AS creator_name
                 FROM interaction_quizzes q
                 JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1)
                 WHERE {where}
-                ORDER BY q.created_at DESC LIMIT ? OFFSET ?""",
-            tuple(params + [page_size, offset]),
+                ORDER BY q.created_at DESC""",
+            tuple(params),
         )
+        rows = []
+        for r in all_rows:
+            if check_activity_visibility(
+                student_username=username,
+                student_grade=s_grade,
+                student_class=s_class,
+                creator_username=r[1],
+                target_scope=r[8] if len(r) > 8 else "teacher_classes",
+                target_grade=r[9] if len(r) > 9 else "",
+                target_class=r[10] if len(r) > 10 else "",
+                target_users=r[11] if len(r) > 11 else "",
+            ):
+                rows.append(r)
+        # 内存分页
+        offset_idx = (page - 1) * page_size
+        rows = rows[offset_idx:offset_idx + page_size]
     else:
         rows = execute_query(
             f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status, q.created_at, q.updated_at,
@@ -557,6 +561,8 @@ async def list_quizzes(
 
     quizzes = []
     for r in rows:
+        # 兼容学生路径（含 target_* 列，creator_name 在 12）和教师/管理员路径（不含 target_*，creator_name 在 8）
+        creator_name_idx = 12 if len(r) > 12 else (8 if len(r) > 8 else 1)
         q = {
             "id": r[0],
             "creator_username": r[1],
@@ -566,7 +572,7 @@ async def list_quizzes(
             "status": r[5],
             "created_at": r[6],
             "updated_at": r[7],
-            "creator_name": r[8] if len(r) > 8 else r[1],
+            "creator_name": r[creator_name_idx],
         }
         # 统一字段名：svg_code → svg_content
         questions = q.get("questions", [])
@@ -600,39 +606,30 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
 
     # 验证测验存在且活跃
     role = user.get("role", 2)
-    quiz = execute_query(
+    quiz_rows = execute_query_dict(
         "SELECT * FROM interaction_quizzes WHERE id = ? AND status = 'active'",
         (quiz_id,),
     )
-    if not quiz:
+    if not quiz_rows:
         raise HTTPException(status_code=404, detail="测验不存在或已结束")
 
-    # 学生只能回答自己班级教师或管理员创建的测验
-    if role == 2:
-        grade, cls = _get_user_grade_class(username)
-        creator = quiz[0][1]
-        # 查询创建者是否为管理员（role=0）
-        creator_info = execute_query("SELECT role, grade, class FROM users WHERE username=?", (creator,))
-        if creator_info:
-            creator_role = creator_info[0][0]
-            creator_cgrade = creator_info[0][1] or ''
-            creator_cclass = creator_info[0][2] or ''
-        else:
-            creator_role = 2
-            creator_cgrade = ''
-            creator_cclass = ''
+    quiz_row = quiz_rows[0]
 
-        is_admin_creator = creator_role == 0
-        if is_admin_creator:
-            teacher_ok = [creator]
-        elif cls and creator_cgrade == grade and (not creator_cclass or f",{cls}," in f",{creator_cclass},"):
-            teacher_ok = [creator]
-        elif not cls and creator_cgrade == grade:
-            teacher_ok = [creator]
-        else:
-            teacher_ok = []
-        if not teacher_ok:
-            raise HTTPException(status_code=403, detail="无权回答非本班教师的测验")
+    # 学生只能回答自己权限范围内的测验
+    if role == 2:
+        from backend.permission_service import check_activity_visibility
+        s_grade, s_class = _get_user_grade_class(username)
+        if not check_activity_visibility(
+            student_username=username,
+            student_grade=s_grade,
+            student_class=s_class,
+            creator_username=quiz_row["creator_username"],
+            target_scope=quiz_row.get("target_scope", "") or "teacher_classes",
+            target_grade=quiz_row.get("target_grade", "") or "",
+            target_class=quiz_row.get("target_class", "") or "",
+            target_users=quiz_row.get("target_users", "") or "",
+        ):
+            raise HTTPException(status_code=403, detail="无权回答该测验")
 
     # 验证是否已答过
     existing = execute_query(
@@ -643,7 +640,7 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         raise HTTPException(status_code=400, detail="您已经答过此题")
 
     # 解析答案并评分
-    questions = json.loads(quiz[0][4]) if isinstance(quiz[0][4], str) else quiz[0][4]
+    questions = json.loads(quiz_row["questions"]) if isinstance(quiz_row["questions"], str) else quiz_row["questions"]
     user_answers = json.loads(req.answers)
 
     total_score = 0
@@ -939,37 +936,28 @@ async def create_poll(req: PollCreate, request: Request):
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     poll_id = execute_insert_update(
-        """INSERT INTO interaction_polls (creator_username, question, options, poll_type, status, created_at)
-           VALUES (?, ?, ?, ?, 'active', ?)""",
-        (user["username"], req.question, json.dumps(req.options, ensure_ascii=False), req.poll_type, now),
+        """INSERT INTO interaction_polls (creator_username, question, options, poll_type, status, created_at,
+                                          target_scope, target_grade, target_class, target_users)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)""",
+        (user["username"], req.question, json.dumps(req.options, ensure_ascii=False), req.poll_type, now,
+         req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
     # ── 异步通知学生（不阻塞创建操作） ──
     async def _notify_poll():
         try:
-            from backend.api.notification_router import notify_users
-            from backend.database import execute_query as db_query
-            creator = user["username"]
-            role_u = user.get("role", 2)
-            if role_u == 0:
-                students = db_query("SELECT username FROM users WHERE role = 2")
-            else:
-                grade, cls = _get_user_grade_class(creator)
-                if grade:
-                    students = db_query(
-                        f"SELECT username FROM users WHERE role = 2 AND grade = ?"
-                        + (" AND INSTR(',' || ? || ',', ',' || class || ',') > 0" if cls else ""),
-                        (grade, cls) if cls else (grade,),
-                    )
-                else:
-                    students = []
-            if students:
-                notify_users(
-                    [r[0] for r in students], "info",
-                    f"新投票「{req.question}」已发布",
-                    f"共 {len(req.options)} 个选项，请参与投票",
-                    "/interaction",
-                )
+            from backend.api.notification_router import notify_users_by_scope
+            notify_users_by_scope(
+                creator_username=user["username"],
+                type_="info",
+                title=f"新投票「{req.question}」已发布",
+                content=f"共 {len(req.options)} 个选项，请参与投票",
+                related_link="/interaction",
+                target_scope=req.target_scope,
+                target_grade=req.target_grade,
+                target_class=req.target_class,
+                target_users=req.target_users,
+            )
         except Exception as e:
             logger.warning(f"发送投票通知失败: {e}")
     asyncio.create_task(_notify_poll())
@@ -985,27 +973,32 @@ async def list_polls(request: Request):
     username = user["username"]
 
     if role == 2:
-        # 学生：看自己班级的投票（管理员创建的全体可见，教师创建的需匹配班级）
-        grade, cls = _get_user_grade_class(username)
-        conditions = ["p.status = 'active'"]
-        params: list[Any] = []
-        if grade:
-            conditions.append("(u.role = 0 OR u.grade = ?)")
-            params.append(grade)
-        if cls:
-            cls_param = f",{cls},"
-            conditions.append("(u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)")
-            params.append(cls_param)
-        where = " AND ".join(conditions)
-        rows = execute_query(
-            f"""SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
-                        COALESCE(u.name, u.username) AS creator_name
-                FROM interaction_polls p
-                JOIN users u ON p.creator_username = u.username AND u.role IN (0, 1)
-                WHERE {where}
-                ORDER BY p.created_at DESC LIMIT 50""",
-            tuple(params),
+        # 学生：获取所有活跃投票后按目标范围过滤
+        from backend.permission_service import check_activity_visibility
+        s_grade, s_class = _get_user_grade_class(username)
+        # 注意：列顺序必须与后续索引访问一致
+        all_rows = execute_query(
+            """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
+                      p.target_scope, p.target_grade, p.target_class, p.target_users,
+                      COALESCE(u.name, u.username) AS creator_name
+               FROM interaction_polls p
+               JOIN users u ON p.creator_username = u.username AND u.role IN (0, 1)
+               WHERE p.status = 'active'
+               ORDER BY p.created_at DESC LIMIT 50""",
         )
+        rows = []
+        for r in all_rows:
+            if check_activity_visibility(
+                student_username=username,
+                student_grade=s_grade,
+                student_class=s_class,
+                creator_username=r[1],
+                target_scope=r[7] if len(r) > 7 else "teacher_classes",
+                target_grade=r[8] if len(r) > 8 else "",
+                target_class=r[9] if len(r) > 9 else "",
+                target_users=r[10] if len(r) > 10 else "",
+            ):
+                rows.append(r)
     elif role == 1:
         # 教师：只看自己创建的投票
         rows = execute_query(
@@ -1031,7 +1024,8 @@ async def list_polls(request: Request):
     for r in rows:
         options = json.loads(r[3]) if isinstance(r[3], str) else r[3]
         poll_type = r[4] if r[4] else "single"
-        creator_name = r[7] if len(r) > 7 else r[1]
+        # 兼容学生路径（含 target_* 列，creator_name 在 11）和教师/管理员路径（不含 target_*，creator_name 在 7）
+        creator_name = r[11] if len(r) > 11 else (r[7] if len(r) > 7 else r[1])
         vote_counts = []
         for i in range(len(options)):
             cnt = execute_query(
@@ -1086,44 +1080,34 @@ async def submit_vote(
     user = get_current_user(request)
     username = user["username"]
 
-    poll = execute_query(
+    poll_rows = execute_query_dict(
         "SELECT * FROM interaction_polls WHERE id = ? AND status = 'active'",
         (poll_id,),
     )
-    if not poll:
+    if not poll_rows:
         raise HTTPException(status_code=404, detail="投票不存在或已结束")
 
-    # 学生只能参与自己班级教师或管理员创建的投票
+    poll_row = poll_rows[0]
+
+    # 学生只能参与自己权限范围内的投票
     role = user.get("role", 2)
     if role == 2:
-        grade, cls = _get_user_grade_class(username)
-        creator = poll[0][1]
-        # 查询创建者是否为管理员（role=0），管理员创建的所有学生都可参与
-        creator_info = execute_query("SELECT role, grade, class FROM users WHERE username=?", (creator,))
-        if creator_info:
-            creator_role = creator_info[0][0]
-            creator_cgrade = creator_info[0][1] or ''
-            creator_cclass = creator_info[0][2] or ''
-        else:
-            creator_role = 2  # 找不到则视为普通用户
-            creator_cgrade = ''
-            creator_cclass = ''
+        from backend.permission_service import check_activity_visibility
+        s_grade, s_class = _get_user_grade_class(username)
+        if not check_activity_visibility(
+            student_username=username,
+            student_grade=s_grade,
+            student_class=s_class,
+            creator_username=poll_row["creator_username"],
+            target_scope=poll_row.get("target_scope", "") or "teacher_classes",
+            target_grade=poll_row.get("target_grade", "") or "",
+            target_class=poll_row.get("target_class", "") or "",
+            target_users=poll_row.get("target_users", "") or "",
+        ):
+            raise HTTPException(status_code=403, detail="无权参与该投票")
 
-        is_admin_creator = creator_role == 0
-        # 管理员创建 或 创建者的年级班级与学生匹配 → 允许
-        if is_admin_creator:
-            teacher_ok = [creator]
-        elif cls and creator_cgrade == grade and (not creator_cclass or f",{cls}," in f",{creator_cclass},"):
-            teacher_ok = [creator]
-        elif not cls and creator_cgrade == grade:
-            teacher_ok = [creator]
-        else:
-            teacher_ok = []
-        if not teacher_ok:
-            raise HTTPException(status_code=403, detail="无权参与非本班教师的投票")
-
-    poll_type = poll[0][6] if len(poll[0]) > 6 and poll[0][6] else "single"
-    options = json.loads(poll[0][3]) if isinstance(poll[0][3], str) else poll[0][3]
+    poll_type = poll_row.get("poll_type") or "single"
+    options = json.loads(poll_row["options"]) if isinstance(poll_row["options"], str) else poll_row["options"]
 
     # 解析选择的选项
     selected_indices = []
@@ -1179,7 +1163,7 @@ async def submit_vote(
     # ── 积分奖励 ──
     try:
         from backend.reward_engine import award_participation
-        poll_title = poll[0][2] if len(poll[0]) > 2 else f"投票#{poll_id}"
+        poll_title = poll_row["question"] or f"投票#{poll_id}"
         award_participation(username, "poll", str(poll_id), poll_title)
     except Exception:
         pass
@@ -1190,14 +1174,15 @@ async def submit_vote(
 @router.get("/polls/{poll_id}/results", summary="查看投票结果")
 async def get_poll_results(poll_id: int, request: Request):
     """获取投票实时结果"""
-    poll = execute_query(
+    poll_rows = execute_query_dict(
         "SELECT * FROM interaction_polls WHERE id = ?",
         (poll_id,),
     )
-    if not poll:
+    if not poll_rows:
         raise HTTPException(status_code=404, detail="投票不存在")
 
-    options = json.loads(poll[0][3]) if isinstance(poll[0][3], str) else poll[0][3]
+    poll_row = poll_rows[0]
+    options = json.loads(poll_row["options"]) if isinstance(poll_row["options"], str) else poll_row["options"]
     vote_counts = []
     for i in range(len(options)):
         cnt = execute_query(
@@ -1213,11 +1198,11 @@ async def get_poll_results(poll_id: int, request: Request):
         (poll_id,),
     )
     unique_voters = voters[0][0] if voters else 0
-    poll_type = poll[0][6] if len(poll[0]) > 6 and poll[0][6] else "single"
+    poll_type = poll_row.get("poll_type") or "single"
     denominator = unique_voters if unique_voters > 0 else total
     return {
         "poll_id": poll_id,
-        "question": poll[0][2],
+        "question": poll_row["question"],
         "poll_type": poll_type,
         "options": [
             {"index": i, "text": opt, "votes": vote_counts[i],
@@ -1397,22 +1382,40 @@ async def ask_question(req: QuestionCreate, request: Request):
     except Exception:
         pass
 
-    # ── 异步通知教师 ──
+    # ── 异步通知教师（通过 teacher_assignments 精确匹配） ──
     async def _notify_question():
         try:
             from backend.api.notification_router import notify_users
-            from backend.database import execute_query as db_query
-            student_grade, student_cls = _get_user_grade_class(user["username"])
-            if student_grade:
-                cls_param = f",{student_cls}," if student_cls else ""
-                teachers = db_query(
-                    f"SELECT username FROM users WHERE role = 1 AND grade = ?"
-                    + (" AND INSTR(',' || class || ',', ?) > 0" if student_cls else ""),
-                    (student_grade, cls_param) if student_cls else (student_grade,),
-                )
-                if teachers:
+            from backend.permission_service import get_teacher_assignments
+            from backend.database import execute_query_dict as db_dict
+            # 查询学生所在年级的 grade_id
+            student = db_dict(
+                "SELECT grade_id, class_id, grade, class FROM users WHERE username=?",
+                (user["username"],),
+            )
+            if student and student[0].get("grade_id"):
+                s = student[0]
+                gid = s["grade_id"]
+                cid = s.get("class_id")
+                # 查找所有在 teacher_assignments 中匹配该年级/班级的教师
+                if cid:
+                    assign_rows = db_dict(
+                        """SELECT DISTINCT ta.teacher_username
+                           FROM teacher_assignments ta
+                           WHERE ta.grade_id=? AND (ta.class_id=? OR ta.class_id IS NULL)""",
+                        (gid, cid),
+                    )
+                else:
+                    assign_rows = db_dict(
+                        """SELECT DISTINCT ta.teacher_username
+                           FROM teacher_assignments ta
+                           WHERE ta.grade_id=?""",
+                        (gid,),
+                    )
+                teacher_usernames = [r["teacher_username"] for r in assign_rows]
+                if teacher_usernames:
                     notify_users(
-                        [r[0] for r in teachers], "info",
+                        teacher_usernames, "info",
                         f"新课堂提问",
                         f"学生提出了新问题：{req.content[:50]}{'...' if len(req.content) > 50 else ''}",
                         "/interaction",
@@ -1455,17 +1458,19 @@ async def list_questions(
     offset = (page - 1) * page_size
 
     if role == 2:
-        # 学生：只看自己班级同学的提问和回答
-        grade, cls = _get_user_grade_class(username)
+        # 学生：只看自己班级同学的提问
+        student = execute_query_dict(
+            "SELECT grade_id, class_id FROM users WHERE username=?", (username,)
+        )
         conditions = []
         params: list[Any] = []
-        if grade:
-            conditions.append("u.grade = ?")
-            params.append(grade)
-        if cls:
-            cls_param = f",{cls},"
-            conditions.append("INSTR(',' || u.class || ',', ?) > 0")
-            params.append(cls_param)
+        if student and student[0].get("grade_id"):
+            s = student[0]
+            conditions.append("u.grade_id = ?")
+            params.append(s["grade_id"])
+            if s.get("class_id"):
+                conditions.append("u.class_id = ?")
+                params.append(s["class_id"])
         where = " AND ".join(conditions) if conditions else "1=1"
         rows = execute_query(
             f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at, q.answered_by
@@ -1484,34 +1489,45 @@ async def list_questions(
         )
         total = count_rows[0][0] if count_rows else 0
     elif role == 1:
-        # 教师：只看自己班级学生的提问
-        grade, cls = _get_user_grade_class(username)
-        conditions = []
-        params: list[Any] = []
-        if grade:
-            conditions.append("u.grade = ?")
-            params.append(grade)
-        if cls:
-            conditions.append("INSTR(',' || ? || ',', ',' || u.class || ',') > 0")
-            params.append(cls)  # 原始教师班级字符串，不额外加逗号
+        # 教师：通过 teacher_assignments 精确匹配任教班级学生的提问
+        from backend.permission_service import get_teacher_assignments
+        assignments = get_teacher_assignments(username)
+        if not assignments:
+            return {"questions": [], "total": 0, "page": page, "page_size": page_size}
+
+        # 用 grade_id/class_id 直接匹配学生
+        stu_conditions = []
+        stu_params: list[Any] = []
+        for a in assignments:
+            gid = a["grade_id"]
+            cid = a.get("class_id")
+            if cid is None:
+                stu_conditions.append("(u.grade_id = ?)")
+                stu_params.append(gid)
+            else:
+                stu_conditions.append("(u.grade_id = ? AND u.class_id = ?)")
+                stu_params.extend([gid, cid])
+        if not stu_conditions:
+            return {"questions": [], "total": 0, "page": page, "page_size": page_size}
+
+        stu_where = " OR ".join(stu_conditions)
         if status:
-            conditions.append("q.status = ?")
-            params.append(status)
-        where = " AND ".join(conditions) if conditions else "1=1"
+            stu_where = f"({stu_where}) AND q.status = ?"
+            stu_params.append(status)
+
         rows = execute_query(
             f"""SELECT q.id, q.student_username, q.content, q.is_anonymous, q.status, q.answer, q.created_at, q.answered_at, q.answered_by
                 FROM interaction_questions q
                 JOIN users u ON q.student_username = u.username AND u.role = 2
-                WHERE {where}
+                WHERE {stu_where}
                 ORDER BY q.created_at DESC LIMIT ? OFFSET ?""",
-            tuple(params + [page_size, offset]),
+            tuple(stu_params + [page_size, offset]),
         )
-        # 获取总数
         count_rows = execute_query(
             f"""SELECT COUNT(*) FROM interaction_questions q
                 JOIN users u ON q.student_username = u.username AND u.role = 2
-                WHERE {where}""",
-            tuple(params),
+                WHERE {stu_where}""",
+            tuple(stu_params),
         )
         total = count_rows[0][0] if count_rows else 0
     else:
@@ -1624,14 +1640,15 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         if username == asker_username:
             raise HTTPException(status_code=403, detail="不能回答自己的提问")
 
-        # 班级验证
-        grade, cls = _get_user_grade_class(username)
-        asker_grade, asker_cls = _get_user_grade_class(asker_username)
-        if grade != asker_grade:
+        # 班级验证（用 grade_id/class_id 精确匹配）
+        from backend.database import execute_query_dict as db_dict
+        me = db_dict("SELECT grade_id, class_id FROM users WHERE username=?", (username,))
+        asker = db_dict("SELECT grade_id, class_id FROM users WHERE username=?", (asker_username,))
+        grade_ok = me and asker and me[0].get("grade_id") and me[0]["grade_id"] == asker[0]["grade_id"]
+        class_ok = (not me[0].get("class_id") or not asker[0].get("class_id")
+                    or me[0]["class_id"] == asker[0]["class_id"])
+        if not grade_ok or not class_ok:
             raise HTTPException(status_code=403, detail="只能回答同班同学的提问")
-        if cls and asker_cls:
-            if not (f",{cls}," in f",{asker_cls}," or f",{asker_cls}," in f",{cls},"):
-                raise HTTPException(status_code=403, detail="只能回答同班同学的提问")
 
         # ── AI 内容审核 ──
         safe, reason = _ai_content_review(req.answer, username, "answer")
@@ -1668,22 +1685,16 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         except Exception as e:
             logger.warning(f"发送回答通知失败: {e}")
 
-        # ── 通知教师审批 ──
+        # ── 通知教师审批（通过 teacher_assignments 精确匹配）──
         try:
             from backend.api.notification_router import notify_users
-            from backend.database import execute_query as db_query
-            g, c = _get_user_grade_class(asker_username)
-            if g:
-                teachers = db_query(
-                    f"SELECT username FROM users WHERE role = 1 AND grade = ?"
-                    + (" AND INSTR(',' || ? || ',', ',' || class || ',') > 0" if c else ""),
-                    (g, c) if c else (g,),
-                )
-                if teachers:
-                    notify_users([r[0] for r in teachers], "info",
-                        "有学生回答了提问，需要审批",
-                        f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
-                        "/interaction")
+            from backend.permission_service import get_teachers_for_student
+            teachers = get_teachers_for_student(asker_username)
+            if teachers:
+                notify_users(teachers, "info",
+                    "有学生回答了提问，需要审批",
+                    f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
+                    "/interaction")
         except Exception as e:
             logger.warning(f"发送审批通知失败: {e}")
 
@@ -1691,22 +1702,8 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
 
     # ── 教师/管理员回答：直接写入主表 ──
     if role == 1:
-        grade, cls = _get_user_grade_class(username)
-        if cls:
-            rows = execute_query(
-                """SELECT q.id FROM interaction_questions q
-                   JOIN users u ON q.student_username = u.username AND u.role = 2
-                   WHERE q.id = ? AND u.grade = ? AND INSTR(',' || ? || ',', ',' || u.class || ',') > 0""",
-                (question_id, grade, cls),
-            )
-        else:
-            rows = execute_query(
-                """SELECT q.id FROM interaction_questions q
-                   JOIN users u ON q.student_username = u.username AND u.role = 2
-                   WHERE q.id = ? AND u.grade = ?""",
-                (question_id, grade),
-            )
-        if not rows:
+        from backend.permission_service import check_teacher_access_to_student
+        if not check_teacher_access_to_student(username, asker_username):
             raise HTTPException(status_code=403, detail="无权回答非本班学生的提问")
 
     execute_insert_update(
@@ -1801,15 +1798,12 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
 
     # 教师：验证该提问来自自己班级
     if role == 1:
-        grade, cls = _get_user_grade_class(user["username"])
-        rows = execute_query(
-            """SELECT q.id FROM interaction_questions q
-               JOIN users u ON q.student_username = u.username AND u.role = 2
-               WHERE q.id = ? AND u.grade = ?"""
-            + (" AND INSTR(',' || ? || ',', ',' || u.class || ',') > 0" if cls else ""),
-            (question_id, grade, cls) if cls else (question_id, grade),
+        from backend.permission_service import check_teacher_access_to_student
+        # 查出提问者
+        q_owner = execute_query(
+            "SELECT student_username FROM interaction_questions WHERE id=?", (question_id,)
         )
-        if not rows:
+        if not q_owner or not check_teacher_access_to_student(user["username"], q_owner[0][0]):
             raise HTTPException(status_code=403, detail="无权审批非本班学生的提问")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1879,15 +1873,11 @@ async def reject_student_answer(question_id: int, answer_id: int, request: Reque
     question_content = answer_row[0][2]
 
     if role == 1:
-        grade, cls = _get_user_grade_class(user["username"])
-        rows = execute_query(
-            """SELECT q.id FROM interaction_questions q
-               JOIN users u ON q.student_username = u.username AND u.role = 2
-               WHERE q.id = ? AND u.grade = ?"""
-            + (" AND INSTR(',' || ? || ',', ',' || u.class || ',') > 0" if cls else ""),
-            (question_id, grade, cls) if cls else (question_id, grade),
+        from backend.permission_service import check_teacher_access_to_student
+        q_owner = execute_query(
+            "SELECT student_username FROM interaction_questions WHERE id=?", (question_id,)
         )
-        if not rows:
+        if not q_owner or not check_teacher_access_to_student(user["username"], q_owner[0][0]):
             raise HTTPException(status_code=403, detail="无权审批非本班学生的提问")
 
     execute_insert_update(

@@ -36,6 +36,10 @@ router = APIRouter()
 class CreateTaskRequest(BaseModel):
     name: str
     description: str = ""
+    target_scope: str = "teacher_classes"
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
 
 
 class SubmitTaskRequest(BaseModel):
@@ -47,6 +51,11 @@ class SubmitTaskRequest(BaseModel):
 
 def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, Any]:
     """将 tasks 表行转换为前端期望的 dict 格式"""
+    # row 可能来自 SELECT *，包含 target_* 字段（索引 6-9）
+    target_scope = row[6] if len(row) > 6 else "teacher_classes"
+    target_grade = row[7] if len(row) > 7 else ""
+    target_class = row[8] if len(row) > 8 else ""
+    target_users = row[9] if len(row) > 9 else ""
     task = {
         "id": row[0],
         "creator": row[1],
@@ -54,6 +63,10 @@ def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, An
         "description": row[3] or "",
         "status": row[4],
         "created_time": row[5],
+        "target_scope": target_scope,
+        "target_grade": target_grade,
+        "target_class": target_class,
+        "target_users": target_users,
     }
     if submissions is not None:
         task["submissions"] = submissions
@@ -68,7 +81,7 @@ def _task_row_to_dict(row, submissions: list[str] | None = None) -> dict[str, An
 def get_all_tasks() -> list[dict[str, Any]]:
     """从数据库获取所有活跃任务"""
     rows = execute_query(
-        "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE status='active' ORDER BY created_at DESC"
+        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users FROM tasks WHERE status='active' ORDER BY created_at DESC"
     )
     return [_task_row_to_dict(row) for row in rows]
 
@@ -76,7 +89,7 @@ def get_all_tasks() -> list[dict[str, Any]]:
 def _get_all_tasks_raw() -> list[dict[str, Any]]:
     """从数据库获取所有任务（含非活跃）"""
     rows = execute_query(
-        "SELECT id, creator_username, name, description, status, created_at FROM tasks ORDER BY created_at DESC"
+        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users FROM tasks ORDER BY created_at DESC"
     )
     return [_task_row_to_dict(row) for row in rows]
 
@@ -84,7 +97,7 @@ def _get_all_tasks_raw() -> list[dict[str, Any]]:
 def _get_creator_tasks(username: str) -> list[dict[str, Any]]:  # type: ignore[valid-type]
     """获取指定创建者的所有任务"""
     rows = execute_query(
-        "SELECT id, creator_username, name, description, status, created_at FROM tasks WHERE creator_username=? ORDER BY created_at DESC",
+        "SELECT id, creator_username, name, description, status, created_at, target_scope, target_grade, target_class, target_users FROM tasks WHERE creator_username=? ORDER BY created_at DESC",
         (username,),
     )
     return [_task_row_to_dict(row) for row in rows]
@@ -107,28 +120,34 @@ from backend.permission_service import (
 
 
 def get_user_relevant_tasks(student_user: str, active_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """获取与学生相关的任务（基于教师的任教范围匹配）
+    """获取与学生相关的任务（基于活动目标范围 + 教师任教范围匹配）
 
-    使用 permission_service 统一判断学生是否在教师管辖范围内。
-    管理员(root)的任务对所有学生可见。
+    优先使用任务的 target_scope 过滤；兼容旧数据（无 target_scope 时回退到任教范围匹配）。
     """
-    relevant = []
+    from backend.permission_service import check_activity_visibility
 
+    # 查询学生的年级班级
+    student_rows = execute_query(
+        "SELECT grade, class FROM users WHERE username=?", (student_user,)
+    )
+    s_grade = str(student_rows[0][0] or "").strip() if student_rows else ""
+    s_class = str(student_rows[0][1] or "").strip() if student_rows else ""
+
+    relevant = []
     for task in active_tasks:
         creator = task["creator"]
 
-        # 管理员（root）的任务对所有学生可见
-        if creator == "root":
-            if task not in relevant:
-                relevant.append(task)
-            continue
-
-        # 只匹配教师创建的任务
-        if not is_teacher(creator):
-            continue
-
-        # 使用统一权限服务判断
-        if is_student_in_teacher_scope(student_user, creator):
+        # 使用统一的活动范围检查
+        if check_activity_visibility(
+            student_username=student_user,
+            student_grade=s_grade,
+            student_class=s_class,
+            creator_username=creator,
+            target_scope=task.get("target_scope", "teacher_classes"),
+            target_grade=task.get("target_grade", ""),
+            target_class=task.get("target_class", ""),
+            target_users=task.get("target_users", ""),
+        ):
             relevant.append(task)
 
     return relevant
@@ -187,8 +206,11 @@ async def create_task(req: CreateTaskRequest, request: Request):
     now = time.strftime("%Y-%m-%d %H:%M:%S")
 
     execute_insert_update(
-        "INSERT INTO tasks (id, creator_username, name, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)",
-        (task_id, username, task_name, req.description.strip(), now, now),
+        """INSERT INTO tasks (id, creator_username, name, description, status, created_at, updated_at,
+                              target_scope, target_grade, target_class, target_users)
+           VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+        (task_id, username, task_name, req.description.strip(), now, now,
+         req.target_scope, req.target_grade, req.target_class, req.target_users),
     )
 
     new_task = {
@@ -198,6 +220,10 @@ async def create_task(req: CreateTaskRequest, request: Request):
         "description": req.description.strip(),
         "status": "active",
         "created_time": now,
+        "target_scope": req.target_scope,
+        "target_grade": req.target_grade,
+        "target_class": req.target_class,
+        "target_users": req.target_users,
         "submissions": [],
     }
 

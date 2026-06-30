@@ -249,6 +249,11 @@ export interface ExamInfo {
   question_count?: number;
   created_at: string;
   updated_at: string;
+  /** 目标范围 */
+  target_scope?: string;
+  target_grade?: string;
+  target_class?: string;
+  target_users?: string;
   /** 学生端专用：我的答题记录 */
   my_attempt?: ExamAttempt | null;
   /** 详情接口返回的题目列表 */
@@ -309,6 +314,10 @@ export interface ExamCreateRequest {
   max_attempts?: number;
   start_time?: string | null;
   end_time?: string | null;
+  target_scope?: string;
+  target_grade?: string;
+  target_class?: string;
+  target_users?: string;
 }
 
 export interface ExamListResponse {

@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Query, WebSocket, WebSock
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
-from backend.database import execute_query, execute_insert_update
+from backend.database import execute_query, execute_insert_update, execute_query_dict
 from backend.logger import logger
 from backend.ws_manager import manager as ws_manager
 from backend.prompts import build_ai_role
@@ -301,32 +301,50 @@ async def list_discussions(
                 (username,),
             )
     else:
-        # 学生：只看到管理员和自己班级教师发布的讨论
-        grade, cls = _get_user_grade_class(username)
-        base_sql = """SELECT DISTINCT d.* FROM discussions d
-            WHERE (d.creator_username IN (SELECT username FROM users WHERE role=0)
-               OR d.creator_username IN (
-                   SELECT username FROM users
-                   WHERE role=1
-                   AND (grade='' OR grade IS NULL OR INSTR(grade, ?)>0 OR INSTR(?, grade)>0)
-                   AND (class='' OR class IS NULL OR INSTR(class, ?)>0 OR INSTR(?, class)>0)
-               ))
-            ORDER BY d.created_at DESC"""
-        params = (grade, grade, cls, cls)
+        # 学生：只看到管理员和自己班级教师发布的讨论（通过 teacher_assignments）
+        student = execute_query_dict(
+            "SELECT grade_id, class_id FROM users WHERE username=?", (username,)
+        )
+        allowed_creators: list[str] = []
+        if student and student[0].get("grade_id"):
+            gid = student[0]["grade_id"]
+            cid = student[0].get("class_id")
+            if cid:
+                ta_rows = execute_query_dict(
+                    """SELECT DISTINCT teacher_username FROM teacher_assignments
+                       WHERE grade_id=? AND (class_id=? OR class_id IS NULL)""",
+                    (gid, cid),
+                )
+            else:
+                ta_rows = execute_query_dict(
+                    """SELECT DISTINCT teacher_username FROM teacher_assignments
+                       WHERE grade_id=?""",
+                    (gid,),
+                )
+            allowed_creators = [r["teacher_username"] for r in ta_rows]
+        # 加上管理员
+        admin_rows = execute_query_dict("SELECT username FROM users WHERE role=0")
+        admin_names = [r["username"] for r in admin_rows] if admin_rows else []
+        allowed_creators = list(set(allowed_creators + admin_names))
 
-        if status:
-            base_sql = """SELECT DISTINCT d.* FROM discussions d
-                WHERE d.status=? AND (d.creator_username IN (SELECT username FROM users WHERE role=0)
-                   OR d.creator_username IN (
-                       SELECT username FROM users
-                       WHERE role=1
-                       AND (grade='' OR grade IS NULL OR INSTR(grade, ?)>0 OR INSTR(?, grade)>0)
-                       AND (class='' OR class IS NULL OR INSTR(class, ?)>0 OR INSTR(?, class)>0)
-                   ))
-                ORDER BY d.created_at DESC"""
-            params = (status, grade, grade, cls, cls)
-
-        rows = execute_query(base_sql, params)
+        if allowed_creators:
+            ph = ",".join("?" for _ in allowed_creators)
+            if status:
+                rows = execute_query(
+                    f"""SELECT * FROM discussions
+                       WHERE status=? AND creator_username IN ({ph})
+                       ORDER BY created_at DESC""",
+                    (status, *allowed_creators),
+                )
+            else:
+                rows = execute_query(
+                    f"""SELECT * FROM discussions
+                       WHERE creator_username IN ({ph})
+                       ORDER BY created_at DESC""",
+                    tuple(allowed_creators),
+                )
+        else:
+            rows = []
 
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",

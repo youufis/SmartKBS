@@ -135,6 +135,38 @@ def init_question_db():
                 except sqlite3.OperationalError:
                     pass  # 字段已存在
 
+            # ── 字段迁移：exams 新增目标范围字段 ──
+            for col_def in [
+                ("target_scope", "TEXT DEFAULT 'teacher_classes'"),
+                ("target_grade", "TEXT DEFAULT ''"),
+                ("target_class", "TEXT DEFAULT ''"),
+                ("target_users", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE exams ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_exam_target ON exams(target_scope, target_grade, target_class)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 字段迁移：code_problems 新增目标范围字段 ──
+            for col_def in [
+                ("target_scope", "TEXT DEFAULT 'teacher_classes'"),
+                ("target_grade", "TEXT DEFAULT ''"),
+                ("target_class", "TEXT DEFAULT ''"),
+                ("target_users", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE code_problems ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cp_target ON code_problems(target_scope, target_grade, target_class)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 智能练习：练习任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS practice_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

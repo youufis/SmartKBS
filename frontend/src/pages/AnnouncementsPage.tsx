@@ -12,6 +12,8 @@ import type { AnnouncementItem } from '../api/notifications'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -47,6 +49,12 @@ const AnnouncementsPage: React.FC = () => {
   const [editForm] = Form.useForm()
   const [aiForm] = Form.useForm()
   const [submitting, setSubmitting] = useState(false)
+  const [announceScope, setAnnounceScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes',
+    target_grade: '',
+    target_class: '',
+    target_users: '',
+  })
 
   const fetchAnnouncements = async (p = page, ps = pageSize) => {
     setLoading(true)
@@ -65,7 +73,7 @@ const AnnouncementsPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // AI 生成公告
+      // AI 生成公告
   const handleAiGenerate = async () => {
     try {
       const values = await aiForm.validateFields()
@@ -80,6 +88,15 @@ const AnnouncementsPage: React.FC = () => {
             target_role: values.target_role,
             priority: values.priority,
           })
+          // 同步 AI 选择的年级/班级到 scope selector
+          const aiGrade = values.target_grade || ''
+          const aiClass = values.target_class || ''
+          setAnnounceScope({
+            target_scope: aiClass ? 'class' : aiGrade ? 'grade' : 'teacher_classes',
+            target_grade: aiGrade,
+            target_class: aiClass,
+            target_users: '',
+          })
           message.success('AI 已生成公告内容，请确认后发布')
           setAiModal(false)
           aiForm.resetFields()
@@ -93,6 +110,15 @@ const AnnouncementsPage: React.FC = () => {
           content: data.data.content,
           target_role: values.target_role,
           priority: values.priority,
+        })
+        // 同步 AI 选择的年级/班级到 scope selector
+        const aiGrade = values.target_grade || ''
+        const aiClass = values.target_class || ''
+        setAnnounceScope({
+          target_scope: aiClass ? 'class' : aiGrade ? 'grade' : 'teacher_classes',
+          target_grade: aiGrade,
+          target_class: aiClass,
+          target_users: '',
         })
         message.success('AI 已生成公告内容，请确认后发布')
         setAiModal(false)
@@ -113,10 +139,15 @@ const AnnouncementsPage: React.FC = () => {
     try {
       const values = await form.validateFields()
       setSubmitting(true)
-      await notificationsApi.createAnnouncement(values)
+      await notificationsApi.createAnnouncement({
+        ...values,
+        target_grade: announceScope.target_grade,
+        target_class: announceScope.target_class,
+      })
       message.success('公告发布成功')
       setCreateModal(false)
       form.resetFields()
+      setAnnounceScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       fetchAnnouncements(1, pageSize)
       setPage(1)
     } catch (err: unknown) {
@@ -339,7 +370,7 @@ const AnnouncementsPage: React.FC = () => {
       <Modal
         title="发布公告"
         open={createModal}
-        onCancel={() => setCreateModal(false)}
+        onCancel={() => { setCreateModal(false); setAnnounceScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         onOk={handleCreate}
         confirmLoading={submitting}
         width={640}
@@ -353,7 +384,7 @@ const AnnouncementsPage: React.FC = () => {
           </Form.Item>
           <Form.Item
             name="target_role"
-            label="可见范围"
+            label="可见角色"
             initialValue={isAdminOrTeacher && user?.role === 'teacher' ? 'student' : 'all'}
             extra={user?.role === 'teacher' ? '教师公告默认发送给所教班级学生，管理员始终可见' : '管理员公告默认发送给所有人'}
           >
@@ -362,6 +393,9 @@ const AnnouncementsPage: React.FC = () => {
               <Select.Option value="teacher">仅教师</Select.Option>
               <Select.Option value="student">仅学生</Select.Option>
             </Select>
+          </Form.Item>
+          <Form.Item label="年级/班级范围">
+            <ActivityScopeSelector value={announceScope} onChange={setAnnounceScope} />
           </Form.Item>
           <Space style={{ width: '100%' }} size={16}>
             <Form.Item name="priority" label="优先级" initialValue="normal">

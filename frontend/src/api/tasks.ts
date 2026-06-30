@@ -7,8 +7,20 @@ export async function getActiveTasks(user?: string): Promise<{ tasks: TaskInfo[]
   return data;
 }
 
-export async function createTask(name: string, description?: string): Promise<{ task: TaskInfo; message: string }> {
-  const { data } = await apiClient.post('/api/tasks/create', { name, description });
+export async function createTask(name: string, description?: string, scope?: {
+  target_scope?: string;
+  target_grade?: string;
+  target_class?: string;
+  target_users?: string;
+}): Promise<{ task: TaskInfo; message: string }> {
+  const { data } = await apiClient.post('/api/tasks/create', {
+    name,
+    description,
+    target_scope: scope?.target_scope || 'teacher_classes',
+    target_grade: scope?.target_grade || '',
+    target_class: scope?.target_class || '',
+    target_users: scope?.target_users || '',
+  });
   return data;
 }
 

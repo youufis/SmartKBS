@@ -23,6 +23,8 @@ import { useNavigate } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import { TYPE_LABELS, TYPE_OPTIONS } from '../constants/questionTypes'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -198,6 +200,7 @@ const ExamPage: React.FC = () => {
     try {
       const values = await createForm.validateFields()
       setSaving(true)
+      const scope = values.activityScope || { target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }
       const res = await examsApi.createExam({
         title: values.title,
         description: values.description || '',
@@ -209,6 +212,10 @@ const ExamPage: React.FC = () => {
         shuffle_options: values.shuffle_options !== false,
         show_result_immediately: values.show_result_immediately || false,
         max_attempts: values.max_attempts || 1,
+        target_scope: scope.target_scope,
+        target_grade: scope.target_grade,
+        target_class: scope.target_class,
+        target_users: scope.target_users,
       })
       message.success(res.message)
       setCreateModal(false)
@@ -792,6 +799,12 @@ const ExamPage: React.FC = () => {
     shuffle_options: true,
     show_result_immediately: false,
     max_attempts: 1,
+    activityScope: {
+      target_scope: 'teacher_classes',
+      target_grade: '',
+      target_class: '',
+      target_users: '',
+    } as ActivityScopeValue,
   }
 
   return (
@@ -985,6 +998,14 @@ const ExamPage: React.FC = () => {
           <Form.Item label="考试说明" name="description">
             <TextArea rows={3} placeholder="可选：填写考试说明或注意事项" />
           </Form.Item>
+
+          {/* ── 活动目标范围 ── */}
+          <Form.Item label="活动目标范围" name="activityScope" style={{ marginBottom: 16 }}>
+            <ActivityScopeSelector
+              showAllOption={isTeacherOrAdmin && user?.role === 'admin'}
+            />
+          </Form.Item>
+
           <Row gutter={16}>
             <Col span={8}>
               <Form.Item label="随机题目顺序" name="shuffle_questions" valuePropName="checked">

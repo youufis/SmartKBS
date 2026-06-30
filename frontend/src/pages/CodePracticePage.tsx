@@ -18,6 +18,8 @@ import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import CodeEditor from '../components/CodeEditor'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -282,6 +284,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
     starter_code: '',
     time_limit: 5,
     test_cases: [] as any[],
+    target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '',
   })
   const [newTestCase, setNewTestCase] = useState({ input: '', expected: '', description: '', score: 1, is_sample: false })
 
@@ -326,6 +329,10 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           score: tc.score,
           is_sample: tc.is_sample,
         })),
+        target_scope: createForm.target_scope || 'teacher_classes',
+        target_grade: createForm.target_grade || '',
+        target_class: createForm.target_class || '',
+        target_users: createForm.target_users || '',
       })
       message.success('题目创建成功')
       setCreateModalOpen(false)
@@ -334,6 +341,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         difficulty: 'medium', language: 'python',
         template_code: '# 在此编写你的代码\n\ndef solution():\n    pass\n',
         starter_code: '', time_limit: 5, test_cases: [],
+        target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '',
       })
       loadProblems()
       apiClient.get('/api/code/teachers/statistics').then(({ data }) => {
@@ -1013,6 +1021,30 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                   />
                 )}
               </>
+            ),
+          },
+          {
+            key: 'scope',
+            label: '目标范围',
+            children: (
+              <div style={{ padding: '8px 0' }}>
+                <ActivityScopeSelector
+                  value={{
+                    target_scope: createForm.target_scope as any || 'teacher_classes',
+                    target_grade: createForm.target_grade || '',
+                    target_class: createForm.target_class || '',
+                    target_users: createForm.target_users || '',
+                  }}
+                  onChange={(val) => setCreateForm({
+                    ...createForm,
+                    target_scope: val.target_scope,
+                    target_grade: val.target_grade,
+                    target_class: val.target_class,
+                    target_users: val.target_users,
+                  })}
+                  showAllOption={isTeacherOrAdmin && user?.role === 'admin'}
+                />
+              </div>
             ),
           },
         ]} />

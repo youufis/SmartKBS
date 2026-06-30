@@ -11,6 +11,8 @@ import {
 import * as tasksApi from '../api/tasks'
 import { useAuthStore } from '../stores/authStore'
 import type { TaskInfo } from '../types'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useChatStore, setTaskFilename } from '../stores/chatStore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -36,6 +38,12 @@ const TaskPage: React.FC = () => {
   const [createModal, setCreateModal] = useState(false)
   const [taskName, setTaskName] = useState('')
   const [taskDesc, setTaskDesc] = useState('')
+  const [taskScope, setTaskScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes',
+    target_grade: '',
+    target_class: '',
+    target_users: '',
+  })
   const [submitModal, setSubmitModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState<TaskInfo | null>(null)
 
@@ -82,11 +90,12 @@ const TaskPage: React.FC = () => {
   const handleCreate = async () => {
     if (!taskName.trim()) { message.warning('请输入任务名称'); return }
     try {
-      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim())
+      const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope)
       message.success(res.message)
       setCreateModal(false)
       setTaskName('')
       setTaskDesc('')
+      setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       loadTasks()
     } catch (err: any) {
       message.error(err?.response?.data?.detail || '创建失败')
@@ -385,8 +394,9 @@ const TaskPage: React.FC = () => {
         title="创建新任务"
         open={createModal}
         onOk={handleCreate}
-        onCancel={() => { setCreateModal(false); setTaskName('') }}
+        onCancel={() => { setCreateModal(false); setTaskName(''); setTaskDesc(''); setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         okText="创建" cancelText="取消"
+        width={640}
       >
         <Input
           placeholder="输入任务名称"
@@ -400,6 +410,9 @@ const TaskPage: React.FC = () => {
           rows={3}
           style={{ marginTop: 12 }}
         />
+        <div style={{ marginTop: 16 }}>
+          <ActivityScopeSelector value={taskScope} onChange={setTaskScope} />
+        </div>
       </Modal>
 
       {/* 提交任务确认弹窗 */}

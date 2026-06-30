@@ -213,24 +213,39 @@ async def dashboard_summary(request: Request):
             })
 
         # ── 课堂互动数据 ──
-        grade, cls = _get_user_grade_class(username)
-        grade_row2 = execute_query("SELECT grade_id FROM users WHERE username=?", (username,))
+        grade_row2 = execute_query("SELECT grade_id, class_id FROM users WHERE username=?", (username,))
         grade_id2 = grade_row2[0][0] if grade_row2 else None
+        class_id2 = grade_row2[0][1] if grade_row2 and len(grade_row2[0]) > 1 else None
         if grade_id2:
-            cls_param = "," + cls + "," if cls else ""
-            cls_cond = "AND (u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)" if cls else ""
-            sql = (
-                "SELECT COUNT(*) FROM interaction_quizzes q "
-                "JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1) "
-                "WHERE q.status = 'active' "
-                "AND (u.role = 0 OR u.grade_id = ?) "
-                + cls_cond + " "
-                "AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)"
-            )
-            active_quiz_count = _db_count(
-                sql,
-                (grade_id2, cls_param, username) if cls else (grade_id2, username),
-            )
+            # 通过 teacher_assignments 找到任教教师
+            if class_id2:
+                ta_rows = execute_query(
+                    """SELECT DISTINCT teacher_username FROM teacher_assignments
+                       WHERE grade_id=? AND (class_id=? OR class_id IS NULL)""",
+                    (grade_id2, class_id2),
+                )
+            else:
+                ta_rows = execute_query(
+                    """SELECT DISTINCT teacher_username FROM teacher_assignments
+                       WHERE grade_id=?""",
+                    (grade_id2,),
+                )
+            teacher_names = [r[0] for r in ta_rows] if ta_rows else []
+            # 管理员也算
+            admin_rows = execute_query("SELECT username FROM users WHERE role=0")
+            admin_names = [r[0] for r in admin_rows] if admin_rows else []
+            allowed_creators = admin_names + teacher_names
+            if allowed_creators:
+                placeholders = ",".join("?" for _ in allowed_creators)
+                active_quiz_count = _db_count(
+                    f"""SELECT COUNT(*) FROM interaction_quizzes q
+                        WHERE q.status = 'active'
+                        AND q.creator_username IN ({placeholders})
+                        AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)""",
+                    tuple(allowed_creators + [username]),
+                )
+            else:
+                active_quiz_count = 0
         else:
             active_quiz_count = 0
         my_quiz_answers = _db_count(
@@ -243,20 +258,19 @@ async def dashboard_summary(request: Request):
         )
 
         # ── 分组讨论数据 ──
-        active_discussion_count = _db_count(
-            """SELECT COUNT(*) FROM discussions
-               WHERE status='active'
-               AND (creator_username IN (SELECT username FROM users WHERE role=0)
-                    OR creator_username IN (
-                        SELECT username FROM users WHERE role=1
-                        AND (grade='' OR grade IS NULL OR INSTR(grade, ?)>0 OR INSTR(?, grade)>0)
-                        AND (class='' OR class IS NULL OR INSTR(class, ?)>0 OR INSTR(?, class)>0)
-                    ))""",
-            (grade, grade, cls, cls) if grade else (),
-        ) if grade else _db_count(
-            """SELECT COUNT(*) FROM discussions
-               WHERE status='active' AND creator_username IN (SELECT username FROM users WHERE role=0)""",
-        )
+        if grade_id2:
+            # 复用上面 already computed allowed_creators
+            if allowed_creators:
+                ph2 = ",".join("?" for _ in allowed_creators)
+                active_discussion_count = _db_count(
+                    f"""SELECT COUNT(*) FROM discussions
+                       WHERE status='active' AND creator_username IN ({ph2})""",
+                    tuple(allowed_creators),
+                )
+            else:
+                active_discussion_count = 0
+        else:
+            active_discussion_count = 0
 
         my_discussion_count = _db_count(
             """SELECT COUNT(*) FROM discussion_members dm
@@ -1333,8 +1347,9 @@ async def get_task_todo(request: Request):
 
     # 获取学生年级班级信息
     grade, cls = _get_user_grade_class(username)
-    grade_row = execute_query("SELECT grade_id FROM users WHERE username=?", (username,))
+    grade_row = execute_query("SELECT grade_id, class_id FROM users WHERE username=?", (username,))
     grade_id = grade_row[0][0] if grade_row else None
+    class_id = grade_row[0][1] if grade_row and len(grade_row[0]) > 1 else None
 
     # ── 1. 待考试 ──
     try:
@@ -1547,22 +1562,35 @@ async def get_task_todo(request: Request):
     try:
         active_quizzes = []
         if grade_id:
-            cls_param = "," + cls + "," if cls else ""
-            cls_cond = "AND (u.role = 0 OR INSTR(',' || u.class || ',', ?) > 0)" if cls else ""
-            sql = (
-                "SELECT q.id, q.title, q.description FROM interaction_quizzes q "
-                "JOIN users u ON q.creator_username = u.username AND u.role IN (0, 1) "
-                "WHERE q.status = 'active' "
-                "AND (u.role = 0 OR u.grade_id = ?) "
-                + cls_cond + " "
-                "AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)"
-            )
-            quiz_rows = execute_query(
-                sql,
-                (grade_id, cls_param, username) if cls else (grade_id, username),
-            )
-            for qr in quiz_rows:
-                active_quizzes.append({"id": qr[0], "title": qr[1], "description": qr[2] or ""})
+            # 通过 teacher_assignments 找到任教教师和管理员
+            if class_id:
+                ta_rows = execute_query(
+                    """SELECT DISTINCT teacher_username FROM teacher_assignments
+                       WHERE grade_id=? AND (class_id=? OR class_id IS NULL)""",
+                    (grade_id, class_id),
+                )
+            else:
+                ta_rows = execute_query(
+                    """SELECT DISTINCT teacher_username FROM teacher_assignments
+                       WHERE grade_id=?""",
+                    (grade_id,),
+                )
+            teacher_names = [r[0] for r in ta_rows] if ta_rows else []
+            admin_rows = execute_query("SELECT username FROM users WHERE role=0")
+            admin_names = [r[0] for r in admin_rows] if admin_rows else []
+            all_creators = admin_names + teacher_names
+            if all_creators:
+                ph = ",".join("?" for _ in all_creators)
+                quiz_rows = execute_query(
+                    f"""SELECT q.id, q.title, q.description FROM interaction_quizzes q
+                        WHERE q.status = 'active'
+                        AND q.creator_username IN ({ph})
+                        AND q.id NOT IN (SELECT quiz_id FROM interaction_quiz_answers WHERE student_username = ?)
+                        ORDER BY q.created_at DESC""",
+                    tuple(all_creators + [username]),
+                )
+                for qr in quiz_rows:
+                    active_quizzes.append({"id": qr[0], "title": qr[1], "description": qr[2] or ""})
         for aq in active_quizzes:
             items.append({
                 "id": f"quiz-{aq['id']}",

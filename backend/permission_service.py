@@ -366,6 +366,238 @@ def get_students_in_scope(username: str, grade_id: int | None = None, class_id: 
 
 
 # ═══════════════════════════════════════════════════════════════
+# 通用师生关系查询（替代旧的 users.grade/class 字符串匹配）
+# ═══════════════════════════════════════════════════════════════
+
+def get_teachers_for_student(student_username: str) -> list[str]:
+    """获取某学生的所有任教教师用户名列表（通过 teacher_assignments）"""
+    student = execute_query_dict(
+        "SELECT grade_id, class_id FROM users WHERE username=?",
+        (student_username,),
+    )
+    if not student or not student[0].get("grade_id"):
+        return []
+    s = student[0]
+    gid = s["grade_id"]
+    cid = s.get("class_id")
+    if cid:
+        rows = execute_query_dict(
+            """SELECT DISTINCT teacher_username FROM teacher_assignments
+               WHERE grade_id=? AND (class_id=? OR class_id IS NULL)""",
+            (gid, cid),
+        )
+    else:
+        rows = execute_query_dict(
+            """SELECT DISTINCT teacher_username FROM teacher_assignments
+               WHERE grade_id=?""",
+            (gid,),
+        )
+    return [r["teacher_username"] for r in rows]
+
+
+def check_teacher_access_to_student(
+    teacher_username: str,
+    student_username: str,
+) -> bool:
+    """判断教师是否有权限访问该学生数据（通过 teacher_assignments）"""
+    return is_student_in_teacher_scope(student_username, teacher_username)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 活动目标范围工具（统一入口）
+# ═══════════════════════════════════════════════════════════════
+
+def get_students_by_scope(
+    creator_username: str,
+    target_scope: str = "teacher_classes",
+    target_grade: str = "",
+    target_class: str = "",
+    target_users: str = "",
+) -> list[dict[str, Any]]:
+    """
+    根据目标范围参数获取对应的学生列表
+
+    target_scope 取值:
+      'all'             - 全体学生
+      'teacher_classes' - 教师任教的所有班级（默认）
+      'grade'           - 指定年级（target_grade）
+      'class'           - 指定班级（target_grade + target_class）
+      'individual'      - 定向学生（target_users，逗号分隔用户名）
+    """
+    from backend.auth import is_admin
+
+    # 兼容旧数据：target_scope 为 NULL/空字符串时视为 teacher_classes
+    if not target_scope:
+        target_scope = "teacher_classes"
+
+    # 管理员创建的活动，默认全体可见
+    if target_scope == "all" or target_scope == "teacher_classes" and is_admin(creator_username):
+        return execute_query_dict(
+            "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 ORDER BY u.grade, u.class, u.name"
+        )
+
+    if target_scope == "teacher_classes":
+        # 按教师任教班级查询
+        return get_students_in_scope(creator_username)
+
+    if target_scope == "grade":
+        if not target_grade:
+            return get_students_in_scope(creator_username)
+        # 指定年级
+        grades = [g.strip() for g in target_grade.split(",") if g.strip()]
+        students = []
+        seen = set()
+        for g_name in grades:
+            rows = execute_query_dict(
+                "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND u.grade=?",
+                (g_name,),
+            )
+            for s in rows:
+                if s["username"] not in seen:
+                    seen.add(s["username"])
+                    students.append(s)
+        return students
+
+    if target_scope == "class":
+        if not target_grade or not target_class:
+            return get_students_in_scope(creator_username)
+        # 指定班级（支持多班级逗号分隔）
+        grades = [g.strip() for g in target_grade.split(",") if g.strip()]
+        classes = [c.strip() for c in target_class.split(",") if c.strip()]
+        students = []
+        seen = set()
+        import re
+        for g_name in grades:
+            for c_name in classes:
+                c_num = re.sub(r'[^\d]', '', c_name) if c_name else ''
+                rows = execute_query_dict(
+                    """SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id
+                       FROM users u WHERE u.role=2 AND u.grade=? AND (u.class=? OR u.class=?)""",
+                    (g_name, c_name, c_num),
+                )
+                for s in rows:
+                    if s["username"] not in seen:
+                        seen.add(s["username"])
+                        students.append(s)
+        return students
+
+    if target_scope == "individual":
+        if not target_users:
+            return get_students_in_scope(creator_username)
+        # 定向学生
+        usernames = [u.strip() for u in target_users.split(",") if u.strip()]
+        if not usernames:
+            return get_students_in_scope(creator_username)
+        placeholders = ",".join("?" for _ in usernames)
+        return execute_query_dict(
+            f"SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND u.username IN ({placeholders})",
+            tuple(usernames),
+        )
+
+    # 安全默认值：回退到教师任教班级
+    return get_students_in_scope(creator_username)
+
+
+def check_activity_visibility(
+    student_username: str,
+    student_grade: str,
+    student_class: str,
+    creator_username: str,
+    target_scope: str = "teacher_classes",
+    target_grade: str = "",
+    target_class: str = "",
+    target_users: str = "",
+) -> bool:
+    """
+    判断某学生对某个活动的可见性
+    用于学生端列表过滤
+    """
+    from backend.auth import is_admin
+
+    # 兼容旧数据：target_scope 为 NULL/空字符串时视为 teacher_classes
+    if not target_scope:
+        target_scope = "teacher_classes"
+
+    if target_scope == "all":
+        return True
+
+    if target_scope == "teacher_classes":
+        # 判断学生是否在教师的任教范围内
+        return is_student_in_teacher_scope(student_username, creator_username)
+
+    if target_scope == "grade":
+        if not target_grade:
+            # 未指定具体年级时回退到教师任教班级
+            return is_student_in_teacher_scope(student_username, creator_username)
+        target_grades = [g.strip() for g in target_grade.split(",") if g.strip()]
+        return student_grade in target_grades
+
+    if target_scope == "class":
+        if not target_grade or not target_class:
+            # 未指定具体年级/班级时回退到教师任教班级
+            return is_student_in_teacher_scope(student_username, creator_username)
+        target_grades = [g.strip() for g in target_grade.split(",") if g.strip()]
+        target_classes = [c.strip() for c in target_class.split(",") if c.strip()]
+        if student_grade not in target_grades:
+            return False
+        # 班级名支持精确匹配或数字提取
+        import re
+        for tc in target_classes:
+            if student_class == tc:
+                return True
+            tc_num = re.sub(r'[^\d]', '', tc)
+            if tc_num and student_class == tc_num:
+                return True
+            if tc_num and student_class == f"{tc_num}班":
+                return True
+        return False
+
+    if target_scope == "individual":
+        if not target_users:
+            return is_student_in_teacher_scope(student_username, creator_username)
+        usernames = [u.strip() for u in target_users.split(",") if u.strip()]
+        return student_username in usernames
+
+    # 安全的默认值：回退到教师任教班级匹配（而非全体可见）
+    return is_student_in_teacher_scope(student_username, creator_username)
+
+
+def filter_activities_by_scope(
+    activities: list[dict[str, Any]],
+    student_username: str,
+) -> list[dict[str, Any]]:
+    """
+    对学生可见的活动列表按目标范围过滤
+    每个 activity dict 需包含:
+      creator_username, target_scope, target_grade, target_class, target_users
+    """
+    # 查询学生的年级班级
+    student_rows = execute_query_dict(
+        "SELECT grade, class FROM users WHERE username=?",
+        (student_username,),
+    )
+    if not student_rows:
+        return activities  # 查不到学生信息则全部返回（兼容）
+    student_grade = str(student_rows[0].get("grade") or "").strip()
+    student_class = str(student_rows[0].get("class") or "").strip()
+
+    result = []
+    for act in activities:
+        if check_activity_visibility(
+            student_username,
+            student_grade,
+            student_class,
+            act.get("creator_username", ""),
+            act.get("target_scope", "teacher_classes"),
+            act.get("target_grade", ""),
+            act.get("target_class", ""),
+            act.get("target_users", ""),
+        ):
+            result.append(act)
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
 # 旧格式兼容（迁移期使用）
 # ═══════════════════════════════════════════════════════════════
 

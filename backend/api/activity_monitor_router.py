@@ -50,6 +50,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     exams = qdb_query(
         """SELECT e.id, e.title, e.status, e.created_at, e.updated_at,
                   e.total_score, e.pass_score, e.duration, e.subject,
+                  e.target_scope, e.target_grade, e.target_class,
                   'exam' as activity_type
            FROM exams e
            WHERE e.creator_username = ?
@@ -113,6 +114,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     task_rows = db_query_dict(
         """SELECT t.id, t.name as title, t.status, t.created_at, t.updated_at,
                   '' as subject, 0 as total_score, 0 as pass_score, 0 as duration,
+                  t.target_scope, t.target_grade, t.target_class,
                   'task' as activity_type
            FROM tasks t
            WHERE t.creator_username = ?
@@ -131,6 +133,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     quiz_rows = db_query_dict(
         """SELECT iq.id, iq.title, iq.status, iq.created_at, iq.updated_at,
                   '' as subject, 0 as total_score, 0 as pass_score, 0 as duration,
+                  iq.target_scope, iq.target_grade, iq.target_class,
                   'quiz' as activity_type
            FROM interaction_quizzes iq
            WHERE iq.creator_username = ?
@@ -149,6 +152,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     code_rows = qdb_query(
         """SELECT cp.id, cp.title, cp.status, cp.created_at, cp.updated_at,
                   cp.subject, 0 as total_score, 0 as pass_score, 0 as duration,
+                  cp.target_scope, cp.target_grade, cp.target_class,
                   'code' as activity_type
            FROM code_problems cp
            WHERE cp.creator_username = ?
@@ -236,6 +240,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     poll_rows = db_query_dict(
         """SELECT p.id, p.question as title, p.status, p.created_at, p.created_at as updated_at,
                   '' as subject, 0 as total_score, 0 as pass_score, 0 as duration,
+                  p.target_scope, p.target_grade, p.target_class,
                   'poll' as activity_type
            FROM interaction_polls p
            WHERE p.creator_username = ?

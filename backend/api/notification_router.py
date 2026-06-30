@@ -96,6 +96,38 @@ def notify_users(usernames: list[str], type_: str, title: str, content: str = ""
         logger.error(f"批量创建通知失败: {e}")
 
 
+def notify_users_by_scope(
+    creator_username: str,
+    type_: str,
+    title: str,
+    content: str = "",
+    related_link: str = "",
+    target_scope: str = "teacher_classes",
+    target_grade: str = "",
+    target_class: str = "",
+    target_users: str = "",
+):
+    """
+    根据目标范围参数向对应的学生发送通知
+    复用 permission_service.get_students_by_scope 获取目标学生列表
+    """
+    from backend.permission_service import get_students_by_scope
+
+    students = get_students_by_scope(
+        creator_username,
+        target_scope=target_scope,
+        target_grade=target_grade,
+        target_class=target_class,
+        target_users=target_users,
+    )
+    if not students:
+        logger.info(f"通知按范围发送: 目标范围={target_scope}, 无匹配学生, 跳过通知")
+        return
+
+    usernames = [s["username"] for s in students]
+    notify_users(usernames, type_, title, content, related_link)
+
+
 # ── 通知 API ──
 
 @router.get("", summary="获取我的通知列表")
@@ -358,12 +390,13 @@ async def list_announcements(
         admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
         admin_placeholders = ",".join("?" for _ in admin_names) if admin_names else "''"
 
-        # 查匹配班级的教师：跟学生同年级/同班的教师
+        # 查匹配班级的教师：通过 teacher_assignments
         teacher_rows = execute_query(
-            """SELECT username FROM users WHERE role=1
-               AND (grade='' OR grade IS NULL OR INSTR(grade, ?)>0 OR INSTR(?, grade)>0)
-               AND (class='' OR class IS NULL OR INSTR(class, ?)>0 OR INSTR(?, class)>0)""",
-            (user_grade, user_grade, user_class, user_class),
+            """SELECT DISTINCT ta.teacher_username FROM teacher_assignments ta
+               JOIN users u ON u.grade_id = ta.grade_id
+               WHERE u.username = ?
+               AND (ta.class_id IS NULL OR ta.class_id = u.class_id)""",
+            (user["username"],),
         )
         teacher_names = [r[0] for r in teacher_rows]
 

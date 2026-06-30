@@ -4,6 +4,8 @@ import {
   Typography, Divider, Tag, message, Empty, Popconfirm,
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons'
+import ActivityScopeSelector from './ActivityScopeSelector'
+import type { ActivityScopeValue } from './ActivityScopeSelector'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -21,7 +23,7 @@ interface Question {
 interface QuizEditorProps {
   open: boolean
   onCancel: () => void
-  onSave: (title: string, description: string, questions: Question[]) => Promise<void>
+  onSave: (title: string, description: string, questions: Question[], scope?: ActivityScopeValue) => Promise<void>
   initialTitle?: string
   initialDescription?: string
   initialQuestions?: Question[]
@@ -43,12 +45,19 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   const [description, setDescription] = useState(initialDescription)
   const [questions, setQuestions] = useState<Question[]>(initialQuestions || [])
   const [saving, setSaving] = useState(false)
+  const [scope, setScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes',
+    target_grade: '',
+    target_class: '',
+    target_users: '',
+  })
 
   useEffect(() => {
     if (open) {
       setTitle(initialTitle)
       setDescription(initialDescription)
       setQuestions(initialQuestions || [])
+      setScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
     }
   }, [open, initialTitle, initialDescription, initialQuestions])
 
@@ -157,7 +166,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
     setSaving(true)
     try {
-      await onSave(title, description, questions)
+      await onSave(title, description, questions, scope)
     } finally {
       setSaving(false)
     }
@@ -213,6 +222,11 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             />
           </Form.Item>
         </Form>
+      </div>
+
+      {/* 目标范围 */}
+      <div style={{ marginBottom: 16 }}>
+        <ActivityScopeSelector value={scope} onChange={setScope} />
       </div>
 
       <Divider />

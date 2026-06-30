@@ -107,6 +107,10 @@ const InteractionPage: React.FC = () => {
         await apiClient.post('/api/interaction/quizzes', {
           title: aiQuizForm.getFieldValue('topic') + ' - 随堂测验',
           questions: JSON.stringify(aiQuizResult.questions),
+          target_scope: 'teacher_classes',
+          target_grade: '',
+          target_class: '',
+          target_users: '',
         })
         message.success(`成功创建测验，共 ${aiQuizResult.questions.length} 题`)
         setAiQuizModal(false)
@@ -120,7 +124,7 @@ const InteractionPage: React.FC = () => {
   }
 
   // ── 创建测验（使用 QuizEditor） ──
-  const handleCreateQuiz = async (title: string, description: string, questions: Question[]) => {
+  const handleCreateQuiz = async (title: string, description: string, questions: Question[], scope?: any) => {
     try {
       const formatted = questions.map(q => ({
         type: q.type,
@@ -134,6 +138,10 @@ const InteractionPage: React.FC = () => {
         title,
         description: description || '',
         questions: JSON.stringify(formatted),
+        target_scope: scope?.target_scope || 'teacher_classes',
+        target_grade: scope?.target_grade || '',
+        target_class: scope?.target_class || '',
+        target_users: scope?.target_users || '',
       })
       message.success(`测验「${title}」创建成功，共 ${questions.length} 题`)
       setQuizEditorOpen(false)

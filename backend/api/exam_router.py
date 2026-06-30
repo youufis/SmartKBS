@@ -18,7 +18,6 @@ from backend.question_db import (
     execute_update,
 )
 from backend.api.dependencies import get_current_user
-from backend.permission_service import parse_legacy_teacher_grade_class
 from backend.auth import is_admin
 from backend.database import execute_query as user_query
 from backend.logger import logger
@@ -43,6 +42,11 @@ class ExamCreate(BaseModel):
     max_attempts: int = 1
     start_time: str | None = None
     end_time: str | None = None
+    # 目标范围字段
+    target_scope: str = "teacher_classes"
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
 
 
 class ExamUpdate(BaseModel):
@@ -59,6 +63,10 @@ class ExamUpdate(BaseModel):
     max_attempts: int | None = None
     start_time: str | None = None
     end_time: str | None = None
+    target_scope: str | None = None
+    target_grade: str | None = None
+    target_class: str | None = None
+    target_users: str | None = None
 
 
 class ExamQuestionAdd(BaseModel):
@@ -122,8 +130,10 @@ async def create_exam(req: ExamCreate, request: Request):
            (title, description, subject, duration, total_score, pass_score,
             shuffle_questions, shuffle_options, show_result_immediately,
             max_attempts, start_time, end_time, status,
-            creator_username, creator_name, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)""",
+            creator_username, creator_name, created_at, updated_at,
+            target_scope, target_grade, target_class, target_users)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?,
+                   ?, ?, ?, ?)""",
         (
             req.title, req.description, req.subject, req.duration,
             req.total_score, req.pass_score,
@@ -132,6 +142,7 @@ async def create_exam(req: ExamCreate, request: Request):
             1 if req.show_result_immediately else 0,
             req.max_attempts, req.start_time, req.end_time,
             username, creator_name, now, now,
+            req.target_scope, req.target_grade, req.target_class, req.target_users,
         ),
     )
 
@@ -201,41 +212,20 @@ async def list_exams(
             tuple(params),
         )
 
-        # 批量查询所有管理员用户名（一次 DB 查询代替 N 次 is_admin() 调用）
-        admin_rows = user_query("SELECT username FROM users WHERE role=0")
-        admin_set = set(row[0] for row in admin_rows) if admin_rows else {"root"}
-
-        # 逐条判断学生是否有权限看到该考试
+        # 逐条判断学生是否有权限看到该考试（使用统一的活动范围检查）
+        from backend.permission_service import check_activity_visibility
         filtered = []
         for exam in all_rows:
-            creator = exam["creator_username"]
-            # 管理员创建的考试对所有学生可见
-            if creator in admin_set:
-                filtered.append(exam)
-                continue
-            # 获取该考试创建者的年级班级信息
-            teacher_rows = user_query(
-                "SELECT grade, class FROM users WHERE username=?", (creator,)
-            )
-            if not teacher_rows:
-                filtered.append(exam)  # 用户不存在则默认可见
-                continue
-            teacher_grade = (teacher_rows[0][0] or "").strip()
-            teacher_class = str(teacher_rows[0][1] or "").strip()
-            # 教师未设置年级班级信息 → 对所有学生可见（兼容旧数据）
-            if not teacher_grade and not teacher_class:
-                filtered.append(exam)
-                continue
-            # 检查学生是否匹配教师的任课班级
-            grade_class_map = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
-            matched = False
-            if student_grade and student_grade in grade_class_map:
-                allowed_classes = grade_class_map[student_grade]
-                if not allowed_classes:
-                    matched = True  # 有年级但没有具体班级限制 → 该年级所有学生可见
-                elif student_class in allowed_classes:
-                    matched = True
-            if matched:
+            if check_activity_visibility(
+                student_username=username,
+                student_grade=student_grade,
+                student_class=student_class,
+                creator_username=exam["creator_username"],
+                target_scope=exam.get("target_scope", "teacher_classes"),
+                target_grade=exam.get("target_grade", ""),
+                target_class=exam.get("target_class", ""),
+                target_users=exam.get("target_users", ""),
+            ):
                 filtered.append(exam)
 
         # 重新分页
@@ -301,8 +291,27 @@ async def get_exam(exam_id: int, request: Request):
         raise HTTPException(status_code=404, detail="考试不存在")
 
     # 权限控制
-    if role == 2 and exam["status"] != "published":
-        raise HTTPException(status_code=403, detail="考试未发布")
+    if role == 2:
+        if exam["status"] != "published":
+            raise HTTPException(status_code=403, detail="考试未发布")
+        # 学生还需检查活动范围
+        from backend.permission_service import check_activity_visibility
+        student_rows = user_query(
+            "SELECT grade, class FROM users WHERE username=?", (username,)
+        )
+        s_grade = str(student_rows[0][0] or "").strip() if student_rows else ""
+        s_class = str(student_rows[0][1] or "").strip() if student_rows else ""
+        if not check_activity_visibility(
+            student_username=username,
+            student_grade=s_grade,
+            student_class=s_class,
+            creator_username=exam["creator_username"],
+            target_scope=exam.get("target_scope", "teacher_classes"),
+            target_grade=exam.get("target_grade", ""),
+            target_class=exam.get("target_class", ""),
+            target_users=exam.get("target_users", ""),
+        ):
+            raise HTTPException(status_code=403, detail="无权查看该考试")
     if role == 1 and exam["creator_username"] != username:
         raise HTTPException(status_code=403, detail="无权查看其他教师的考试")
 
@@ -365,7 +374,8 @@ async def update_exam(exam_id: int, req: ExamUpdate, request: Request):
     params = []
     for field in ["title", "description", "subject", "duration",
                    "total_score", "pass_score", "start_time", "end_time",
-                   "max_attempts"]:
+                   "max_attempts", "target_scope", "target_grade",
+                   "target_class", "target_users"]:
         val = getattr(req, field, None)
         if val is not None:
             updates.append(f"{field} = ?")
@@ -396,14 +406,17 @@ async def update_exam(exam_id: int, req: ExamUpdate, request: Request):
         if changed:
             async def _notify_update():
                 try:
-                    from backend.api.notification_router import notify_users
-                    all_students = user_query("SELECT username FROM users WHERE role = 2")
-                    student_usernames = [r[0] for r in all_students]
-                    notify_users(
-                        student_usernames, "exam",
-                        f"考试「{exam['title']}」信息已更新",
-                        f"涉及字段：{'、'.join(changed)}，请重新查看考试详情",
-                        "/exam",
+                    from backend.api.notification_router import notify_users_by_scope
+                    notify_users_by_scope(
+                        creator_username=exam["creator_username"],
+                        type_="exam",
+                        title=f"考试「{exam['title']}」信息已更新",
+                        content=f"涉及字段：{'、'.join(changed)}，请重新查看考试详情",
+                        related_link="/exam",
+                        target_scope=exam.get("target_scope", "teacher_classes"),
+                        target_grade=exam.get("target_grade", ""),
+                        target_class=exam.get("target_class", ""),
+                        target_users=exam.get("target_users", ""),
                     )
                 except Exception as notify_err:
                     logger.warning(f"发送考试更新通知失败: {notify_err}")
@@ -487,18 +500,20 @@ async def publish_exam(exam_id: int, request: Request):
 
     logger.info(f"用户 {username} 发布考试: {exam['title']} (id={exam_id})")
 
-    # ── 异步发送通知给所有学生（不阻塞发布操作） ──
+    # ── 异步按目标范围发送通知（不阻塞发布操作） ──
     async def _notify_publish():
         try:
-            from backend.api.notification_router import notify_users
-            from backend.database import execute_query as db_query
-            all_students = db_query("SELECT username FROM users WHERE role = 2")
-            student_usernames = [r[0] for r in all_students]
-            notify_users(
-                student_usernames, "exam",
-                f"新考试「{exam['title']}」已发布",
-                f"时长 {exam['duration']} 分钟，满分 {exam['total_score']} 分",
-                "/exam",
+            from backend.api.notification_router import notify_users_by_scope
+            notify_users_by_scope(
+                creator_username=exam["creator_username"],
+                type_="exam",
+                title=f"新考试「{exam['title']}」已发布",
+                content=f"时长 {exam['duration']} 分钟，满分 {exam['total_score']} 分",
+                related_link="/exam",
+                target_scope=exam.get("target_scope", "teacher_classes"),
+                target_grade=exam.get("target_grade", ""),
+                target_class=exam.get("target_class", ""),
+                target_users=exam.get("target_users", ""),
             )
         except Exception as notify_err:
             logger.warning(f"发送考试通知失败: {notify_err}")
@@ -889,6 +904,25 @@ async def start_exam(exam_id: int, request: Request):
 
     if exam["status"] != "published":
         raise HTTPException(status_code=400, detail="考试未发布或已结束")
+
+    # 检查活动范围
+    from backend.permission_service import check_activity_visibility
+    student_rows = user_query(
+        "SELECT grade, class FROM users WHERE username=?", (username,)
+    )
+    s_grade = str(student_rows[0][0] or "").strip() if student_rows else ""
+    s_class = str(student_rows[0][1] or "").strip() if student_rows else ""
+    if not check_activity_visibility(
+        student_username=username,
+        student_grade=s_grade,
+        student_class=s_class,
+        creator_username=exam["creator_username"],
+        target_scope=exam.get("target_scope", "teacher_classes"),
+        target_grade=exam.get("target_grade", ""),
+        target_class=exam.get("target_class", ""),
+        target_users=exam.get("target_users", ""),
+    ):
+        raise HTTPException(status_code=403, detail="无权参加该考试")
 
     # 检查考试时间范围
     now = datetime.now()
