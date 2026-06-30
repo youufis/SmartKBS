@@ -2,6 +2,7 @@
 资源中心 API 路由
 HTML 文件列表/上传/删除/导航
 """
+import asyncio
 import os
 import re
 import shutil
