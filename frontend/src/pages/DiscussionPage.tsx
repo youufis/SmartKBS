@@ -14,6 +14,8 @@ import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -48,6 +50,12 @@ const DiscussionPage: React.FC = () => {
   const [createForm] = Form.useForm()
   const [aiForm] = Form.useForm()
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+  const [discussionScope, setDiscussionScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes',
+    target_grade: '',
+    target_class: '',
+    target_users: '',
+  })
 
   // 从系统配置加载课程列表
   useEffect(() => {
@@ -81,10 +89,17 @@ const DiscussionPage: React.FC = () => {
       await createForm.validateFields()
       setCreateLoading(true)
       const values = createForm.getFieldsValue()
-      await apiClient.post('/api/interaction/discussions', values)
+      await apiClient.post('/api/interaction/discussions', {
+        ...values,
+        target_scope: discussionScope.target_scope,
+        target_grade: discussionScope.target_grade,
+        target_class: discussionScope.target_class,
+        target_users: discussionScope.target_users,
+      })
       message.success('讨论创建成功')
       setCreateOpen(false)
       createForm.resetFields()
+      setDiscussionScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       loadDiscussions()
     } catch (err: any) {
       if (err?.errorFields) return
@@ -250,11 +265,8 @@ const DiscussionPage: React.FC = () => {
       <Form.Item name="duration_minutes" label="讨论时长 (分钟)" initialValue={30}>
         <InputNumber min={5} max={120} style={{ width: '100%' }} />
       </Form.Item>
-      <Form.Item name="grade" label="适用年级（留空则不限）">
-        <Input placeholder="如：高一" />
-      </Form.Item>
-      <Form.Item name="classes" label="适用班级（留空则不限）">
-        <Input placeholder="多个用逗号分隔，如：1,2,3" />
+      <Form.Item label="目标范围">
+        <ActivityScopeSelector value={discussionScope} onChange={setDiscussionScope} />
       </Form.Item>
       <Form.Item name="require_summary" label="提交要求" valuePropName="checked" initialValue={false}>
         <Select>

@@ -77,6 +77,8 @@ export async function createAnnouncement(announcement: {
   target_role?: string
   target_grade?: string
   target_class?: string
+  target_scope?: string
+  target_users?: string
   priority?: string
   is_pinned?: boolean
 }): Promise<{ message: string; announcement_id: number }> {

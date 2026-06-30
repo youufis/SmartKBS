@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
-from backend.database import execute_query, execute_insert_update, execute_batch
+from backend.database import execute_query, execute_insert_update, execute_batch, execute_query_dict
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
@@ -26,6 +26,8 @@ class AnnouncementCreate(BaseModel):
     target_role: str = "all"
     target_grade: str = ""
     target_class: str = ""
+    target_scope: str = "teacher_classes"
+    target_users: str = ""
     priority: str = "normal"
     is_pinned: bool = False
 
@@ -37,6 +39,8 @@ class AnnouncementUpdate(BaseModel):
     target_role: str | None = None
     target_grade: str | None = None
     target_class: str | None = None
+    target_scope: str | None = None
+    target_users: str | None = None
     priority: str | None = None
     is_pinned: bool | None = None
 
@@ -310,9 +314,11 @@ async def create_announcement(req: AnnouncementCreate, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     announcement_id = execute_insert_update(
         """INSERT INTO announcements
-           (creator_username, title, content, target_role, target_grade, target_class, priority, is_pinned, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (username, req.title, req.content, req.target_role, req.target_grade, req.target_class, req.priority, 1 if req.is_pinned else 0, now, now),
+           (creator_username, title, content, target_role, target_grade, target_class,
+            target_scope, target_users, priority, is_pinned, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (username, req.title, req.content, req.target_role, req.target_grade, req.target_class,
+         req.target_scope, req.target_users, req.priority, 1 if req.is_pinned else 0, now, now),
     )
 
     logger.info(f"用户 {username} 发布公告: {req.title}")
@@ -385,12 +391,8 @@ async def list_announcements(
                 (user["username"], page_size, (page - 1) * page_size),
             )
     else:
-        # 学生：管理员公告 + 匹配班级的教师公告
-        # 先查出所有管理员用户名
+        # 学生：管理员公告 + 匹配班级的教师公告，再按 target_scope 过滤
         admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
-        admin_placeholders = ",".join("?" for _ in admin_names) if admin_names else "''"
-
-        # 查匹配班级的教师：通过 teacher_assignments
         teacher_rows = execute_query(
             """SELECT DISTINCT ta.teacher_username FROM teacher_assignments ta
                JOIN users u ON u.grade_id = ta.grade_id
@@ -403,24 +405,56 @@ async def list_announcements(
         all_creator_names = admin_names + teacher_names
         if all_creator_names:
             placeholders = ",".join("?" for _ in all_creator_names)
-            count_result = execute_query(
-                f"""SELECT COUNT(*) FROM announcements
-                   WHERE creator_username IN ({placeholders})""",
-                tuple(all_creator_names),
-            )
-            total = count_result[0][0] if count_result else 0
-            rows = execute_query(
-                f"""SELECT id, creator_username, title, content, target_role, target_grade, target_class,
-                          priority, is_pinned, created_at, updated_at
+            all_rows = execute_query(
+                f"""SELECT id, creator_username, title, content, target_role,
+                           target_grade, target_class, priority, is_pinned,
+                           created_at, updated_at, target_scope, target_users
                    FROM announcements
                    WHERE creator_username IN ({placeholders})
-                   ORDER BY is_pinned DESC, created_at DESC
-                   LIMIT ? OFFSET ?""",
-                (*all_creator_names, page_size, (page - 1) * page_size),
+                   ORDER BY is_pinned DESC, created_at DESC""",
+                tuple(all_creator_names),
             )
         else:
-            total = 0
-            rows = []
+            all_rows = []
+
+        announcements = []
+        for r in all_rows:
+            creator_name_row = execute_query(
+                "SELECT COALESCE(NULLIF(name, ''), username) FROM users WHERE username = ?", (r[1],)
+            )
+            creator_name = creator_name_row[0][0] if creator_name_row else r[1]
+            announcements.append({
+                "id": r[0],
+                "creator_username": r[1],
+                "creator_name": creator_name,
+                "title": r[2],
+                "content": r[3],
+                "target_role": r[4],
+                "target_grade": r[5] or "",
+                "target_class": r[6] or "",
+                "priority": r[7],
+                "is_pinned": bool(r[8]),
+                "created_at": r[9],
+                "updated_at": r[10],
+                "target_scope": r[11] if len(r) > 11 else "teacher_classes",
+                "target_users": r[12] if len(r) > 12 else "",
+            })
+
+        # 按目标范围过滤
+        from backend.permission_service import filter_activities_by_scope
+        announcements = filter_activities_by_scope(announcements, user["username"])
+
+        # 内存分页
+        total = len(announcements)
+        offset = (page - 1) * page_size
+        announcements = announcements[offset:offset + page_size]
+
+        return {
+            "announcements": announcements,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
 
     announcements = []
     for r in rows:

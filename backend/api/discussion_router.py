@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_insert_update, execute_query_dict
+from backend.permission_service import filter_activities_by_scope, check_activity_visibility
 from backend.logger import logger
 from backend.ws_manager import manager as ws_manager
 from backend.prompts import build_ai_role
@@ -155,6 +156,10 @@ class DiscussionCreate(BaseModel):
     grade: str = ""
     classes: str = ""
     require_summary: bool = False
+    target_scope: str = "teacher_classes"
+    target_grade: str = ""
+    target_class: str = ""
+    target_users: str = ""
 
 
 class DiscussionUpdate(BaseModel):
@@ -195,12 +200,17 @@ async def create_discussion(req: DiscussionCreate, request: Request):
         """INSERT INTO discussions
            (creator_username, title, description, subject, group_mode,
             group_count, members_per_group, ai_role, duration_minutes,
-            status, grade, classes, require_summary, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+            status, grade, classes, require_summary,
+            target_scope, target_grade, target_class, target_users,
+            created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?,
+                   ?, ?, ?, ?, ?, ?)""",
         (user["username"], req.title, req.description, req.subject,
          req.group_mode, req.group_count, req.members_per_group,
          req.ai_role, req.duration_minutes,
-         req.grade, req.classes, 1 if req.require_summary else 0, now, now),
+         req.grade, req.classes, 1 if req.require_summary else 0,
+         req.target_scope, req.target_grade, req.target_class, req.target_users,
+         now, now),
     )
     logger.info(f"教师 {user['username']} 创建讨论: {req.title}")
     return {"status": "ok", "discussion_id": disc_id}
@@ -301,55 +311,22 @@ async def list_discussions(
                 (username,),
             )
     else:
-        # 学生：只看到管理员和自己班级教师发布的讨论（通过 teacher_assignments）
-        student = execute_query_dict(
-            "SELECT grade_id, class_id FROM users WHERE username=?", (username,)
-        )
-        allowed_creators: list[str] = []
-        if student and student[0].get("grade_id"):
-            gid = student[0]["grade_id"]
-            cid = student[0].get("class_id")
-            if cid:
-                ta_rows = execute_query_dict(
-                    """SELECT DISTINCT teacher_username FROM teacher_assignments
-                       WHERE grade_id=? AND (class_id=? OR class_id IS NULL)""",
-                    (gid, cid),
-                )
-            else:
-                ta_rows = execute_query_dict(
-                    """SELECT DISTINCT teacher_username FROM teacher_assignments
-                       WHERE grade_id=?""",
-                    (gid,),
-                )
-            allowed_creators = [r["teacher_username"] for r in ta_rows]
-        # 加上管理员
-        admin_rows = execute_query_dict("SELECT username FROM users WHERE role=0")
-        admin_names = [r["username"] for r in admin_rows] if admin_rows else []
-        allowed_creators = list(set(allowed_creators + admin_names))
-
-        if allowed_creators:
-            ph = ",".join("?" for _ in allowed_creators)
-            if status:
-                rows = execute_query(
-                    f"""SELECT * FROM discussions
-                       WHERE status=? AND creator_username IN ({ph})
-                       ORDER BY created_at DESC""",
-                    (status, *allowed_creators),
-                )
-            else:
-                rows = execute_query(
-                    f"""SELECT * FROM discussions
-                       WHERE creator_username IN ({ph})
-                       ORDER BY created_at DESC""",
-                    tuple(allowed_creators),
-                )
+        # 学生：先查出所有讨论，再按 target_scope 过滤
+        if status:
+            rows = execute_query(
+                "SELECT * FROM discussions WHERE status=? ORDER BY created_at DESC",
+                (status,),
+            )
         else:
-            rows = []
+            rows = execute_query(
+                "SELECT * FROM discussions ORDER BY created_at DESC"
+            )
 
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
                "duration_minutes", "status", "grade", "classes",
-               "require_summary", "created_at", "updated_at"]
+               "require_summary", "target_scope", "target_grade",
+               "target_class", "target_users", "created_at", "updated_at"]
     results = []
     for row in rows:
         item = dict(zip(columns, row))
@@ -410,6 +387,10 @@ async def list_discussions(
                     item["my_group"] = {"id": my_g[0][0], "group_index": my_g[0][1], "name": my_g[0][2]}
         results.append(item)
 
+    # 学生端按 target_scope 过滤可见性
+    if role == 2:
+        results = filter_activities_by_scope(results, username)
+
     return results
 
 
@@ -430,8 +411,27 @@ async def get_discussion(disc_id: int, request: Request):
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
                "duration_minutes", "status", "grade", "classes",
-               "require_summary", "created_at", "updated_at"]
+               "require_summary", "target_scope", "target_grade",
+               "target_class", "target_users", "created_at", "updated_at"]
     disc = dict(zip(columns, rows[0]))
+
+    # 学生只能查看自己范围内的讨论
+    if role == 2:
+        student_rows = execute_query_dict(
+            "SELECT grade, class FROM users WHERE username=?", (user["username"],)
+        )
+        if student_rows:
+            s_grade = str(student_rows[0].get("grade") or "").strip()
+            s_class = str(student_rows[0].get("class") or "").strip()
+            if not check_activity_visibility(
+                user["username"], s_grade, s_class,
+                disc.get("creator_username", ""),
+                disc.get("target_scope", "teacher_classes"),
+                disc.get("target_grade", ""),
+                disc.get("target_class", ""),
+                disc.get("target_users", ""),
+            ):
+                raise HTTPException(status_code=403, detail="无权查看该讨论")
 
     # 获取所有小组
     groups = execute_query(
@@ -523,7 +523,8 @@ async def start_discussion(disc_id: int, request: Request):
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
                "duration_minutes", "status", "grade", "classes",
-               "require_summary", "created_at", "updated_at"]
+               "require_summary", "target_scope", "target_grade",
+               "target_class", "target_users", "created_at", "updated_at"]
     disc = dict(zip(columns, rows[0]))
 
     if disc["status"] != "pending":
@@ -605,7 +606,8 @@ async def _auto_generate_report(disc_id: int):
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
                "duration_minutes", "status", "grade", "classes",
-               "require_summary", "created_at", "updated_at"]
+               "require_summary", "target_scope", "target_grade",
+               "target_class", "target_users", "created_at", "updated_at"]
     disc = dict(zip(columns, rows[0]))
 
     groups = execute_query(
@@ -967,7 +969,8 @@ async def get_my_discussions(request: Request):
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
                "duration_minutes", "status", "grade", "classes",
-               "require_summary", "created_at", "updated_at"]
+               "require_summary", "target_scope", "target_grade",
+               "target_class", "target_users", "created_at", "updated_at"]
     results = []
     for row in rows:
         item = dict(zip(columns, row))
@@ -1394,7 +1397,8 @@ async def generate_report(disc_id: int, request: Request):
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
                "duration_minutes", "status", "grade", "classes",
-               "require_summary", "created_at", "updated_at"]
+               "require_summary", "target_scope", "target_grade",
+               "target_class", "target_users", "created_at", "updated_at"]
     disc = dict(zip(columns, rows[0]))
 
     # 获取所有小组的消息

@@ -18,6 +18,8 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 const { Title, Text } = Typography
 
 const InteractionPage: React.FC = () => {
@@ -39,6 +41,7 @@ const InteractionPage: React.FC = () => {
   const [aiQuizLoading, setAiQuizLoading] = useState(false)
   const [aiQuizResult, setAiQuizResult] = useState<any>(null)
   const [aiQuizForm] = Form.useForm()
+  const [aiQuizScope, setAiQuizScope] = useState<ActivityScopeValue>({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
   // 列表分页
   const [quizPage, setQuizPage] = useState(1)
   const [quizPageSize, setQuizPageSize] = useState(10)
@@ -107,14 +110,15 @@ const InteractionPage: React.FC = () => {
         await apiClient.post('/api/interaction/quizzes', {
           title: aiQuizForm.getFieldValue('topic') + ' - 随堂测验',
           questions: JSON.stringify(aiQuizResult.questions),
-          target_scope: 'teacher_classes',
-          target_grade: '',
-          target_class: '',
-          target_users: '',
+          target_scope: aiQuizScope.target_scope,
+          target_grade: aiQuizScope.target_grade,
+          target_class: aiQuizScope.target_class,
+          target_users: aiQuizScope.target_users,
         })
         message.success(`成功创建测验，共 ${aiQuizResult.questions.length} 题`)
         setAiQuizModal(false)
         setAiQuizResult(null)
+        setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
         setActiveTab('quizzes')
         await loadQuizzes()
       } catch (err: any) {
@@ -505,9 +509,9 @@ const InteractionPage: React.FC = () => {
 
       {/* ── AI 生成测验弹窗 ── */}
       <Modal title={<Space><RobotOutlined />AI 生成随堂测验</Space>} open={aiQuizModal}
-        onCancel={() => { setAiQuizModal(false); setAiQuizResult(null) }}
+        onCancel={() => { setAiQuizModal(false); setAiQuizResult(null); setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         footer={aiQuizResult?.questions?.length > 0 ? [
-          <Button key="cancel" onClick={() => { setAiQuizModal(false); setAiQuizResult(null) }}>取消</Button>,
+          <Button key="cancel" onClick={() => { setAiQuizModal(false); setAiQuizResult(null); setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}>取消</Button>,
           <Button key="apply" type="primary" onClick={handleApplyAiQuiz}>填入表单</Button>,
         ] : null}>
         <Form form={aiQuizForm} layout="vertical" onFinish={handleAiGenerateQuiz}>
@@ -528,6 +532,9 @@ const InteractionPage: React.FC = () => {
           </Form.Item>
           <Form.Item name="count" label="题目数量" initialValue={1}>
             <InputNumber min={1} max={50} style={{ width: 120 }} /> 题
+          </Form.Item>
+          <Form.Item label="目标范围">
+            <ActivityScopeSelector value={aiQuizScope} onChange={setAiQuizScope} />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={aiQuizLoading} icon={<RobotOutlined />} block>
             AI 生成

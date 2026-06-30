@@ -141,8 +141,10 @@ const AnnouncementsPage: React.FC = () => {
       setSubmitting(true)
       await notificationsApi.createAnnouncement({
         ...values,
+        target_scope: announceScope.target_scope,
         target_grade: announceScope.target_grade,
         target_class: announceScope.target_class,
+        target_users: announceScope.target_users,
       })
       message.success('公告发布成功')
       setCreateModal(false)
