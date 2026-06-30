@@ -596,13 +596,14 @@ const UserMgmtPage: React.FC = () => {
               </Upload>
               <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>下载模板</Button>
               <Button icon={<DownloadOutlined />} onClick={async () => {
+                const hide = message.loading('正在导出用户…', 0)
                 try {
-                  const hide = message.loading('正在导出用户…', 0)
                   await usersApi.exportUsersCsv()
                   hide()
                   message.success('用户导出成功')
                 } catch (err: unknown) {
-                  message.error((err as ApiError)?.response?.data?.detail || '导出失败')
+                  hide()
+                  message.error((err as ApiError)?.response?.data?.detail || '导出失败，请确认服务已重启')
                 }
               }}>导出用户</Button>
             </Space>
