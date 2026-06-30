@@ -333,12 +333,17 @@ def _is_running_under_iis() -> bool:
 async def _restart_service():
     """重启服务：自动检测 IIS 或 uvicorn 模式"""
     if _is_running_under_iis():
-        appcmd = os.path.expandvars("%windir%\\system32\\inetsrv\\appcmd.exe")
+        pool_name = os.environ.get('SMARTKB_APP_POOL', 'SmartKBS')
         try:
+            # 使用 PowerShell WebAdministration 模块回收应用池
+            # 相比 appcmd.exe，此方式不需要管理员权限
+            ps_cmd = [
+                "powershell", "-Command",
+                f"Import-Module WebAdministration; "
+                f"Restart-WebAppPool -Name '{pool_name}'"
+            ]
             await _run_cmd(
-                # IIS 应用池名称可通过环境变量 SMARTKB_APP_POOL 自定义，默认 SmartKBS
-                [appcmd, "recycle", "apppool",
-                 f"/apppool.name:{os.environ.get('SMARTKB_APP_POOL', 'SmartKBS')}"],
+                ps_cmd,
                 cwd=str(BASE_DIR), timeout=15, capture_output=False,
             )
             logger.info("IIS 应用池已回收，服务重启完成")
@@ -350,7 +355,7 @@ async def _restart_service():
                 f"SMARTKB_APP_POOL=你的应用池名称"
             )
             _state["message"] = hint
-            logger.warning(f"IIS appcmd 回收失败: {e}\n💡 {hint}")
+            logger.warning(f"IIS 应用池回收失败: {e}\n💡 {hint}")
 
     # uvicorn 模式
     # 检查是否启用了 --reload (文件变动自动重启)
