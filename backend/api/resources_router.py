@@ -652,7 +652,7 @@ def _extract_html_title(html_content: str) -> str:
 
 
 @router.get("/ai-themes")
-async def get_ai_themes(type: str = Query("animation", description="资源类型: animation/quiz/practice")):
+async def get_ai_themes(type: str = Query("animation", description="资源类型: animation/quiz/practice/custom/interactive")):
     """获取指定资源类型的可选视觉主题列表"""
     from backend.prompts.html_generator import get_themes_for_type
     themes = get_themes_for_type(type)
@@ -782,17 +782,29 @@ async def ai_preview_html(request: Request):
         raise HTTPException(status_code=403, detail="权限不足：仅管理员和教师可以生成资源")
 
     body = await request.json()
-    gen_type = body.get("type", "custom")  # animation / quiz / practice / custom
+    gen_type = body.get("type", "custom")  # animation / quiz / practice / custom / interactive
     topic = body.get("topic", "").strip()
     subject = body.get("subject", "").strip()
     grade = body.get("grade", "").strip()
     custom_prompt = body.get("custom_prompt", "").strip()
     theme = body.get("theme", "").strip()
+    experiment_params = body.get("experiment_params", {})
+    enable_media = body.get("enable_media", True)
 
     # 校验
     if gen_type == "custom":
         if not custom_prompt:
             raise HTTPException(status_code=400, detail="自定义类型需要提供 custom_prompt")
+    elif gen_type == "interactive":
+        # 交互式类型：topic 或 custom_prompt 至少有一个
+        if not topic and not custom_prompt:
+            raise HTTPException(status_code=400, detail="请输入实验/交互主题或自定义需求")
+        # 如果有 experiment_params，附加到 custom_prompt
+        if experiment_params and isinstance(experiment_params, dict):
+            extra = "\n【用户指定的实验参数】\n"
+            for k, v in experiment_params.items():
+                extra += f"- {k}: {v}\n"
+            custom_prompt = (custom_prompt or "") + extra
     elif not topic:
         raise HTTPException(status_code=400, detail="请输入知识点/主题")
 
@@ -811,7 +823,7 @@ async def ai_preview_html(request: Request):
         logger.warning(f"RAG 检索失败（不影响生成）: {e}")
         rag_context = ""
 
-    # ── 题库取题（仅 quiz/practice 类型）──
+    # ── 题库取题（仅 quiz/practice / interactive 类型）──
     real_questions = []
     user_name = user.get("name", "")
     if gen_type in ("quiz", "practice"):
@@ -870,9 +882,30 @@ async def ai_preview_html(request: Request):
         except Exception as e:
             logger.warning(f"保存 AI 题目到题库失败（不影响结果）: {e}")
 
+    # ── SVG + 图片配图增强 ──
+    if enable_media:
+        try:
+            from backend.api.image_gen_service import plan_and_generate_media
+            html_dir = get_account_html_dir(username)
+            enhanced_html = await plan_and_generate_media(
+                html_content=html_content,
+                topic=topic or custom_prompt or "",
+                subject=subject,
+                resource_type=gen_type,
+                api_key=api_key,
+                html_dir=html_dir,
+            )
+            if enhanced_html and len(enhanced_html) > len(html_content):
+                logger.info(f"配图增强完成: {len(enhanced_html) - len(html_content)} chars 新增")
+                html_content = enhanced_html
+        except ImportError:
+            logger.debug("image_gen_service 中未找到 plan_and_generate_media")
+        except Exception as e:
+            logger.warning(f"配图增强失败（不影响主结果）: {e}")
+
     # 生成建议文件名
     title = _extract_html_title(html_content)
-    type_labels = {"animation": "动画讲解", "quiz": "互动答题", "practice": "练习题", "custom": "自定义"}
+    type_labels = {"animation": "动画讲解", "quiz": "互动答题", "practice": "练习题", "custom": "自定义", "interactive": "实验交互"}
     type_label = type_labels.get(gen_type, "HTML资源")
     if title:
         suggested_name = f"{_sanitize_filename(title)}_{type_label}.html"
@@ -1042,4 +1075,482 @@ async def ai_save_html(request: Request):
         "file_name": filename,
         "file_path": rel_path,
         "url_path": rel_path,
+        "is_subdir": False,
     }
+
+
+# ═══════════════════════════════════════════════
+# 多文件结构解析 + 子目录保存（适用于复杂交互资源）
+# ═══════════════════════════════════════════════
+
+def _parse_multi_file_output(ai_output: str) -> dict[str, str]:
+    """解析 AI 输出的多文件格式，返回 {相对路径: 文件内容} 字典
+
+    格式示例：
+    === FILE: index.html ===
+    <!DOCTYPE html>...
+    === FILE: css/style.css ===
+    ...
+
+    Returns:
+        { "index.html": "...", "css/style.css": "...", "js/app.js": "..." }
+    """
+    files: dict[str, str] = {}
+    if not ai_output:
+        return files
+
+    # 匹配 === FILE: 路径 === 块
+    pattern = r'=== FILE:\s*([^\n=]+?)\s*==='
+    matches = list(re.finditer(pattern, ai_output))
+    if not matches:
+        # 没有多文件标记，当作单文件处理
+        return {}
+
+    for i, match in enumerate(matches):
+        file_path = match.group(1).strip()
+        # 文件内容从当前标记末尾到下一个标记开始（或字符串末尾）
+        content_start = match.end()
+        if i + 1 < len(matches):
+            content_end = matches[i + 1].start()
+        else:
+            content_end = len(ai_output)
+        content = ai_output[content_start:content_end].strip()
+
+        # 清理可能残留的 markdown 代码块标记
+        if content.startswith("```"):
+            first_nl = content.find("\n")
+            if first_nl != -1:
+                content = content[first_nl + 1:]
+        if content.endswith("```"):
+            content = content[:-3].strip()
+        elif content.endswith("```\n"):
+            content = content[:-4].strip()
+
+        if content:
+            files[file_path] = content
+
+    return files
+
+
+def _save_resource_subdir(
+    files: dict[str, str],
+    base_dir: str,
+    dir_name: str,
+) -> tuple[str, str]:
+    """将多文件结构保存到 HTML 目录
+
+    结构：
+      base_dir/
+        res_name.html       ← 主入口，直接放在 HTML 目录，资源列表可见
+        res_name/            ← 同名子目录，存放 CSS/JS/图片等配套文件
+          css/style.css
+          js/app.js
+          data/config.json
+          media/img_xxx.png
+
+    Args:
+        files: {相对路径: 文件内容} 字典
+        base_dir: HTML 目录（如 /d/SmartKBS/youufis/html）
+        dir_name: 目录/文件名前缀（如 "冒泡排序_实验交互"）
+
+    Returns:
+        (main_entry_abs_path, main_entry_rel_path)
+    """
+    os.makedirs(base_dir, exist_ok=True)
+
+    safe_name = _sanitize_filename(dir_name)
+
+    # 确定主 .html 文件名（处理重名）
+    main_html = f"{safe_name}.html"
+    main_path = os.path.join(base_dir, main_html)
+    counter = 1
+    while os.path.exists(main_path):
+        main_html = f"{safe_name}_{counter}.html"
+        main_path = os.path.join(base_dir, main_html)
+        counter += 1
+
+    # 配套子目录（与 .html 同名，不含扩展名）
+    assets_dir_name = os.path.splitext(main_html)[0]
+    assets_dir = os.path.join(base_dir, assets_dir_name)
+    os.makedirs(assets_dir, exist_ok=True)
+
+    # 分离主入口和配套文件
+    main_content = ""
+    saved_asset_count = 0
+    for rel_path, content in files.items():
+        clean_path = rel_path.replace("\\", "/")
+        # 安全校验
+        if ".." in clean_path.split("/"):
+            logger.warning(f"跳过含路径穿越的条目: {rel_path}")
+            continue
+
+        if clean_path in ("index.html", "index.htm"):
+            main_content = content
+        else:
+            # 配套文件 → 保存到 assets_dir
+            target_path = os.path.normpath(os.path.join(assets_dir, clean_path))
+            if not target_path.startswith(os.path.normpath(assets_dir)):
+                logger.warning(f"跳过越界路径: {rel_path}")
+                continue
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(target_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            saved_asset_count += 1
+
+    # 如果没有 index.html，将第一个文件当作主入口
+    if not main_content:
+        first_key = next(iter(files.keys()), "")
+        if first_key:
+            main_content = files[first_key]
+            # 如果第一个文件是配套文件，已写入 assets_dir，需复制到主文件
+            if first_key not in ("index.html", "index.htm"):
+                with open(main_path, "w", encoding="utf-8") as f:
+                    f.write(main_content)
+                saved_asset_count -= 1  # 已在 assets_dir 写了一份
+
+    # ── 路径重写：将 index.html 中的相对引用改为带 assets_dir 前缀 ──
+    if main_content and saved_asset_count > 0:
+        # 只重写非绝对路径引用，添加 assets_dir_name/ 前缀
+        # 处理 href="xxx" / src="xxx" / src='xxx' — 排除已含 / 前缀的绝对路径
+        main_content = re.sub(
+            r'(href="|src=")([^"\'/][^"]*")',
+            lambda m: f'{m.group(1)}{assets_dir_name}/{m.group(2)}'
+            if not m.group(2).startswith(("http://", "https://", "data:", "#", "mailto:"))
+            else m.group(0),
+            main_content,
+        )
+        main_content = re.sub(
+            r"(src=')([^'/][^']*')",
+            lambda m: f"{m.group(1)}{assets_dir_name}/{m.group(2)}",
+            main_content,
+        )
+        # 处理 CSS url(xxx) / url("xxx")
+        main_content = re.sub(
+            r'(url\()([^"\')\s][^)\s]*\))',
+            lambda m: f'{m.group(1)}{assets_dir_name}/{m.group(2)}',
+            main_content,
+        )
+        main_content = re.sub(
+            r'(url\(")([^"]+)("\))',
+            lambda m: f'{m.group(1)}{assets_dir_name}/{m.group(2)}{m.group(3)}',
+            main_content,
+        )
+        # 处理 import 语句
+        main_content = re.sub(
+            r'(import\s+["\'])([^"\']+)(["\'])',
+            lambda m: f'{m.group(1)}{assets_dir_name}/{m.group(2)}{m.group(3)}'
+            if not m.group(2).startswith(("/", "http", ".")) else m.group(0),
+            main_content,
+        )
+
+    # 写主入口
+    if main_content:
+        with open(main_path, "w", encoding="utf-8") as f:
+            f.write(main_content)
+
+    logger.info(
+        f"多文件资源已保存: {main_html} + {assets_dir_name}/ "
+        f"({saved_asset_count} 个配套文件)"
+    )
+
+    from backend.config import BASE_DIR as _BASE_DIR
+    rel_path = os.path.relpath(main_path, str(_BASE_DIR)).replace("\\", "/")
+
+    return main_path, rel_path
+
+
+@router.post("/ai-save-multi")
+async def ai_save_multi_html(request: Request):
+    """保存 AI 生成的多文件 HTML 资源到子目录
+
+    从 AI 输出的多文件格式中解析出各个文件，保存到子目录。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    body = await request.json()
+    ai_output = body.get("ai_output", "").strip()
+    dir_name = body.get("dir_name", "").strip()
+    single_html = body.get("html_content", "").strip()
+
+    if not ai_output and not single_html:
+        raise HTTPException(status_code=400, detail="请提供 AI 输出内容")
+
+    html_dir = get_account_html_dir(username)
+
+    if ai_output:
+        # 尝试解析多文件格式
+        files = _parse_multi_file_output(ai_output)
+        if files:
+            # 有多文件结构，保存到子目录
+            if not dir_name:
+                # 从文件名或 index.html 标题推断
+                if "index.html" in files:
+                    title_match = re.search(r'<title[^>]*>(.*?)</title>', files["index.html"], re.DOTALL)
+                    if title_match:
+                        dir_name = _sanitize_filename(title_match.group(1).strip())
+                    else:
+                        dir_name = f"AI资源_{int(time.time())}"
+                else:
+                    dir_name = f"AI资源_{int(time.time())}"
+
+            main_path, rel_path = _save_resource_subdir(files, html_dir, dir_name)
+            main_basename = os.path.basename(main_path)
+            assets_dir_name = os.path.splitext(main_basename)[0]
+
+            file_count = len(files)
+            return {
+                "message": f"✅ 多文件资源已保存：{main_basename} + {assets_dir_name}/ 目录 ({file_count} 个文件)",
+                "is_subdir": True,
+                "dir_name": assets_dir_name,
+                "main_entry": main_basename,
+                "url_path": rel_path,
+                "file_count": file_count,
+            }
+
+    # 没有多文件结构，回退到单文件保存
+    if not single_html:
+        single_html = ai_output  # 把整个输出当 HTML 保存
+
+    # 沿用现有的 ai-save 逻辑
+    from backend.config import BASE_DIR as _BASE_DIR
+    filename = f"{_sanitize_filename(dir_name or 'AI资源')}.html"
+    filename = filename if filename.lower().endswith(".html") else filename + ".html"
+    target_path = os.path.join(html_dir, filename)
+
+    if os.path.exists(target_path):
+        name, ext = os.path.splitext(filename)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"{name}_{timestamp}{ext}"
+        target_path = os.path.join(html_dir, filename)
+
+    with open(target_path, "w", encoding="utf-8") as f:
+        f.write(single_html)
+
+    ensure_teacher_html_files(username)
+    rel_path = os.path.relpath(target_path, str(_BASE_DIR)).replace("\\", "/")
+
+    return {
+        "message": f"✅ HTML 资源已保存为 {filename}",
+        "file_name": filename,
+        "file_path": rel_path,
+        "url_path": rel_path,
+        "is_subdir": False,
+    }
+
+
+# ═══════════════════════════════════════════════
+# 异步 AI 生成（适用于复杂耗时的资源生成）
+# ═══════════════════════════════════════════════
+
+@router.post("/ai-generate-async")
+async def ai_generate_async(request: Request):
+    """异步启动 AI 生成 HTML 资源，立即返回 task_id
+
+    前端通过轮询 /api/resources/ai-task/{task_id} 获取生成进度和结果。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    user_name = user.get("name", "")
+
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    body = await request.json()
+    gen_type = body.get("type", "interactive")
+    topic = body.get("topic", "").strip()
+    subject = body.get("subject", "").strip()
+    grade = body.get("grade", "").strip()
+    custom_prompt = body.get("custom_prompt", "").strip()
+    theme = body.get("theme", "").strip()
+    experiment_params = body.get("experiment_params", {})
+    enable_media = body.get("enable_media", True)
+
+    if not topic and not custom_prompt:
+        raise HTTPException(status_code=400, detail="请输入主题或自定义需求")
+
+    # 处理实验参数（与同步路径一致）
+    if experiment_params and isinstance(experiment_params, dict):
+        extra = "\n【用户指定的实验参数】\n"
+        for k, v in experiment_params.items():
+            extra += f"- {k}: {v}\n"
+        custom_prompt = (custom_prompt or "") + extra
+
+    # 获取 API Key
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置")
+
+    # 构建异步任务
+    from backend.ai_task_manager import task_manager as _task_manager
+
+    async def _do_generate_inner() -> dict:
+        """实际生成逻辑（在超时保护内执行）"""
+        try:
+            # ── 阶段1: 构建 Prompt 并调用 AI ──
+            logger.info(f"[异步] 开始 AI 生成 HTML, 类型={gen_type}, 主题={topic}")
+
+            # RAG 检索
+            rag_context = ""
+            try:
+                from backend.rag import retrieve_knowledge
+                rag_context = retrieve_knowledge(topic, username)
+            except Exception as e:
+                logger.warning(f"[异步] RAG 检索失败: {e}")
+
+            # ── 异步任务用更长的超时（后台不阻塞 HTTP）──
+            ASYNC_AI_TIMEOUT = 600  # 10 分钟，复杂资源可能需要更长时间
+
+            prompt = build_html_prompt(
+                prompt_type=gen_type,
+                topic=topic,
+                rag_context=rag_context,
+                subject=subject,
+                grade=grade,
+                custom_prompt=custom_prompt,
+                theme=theme,
+            )
+
+            from backend.api.ai_service import call_ai_sync_with_timeout
+            ai_result = await call_ai_sync_with_timeout(prompt, api_key, timeout=ASYNC_AI_TIMEOUT)
+            if not ai_result or len(ai_result.strip()) < 50:
+                return {"error": "AI 返回内容为空或过短"}
+
+            # 清理 AI 输出
+            html_cleaned = ai_result.strip()
+            html_match = re.search(
+                r'```(?:html)?\s*(\<!DOCTYPE html\>.*?)\s*```',
+                html_cleaned, re.DOTALL | re.IGNORECASE,
+            )
+            if html_match:
+                html_cleaned = html_match.group(1).strip()
+            else:
+                doctype_match = re.search(
+                    r'(\<!DOCTYPE html\>.*)', html_cleaned, re.DOTALL | re.IGNORECASE,
+                )
+                if doctype_match:
+                    html_cleaned = doctype_match.group(1).strip()
+
+            # ── 阶段2: 解析多文件结构 ──
+            files = _parse_multi_file_output(ai_result)
+            html_dir = get_account_html_dir(username)
+
+            # 确定目录名
+            title = _extract_html_title(html_cleaned) or topic
+            type_labels = {
+                "animation": "动画讲解", "quiz": "互动答题",
+                "practice": "练习题", "custom": "自定义", "interactive": "实验交互",
+            }
+            dir_name = f"{_sanitize_filename(title)}_{type_labels.get(gen_type, '资源')}"
+
+            saved_info = {}
+            if files:
+                # 多文件 → 主 .html + 同名目录
+                main_path, rel_path = _save_resource_subdir(files, html_dir, dir_name)
+                main_basename = os.path.basename(main_path)
+                assets_dir = os.path.splitext(main_basename)[0]
+                saved_info = {
+                    "is_subdir": True,
+                    "dir_name": assets_dir,
+                    "main_entry": main_basename,
+                    "url_path": rel_path,
+                    "file_count": len(files),
+                }
+            else:
+                # 单文件
+                from backend.config import BASE_DIR as _BASE_DIR
+                filename = f"{_sanitize_filename(dir_name)}.html"
+                target_path = os.path.join(html_dir, filename)
+                if os.path.exists(target_path):
+                    name, ext = os.path.splitext(filename)
+                    ts = time.strftime("%Y%m%d_%H%M%S")
+                    filename = f"{name}_{ts}{ext}"
+                    target_path = os.path.join(html_dir, filename)
+                with open(target_path, "w", encoding="utf-8") as f:
+                    f.write(html_cleaned)
+                ensure_teacher_html_files(username)
+                rel_path = os.path.relpath(target_path, str(_BASE_DIR)).replace("\\", "/")
+                saved_info = {
+                    "is_subdir": False,
+                    "file_name": filename,
+                    "url_path": rel_path,
+                }
+
+            # ── 阶段3: 配图增强（如果启用）──
+            media_count = 0
+            if enable_media:
+                try:
+                    from backend.api.image_gen_service import plan_and_generate_media
+                    # 如果是子目录，将增强后的内容写回 index.html
+                    enhanced = await plan_and_generate_media(
+                        html_content=html_cleaned,
+                        topic=topic,
+                        subject=subject,
+                        resource_type=gen_type,
+                        api_key=api_key,
+                        html_dir=html_dir,
+                    )
+                    if enhanced and len(enhanced) > len(html_cleaned):
+                        if files and saved_info.get("is_subdir"):
+                            # 配图增强写入主 .html 文件
+                            main_html_path = os.path.join(html_dir, saved_info["main_entry"])
+                            if os.path.exists(main_html_path):
+                                with open(main_html_path, "w", encoding="utf-8") as f:
+                                    f.write(enhanced)
+                        elif not saved_info.get("is_subdir"):
+                            fpath = os.path.join(html_dir, saved_info.get("file_name", ""))
+                            if os.path.exists(fpath):
+                                with open(fpath, "w", encoding="utf-8") as f:
+                                    f.write(enhanced)
+                except Exception as e:
+                    logger.warning(f"[异步] 配图增强失败: {e}")
+
+            logger.info(f"[异步] 生成完成: {saved_info}")
+            return {"saved": saved_info}
+
+        except Exception as e:
+            logger.error(f"[异步] 生成失败: {e}")
+            return {"error": str(e)}
+
+    async def _generate_task() -> dict:
+        """后台生成任务（带整体超时保护）"""
+        OVERALL_TASK_TIMEOUT = 900  # 15 分钟
+        try:
+            return await asyncio.wait_for(
+                _do_generate_inner(),
+                timeout=OVERALL_TASK_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"[异步] 生成任务整体超时（{OVERALL_TASK_TIMEOUT}s）")
+            return {"error": f"生成任务超时（超过 {OVERALL_TASK_TIMEOUT//60} 分钟），请简化描述后重试"}
+
+    task_id = await _task_manager.create_task(
+        description=f"AI 生成 {gen_type} 资源: {topic or custom_prompt[:30]}",
+        coro_factory=_generate_task,
+    )
+
+    return {
+        "task_id": task_id,
+        "message": "生成任务已启动",
+        "poll_url": f"/api/resources/ai-task/{task_id}",
+    }
+
+
+@router.get("/ai-task/{task_id}")
+async def get_ai_task_status(task_id: str, request: Request):
+    """获取异步 AI 生成任务的状态和结果"""
+    from backend.ai_task_manager import task_manager as _task_manager
+    task = _task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+
+    result = task.to_dict()
+    # 如果已完成且有 saved_info，格式化输出
+    if task.status.value == "completed" and task.result:
+        result["data"] = task.result
+
+    return result
