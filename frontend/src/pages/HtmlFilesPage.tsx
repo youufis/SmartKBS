@@ -285,9 +285,15 @@ const HtmlFilesPage: React.FC = () => {
       hoverable
       draggable
       onDragStart={(e) => handleDragStart(e, urlPath)}
-      style={{ fontSize: 14, cursor: isShared ? 'pointer' : 'grab' }}
+      style={{ fontSize: 14, cursor: 'pointer' }}
       className="resource-file-card"
-      onClick={() => isShared && handleOpenResource(urlPath, name, owner, resourceId)}
+      onClick={() => {
+        if (isShared) {
+          handleOpenResource(urlPath, name, owner, resourceId)
+        } else {
+          window.open(`/api/files/${urlPath}`, '_blank')
+        }
+      }}
     >
       <Card.Meta
         avatar={<FileOutlined style={{ fontSize: 16, color: isShared ? '#ff4d4f' : undefined }} />}

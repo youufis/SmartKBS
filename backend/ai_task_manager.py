@@ -122,15 +122,15 @@ class AITaskManager:
             logger.error(f"AI 后台任务失败: {task_id} - {e}")
         finally:
             task.completed_at = time.time()
-            # 延迟清理
-            asyncio.create_task(self._schedule_cleanup(task_id))
-
-    async def _schedule_cleanup(self, task_id: str):
-        """定时清理已完成的任务"""
-        await asyncio.sleep(self.TASK_TTL)
-        async with self._lock:
-            self._tasks.pop(task_id, None)
-            logger.debug(f"AI 后台任务已清理: {task_id}")
+            # 延迟清理（捕获取消异常，避免 reload 时崩溃）
+            try:
+                await asyncio.sleep(self.TASK_TTL)
+                async with self._lock:
+                    self._tasks.pop(task_id, None)
+                    logger.debug(f"AI 后台任务已清理: {task_id}")
+            except (asyncio.CancelledError, RuntimeError):
+                # 服务器关闭/reload 时忽略清理任务取消
+                pass
 
     def get_task(self, task_id: str) -> Optional[AITask]:
         """获取任务状态"""
