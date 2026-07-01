@@ -296,17 +296,19 @@ const PortraitPage: React.FC = () => {
               }}
               title={<Space><EditOutlined style={{ color: commentColor }} /><Text strong>AI 本周寄语</Text></Space>}
             >
-              <Paragraph
-                style={{
-                  fontSize: 15,
-                  lineHeight: 1.8,
-                  whiteSpace: 'pre-wrap',
-                  fontStyle: 'italic',
-                  color: '#595959',
-                }}
-              >
-                {todayPortrait.ai_comment || '暂无寄语'}
-              </Paragraph>
+              <div style={{ maxHeight: 400, overflow: 'auto' }}>
+                <Paragraph
+                  style={{
+                    fontSize: 15,
+                    lineHeight: 1.8,
+                    whiteSpace: 'pre-wrap',
+                    fontStyle: 'italic',
+                    color: '#595959',
+                  }}
+                >
+                  {todayPortrait.ai_comment || '暂无寄语'}
+                </Paragraph>
+              </div>
             </Card>
           </Col>
         </Row>
@@ -721,6 +723,31 @@ const PortraitPage: React.FC = () => {
                   <PictureOutlined style={{ fontSize: 64, color: 'rgba(255,255,255,0.5)' }} />
                 </div>
               )}
+              <div style={{
+                marginTop: 12,
+                padding: '12px 16px',
+                background: '#fafafa',
+                borderRadius: 8,
+                border: '1px solid #f0f0f0',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <Tag style={{ margin: 0 }}>
+                    {STYLE_EMOJI[detailPortrait.style] || '🎨'}{' '}
+                    {styles.find(s => s.key === detailPortrait.style)?.name || detailPortrait.style}
+                  </Tag>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    📅 {detailPortrait.created_date}
+                  </Text>
+                </div>
+                <Space split={<Text type="secondary">|</Text>}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    <EyeOutlined /> {detailPortrait.view_count || 0} 次浏览
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    <HeartOutlined /> {detailPortrait.like_count || 0} 次点赞
+                  </Text>
+                </Space>
+              </div>
             </Col>
             <Col xs={24} md={12}>
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -745,15 +772,20 @@ const PortraitPage: React.FC = () => {
                   <Text strong style={{ display: 'block', marginBottom: 8 }}>
                     <EditOutlined style={{ color: commentColor }} /> AI 寄语
                   </Text>
-                  <Paragraph style={{
-                    fontSize: 14,
-                    lineHeight: 1.8,
-                    whiteSpace: 'pre-wrap',
-                    fontStyle: 'italic',
-                    margin: 0,
+                  <div style={{
+                    maxHeight: 300,
+                    overflow: 'auto',
                   }}>
-                    {detailPortrait.ai_comment || '暂无寄语'}
-                  </Paragraph>
+                    <Paragraph style={{
+                      fontSize: 14,
+                      lineHeight: 1.8,
+                      whiteSpace: 'pre-wrap',
+                      fontStyle: 'italic',
+                      margin: 0,
+                    }}>
+                      {detailPortrait.ai_comment || '暂无寄语'}
+                    </Paragraph>
+                  </div>
                 </div>
 
                 <Space>

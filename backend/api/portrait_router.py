@@ -679,7 +679,7 @@ async def get_public_gallery(request: Request):
             "style": row[3],
             "image_path": row[4] or "",
             "image_url": _to_portrait_url("", portrait_id=row[0]),
-            "ai_comment": (row[5] or "")[:100],
+            "ai_comment": (row[5] or ""),
             "like_count": row[6] or 0,
             "view_count": row[7] or 0,
         }
@@ -729,7 +729,7 @@ async def get_class_gallery(request: Request):
             "style": row[3],
             "image_path": row[4] or "",
             "image_url": _to_portrait_url("", portrait_id=row[0]),
-            "ai_comment": (row[5] or "")[:100],
+            "ai_comment": (row[5] or ""),
             "like_count": row[6] or 0,
             "view_count": row[7] or 0,
         }
@@ -761,7 +761,7 @@ async def get_hot_gallery(request: Request):
             "style": row[3],
             "image_path": row[4] or "",
             "image_url": _to_portrait_url("", portrait_id=row[0]),
-            "ai_comment": (row[5] or "")[:100],
+            "ai_comment": (row[5] or ""),
             "like_count": row[6] or 0,
             "view_count": row[7] or 0,
         }
