@@ -321,13 +321,8 @@ def _set_progress(step: str, message: str, progress: int):
 
 
 def _is_running_under_iis() -> bool:
-    """检测是否运行在 IIS httpPlatform 下"""
-    # IIS httpPlatform 会设置 HTTP_PLATFORM_PORT 环境变量
-    if os.environ.get("HTTP_PLATFORM_PORT"):
-        return True
-    # 检查 appcmd.exe 是否存在（IIS 管理工具）
-    appcmd = os.path.expandvars("%windir%\\system32\\inetsrv\\appcmd.exe")
-    return os.path.isfile(appcmd)
+    """检测是否运行在 IIS httpPlatform 下（通过环境变量，无需 appcmd.exe）"""
+    return bool(os.environ.get("HTTP_PLATFORM_PORT"))
 
 
 async def _restart_service():
@@ -360,31 +355,21 @@ async def _restart_service():
             _state["message"] = hint
             logger.warning(f"IIS 应用池回收失败: {e}\n💡 {hint}")
 
-    # uvicorn 模式
-    # 检查是否启用了 --reload (文件变动自动重启)
+    # ── uvicorn 模式 ──
+    # 升级后的文件变更会由 uvicorn --reload 自动检测并重启服务。
+    # 如果未使用 --reload，提醒用户自行添加。
     import sys as _sys
     has_reload = any("--reload" in a for a in _sys.argv)
     if has_reload:
-        logger.info("检测到 uvicorn --reload 模式，服务将自动检测文件变更重启")
+        logger.info("检测到 uvicorn --reload 模式，文件变更将自动触发重启")
         return
 
-    # 尝试通过 taskkill 仅杀当前端口的 uvicorn 进程
-    try:
-        from backend.config import SERVER_PORT
-        port = SERVER_PORT
-        # 用 PowerShell 查找占用指定端口的进程并终止
-        ps_cmd = [
-            "powershell", "-Command",
-            f"Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue "
-            f"| Select-Object -ExpandProperty OwningProcess "
-            f"| ForEach-Object {{ Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }}"
-        ]
-        await _run_cmd(ps_cmd, cwd=str(BASE_DIR), timeout=10, capture_output=False)
-        logger.info(f"已终止占用端口 {port} 的进程（uvicorn 将自动退出）")
-    except Exception:
-        msg = "无法自动重启服务，请手动重启 uvicorn 使新代码生效"
-        _state["message"] = msg
-        logger.warning(msg)
+    # --reload 模式能安全可靠地自动重启，建议加上此参数
+    logger.warning(
+        "未检测到 uvicorn --reload 参数，升级后可能无法自动重启。\n"
+        "💡 建议在启动命令中添加 --reload 参数，例如：\n"
+        "   uvicorn backend.main:app --reload"
+    )
 
 
 async def _fetch_remote_version() -> dict[str, Any] | None:
