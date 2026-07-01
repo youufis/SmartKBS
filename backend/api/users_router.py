@@ -577,7 +577,7 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
 
 @router.post("/bulk-delete")
 async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
-    """批量彻底删除用户（按用户名模式匹配，跳过管理员账号）"""
+    """批量彻底删除用户（按用户名模式匹配，跳过管理员账号，流式进度返回）"""
     current_user = get_current_user(request)
     if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
         raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以批量删除")
@@ -586,25 +586,54 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
     if not pattern:
         raise HTTPException(status_code=400, detail="请提供要删除的用户名模式")
 
-    try:
-        # 先查出匹配的非管理员用户（用于返回列表）
-        rows = execute_query(
-            "SELECT username FROM users WHERE username LIKE ? AND role != 0",
-            (f"%{pattern}%",),
+    # 先查出匹配的非管理员用户
+    rows = execute_query(
+        "SELECT username FROM users WHERE username LIKE ? AND role != 0",
+        (f"%{pattern}%",),
+    )
+    all_users = [row[0] for row in rows]
+    total = len(all_users)
+
+    async def event_generator():
+        if total == 0:
+            yield f"data: {json.dumps({'type': 'done', 'deleted': 0, 'message': '没有匹配的用户'}, ensure_ascii=False)}\n\n"
+            return
+
+        yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
+
+        deleted_count = 0
+        error_list = []
+        for i, username in enumerate(all_users):
+            try:
+                _delete_user_completely(username)
+                deleted_count += 1
+            except Exception as e:
+                error_list.append(f"用户 '{username}': {str(e)}")
+                logger.error(f"批量删除用户 '{username}' 失败: {e}")
+
+            yield f"data: {json.dumps({
+                'type': 'progress',
+                'current': i + 1,
+                'total': total,
+                'deleted': deleted_count,
+                'error_count': len(error_list),
+                'percent': round((i + 1) / total * 100, 1),
+            }, ensure_ascii=False)}\n\n"
+
+        logger.info(f"批量删除用户: pattern={pattern}, deleted={deleted_count}, errors={len(error_list)}")
+        done_msg = (
+            f"成功删除 {deleted_count} 个用户，{len(error_list)} 个错误"
+            if error_list else f"成功删除 {deleted_count} 个用户"
         )
-        deleted = [row[0] for row in rows]
-        if not deleted:
-            return {"message": "没有匹配的用户", "deleted": []}
+        yield f"data: {json.dumps({
+            'type': 'done',
+            'deleted': deleted_count,
+            'error_count': len(error_list),
+            'errors': error_list[:50],
+            'message': done_msg,
+        }, ensure_ascii=False)}\n\n"
 
-        # 逐个彻底删除（每个用户清理数据库记录 + 文件目录）
-        for username in deleted:
-            _delete_user_completely(username)
-
-        logger.info(f"批量删除用户: pattern={pattern}, count={len(deleted)}")
-        return {"message": f"已删除 {len(deleted)} 个用户", "deleted": deleted}
-    except Exception as e:
-        logger.error(f"批量删除失败: {e}")
-        raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}")
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/import")
