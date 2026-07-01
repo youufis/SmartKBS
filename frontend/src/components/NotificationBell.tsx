@@ -76,7 +76,12 @@ const NotificationBell: React.FC = () => {
   useEffect(() => {
     fetchAllUnreadCounts()
     const timer = setInterval(fetchAllUnreadCounts, 30000)
-    return () => clearInterval(timer)
+    const handleUnreadChange = () => fetchAllUnreadCounts()
+    window.addEventListener('notification:unread-changed', handleUnreadChange)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('notification:unread-changed', handleUnreadChange)
+    }
   }, [fetchAllUnreadCounts])
 
   useEffect(() => {

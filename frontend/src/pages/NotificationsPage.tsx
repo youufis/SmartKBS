@@ -73,10 +73,15 @@ const NotificationsPage: React.FC = () => {
     if (activeTab === 'system') fetchNotifications()
   }, [page, filter, activeTab])
 
+  const refreshUnreadCount = () => {
+    window.dispatchEvent(new CustomEvent('notification:unread-changed'))
+  }
+
   const handleMarkRead = async (id: number) => {
     try {
       await notificationsApi.markAsRead(id)
       fetchNotifications()
+      refreshUnreadCount()
     } catch {
       message.error('标记已读失败，请重试')
     }
@@ -87,6 +92,7 @@ const NotificationsPage: React.FC = () => {
       await notificationsApi.markAllAsRead()
       message.success('已全部标记为已读')
       fetchNotifications()
+      refreshUnreadCount()
     } catch {
       message.error('操作失败，请重试')
     }
@@ -97,6 +103,7 @@ const NotificationsPage: React.FC = () => {
       await notificationsApi.deleteNotification(id)
       message.success('通知已删除')
       fetchNotifications()
+      refreshUnreadCount()
     } catch {
       message.error('删除失败，请重试')
     }

@@ -49,7 +49,8 @@ export async function getUnreadCount(): Promise<number> {
 
 /** 标记通知为已读 */
 export async function markAsRead(id: number): Promise<void> {
-  await apiClient.put(`/api/notifications/${id}/read`)
+  const resp = await apiClient.put(`/api/notifications/${id}/read`)
+  console.log(`[markAsRead] id=${id}, status=${resp.status}, data=`, resp.data)
 }
 
 /** 标记所有通知为已读 */
