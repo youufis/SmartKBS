@@ -1213,6 +1213,15 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_qqr_status ON quick_quiz_rooms(status)")
             except sqlite3.OperationalError:
                 pass
+            # 兼容旧表：添加 target_scope 和 target_users 列
+            try:
+                c.execute("ALTER TABLE quick_quiz_rooms ADD COLUMN target_scope TEXT DEFAULT 'teacher_classes'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE quick_quiz_rooms ADD COLUMN target_users TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
 
             # ── 抢答活动参与者表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS quick_quiz_players (

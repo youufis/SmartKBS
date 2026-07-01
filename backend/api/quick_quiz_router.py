@@ -129,6 +129,9 @@ def _can_view_room(room: dict[str, Any], username: str, role: int) -> bool:
         # 教师：自己的房间，或管理员创建的房间（同年级/不限年级）
         if room["creator_username"] == username:
             return True
+        # 全体学生范围的活动，教师可见
+        if room.get("target_scope") == "all":
+            return True
         # 管理员创建的房间，教师也可以看
         creator = execute_query_one(
             "SELECT role FROM users WHERE username=?",
@@ -148,31 +151,26 @@ def _can_view_room(room: dict[str, Any], username: str, role: int) -> bool:
                     return True
         return False
     if role == 2:
-        # 学生：已加入该房间的始终可见
+        # 学生：已加入该房间的始终可见（已加入的无论范围如何都可见）
         existing = execute_query_one(
             "SELECT id FROM quick_quiz_players WHERE room_id=? AND student_username=?",
             (room["id"], username),
         )
         if existing:
             return True
-        # 管理员创建的（不限班级）
-        creator = execute_query_one(
-            "SELECT role FROM users WHERE username=?",
-            (room["creator_username"],),
-        )
-        if creator and creator["role"] == 0:
-            return True
-        # 同年级同班级
+        # 使用统一的 permission_service 判断可见性
+        from backend.permission_service import check_activity_visibility
         grade, cls = _get_student_grade_class(username)
-        if not grade or not cls:
-            return False
-        if room.get("target_grade") and room["target_grade"] != grade:
-            return False
-        if room.get("target_class"):
-            target_classes = [c.strip() for c in room["target_class"].split(",") if c.strip()]
-            if target_classes and cls not in target_classes:
-                return False
-        return True
+        return check_activity_visibility(
+            student_username=username,
+            student_grade=grade,
+            student_class=cls,
+            creator_username=room["creator_username"],
+            target_scope=room.get("target_scope", "teacher_classes") or "teacher_classes",
+            target_grade=room.get("target_grade", "") or "",
+            target_class=room.get("target_class", "") or "",
+            target_users=room.get("target_users", "") or "",
+        )
     return False
 
 
@@ -190,8 +188,10 @@ def _room_to_dict(room: dict[str, Any]) -> dict[str, Any]:
         "scoring_mode": room["scoring_mode"],
         "min_players": room["min_players"],
         "max_players": room["max_players"],
+        "target_scope": room.get("target_scope", "teacher_classes") or "teacher_classes",
         "target_grade": room["target_grade"] or "",
         "target_class": room["target_class"] or "",
+        "target_users": room.get("target_users", "") or "",
         "subject": room.get("subject", "") or "",
         "knowledge_points": room.get("knowledge_points", "") or "",
         "difficulty": room.get("difficulty", "medium") or "medium",
@@ -511,15 +511,18 @@ async def create_room(request: Request):
     scoring_mode = body.get("scoring_mode", "speed")
     min_players = int(body.get("min_players", 1))
     max_players = int(body.get("max_players", 50))
-    # 教师未指定年级/班级时，自动填充自己的
+    target_scope = body.get("target_scope", "teacher_classes") or "teacher_classes"
     target_grade = body.get("target_grade", "")
     target_class = body.get("target_class", "")
-    if role == 1 and not target_grade:
-        auto_grade, auto_cls = _get_student_grade_class(username)
-        if auto_grade and not target_grade:
-            target_grade = auto_grade
-        if auto_cls and not target_class:
-            target_class = auto_cls
+    target_users = body.get("target_users", "") or ""
+    # 教师未指定年级/班级时，自动填充自己的（仅兼容旧模式）
+    if not target_scope or target_scope == "teacher_classes":
+        if role == 1 and not target_grade:
+            auto_grade, auto_cls = _get_student_grade_class(username)
+            if auto_grade and not target_grade:
+                target_grade = auto_grade
+            if auto_cls and not target_class:
+                target_class = auto_cls
     subject = body.get("subject", "")
     knowledge_points = body.get("knowledge_points", "")
     difficulty = body.get("difficulty", "medium")
@@ -531,12 +534,14 @@ async def create_room(request: Request):
         """INSERT INTO quick_quiz_rooms
            (room_code, title, creator_username, status, question_source, question_count,
             time_limit, scoring_mode, min_players, max_players,
-            target_grade, target_class, subject, knowledge_points, difficulty,
+            target_scope, target_grade, target_class, target_users,
+            subject, knowledge_points, difficulty,
             created_at)
-           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (room_code, title, username, question_source, question_count,
          time_limit, scoring_mode, min_players, max_players,
-         target_grade, target_class, subject, knowledge_points, difficulty,
+         target_scope, target_grade, target_class, target_users,
+         subject, knowledge_points, difficulty,
          now),
     )
 
@@ -576,32 +581,12 @@ async def list_rooms(
         # 管理员：全部
         pass
     elif role == 1:
-        # 教师：自己的 + 管理员创建的同年级
-        grade, cls = _get_student_grade_class(username)
-        conditions.append(
-            "(qq.creator_username=? OR (u2.role=0"
-        )
+        # 教师：仅查看和管理自己创建的房间
+        conditions.append("qq.creator_username=?")
         params.append(username)
-        if grade:
-            conditions[-1] += " AND (qq.target_grade='' OR qq.target_grade=?)"
-            params.append(grade)
-        conditions[-1] += "))"
     elif role == 2:
-        # 学生：活跃 + 可加入的
+        # 学生：仅看等待中/进行中的活动
         conditions.append("qq.status IN ('waiting','playing')")
-        grade, cls = _get_student_grade_class(username)
-        if grade:
-            # 管理员创建的（不限年级）或 同年级的
-            conditions.append(
-                "(u2.role=0 OR (qq.target_grade=?"
-            )
-            params.append(grade)
-            if cls:
-                conditions[-1] += f" AND (qq.target_class='' OR INSTR(',' || qq.target_class || ',', ?) > 0)"
-                params.append(f",{cls},")
-            conditions[-1] += "))"
-        else:
-            conditions.append("(u2.role=0)")
 
     if status:
         conditions.append("qq.status=?")
@@ -614,7 +599,6 @@ async def list_rooms(
         f"""SELECT qq.*, COALESCE(u.name, u.username) AS creator_name
             FROM quick_quiz_rooms qq
             LEFT JOIN users u ON qq.creator_username = u.username
-            LEFT JOIN users u2 ON qq.creator_username = u2.username
             WHERE {where}
             ORDER BY qq.created_at DESC
             LIMIT ? OFFSET ?""",
@@ -625,6 +609,9 @@ async def list_rooms(
     result = []
     for r in rows:
         room = _room_to_dict(r)
+        # 对学生角色做细粒度权限过滤（支持 target_scope 统一判断）
+        if role == 2 and not _can_view_room(r, username, role):
+            continue
         player_count = execute_query_one(
             "SELECT COUNT(*) as cnt FROM quick_quiz_players WHERE room_id=?",
             (r["id"],),
@@ -634,7 +621,7 @@ async def list_rooms(
         result.append(room)
 
     total = execute_query_one(
-        f"SELECT COUNT(*) as cnt FROM quick_quiz_rooms qq LEFT JOIN users u2 ON qq.creator_username = u2.username WHERE {where}",
+        f"SELECT COUNT(*) as cnt FROM quick_quiz_rooms qq WHERE {where}",
         tuple(params),
     )
 
@@ -694,7 +681,8 @@ async def update_room(room_id: int, request: Request):
 
     for field in ["title", "question_source", "question_count", "time_limit",
                    "scoring_mode", "min_players", "max_players",
-                   "target_grade", "target_class", "subject", "knowledge_points", "difficulty"]:
+                   "target_scope", "target_grade", "target_class", "target_users",
+                   "subject", "knowledge_points", "difficulty"]:
         if field in body:
             upd_fields.append(f"{field}=?")
             upd_params.append(body[field])

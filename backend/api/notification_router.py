@@ -358,38 +358,19 @@ async def list_announcements(
             (page_size, (page - 1) * page_size),
         )
     elif role == 1:
-        # 教师：自己发布的 + 管理员发布的
-        admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
-        if admin_names:
-            placeholders = ",".join("?" for _ in admin_names)
-            count_result = execute_query(
-                f"""SELECT COUNT(*) FROM announcements
-                   WHERE creator_username=? OR creator_username IN ({placeholders})""",
-                (user["username"], *admin_names),
-            )
-            total = count_result[0][0] if count_result else 0
-            rows = execute_query(
-                f"""SELECT id, creator_username, title, content, target_role, target_grade, target_class,
-                          priority, is_pinned, created_at, updated_at
-                   FROM announcements
-                   WHERE creator_username=? OR creator_username IN ({placeholders})
-                   ORDER BY is_pinned DESC, created_at DESC
-                   LIMIT ? OFFSET ?""",
-                (user["username"], *admin_names, page_size, (page - 1) * page_size),
-            )
-        else:
-            count_result = execute_query(
-                "SELECT COUNT(*) FROM announcements WHERE creator_username=?", (user["username"],)
-            )
-            total = count_result[0][0] if count_result else 0
-            rows = execute_query(
-                """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
-                          priority, is_pinned, created_at, updated_at
-                   FROM announcements WHERE creator_username=?
-                   ORDER BY is_pinned DESC, created_at DESC
-                   LIMIT ? OFFSET ?""",
-                (user["username"], page_size, (page - 1) * page_size),
-            )
+        # 教师：仅查看自己发布的公告
+        count_result = execute_query(
+            "SELECT COUNT(*) FROM announcements WHERE creator_username=?", (user["username"],)
+        )
+        total = count_result[0][0] if count_result else 0
+        rows = execute_query(
+            """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
+                      priority, is_pinned, created_at, updated_at
+               FROM announcements WHERE creator_username=?
+               ORDER BY is_pinned DESC, created_at DESC
+               LIMIT ? OFFSET ?""",
+            (user["username"], page_size, (page - 1) * page_size),
+        )
     else:
         # 学生：管理员公告 + 匹配班级的教师公告，再按 target_scope 过滤
         admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
