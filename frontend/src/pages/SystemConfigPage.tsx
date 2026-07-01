@@ -153,9 +153,7 @@ const UpgradePanel: React.FC = () => {
             <li>更新本地文件</li>
             <li>更新数据库结构（如有需要）</li>
             <li>安装新增的依赖包</li>
-            <li>手动重启服务使新代码生效</li>
           </ol>
-          <p style={{ color: '#fa8c16' }}>⚠️ 升级完成后，请手动重启服务以加载新代码</p>
           <p>💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理</p>
         </div>
       ),
@@ -178,7 +176,7 @@ const UpgradePanel: React.FC = () => {
                 if (st.error) {
                   message.error('升级失败: ' + st.error)
                 } else {
-                  message.success('🎉 升级完成！请手动重启服务后刷新页面')
+                  message.success('🎉 升级完成！请刷新页面')
                 }
                 loadHistory()
               }
@@ -205,7 +203,6 @@ const UpgradePanel: React.FC = () => {
             <Text strong style={{ color: '#cf1322' }}>回滚操作将执行以下步骤：</Text>
             <ol style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#555' }}>
               <li>将代码回退到最近一次升级前的版本（git reset --hard HEAD@{'{'}1{'}'}）</li>
-              <li>手动重启系统服务使旧代码生效</li>
               <li>升级历史中将新增一条回滚记录</li>
             </ol>
           </div>
@@ -225,7 +222,7 @@ const UpgradePanel: React.FC = () => {
       onOk: async () => {
         try {
           await apiRollback()
-          message.success('🎉 回滚完成，请手动重启服务后刷新页面')
+          message.success('🎉 回滚完成，请刷新页面')
           loadHistory()
           loadVersion()
         } catch (e: any) {
@@ -441,7 +438,7 @@ const UpgradePanel: React.FC = () => {
             />
           )}
           <p style={{ fontSize: 12, color: '#999' }}>
-            {restarting ? '正在等待服务恢复...' : '升级完成后请手动重启服务'}
+            {restarting ? '正在等待服务恢复...' : '如长时间无响应可点击右上角「取消升级」'}
           </p>
           {upgradeProg.error && (
             <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
