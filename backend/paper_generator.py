@@ -152,6 +152,9 @@ def _latex_to_png(latex_str: str, fontsize: int = 12, dpi: int = 150) -> io.Byte
     """
     if not _HAS_MPL:
         return None
+    # 如果公式包含中文字符，matplotlib 数学字体不支持，直接回退 Unicode
+    if re.search(r'[\u4e00-\u9fff\u3000-\u303f]', latex_str):
+        return None
     try:
         buf = io.BytesIO()
         fig, ax = plt.subplots(figsize=(0.01, 0.01), dpi=dpi)
@@ -181,6 +184,12 @@ def _latex_to_unicode(latex_str: str) -> str:
 
     # 去除外层多余的 $（安全处理）
     text = text.strip('$')
+
+    # 处理 \underline{...} → 下划线文本
+    text = re.sub(r'\\underline\{([^}]*)\}', r'\1', text)
+
+    # 处理 \quad, \qquad → 空格
+    text = re.sub(r'\\quad|\\qquad', ' ', text)
 
     # 处理 \text{...}
     text = re.sub(r'\\text\{([^}]*)\}', r'\1', text)
