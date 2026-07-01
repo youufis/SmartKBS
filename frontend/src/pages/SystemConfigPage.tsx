@@ -153,10 +153,9 @@ const UpgradePanel: React.FC = () => {
             <li>更新本地文件</li>
             <li>更新数据库结构（如有需要）</li>
             <li>安装新增的依赖包</li>
-            <li>重启服务使新代码生效</li>
+            <li>手动重启服务使新代码生效</li>
           </ol>
-          <p style={{ color: 'red' }}>⚠️ 升级期间系统会短暂离线（约 1-3 分钟）</p>
-          <p style={{ color: '#fa8c16' }}>🖥️ 如果您不是在服务器本机操作，升级过程中页面会短暂断连，服务重启后会自动恢复</p>
+          <p style={{ color: '#fa8c16' }}>⚠️ 升级完成后，请手动重启服务以加载新代码</p>
           <p>💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理</p>
         </div>
       ),
@@ -179,7 +178,7 @@ const UpgradePanel: React.FC = () => {
                 if (st.error) {
                   message.error('升级失败: ' + st.error)
                 } else {
-                  message.success('🎉 升级完成！请刷新页面')
+                  message.success('🎉 升级完成！请手动重启服务后刷新页面')
                 }
                 loadHistory()
               }
@@ -206,7 +205,7 @@ const UpgradePanel: React.FC = () => {
             <Text strong style={{ color: '#cf1322' }}>回滚操作将执行以下步骤：</Text>
             <ol style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#555' }}>
               <li>将代码回退到最近一次升级前的版本（git reset --hard HEAD@{'{'}1{'}'}）</li>
-              <li>重启系统服务使旧代码生效</li>
+              <li>手动重启系统服务使旧代码生效</li>
               <li>升级历史中将新增一条回滚记录</li>
             </ol>
           </div>
@@ -226,7 +225,7 @@ const UpgradePanel: React.FC = () => {
       onOk: async () => {
         try {
           await apiRollback()
-          message.success('🎉 回滚完成，请刷新页面')
+          message.success('🎉 回滚完成，请手动重启服务后刷新页面')
           loadHistory()
           loadVersion()
         } catch (e: any) {
@@ -436,13 +435,13 @@ const UpgradePanel: React.FC = () => {
               type="warning"
               showIcon
               icon={<SyncOutlined spin />}
-              message="⏳ 服务正在重启..."
-              description="服务重启中，连接暂时中断。这是正常现象，请耐心等待约 1-3 分钟，系统将自动恢复。如果您正在远程操作，切勿关闭此页面。"
+              message="⏳ 等待服务恢复..."
+              description="服务暂时无响应，请稍后刷新页面重试。如果您正在远程操作，切勿关闭此页面。"
               style={{ marginTop: 8, marginBottom: 8 }}
             />
           )}
           <p style={{ fontSize: 12, color: '#999' }}>
-            {restarting ? '正在等待服务重启完成...' : '如长时间无响应可点击右上角「取消升级」'}
+            {restarting ? '正在等待服务恢复...' : '升级完成后请手动重启服务'}
           </p>
           {upgradeProg.error && (
             <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
