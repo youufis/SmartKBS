@@ -49,6 +49,75 @@ export async function bulkDeleteUsers(pattern: string): Promise<string> {
   return data.message;
 }
 
+/** 流式批量删除用户（支持进度回调） */
+export interface BulkDeleteProgressEvent {
+  type: 'start' | 'progress' | 'done';
+  total?: number;
+  current?: number;
+  deleted?: number;
+  error_count?: number;
+  percent?: number;
+  errors?: string[];
+  message?: string;
+}
+
+export async function bulkDeleteUsersStream(
+  pattern: string,
+  onProgress: (event: BulkDeleteProgressEvent) => void,
+): Promise<BulkDeleteProgressEvent> {
+  const token = localStorage.getItem('smartkb_token');
+
+  const response = await fetch('/api/users/bulk-delete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ pattern }),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.detail || `批量删除失败 (${response.status})`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const readStream = async (): Promise<BulkDeleteProgressEvent> => {
+    let lastEvent: BulkDeleteProgressEvent = { type: 'done' };
+
+    const processBuffer = () => {
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data: ')) continue;
+        try {
+          const event = JSON.parse(trimmed.slice(6)) as BulkDeleteProgressEvent;
+          lastEvent = event;
+          onProgress(event);
+        } catch { /* skip malformed */ }
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      processBuffer();
+    }
+    // 处理剩余 buffer
+    processBuffer();
+
+    return lastEvent;
+  };
+
+  return readStream();
+}
+
 export async function importUsers(file: File): Promise<{ message: string; imported: number; errors: string[] }> {
   const formData = new FormData();
   formData.append('file', file);

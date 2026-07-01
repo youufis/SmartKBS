@@ -8,7 +8,7 @@ import {
 import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, RollbackOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
 import type { UserItem } from '../types'
-import type { ImportProgressEvent, GradePromotionPreview, GradePromotionResult } from '../api/users'
+import type { ImportProgressEvent, BulkDeleteProgressEvent, GradePromotionPreview, GradePromotionResult } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
 
@@ -159,16 +159,86 @@ const UserMgmtPage: React.FC = () => {
     }
   }
 
-  // ── 批量删除 ──
+  // ── 批量删除（含进度提示） ──
   const [bulkPattern, setBulkPattern] = useState('')
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{
+    visible: boolean
+    percent: number
+    current: number
+    total: number
+    deleted: number
+    errorCount: number
+    errors: string[]
+    message: string
+    done: boolean
+  }>({
+    visible: false,
+    percent: 0,
+    current: 0,
+    total: 0,
+    deleted: 0,
+    errorCount: 0,
+    errors: [],
+    message: '',
+    done: false,
+  })
+
   const handleBulkDelete = async () => {
     if (!bulkPattern.trim()) { message.warning('请输入模式'); return }
+    setBulkDeleteProgress({
+      visible: true,
+      percent: 0,
+      current: 0,
+      total: 0,
+      deleted: 0,
+      errorCount: 0,
+      errors: [],
+      message: '正在查询匹配的用户…',
+      done: false,
+    })
     try {
-      const msg = await usersApi.bulkDeleteUsers(bulkPattern)
-      message.success(msg)
+      await usersApi.bulkDeleteUsersStream(bulkPattern, (event: BulkDeleteProgressEvent) => {
+        if (event.type === 'start') {
+          setBulkDeleteProgress(prev => ({
+            ...prev,
+            total: event.total || 0,
+            message: `准备删除 ${event.total} 个用户…`,
+          }))
+        } else if (event.type === 'progress') {
+          setBulkDeleteProgress(prev => ({
+            ...prev,
+            percent: event.percent || 0,
+            current: event.current || 0,
+            total: event.total || 0,
+            deleted: event.deleted || 0,
+            errorCount: event.error_count || 0,
+            message: `正在删除 ${event.current}/${event.total}…`,
+          }))
+        } else if (event.type === 'done') {
+          const errList = event.errors || []
+          setBulkDeleteProgress(prev => ({
+            ...prev,
+            percent: 100,
+            deleted: event.deleted || 0,
+            errorCount: event.error_count || 0,
+            errors: errList,
+            message: event.message || '批量删除完成',
+            done: true,
+          }))
+        }
+      })
     } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || '批量删除失败')
+      setBulkDeleteProgress(prev => ({
+        ...prev,
+        message: err instanceof Error ? err.message : '批量删除失败',
+        done: true,
+      }))
     }
+  }
+
+  const handleBulkDeleteDone = () => {
+    setBulkDeleteProgress(prev => ({ ...prev, visible: false }))
+    setBulkPattern('')
   }
 
   // ── 批量升年级 ──
@@ -655,10 +725,43 @@ const UserMgmtPage: React.FC = () => {
                 <Input placeholder="用户名关键词，如 s11" value={bulkPattern}
                   onChange={(e) => setBulkPattern(e.target.value)} style={{ width: 240 }} />
                 <Popconfirm title="确认批量删除？" onConfirm={handleBulkDelete}>
-                  <Button danger>批量删除</Button>
+                  <Button danger disabled={bulkDeleteProgress.visible}>批量删除</Button>
                 </Popconfirm>
               </Space>
             </Card>
+            {/* 批量删除进度弹窗 */}
+            <Modal
+              title="批量删除进度"
+              open={bulkDeleteProgress.visible}
+              footer={
+                bulkDeleteProgress.done
+                  ? <Button type="primary" onClick={handleBulkDeleteDone}>确定</Button>
+                  : null
+              }
+              closable={bulkDeleteProgress.done}
+              maskClosable={bulkDeleteProgress.done}
+              onCancel={handleBulkDeleteDone}
+            >
+              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+                <Progress percent={bulkDeleteProgress.percent} status={bulkDeleteProgress.done ? (bulkDeleteProgress.errorCount > 0 ? 'exception' : 'success') : 'active'} />
+                <Typography.Text>{bulkDeleteProgress.message}</Typography.Text>
+                {bulkDeleteProgress.total > 0 && (
+                  <Typography.Text type="secondary">
+                    已处理 {bulkDeleteProgress.current} / {bulkDeleteProgress.total} 个
+                    ｜ 成功 {bulkDeleteProgress.deleted} 个
+                    ｜ 失败 {bulkDeleteProgress.errorCount} 个
+                  </Typography.Text>
+                )}
+                {bulkDeleteProgress.errors.length > 0 && (
+                  <div style={{ maxHeight: 200, overflow: 'auto', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4, padding: '8px 12px' }}>
+                    <Typography.Text type="danger" strong>错误详情：</Typography.Text>
+                    {bulkDeleteProgress.errors.map((err, i) => (
+                      <Typography.Text key={i} type="danger" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{err}</Typography.Text>
+                    ))}
+                  </div>
+                )}
+              </Space>
+            </Modal>
 
           {/* ── 批量升年级 ── */}
           <Card size="small" title={<span><RiseOutlined /> 批量升年级</span>}
