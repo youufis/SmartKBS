@@ -596,10 +596,16 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
 
     async def event_generator():
         if total == 0:
-            yield f"data: {json.dumps({'type': 'done', 'deleted': 0, 'message': '没有匹配的用户'}, ensure_ascii=False)}\n\n"
+            yield "data: {}\n\n".format(json.dumps(
+                {'type': 'done', 'deleted': 0, 'message': '没有匹配的用户'},
+                ensure_ascii=False,
+            ))
             return
 
-        yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
+        yield "data: {}\n\n".format(json.dumps(
+            {'type': 'start', 'total': total},
+            ensure_ascii=False,
+        ))
 
         deleted_count = 0
         error_list = []
@@ -611,27 +617,29 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
                 error_list.append(f"用户 '{username}': {str(e)}")
                 logger.error(f"批量删除用户 '{username}' 失败: {e}")
 
-            yield f"data: {json.dumps({
+            progress_data = {
                 'type': 'progress',
                 'current': i + 1,
                 'total': total,
                 'deleted': deleted_count,
                 'error_count': len(error_list),
                 'percent': round((i + 1) / total * 100, 1),
-            }, ensure_ascii=False)}\n\n"
+            }
+            yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
 
         logger.info(f"批量删除用户: pattern={pattern}, deleted={deleted_count}, errors={len(error_list)}")
         done_msg = (
             f"成功删除 {deleted_count} 个用户，{len(error_list)} 个错误"
             if error_list else f"成功删除 {deleted_count} 个用户"
         )
-        yield f"data: {json.dumps({
+        done_data = {
             'type': 'done',
             'deleted': deleted_count,
             'error_count': len(error_list),
             'errors': error_list[:50],
             'message': done_msg,
-        }, ensure_ascii=False)}\n\n"
+        }
+        yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
