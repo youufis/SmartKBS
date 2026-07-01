@@ -326,49 +326,14 @@ def _is_running_under_iis() -> bool:
 
 
 async def _restart_service():
-    """重启服务：自动检测 IIS 或 uvicorn 模式"""
-    if _is_running_under_iis():
-        # ── 通过计划任务回收 IIS 应用池 ──
-        # 前置要求：以管理员身份运行以下命令创建计划任务（只需执行一次）：
-        #   schtasks /Create /SC ONCE /TN "RecycleSmartKBS"
-        #       /TR "C:\Windows\system32\inetsrv\appcmd.exe recycle apppool SmartKBS"
-        #       /ST 00:00 /RL HIGHEST /RU "NT AUTHORITY\SYSTEM" /F
-        #
-        # 原理：schtasks /Run 不需要管理员权限即可触发已存在的计划任务，
-        #       而该任务以 SYSTEM 身份执行 appcmd recycle，完美避开权限问题。
-        try:
-            logger.info("正在通过计划任务 RecycleSmartKBS 回收 IIS 应用池...")
-            subprocess.run(
-                ["schtasks", "/Run", "/TN", "RecycleSmartKBS"],
-                capture_output=True, timeout=30, check=True,
-            )
-            logger.info("已触发计划任务 RecycleSmartKBS，IIS 应用池回收成功")
-            return
-        except Exception as e:
-            hint = (
-                "IIS 应用池回收失败。请先以管理员身份运行以下命令创建计划任务（只需一次）：\n"
-                "  schtasks /Create /SC ONCE /TN \"RecycleSmartKBS\" "
-                "/TR \"C:\\Windows\\system32\\inetsrv\\appcmd.exe recycle apppool SmartKBS\" "
-                "/ST 00:00 /RL HIGHEST /RU \"NT AUTHORITY\\SYSTEM\" /F\n"
-                "如需自定义应用池名称，请将命令中的 SmartKBS 替换为你的应用池名称。"
-            )
-            _state["message"] = hint
-            logger.warning(f"IIS 应用池回收失败: {e}\n💡 {hint}")
-
-    # ── uvicorn 模式 ──
-    # 升级后的文件变更会由 uvicorn --reload 自动检测并重启服务。
-    # 如果未使用 --reload，提醒用户自行添加。
-    import sys as _sys
-    has_reload = any("--reload" in a for a in _sys.argv)
-    if has_reload:
-        logger.info("检测到 uvicorn --reload 模式，文件变更将自动触发重启")
-        return
-
-    # --reload 模式能安全可靠地自动重启，建议加上此参数
-    logger.warning(
-        "未检测到 uvicorn --reload 参数，升级后可能无法自动重启。\n"
-        "💡 建议在启动命令中添加 --reload 参数，例如：\n"
-        "   uvicorn backend.main:app --reload"
+    """升级完成提醒：服务需手动重启以加载新代码"""
+    logger.info(
+        "✅ 升级完成！请手动重启服务以加载新代码。\n"
+        "   - IIS 模式：回收应用池（或运行 schtasks /Run /TN \"RecycleSmartKBS\"）\n"
+        "   - uvicorn 模式：按 Ctrl+C 重启，或添加 --reload 参数自动检测"
+    )
+    _state["message"] = (
+        "✅ 升级完成。请手动重启服务使新代码生效。"
     )
 
 
@@ -878,21 +843,17 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         _set_progress("restart", "正在重启服务（短暂离线）...", 95)
         logger.info(f"[upgrade] Step 7/7: 重启服务")
 
-        # 先将最终进度写入 _state（重启前保留现场）
-        _state["step"] = "restart"
-        _state["message"] = f"✅ 升级完成！{APP_VERSION} → {to_version}（{behind} 个提交），正在重启服务..."
-        _state["progress"] = 99
+        # 先将最终进度写入 _state
+        _state["step"] = "done"
+        _state["message"] = f"✅ 升级完成！{APP_VERSION} → {to_version}（{behind} 个提交），请手动重启服务"
+        _state["progress"] = 100
+        _state["running"] = False
 
-        # 重启前主动释放锁 —— 避免进程被回收后锁文件残留
-        # 注：服务重启期间不可能有新的升级请求，提前释放是安全的
+        # 主动释放锁
         _release_lock()
 
         await _restart_service()
 
-        # ── 注意：以下代码在 IIS 模式下可能不会执行（进程被回收）──
-        # 但 uvicorn 模式下会执行到
-        _set_progress("done", f"✅ 升级完成！{APP_VERSION} → {to_version}（{behind} 个提交）", 100)
-        _state["running"] = False
         logger.info(f"[upgrade] 在线增量升级成功: {APP_VERSION} → {to_version}")
 
     except Exception as e:
@@ -1005,6 +966,7 @@ async def rollback(request: Request):
         # HEAD@{1} 是执行 git reset --hard origin/master 之前的位置
         await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=60)
         await _restart_service()
+        _set_progress("done", "✅ 已回滚到上一个版本，请手动重启服务", 100)
 
         s = _load_state()
         s["history"].append({
