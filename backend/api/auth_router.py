@@ -91,39 +91,42 @@ async def login(req: LoginRequest, fastapi_request: Request):
     role_name = {0: "admin", 1: "teacher", 2: "student"}.get(role_val, "student")
 
     # ── 记录登录日志（考勤统计用） ──
-    # 仅记录学生账号（role=2）的登录
+    # 记录所有用户（学生/教师/管理员）的登录
     logger.info(f"登录日志检查 - username={username}, role_val={role_val}, name_val={name_val}")
+    try:
+        import datetime
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 先关闭上一次未登出的会话
+        execute_insert_update(
+            "UPDATE login_logs SET logout_time=? WHERE username=? AND (logout_time IS NULL OR logout_time = '')",
+            (now_str, username),
+        )
+
+        # 获取客户端 IP（用 fastapi_request 而非 req，因为 req 是 Pydantic 模型）
+        client_ip = fastapi_request.headers.get("x-forwarded-for", "")
+        if client_ip:
+            client_ip = client_ip.split(",")[0].strip()
+        else:
+            client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
+        user_agent = fastapi_request.headers.get("user-agent", "")[:200]
+
+        # 角色名称映射
+        role_label = {0: "管理员", 1: "教师", 2: "学生"}.get(role_val, "未知")
+        execute_insert_update(
+            """INSERT INTO login_logs (username, student_name, grade, class_name, login_time, login_ip, user_agent)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (username, f"{name_val or ''}({role_label})", grade_val or "", str(class_val) if class_val else "",
+             now_str, client_ip, user_agent),
+        )
+        logger.info(f"登录日志已记录: {username}({role_label}) @ {now_str} from {client_ip}")
+    except Exception as e:
+        logger.warning(f"记录登录日志失败: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
+
+    # ── 每日登录积分奖励（仅学生，一天一次） ──
     if role_val == 2:
-        try:
-            import datetime
-            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-            # 先关闭上一次未登出的会话（logout_time 默认是空字符串，需同时匹配 NULL 和 ''）
-            execute_insert_update(
-                "UPDATE login_logs SET logout_time=? WHERE username=? AND (logout_time IS NULL OR logout_time = '')",
-                (now_str, username),
-            )
-
-            # 获取客户端 IP（用 fastapi_request 而非 req，因为 req 是 Pydantic 模型）
-            client_ip = fastapi_request.headers.get("x-forwarded-for", "")
-            if client_ip:
-                client_ip = client_ip.split(",")[0].strip()
-            else:
-                client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
-            user_agent = fastapi_request.headers.get("user-agent", "")[:200]
-            execute_insert_update(
-                """INSERT INTO login_logs (username, student_name, grade, class_name, login_time, login_ip, user_agent)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (username, name_val or "", grade_val or "", str(class_val) if class_val else "",
-                 now_str, client_ip, user_agent),
-            )
-            logger.info(f"登录日志已记录: {username} @ {now_str} from {client_ip}")
-        except Exception as e:
-            logger.warning(f"记录登录日志失败: {e}")
-            import traceback
-            logger.warning(traceback.format_exc())
-
-        # ── 每日登录积分奖励（仅学生，一天一次） ──
         try:
             from backend.reward_engine import award_daily_login
             awarded = award_daily_login(username)
@@ -211,33 +214,33 @@ async def get_current_user(request: Request):
     username, class_val, name_val, gender_val, role_val, grade_val = rows[0]
     role_name = {0: "admin", 1: "teacher", 2: "student"}.get(role_val, "student")
 
-    # ── 会话恢复时也记录考勤（学生自动登录/刷新页面均会触发） ──
-    if role_val == 2:
-        try:
-            # 检查今天是否已有记录，避免重复写入过多
-            import datetime
-            today = datetime.datetime.now().strftime("%Y-%m-%d")
-            existing = execute_query(
-                "SELECT COUNT(*) FROM login_logs WHERE username=? AND login_time LIKE ?",
-                (username, f"{today}%"),
+    # ── 会话恢复时也记录考勤（所有角色均记录） ──
+    try:
+        # 检查今天是否已有记录，避免重复写入过多
+        import datetime
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        existing = execute_query(
+            "SELECT COUNT(*) FROM login_logs WHERE username=? AND login_time LIKE ?",
+            (username, f"{today}%"),
+        )
+        if existing and existing[0][0] == 0:
+            client_ip = request.headers.get("x-forwarded-for", "")
+            if client_ip:
+                client_ip = client_ip.split(",")[0].strip()
+            else:
+                client_ip = request.client.host if request.client else "unknown"
+            user_agent = request.headers.get("user-agent", "")[:200]
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            role_label = {0: "管理员", 1: "教师", 2: "学生"}.get(role_val, "未知")
+            execute_insert_update(
+                """INSERT INTO login_logs (username, student_name, grade, class_name, login_time, login_ip, user_agent)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (username, f"{name_val or ''}({role_label})", grade_val or "", str(class_val) if class_val else "",
+                 now_str, client_ip, user_agent),
             )
-            if existing and existing[0][0] == 0:
-                client_ip = request.headers.get("x-forwarded-for", "")
-                if client_ip:
-                    client_ip = client_ip.split(",")[0].strip()
-                else:
-                    client_ip = request.client.host if request.client else "unknown"
-                user_agent = request.headers.get("user-agent", "")[:200]
-                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                execute_insert_update(
-                    """INSERT INTO login_logs (username, student_name, grade, class_name, login_time, login_ip, user_agent)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (username, name_val or "", grade_val or "", str(class_val) if class_val else "",
-                     now_str, client_ip, user_agent),
-                )
-                logger.info(f"会话恢复记录考勤: {username} @ {now_str}")
-        except Exception as e:
-            logger.warning(f"会话恢复记录考勤失败: {e}")
+            logger.info(f"会话恢复记录考勤: {username}({role_label}) @ {now_str}")
+    except Exception as e:
+        logger.warning(f"会话恢复记录考勤失败: {e}")
 
     return {
         "username": username,

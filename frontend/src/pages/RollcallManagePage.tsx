@@ -816,6 +816,18 @@ interface AttendanceSummary {
   students: AttendanceStudent[]
 }
 
+interface StaffLoginInfo {
+  name: string
+  username: string
+  role: string
+  grade: string
+  class: string
+  is_online: boolean
+  last_login_time: string
+  last_login_ip: string
+  last_user_agent: string
+}
+
 const AttendanceStats: React.FC = () => {
   const user = useAuthStore((s) => s.user)
 
@@ -832,6 +844,11 @@ const AttendanceStats: React.FC = () => {
   const [onlineStudents, setOnlineStudents] = useState<AttendanceStudent[]>([])
   const [onlineLoading, setOnlineLoading] = useState(false)
 
+  // ── 教职工登录信息（管理员可见） ──
+  const [viewMode, setViewMode] = useState<'student' | 'staff'>('student')
+  const [staffList, setStaffList] = useState<StaffLoginInfo[]>([])
+  const [staffLoading, setStaffLoading] = useState(false)
+
   // 默认加载全部在线学生
   useEffect(() => {
     loadOnlineStudents()
@@ -846,6 +863,20 @@ const AttendanceStats: React.FC = () => {
       // ignore
     } finally {
       setOnlineLoading(false)
+    }
+  }
+
+  // ── 加载教职工登录信息（管理员） ──
+  const loadStaffLogins = async () => {
+    setStaffLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/rollcall/attendance/staff-logins')
+      setStaffList(data.staff || [])
+    } catch {
+      message.error('加载教职工登录信息失败')
+      setStaffList([])
+    } finally {
+      setStaffLoading(false)
     }
   }
 
@@ -892,6 +923,49 @@ const AttendanceStats: React.FC = () => {
       message.error('加载考勤数据失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // ── 清除登录日志 ──
+  const [clearTargetUsername, setClearTargetUsername] = useState<string>('')
+  const [clearModalVisible, setClearModalVisible] = useState(false)
+  const [clearAll, setClearAll] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [keepDays, setKeepDays] = useState<number>(0)
+
+  const showClearModal = (all: boolean, username?: string) => {
+    setClearAll(all)
+    setClearTargetUsername(username || '')
+    setKeepDays(0)
+    setClearModalVisible(true)
+  }
+
+  const handleClearLogs = async () => {
+    setClearing(true)
+    try {
+      const params: Record<string, string> = {}
+      if (!clearAll && clearTargetUsername) {
+        params.username = clearTargetUsername
+      }
+      if (keepDays > 0) {
+        params.keep_days = String(keepDays)
+      }
+      await apiClient.delete('/api/rollcall/attendance/login-logs', { params })
+      const msg = keepDays > 0
+        ? `已清除 ${keepDays} 天前的${clearAll ? '' : `用户「${clearTargetUsername}」的`}登录日志`
+        : clearAll
+          ? '已清除全部登录日志'
+          : `已清除用户「${clearTargetUsername}」的全部登录日志`
+      message.success(msg)
+      setClearModalVisible(false)
+      // 刷新数据
+      if (viewMode === 'staff') {
+        loadStaffLogins()
+      }
+    } catch {
+      message.error('清除登录日志失败')
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -968,6 +1042,53 @@ const AttendanceStats: React.FC = () => {
     },
   ]
 
+  // ── 教职工登录表格列 ──
+  const staffColumns = [
+    {
+      title: '序号', key: 'index', width: 60,
+      render: (_: unknown, __: unknown, i: number) => i + 1,
+    },
+    {
+      title: '姓名', dataIndex: 'name', key: 'name',
+      render: (n: string) => n || <Text type="secondary">-</Text>,
+    },
+    {
+      title: '角色', dataIndex: 'role', key: 'role',
+      render: (r: string) => r === '管理员'
+        ? <Tag color="red">{r}</Tag>
+        : <Tag color="blue">{r}</Tag>,
+    },
+    {
+      title: '用户名', dataIndex: 'username', key: 'username',
+      render: (u: string) => u ? <Text copyable={{ text: u }} style={{ fontSize: 12 }}>{u}</Text> : <Text type="secondary">-</Text>,
+    },
+    {
+      title: '在线状态', dataIndex: 'is_online', key: 'is_online',
+      render: (online: boolean) => online
+        ? <Tag icon={<LoginOutlined />} color="success">在线</Tag>
+        : <Tag icon={<StopOutlined />} color="default">离线</Tag>,
+    },
+    {
+      title: '最近登录时间', dataIndex: 'last_login_time', key: 'last_login_time',
+      render: (t: string) => t || <Text type="secondary">-</Text>,
+    },
+    {
+      title: '登录 IP', dataIndex: 'last_login_ip', key: 'last_login_ip',
+      render: (ip: string) => ip || <Text type="secondary">-</Text>,
+    },
+    {
+      title: '操作', key: 'actions', width: 80,
+      render: (_: unknown, record: StaffLoginInfo) => (
+        <Button type="link" size="small" danger
+          onClick={() => showClearModal(false, record.username)}>
+          清除记录
+        </Button>
+      ),
+    },
+  ]
+
+  const isAdmin = user?.role === 'admin'
+
   return (
     <>
       <Card
@@ -975,23 +1096,56 @@ const AttendanceStats: React.FC = () => {
           <Space>
             <UserOutlined style={{ color: '#52c41a', fontSize: 20 }} />
             <span>📋 考勤统计</span>
+            {isAdmin && (
+              <Button.Group size="small" style={{ marginLeft: 12 }}>
+                <Button
+                  type={viewMode === 'student' ? 'primary' : 'default'}
+                  icon={<TeamOutlined />}
+                  onClick={() => { setViewMode('student'); setSummary(null); loadOnlineStudents() }}
+                >
+                  学生考勤
+                </Button>
+                <Button
+                  type={viewMode === 'staff' ? 'primary' : 'default'}
+                  icon={<UserOutlined />}
+                  onClick={() => { setViewMode('staff'); loadStaffLogins() }}
+                >
+                  教职工登录
+                </Button>
+              </Button.Group>
+            )}
           </Space>
         }
         extra={
           <Space>
-            {summary && (
+            {viewMode === 'student' && summary && (
               <Tag color="blue" style={{ fontSize: 13 }}>
                 {summary.grade} · {summary.class}
               </Tag>
             )}
-            {!grade && !cls && onlineStudents.length > 0 && (
+            {viewMode === 'student' && !grade && !cls && onlineStudents.length > 0 && (
               <Tag icon={<LoginOutlined />} color="success" style={{ fontSize: 13 }}>
                 全部在线 · {onlineStudents.length} 人
               </Tag>
             )}
+            {viewMode === 'staff' && staffList.length > 0 && (
+              <Tag icon={<UserOutlined />} color="purple" style={{ fontSize: 13 }}>
+                教职工 · {staffList.length} 人
+              </Tag>
+            )}
+            {isAdmin && (
+              <Button icon={<DeleteOutlined />} danger
+                onClick={() => showClearModal(true)}>
+                清除全部记录
+              </Button>
+            )}
             <Button icon={<ReloadOutlined />}
-              onClick={() => grade && cls ? handleClassChange(cls) : loadOnlineStudents()}
-              loading={loading || onlineLoading}>
+              onClick={() => {
+                if (viewMode === 'staff') loadStaffLogins()
+                else if (grade && cls) handleClassChange(cls)
+                else loadOnlineStudents()
+              }}
+              loading={loading || onlineLoading || staffLoading}>
               刷新数据
             </Button>
           </Space>
@@ -999,101 +1153,168 @@ const AttendanceStats: React.FC = () => {
         style={{ marginBottom: 16 }}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          {/* 选择器 */}
-          <Space wrap>
-            <Select
-              placeholder="— 选择年级 —"
-              value={grade || undefined}
-              onChange={handleGradeChange}
-              options={grades.map(g => ({ label: g, value: g }))}
-              style={{ width: 160 }}
-              size="large"
-              allowClear
-            />
-            <Select
-              placeholder="— 选择班级 —"
-              value={cls || undefined}
-              onChange={handleClassChange}
-              options={classes.map(c => ({ label: c, value: c }))}
-              style={{ width: 180 }}
-              size="large"
-              disabled={!grade}
-              allowClear
-            />
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              （默认显示全部在线学生，选择年级/班级可查看班级详情）
-            </Text>
-          </Space>
-
-          {/* 统计概览 - 班级模式 */}
-          {summary && (
+          {/* ── 学生考勤模式 ── */}
+          {viewMode === 'student' && (
             <>
-              <Row gutter={24}>
-                <Col span={6}>
-                  <Card size="small" style={{ textAlign: 'center', background: '#f6ffed' }}>
-                    <Statistic title="班级总人数" value={summary.total_count}
-                      prefix={<TeamOutlined />} valueStyle={{ color: '#52c41a' }} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small" style={{ textAlign: 'center', background: '#e6f7ff' }}>
-                    <Statistic title="已登录" value={summary.logged_in_count}
-                      prefix={<LoginOutlined />} valueStyle={{ color: '#1890ff' }} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small" style={{ textAlign: 'center', background: '#fff7e6' }}>
-                    <Statistic title="未登录" value={summary.not_logged_in_count}
-                      prefix={<StopOutlined />} valueStyle={{ color: '#faad14' }} />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small" style={{ textAlign: 'center', background: '#f0f5ff' }}>
-                    <Statistic title="登录率" value={summary.login_rate} suffix="%"
-                      prefix={<BarChartOutlined />} valueStyle={{ color: '#722ed1' }} />
-                  </Card>
-                </Col>
-              </Row>
+              {/* 选择器 */}
+              <Space wrap>
+                <Select
+                  placeholder="— 选择年级 —"
+                  value={grade || undefined}
+                  onChange={handleGradeChange}
+                  options={grades.map(g => ({ label: g, value: g }))}
+                  style={{ width: 160 }}
+                  size="large"
+                  allowClear
+                />
+                <Select
+                  placeholder="— 选择班级 —"
+                  value={cls || undefined}
+                  onChange={handleClassChange}
+                  options={classes.map(c => ({ label: c, value: c }))}
+                  style={{ width: 180 }}
+                  size="large"
+                  disabled={!grade}
+                  allowClear
+                />
+                <Text type="secondary" style={{ fontSize: 13 }}>
+                  （默认显示全部在线学生，选择年级/班级可查看班级详情）
+                </Text>
+              </Space>
 
-              <Divider>📋 学生考勤明细</Divider>
+              {/* 统计概览 - 班级模式 */}
+              {summary && (
+                <>
+                  <Row gutter={24}>
+                    <Col span={6}>
+                      <Card size="small" style={{ textAlign: 'center', background: '#f6ffed' }}>
+                        <Statistic title="班级总人数" value={summary.total_count}
+                          prefix={<TeamOutlined />} valueStyle={{ color: '#52c41a' }} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card size="small" style={{ textAlign: 'center', background: '#e6f7ff' }}>
+                        <Statistic title="已登录" value={summary.logged_in_count}
+                          prefix={<LoginOutlined />} valueStyle={{ color: '#1890ff' }} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card size="small" style={{ textAlign: 'center', background: '#fff7e6' }}>
+                        <Statistic title="未登录" value={summary.not_logged_in_count}
+                          prefix={<StopOutlined />} valueStyle={{ color: '#faad14' }} />
+                      </Card>
+                    </Col>
+                    <Col span={6}>
+                      <Card size="small" style={{ textAlign: 'center', background: '#f0f5ff' }}>
+                        <Statistic title="登录率" value={summary.login_rate} suffix="%"
+                          prefix={<BarChartOutlined />} valueStyle={{ color: '#722ed1' }} />
+                      </Card>
+                    </Col>
+                  </Row>
 
-              <Table
-                dataSource={summary.students}
-                columns={columns}
-                rowKey={(r) => r.username || r.name}
-                loading={loading}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生` }}
-                size="middle"
-              />
+                  <Divider>📋 学生考勤明细</Divider>
+
+                  <Table
+                    dataSource={summary.students}
+                    columns={columns}
+                    rowKey={(r) => r.username || r.name}
+                    loading={loading}
+                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生` }}
+                    size="middle"
+                  />
+                </>
+              )}
+
+              {/* 全部在线学生模式（默认） */}
+              {!summary && onlineStudents.length > 0 && (
+                <>
+                  <Divider>📋 当前全部在线学生</Divider>
+                  <Table
+                    dataSource={onlineStudents}
+                    columns={columns}
+                    rowKey={(r) => r.username || r.name}
+                    loading={onlineLoading}
+                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名在线学生` }}
+                    size="middle"
+                  />
+                </>
+              )}
+
+              {!summary && onlineStudents.length === 0 && !onlineLoading && !loading && (
+                <Empty description={grade || cls ? '请先选择年级和班级查看考勤统计' : '当前没有在线学生'} />
+              )}
+
+              {(loading || onlineLoading) && (
+                <div style={{ textAlign: 'center', padding: 40 }}>
+                  <Spin tip="加载考勤数据..." />
+                </div>
+              )}
             </>
           )}
 
-          {/* 全部在线学生模式（默认） */}
-          {!summary && onlineStudents.length > 0 && (
+          {/* ── 教职工登录模式 ── */}
+          {viewMode === 'staff' && (
             <>
-              <Divider>📋 当前全部在线学生</Divider>
+              <Divider>📋 教职工登录信息</Divider>
               <Table
-                dataSource={onlineStudents}
-                columns={columns}
-                rowKey={(r) => r.username || r.name}
-                loading={onlineLoading}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名在线学生` }}
+                dataSource={staffList}
+                columns={staffColumns}
+                rowKey="username"
+                loading={staffLoading}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名教职工` }}
                 size="middle"
               />
+              {staffList.length === 0 && !staffLoading && (
+                <Empty description="暂无教职工登录记录" />
+              )}
+              {staffLoading && (
+                <div style={{ textAlign: 'center', padding: 40 }}>
+                  <Spin tip="加载教职工登录信息..." />
+                </div>
+              )}
             </>
-          )}
-
-          {!summary && onlineStudents.length === 0 && !onlineLoading && !loading && (
-            <Empty description={grade || cls ? '请先选择年级和班级查看考勤统计' : '当前没有在线学生'} />
-          )}
-
-          {(loading || onlineLoading) && (
-            <div style={{ textAlign: 'center', padding: 40 }}>
-              <Spin tip="加载考勤数据..." />
-            </div>
           )}
         </Space>
       </Card>
+
+      {/* 清除确认弹窗 */}
+      <Modal
+        title={clearAll ? '确认清除登录日志' : `确认清除登录日志`}
+        open={clearModalVisible}
+        onOk={handleClearLogs}
+        onCancel={() => setClearModalVisible(false)}
+        confirmLoading={clearing}
+        okText="确认清除"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <p>
+            {clearAll
+              ? `确定要清除登录日志吗？你可以选择保留最近 N 天的记录，仅清除更早的日志。`
+              : `确定要清除用户「${clearTargetUsername}」的登录日志吗？`
+            }
+          </p>
+          {clearAll && (
+            <Space>
+              <span style={{ whiteSpace: 'nowrap' }}>仅清除</span>
+              <Select
+                value={keepDays}
+                onChange={setKeepDays}
+                style={{ width: 120 }}
+                options={[
+                  { label: '全部记录', value: 0 },
+                  { label: '保留近 7 天', value: 7 },
+                  { label: '保留近 15 天', value: 15 },
+                  { label: '保留近 30 天', value: 30 },
+                  { label: '保留近 90 天', value: 90 },
+                ]}
+              />
+              <span style={{ whiteSpace: 'nowrap' }}>之前的旧记录</span>
+            </Space>
+          )}
+        </Space>
+      </Modal>
 
       {/* 登录明细弹窗 */}
       <Modal
