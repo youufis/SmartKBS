@@ -936,3 +936,127 @@ async def attendance_online_students(request: Request):
         })
 
     return {"students": student_list, "total": len(student_list)}
+
+
+@router.get("/attendance/staff-logins", summary="获取教职工登录信息（管理员专用）")
+async def attendance_staff_logins(request: Request):
+    """获取所有教师和管理员的登录信息（仅管理员可查看）"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+
+    if role != 0:
+        raise HTTPException(status_code=403, detail="仅管理员可查看教职工登录信息")
+
+    # 获取所有教师(role=1)和管理员(role=0)
+    staff_rows = execute_query_dict(
+        """SELECT username, name, role, grade, class
+           FROM users
+           WHERE role IN (0, 1)
+           ORDER BY role, username"""
+    )
+
+    if not staff_rows:
+        return {"staff": [], "total": 0}
+
+    # 获取每位教职工的最新登录信息
+    staff_usernames = [r["username"] for r in staff_rows]
+    latest_logins = {}
+    if staff_usernames:
+        ph = ",".join(["?"] * len(staff_usernames))
+        latest_rows = execute_query_dict(
+            f"""SELECT username, login_time, login_ip, user_agent, logout_time FROM login_logs
+                WHERE username IN ({ph})
+                AND login_time = (
+                    SELECT MAX(login_time) FROM login_logs sub
+                    WHERE sub.username = login_logs.username
+                )
+                ORDER BY login_time DESC""",
+            tuple(staff_usernames),
+        )
+        for lr in latest_rows:
+            # 如果已登出，则标记为离线
+            is_online = not lr.get("logout_time")
+            latest_logins[lr["username"]] = {
+                "login_time": lr["login_time"],
+                "login_ip": lr["login_ip"],
+                "user_agent": lr.get("user_agent", ""),
+                "is_online": is_online,
+            }
+
+    # 获取当前在线教职工（有活跃 token）
+    online_usernames = get_online_usernames()
+
+    staff_list = []
+    for r in staff_rows:
+        login_info = latest_logins.get(r["username"], {})
+        is_online = r["username"] in online_usernames
+        role_label = "管理员" if r["role"] == 0 else "教师"
+        staff_list.append({
+            "name": r["name"] or "",
+            "username": r["username"],
+            "role": role_label,
+            "grade": r.get("grade", "") or "",
+            "class": r.get("class", "") or "",
+            "is_online": is_online,
+            "last_login_time": login_info.get("login_time", ""),
+            "last_login_ip": login_info.get("login_ip", ""),
+            "last_user_agent": login_info.get("user_agent", ""),
+        })
+
+    return {"staff": staff_list, "total": len(staff_list)}
+
+
+@router.delete("/attendance/login-logs", summary="清除登录日志（管理员专用）")
+async def attendance_clear_login_logs(request: Request):
+    """清除登录日志记录（仅管理员可操作）"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+
+    if role != 0:
+        raise HTTPException(status_code=403, detail="仅管理员可清除登录日志")
+
+    # 获取查询参数
+    target_username = request.query_params.get("username", "")
+    keep_days_str = request.query_params.get("keep_days", "")
+
+    try:
+        if target_username:
+            if keep_days_str:
+                # 保留最近 N 天，清除更早的记录
+                try:
+                    keep_days = int(keep_days_str)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="keep_days 必须是整数")
+                execute_insert_update(
+                    "DELETE FROM login_logs WHERE username=? AND login_time < datetime('now', ? || ' days')",
+                    (target_username, f"-{keep_days}"),
+                )
+                logger.info(f"管理员 {user['username']} 已清除用户 {target_username} {keep_days} 天前的登录日志")
+                return {"success": True, "message": f"已清除用户 {target_username} {keep_days} 天前的登录日志"}
+            else:
+                execute_insert_update(
+                    "DELETE FROM login_logs WHERE username=?",
+                    (target_username,),
+                )
+                logger.info(f"管理员 {user['username']} 已清除用户 {target_username} 的全部登录日志")
+                return {"success": True, "message": f"已清除用户 {target_username} 的全部登录日志"}
+        else:
+            if keep_days_str:
+                try:
+                    keep_days = int(keep_days_str)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="keep_days 必须是整数")
+                execute_insert_update(
+                    "DELETE FROM login_logs WHERE login_time < datetime('now', ? || ' days')",
+                    (f"-{keep_days}",),
+                )
+                logger.info(f"管理员 {user['username']} 已清除 {keep_days} 天前的全部登录日志")
+                return {"success": True, "message": f"已清除 {keep_days} 天前的全部登录日志"}
+            else:
+                execute_insert_update("DELETE FROM login_logs")
+                logger.info(f"管理员 {user['username']} 已清除全部登录日志")
+                return {"success": True, "message": "已清除全部登录日志"}
+    except Exception as e:
+        logger.error(f"清除登录日志失败: {e}")
+        raise HTTPException(status_code=500, detail="清除登录日志失败")
