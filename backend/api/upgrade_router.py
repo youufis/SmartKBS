@@ -328,27 +328,30 @@ def _is_running_under_iis() -> bool:
 async def _restart_service():
     """重启服务：自动检测 IIS 或 uvicorn 模式"""
     if _is_running_under_iis():
+        # ── 通过计划任务回收 IIS 应用池 ──
+        # 前置要求：以管理员身份运行以下命令创建计划任务（只需执行一次）：
+        #   schtasks /Create /SC ONCE /TN "RecycleSmartKBS"
+        #       /TR "C:\Windows\system32\inetsrv\appcmd.exe recycle apppool SmartKBS"
+        #       /ST 00:00 /RL HIGHEST /RU "NT AUTHORITY\SYSTEM" /F
+        #
+        # 原理：schtasks /Run 不需要管理员权限即可触发已存在的计划任务，
+        #       而该任务以 SYSTEM 身份执行 appcmd recycle，完美避开权限问题。
         try:
-            # 触碰 web.config 触发 IIS 自动回收应用池
-            # IIS 内建机制：检测到 web.config 变更时自动回收所属应用池
-            # 此方式不需要任何管理员权限
-            web_config = BASE_DIR / "web.config"
-            if web_config.exists():
-                # 追加换行 → IIS 必定检测到文件内容 + 时间变更 → 触发应用回收
-                web_config.write_bytes(web_config.read_bytes() + b"\n")
-                await asyncio.sleep(1)
-                # 还原文件（去掉末尾多余的换行）
-                content = web_config.read_bytes()
-                if content.endswith(b"\n"):
-                    web_config.write_bytes(content[:-1])
-                logger.info("已触发 web.config 变更，IIS 将自动回收应用池...")
-                await asyncio.sleep(2)
-                logger.info("IIS 应用池自动回收触发完成")
-            else:
-                logger.warning("web.config 不存在，无法通过触碰文件触发 IIS 回收")
+            logger.info("正在通过计划任务 RecycleSmartKBS 回收 IIS 应用池...")
+            subprocess.run(
+                ["schtasks", "/Run", "/TN", "RecycleSmartKBS"],
+                capture_output=True, timeout=30, check=True,
+            )
+            logger.info("已触发计划任务 RecycleSmartKBS，IIS 应用池回收成功")
             return
         except Exception as e:
-            hint = "IIS 应用池回收失败（触碰 web.config 方式）"
+            hint = (
+                "IIS 应用池回收失败。请先以管理员身份运行以下命令创建计划任务（只需一次）：\n"
+                "  schtasks /Create /SC ONCE /TN \"RecycleSmartKBS\" "
+                "/TR \"C:\\Windows\\system32\\inetsrv\\appcmd.exe recycle apppool SmartKBS\" "
+                "/ST 00:00 /RL HIGHEST /RU \"NT AUTHORITY\\SYSTEM\" /F\n"
+                "如需自定义应用池名称，请将命令中的 SmartKBS 替换为你的应用池名称。"
+            )
             _state["message"] = hint
             logger.warning(f"IIS 应用池回收失败: {e}\n💡 {hint}")
 
