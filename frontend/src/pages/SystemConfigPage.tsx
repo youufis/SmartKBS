@@ -176,7 +176,7 @@ const UpgradePanel: React.FC = () => {
                 if (st.error) {
                   message.error('升级失败: ' + st.error)
                 } else {
-                  message.success('🎉 升级完成！请刷新页面')
+                  message.success('🎉 升级完成！如需加载新代码请手动重启服务')
                 }
                 loadHistory()
               }

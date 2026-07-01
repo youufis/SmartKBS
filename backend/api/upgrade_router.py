@@ -326,15 +326,9 @@ def _is_running_under_iis() -> bool:
 
 
 async def _restart_service():
-    """升级完成提醒：服务需手动重启以加载新代码"""
-    logger.info(
-        "✅ 升级完成！请手动重启服务以加载新代码。\n"
-        "   - IIS 模式：回收应用池（或运行 schtasks /Run /TN \"RecycleSmartKBS\"）\n"
-        "   - uvicorn 模式：按 Ctrl+C 重启，或添加 --reload 参数自动检测"
-    )
-    _state["message"] = (
-        "✅ 升级完成。请手动重启服务使新代码生效。"
-    )
+    """升级完成提醒"""
+    logger.info("✅ 升级完成，如需加载新代码请手动重启服务")
+    _state["message"] = "✅ 升级完成，如需加载新代码请手动重启服务"
 
 
 async def _fetch_remote_version() -> dict[str, Any] | None:
