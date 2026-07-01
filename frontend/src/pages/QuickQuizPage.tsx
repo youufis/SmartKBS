@@ -18,6 +18,8 @@ import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import useSubjectOptions from '../hooks/useSubjectOptions'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -42,6 +44,12 @@ const QuickQuizPage: React.FC = () => {
   const [history, setHistory] = useState<any[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyTab, setHistoryTab] = useState('active')
+  const [activityScope, setActivityScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes',
+    target_grade: '',
+    target_class: '',
+    target_users: '',
+  })
 
   useEffect(() => {
     loadRooms()
@@ -75,10 +83,19 @@ const QuickQuizPage: React.FC = () => {
 
   const handleCreate = async (values: any) => {
     try {
-      const { data } = await apiClient.post('/api/quick-quiz/room', values)
+      const scope = activityScope || { target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }
+      const payload = {
+        ...values,
+        target_scope: scope.target_scope,
+        target_grade: scope.target_grade,
+        target_class: scope.target_class,
+        target_users: scope.target_users,
+      }
+      const { data } = await apiClient.post('/api/quick-quiz/room', payload)
       message.success(`房间「${data.title}」创建成功！房间码：${data.room_code}`)
       setCreateModal(false)
       form.resetFields()
+      setActivityScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       loadRooms()
     } catch (err: any) {
       message.error(err.response?.data?.detail || '创建失败')
@@ -107,7 +124,15 @@ const QuickQuizPage: React.FC = () => {
   const handleEdit = async (values: any) => {
     if (!editRoom) return
     try {
-      await apiClient.put(`/api/quick-quiz/room/${editRoom.id}`, values)
+      const scope = activityScope || { target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }
+      const payload = {
+        ...values,
+        target_scope: scope.target_scope,
+        target_grade: scope.target_grade,
+        target_class: scope.target_class,
+        target_users: scope.target_users,
+      }
+      await apiClient.put(`/api/quick-quiz/room/${editRoom.id}`, payload)
       message.success('活动配置已更新')
       setEditModal(false)
       setEditRoom(null)
@@ -193,6 +218,12 @@ const QuickQuizPage: React.FC = () => {
             <Button size="small"
               onClick={() => {
                 setEditRoom(record)
+                setActivityScope({
+                  target_scope: record.target_scope || 'teacher_classes',
+                  target_grade: record.target_grade || '',
+                  target_class: record.target_class || '',
+                  target_users: record.target_users || '',
+                })
                 editForm.setFieldsValue({
                   title: record.title,
                   question_source: record.question_source || 'bank_academic',
@@ -202,8 +233,6 @@ const QuickQuizPage: React.FC = () => {
                   subject: record.subject,
                   difficulty: record.difficulty,
                   knowledge_points: record.knowledge_points,
-                  target_grade: record.target_grade,
-                  target_class: record.target_class,
                   min_players: record.min_players,
                   max_players: record.max_players,
                 })
@@ -371,7 +400,11 @@ const QuickQuizPage: React.FC = () => {
       <Modal
         title="🚀 创建抢答活动"
         open={createModal}
-        onCancel={() => setCreateModal(false)}
+        onCancel={() => {
+          setCreateModal(false)
+          form.resetFields()
+          setActivityScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
+        }}
         onOk={() => form.submit()}
         okText="创建"
         width={600}
@@ -455,18 +488,13 @@ const QuickQuizPage: React.FC = () => {
           <Form.Item name="knowledge_points" label="知识点（可选，逗号分隔）">
             <Input placeholder="例如：计算机网络, 数据结构" />
           </Form.Item>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="target_grade" label="目标年级（留空不限）">
-                <Input placeholder="高一、高二..." />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="target_class" label="目标班级（留空不限）">
-                <Input placeholder="1,2,3..." />
-              </Form.Item>
-            </Col>
-          </Row>
+          <Form.Item label="活动目标范围" style={{ marginBottom: 16 }}>
+            <ActivityScopeSelector
+              value={activityScope}
+              onChange={setActivityScope}
+              showAllOption={isTeacherOrAdmin && user?.role === 'admin'}
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -499,7 +527,12 @@ const QuickQuizPage: React.FC = () => {
       <Modal
         title="✏️ 编辑抢答活动"
         open={editModal}
-        onCancel={() => { setEditModal(false); setEditRoom(null); editForm.resetFields() }}
+        onCancel={() => {
+          setEditModal(false)
+          setEditRoom(null)
+          editForm.resetFields()
+          setActivityScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
+        }}
         onOk={() => editForm.submit()}
         okText="保存"
         width={600}
@@ -556,18 +589,13 @@ const QuickQuizPage: React.FC = () => {
           <Form.Item name="knowledge_points" label="知识点（可选，逗号分隔）">
             <Input placeholder="例如：计算机网络, 数据结构" />
           </Form.Item>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="target_grade" label="目标年级">
-                <Input placeholder="留空不限" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="target_class" label="目标班级">
-                <Input placeholder="留空不限" />
-              </Form.Item>
-            </Col>
-          </Row>
+          <Form.Item label="活动目标范围" style={{ marginBottom: 16 }}>
+            <ActivityScopeSelector
+              value={activityScope}
+              onChange={setActivityScope}
+              showAllOption={isTeacherOrAdmin && user?.role === 'admin'}
+            />
+          </Form.Item>
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="min_players" label="最少人数">

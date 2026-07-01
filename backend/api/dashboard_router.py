@@ -516,18 +516,18 @@ async def dashboard_summary(request: Request):
             discussion_member_count = _db_count("SELECT COUNT(*) FROM discussion_members")
         else:
             discussion_total = _db_count(
-                """SELECT COUNT(*) FROM discussions WHERE creator_username=? OR creator_username IN (SELECT username FROM users WHERE role=0)""",
+                "SELECT COUNT(*) FROM discussions WHERE creator_username=?",
                 (username,),
             )
             discussion_active = _db_count(
-                """SELECT COUNT(*) FROM discussions WHERE status='active' AND (creator_username=? OR creator_username IN (SELECT username FROM users WHERE role=0))""",
+                "SELECT COUNT(*) FROM discussions WHERE status='active' AND creator_username=?",
                 (username,),
             )
             discussion_member_count = _db_count(
                 """SELECT COUNT(*) FROM discussion_members dm
                    JOIN discussion_groups dg ON dm.group_id = dg.id
                    JOIN discussions d ON dg.discussion_id = d.id
-                   WHERE d.creator_username=? OR d.creator_username IN (SELECT username FROM users WHERE role=0)""",
+                   WHERE d.creator_username=?""",
                 (username,),
             )
 
@@ -1098,7 +1098,7 @@ async def recent_activity(request: Request):
                    JOIN discussion_groups dg ON m.group_id = dg.id
                    JOIN discussions d ON dg.discussion_id = d.id
                    WHERE m.created_at >= ?
-                   AND (d.creator_username = ? OR d.creator_username IN (SELECT username FROM users WHERE role=0))
+                   AND d.creator_username = ?
                    AND m.msg_type IN ('text', 'ai_suggest')
                    ORDER BY m.created_at DESC LIMIT 5""",
                 (week_ago_ts, username),
