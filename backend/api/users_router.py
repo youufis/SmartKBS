@@ -165,8 +165,9 @@ def _delete_user_completely(username: str):
         # 先清理共享资源关联的课程绑定
         ("DELETE FROM curriculum_bindings WHERE resource_id IN (SELECT id FROM shared_resources WHERE owner_username=?)", (username,)),
         ("DELETE FROM shared_resources WHERE owner_username=?", (username,)),
-        ("DELETE FROM tasks WHERE creator_username=?", (username,)),
+        # 先删 task_grades 子表，再删 tasks 父表（顺序不可颠倒）
         ("DELETE FROM task_grades WHERE task_id IN (SELECT id FROM tasks WHERE creator_username=?)", (username,)),
+        ("DELETE FROM tasks WHERE creator_username=?", (username,)),
         ("DELETE FROM announcements WHERE creator_username=?", (username,)),
         ("DELETE FROM interaction_quizzes WHERE creator_username=?", (username,)),
         ("DELETE FROM interaction_polls WHERE creator_username=?", (username,)),
@@ -175,7 +176,7 @@ def _delete_user_completely(username: str):
         ("DELETE FROM quest_question_records WHERE quest_id IN (SELECT id FROM quest_records WHERE student_username=?)", (username,)),
         ("DELETE FROM quest_records WHERE student_username=?", (username,)),
         ("DELETE FROM quest_badge_counts WHERE student_username=?", (username,)),
-        ("DELETE FROM quest_question_bank WHERE creator_username=?", (username,)),
+        # quest_question_bank 没有 creator_username 列，创建题目时不追踪创建者，故不删除
         # 知识抢答（quick_quiz）
         ("DELETE FROM quick_quiz_answers WHERE student_username=?", (username,)),
         ("DELETE FROM quick_quiz_players WHERE student_username=?", (username,)),
@@ -187,18 +188,32 @@ def _delete_user_completely(username: str):
         ("DELETE FROM rollcall_weights WHERE teacher_username=?", (username,)),
         ("DELETE FROM rollcall_meta WHERE teacher_username=?", (username,)),
         ("DELETE FROM rollcall_history WHERE teacher_username=?", (username,)),
-        # 学生作为被积分/点名对象（student_name TEXT 匹配）
-        ("DELETE FROM scores WHERE student_name=?", (student_name,)),
-        ("DELETE FROM rollcall_weights WHERE student_name=?", (student_name,)),
-        ("DELETE FROM rollcall_history WHERE student_name=?", (student_name,)),
+        # 学生作为被积分/点名对象（student_name TEXT 匹配，已移至下方条件追加）
         # 自我画像数据
         ("DELETE FROM portrait_likes WHERE portrait_id IN (SELECT id FROM student_portraits WHERE username=?)", (username,)),
         ("DELETE FROM student_portraits WHERE username=?", (username,)),
+        # 学伴数据
+        ("DELETE FROM ai_companion_config WHERE username=?", (username,)),
+        ("DELETE FROM ai_companion_memory WHERE student_username=?", (username,)),
+        ("DELETE FROM ai_companion_push_log WHERE student_username=?", (username,)),
+        # 错题本
+        ("DELETE FROM wrong_book WHERE student_username=?", (username,)),
+        # 协作白板：先清理用户在他人房间的痕迹，再删除自己创建的房间
+        ("DELETE FROM whiteboard_operations WHERE username=?", (username,)),
+        ("DELETE FROM whiteboard_room_members WHERE username=?", (username,)),
+        ("DELETE FROM whiteboard_rooms WHERE creator_username=?", (username,)),
+        # 讨论组子表（需先于 discussions 删除）
+        ("DELETE FROM discussion_groups WHERE discussion_id IN (SELECT id FROM discussions WHERE creator_username=?)", (username,)),
     ]
     # 删除资源分组项
     for gid in group_id_list:
         delete_ops.append(("DELETE FROM resource_group_items WHERE group_id=?", (gid,)))
     delete_ops.append(("DELETE FROM resource_groups WHERE username=?", (username,)))
+    # 仅当 student_name 非空时才按姓名匹配删除，避免空字符串误删他人记录
+    if student_name:
+        delete_ops.append(("DELETE FROM scores WHERE student_name=?", (student_name,)))
+        delete_ops.append(("DELETE FROM rollcall_weights WHERE student_name=?", (student_name,)))
+        delete_ops.append(("DELETE FROM rollcall_history WHERE student_name=?", (student_name,)))
     # 最后删除用户本身
     delete_ops.append(("DELETE FROM users WHERE username=?", (username,)))
 
@@ -209,7 +224,7 @@ def _delete_user_completely(username: str):
         except Exception as e:
             logger.warning(f"删除操作跳过（表或列不存在）: {sql[:80]}... - {e}")
 
-    # 4. 删除 questions.db 中的考试答题记录和代码练习记录
+    # 4. 删除 questions.db 中的考试、练习、题库等记录
     try:
         from backend.question_db import execute_update as q_execute_update
         q_execute_update(
@@ -223,6 +238,31 @@ def _delete_user_completely(username: str):
         )
         q_execute_update(
             "DELETE FROM ai_practice_results WHERE student_username=?", (username,)
+        )
+        # 教师创建的考试（先删关联的 exam_questions）
+        q_execute_update(
+            "DELETE FROM exam_questions WHERE exam_id IN (SELECT id FROM exams WHERE creator_username=?)", (username,)
+        )
+        q_execute_update(
+            "DELETE FROM exams WHERE creator_username=?", (username,)
+        )
+        # 教师创建的题库题目
+        q_execute_update(
+            "DELETE FROM question_bank WHERE creator_username=?", (username,)
+        )
+        # 教师创建的智能练习（先删关联题目，再删练习记录）
+        q_execute_update(
+            "DELETE FROM practice_session_questions WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)
+        )
+        q_execute_update(
+            "DELETE FROM practice_attempts WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)
+        )
+        q_execute_update(
+            "DELETE FROM practice_sessions WHERE creator_username=?", (username,)
+        )
+        # 学生答题记录（与教师创建的练习独立）
+        q_execute_update(
+            "DELETE FROM practice_attempts WHERE student_username=?", (username,)
         )
     except Exception as e:
         logger.warning(f"删除 questions.db 记录失败: {e}")
