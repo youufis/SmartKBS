@@ -74,20 +74,32 @@ const NotificationsPage: React.FC = () => {
   }, [page, filter, activeTab])
 
   const handleMarkRead = async (id: number) => {
-    await notificationsApi.markAsRead(id)
-    fetchNotifications()
+    try {
+      await notificationsApi.markAsRead(id)
+      fetchNotifications()
+    } catch {
+      message.error('标记已读失败，请重试')
+    }
   }
 
   const handleMarkAllRead = async () => {
-    await notificationsApi.markAllAsRead()
-    message.success('已全部标记为已读')
-    fetchNotifications()
+    try {
+      await notificationsApi.markAllAsRead()
+      message.success('已全部标记为已读')
+      fetchNotifications()
+    } catch {
+      message.error('操作失败，请重试')
+    }
   }
 
   const handleDelete = async (id: number) => {
-    await notificationsApi.deleteNotification(id)
-    message.success('通知已删除')
-    fetchNotifications()
+    try {
+      await notificationsApi.deleteNotification(id)
+      message.success('通知已删除')
+      fetchNotifications()
+    } catch {
+      message.error('删除失败，请重试')
+    }
   }
 
   // ── 学伴消息 ──

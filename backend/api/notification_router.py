@@ -208,11 +208,20 @@ async def mark_read(notification_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    execute_insert_update(
-        """UPDATE notifications SET is_read = 1
-           WHERE id = ? AND recipient_username = ?""",
-        (notification_id, username),
-    )
+    from backend.database import get_connection
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE notifications SET is_read = 1 WHERE id = ? AND recipient_username = ?",
+            (notification_id, username),
+        )
+        conn.commit()
+        affected = c.rowcount
+
+    logger.info(f"标记通知已读: id={notification_id}, username={username}, affected={affected}")
+    if affected == 0:
+        logger.warning(f"标记已读未找到通知: id={notification_id}, username={username}")
+
     return {"message": "已标记为已读"}
 
 

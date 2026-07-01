@@ -101,26 +101,27 @@ const NotificationBell: React.FC = () => {
         tasks.push(useCompanionStore.getState().markAllPushesRead())
       }
       await Promise.all(tasks)
-      setUnreadCount(0)
-      setPushUnreadCount(0)
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
-      setPushes([])
+      fetchAllUnreadCounts()
+      fetchRecentNotifications()
     } catch {
       // ignore
     }
   }
 
-  const handleMarkRead = async (id: number) => {
+  const handleMarkRead = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation()
     try {
       await notificationsApi.markAsRead(id)
       setUnreadCount((prev) => Math.max(0, prev - 1))
       setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)))
+      fetchAllUnreadCounts()
     } catch {
       // ignore
     }
   }
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation()
     try {
       await notificationsApi.deleteNotification(id)
       setNotifications((prev) => prev.filter((n) => n.id !== id))
@@ -130,13 +131,15 @@ const NotificationBell: React.FC = () => {
     }
   }
 
-  const handlePushMarkRead = async (pushId: number) => {
+  const handlePushMarkRead = async (e: React.MouseEvent, pushId: number) => {
+    e.stopPropagation()
     await useCompanionStore.getState().markPushRead(pushId)
     setPushes((prev) => prev.filter((p) => p.id !== pushId))
     setPushUnreadCount((prev) => Math.max(0, prev - 1))
   }
 
-  const handlePushDelete = async (pushId: number) => {
+  const handlePushDelete = async (e: React.MouseEvent, pushId: number) => {
+    e.stopPropagation()
     try {
       await companionApi.deletePush(pushId)
       setPushes((prev) => prev.filter((p) => p.id !== pushId))
@@ -192,10 +195,10 @@ const NotificationBell: React.FC = () => {
                     }}
                     actions={
                       item.is_read
-                        ? [<Button type="text" size="small" icon={<DeleteOutlined />} onClick={() => handleDelete(item.id)} />]
+                        ? [<Button type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => handleDelete(e, item.id)} />]
                         : [
-                          <Button type="text" size="small" icon={<CheckOutlined />} onClick={() => handleMarkRead(item.id)} />,
-                          <Button type="text" size="small" icon={<DeleteOutlined />} onClick={() => handleDelete(item.id)} />,
+                          <Button type="text" size="small" icon={<CheckOutlined />} onClick={(e) => handleMarkRead(e, item.id)} />,
+                          <Button type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => handleDelete(e, item.id)} />,
                         ]
                     }
                   >
@@ -242,10 +245,10 @@ const NotificationBell: React.FC = () => {
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                         actions={[
                           <Button type="text" size="small" icon={<CheckOutlined />}
-                            onClick={() => handlePushMarkRead(item.id)}
+                            onClick={(e) => handlePushMarkRead(e, item.id)}
                           />,
                           <Button type="text" size="small" icon={<DeleteOutlined />}
-                            onClick={() => handlePushDelete(item.id)}
+                            onClick={(e) => handlePushDelete(e, item.id)}
                           />,
                         ]}
                       >

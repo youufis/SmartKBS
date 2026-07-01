@@ -1146,8 +1146,9 @@ async def _perform_version_check():
     content = "\n".join(content_lines)
 
     # 检查是否已经通知过，避免重复
+    # 去重键仅基于版本号（不含 behind 提交数），防止 behind 变化导致重复通知
     s = _load_state()
-    notify_key = f"{latest or 'unknown'}:{behind}"
+    notify_key = latest or current
     if s.get(_AUTO_CHECK_STATE_KEY, "") == notify_key:
         # 已通知过，只更新预缓存标记
         _update_prefetch_flag(s, notify_key)
