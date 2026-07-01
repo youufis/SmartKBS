@@ -59,7 +59,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
     )
     for e in exams:
         sub = qdb_query(
-            "SELECT COUNT(DISTINCT student_username) as cnt FROM exam_attempts WHERE exam_id=? AND status='submitted'",
+            "SELECT COUNT(DISTINCT student_username) as cnt FROM exam_attempts WHERE exam_id=? AND status IN ('submitted','graded')",
             (e["id"],),
         )
         e["submitted_count"] = sub[0]["cnt"] if sub else 0
@@ -191,7 +191,9 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         activities.append(d)
 
     # ── 9. 课程练习（smartkb.db）──
-    # 课程无 creator_username，按任教年级精确匹配
+    # 参考学生端任务清单(dashboard_router.py) 的统计逻辑：
+    #   按具体练习资源（curriculum_bindings 中 resource_type='html' 且文件名含 _练习.html）细分
+    #   完成数按 ai_practice_results 统计（questions.db）
     course_grade_set: set[str] = set()
     for ta in db_query_dict(
         "SELECT DISTINCT g.name as grade_name FROM teacher_assignments ta JOIN grades g ON ta.grade_id=g.id WHERE ta.teacher_username=?",
@@ -201,40 +203,56 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         if gn:
             course_grade_set.add(gn)
 
-    course_rows = db_query_dict(
-        """SELECT c.id, c.name as title, c.status, c.created_at, c.updated_at,
-                  c.subject, 0 as total_score, 0 as pass_score, 0 as duration,
-                  'course' as activity_type
-           FROM courses c
-           ORDER BY c.sort_order, c.id""",
+    # 查询绑定了 _练习.html 的课程练习资源（与 task-todo 逻辑一致）
+    bind_rows = db_query_dict(
+        """SELECT cb.id as binding_id, cb.knowledge_point_id,
+                  kp.name as kp_name, c.name as course_name, c.id as course_id,
+                  c.subject, c.status as course_status, c.grade as course_grade,
+                  c.created_at, c.updated_at,
+                  COALESCE(sr.file_path, '') as fp, COALESCE(sr.file_name, '') as fn
+           FROM curriculum_bindings cb
+           JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+           JOIN chapters ch ON kp.chapter_id = ch.id
+           JOIN courses c ON ch.course_id = c.id
+           LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+           WHERE cb.resource_type='html' AND c.status='active'
+           ORDER BY c.sort_order, ch.sort_order, kp.sort_order, cb.id""",
     )
-    for c in course_rows:
-        c_grade = (c.get("grade") or "").strip()
-        # 管理员：显示全部；教师：仅显示 grade 精确匹配任教年级的课程
+    for b in bind_rows:
+        fn = str(b["fn"] or "")
+        fp = str(b["fp"] or "")
+        # 只显示 _练习.html 的资源（参考学生端任务清单）
+        if "_练习.html" not in fn and "_练习.html" not in fp:
+            continue
+
+        course_grade = (b.get("course_grade") or "").strip()
+        # 管理员：显示全部；教师：仅显示 grade 匹配任教年级的课程
         if not is_admin(teacher_username):
-            if not c_grade or not course_grade_set or c_grade not in course_grade_set:
+            if not course_grade or not course_grade_set or course_grade not in course_grade_set:
                 continue
 
-        # 检查课程下是否有绑定的练习题（curriculum_bindings）
-        bind_count = db_query_dict(
-            "SELECT COUNT(*) as cnt FROM curriculum_bindings cb WHERE cb.knowledge_point_id IN "
-            "(SELECT kp.id FROM knowledge_points kp JOIN chapters ch ON ch.id=kp.chapter_id WHERE ch.course_id=?)",
-            (c["id"],),
+        # 统计已完成的 Student 数（从 ai_practice_results 查询，与 task-todo 一致）
+        done_count = qdb_query(
+            "SELECT COUNT(DISTINCT student_username) as cnt FROM ai_practice_results WHERE kp_id=?",
+            (b["knowledge_point_id"],),
         )
-        if not bind_count or bind_count[0]["cnt"] == 0:
-            continue  # 无绑定练习的课程不显示
 
-        # 统计已开始学习的学生数
-        kp_count = db_query_dict(
-            """SELECT COUNT(DISTINCT lp.student_username) as cnt
-               FROM learning_progress lp
-               JOIN knowledge_points kp ON kp.id = lp.knowledge_point_id
-               JOIN chapters ch ON ch.id = kp.chapter_id
-               WHERE ch.course_id = ? AND lp.status != 'not_started'""",
-            (c["id"],),
-        )
-        c["submitted_count"] = kp_count[0]["cnt"] if kp_count else 0
-        activities.append(c)
+        activities.append({
+            "id": b["binding_id"],
+            "title": f"{b['course_name']} - {b['kp_name']}",
+            "status": b["course_status"],
+            "created_at": b["created_at"],
+            "updated_at": b["updated_at"],
+            "subject": b.get("subject", "") or "",
+            "total_score": 0,
+            "pass_score": 0,
+            "duration": 0,
+            "activity_type": "course",
+            "submitted_count": done_count[0]["cnt"] if done_count else 0,
+            "target_scope": "",
+            "target_grade": course_grade,
+            "target_class": "",
+        })
 
     # ── 8. 快速投票（smartkb.db）──
     poll_rows = db_query_dict(
@@ -288,7 +306,7 @@ def _get_students_with_completion(
     if activity_type == "exam":
         rows = qdb_query(
             """SELECT student_username, student_name, score, total_score, submitted_at
-               FROM exam_attempts WHERE exam_id=? AND status='submitted'""",
+               FROM exam_attempts WHERE exam_id=? AND status IN ('submitted','graded')""",
             (activity_id,),
         )
         for a in rows:
@@ -452,39 +470,30 @@ def _get_students_with_completion(
             }
 
     elif activity_type == "course":
-        # 获取课程下所有知识点
-        kp_rows = db_query_dict(
-            """SELECT kp.id FROM knowledge_points kp
-               JOIN chapters ch ON ch.id = kp.chapter_id
-               WHERE ch.course_id = ? AND kp.status = 'active'""",
+        # 课程练习：按知识点从 ai_practice_results 查询完成情况（与 task-todo 一致）
+        bind_rows = db_query_dict(
+            """SELECT cb.knowledge_point_id, kp.name as kp_name
+               FROM curriculum_bindings cb
+               JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+               WHERE cb.id=?""",
             (activity_id,),
         )
-        kp_ids = [k["id"] for k in kp_rows]
-        total_kps = len(kp_ids)
-
-        if kp_ids:
-            placeholders = ",".join("?" * len(kp_ids))
-            lp_rows = db_query_dict(
-                f"""SELECT student_username,
-                           COUNT(*) as completed_kps,
-                           AVG(COALESCE(score,0)) as avg_score
-                    FROM learning_progress
-                    WHERE knowledge_point_id IN ({placeholders})
-                      AND status = 'completed'
-                    GROUP BY student_username""",
-                tuple(kp_ids),
+        if bind_rows:
+            kp_id = bind_rows[0]["knowledge_point_id"]
+            done_rows = qdb_query(
+                "SELECT DISTINCT student_username, accuracy as score FROM ai_practice_results WHERE kp_id=?",
+                (kp_id,),
             )
-            for a in lp_rows:
+            for a in done_rows:
                 uname = a["student_username"]
                 if uname not in student_map:
                     continue
-                completed_kps = a["completed_kps"] or 0
                 completed_map[uname] = {
                     "username": uname,
                     "name": student_map[uname].get("name", ""),
                     "grade": student_map[uname].get("grade", ""),
                     "class_name": student_map[uname].get("class", ""),
-                    "score": round(a.get("avg_score", 0) or 0, 1),
+                    "score": round(a.get("score", 0) or 0, 1),
                     "total_score": 100,
                     "submitted_at": "",
                     "status": "completed",
@@ -558,10 +567,16 @@ async def list_teacher_activities(
         from backend.database import execute_query as db_query
         teacher_rows = db_query("SELECT username FROM users WHERE role IN (0, 1)")
         all_activities = []
+        seen: set[tuple[str, int]] = set()
         for row in teacher_rows:
             t_uname = row[0] if row else ""
-            if t_uname:
-                all_activities.extend(_get_teacher_activities(t_uname))
+            if not t_uname:
+                continue
+            for act in _get_teacher_activities(t_uname):
+                key = (act["activity_type"], act["id"])
+                if key not in seen:
+                    seen.add(key)
+                    all_activities.append(act)
     else:
         all_activities = _get_teacher_activities(username)
 
@@ -617,7 +632,18 @@ def _lookup_activity(activity_type: str, activity_id: int, username: str):
     elif activity_type in db_types:
         table = _DB_TABLES[activity_type]
         if activity_type == "course":
-            rows = db_query_dict(f"SELECT * FROM {table} WHERE id=?", (activity_id,))
+            # 课程练习按 binding_id 查询，与活动列表保持一致
+            rows = db_query_dict(
+                """SELECT cb.id, cb.knowledge_point_id, kp.name as kp_name,
+                          c.name as title, c.status, c.subject, c.created_at,
+                          0 as total_score, 0 as pass_score
+                   FROM curriculum_bindings cb
+                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                   JOIN chapters ch ON kp.chapter_id = ch.id
+                   JOIN courses c ON ch.course_id = c.id
+                   WHERE cb.id=?""",
+                (activity_id,),
+            )
         else:
             rows = db_query_dict(f"SELECT * FROM {table} WHERE id=? AND creator_username=?", (activity_id, username))
             if not rows and is_admin(username):
