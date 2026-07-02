@@ -214,6 +214,8 @@ def _delete_user_completely(username: str):
         delete_ops.append(("DELETE FROM scores WHERE student_name=?", (student_name,)))
         delete_ops.append(("DELETE FROM rollcall_weights WHERE student_name=?", (student_name,)))
         delete_ops.append(("DELETE FROM rollcall_history WHERE student_name=?", (student_name,)))
+    # 教师任教关系
+    delete_ops.append(("DELETE FROM teacher_assignments WHERE teacher_username=?", (username,)))
     # 最后删除用户本身
     delete_ops.append(("DELETE FROM users WHERE username=?", (username,)))
 
@@ -232,6 +234,13 @@ def _delete_user_completely(username: str):
         )
         q_execute_update(
             "DELETE FROM code_submissions WHERE student_username=?", (username,)
+        )
+        # 教师创建的代码题（先删关联的测试用例和运行记录）
+        q_execute_update(
+            "DELETE FROM code_test_cases WHERE problem_id IN (SELECT id FROM code_problems WHERE creator_username=?)", (username,)
+        )
+        q_execute_update(
+            "DELETE FROM code_runs WHERE problem_id IN (SELECT id FROM code_problems WHERE creator_username=?)", (username,)
         )
         q_execute_update(
             "DELETE FROM code_problems WHERE creator_username=?", (username,)

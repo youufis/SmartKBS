@@ -393,6 +393,15 @@ async def delete_code_problem(problem_id: int, request: Request):
         raise HTTPException(status_code=403, detail="权限不足")
     if not q_one("SELECT id FROM code_problems WHERE id=?", (problem_id,)):
         raise HTTPException(status_code=404, detail="不存在")
+    # 硬删除关联数据（测试用例、提交记录、运行记录）
+    q_update("DELETE FROM code_test_cases WHERE problem_id=?", (problem_id,))
+    q_update("DELETE FROM code_submissions WHERE problem_id=?", (problem_id,))
+    q_update("DELETE FROM code_runs WHERE problem_id=?", (problem_id,))
+    # activity_rewards 和 notifications 在 smartkb.db（使用主数据库连接）
+    from backend.database import execute_insert_update as db_update
+    db_update("DELETE FROM activity_rewards WHERE activity_type='code' AND activity_id=?", (str(problem_id),))
+    db_update("DELETE FROM notifications WHERE source_type='code' AND source_id=?", (str(problem_id),))
+    # 软删主记录
     q_update("UPDATE code_problems SET status='deleted',updated_at=? WHERE id=?", (_now(), problem_id))
     return {"status": "ok"}
 

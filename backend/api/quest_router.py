@@ -1280,6 +1280,13 @@ async def delete_quest_record(quest_id: int, request: Request):
     execute_insert_update(
         "DELETE FROM quest_question_records WHERE quest_id=?", (quest_id,)
     )
+    # 清理关联数据
+    execute_insert_update(
+        "DELETE FROM activity_rewards WHERE activity_type='quest' AND activity_id=?", (str(quest_id),)
+    )
+    execute_insert_update(
+        "DELETE FROM notifications WHERE source_type='quest' AND source_id=?", (str(quest_id),)
+    )
     # 删除闯关记录
     execute_insert_update(
         "DELETE FROM quest_records WHERE id=?", (quest_id,)

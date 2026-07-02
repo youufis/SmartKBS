@@ -68,22 +68,24 @@ def _is_notification_type_enabled(type_: str) -> bool:
     return type_ in enabled
 
 
-def create_notification(recipient: str, type_: str, title: str, content: str = "", related_link: str = ""):
+def create_notification(recipient: str, type_: str, title: str, content: str = "", related_link: str = "",
+                        source_type: str = "", source_id: str = ""):
     """创建一条通知（内部调用，会检查类型是否启用）"""
     if not _is_notification_type_enabled(type_):
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         execute_insert_update(
-            """INSERT INTO notifications (recipient_username, type, title, content, related_link, is_read, created_at)
-               VALUES (?, ?, ?, ?, ?, 0, ?)""",
-            (recipient, type_, title, content, related_link, now),
+            """INSERT INTO notifications (recipient_username, type, title, content, related_link, is_read, created_at, source_type, source_id)
+               VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)""",
+            (recipient, type_, title, content, related_link, now, source_type, source_id),
         )
     except Exception as e:
         logger.error(f"创建通知失败: {e}")
 
 
-def notify_users(usernames: list[str], type_: str, title: str, content: str = "", related_link: str = ""):
+def notify_users(usernames: list[str], type_: str, title: str, content: str = "", related_link: str = "",
+                 source_type: str = "", source_id: str = ""):
     """批量通知多个用户（使用批量插入优化性能，会检查类型是否启用）"""
     if not usernames:
         return
@@ -91,10 +93,10 @@ def notify_users(usernames: list[str], type_: str, title: str, content: str = ""
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     sql = """INSERT INTO notifications
-             (recipient_username, type, title, content, related_link, is_read, created_at)
-             VALUES (?, ?, ?, ?, ?, 0, ?)"""
+             (recipient_username, type, title, content, related_link, is_read, created_at, source_type, source_id)
+             VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)"""
     try:
-        ops = [(sql, (r, type_, title, content, related_link, now)) for r in usernames]
+        ops = [(sql, (r, type_, title, content, related_link, now, source_type, source_id)) for r in usernames]
         execute_batch(ops)
     except Exception as e:
         logger.error(f"批量创建通知失败: {e}")
@@ -110,6 +112,8 @@ def notify_users_by_scope(
     target_grade: str = "",
     target_class: str = "",
     target_users: str = "",
+    source_type: str = "",
+    source_id: str = "",
 ):
     """
     根据目标范围参数向对应的学生发送通知
@@ -129,7 +133,7 @@ def notify_users_by_scope(
         return
 
     usernames = [s["username"] for s in students]
-    notify_users(usernames, type_, title, content, related_link)
+    notify_users(usernames, type_, title, content, related_link, source_type=source_type, source_id=source_id)
 
 
 # ── 通知 API ──

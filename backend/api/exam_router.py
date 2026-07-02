@@ -19,7 +19,7 @@ from backend.question_db import (
 )
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
-from backend.database import execute_query as user_query
+from backend.database import execute_query as user_query, execute_insert_update as db_update
 from backend.logger import logger
 from backend.api.ai_service import call_ai_async
 
@@ -463,6 +463,9 @@ async def delete_exam(exam_id: int, request: Request):
     # 删除关联数据
     execute_update("DELETE FROM exam_questions WHERE exam_id = ?", (exam_id,))
     execute_update("DELETE FROM exam_attempts WHERE exam_id = ?", (exam_id,))
+    # activity_rewards 和 notifications 在 smartkb.db（使用主数据库连接）
+    db_update("DELETE FROM activity_rewards WHERE activity_type='exam' AND activity_id=?", (str(exam_id),))
+    db_update("DELETE FROM notifications WHERE source_type='exam' AND source_id=?", (str(exam_id),))
     execute_update("DELETE FROM exams WHERE id = ?", (exam_id,))
 
     logger.info(f"用户 {username} 删除考试: {exam['title']} (id={exam_id})")

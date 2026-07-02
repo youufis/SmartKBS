@@ -1089,6 +1089,14 @@ async def delete_chapter(chapter_id: int, request: Request):
         execute_insert_update(
             f"DELETE FROM curriculum_bindings WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
         )
+        execute_insert_update(
+            f"DELETE FROM knowledge_prerequisites WHERE knowledge_point_id IN ({kp_placeholders})", kp_tuple,
+        )
+        execute_insert_update(
+            f"DELETE FROM knowledge_prerequisites WHERE prerequisite_id IN ({kp_placeholders})", kp_tuple,
+        )
+        from backend.question_db import execute_insert as q_exec2
+        q_exec2(f"DELETE FROM ai_practice_results WHERE kp_id IN ({kp_placeholders})", kp_tuple)
     execute_insert_update(
         f"DELETE FROM knowledge_points WHERE chapter_id IN ({placeholders})", ch_tuple,
     )

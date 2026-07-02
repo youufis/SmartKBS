@@ -428,6 +428,18 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_notif_time ON notifications(recipient_username, created_at)")
             except sqlite3.OperationalError:
                 pass
+            try:
+                c.execute("ALTER TABLE notifications ADD COLUMN source_type TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE notifications ADD COLUMN source_id TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_notif_source ON notifications(source_type, source_id)")
+            except sqlite3.OperationalError:
+                pass
 
             # ── AI 批改结果表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS task_grades (

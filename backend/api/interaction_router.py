@@ -331,6 +331,8 @@ async def delete_quiz(quiz_id: int, request: Request):
         raise HTTPException(status_code=403, detail="无权删除此测验")
 
     execute_insert_update("DELETE FROM interaction_quiz_answers WHERE quiz_id = ?", (quiz_id,))
+    execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='quiz' AND activity_id=?", (str(quiz_id),))
+    execute_insert_update("DELETE FROM notifications WHERE source_type='quiz' AND source_id=?", (str(quiz_id),))
     execute_insert_update("DELETE FROM interaction_quizzes WHERE id = ?", (quiz_id,))
     return {"message": "测验已删除"}
 
@@ -435,6 +437,8 @@ async def delete_poll(poll_id: int, request: Request):
         raise HTTPException(status_code=403, detail="无权删除")
 
     execute_insert_update("DELETE FROM interaction_poll_votes WHERE poll_id = ?", (poll_id,))
+    execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='poll' AND activity_id=?", (str(poll_id),))
+    execute_insert_update("DELETE FROM notifications WHERE source_type='poll' AND source_id=?", (str(poll_id),))
     execute_insert_update("DELETE FROM interaction_polls WHERE id = ?", (poll_id,))
     return {"message": "投票已删除"}
 
@@ -444,25 +448,30 @@ async def delete_question(question_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+    # 先查出提问信息用于清理关联数据
+    q_row = execute_query("SELECT student_username FROM interaction_questions WHERE id=?", (question_id,))
+    if not q_row:
+        raise HTTPException(status_code=404, detail="提问不存在")
+    q_student = q_row[0][0]
+
     if role == 0:
         # 管理员：删除任何提问
         execute_insert_update("DELETE FROM interaction_questions WHERE id = ?", (question_id,))
     elif role == 1:
         # 教师：只能删除自己班级学生的提问
         from backend.permission_service import check_teacher_access_to_student
-        # 先查出提问者
-        q_row = execute_query("SELECT student_username FROM interaction_questions WHERE id=?", (question_id,))
-        if not q_row:
-            raise HTTPException(status_code=404, detail="提问不存在")
-        if not check_teacher_access_to_student(username, q_row[0][0]):
+        if not check_teacher_access_to_student(username, q_student):
             raise HTTPException(status_code=403, detail="无权删除非本班学生的提问")
-        deleted = execute_insert_update("DELETE FROM interaction_questions WHERE id=?", (question_id,))
+        execute_insert_update("DELETE FROM interaction_questions WHERE id=?", (question_id,))
     else:
         # 学生：只能删除自己的提问
-        execute_insert_update(
-            "DELETE FROM interaction_questions WHERE id = ? AND student_username = ?",
-            (question_id, username),
-        )
+        if q_student != username:
+            raise HTTPException(status_code=403, detail="无权删除他人的提问")
+        execute_insert_update("DELETE FROM interaction_questions WHERE id=?", (question_id,))
+
+    # 清理关联数据
+    execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='question' AND activity_id=?", (str(question_id),))
+    execute_insert_update("DELETE FROM notifications WHERE source_type='question' AND source_id=?", (str(question_id),))
     return {"message": "提问已删除"}
 
 

@@ -752,6 +752,8 @@ async def delete_discussion(disc_id: int, request: Request):
         execute_insert_update("DELETE FROM discussion_members WHERE group_id=?", (g[0],))
     execute_insert_update("DELETE FROM discussion_groups WHERE discussion_id=?", (disc_id,))
     execute_insert_update("DELETE FROM discussion_reports WHERE discussion_id=?", (disc_id,))
+    execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='discussion' AND activity_id=?", (str(disc_id),))
+    execute_insert_update("DELETE FROM notifications WHERE source_type='discussion' AND source_id=?", (str(disc_id),))
     execute_insert_update("DELETE FROM discussions WHERE id=?", (disc_id,))
 
     logger.info(f"教师 {user['username']} 删除了讨论 #{disc_id}")
