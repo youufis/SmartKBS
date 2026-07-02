@@ -5,6 +5,7 @@ SmartKB 后端入口
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # 确保项目根目录在 sys.path 中
@@ -33,18 +34,23 @@ def _get_app_version() -> str:
 
 APP_VERSION = _get_app_version()
 
-# 创建 FastAPI 应用
-app = FastAPI(
-    title="SmartKBS - 智慧教学平台 API",
-    description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
-    version=APP_VERSION,
-    docs_url="/docs",
-)
+# ── 过滤 uvicorn 访问日志中的同步上报请求 ──
+import logging
+
+class _SyncReportFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        return "/api/config-sync/report" not in msg
+
+logging.getLogger("uvicorn.access").addFilter(_SyncReportFilter())
 
 
-@app.on_event("startup") # type: ignore
-async def startup():
-    """应用启动初始化"""
+# ── 应用生命周期 ──
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期：启动初始化 + 关闭清理"""
+    # ── startup ──
     init_db()
     init_question_db()
     try:
@@ -64,11 +70,19 @@ async def startup():
     except Exception as e:
         import sys
         print(f"[main] 启动后台版本检测失败: {e}", file=sys.stderr)
-
-
-@app.on_event("shutdown") # type: ignore
-async def shutdown():
+    yield
+    # ── shutdown ──
     pass
+
+
+# 创建 FastAPI 应用
+app = FastAPI(
+    title="SmartKBS - 智慧教学平台 API",
+    description="通用学科 AI 智慧教学管理平台 — 集成 AI 对话、考试、批改、资源管理等功能",
+    version=APP_VERSION,
+    docs_url="/docs",
+    lifespan=lifespan,
+)
 
 # CORS 配置（开发环境允许前端 dev server 跨域）
 app.add_middleware(
