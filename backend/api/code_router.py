@@ -258,7 +258,7 @@ async def list_code_problems(
             student_where += " AND cp.subject=?"
             student_params.append(subject)
         all_rows = q_query(
-            f"SELECT cp.* FROM code_problems cp WHERE {student_where} ORDER BY cp.id DESC",
+            f"SELECT cp.id,cp.id as problem_id,cp.title,cp.subject,cp.knowledge_points,cp.difficulty,cp.created_at,cp.creator_username,cp.creator_name,cp.language,cp.time_limit,cp.starter_code,cp.description,cp.template_code,cp.target_scope,cp.target_grade,cp.target_class,cp.target_users,cp.status FROM code_problems cp WHERE {student_where} ORDER BY cp.id DESC",
             tuple(student_params),
         )
         from backend.permission_service import check_activity_visibility
@@ -329,6 +329,9 @@ async def get_code_problem(problem_id: int, request: Request):
             target_users=p.get("target_users", ""),
         ):
             raise HTTPException(status_code=403, detail="无权查看该题目")
+    # 统一字段名
+    if "problem_id" not in p and "id" in p:
+        p["problem_id"] = p["id"]
     p["sample_cases"] = q_query("SELECT id,input,expected_output,description,score FROM code_test_cases WHERE problem_id=? AND is_sample=1 ORDER BY sort_order", (problem_id,))
     b = q_one("SELECT id,status,score,passed_cases,total_cases,execution_time,source_code,created_at FROM code_submissions WHERE problem_id=? AND student_username=? AND is_best=1", (problem_id, user["username"]))
     p["best_submission"] = b

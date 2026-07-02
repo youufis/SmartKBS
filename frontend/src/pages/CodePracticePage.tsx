@@ -41,7 +41,8 @@ const CompactCodeView: React.FC<{
   problemId: number
   starterCode?: string
   language?: string
-}> = ({ problemId, starterCode, language: initLang = 'python' }) => {
+  supportedLanguages?: { value: string; label: string; available: boolean }[]
+}> = ({ problemId, starterCode, language: initLang = 'python', supportedLanguages }) => {
   const [code, setCode] = useState(starterCode || '# 在此编写你的代码\n\ndef solution():\n    pass\n')
   const [lang, setLang] = useState(initLang)
   const [customInput, setCustomInput] = useState('')
@@ -97,7 +98,7 @@ const CompactCodeView: React.FC<{
     while (Date.now() - start < 60000) {
       try {
         const { data } = await apiClient.get(`/api/code/submissions/${subId}`)
-        if (['accepted','wrong_answer','runtime_error','time_limit','failed'].includes(data.status)) {
+        if (['accepted','wrong_answer','runtime_error','time_limit','compile_error','failed'].includes(data.status)) {
           setSubmissionResult(data)
           setPollingSubmission(false)
           return
@@ -168,7 +169,9 @@ const CompactCodeView: React.FC<{
             {pollingSubmission ? '评分中...' : '提交'}
           </Button>
           <Select size="small" value={lang} onChange={setLang} style={{ width: 100 }}
-            options={[{ value: 'python', label: 'Python' }, { value: 'javascript', label: 'JavaScript' }]} />
+            options={supportedLanguages && supportedLanguages.length > 0
+              ? supportedLanguages
+              : [{ value: 'python', label: 'Python', available: true }, { value: 'javascript', label: 'JavaScript', available: true }]} />
           <Input size="small" placeholder="自定义输入" value={customInput}
             onChange={e => setCustomInput(e.target.value)} style={{ width: 160, fontSize: 12 }} />
           {/* 结果与按钮同行显示 */}
@@ -233,7 +236,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
 
   // 提交历史
   const [submissions, setSubmissions] = useState<any[]>([])
-  const [submissionsLoading] = useState(false)
+  const [submissionsLoading, setSubmissionsLoading] = useState(false)
 
   // AI 审查
   const [aiReview, setAiReview] = useState<any>(null)
@@ -247,6 +250,9 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
 
   // 科目列表（从系统配置动态加载）
   const [subjectOptions, setSubjectOptions] = useState<string[]>([])
+
+  // ── 展开控制（每次只展开一个题目） ──
+  const [expandedRowKeys, setExpandedRowKeys] = useState<number[]>([])
 
   // ── 教师端：创建题目 ──
   const [createModalOpen, setCreateModalOpen] = useState(false)
@@ -511,11 +517,14 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
 
   // ── 加载提交历史 ──
   const loadSubmissions = async (problemId: number) => {
+    setSubmissionsLoading(true)
     try {
       const { data } = await apiClient.get(`/api/code/my-submissions/${problemId}`)
       setSubmissions(data.submissions || [])
     } catch {
       // silent
+    } finally {
+      setSubmissionsLoading(false)
     }
   }
 
@@ -730,16 +739,21 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                   problemId={record.problem_id}
                   starterCode={record.starter_code}
                   language={record.language || 'python'}
+                  supportedLanguages={supportedLangs}
                 />
               </div>
             ),
             rowExpandable: () => true,
+            expandedRowKeys,
+            onExpand: (expanded, record) => {
+              setExpandedRowKeys(expanded ? [record.problem_id] : [])
+            },
             expandIcon: ({ expanded, onExpand, record }: any) => (
               <Button
                 type="text"
                 size="small"
                 icon={expanded ? <MinusSquareOutlined /> : <PlusSquareOutlined />}
-                onClick={(e) => onExpand(record, e)}
+                onClick={(e) => { e.stopPropagation(); onExpand(record, e) }}
                 style={{ marginRight: 8 }}
               />
             ),
@@ -749,7 +763,10 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               dataIndex: 'title',
               render: (text: string, record: any) => (
                 <Space>
-                  <Text strong>{text}</Text>
+                  <Text strong style={{ cursor: 'pointer', color: '#1677ff' }}
+                    onClick={() => loadProblem(record.problem_id)}>
+                    {text}
+                  </Text>
                   <Tag color={record.difficulty === 'easy' ? 'green' : record.difficulty === 'hard' ? 'red' : 'orange'}>
                     {record.difficulty === 'easy' ? '简单' : record.difficulty === 'hard' ? '困难' : '中等'}
                   </Tag>
