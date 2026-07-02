@@ -161,10 +161,13 @@ async def clear_sync_logs():
 
 @router.post("/config-sync/deduplicate")
 async def deduplicate_sync_logs():
-    """IP 去重：相同 caller_ip 只保留最新一条记录"""
+    """IP 去重：相同 IP（不含端口）只保留最新一条记录"""
     execute_insert_update(
         """DELETE FROM config_sync_logs WHERE id NOT IN (
-            SELECT MAX(id) FROM config_sync_logs GROUP BY caller_ip
+            SELECT MAX(id) FROM config_sync_logs
+            GROUP BY CASE WHEN INSTR(caller_ip, ':') > 0
+                     THEN SUBSTR(caller_ip, 1, INSTR(caller_ip, ':') - 1)
+                     ELSE caller_ip END
         )"""
     )
     rows = execute_query("SELECT COUNT(*) FROM config_sync_logs")
