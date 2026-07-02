@@ -22,6 +22,8 @@ export interface PortraitData {
   student_name?: string;
   grade?: string;
   class_name?: string;
+  /** 创作者的主题偏好（分享后其他人可见） */
+  portrait_theme?: string;
 }
 
 export interface PortraitStyle {
@@ -97,6 +99,17 @@ export async function sharePortrait(id: number, scope: string = 'public'): Promi
 export async function unsharePortrait(id: number): Promise<{ message: string }> {
   const { data } = await apiClient.post(`/api/portrait/${id}/unshare`);
   return data;
+}
+
+/** 获取当前用户的主题偏好 */
+export async function getPortraitTheme(): Promise<string> {
+  const { data } = await apiClient.get('/api/portrait/theme');
+  return data.theme;
+}
+
+/** 保存当前用户的主题偏好 */
+export async function setPortraitTheme(theme: string): Promise<void> {
+  await apiClient.put('/api/portrait/theme', { theme });
 }
 
 /** 点赞/取消点赞 */

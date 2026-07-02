@@ -97,6 +97,10 @@ def init_db():
                 c.execute("ALTER TABLE users ADD COLUMN security_locked_until TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN portrait_theme TEXT DEFAULT 'auto'")
+            except sqlite3.OperationalError:
+                pass
 
             # ── 年级主数据表（全学段：小学/初中/高中）──
             c.execute("""CREATE TABLE IF NOT EXISTS grades (

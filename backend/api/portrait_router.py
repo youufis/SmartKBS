@@ -36,6 +36,10 @@ class GenerateRequest(BaseModel):
     use_points: bool = False  # 是否消耗 50 积分兑换额外生成机会
 
 
+class ThemeRequest(BaseModel):
+    theme: str = "auto"  # 'auto' 或主题 key
+
+
 class ShareRequest(BaseModel):
     scope: str = "public"  # public | class | private
 
@@ -84,19 +88,21 @@ def _format_portrait_row(row: tuple) -> dict[str, Any]:
 
 
 def _enrich_with_student_info(portrait: dict[str, Any]) -> dict[str, Any]:
-    """补充学生姓名信息"""
+    """补充学生姓名信息和主题偏好"""
     rows = execute_query(
-        "SELECT name, grade, class FROM users WHERE username=?",
+        "SELECT name, grade, class, portrait_theme FROM users WHERE username=?",
         (portrait["username"],),
     )
     if rows:
         portrait["student_name"] = rows[0][0] or portrait["username"]
         portrait["grade"] = rows[0][1] or ""
         portrait["class_name"] = rows[0][2] or ""
+        portrait["portrait_theme"] = rows[0][3] or "auto"
     else:
         portrait["student_name"] = portrait["username"]
         portrait["grade"] = ""
         portrait["class_name"] = ""
+        portrait["portrait_theme"] = "auto"
     return portrait
 
 
@@ -362,6 +368,7 @@ async def get_today_portrait(request: Request):
         return {"exists": False}
 
     portrait = _format_portrait_row(rows[0])
+    portrait = _enrich_with_student_info(portrait)
 
     # 如果已软删除，标记不可用但仍告知已生成
     if portrait.get("status") == "deleted":
@@ -387,6 +394,31 @@ async def get_portrait_styles():
             "desc": info["desc_cn"],
         })
     return {"styles": styles}
+
+
+@router.get("/theme")
+async def get_theme(request: Request):
+    """获取当前用户的主题偏好"""
+    user = get_current_user(request)
+    username = user["username"]
+    rows = execute_query(
+        "SELECT portrait_theme FROM users WHERE username=?",
+        (username,),
+    )
+    theme = rows[0][0] if rows else "auto"
+    return {"theme": theme}
+
+
+@router.put("/theme")
+async def set_theme(request: Request, body: ThemeRequest):
+    """保存当前用户的主题偏好"""
+    user = get_current_user(request)
+    username = user["username"]
+    execute_insert_update(
+        "UPDATE users SET portrait_theme=? WHERE username=?",
+        (body.theme, username),
+    )
+    return {"theme": body.theme}
 
 
 @router.post("/generate")
@@ -519,6 +551,7 @@ async def list_portraits(request: Request):
     portraits = []
     for row in rows:
         p = _format_portrait_row(row)
+        p = _enrich_with_student_info(p)
         p["liked"] = _check_liked(p["id"], username)
         portraits.append(p)
 

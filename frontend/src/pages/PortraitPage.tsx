@@ -44,10 +44,48 @@ const SCOPE_MAP: Record<string, { label: string; icon: React.ReactNode; color: s
   private: { label: '私密', icon: <LockOutlined />, color: 'default' },
 }
 
-const COMMENT_COLORS = [
-  '#f56a00', '#7265e6', '#ffbf00', '#00a2ae', '#eb2f96',
-  '#fa541c', '#722ed1', '#13c2c2', '#52c41a', '#fa8c16',
+// ── 10 套预设主题外观（用户可自选） ──
+const PRESET_THEMES = [
+  { key: 'aurora',     name: '极光紫', color: '#722ed1', gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', borderColor: '#d3adf7', bgTint: '#f9f0ff' },
+  { key: 'ocean',      name: '海洋蓝', color: '#1890ff', gradient: 'linear-gradient(135deg, #00c6fb 0%, #005bea 100%)', borderColor: '#91d5ff', bgTint: '#e6f7ff' },
+  { key: 'forest',     name: '森林绿', color: '#52c41a', gradient: 'linear-gradient(135deg, #56ab2f 0%, #a8e063 100%)', borderColor: '#b7eb8f', bgTint: '#f6ffed' },
+  { key: 'sunset',     name: '日落橙', color: '#fa8c16', gradient: 'linear-gradient(135deg, #f2994a 0%, #f2c94c 100%)', borderColor: '#ffd591', bgTint: '#fff7e6' },
+  { key: 'cherry',     name: '樱花粉', color: '#eb2f96', gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', borderColor: '#ffadd2', bgTint: '#fff0f6' },
+  { key: 'night',      name: '星空黑', color: '#1a1a2e', gradient: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)', borderColor: '#5a5a8a', bgTint: '#f0f0f5' },
+  { key: 'minimal',    name: '极简灰', color: '#8c8c8c', gradient: 'linear-gradient(135deg, #a8a8a8 0%, #5c5c5c 100%)', borderColor: '#d9d9d9', bgTint: '#fafafa' },
+  { key: 'passion',    name: '热情红', color: '#f5222d', gradient: 'linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%)', borderColor: '#ffa39e', bgTint: '#fff1f0' },
+  { key: 'golden',     name: '金色麦田', color: '#d4b106', gradient: 'linear-gradient(135deg, #d4b106 0%, #f5d76e 100%)', borderColor: '#ffe58f', bgTint: '#fffbe6' },
+  { key: 'mint',       name: '薄荷清凉', color: '#13c2c2', gradient: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)', borderColor: '#87e8de', bgTint: '#e6fffb' },
 ]
+
+// 每种画像风格 → 绑定对应的主题（auto 模式使用此映射）
+const STYLE_THEME_MAP: Record<string, string> = {
+  magic_academy: 'aurora',
+  cyber_scholar: 'ocean',
+  chinese_ink: 'minimal',
+  space_explorer: 'night',
+  anime_hero: 'passion',
+  fairy_spirit: 'cherry',
+  steampunk: 'sunset',
+  pixel_world: 'mint',
+  dunhuang: 'golden',
+  aurora_dream: 'aurora',
+  superhero: 'passion',
+  medieval_knight: 'sunset',
+  cyber_faerie: 'cherry',
+  ocean_explorer: 'ocean',
+  time_traveler: 'night',
+  creative: 'minimal',
+}
+
+/** 获取主题：用户手动选择时用固定主题，auto 模式跟随画像风格 */
+function getTheme(themeKey: string, styleKey?: string) {
+  const key = themeKey === 'auto' ? (styleKey ? STYLE_THEME_MAP[styleKey] : undefined) : themeKey
+  return PRESET_THEMES.find(t => t.key === (key || 'aurora')) || PRESET_THEMES[0]
+}
+
+const DEFAULT_THEME_KEY = 'auto'
+const STORAGE_THEME_KEY = 'portrait_theme_key'
 
 const PortraitPage: React.FC = () => {
   const currentUser = useAuthStore((s) => s.user)
@@ -68,7 +106,11 @@ const PortraitPage: React.FC = () => {
   const [detailModalVisible, setDetailModalVisible] = useState(false)
   const [detailPortrait, setDetailPortrait] = useState<PortraitData | null>(null)
   const [galleryTab, setGalleryTab] = useState('public')
-  const [commentColor] = useState(() => COMMENT_COLORS[Math.floor(Math.random() * COMMENT_COLORS.length)])
+  // 用户选择的主题（'auto'=跟随画像风格，其他=固定主题，持久化到后端+localStorage）
+  const [themeKey, setThemeKey] = useState<string>(DEFAULT_THEME_KEY)
+  const [themeLoaded, setThemeLoaded] = useState(false)
+  const theme = getTheme(themeKey, todayPortrait?.style)
+  const [themePickerOpen, setThemePickerOpen] = useState(false)
   // 分页状态
   const [historyPage, setHistoryPage] = useState(1)
   const [historyPageSize, setHistoryPageSize] = useState(12)
@@ -77,6 +119,33 @@ const PortraitPage: React.FC = () => {
   // 搜索状态
   const [historySearch, setHistorySearch] = useState('')
   const [gallerySearch, setGallerySearch] = useState('')
+
+  // 启动时从后端加载主题偏好，降级到 localStorage
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getPortraitTheme } = await import('../api/portrait')
+        const backendTheme = await getPortraitTheme()
+        if (backendTheme) {
+          setThemeKey(backendTheme)
+          localStorage.setItem(STORAGE_THEME_KEY, backendTheme)
+        }
+      } catch {
+        // 后端不可用时使用 localStorage
+        const local = localStorage.getItem(STORAGE_THEME_KEY)
+        if (local) setThemeKey(local)
+      }
+      setThemeLoaded(true)
+    })()
+  }, [])
+
+  // 主题切换时持久化到 localStorage + 后端
+  useEffect(() => {
+    localStorage.setItem(STORAGE_THEME_KEY, themeKey)
+    if (themeLoaded) {
+      import('../api/portrait').then(m => m.setPortraitTheme(themeKey)).catch(() => {})
+    }
+  }, [themeKey, themeLoaded])
 
   useEffect(() => {
     fetchStyles()
@@ -217,13 +286,17 @@ const PortraitPage: React.FC = () => {
         <Row gutter={24}>
           <Col xs={24} md={12}>
             <Card
-              style={{ borderRadius: 12, overflow: 'hidden' }}
+              style={{
+                borderRadius: 12, overflow: 'hidden',
+                borderTop: `4px solid ${theme.color}`,
+                background: theme.bgTint,
+              }}
               cover={
                 todayPortrait.image_url ? (
                   <img
                     alt="今日画像"
                     src={todayPortrait.image_url}
-                    style={{ width: '100%', maxHeight: 400, objectFit: 'contain', background: '#f5f5f5' }}
+                    style={{ width: '100%', maxHeight: 400, objectFit: 'contain', background: theme.bgTint }}
                   />
                 ) : (
                   <div style={{
@@ -231,7 +304,7 @@ const PortraitPage: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    background: theme.gradient,
                     flexDirection: 'column',
                     color: '#fff',
                     fontSize: 18,
@@ -292,9 +365,10 @@ const PortraitPage: React.FC = () => {
               style={{
                 borderRadius: 12,
                 minHeight: 300,
-                borderLeft: `4px solid ${commentColor}`,
+                borderLeft: `5px solid ${theme.color}`,
+                background: theme.bgTint,
               }}
-              title={<Space><EditOutlined style={{ color: commentColor }} /><Text strong>AI 本周寄语</Text></Space>}
+              title={<Space><EditOutlined style={{ color: theme.color }} /><Text strong>AI 本周寄语</Text></Space>}
             >
               <div style={{ maxHeight: 400, overflow: 'auto' }}>
                 <Paragraph
@@ -453,7 +527,9 @@ const PortraitPage: React.FC = () => {
       ) : (
         <>
         <Row gutter={[16, 16]}>
-          {paged.map((portrait) => (
+          {paged.map((portrait) => {
+            const ct = getTheme(themeKey, portrait.style)
+            return (
             <Col xs={24} sm={12} md={8} lg={6} key={portrait.id}>
               <Badge.Ribbon
                 text={
@@ -466,7 +542,7 @@ const PortraitPage: React.FC = () => {
               >
                 <Card
                   hoverable
-                  style={{ borderRadius: 12, overflow: 'hidden' }}
+                  style={{ borderRadius: 12, overflow: 'hidden', borderTop: `4px solid ${ct.color}`, background: ct.bgTint }}
                   cover={
                     portrait.image_url ? (
                       <div
@@ -481,7 +557,7 @@ const PortraitPage: React.FC = () => {
                       <div
                         style={{
                           height: 200,
-                          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                          background: getTheme(themeKey, portrait.style).gradient,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -529,7 +605,7 @@ const PortraitPage: React.FC = () => {
                 </Card>
               </Badge.Ribbon>
             </Col>
-          ))}
+          )})}
         </Row>
         <div style={{ textAlign: 'center', marginTop: 24 }}>
           <Pagination
@@ -601,11 +677,13 @@ const PortraitPage: React.FC = () => {
         ) : (
           <>
           <Row gutter={[16, 16]}>
-            {data.map((portrait) => (
+            {data.map((portrait) => {
+              const ct = getTheme(portrait.portrait_theme || themeKey, portrait.style)
+              return (
               <Col xs={24} sm={12} md={8} lg={6} key={portrait.id}>
                 <Card
                   hoverable
-                  style={{ borderRadius: 12, overflow: 'hidden' }}
+                  style={{ borderRadius: 12, overflow: 'hidden', borderTop: `4px solid ${ct.color}`, background: ct.bgTint }}
                   cover={
                     portrait.image_url ? (
                       <div
@@ -620,7 +698,7 @@ const PortraitPage: React.FC = () => {
                       <div
                         style={{
                           height: 200,
-                          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                          background: getTheme(themeKey, portrait.style).gradient,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -670,7 +748,7 @@ const PortraitPage: React.FC = () => {
                   />
                 </Card>
               </Col>
-            ))}
+            )})}
           </Row>
           <div style={{ textAlign: 'center', marginTop: 24 }}>
             <Pagination
@@ -701,7 +779,9 @@ const PortraitPage: React.FC = () => {
       centered
       destroyOnClose
     >
-      {detailPortrait && (
+      {detailPortrait && (() => {
+        const dt = getTheme(detailPortrait.portrait_theme || themeKey, detailPortrait.style)
+        return (
         <div>
           <Row gutter={[16, 16]}>
             <Col xs={24} md={12}>
@@ -714,7 +794,7 @@ const PortraitPage: React.FC = () => {
               ) : (
                 <div style={{
                   height: 300,
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  background: dt.gradient,
                   borderRadius: 8,
                   display: 'flex',
                   alignItems: 'center',
@@ -764,13 +844,13 @@ const PortraitPage: React.FC = () => {
                 </div>
 
                 <div style={{
-                  background: '#f9f9f9',
+                  background: dt.bgTint,
                   borderRadius: 8,
                   padding: 16,
-                  borderLeft: `4px solid ${commentColor}`,
+                  borderLeft: `5px solid ${dt.color}`,
                 }}>
                   <Text strong style={{ display: 'block', marginBottom: 8 }}>
-                    <EditOutlined style={{ color: commentColor }} /> AI 寄语
+                    <EditOutlined style={{ color: dt.color }} /> AI 寄语
                   </Text>
                   <div style={{
                     maxHeight: 300,
@@ -827,7 +907,7 @@ const PortraitPage: React.FC = () => {
             </Col>
           </Row>
         </div>
-      )}
+      )})()}
     </Modal>
   )
 
@@ -843,7 +923,9 @@ const PortraitPage: React.FC = () => {
       okText="确认分享"
       cancelText="取消"
     >
-      {sharingPortrait && (
+      {sharingPortrait && (() => {
+        const st = getTheme(sharingPortrait.portrait_theme || themeKey, sharingPortrait.style)
+        return (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div style={{
             display: 'flex',
@@ -862,7 +944,7 @@ const PortraitPage: React.FC = () => {
             ) : (
               <div style={{
                 width: 80, height: 80,
-                background: 'linear-gradient(135deg, #667eea, #764ba2)',
+                background: st.gradient,
                 borderRadius: 8,
                 display: 'flex',
                 alignItems: 'center',
@@ -901,7 +983,7 @@ const PortraitPage: React.FC = () => {
             </Space>
           </Radio.Group>
         </Space>
-      )}
+      )})()}
     </Modal>
   )
 
@@ -910,6 +992,69 @@ const PortraitPage: React.FC = () => {
   // ─────────────────────────────────────────
   return (
     <div style={{ padding: '8px 0' }}>
+      {/* ── 主题选择器 ── */}
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+        marginBottom: 12, gap: 8,
+      }}>
+        <Button
+          type="text"
+          size="small"
+          icon={<span style={{
+            display: 'inline-block', width: 12, height: 12,
+            borderRadius: '50%', background: theme.color,
+            border: '2px solid ' + theme.borderColor,
+            verticalAlign: 'middle',
+          }} />}
+          onClick={() => setThemePickerOpen(!themePickerOpen)}
+        >
+          {themeKey === 'auto' ? '🎨 自动匹配' : `🎨 ${theme.name}`}
+        </Button>
+      </div>
+      {themePickerOpen && (
+        <div style={{
+          background: '#fafafa', borderRadius: 10, padding: '12px 16px',
+          marginBottom: 16, border: '1px solid #f0f0f0',
+        }}>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 10, fontSize: 13 }}>
+            选择卡片和详情窗口的主题配色
+          </Text>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* 自动匹配 */}
+            <Tooltip title="自动匹配（跟随画像风格）">
+              <div
+                onClick={() => { setThemeKey('auto'); setThemePickerOpen(false) }}
+                style={{
+                  width: 36, height: 36, borderRadius: '50%', cursor: 'pointer',
+                  background: 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)',
+                  border: themeKey === 'auto' ? '3px solid #333' : '3px solid transparent',
+                  boxShadow: themeKey === 'auto' ? '0 0 0 2px #bbb' : 'none',
+                  transition: 'all 0.2s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 18,
+                }}
+              >
+                ✨
+              </div>
+            </Tooltip>
+            {PRESET_THEMES.map(t => (
+              <Tooltip key={t.key} title={t.name}>
+                <div
+                  onClick={() => { setThemeKey(t.key); setThemePickerOpen(false) }}
+                  style={{
+                    width: 36, height: 36, borderRadius: '50%', cursor: 'pointer',
+                    background: t.gradient,
+                    border: themeKey === t.key ? `3px solid ${t.color}` : '3px solid transparent',
+                    boxShadow: themeKey === t.key ? `0 0 0 2px ${t.borderColor}` : 'none',
+                    transition: 'all 0.2s',
+                  }}
+                />
+              </Tooltip>
+            ))}
+          </div>
+        </div>
+      )}
+
       <Tabs
         activeKey={activeTab}
         onChange={setActiveTab}
