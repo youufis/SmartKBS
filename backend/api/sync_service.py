@@ -159,6 +159,19 @@ async def clear_sync_logs():
     return {"status": "ok"}
 
 
+@router.post("/config-sync/deduplicate")
+async def deduplicate_sync_logs():
+    """IP 去重：相同 caller_ip 只保留最新一条记录"""
+    execute_insert_update(
+        """DELETE FROM config_sync_logs WHERE id NOT IN (
+            SELECT MAX(id) FROM config_sync_logs GROUP BY caller_ip
+        )"""
+    )
+    rows = execute_query("SELECT COUNT(*) FROM config_sync_logs")
+    remaining = rows[0][0] if rows else 0
+    return {"status": "ok", "remaining": remaining}
+
+
 @router.get("/config-sync/export")
 async def export_sync_logs():
     """导出所有同步记录为 JSON"""

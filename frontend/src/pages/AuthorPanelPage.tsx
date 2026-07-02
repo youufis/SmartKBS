@@ -4,7 +4,8 @@ import {
 } from 'antd'
 import {
   EyeOutlined, GlobalOutlined, ApiOutlined, TeamOutlined,
-  LoginOutlined, EnvironmentOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, ClearOutlined
+  LoginOutlined, EnvironmentOutlined, DeleteOutlined, ReloadOutlined, DownloadOutlined, ClearOutlined,
+  CompressOutlined
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 
@@ -84,6 +85,17 @@ const AuthorPanelPage: React.FC = () => {
       setPage(1)
     } catch {
       message.error('清空失败')
+    }
+  }
+
+  const handleDeduplicate = async () => {
+    try {
+      const { data } = await apiClient.post('/api/config-sync/deduplicate')
+      message.success(`IP 去重完成，剩余 ${data.remaining} 条记录`)
+      loadData(1, pageSize)
+      setPage(1)
+    } catch {
+      message.error('去重失败')
     }
   }
 
@@ -206,6 +218,16 @@ const AuthorPanelPage: React.FC = () => {
             >
               <Button size="small" danger icon={<ClearOutlined />}>
                 清空
+              </Button>
+            </Popconfirm>
+            <Popconfirm
+              title="IP 去重后将保留每个 IP 的最新一条记录，确定执行？"
+              onConfirm={handleDeduplicate}
+              okText="确定"
+              cancelText="取消"
+            >
+              <Button size="small" icon={<CompressOutlined />}>
+                IP去重
               </Button>
             </Popconfirm>
             <Button size="small" icon={<ReloadOutlined />} onClick={() => loadData(page, pageSize)}>
