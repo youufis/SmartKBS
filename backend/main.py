@@ -40,7 +40,7 @@ import logging
 class _SyncReportFilter(logging.Filter):
     def filter(self, record):
         msg = record.getMessage()
-        return "/api/config-sync/report" not in msg
+        return "/api/config-sync/" not in msg
 
 logging.getLogger("uvicorn.access").addFilter(_SyncReportFilter())
 
