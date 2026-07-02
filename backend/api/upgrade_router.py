@@ -11,7 +11,6 @@ import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -318,11 +317,6 @@ def _set_progress(step: str, message: str, progress: int):
     _state["step"] = step
     _state["message"] = message
     _state["progress"] = progress
-
-
-def _is_running_under_iis() -> bool:
-    """检测是否运行在 IIS httpPlatform 下（通过环境变量，无需 appcmd.exe）"""
-    return bool(os.environ.get("HTTP_PLATFORM_PORT"))
 
 
 async def _restart_service():
@@ -772,27 +766,34 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         logger.info(f"[upgrade] 变更文件: {len(changed_files)} 个")
 
         # ── Step 3: 数据库迁移（在线程池执行，避免阻塞事件循环） ──
-        _set_progress("migrate", "执行数据库迁移...", 50)
         logger.info(f"[upgrade] Step 3/7: 数据库迁移")
+        applied: list[str] = []
         try:
             loop = asyncio.get_running_loop()
             applied = await loop.run_in_executor(
                 None, _run_migrations, APP_VERSION, to_version
             )
-            if applied:
-                logger.info(f"[upgrade] 数据库迁移完成: {', '.join(applied)}")
         except RuntimeError as e:
             raise RuntimeError(f"数据库迁移失败，将自动回滚: {e}")
-        logger.info(f"[upgrade] Step 3/7: 迁移完成")
+        if applied:
+            _set_progress("migrate", f"数据库迁移: {', '.join(applied)}", 50)
+            logger.info(f"[upgrade] 数据库迁移完成: {', '.join(applied)}")
+        else:
+            logger.info(f"[upgrade] Step 3/7: 无数据库迁移，跳过")
 
-        # ── Step 4: pip install ──
-        _set_progress("pip", "正在增量安装 Python 依赖...", 65)
-        logger.info(f"[upgrade] Step 4/7: pip install")
-        await _run_cmd(
-            [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
-            cwd=str(BASE_DIR), timeout=600,
-        )
-        logger.info(f"[upgrade] Step 4/7: pip 完成")
+        # ── Step 4: pip install（仅 requirements.txt 有变更时才执行）──
+        needs_pip = any(f.replace("\\", "/") == "requirements.txt" for f in changed_files)
+        if needs_pip:
+            _set_progress("pip", "检测到依赖变更，正在安装 Python 依赖...", 65)
+            logger.info(f"[upgrade] Step 4/7: pip install (requirements.txt 已变更)")
+            await _run_cmd(
+                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
+                cwd=str(BASE_DIR), timeout=600,
+            )
+            logger.info(f"[upgrade] Step 4/7: pip 完成")
+        else:
+            # 进度不变，不刷多余提示
+            logger.info(f"[upgrade] Step 4/7: requirements.txt 无变更，跳过 pip install")
 
         # ── Step 5: 重载模块版本 ──
         try:
@@ -833,9 +834,8 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         _save_state(s)
         logger.info(f"[upgrade] Step 6b/7: 完成状态已持久化")
 
-        # ── Step 7: 重启服务 ──
-        _set_progress("restart", "正在重启服务（短暂离线）...", 95)
-        logger.info(f"[upgrade] Step 7/7: 重启服务")
+        # ── Step 7: 完成 ──
+        logger.info(f"[upgrade] Step 7/7: 升级流程完成")
 
         # 先将最终进度写入 _state
         _state["step"] = "done"
