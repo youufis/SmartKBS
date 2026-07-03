@@ -109,6 +109,9 @@ async def login(req: LoginRequest, fastapi_request: Request):
             client_ip = client_ip.split(",")[0].strip()
         else:
             client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
+        # 去除可能附加的端口号 (如 192.168.1.1:8080 → 192.168.1.1)
+        if client_ip and client_ip.count(':') == 1 and client_ip.rsplit(':', 1)[1].isdigit():
+            client_ip = client_ip.rsplit(':', 1)[0]
         user_agent = fastapi_request.headers.get("user-agent", "")[:200]
 
         # 角色名称映射
@@ -229,6 +232,9 @@ async def get_current_user(request: Request):
                 client_ip = client_ip.split(",")[0].strip()
             else:
                 client_ip = request.client.host if request.client else "unknown"
+            # 去除可能附加的端口号
+            if client_ip and client_ip.count(':') == 1 and client_ip.rsplit(':', 1)[1].isdigit():
+                client_ip = client_ip.rsplit(':', 1)[0]
             user_agent = request.headers.get("user-agent", "")[:200]
             now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             role_label = {0: "管理员", 1: "教师", 2: "学生"}.get(role_val, "未知")

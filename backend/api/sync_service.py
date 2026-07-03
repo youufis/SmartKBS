@@ -84,6 +84,9 @@ async def receive_sync_report(request: Request):
         caller_ip = caller_ip.split(",")[0].strip()
     else:
         caller_ip = request.client.host if request.client else "unknown"
+    # 去除可能附加的端口号
+    if caller_ip and caller_ip.count(':') == 1 and caller_ip.rsplit(':', 1)[1].isdigit():
+        caller_ip = caller_ip.rsplit(':', 1)[0]
 
     geo = await _resolve_geo(caller_ip)
 
