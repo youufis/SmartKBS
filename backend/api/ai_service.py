@@ -75,7 +75,7 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
         messages = [{"role": "user", "content": prompt}]
         response = DashScopeApp.call(
             app_id=app_id,
-            messages=messages,
+            messages=messages,  # type: ignore
             stream=False,
             headers={"X-DashScope-OssResourceResolve": "enable"},
         )
@@ -207,7 +207,7 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
         response = DashScopeApp.call(**call_params)
         new_session_id = session_id
         has_output = False
-        last_accumulated = ""
+        accumulated_text = ""
         for chunk in response:
             output = getattr(chunk, "output", None)
             if output:
@@ -217,14 +217,8 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
                 text = getattr(output, "text", None)
                 if text:
                     has_output = True
-                    # 计算增量（兼容 API 返回累计文本或增量文本）
-                    if text.startswith(last_accumulated):
-                        delta = text[len(last_accumulated):]
-                    else:
-                        delta = text
-                    last_accumulated = text
-                    if delta:
-                        yield {"text": delta, "session_id": new_session_id}
+                    accumulated_text += text
+                    yield {"text": accumulated_text, "session_id": new_session_id}
         # 智能体返回空文本时降级
         if not has_output:
             logger.warning(f"智能体流式返回为空，降级到直接调模型 (app_id={app_id})")
@@ -274,29 +268,23 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
                 yield {"text": f"AI 调用失败 (HTTP {resp.status_code})", "session_id": None}
                 return
 
-            last_accumulated = ""
+            accumulated_text = ""
             for line in resp.iter_lines():
                 if not line:
                     continue
                 decoded = line.decode("utf-8") if isinstance(line, bytes) else line
-                if decoded.startswith("data:"):
-                    data_str = decoded[5:].strip()
+                if decoded.startswith("data:"):  # type: ignore[arg-type]
+                    data_str = decoded[5:].strip()  # type: ignore[union-attr]
                     if data_str == "[DONE]":
                         break
                     try:
                         data = json.loads(data_str)
                         if "choices" in data and data["choices"]:
                             delta = data["choices"][0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                # 计算增量（兼容 OpenAI 标准和累计两种模式）
-                                if content.startswith(last_accumulated):
-                                    inc = content[len(last_accumulated):]
-                                else:
-                                    inc = content
-                                last_accumulated = content
-                                if inc:
-                                    yield {"text": inc, "session_id": None}
+                            chunk_text = delta.get("content", "")
+                            if chunk_text:
+                                accumulated_text += chunk_text
+                                yield {"text": accumulated_text, "session_id": None}
                     except json.JSONDecodeError:
                         continue
         except Exception as e:
@@ -469,8 +457,8 @@ def call_multimodal_stream(
             if not line:
                 continue
             decoded = line.decode("utf-8") if isinstance(line, bytes) else line
-            if decoded.startswith("data:"):
-                data_str = decoded[5:].strip()
+            if decoded.startswith("data:"):  # type: ignore[arg-type]
+                data_str = decoded[5:].strip()  # type: ignore[union-attr]
                 if data_str == "[DONE]":
                     break
                 try:

@@ -499,8 +499,8 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
             if not line:
                 continue
             decoded = line.decode("utf-8") if isinstance(line, bytes) else line
-            if decoded.startswith("data:"):
-                data_str = decoded[5:]
+            if decoded.startswith("data:"):  # type: ignore[arg-type]
+                data_str = decoded[5:]  # type: ignore[union-attr]
                 if data_str.strip() == "[DONE]":
                     break
                 try:
@@ -552,8 +552,8 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             if not line:
                 continue
             decoded = line.decode("utf-8") if isinstance(line, bytes) else line
-            if decoded.startswith("data:"):
-                data_str = decoded[5:]
+            if decoded.startswith("data:"):  # type: ignore[arg-type]
+                data_str = decoded[5:]  # type: ignore[union-attr]
                 if data_str.strip() == "[DONE]":
                     break
                 try:
