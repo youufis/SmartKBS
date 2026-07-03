@@ -287,6 +287,7 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
                                 yield {"text": accumulated_text, "session_id": None}
                     except json.JSONDecodeError:
                         continue
+            break  # 成功后跳出格式轮询，避免重复请求
         except Exception as e:
             logger.error(f"大模型流式调用异常: {e}")
             yield {"text": f"网络连接错误：{str(e)}", "session_id": None}
