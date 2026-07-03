@@ -11,6 +11,7 @@ from backend.config import BASE_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
 from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, is_admin, get_online_usernames
 from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
+from backend.logger import logger
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
 from backend.permission_service import (
     get_teacher_grades,

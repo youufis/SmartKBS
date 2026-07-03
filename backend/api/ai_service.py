@@ -71,9 +71,11 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
     """调用百炼智能体应用（同步）"""
     from dashscope import Application as DashScopeApp
     try:
+        # 新版 dashscope SDK 使用 messages 替代 prompt
+        messages = [{"role": "user", "content": prompt}]
         response = DashScopeApp.call(
             app_id=app_id,
-            prompt=prompt,
+            messages=messages,
             stream=False,
             headers={"X-DashScope-OssResourceResolve": "enable"},
         )
@@ -124,26 +126,41 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
 def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> str:
     """直接调用大模型（同步，OpenAI 兼容接口）"""
     import requests as sync_requests
-    try:
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-        }
-        resp = sync_requests.post(
-            f"{api_base}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=(30, 120),  # (连接超时30秒, 读取超时120秒)
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
-        logger.error(f"大模型调用失败: status={resp.status_code}, {resp.text[:300]}")
-        raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
-    except Exception as e:
-        logger.error(f"大模型调用异常: {e}")
-        raise
+    # 构建消息内容（兼容 content 字符串和数组两种格式）
+    content = prompt if prompt else ""
+    # 先尝试字符串格式
+    messages = [{"role": "user", "content": content}]
+    last_error = None
+    for fmt in ["str", "array"]:
+        if fmt == "array":
+            # 部分 DashScope 模型要求 content 为数组格式
+            messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
+        try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
+            }
+            resp = sync_requests.post(
+                f"{api_base}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=(30, 120),  # (连接超时30秒, 读取超时120秒)
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            # 400 错误可能是格式问题，尝试下一种格式
+            if resp.status_code == 400:
+                last_error = resp.text[:300]
+                continue
+            logger.error(f"大模型调用失败: status={resp.status_code}, {resp.text[:300]}")
+            raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
+        except Exception as e:
+            logger.error(f"大模型调用异常: {e}")
+            raise
+    # 两种格式都失败
+    raise Exception(f"AI 调用失败: {last_error}")
 
 
 def call_ai_sync_direct(prompt: str, api_key: str) -> str:
@@ -175,9 +192,10 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
                        session_id: Optional[str] = None):
     """调用百炼智能体应用（流式），返回生成器，yield {"text": str, "session_id": str}"""
     from dashscope import Application as DashScopeApp
+    messages = [{"role": "user", "content": prompt}]
     call_params = {
         "app_id": app_id,
-        "prompt": prompt,
+        "messages": messages,
         "stream": True,
         "incremental_output": True,
         "headers": {"X-DashScope-OssResourceResolve": "enable"},
@@ -229,52 +247,61 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
 def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
     """直接调用大模型（流式，OpenAI 兼容接口），yield {"text": str, "session_id": None}"""
     import requests as sync_requests
-    try:
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": True,
-        }
-        resp = sync_requests.post(
-            f"{api_base}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            stream=True,
-            timeout=180,
-        )
-        if resp.status_code != 200:
-            logger.error(f"大模型流式调用失败: status={resp.status_code}")
-            yield {"text": f"AI 调用失败 (HTTP {resp.status_code})", "session_id": None}
-            return
+    content = prompt if prompt else ""
+    # 先尝试字符串格式，失败则降级到数组格式
+    for fmt in ["str", "array"]:
+        if fmt == "str":
+            messages = [{"role": "user", "content": content}]
+        else:
+            messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
+        try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": True,
+            }
+            resp = sync_requests.post(
+                f"{api_base}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+                stream=True,
+                timeout=180,
+            )
+            if resp.status_code == 400 and fmt == "str":
+                continue  # 尝试数组格式
+            if resp.status_code != 200:
+                logger.error(f"大模型流式调用失败: status={resp.status_code}")
+                yield {"text": f"AI 调用失败 (HTTP {resp.status_code})", "session_id": None}
+                return
 
-        last_accumulated = ""
-        for line in resp.iter_lines():
-            if not line:
-                continue
-            decoded = line.decode("utf-8") if isinstance(line, bytes) else line
-            if decoded.startswith("data:"):
-                data_str = decoded[5:].strip()
-                if data_str == "[DONE]":
-                    break
-                try:
-                    data = json.loads(data_str)
-                    if "choices" in data and data["choices"]:
-                        delta = data["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            # 计算增量（兼容 OpenAI 标准和累计两种模式）
-                            if content.startswith(last_accumulated):
-                                inc = content[len(last_accumulated):]
-                            else:
-                                inc = content
-                            last_accumulated = content
-                            if inc:
-                                yield {"text": inc, "session_id": None}
-                except json.JSONDecodeError:
+            last_accumulated = ""
+            for line in resp.iter_lines():
+                if not line:
                     continue
-    except Exception as e:
-        logger.error(f"大模型流式调用异常: {e}")
-        yield {"text": f"网络连接错误：{str(e)}", "session_id": None}
+                decoded = line.decode("utf-8") if isinstance(line, bytes) else line
+                if decoded.startswith("data:"):
+                    data_str = decoded[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        if "choices" in data and data["choices"]:
+                            delta = data["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                # 计算增量（兼容 OpenAI 标准和累计两种模式）
+                                if content.startswith(last_accumulated):
+                                    inc = content[len(last_accumulated):]
+                                else:
+                                    inc = content
+                                last_accumulated = content
+                                if inc:
+                                    yield {"text": inc, "session_id": None}
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            logger.error(f"大模型流式调用异常: {e}")
+            yield {"text": f"网络连接错误：{str(e)}", "session_id": None}
 
 
 # ── 异步调用（非流式，使用 httpx） ──
@@ -319,26 +346,37 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
     """异步直接调用大模型（OpenAI 兼容接口）"""
     import httpx
 
-    try:
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-        }
-        async with httpx.AsyncClient(timeout=180) as client:
-            resp = await client.post(
-                f"{api_base}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            logger.error(f"大模型异步调用失败: status={resp.status_code}, {resp.text[:300]}")
-            raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
-    except Exception as e:
-        logger.error(f"大模型异步调用异常: {e}")
-        raise
+    content = prompt if prompt else ""
+    last_error = None
+    for fmt in ["str", "array"]:
+        if fmt == "str":
+            messages = [{"role": "user", "content": content}]
+        else:
+            messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
+        try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
+            }
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(
+                    f"{api_base}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data["choices"][0]["message"]["content"]
+                if resp.status_code == 400:
+                    last_error = resp.text[:300]
+                    continue
+                logger.error(f"大模型异步调用失败: status={resp.status_code}, {resp.text[:300]}")
+                raise Exception(f"AI 调用失败 (HTTP {resp.status_code})")
+        except Exception as e:
+            logger.error(f"大模型异步调用异常: {e}")
+            raise
+    raise Exception(f"AI 调用失败: {last_error}")
 
 
 # ═══════════════════════════════════════════════════════════════
