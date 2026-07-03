@@ -42,7 +42,7 @@ class PracticeGenerateRequest(BaseModel):
     knowledge_points: str
     subject: str = ""
     question_type: str = "mixed"
-    count: int = 1
+    count: int = 5
     difficulty: str = "medium"
 
 
@@ -89,7 +89,7 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
     type_desc = TYPE_DESC_MAP.get(req.question_type, "混合题型")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     ai_role = build_ai_role(subject=req.subject)
-    prompt = f"{ai_role}" + PRACTICE_GENERATE_PROMPT.format(
+    prompt = f"{ai_role}\n" + PRACTICE_GENERATE_PROMPT.format(
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
@@ -198,7 +198,7 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
     type_desc = TYPE_DESC_MAP.get(req.question_type, "混合题型")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     ai_role = build_ai_role(subject=req.subject)
-    prompt = f"{ai_role}" + PRACTICE_GENERATE_PROMPT.format(
+    prompt = f"{ai_role}\n" + PRACTICE_GENERATE_PROMPT.format(
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
@@ -212,6 +212,25 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for q in questions:
+            q_text = q.get("question", "").strip()
+            if not q_text:
+                continue
+            # 去重：相同知识点+题目文本不再重复插入
+            dup = execute_query(
+                "SELECT id FROM question_bank WHERE knowledge_points LIKE ? AND question_text=? AND status='active'",
+                (f"%{req.knowledge_points}%", q_text),
+            )
+            if dup:
+                logger.info(f"跳过重复题目 (kp={req.knowledge_points}): {q_text[:40]}...")
+                qid = dup[0]["id"]
+                q["id"] = qid
+                q["index"] = qid
+                if "svg_code" in q and "svg_content" not in q:
+                    q["svg_content"] = q["svg_code"]
+                if "has_svg" not in q:
+                    q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+                q["media_files"] = []
+                continue
             opts = json.dumps(q.get("options", {}), ensure_ascii=False) if q.get("options") else ""
             svg_code = q.get("svg_code") or ""
             has_svg = 1 if svg_code.strip() else 0

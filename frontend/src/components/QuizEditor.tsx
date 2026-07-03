@@ -4,6 +4,7 @@ import {
   Typography, Divider, Tag, message, Empty, Popconfirm,
 } from 'antd'
 import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons'
+import FormulaRenderer from './FormulaRenderer'
 import ActivityScopeSelector from './ActivityScopeSelector'
 import type { ActivityScopeValue } from './ActivityScopeSelector'
 
@@ -295,10 +296,20 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             <TextArea
               value={q.question}
               onChange={e => updateQuestion(q.id, 'question', e.target.value)}
-              placeholder="输入题目内容..."
+              placeholder="输入题目内容（支持 $...$ LaTeX 公式）..."
               rows={2}
-              style={{ marginBottom: 12 }}
+              style={{ marginBottom: 4 }}
             />
+            {q.question.trim() && (
+              <div style={{
+                marginBottom: 12, padding: '4px 8px',
+                borderRadius: 4, background: '#fff',
+                border: '1px dashed #d9d9d9', fontSize: 13, color: '#888',
+              }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>预览：</Text>
+                <FormulaRenderer content={q.question} />
+              </div>
+            )}
 
             {/* 选项编辑 */}
             {q.type !== 'true_false' ? (
@@ -381,9 +392,19 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               <Input
                 value={q.explanation}
                 onChange={e => updateQuestion(q.id, 'explanation', e.target.value)}
-                placeholder="解析（可选）：帮助学生理解..."
+                placeholder="解析（可选，支持 $...$ LaTeX 公式）..."
                 size="small"
               />
+              {q.explanation.trim() && (
+                <div style={{
+                  marginTop: 4, padding: '4px 8px',
+                  borderRadius: 4, background: '#fff',
+                  border: '1px dashed #d9d9d9', fontSize: 13, color: '#888',
+                }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>预览：</Text>
+                  <FormulaRenderer content={q.explanation} />
+                </div>
+              )}
             </div>
           </div>
         ))

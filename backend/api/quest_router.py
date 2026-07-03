@@ -83,26 +83,26 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         question_index=question_index,
     )
     try:
-        text = call_ai_sync_direct(prompt, api_key)
+        import concurrent.futures
+        from backend.api.ai_service import _ai_thread_pool, call_ai_sync
+        # 在共享线程池中运行同步调用，避免阻塞事件循环
+        future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
+        text = future.result(timeout=60)
         # 清理可能的 markdown 代码块
         text = text.strip()
         if text.startswith("```"):
-            # 提取 JSON
             start = text.find("{")
             end = text.rfind("}")
             if start >= 0 and end > start:
                 text = text[start:end + 1]
         result = json.loads(text)
-        # 验证必要字段
         for key in ("category", "question", "options", "answer", "explanation"):
             if key not in result:
                 raise ValueError(f"AI 返回缺少字段: {key}")
-        # 补充可选媒体字段（AI 可能未返回）
         result.setdefault("svg_content", "")
         result.setdefault("has_svg", 1 if result.get("svg_content") else 0)
         result.setdefault("media_files", "")
         result.setdefault("media_placeholders", "")
-        # 如果有 SVG 内容，做基本合法性校验
         svg = result.get("svg_content", "")
         if svg and "<svg" not in svg:
             logger.warning(f"AI 返回的 svg_content 格式异常，已忽略: {svg[:50]}")
@@ -111,11 +111,9 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         return result
     except Exception as e:
         logger.error(f"AI 出题失败: {e}，尝试从题库取备用题")
-        # 降级：从题库取一道题
         bank_q = _get_question_from_bank([])
         if bank_q:
             return bank_q
-        # 题库也没有，返回内置兜底题
         return {
             "category": "综合",
             "question": "以下哪项不是中国的四大发明？",
@@ -127,10 +125,19 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
 
 
 def _save_question_to_bank(question_data: dict[str, Any]):
-    """将 AI 生成的题目持久化到题库表（去重）"""
+    """将 AI 生成的题目持久化到题库表（按 question_text 去重）"""
+    if not question_data.get("question"):
+        return
     try:
+        # 先检查是否已存在相同题目
+        existing = execute_query(
+            "SELECT id FROM quest_question_bank WHERE question_text=?",
+            (question_data["question"],),
+        )
+        if existing:
+            return  # 已存在，跳过
         execute_insert_update(
-            """INSERT OR IGNORE INTO quest_question_bank
+            """INSERT INTO quest_question_bank
                (category, question_text, options, correct_answer, explanation, used_count, created_at,
                 svg_content, has_svg, media_files, media_placeholders)
                VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
@@ -293,7 +300,9 @@ def _call_ai_phone_friend(api_key: str, question: str, options: dict[str, Any]) 
         option_d=opts.get("D", ""),
     )
     try:
-        text = call_ai_sync_direct(prompt, api_key)
+        from backend.api.ai_service import _ai_thread_pool, call_ai_sync
+        future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
+        text = future.result(timeout=30)
         return text.strip().strip('"').strip("'")
     except Exception as e:
         logger.error(f"电话朋友 AI 调用失败: {e}")
@@ -310,7 +319,9 @@ def _call_ai_audience_vote(api_key: str, question: str, options: dict[str, Any])
         option_d=options.get("D", ""),
     )
     try:
-        text = call_ai_sync_direct(prompt, api_key)
+        from backend.api.ai_service import _ai_thread_pool, call_ai_sync
+        future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
+        text = future.result(timeout=30)
         text = text.strip()
         if text.startswith("```"):
             start = text.find("{")

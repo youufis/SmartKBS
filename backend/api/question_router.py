@@ -52,6 +52,9 @@ class QuestionUpdate(BaseModel):
     difficulty: str | None = None
 
 
+_VALID_SOURCES = {"manual", "ai", "quiz_import", "batch_import", "exam_import"}
+
+
 class ImportQuestion(BaseModel):
     """导入题目到题库请求"""
     type: str = "single"
@@ -103,6 +106,10 @@ async def import_question(req: ImportQuestion, request: Request):
     role = user.get("role", 2)
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可导入题目")
+
+    # 校验 source 字段
+    if req.source not in _VALID_SOURCES:
+        raise HTTPException(status_code=400, detail=f"无效的 source 值: {req.source}，允许值: {', '.join(sorted(_VALID_SOURCES))}")
 
     # 获取用户姓名
     from backend.database import execute_query as user_query
@@ -202,7 +209,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
     # 构造 Prompt
     type_desc = QUESTION_TYPE_MAP.get(req.question_type, "单选题")
-    prompt = _build_generate_prompt(req.subject, req.knowledge_points, type_desc, req.count, req.difficulty)
+    prompt = _build_generate_prompt(req.subject, req.knowledge_points, type_desc, req.count, req.difficulty, username)
     logger.info(f"开始调用AI生成试题: subject={req.subject}, type={req.question_type}, count={req.count}")
 
     # 调用 AI
@@ -230,12 +237,17 @@ async def generate_questions(req: GenerateRequest, request: Request):
     for q_data in questions[:req.count]:
         q_type = q_data.get("type", req.question_type)
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
+        svg_code = q_data.get("svg_code") or ""
+        has_svg = 1 if svg_code.strip() else 0
+        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
         qid = execute_insert(
             """INSERT INTO question_bank
                (type, question_text, options, correct_answer, explanation,
                 knowledge_points, subject, difficulty, creator_username, creator_name,
-                source, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai', 'active', ?, ?)""",
+                source, status, created_at, updated_at,
+                svg_content, has_svg, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ai', 'active', ?, ?,
+                       ?, ?, ?)""",
             (
                 q_type,
                 q_data.get("question", ""),
@@ -249,6 +261,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
                 creator_name,
                 now,
                 now,
+                svg_code, has_svg, media_placeholders,
             ),
         )
 
@@ -276,11 +289,13 @@ async def generate_questions(req: GenerateRequest, request: Request):
     }
 
 
-def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, count: int, difficulty: str) -> str:
+def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, count: int, difficulty: str, username: str = "") -> str:
     """构建 AI 生成试题的 Prompt（使用集中化模板）"""
     from backend.prompts.chat import QUESTION_GENERATE_PROMPT
+    from backend.prompts import build_ai_role
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
-    return QUESTION_GENERATE_PROMPT.format(
+    ai_role = build_ai_role(subject=subject)
+    return f"{ai_role}\n" + QUESTION_GENERATE_PROMPT.format(
         subject=subject,
         knowledge_points=knowledge_points,
         type_desc=type_desc,
@@ -381,7 +396,7 @@ async def list_questions(
     if role == 2:  # student
         raise HTTPException(status_code=403, detail="学生无权访问题库")
 
-    conditions = ["q.status = 'active'", "q.type != 'code'"]
+    conditions = ["q.status = 'active'"]
     params = []
 
     if type:
@@ -550,21 +565,24 @@ async def dedup_questions(request: Request):
 
     results = []
     total_deleted = 0
+    total_skipped = 0
 
     for row in rows:
         question_text = row["question_text"]
         id_list = sorted([int(x) for x in row["ids"].split(",")])
-        keep_id = id_list[0]  # 保留 ID 最小的（最早创建的）
+        keep_id = id_list[0]
         delete_ids = id_list[1:]
 
-        # 检查权限：只删除当前用户有权限的
         allowed_delete = []
+        skipped = 0
         for did in delete_ids:
             q = execute_query_one(
                 "SELECT creator_username FROM question_bank WHERE id = ?", (did,)
             )
             if q and (role == 0 or q["creator_username"] == username):
                 allowed_delete.append(did)
+            else:
+                skipped += 1
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for did in allowed_delete:
@@ -573,20 +591,26 @@ async def dedup_questions(request: Request):
                 (now, did),
             )
 
-        if allowed_delete:
+        if allowed_delete or skipped:
             results.append({
                 "question_text": question_text[:60] + ("..." if len(question_text) > 60 else ""),
                 "keep_id": keep_id,
                 "deleted_ids": allowed_delete,
                 "count": len(allowed_delete),
+                "skipped": skipped,
             })
             total_deleted += len(allowed_delete)
+            total_skipped += skipped
 
-    logger.info(f"去重完成: 删除 {total_deleted} 条重复试题, by={username}")
+    msg = f"共删除 {total_deleted} 条重复试题"
+    if total_skipped:
+        msg += f"，{total_skipped} 条因权限不足跳过"
+    logger.info(f"去重完成: 删除 {total_deleted}, 跳过 {total_skipped}, by={username}")
     return {
         "total_deleted": total_deleted,
+        "total_skipped": total_skipped,
         "groups": results,
-        "message": f"共删除 {total_deleted} 条重复试题",
+        "message": msg,
     }
 
 
@@ -1060,8 +1084,11 @@ def _extract_text_from_file(file_bytes: bytes, ext: str) -> str:
 
 def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
     """构建 AI 提取试题的 Prompt（含公式和配图支持）"""
+    from backend.prompts import build_ai_role
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
-    return f"""你是一个试题提取助手。下面是一些文本内容，可能包含试题和答案。
+    ai_role = build_ai_role(subject=subject)
+    prompt = f"""{ai_role}
+你是一个试题提取助手。下面是一些文本内容，可能包含试题和答案。
 请从文本中识别并提取出所有试题，按照 JSON 格式输出。
 
 科目：{subject}

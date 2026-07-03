@@ -530,8 +530,8 @@ const InteractionPage: React.FC = () => {
               <Select.Option value="mixed">混合出题（单选+判断）</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="count" label="题目数量" initialValue={1}>
-            <InputNumber min={1} max={50} style={{ width: 120 }} /> 题
+          <Form.Item name="count" label="题目数量" initialValue={5}>
+            <InputNumber min={1} max={50} defaultValue={5} style={{ width: 120 }} /> 题
           </Form.Item>
           <Form.Item label="目标范围">
             <ActivityScopeSelector value={aiQuizScope} onChange={setAiQuizScope} />

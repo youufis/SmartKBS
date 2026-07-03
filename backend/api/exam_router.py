@@ -89,6 +89,13 @@ class AutoSelectRequest(BaseModel):
     count: int = 10
     exclude_existing: bool = True
 
+    class Config:
+        @staticmethod
+        def validate_schema(v):
+            if v.get("count", 10) < 1 or v.get("count", 10) > 200:
+                raise ValueError("选题数量范围为 1-200")
+            return v
+
 
 # ── 辅助函数 ──
 
@@ -834,9 +841,12 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
     if not rows:
         raise HTTPException(status_code=404, detail="未找到符合条件的题目")
 
+    # count 上限校验
+    select_count = max(1, min(req.count, 200, len(rows)))
+
     # 随机选取
     import random
-    selected = random.sample(rows, min(req.count, len(rows)))
+    selected = random.sample(rows, select_count)
 
     # 获取当前最大排序序号
     max_order_row = execute_query_one(
@@ -848,6 +858,7 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
     # 等分总分
     score_per_question = round(exam["total_score"] / len(selected), 1)
     score_per_question = max(score_per_question, 1)
+    actual_total = round(score_per_question * len(selected), 1)
 
     added = 0
     added_questions = []
@@ -855,7 +866,6 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
 
     for i, q in enumerate(selected):
         qid = q["id"]
-        # 二次检查是否已添加（避免并发）
         existing = execute_query_one(
             "SELECT id FROM exam_questions WHERE exam_id = ? AND question_id = ?",
             (exam_id, qid),
@@ -877,10 +887,17 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
             "knowledge_points": q["knowledge_points"],
         })
 
-    # 更新考试时间
-    execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
+    # 同步总分（确保与实际分配一致）
+    if abs(actual_total - exam["total_score"]) > 0.1:
+        execute_update(
+            "UPDATE exams SET total_score = ?, updated_at = ? WHERE id = ?",
+            (actual_total, now, exam_id),
+        )
+        logger.info(f"智能选题同步总分: {exam['total_score']} → {actual_total}")
+    else:
+        execute_update("UPDATE exams SET updated_at = ? WHERE id = ?", (now, exam_id))
 
-    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 条件={req.model_dump()} 选取={added}题")
+    logger.info(f"用户 {username} 智能选题: 考试{exam_id} 选取={added}题")
 
     return {
         "message": f"智能选题完成，共添加 {added} 道试题",
@@ -1174,6 +1191,16 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     attempt_id = attempt["id"]
 
+    # 校验考试是否已过期
+    now_dt = datetime.now()
+    if exam.get("end_time"):
+        try:
+            end_dt = datetime.strptime(exam["end_time"], "%Y-%m-%d %H:%M:%S")
+            if now_dt > end_dt:
+                raise HTTPException(status_code=400, detail="考试已结束，无法提交")
+        except ValueError:
+            pass
+
     # 获取所有题目信息（含 question_text 用于 AI 批改）
     questions = execute_query(
         """SELECT q.id, q.type, q.question_text, q.correct_answer, eq.score
@@ -1182,6 +1209,15 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
            WHERE eq.exam_id = ? AND q.status = 'active'""",
         (exam_id,),
     )
+
+    # 检测是否有题目已被删除
+    total_in_exam = execute_query_one(
+        "SELECT COUNT(*) as cnt FROM exam_questions WHERE exam_id = ?",
+        (exam_id,),
+    )
+    if total_in_exam and len(questions) < total_in_exam["cnt"]:
+        deleted_count = total_in_exam["cnt"] - len(questions)
+        logger.warning(f"考试 {exam_id} 有 {deleted_count} 道题已被删除，跳过评分")
 
     total_score = exam["total_score"]
     earned_score = 0.0

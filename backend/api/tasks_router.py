@@ -25,11 +25,6 @@ from backend.config import (
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
-from backend.permission_service import (
-    get_teacher_assignments,
-    is_student_in_teacher_scope,
-)
-
 router = APIRouter()
 
 
@@ -105,18 +100,17 @@ def _get_creator_tasks(username: str) -> list[dict[str, Any]]:  # type: ignore[v
 
 def _check_task_ownership(task_id: str, username: str) -> dict[str, Any] | None:
     """验证当前用户是否有权操作该任务，返回任务信息或 None"""
-    for task in _get_all_tasks_raw():
-        if task["id"] == task_id:
-            if is_admin(username) or task.get("creator") == username:
-                return task
-            return None
+    rows = execute_query(
+        "SELECT id, creator_username, name, description, status, created_at, "
+        "target_scope, target_grade, target_class, target_users "
+        "FROM tasks WHERE id=?", (task_id,),
+    )
+    if not rows:
+        return None
+    task = _task_row_to_dict(rows[0])
+    if is_admin(username) or task.get("creator") == username:
+        return task
     return None
-
-
-from backend.permission_service import (
-    get_teacher_assignments,
-    is_student_in_teacher_scope,
-)
 
 
 def get_user_relevant_tasks(student_user: str, active_tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -202,7 +196,8 @@ async def create_task(req: CreateTaskRequest, request: Request):
     if not task_name:
         raise HTTPException(status_code=400, detail="任务名称不能为空")
 
-    task_id = f"{username}_{task_name}_{int(time.time())}"
+    import uuid
+    task_id = f"{username}_{task_name}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     now = time.strftime("%Y-%m-%d %H:%M:%S")
 
     execute_insert_update(
@@ -256,10 +251,34 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
             raise HTTPException(status_code=404, detail="任务未找到")
 
     creator = task_info["creator"]
+    target_scope = task_info.get("target_scope", "teacher_classes")
 
-    # 记录提交（幂等）
+    # 权限校验：学生只能提交到可见范围内的任务
+    if user.get("role") == 2:
+        from backend.permission_service import check_activity_visibility
+        s_grade = user.get("grade", "")
+        s_class = user.get("class", "")
+        rows_grade = execute_query(
+            "SELECT grade, class FROM users WHERE username=?", (username,),
+        )
+        if rows_grade:
+            s_grade = str(rows_grade[0][0] or "").strip()
+            s_class = str(rows_grade[0][1] or "").strip()
+        if not check_activity_visibility(
+            student_username=username,
+            student_grade=s_grade,
+            student_class=s_class,
+            creator_username=creator,
+            target_scope=target_scope,
+            target_grade=task_info.get("target_grade", ""),
+            target_class=task_info.get("target_class", ""),
+            target_users=task_info.get("target_users", ""),
+        ):
+            raise HTTPException(status_code=403, detail="无权提交到该任务")
+
+    # 记录提交（已存在的更新提交时间，不静默忽略）
     execute_insert_update(
-        "INSERT OR IGNORE INTO task_submissions (task_id, student_username, submitted_at) VALUES (?, ?, datetime('now'))",
+        "INSERT OR REPLACE INTO task_submissions (task_id, student_username, submitted_at) VALUES (?, ?, datetime('now'))",
         (task_info["id"], username),
     )
 
@@ -601,7 +620,7 @@ async def ai_grade_task(task_id: str, request: Request):
     # 5. 构建批改 prompt
     from backend.prompts.homework_grade import TASK_GRADING_PROMPT
     ai_role = build_ai_role()
-    prompt = f"{ai_role}" + TASK_GRADING_PROMPT.format(
+    prompt = f"{ai_role}\n" + TASK_GRADING_PROMPT.format(
         subject="",
         task_name=task_name,
         task_description=task_desc,

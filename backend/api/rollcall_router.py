@@ -34,7 +34,8 @@ def _get_rollcall_teacher(request: Request, body: dict[str, Any] | None = None) 
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         try:
-            payload = pyjwt.decode(auth[7:], options={"verify_signature": False})
+            from backend.auth import JWT_SECRET_KEY, JWT_ALGORITHM
+            payload = pyjwt.decode(auth[7:], JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
             return payload.get("username", "root")
         except Exception:
             pass
@@ -125,45 +126,46 @@ def _load_history(teacher, grade, cls):
 
 def _save_history(teacher, grade, cls, data):
     """保存点名状态到数据库"""
-    with get_connection() as conn:
-        c = conn.cursor()
-        c.execute(
-            "DELETE FROM rollcall_weights WHERE teacher_username=? AND grade=? AND class_name=?",
-            (teacher, grade, cls),
-        )
-        for sname, weight in data.get("weights", {}).items():
+    try:
+        with get_connection() as conn:
+            c = conn.cursor()
             c.execute(
-                "INSERT INTO rollcall_weights (teacher_username, grade, class_name, student_name, weight) VALUES (?, ?, ?, ?, ?)",
-                (teacher, grade, cls, sname, weight),
+                "DELETE FROM rollcall_weights WHERE teacher_username=? AND grade=? AND class_name=?",
+                (teacher, grade, cls),
             )
-        picked = json.dumps(data.get("picked_in_round", []), ensure_ascii=False)
-        c.execute(
-            "INSERT OR REPLACE INTO rollcall_meta (teacher_username, grade, class_name, last_time, picked_in_round, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
-            (teacher, grade, cls, data.get("last_time"), picked),
-        )
-        c.execute(
-            "DELETE FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=?",
-            (teacher, grade, cls),
-        )
-        for entry in data.get("history", []):
-            raw_time = entry.get("time", "")
-            # 补全日期：如果只有时间没有日期，结合 last_time 或当前日期
-            if raw_time and len(raw_time) <= 10 and ":" in raw_time:
-                if data.get("last_time"):
-                    base_date = time.strftime("%Y-%m-%d", time.localtime(data["last_time"]))
+            for sname, weight in data.get("weights", {}).items():
+                c.execute(
+                    "INSERT INTO rollcall_weights (teacher_username, grade, class_name, student_name, weight) VALUES (?, ?, ?, ?, ?)",
+                    (teacher, grade, cls, sname, weight),
+                )
+            picked = json.dumps(data.get("picked_in_round", []), ensure_ascii=False)
+            c.execute(
+                "INSERT OR REPLACE INTO rollcall_meta (teacher_username, grade, class_name, last_time, picked_in_round, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                (teacher, grade, cls, data.get("last_time"), picked),
+            )
+            c.execute(
+                "DELETE FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=?",
+                (teacher, grade, cls),
+            )
+            for entry in data.get("history", []):
+                raw_time = entry.get("time", "")
+                if raw_time and len(raw_time) <= 10 and ":" in raw_time:
+                    if data.get("last_time"):
+                        base_date = time.strftime("%Y-%m-%d", time.localtime(data["last_time"]))
+                    else:
+                        base_date = time.strftime("%Y-%m-%d")
+                    full_time = f"{base_date} {raw_time}"
                 else:
-                    base_date = time.strftime("%Y-%m-%d")
-                full_time = f"{base_date} {raw_time}"
-            else:
-                full_time = raw_time if raw_time else time.strftime("%Y-%m-%d %H:%M:%S")
-            c.execute(
-                "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name, result, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (teacher, grade, cls, entry.get("student", ""), entry.get("result", ""), entry.get("points", 0), full_time),
-            )
-        conn.commit()
-        data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
-
-
+                    full_time = raw_time if raw_time else time.strftime("%Y-%m-%d %H:%M:%S")
+                c.execute(
+                    "INSERT INTO rollcall_history (teacher_username, grade, class_name, student_name, result, points, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (teacher, grade, cls, entry.get("student", ""), entry.get("result", ""), entry.get("points", 0), full_time),
+                )
+            conn.commit()
+            data["updated"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        logger.error(f"保存点名状态失败: {e}")
+        raise
 def _weighted_pick(weights):
     """权重越高越可能被选到，最低保底权重1"""
     names = list(weights.keys())
@@ -180,14 +182,14 @@ def _weighted_pick(weights):
 
 
 def _apply_decay(weights, last_time):
-    """权重自然恢复：每隔几分钟权重向10恢复"""
+    """权重自然恢复：每隔几分钟权重向10恢复，同时更新 last_time 确保持久化"""
     if not last_time:
         return time.time()
     elapsed = (time.time() - last_time) / 60
     if elapsed >= 2:
         for s in weights:
             weights[s] = min(10, weights[s] + elapsed * 0.3)
-        return time.time()
+        last_time = time.time()
     return last_time
 
 
@@ -201,6 +203,11 @@ def _save_to_student_chat(student_name, cls, content):
     except Exception:
         pass
     if not username:
+        return None
+    # 安全校验：只允许字母数字下划线
+    import re as _re
+    if not _re.match(r'^\w+$', username):
+        logger.warning(f"非法用户名，跳过写入 ChatHistory: {username}")
         return None
     try:
         role_rows = execute_query("SELECT role FROM users WHERE username=?", (username,))

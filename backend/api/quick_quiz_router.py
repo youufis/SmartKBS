@@ -146,8 +146,10 @@ def _can_view_room(room: dict[str, Any], username: str, role: int) -> bool:
                 if not room.get("target_class"):
                     return True
                 # 教师 class 可能是 "1,2,3"，用 INSTR 匹配
-                cls_param = f",{cls},"
-                if cls and f",{room['target_class']}," and f",{room['target_class']}," and (not room['target_class'] or cls == room['target_class'] or f",{room['target_class']},".find(cls_param) >= 0):
+                if not room.get("target_class"):
+                    return True
+                target_classes = str(room["target_class"]).split(",")
+                if cls in target_classes:
                     return True
         return False
     if role == 2:
@@ -305,10 +307,20 @@ def _load_questions_from_bank(subject: str = "", knowledge_points: str = "",
             "explanation": r.get("explanation") or "",
             "svg_content": r.get("svg_content") or "",
             "has_svg": r.get("has_svg") or 0,
-            "media_files": r.get("media_files") or "",
-            "media_placeholders": r.get("media_placeholders") or "",
+            "media_files": _parse_json_field(r.get("media_files")),
+            "media_placeholders": _parse_json_field(r.get("media_placeholders")),
         })
     return questions
+
+
+def _parse_json_field(val: Any) -> Any:
+    """解析可能为 JSON 字符串的字段，失败时返回原文"""
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return val
+    return val or ""
 
 
 def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1181,7 +1193,6 @@ async def submit_answer(room_id: int, request: Request):
         raise HTTPException(status_code=400, detail="请选择答案")
 
     # 计算用时
-    import time
     time_spent = round(time.time() - state["question_start_time"], 1)
 
     # 获取当前题目
@@ -1202,8 +1213,15 @@ async def submit_answer(room_id: int, request: Request):
         (room_id, username),
     )
 
-    # 计分：答对 +1 分，答错 -2 分
-    score = 1 if is_correct else -2
+    # 计分：根据 scoring_mode 计算
+    room_data = execute_query_one("SELECT scoring_mode FROM quick_quiz_rooms WHERE id=?", (room_id,))
+    scoring_mode = room_data["scoring_mode"] if room_data else "simple"
+    if scoring_mode == "speed":
+        score = _calc_speed_score(time_spent, state["time_limit"]) if is_correct else -20
+    elif scoring_mode == "tiered":
+        score = _calc_tiered_score(time_spent) if is_correct else -20
+    else:
+        score = 1 if is_correct else -2
     streak = (player["streak"] if player else 0) + 1 if is_correct else 0
 
     # 记录答题
@@ -1520,7 +1538,6 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
     state["first_blood"] = None
     state["answered_in_round"] = {}
 
-    import time
     state["question_start_time"] = time.time()
 
     # 取消旧的定时器（如果正在被该函数调用则不取消，避免自我取消）
@@ -1648,56 +1665,66 @@ async def _do_reveal(room_id: int) -> dict[str, Any] | None:
     return reveal_data
 
 
+_end_game_lock: set[int] = set()  # 防止 _do_end_game 重复执行
+
+
 async def _do_end_game(room_id: int):
     """结束游戏，发放奖励"""
-    state = game_manager.get_room(room_id)
-    now = _now()
+    # 防重入锁
+    if room_id in _end_game_lock:
+        return
+    _end_game_lock.add(room_id)
+    try:
+        state = game_manager.get_room(room_id)
+        now = _now()
 
-    # 如果还有未公布答案的题目，先公布
-    if state and state["phase"] == "question":
-        await _do_reveal(room_id)
+        # 如果还有未公布答案的题目，先公布
+        if state and state["phase"] == "question":
+            await _do_reveal(room_id)
 
-    # 更新房间状态
-    execute_insert_update(
-        "UPDATE quick_quiz_rooms SET status='ended', ended_at=? WHERE id=?",
-        (now, room_id),
-    )
+        # 更新房间状态
+        execute_insert_update(
+            "UPDATE quick_quiz_rooms SET status='ended', ended_at=? WHERE id=?",
+            (now, room_id),
+        )
 
-    room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
+        room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
 
-    # 获取最终排行榜
-    ranking = execute_query_dict(
-        """SELECT student_username, student_name, total_score, correct_count, wrong_count,
-                  total_time, max_streak
-           FROM quick_quiz_players
-           WHERE room_id=?
-           ORDER BY total_score DESC, correct_count DESC, total_time ASC""",
-        (room_id,),
-    )
-    for i, r in enumerate(ranking):
-        r["rank"] = i + 1
+        # 获取最终排行榜
+        ranking = execute_query_dict(
+            """SELECT student_username, student_name, total_score, correct_count, wrong_count,
+                      total_time, max_streak
+               FROM quick_quiz_players
+               WHERE room_id=?
+               ORDER BY total_score DESC, correct_count DESC, total_time ASC""",
+            (room_id,),
+        )
+        for i, r in enumerate(ranking):
+            r["rank"] = i + 1
 
-    # 保存排行快照
-    execute_insert_update(
-        "INSERT INTO quick_quiz_rankings (room_id, round_number, rankings, created_at) VALUES (?, ?, ?, ?)",
-        (room_id, 0, json.dumps(ranking, ensure_ascii=False), now),
-    )
+        # 保存排行快照
+        execute_insert_update(
+            "INSERT INTO quick_quiz_rankings (room_id, round_number, rankings, created_at) VALUES (?, ?, ?, ?)",
+            (room_id, 0, json.dumps(ranking, ensure_ascii=False), now),
+        )
 
-    # 发放积分奖励
-    if room:
-        await _award_rewards(room_id, room, ranking)
+        # 发放积分奖励
+        if room:
+            await _award_rewards(room_id, room, ranking)
 
-    # 广播结束
-    await game_manager.broadcast(room_id, {
-        "type": "game_end",
-        "data": {
-            "final_ranking": ranking,
-            "room": _room_to_dict(room) if room else {},
-        }
-    })
+        # 广播结束
+        await game_manager.broadcast(room_id, {
+            "type": "game_end",
+            "data": {
+                "final_ranking": ranking,
+                "room": _room_to_dict(room) if room else {},
+            }
+        })
 
-    # 清理内存状态
-    game_manager.remove_room(room_id)
+        # 清理内存状态
+        game_manager.remove_room(room_id)
+    finally:
+        _end_game_lock.discard(room_id)
 
 
 async def _award_rewards(room_id: int, room: dict[str, Any], ranking: list[dict[str, Any]]):

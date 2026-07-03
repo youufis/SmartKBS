@@ -88,8 +88,6 @@ def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
     if not allowed:
         return False, msg
 
-    import json
-    import re
     prompt = (
         '你是一个课堂内容审核助手。请判断以下学生在分组讨论中的发言是否包含：\n'
         '1. 违反法律法规的内容\n'
@@ -106,15 +104,14 @@ def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
         return True, ""
 
     try:
-        from backend.api.ai_service import call_ai_sync_direct
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_ai_sync_direct, prompt, api_key)
-            try:
-                result = future.result(timeout=15)
-            except concurrent.futures.TimeoutError:
-                logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
-                return True, ""
+        import json, re, concurrent.futures
+        from backend.api.ai_service import _ai_thread_pool
+        future = _ai_thread_pool.submit(_call_review_sync, prompt, api_key)
+        try:
+            result = future.result(timeout=15)
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
+            return True, ""
         jm = re.search(r'\{[^}]+\}', result)
         if jm:
             data = json.loads(jm.group())
@@ -124,6 +121,12 @@ def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
         return True, ""
     except Exception:
         return True, ""
+
+
+def _call_review_sync(prompt: str, api_key: str) -> str:
+    """内容审核专用同步调用"""
+    from backend.api.ai_service import call_ai_sync_direct
+    return call_ai_sync_direct(prompt, api_key)
 
 
 # ── 辅助函数 ──
@@ -195,6 +198,13 @@ async def create_discussion(req: DiscussionCreate, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可创建讨论")
 
+    if not req.title.strip():
+        raise HTTPException(status_code=400, detail="请输入讨论标题")
+    if req.duration_minutes < 1 or req.duration_minutes > 120:
+        raise HTTPException(status_code=400, detail="讨论时长范围为 1-120 分钟")
+    if req.group_count < 0 or req.members_per_group < 1:
+        raise HTTPException(status_code=400, detail="分组参数无效")
+
     now = _now()
     disc_id = execute_insert_update(
         """INSERT INTO discussions
@@ -235,7 +245,7 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
 
     from backend.prompts.discussion import DISCUSSION_PLAN_PROMPT
     ai_role = build_ai_role(subject=req.subject)
-    prompt = f"{ai_role}" + DISCUSSION_PLAN_PROMPT.format(
+    prompt = f"{ai_role}\n" + DISCUSSION_PLAN_PROMPT.format(
         subject=req.subject,
         topic=req.topic,
         ai_role_desc=ai_role_desc,
@@ -535,7 +545,8 @@ async def start_discussion(disc_id: int, request: Request):
     members_per_group = disc["members_per_group"]
 
     if group_count <= 0 and members_per_group > 0:
-        group_count = members_per_group  # 先按人数创建组，后续加入的学生会分配到最少人的组
+        # 根据 members_per_group 估算组数（后续自动分配）
+        group_count = members_per_group * 2  # 默认按每组人数*2 估算组数
     if group_count <= 0:
         group_count = 4  # 默认 4 组
 
@@ -602,6 +613,16 @@ async def _auto_generate_report(disc_id: int):
     rows = execute_query("SELECT * FROM discussions WHERE id=?", (disc_id,))
     if not rows:
         return
+    # 检查是否要求生成报告
+    columns_all = ["id", "creator_username", "title", "description", "subject",
+                   "group_mode", "group_count", "members_per_group", "ai_role",
+                   "duration_minutes", "status", "grade", "classes",
+                   "require_summary"]
+    if not dict(zip(columns_all, rows[0])).get("require_summary"):
+        logger.info(f"讨论 #{disc_id} 未开启总结报告，跳过自动生成")
+        return
+    if not rows:
+        return
 
     columns = ["id", "creator_username", "title", "description", "subject",
                "group_mode", "group_count", "members_per_group", "ai_role",
@@ -648,7 +669,7 @@ async def _auto_generate_report(disc_id: int):
                 from backend.prompts.discussion import DISCUSSION_AI_SUMMARY_PROMPT
                 group_name = g[2] or f"第{g[1]}组"
                 ai_role = build_ai_role(subject=disc.get("subject", ""))
-                prompt = f"{ai_role}" + DISCUSSION_AI_SUMMARY_PROMPT.format(
+                prompt = f"{ai_role}\n" + DISCUSSION_AI_SUMMARY_PROMPT.format(
                     subject=disc.get("subject") or "",
                     title=disc["title"],
                     group_name=group_name,
@@ -717,8 +738,6 @@ async def restart_discussion(disc_id: int, request: Request):
         raise HTTPException(status_code=404, detail="讨论不存在")
     if role == 1 and rows[0][1] != user["username"]:
         raise HTTPException(status_code=403, detail="只能管理自己的讨论")
-    if not rows:
-        raise HTTPException(status_code=404, detail="讨论不存在")
     if rows[0][0] != "ended":
         raise HTTPException(status_code=400, detail="仅已结束的讨论可重新开始")
 
@@ -1084,10 +1103,10 @@ async def ai_suggest(group_id: int, request: Request):
 
 # ── AI 归纳总结（互动讨论后的 AI 总结功能）──
 
-def _get_api_key() -> str:
+def _get_api_key(username: str = "") -> str:
     """获取 API Key 的辅助函数（委托共享的 get_api_keys）"""
     from backend.api.chat_router import get_api_keys
-    key, _ = get_api_keys("")
+    key, _ = get_api_keys(username) if username else get_api_keys("")
     return key
 
 
@@ -1148,7 +1167,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
 
     from backend.prompts.discussion import DISCUSSION_AI_SUMMARY_PROMPT
     ai_role = build_ai_role(subject=subject)
-    prompt = f"{ai_role}" + DISCUSSION_AI_SUMMARY_PROMPT.format(
+    prompt = f"{ai_role}\n" + DISCUSSION_AI_SUMMARY_PROMPT.format(
         subject=subject,
         title=title,
         group_name=group_name,

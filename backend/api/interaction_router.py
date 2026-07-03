@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+import random
 import re
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,14 @@ from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_insert_update, execute_batch, execute_query_dict
 from backend.logger import logger
 from backend.prompts import build_ai_role
+from backend.api.chat_router import get_api_keys
+from backend.api.ai_service import call_ai_async
+from backend.question_db import (
+    execute_query as qb_execute_query,
+    execute_insert as qb_execute_insert,
+    execute_update as qb_execute_update,
+)
+from backend.config import BASE_DIR
 
 router = APIRouter()
 
@@ -69,7 +78,7 @@ class QuestionAnswer(BaseModel):
 class AiGenerateQuiz(BaseModel):
     topic: str
     subject: str = ""  # 由前端传递
-    count: int = 1
+    count: int = 5
     question_type: str = "single"  # single / true_false / mixed
 
 
@@ -101,60 +110,316 @@ def _call_ai(prompt: str) -> str:
         return f"AI 调用出错: {str(e)}"
 
 
+# ── 从题库搜索题目 ──
+
+
+def _array_opts_to_dict(opt_array: list[str]) -> dict[str, str]:
+    """将 AI 返回的选项数组 ["A. 文本", "B. 文本"] 转为入库对象 {"A": "文本", "B": "文本"}"""
+    result: dict[str, str] = {}
+    for opt in opt_array:
+        opt_str = str(opt).strip()
+        if len(opt_str) >= 2 and opt_str[1] in ('.', '、'):
+            key = opt_str[0].upper()
+            val = opt_str[2:].strip()
+            result[key] = val
+        else:
+            key = chr(65 + len(result))
+            result[key] = opt_str
+    return result
+
+
+def _search_questions_from_bank(
+    topic: str,
+    subject: str,
+    question_type: str,
+    count: int,
+) -> list[dict[str, Any]]:
+    """从学科题库（question_bank）搜索匹配的题目，返回与 AI 出题一致的格式"""
+    conditions = ["status='active'", "type IN ('single','true_false')"]
+    params: list[Any] = []
+
+    if subject:
+        conditions.append("subject=?")
+        params.append(subject)
+
+    if topic:
+        conditions.append("(knowledge_points LIKE ? OR question_text LIKE ?)")
+        kw = f"%{topic}%"
+        params.extend([kw, kw])
+
+    if question_type != "mixed":
+        conditions.append("type=?")
+        params.append(question_type)
+
+    where = " AND ".join(conditions)
+
+    rows = qb_execute_query(
+        f"""SELECT id, type, question_text, options, correct_answer, explanation,
+                   svg_content, has_svg, media_files, media_placeholders
+            FROM question_bank
+            WHERE {where}
+            ORDER BY RANDOM()
+            LIMIT ?""",
+        tuple(params + [count]),
+    )
+
+    questions = []
+    for r in rows:
+        opts = {}
+        opt_raw = r.get("options")
+        if opt_raw:
+            try:
+                opts = json.loads(opt_raw) if isinstance(opt_raw, str) else opt_raw
+            except (json.JSONDecodeError, TypeError):
+                opts = {}
+
+        # 将选项对象 {"A": "文本"} 转为数组格式 ["A. 文本"]
+        opt_array: list[str] = []
+        if isinstance(opts, dict):
+            for key in sorted(opts.keys()):
+                label = str(key).strip().upper()
+                text = str(opts[key]).strip()
+                # 避免重复前缀
+                if text.startswith(f"{label}.") or text.startswith(f"{label}、"):  # type: ignore[union-attr]
+                    opt_array.append(text)
+                else:
+                    opt_array.append(f"{label}. {text}")
+        elif isinstance(opts, list):
+            opt_array = [str(o) for o in opts]
+
+        # 判断题固定选项
+        if r.get("type") == "true_false":
+            opt_array = ["对", "错"]
+
+        # 解析 JSON 字段
+        media_files_raw = r.get("media_files") or ""
+        try:
+            media_files = json.loads(media_files_raw) if isinstance(media_files_raw, str) else media_files_raw
+        except (json.JSONDecodeError, TypeError):
+            media_files = ""
+        media_placeholders_raw = r.get("media_placeholders") or ""
+        try:
+            media_placeholders = json.loads(media_placeholders_raw) if isinstance(media_placeholders_raw, str) else media_placeholders_raw
+        except (json.JSONDecodeError, TypeError):
+            media_placeholders = ""
+
+        questions.append({
+            "id": r.get("id"),
+            "type": r.get("type", "single"),
+            "question": r.get("question_text", ""),
+            "options": opt_array,
+            "answer": (r.get("correct_answer") or "").strip().upper(),
+            "explanation": r.get("explanation") or "",
+            "score": 1,
+            "svg_code": r.get("svg_content") or "",
+            "svg_content": r.get("svg_content") or "",
+            "has_svg": r.get("has_svg") or 0,
+            "media_files": media_files,
+            "media_placeholders": media_placeholders,
+            "_source": "bank",
+        })
+
+    return questions
+
+
 # ── AI 生成随堂测验 ──
 
-@router.post("/quizzes/ai-generate", summary="AI 自动生成随堂测验")
+@router.post("/quizzes/ai-generate", summary="AI 自动生成随堂测验（优先题库，不足时 AI 补充）")
 async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
-    """AI 根据主题自动生成测验题目"""
+    """优先从题库抽取匹配题目，不足时 AI 补充"""
     user = get_current_user(request)
+    username = user["username"]
     role = user.get("role", 2)
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
 
-    type_desc = {
-        "single": "单选题",
-        "true_false": "判断题",
-        "mixed": "混合（单选+判断）",
-    }.get(req.question_type, "单选题")
+    if not req.topic.strip():
+        raise HTTPException(status_code=400, detail="请输入主题")
+    if req.count < 1 or req.count > 50:
+        raise HTTPException(status_code=400, detail="数量范围为 1-50")
 
-    from backend.prompts.quiz import QUIZ_GENERATE_PROMPT
-    ai_role = build_ai_role(subject=req.subject)
-    prompt = f"{ai_role}" + QUIZ_GENERATE_PROMPT.format(
-        subject=req.subject,
-        topic=req.topic,
-        type_desc=type_desc,
-        count=req.count,
-    )
+    all_questions: list[dict[str, Any]] = []
 
-    result = _call_ai(prompt)
-    # 尝试从返回中提取 JSON
-    import re
-    json_match = re.search(r'\[[\s\S]*\]', result)
-    if json_match:
+    # ════════════════════════════════════════════
+    # 第 1 步：优先从题库抽取
+    # ════════════════════════════════════════════
+    try:
+        bank_questions = _search_questions_from_bank(
+            topic=req.topic,
+            subject=req.subject,
+            question_type=req.question_type,
+            count=req.count,
+        )
+        all_questions.extend(bank_questions)
+        if bank_questions:
+            logger.info(f"从题库命中 {len(bank_questions)} 道题 (topic={req.topic})")
+    except Exception as e:
+        logger.warning(f"题库搜索异常，跳过: {e}")
+
+    # ════════════════════════════════════════════
+    # 第 2 步：题库不足时，AI 补充
+    # ════════════════════════════════════════════
+    remaining = req.count - len(all_questions)
+    if remaining > 0:
+        api_key, _ = get_api_keys(username)
+        if not api_key:
+            # 无 AI Key 但有题库题目 → 直接返回题库结果
+            if all_questions:
+                logger.info(f"无 API Key，仅返回题库 {len(all_questions)} 道题")
+                random.shuffle(all_questions)
+                return {"questions": all_questions, "total": len(all_questions),
+                        "note": "未配置 API Key，仅从题库匹配"}
+            raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
+
+        type_desc = {
+            "single": "单选题（4个选项）",
+            "true_false": "判断题",
+            "mixed": "混合出题（AI 自动搭配单选/判断）",
+        }.get(req.question_type, "单选题")
+
+        from backend.prompts.quiz import QUIZ_GENERATE_PROMPT
+        ai_role = build_ai_role(subject=req.subject)
+        prompt = f"{ai_role}\n" + QUIZ_GENERATE_PROMPT.format(
+            subject=req.subject,
+            topic=req.topic,
+            type_desc=type_desc,
+            count=remaining,
+        )
+
         try:
-            questions = json.loads(json_match.group())
-            # 按请求数量截取，并统一字段名
-            questions = questions[:req.count]
-            for q in questions:
+            result_text = await call_ai_async(prompt, api_key)
+        except Exception as e:
+            # AI 失败但有题库题目 → 静默返回题库结果
+            if all_questions:
+                logger.warning(f"AI 补充出题失败，仅返回题库 {len(all_questions)} 道题: {e}")
+                random.shuffle(all_questions)
+                return {"questions": all_questions, "total": len(all_questions),
+                        "note": f"AI 补充出题失败，仅返回题库中的 {len(all_questions)} 道题"}
+            raise HTTPException(status_code=502, detail=f"AI 出题失败: {str(e)}")
+
+        ai_questions = _parse_ai_generated(result_text)
+        if ai_questions:
+            ai_questions = ai_questions[:remaining]
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for q in ai_questions:
                 if "svg_code" in q and "svg_content" not in q:
                     q["svg_content"] = q["svg_code"]
                 if "has_svg" not in q:
-                    q["has_svg"] = 1 if q.get("svg_code") else 0
-            return {"questions": questions, "raw": result}
-        except json.JSONDecodeError:
-            pass
-    return {"questions": [], "raw": result, "error": "AI 返回格式异常，请重试或手动输入"}
+                    q["has_svg"] = 1 if q.get("svg_code") or q.get("svg_content") else 0
+                q["_source"] = "ai"
+
+                # ── 入库到 question_bank ──
+                try:
+                    q_text = (q.get("question") or "").strip()
+                    if q_text:
+                        # 去重：相同题目文本不再重复插入
+                        dup = qb_execute_query(
+                            "SELECT id FROM question_bank WHERE question_text=? AND status='active'",
+                            (q_text,),
+                        )
+                        if dup:
+                            qid = dup[0]["id"]
+                            q["id"] = qid
+                            q["media_files"] = []
+                            logger.info(f"跳过重复题目 (topic={req.topic}): {q_text[:40]}...")
+                        else:
+                            # 选项格式转换: 数组 → 对象
+                            opts = q.get("options")
+                            if isinstance(opts, list):
+                                opts_dict = _array_opts_to_dict(opts)
+                            elif isinstance(opts, dict):
+                                opts_dict = opts
+                            else:
+                                opts_dict = {}
+
+                            # 判断题固定选项
+                            if q.get("type") == "true_false":
+                                opts_dict = {"A": "对", "B": "错"}
+
+                            svg_code = q.get("svg_code") or q.get("svg_content") or ""
+                            has_svg = 1 if svg_code.strip() else 0
+                            media_placeholders = json.dumps(
+                                q.get("media_placeholders") or [], ensure_ascii=False)
+
+                            qid = qb_execute_insert(
+                                """INSERT INTO question_bank
+                                   (type,question_text,options,correct_answer,explanation,
+                                    knowledge_points,subject,difficulty,creator_username,source,
+                                    status,created_at,updated_at,
+                                    svg_content,has_svg,media_placeholders)
+                                   VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
+                                (q.get("type", "single"), q_text,
+                                 json.dumps(opts_dict, ensure_ascii=False),
+                                 q.get("answer", ""), q.get("explanation", ""),
+                                 req.topic, req.subject, "medium",
+                                 username, now_str, now_str,
+                                 svg_code, has_svg, media_placeholders),
+                            )
+                            if qid:
+                                q["id"] = qid
+                                logger.info(f"AI 题目已入库: id={qid}")
+
+                                # ── 自动调用通义万相生图（有占位符时）──
+                                placeholders = q.get("media_placeholders") or []
+                                media_files: list[Any] = []
+                                if placeholders:
+                                    try:
+                                        from backend.api.config_router import get_config_value
+                                        if get_config_value("IMAGE_GEN_ENABLED", True):
+                                            from backend.api.image_gen_service import generate_placeholders_batch
+                                            media_dir = BASE_DIR / "question_media" / str(qid)
+                                            media_files = await generate_placeholders_batch(
+                                                placeholders=placeholders,
+                                                subject=req.subject,
+                                                media_dir=media_dir,
+                                                qid=qid,
+                                                now=now_str,
+                                            )
+                                            # 更新占位符状态和 media_files
+                                            qb_execute_update(
+                                                "UPDATE question_bank SET media_placeholders=?, media_files=? WHERE id=?",
+                                                (json.dumps(placeholders, ensure_ascii=False),
+                                                 json.dumps(media_files, ensure_ascii=False), qid),
+                                            )
+                                    except Exception as img_err:
+                                        logger.warning(f"AI 题目自动生图失败 (id={qid}): {img_err}")
+                                q["media_files"] = media_files
+                except Exception as e:
+                    logger.warning(f"AI 题目入库失败，跳过: {e}")
+
+            if len(ai_questions) < remaining:
+                logger.warning(f"AI 出题数量不足: 请求 {remaining} 道, 实际 {len(ai_questions)} 道")
+            all_questions.extend(ai_questions)
+            logger.info(f"AI 补充 {len(ai_questions)} 道题")
+        elif not all_questions:
+            # 既无题库又无 AI → 报错
+            raise HTTPException(status_code=502, detail="AI 返回格式异常，未能解析出题目")
+
+    # 随机打乱，混合题库与 AI 题目
+    random.shuffle(all_questions)
+
+    return {"questions": all_questions, "total": len(all_questions)}
 
 
 # ── AI 生成快速投票 ──
 
 @router.post("/polls/ai-generate", summary="AI 自动生成投票")
 async def ai_generate_poll(req: AiGeneratePoll, request: Request):
-    """AI 根据主题自动生成投票问题和选项"""
+    """AI 根据主题自动生成投票问题和选项（异步调用）"""
     user = get_current_user(request)
+    username = user["username"]
     role = user.get("role", 2)
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+
+    if not req.topic.strip():
+        raise HTTPException(status_code=400, detail="请输入主题")
+    if req.option_count < 2 or req.option_count > 10:
+        raise HTTPException(status_code=400, detail="选项数量范围为 2-10")
+
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
 
     prompt = (
         '请根据主题"' + req.topic + '"生成一个课堂投票，包含' + str(req.option_count) + '个选项。\n\n'
@@ -165,16 +430,44 @@ async def ai_generate_poll(req: AiGeneratePoll, request: Request):
         '}'
     )
 
-    result = _call_ai(prompt)
+    try:
+        result_text = await call_ai_async(prompt, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 生成投票失败: {str(e)}")
+
     import re
-    json_match = re.search(r'\{[\s\S]*\}', result)
+    json_match = re.search(r'\{[\s\S]*\}', result_text)
     if json_match:
         try:
             data = json.loads(json_match.group())
-            return {"poll": data, "raw": result}
+            return {"poll": data, "raw": result_text}
         except json.JSONDecodeError:
             pass
-    return {"poll": None, "raw": result, "error": "AI 返回格式异常，请重试或手动输入"}
+    return {"poll": None, "raw": result_text, "error": "AI 返回格式异常，请重试或手动输入"}
+
+
+# ── 解析 AI 返回的题目 JSON ──
+
+
+def _parse_ai_generated(text: str) -> list[dict[str, Any]]:
+    """解析 AI 返回的 JSON 题目列表（兼容课程练习的解析逻辑）"""
+    text = text.strip()
+    json_match = re.search(r'\[[\s\S]*\]', text)
+    if json_match:
+        json_str = json_match.group()
+    else:
+        logger.warning(f"AI 返回中未找到 JSON 数组，尝试全文解析: {text[:300]}")
+        json_str = text
+    json_str = json_str.replace("```json", "").replace("```", "").strip()
+    try:
+        questions = json.loads(json_str)
+        if isinstance(questions, list):
+            return questions
+        elif isinstance(questions, dict) and "questions" in questions:
+            return questions["questions"]
+    except json.JSONDecodeError:
+        pass
+    return []
 
 
 # ── AI 建议回答提问 ──
@@ -416,14 +709,16 @@ async def update_poll(poll_id: int, req: PollUpdate, request: Request):
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if req.question is not None:
-        execute_insert_update("UPDATE interaction_polls SET question = ?, created_at = ? WHERE id = ?",
-                              (req.question, now, poll_id))
+        execute_insert_update("UPDATE interaction_polls SET question = ? WHERE id = ?",
+                              (req.question, poll_id))
     if req.options is not None:
-        execute_insert_update("UPDATE interaction_polls SET options = ?, created_at = ? WHERE id = ?",
-                              (json.dumps(req.options, ensure_ascii=False), now, poll_id))
+        execute_insert_update("UPDATE interaction_polls SET options = ? WHERE id = ?",
+                              (json.dumps(req.options, ensure_ascii=False), poll_id))
+        # 选项变更时清理旧投票记录，避免统计错误
+        execute_insert_update("DELETE FROM interaction_poll_votes WHERE poll_id = ?", (poll_id,))
     if req.poll_type is not None:
-        execute_insert_update("UPDATE interaction_polls SET poll_type = ?, created_at = ? WHERE id = ?",
-                              (req.poll_type, now, poll_id))
+        execute_insert_update("UPDATE interaction_polls SET poll_type = ? WHERE id = ?",
+                              (req.poll_type, poll_id))
     return {"message": "投票已更新"}
 
 
@@ -1151,11 +1446,10 @@ async def submit_vote(
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     if poll_type == "multiple":
-        # 多选：先删后插，所有操作在同一个事务中执行，避免数据库锁冲突
-        ops = [
+        # 多选：先删后插，所有操作在同一个事务中执行
+        ops: list[tuple[str, tuple[Any, ...]]] = [
             ("DELETE FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?", (poll_id, username)),
         ]
-        ops: list[tuple[str, tuple[Any, ...]]] = []
         for idx in selected_indices:
             ops.append((
                 "INSERT INTO interaction_poll_votes (poll_id, student_username, selected_option, created_at) VALUES (?, ?, ?, ?)",
@@ -1310,40 +1604,28 @@ def _ai_content_review(content: str, username: str, role: str = "question") -> t
         '请严格判断。只返回以下JSON格式（不要包含其他文字）：\n'
         '{"safe": true, "reason": ""} 或 {"safe": false, "reason": "简要说明违规原因（10字以内）"}'
     )
-    import os
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
+    api_key, _ = get_api_keys(username)
     if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
-    if not api_key:
-        # 无 API Key 时放行（不阻塞功能）
         return True, ""
 
     try:
-        from backend.api.ai_service import call_ai_sync_direct
-        # 使用 asyncio.wait_for 添加超时控制，防止 AI 调用挂死
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_ai_sync_direct, prompt, api_key)
-            try:
-                result = future.result(timeout=15)  # AI 审核最多等 15 秒
-            except concurrent.futures.TimeoutError:
-                logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
-                return True, ""
+        import json, re, concurrent.futures
+        from backend.api.ai_service import _ai_thread_pool
+        from backend.api.discussion_router import _call_review_sync
+        future = _ai_thread_pool.submit(_call_review_sync, prompt, api_key)
+        try:
+            result = future.result(timeout=15)
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
+            return True, ""
         jm = re.search(r'\{[^}]+\}', result)
         if jm:
             data = json.loads(jm.group())
             if not data.get("safe", True):
-                # 记录拒绝
                 _record_rejection(username, content)
                 return False, data.get("reason", "内容不合规")
         return True, ""
     except Exception:
-        # AI 调用失败时放行，不阻塞正常使用
         return True, ""
 
 

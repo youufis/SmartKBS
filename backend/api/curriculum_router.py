@@ -132,8 +132,8 @@ def _check_resource_ownership(resource_type: str, resource_id: int, username: st
                 (str(resource_id), username),
             )
             return row is not None
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"资源所有权校验异常 (type={resource_type}, id={resource_id}): {e}")
     return False
 
 
@@ -1506,19 +1506,34 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
 
     for item in req.items:
         if item.type == "chapter":
-            if item.parent_id is not None:
-                execute_insert_update(
-                    "UPDATE chapters SET sort_order=?, parent_id=?, updated_at=? WHERE id=?",
-                    (item.sort_order, item.parent_id if item.parent_id > 0 else None, now, item.id),
-                )
-            else:
-                execute_insert_update(
-                    "UPDATE chapters SET sort_order=?, updated_at=? WHERE id=?",
-                    (item.sort_order, now, item.id),
-                )
+            # 校验章节存在
+            ch = execute_query_one("SELECT id FROM chapters WHERE id=?", (item.id,))
+            if not ch:
+                logger.warning(f"排序跳过: 章节 id={item.id} 不存在")
+                continue
+            # 校验目标父章节存在（parent_id>0 时）
+            if item.parent_id is not None and item.parent_id > 0:
+                parent_ch = execute_query_one("SELECT id FROM chapters WHERE id=?", (item.parent_id,))
+                if not parent_ch:
+                    logger.warning(f"排序跳过: 父章节 id={item.parent_id} 不存在")
+                    continue
+            execute_insert_update(
+                "UPDATE chapters SET sort_order=?, parent_id=?, updated_at=? WHERE id=?",
+                (item.sort_order, item.parent_id if item.parent_id and item.parent_id > 0 else None, now, item.id),
+            )
             updated["chapters"] += 1
         elif item.type == "knowledge_point":
+            # 校验知识点存在
+            kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (item.id,))
+            if not kp:
+                logger.warning(f"排序跳过: 知识点 id={item.id} 不存在")
+                continue
+            # 校验目标章节存在
             if item.chapter_id is not None:
+                target_ch = execute_query_one("SELECT id FROM chapters WHERE id=?", (item.chapter_id,))
+                if not target_ch:
+                    logger.warning(f"排序跳过: 目标章节 id={item.chapter_id} 不存在")
+                    continue
                 execute_insert_update(
                     "UPDATE knowledge_points SET sort_order=?, chapter_id=?, updated_at=? WHERE id=?",
                     (item.sort_order, item.chapter_id, now, item.id),
@@ -1574,6 +1589,16 @@ async def update_progress(kp_id: int, req: ProgressUpdate, request: Request):
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
 
+    # ── 完成知识点积分奖励（仅学生，仅首次完成，需在更新前检查旧状态） ──
+    is_first_completion = False
+    if req.status == "completed" and user.get("role") == 2:
+        old_row = execute_query_one(
+            "SELECT status FROM learning_progress WHERE student_username=? AND knowledge_point_id=?",
+            (user["username"], kp_id),
+        )
+        if not old_row or old_row["status"] != "completed":
+            is_first_completion = True
+
     now = _now()
     existing = execute_query_one(
         "SELECT id FROM learning_progress WHERE student_username=? AND knowledge_point_id=?",
@@ -1601,19 +1626,13 @@ async def update_progress(kp_id: int, req: ProgressUpdate, request: Request):
             (user["username"], kp_id, req.status, score, completed_at, now),
         )
 
-    # ── 完成知识点积分奖励（仅学生，仅首次完成） ──
-    if req.status == "completed" and user.get("role") == 2:
+    # ── 首次完成发奖励（已在更新前记录了 is_first_completion）──
+    if is_first_completion:
         try:
-            # 检查是否之前已完成过（幂等判断：仅首次完成给奖励）
-            old_row = execute_query_one(
-                "SELECT status FROM learning_progress WHERE student_username=? AND knowledge_point_id=?",
-                (user["username"], kp_id),
-            )
-            if not old_row or old_row["status"] != "completed":
-                from backend.reward_engine import award_participation
-                kp_name = execute_query_one("SELECT name FROM knowledge_points WHERE id=?", (kp_id,))
-                title = kp_name["name"] if kp_name else f"知识点#{kp_id}"
-                award_participation(user["username"], "learning", str(kp_id), title)
+            from backend.reward_engine import award_participation
+            kp_name = execute_query_one("SELECT name FROM knowledge_points WHERE id=?", (kp_id,))
+            title = kp_name["name"] if kp_name else f"知识点#{kp_id}"
+            award_participation(user["username"], "learning", str(kp_id), title)
         except Exception:
             pass
 

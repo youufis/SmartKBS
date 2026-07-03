@@ -74,15 +74,24 @@ async def get_wrong_questions(request: Request):
                         params.append(g)
 
                 if grade_conditions:
-                    where_clause = " OR ".join(grade_conditions)
-                    first = execute_query(
-                        f"""SELECT ea.student_username FROM exam_attempts ea
-                           JOIN exams e ON e.id = ea.exam_id
-                           JOIN (SELECT username, grade, class FROM users) u ON u.username = ea.student_username
-                           WHERE ea.status = 'submitted' AND ({where_clause})
-                           ORDER BY ea.submitted_at DESC LIMIT 1""",
+                    # 先在 smartkb.db 查出匹配的学生用户名
+                    student_where = " OR ".join(grade_conditions)
+                    matched_students = user_query(
+                        f"SELECT username FROM users WHERE ({student_where})",
                         tuple(params),
                     )
+                    matched_usernames = [r[0] for r in matched_students if r[0]]
+                    if matched_usernames:
+                        usernames_ph = ",".join("?" * len(matched_usernames))
+                        first = execute_query(
+                            f"""SELECT ea.student_username FROM exam_attempts ea
+                               WHERE ea.status = 'submitted'
+                               AND ea.student_username IN ({usernames_ph})
+                               ORDER BY ea.submitted_at DESC LIMIT 1""",
+                            tuple(matched_usernames),
+                        )
+                    else:
+                        first = []
                 else:
                     first = []
                 target_username = first[0]["student_username"] if first else ""
@@ -110,6 +119,30 @@ async def get_wrong_questions(request: Request):
     wrong_list = []
     total_wrong = 0
 
+    if not attempts:
+        return {"total_wrong": 0, "exams": []}
+
+    # 批量查询所有考试关联的题目（替代 N+1）
+    exam_ids = [a["exam_id"] for a in attempts]
+    placeholders = ",".join("?" * len(exam_ids))
+    all_questions = execute_query(
+        f"""SELECT q.id, q.type, q.question_text, q.correct_answer,
+                   q.knowledge_points, q.options, eq.score as question_score,
+                   q.svg_content, q.has_svg, q.media_files, q.media_placeholders,
+                   eq.exam_id
+            FROM exam_questions eq
+            JOIN question_bank q ON q.id = eq.question_id
+            WHERE eq.exam_id IN ({placeholders}) AND q.status = 'active'""",
+        tuple(exam_ids),
+    )
+    # 按 exam_id 分组
+    questions_by_exam: dict[int, dict[str, Any]] = {}
+    for q in all_questions:
+        eid = q["exam_id"]
+        if eid not in questions_by_exam:
+            questions_by_exam[eid] = {}
+        questions_by_exam[eid][str(q["id"])] = q
+
     for a in attempts:
         answers_data = a.get("answers")
         if isinstance(answers_data, str):
@@ -121,17 +154,7 @@ async def get_wrong_questions(request: Request):
         if not answers_data:
             continue
 
-        # 获取该考试的题目信息
-        questions = execute_query(
-            """SELECT q.id, q.type, q.question_text, q.correct_answer,
-                      q.knowledge_points, q.options, eq.score as question_score,
-                      q.svg_content, q.has_svg, q.media_files, q.media_placeholders
-               FROM exam_questions eq
-               JOIN question_bank q ON q.id = eq.question_id
-               WHERE eq.exam_id = ? AND q.status = 'active'""",
-            (a["exam_id"],),
-        )
-        q_map = {str(q["id"]): q for q in questions}
+        q_map = questions_by_exam.get(a["exam_id"], {})
 
         exam_wrong = []
         for qid, ans in answers_data.items():
@@ -587,12 +610,15 @@ async def get_review_plan(request: Request):
     if not all_wrong:
         return {"plan": "暂无错题，继续保持！", "total_wrong": 0}
 
-    # 构建错题文本
+    # 构建错题文本（最多 30 条，超出部分统计汇总）
+    max_detail = 30
     wrong_text = ""
-    for i, w in enumerate(all_wrong[:15], 1):
+    for i, w in enumerate(all_wrong[:max_detail], 1):
         wrong_text += f"{i}. [{w['type']}] {w['question']}\n"
         wrong_text += f"   你的答案：{w['your_answer']} | 正确答案：{w['correct']}\n"
         wrong_text += f"   知识点：{w['knowledge']}\n\n"
+    if len(all_wrong) > max_detail:
+        wrong_text += f"...（共 {len(all_wrong)} 道错题，以上为最近 {max_detail} 道）\n"
 
     type_labels = {"single": "单选题", "multiple": "多选题", "true_false": "判断题", "short": "简答题",
                    "fill": "填空题", "essay": "作文", "subjective": "主观题"}
@@ -601,7 +627,7 @@ async def get_review_plan(request: Request):
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
     ai_role = build_ai_role(grade=student_grade)
-    prompt = f"{ai_role}" + WRONG_BOOK_REVIEW_PROMPT.format(
+    prompt = f"{ai_role}\n" + WRONG_BOOK_REVIEW_PROMPT.format(
         student_name=student_name,
         grade=student_grade,
         cls=student_class,
@@ -738,7 +764,7 @@ async def export_review_plan_docx(
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
     ai_role = build_ai_role(grade=student_grade)
-    prompt = f"{ai_role}" + WRONG_BOOK_REVIEW_PROMPT.format(
+    prompt = f"{ai_role}\n" + WRONG_BOOK_REVIEW_PROMPT.format(
         student_name=student_name,
         grade=student_grade,
         cls=student_class,
