@@ -373,8 +373,12 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
 
 
 def is_multimodal_model(model_name: str) -> bool:
-    """判断模型名称是否为多模态模型（由用户勾选决定，此处始终返回 True）"""
-    return True
+    """判断是否为多模态模式（由用户在系统配置中手动勾选决定）"""
+    try:
+        from backend.api.config_router import get_config_value
+        return bool(get_config_value("ENABLE_MULTIMODAL", False))
+    except Exception:
+        return False
 
 
 def _build_multimodal_content(

@@ -1226,7 +1226,7 @@ const ChatPage: React.FC = () => {
               历史对话
             </Button>
             {usage && (
-              <Tooltip title={usage.multimodal_enabled ? `当前模型：${usage.model_name || '未知'}（支持多模态：图片+文本）` : `当前模型：${usage.model_name || '未知'}（文本模型）`}>
+              <Tooltip title={usage.multimodal_enabled ? '支持多模态：图片+文本' : '纯文本模型'}>
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   fontSize: 12, padding: '2px 8px', borderRadius: 4,

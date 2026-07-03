@@ -246,7 +246,13 @@ async def get_usage(request: Request):
 
     # 管理员不受限
     if role_val == 0:
-        return {"enabled": enabled, "used": 0, "max": 0, "remaining": -1}
+        multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
+        model_name = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+        return {
+            "enabled": enabled, "used": 0, "max": 0, "remaining": -1,
+            "multimodal_enabled": multimodal_enabled,
+            "model_name": model_name,
+        }
 
     multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
     model_name = get_config_value("MODEL_NAME", "deepseek-v4-flash")
@@ -366,49 +372,43 @@ def _chat_event_generator(
 
         if multimodal_enabled and image_files:
             model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-            # 安全校验：检查模型是否真的是多模态模型，防止配置不一致导致 API 报错
-            from backend.api.ai_service import is_multimodal_model
-            if not is_multimodal_model(model):
-                logger.warning(f"多模态已勾选但模型 {model} 不支持多模态，降级到视觉模型处理")
-                multimodal_enabled = False  # 降级，走下方旧逻辑
-            else:
-                api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                            "https://dashscope.aliyuncs.com/compatible-mode/v1")
-                from backend.api.ai_service import call_multimodal_stream
+            api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                        "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            from backend.api.ai_service import call_multimodal_stream
 
-                # 如果摘要已由视觉模型生成文字描述，多模态模型无需再看原图
-                image_files_for_mm = [] if _summaries_generated else image_files
+            # 如果摘要已由视觉模型生成文字描述，多模态模型无需再看原图
+            image_files_for_mm = [] if _summaries_generated else image_files
 
-                full_text = ""
-                for chunk in call_multimodal_stream(
-                    prompt=enhanced_prompt,
-                    api_key=dashscope_api_key,
-                    model=model,
-                    api_base=api_base,
-                    image_paths=image_files_for_mm,
-                ):
-                    full_text = chunk["text"]
-                    yield f"data: {json.dumps({'type': 'delta', 'content': full_text})}\n\n"
+            full_text = ""
+            for chunk in call_multimodal_stream(
+                prompt=enhanced_prompt,
+                api_key=dashscope_api_key,
+                model=model,
+                api_base=api_base,
+                image_paths=image_files_for_mm,
+            ):
+                full_text = chunk["text"]
+                yield f"data: {json.dumps({'type': 'delta', 'content': full_text})}\n\n"
 
-                # 多模态处理完图片后，继续处理剩余的非图片文件（文档等）
-                non_image_files = [fp for fp in valid_file_paths if fp not in image_files]
-                if non_image_files:
-                    _sep = "\n\n"
-                    for fp in non_image_files:
-                        if is_document_file(fp):
-                            doc_content = ""
-                            for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
-                                doc_content = chunk['text']
-                                combined = full_text + _sep + doc_content
-                                yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
-                            full_text += _sep + doc_content
-                        else:
-                            err = f'不支持的文件类型: {fp}'
-                            combined = full_text + _sep + err
+            # 多模态处理完图片后，继续处理剩余的非图片文件（文档等）
+            non_image_files = [fp for fp in valid_file_paths if fp not in image_files]
+            if non_image_files:
+                _sep = "\n\n"
+                for fp in non_image_files:
+                    if is_document_file(fp):
+                        doc_content = ""
+                        for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
+                            doc_content = chunk['text']
+                            combined = full_text + _sep + doc_content
                             yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
+                        full_text += _sep + doc_content
+                    else:
+                        err = f'不支持的文件类型: {fp}'
+                        combined = full_text + _sep + err
+                        yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
 
-                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
-                return
+            yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
+            return
 
         if not valid_file_paths:
             for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key, username):
