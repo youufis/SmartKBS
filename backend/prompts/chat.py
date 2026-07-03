@@ -16,7 +16,8 @@ QUESTION_GENERATE_PROMPT = """请根据以下要求生成试题，并**自动为
 ━━━━ 公式标记规则 ━━━━
 涉及数学、物理、化学公式时，使用 LaTeX 语法：$...$ 行内公式，$$...$$ 独立公式。
 
-━━━━ 配图规则（AI 自动判断，优先使用 SVG） ━━━━
+━━━━ 配图规则（AI 自动判断，SVG 优先） ━━━━
+**根据题目有必要才配图，且SVG优先。** 除非用户明确要求配图，否则纯概念/记忆性文字题不需要配图。
 每道题输出 svg_code（技术图示）和 media_placeholders（实物图占位符）字段，都可以为 null：
 - 【svg_code — **优先使用**】适用于电路图、流程图、函数图像等纯 SVG 技术图示（viewBox="0 0 600 400"，中文标注，主色 #1976D2），无需额外 API 调用
 - 【media_placeholders】— **仅当需要真实图片时才使用**，适用于硬件外观、实物照片等。会消耗额外的 AI 生图配额，非必需时勿用
@@ -73,6 +74,7 @@ QUESTION_GENERATE_WITH_MEDIA_PROMPT = """请根据以下要求生成试题，并
 - 普通文字内容不要使用 $ 符号
 
 ━━━━ 配图规则（AI 自动判断，优先使用 SVG） ━━━━
+**根据题目有必要才配图，且SVG优先。** 纯概念/记忆性文字题不需要配图（除非用户明确要求）。
 每道题输出 svg_code 和 media_placeholders 字段（都可以为 null）：
 
 【svg_code — **优先使用**】
@@ -90,8 +92,9 @@ purpose 为 "实物图" / "微观图" / "场景图"，description 写 50-100 字
 **⚠️ 图片描述安全规则**：`description` 的内容将直接作为图片生成的提示词，**严禁**包含任何与题目答案、解析、解题过程、正确/错误选项相关的文字信息。
 
 【选择建议】
-- **能用 SVG 解决的问题优先用 SVG**，不要滥用 media_placeholders
-- 纯概念/记忆性文字题：svg_code 和 media_placeholders 都留 null
+- **SVG 优先**：能用 SVG 解决的优先用 SVG，不要滥用 media_placeholders
+- **有必要才配图**：纯概念/记忆性文字题，svg_code 和 media_placeholders 都留 null
+- **用户要求配图时**：即使题目不需要配图，也按要求生成
 - 技术图示类题目：只用 svg_code（推荐）
 - 确实需要真实图片时：再加 media_placeholders
 - 两者可同时存在：SVG 画原理 + 占位符生成实物照片，互不冲突
