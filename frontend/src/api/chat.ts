@@ -7,6 +7,7 @@ export interface UsageInfo {
   max: number;
   remaining: number;
   multimodal_enabled?: boolean;
+  model_name?: string;
 }
 
 /** 获取当前用户的每日用量 */

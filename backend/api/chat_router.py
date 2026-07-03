@@ -249,6 +249,7 @@ async def get_usage(request: Request):
         return {"enabled": enabled, "used": 0, "max": 0, "remaining": -1}
 
     multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
+    model_name = get_config_value("MODEL_NAME", "deepseek-v4-flash")
 
     return {
         "enabled": enabled,
@@ -256,6 +257,7 @@ async def get_usage(request: Request):
         "max": max_req,
         "remaining": max(0, max_req - used),
         "multimodal_enabled": multimodal_enabled,
+        "model_name": model_name,
     }
 
 

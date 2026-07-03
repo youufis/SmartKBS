@@ -1225,6 +1225,20 @@ const ChatPage: React.FC = () => {
             <Button size="small" icon={<HistoryOutlined />} onClick={handleOpenHistory}>
               历史对话
             </Button>
+            {usage && (
+              <Tooltip title={usage.multimodal_enabled ? `当前模型：${usage.model_name || '未知'}（支持多模态：图片+文本）` : `当前模型：${usage.model_name || '未知'}（文本模型）`}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontSize: 12, padding: '2px 8px', borderRadius: 4,
+                  background: usage.multimodal_enabled ? '#e6f7ff' : '#f6f6f6',
+                  color: usage.multimodal_enabled ? '#1677ff' : '#999',
+                  border: '1px solid', borderColor: usage.multimodal_enabled ? '#91caff' : '#e8e8e8',
+                  cursor: 'default', whiteSpace: 'nowrap',
+                }}>
+                  {usage.multimodal_enabled ? '🖼️ 多模态' : '💬 文本'}
+                </span>
+              </Tooltip>
+            )}
             <div style={{ flex: 1, minWidth: 0 }} />
             {usage && (
               <div style={{ fontSize: 12, color: '#999', whiteSpace: 'nowrap' }}>
