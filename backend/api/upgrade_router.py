@@ -332,8 +332,13 @@ async def _fetch_remote_version() -> dict[str, Any] | None:
             resp = await c.get(REMOTE_VERSION_URL)
             if resp.status_code == 200:
                 return resp.json()
-    except Exception:
-        pass
+            logger.warning(f"[upgrade] 远程版本获取失败，HTTP {resp.status_code}")
+    except httpx.TimeoutException:
+        logger.warning("[upgrade] 远程版本获取超时（30s），无法连接 GitHub")
+    except httpx.ConnectError:
+        logger.warning("[upgrade] 远程版本连接失败，服务器可能无法访问 GitHub")
+    except Exception as e:
+        logger.warning(f"[upgrade] 远程版本获取异常: {e}")
     return None
 
 
@@ -1089,17 +1094,26 @@ _AUTO_PREFETCH_KEY = "_prefetched_version"  # 预缓存标记：记录已预拉�
 
 async def _auto_check_worker():
     """后台循环：定期检测远程是否有新版本，发现更新时通知所有管理员"""
+    logger.info(f"[auto-upgrade] 后台版本检测线程已启动，每 {_AUTO_CHECK_INTERVAL//3600} 小时检测一次")
     while True:
         try:
             await _perform_version_check()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[auto-upgrade] 版本检测异常: {e}")
 
         await asyncio.sleep(_AUTO_CHECK_INTERVAL)
 
 
 async def _perform_version_check():
     """执行一次版本检测，发现新版本则通知管理员"""
+    # 持久化记录本次检测时间
+    try:
+        s = _load_state()
+        s["_auto_check_last_run"] = datetime.now(timezone.utc).isoformat()
+        _save_state(s)
+    except Exception:
+        pass
+
     # 先获取远程版本信息，失败不阻断，后续仍尝试 git 检测
     remote = await _fetch_remote_version()
 
@@ -1113,24 +1127,31 @@ async def _perform_version_check():
         # 自动初始化 Git 仓库（.git 缺失时 git init + remote add）
         try:
             _git_setup_repo()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[auto-upgrade] Git 自动初始化失败: {e}")
 
         git_issues = _check_git_env()
-        if not git_issues:
+        if git_issues:
+            logger.debug(f"[auto-upgrade] Git 环境问题，跳过热修复检查: {'; '.join(git_issues)}")
+        else:
             try:
                 await _run_git(["fetch", "--all"], timeout=120)
                 out = await _run_git(
                     ["rev-list", "--count", "HEAD..origin/master"], timeout=30
                 )
                 behind = int(out) if out else 0
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[auto-upgrade] Git 检测落后提交失败（网络或仓库问题）: {e}")
                 # 网络异常不阻止后续，behind 保持为 0
+    else:
+        logger.debug("[auto-upgrade] Git 未安装，跳过热修复提交检测")
 
     has_update = has_new_version or (behind > 0)
     if not has_update:
+        logger.debug(f"[auto-upgrade] 当前已是最新 (v{current})，无需通知")
         return
+
+    logger.info(f"[auto-upgrade] 检测到新版本！当前: v{current}, 最新: v{latest}, 落后提交: {behind}")
 
     # 构建通知所需信息
     if remote:
@@ -1150,6 +1171,7 @@ async def _perform_version_check():
     s = _load_state()
     notify_key = latest or current
     if s.get(_AUTO_CHECK_STATE_KEY, "") == notify_key:
+        logger.debug(f"[auto-upgrade] 版本 {notify_key} 已通知过，跳过重复通知")
         # 已通知过，只更新预缓存标记
         _update_prefetch_flag(s, notify_key)
         return
@@ -1159,7 +1181,8 @@ async def _perform_version_check():
         from backend.database import execute_query
         rows = execute_query("SELECT username FROM users WHERE role=0")
         admins = [row[0] for row in rows] if rows else []
-    except Exception:
+    except Exception as e:
+        logger.error(f"[auto-upgrade] 查询管理员列表失败: {e}")
         admins = []
 
     if admins:
@@ -1172,13 +1195,16 @@ async def _perform_version_check():
                 content=content,
                 related_link="/admin/system-config",
             )
-            pass
-        except Exception:
-            pass
+            logger.info(f"[auto-upgrade] 已向 {len(admins)} 名管理员发送版本更新通知: {version_label}")
+        except Exception as e:
+            logger.error(f"[auto-upgrade] 发送版本通知失败: {e}")
+    else:
+        logger.warning("[auto-upgrade] 未找到管理员用户，跳过版本通知")
 
     # 记录已通知过的版本
     s[_AUTO_CHECK_STATE_KEY] = notify_key
     _save_state(s)
+    logger.info(f"[auto-upgrade] 版本通知状态已持久化: {notify_key}")
 
     # ── 预缓存标记 ──
     _update_prefetch_flag(s, notify_key)
