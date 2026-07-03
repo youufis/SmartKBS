@@ -663,7 +663,7 @@ const SystemConfigPage: React.FC = () => {
             .join('\n')
         }
         if (!formValues['enabled_notification_types']) {
-          formValues['enabled_notification_types'] = ['exam']
+          formValues['enabled_notification_types'] = ['exam', 'system']
         }
         form.setFieldsValue(formValues)
         loadApikeyStatus()

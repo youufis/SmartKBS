@@ -69,7 +69,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         {"key": "subjective", "label": "主观题"},
     ],
     # 消息通知类型（默认只启用考试通知，管理员可在系统配置中调整）
-    "enabled_notification_types": ["exam"],
+    "enabled_notification_types": ["exam", "system"],
     # 图片生成（通义万相，与对话模型共享 API Key）
     "IMAGE_GEN_ENABLED": True,
     "IMAGE_GEN_MODEL": "wan2.2-t2i-flash",
