@@ -68,6 +68,7 @@ class ChangePasswordRequest(BaseModel):
 
 class BulkDeleteRequest(BaseModel):
     pattern: str
+    confirm: bool = False  # 确认删除，防止误操作
 
 
 # ── 辅助函数 ──
@@ -594,6 +595,27 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
     pattern = req.pattern.strip()
     if not pattern:
         raise HTTPException(status_code=400, detail="请提供要删除的用户名模式")
+
+    if not req.confirm:
+        rows_preview = execute_query(
+            "SELECT username FROM users WHERE username LIKE ? AND role != 0 LIMIT 10",
+            (f"%{pattern}%",),
+        )
+        preview = [r[0] for r in rows_preview]
+        count = execute_query(
+            "SELECT COUNT(*) FROM users WHERE username LIKE ? AND role != 0",
+            (f"%{pattern}%",),
+        )
+        total_match = count[0][0] if count else 0
+        raise HTTPException(
+            status_code=400,
+            detail=json.dumps({
+                "error": "请确认批量删除操作",
+                "message": f"模式 '{pattern}' 匹配 {total_match} 个用户，前 {min(len(preview), 10)} 个: {preview}。请设置 confirm=true 确认删除",
+                "matched_count": total_match,
+                "preview": preview,
+            }, ensure_ascii=False),
+        )
 
     # 先查出匹配的非管理员用户
     rows = execute_query(

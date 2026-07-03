@@ -4,6 +4,7 @@
 配置存储于 backend/system_config.json
 """
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -97,13 +98,17 @@ def load_config() -> dict[str, Any]:
     return dict(DEFAULT_CONFIG)
 
 
+_config_lock = threading.Lock()
+
+
 def save_config(config: dict[str, Any]):
-    """保存配置到文件"""
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    """保存配置到文件（线程安全）"""
+    with _config_lock:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_FILE.write_text(
+            json.dumps(config, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
 
 def get_config_value(key: str, default: Any = None) -> Any:

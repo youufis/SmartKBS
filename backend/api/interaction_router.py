@@ -2449,7 +2449,9 @@ async def ai_class_summary(
         def _safe(s):
             return str(s).replace('{', '{{').replace('}', '}}')
 
-        prompt = CLASS_SUMMARY_PROMPT.format(
+        from backend.prompts import build_ai_role
+        ai_role = build_ai_role()
+        prompt = f"{ai_role}\n" + CLASS_SUMMARY_PROMPT.format(
             subject=_safe(_subject),
             time_range=_safe(_time_range),
             student_count=_safe(student_count),
@@ -2601,7 +2603,9 @@ async def export_class_summary_docx(
     def _safe(s):
         return str(s).replace('{', '{{').replace('}', '}}')
 
-    prompt = CLASS_SUMMARY_PROMPT.format(
+    from backend.prompts import build_ai_role
+    ai_role = build_ai_role()
+    prompt = f"{ai_role}\n" + CLASS_SUMMARY_PROMPT.format(
         subject=_safe(subject or ""),
         time_range=_safe("本堂课"),
         student_count=_safe(student_count),

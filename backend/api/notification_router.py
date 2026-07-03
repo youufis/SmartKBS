@@ -399,14 +399,22 @@ async def list_announcements(
         all_creator_names = admin_names + teacher_names
         if all_creator_names:
             placeholders = ",".join("?" for _ in all_creator_names)
+            # 总数
+            count_result = execute_query(
+                f"SELECT COUNT(*) FROM announcements WHERE creator_username IN ({placeholders})",
+                tuple(all_creator_names),
+            )
+            total = count_result[0][0] if count_result else 0
+            offset = (page - 1) * page_size
             all_rows = execute_query(
                 f"""SELECT id, creator_username, title, content, target_role,
                            target_grade, target_class, priority, is_pinned,
                            created_at, updated_at, target_scope, target_users
                    FROM announcements
                    WHERE creator_username IN ({placeholders})
-                   ORDER BY is_pinned DESC, created_at DESC""",
-                tuple(all_creator_names),
+                   ORDER BY is_pinned DESC, created_at DESC
+                   LIMIT ? OFFSET ?""",
+                tuple(all_creator_names + [page_size, offset]),
             )
         else:
             all_rows = []

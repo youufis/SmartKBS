@@ -52,7 +52,9 @@ ACTIVITY_TYPE_NAMES = {
     "code":       "代码练习",
     "quest":      "知识闯关",
     "quick_quiz": "知识抢答",
-    "course_practice": "课程练习",    "resource_view":  "资源浏览",}
+    "course_practice": "课程练习",
+    "resource_view":  "资源浏览",
+}
 
 REWARD_TYPE_NAMES = {
     "participation": "参与基础分",
@@ -336,15 +338,28 @@ def get_student_rewards(student_username: str, limit: int = 50,
     ]
 
 
+# 积分缓存：避免高频重复查询
+_student_total_cache: dict[str, tuple[float, int]] = {}
+_STUDENT_TOTAL_CACHE_TTL = 30
+
+
 def get_student_total(student_username: str) -> int:
-    """获取学生总积分"""
+    """获取学生总积分（带 30 秒缓存）"""
+    now = time.time()
+    cached = _student_total_cache.get(student_username)
+    if cached and (now - cached[0]) < _STUDENT_TOTAL_CACHE_TTL:
+        return cached[1]
     row = execute_query(
         "SELECT total_points FROM student_total_points WHERE student_username=?",
         (student_username,),
     )
     if row:
-        return row[0][0]
-    return update_student_total(student_username)
+        total = row[0][0]
+        _student_total_cache[student_username] = (now, total)
+        return total
+    total = update_student_total(student_username)
+    _student_total_cache[student_username] = (now, total)
+    return total
 
 
 def get_class_ranking(grade: str, class_name: str = "",

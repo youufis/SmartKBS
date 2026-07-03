@@ -78,8 +78,10 @@ async def dashboard_summary(request: Request):
     username = user["username"]
     role = user.get("role", 2)
 
-    # 尝试从缓存读取
-    cache_key = f"{role}:{username}"
+    # 尝试从缓存读取（教师按年级/班级分别缓存）
+    grade_param = request.query_params.get("grade", "")
+    class_param = request.query_params.get("class", "")
+    cache_key = f"{role}:{username}:{grade_param}:{class_param}"
     cached = _get_cached(cache_key)
     if cached is not None:
         return cached
@@ -102,8 +104,8 @@ async def dashboard_summary(request: Request):
         "user_name": display_name,
     }
 
-    grade = ""
-    cls = ""
+    grade = grade_param
+    cls = class_param
 
     if role == 2:  # ── 学生 ──
         pending_count = _q_count(
