@@ -293,9 +293,9 @@ def _get_week_range() -> tuple[str, str]:
 
 
 def _get_api_key() -> str:
-    """获取可用的 API Key"""
-    key = (os.environ.get("DASHSCOPE_API_KEY", "")
-           or get_config_value("dashscope_api_key", ""))
+    """获取可用的 API Key（使用统一缓存入口）"""
+    from backend.api.chat_router import get_api_keys
+    key, _ = get_api_keys("")
     if not key:
         raise HTTPException(status_code=400, detail="API Key 未配置，请在系统设置中配置")
     return key

@@ -43,15 +43,9 @@ router = APIRouter()
 
 
 def _get_dashscope_api_key() -> str:
-    """获取 DashScope API Key"""
-    key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
+    """获取 DashScope API Key（使用统一缓存入口）"""
+    from backend.api.chat_router import get_api_keys
+    key, _ = get_api_keys("")
     return key
 
 

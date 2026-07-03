@@ -4,6 +4,7 @@
 """
 from datetime import datetime
 from typing import Any
+import time
 
 from backend.database import execute_query, execute_insert_update
 from backend.logger import logger

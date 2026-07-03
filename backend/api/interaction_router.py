@@ -91,15 +91,8 @@ class AiGeneratePoll(BaseModel):
 
 def _call_ai(prompt: str) -> str:
     """调用 AI（非流式）- 支持智能体/直接调大模型双模式"""
-    import os
-    api_key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not api_key:
-        try:
-            from backend.api.config_router import load_config
-            cfg = load_config()
-            api_key = cfg.get("dashscope_api_key", "")
-        except Exception:
-            pass
+    from backend.api.chat_router import get_api_keys
+    api_key, _ = get_api_keys("")
     if not api_key:
         return "⚠️ AI 功能不可用：请配置 DashScope API Key"
 
