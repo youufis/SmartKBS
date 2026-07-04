@@ -74,10 +74,11 @@ class WhiteboardManager:
         )
 
         # 更新数据库成员在线数（基于实时 WebSocket 连接中的学生数）
+        # 注：await 之后 rooms 可能已被清理，需重新检查
         student_online = sum(
             1 for c in self.rooms[room_id]["connections"].values()
             if c.get("role") == "student"
-        )
+        ) if room_id in self.rooms else 0
         execute_insert_update(
             "UPDATE whiteboard_rooms SET student_count=? WHERE id=?",
             (student_online, room_id),
@@ -91,13 +92,15 @@ class WhiteboardManager:
             "online_count": student_online,
         })
         # 新加入者：从内存获取最新快照
-        last_snap = self.rooms[room_id].get("last_snapshot", "")
-        if last_snap:
-            await self.send_to_user(room_id, username, {
-                "type": "op_broadcast",
-                "sender": "system",
-                "data": {"snapshot": last_snap},
-            })
+        # 注：await 之后 rooms 可能已被其他协程清理，需要重新检查
+        if room_id in self.rooms:
+            last_snap = self.rooms[room_id].get("last_snapshot", "")
+            if last_snap:
+                await self.send_to_user(room_id, username, {
+                    "type": "op_broadcast",
+                    "sender": "system",
+                    "data": {"snapshot": last_snap},
+                })
 
     async def leave_room(self, room_id: int, username: str):
         if room_id in self.rooms:
