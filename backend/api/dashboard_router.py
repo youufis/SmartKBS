@@ -1407,7 +1407,8 @@ async def get_task_todo(request: Request):
     # ── 3. 待完成智能练习 ──
     try:
         pending_practices = q_execute_query(
-            """SELECT ps.id, ps.title, ps.subject, ps.question_count, ps.total_score
+            """SELECT ps.id, ps.title, ps.subject, ps.question_count, ps.total_score,
+                      ps.source, ps.target_students
                FROM practice_sessions ps
                WHERE ps.status='active'
                  AND ps.id NOT IN (
@@ -1417,6 +1418,15 @@ async def get_task_todo(request: Request):
             (username,),
         )
         for pp in pending_practices:
+            # 定向练习（target_students 不为空）仅对指定学生可见
+            target = (pp.get("target_students") or "").strip()
+            if target:
+                target_list = [u.strip() for u in target.split(",") if u.strip()]
+                if username not in target_list:
+                    continue
+            # 错题巩固练习（source='wrong_book'）仅对目标学生可见
+            if pp.get("source") == "wrong_book" and not target:
+                continue
             items.append({
                 "id": f"practice-{pp['id']}",
                 "type": "practice",
