@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Layout, Card, Table, Select, Button, message, Tag, Space, Typography,
-  Row, Col, Statistic, Tooltip, Spin,
+  Row, Col, Statistic, Tooltip, Spin, Tabs,
 } from 'antd'
 import {
   ReloadOutlined, TeamOutlined, BookOutlined, CheckCircleOutlined,
-  ClockCircleOutlined, StopOutlined,
+  ClockCircleOutlined, StopOutlined, BarChartOutlined,
 } from '@ant-design/icons'
 import * as curriculumApi from '../api/curriculum'
 import { useAuthStore } from '../stores/authStore'
 import apiClient from '../api/client'
+import LearningProgress from '../components/LearningProgress'
 
 const { Option } = Select
 
@@ -250,156 +251,97 @@ const CurriculumProgressPage: React.FC = () => {
     )
   }
 
-  if (!courseId) {
-    // 只显示筛选条件栏，不加载数据
+  function renderCurriculumTab() {
     return (
-      <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
-        <Card style={{ marginBottom: 16 }}>
+      <>
+        {/* ── 筛选条件（始终显示） ── */}
+        <Card size="small" style={{ marginBottom: 16 }}>
           <Space wrap>
-            <Select value={courseId} placeholder="选择课程" style={{ width: 240 }}
-              onChange={v => setCourseId(v)}
-              options={courses.map(c => ({ value: c.id, label: c.name }))} />
-            <Select value={grade} placeholder="选择年级" style={{ width: 140 }}
-              onChange={v => setGrade(v)} allowClear
-              options={gradeOptions.map(g => ({ value: g, label: g }))} />
-            <Select value={className} placeholder="选择班级" style={{ width: 140 }}
-              onChange={v => setClassName(v)} allowClear disabled={!grade || classOptions.length === 0}
-              options={classOptions.map(c => ({ value: c, label: c }))} />
+            <span>课程：</span>
+            <Select
+              value={courseId} onChange={setCourseId}
+              style={{ width: 200 }} placeholder="选择课程" allowClear
+            >
+              {courses.map((c) => (<Option key={c.id} value={c.id}>{c.name}</Option>))}
+            </Select>
+            <span>年级：</span>
+            <Select
+              value={grade} onChange={setGrade}
+              style={{ width: 120 }} placeholder="全部年级" allowClear
+            >
+              {gradeOptions.map((g) => (<Option key={g} value={g}>{g}</Option>))}
+            </Select>
+            <span>班级：</span>
+            <Select
+              value={className} onChange={setClassName}
+              style={{ width: 120 }} placeholder="全部班级" allowClear
+            >
+              {classOptions.map((c) => (<Option key={c} value={c}>{c}</Option>))}
+            </Select>
           </Space>
         </Card>
-        <Card>
+
+        {courseId ? (
+          <>
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+              <Col span={6}><Card><Statistic title="学生总数" value={stats.totalStudents} prefix={<TeamOutlined />} /></Card></Col>
+              <Col span={6}><Card><Statistic title="平均完成率" value={stats.avgRate} suffix="%" precision={1} valueStyle={{ color: stats.avgRate >= 60 ? '#52c41a' : '#faad14' }} /></Card></Col>
+              <Col span={6}><Card><Statistic title="最高课程" value={stats.bestCourse || '—'} valueStyle={{ fontSize: 18 }} /></Card></Col>
+              <Col span={6}><Card><Statistic title="最高完成率" value={stats.bestRate} suffix="%" precision={1} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+            </Row>
+
+            <Card
+              extra={<Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>}
+              style={{ marginBottom: 16 }}
+            >
+              <Space style={{ marginBottom: 12 }}>
+                <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>
+                <Tag icon={<ClockCircleOutlined />} color="processing">学习中</Tag>
+                <Tag icon={<StopOutlined />} color="default">未开始</Tag>
+              </Space>
+              <Table
+                dataSource={students}
+                columns={columns}
+                rowKey="username"
+                loading={loading}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => '共 ' + t + ' 名学生' }}
+                expandable={{
+                  expandedRowRender: renderExpandedRow,
+                  expandedRowKeys,
+                  onExpandedRowsChange: (keys: readonly React.Key[]) => setExpandedRowKeys([...keys]),
+                  rowExpandable: () => true,
+                }}
+                scroll={{ x: 600 }}
+                size="middle"
+              />
+            </Card>
+          </>
+        ) : (
           <div style={{ textAlign: 'center', padding: 80 }}>
             <Typography.Text type="secondary" style={{ fontSize: 16 }}>请选择课程查看学生进度数据</Typography.Text>
           </div>
-        </Card>
-      </Layout>
+        )}
+      </>
     )
   }
 
   return (
     <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
-      {/* ── 统计卡片 ── */}
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="学生总数"
-              value={stats.totalStudents}
-              prefix={<TeamOutlined />}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="平均完成率"
-              value={stats.avgRate}
-              suffix="%"
-              precision={1}
-              valueStyle={{ color: stats.avgRate >= 60 ? '#52c41a' : '#faad14' }}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="最高课程"
-              value={stats.bestCourse || '—'}
-              valueStyle={{ fontSize: 18 }}
-            />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card>
-            <Statistic
-              title="最高完成率"
-              value={stats.bestRate}
-              suffix="%"
-              precision={1}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      {/* ── 筛选条件 + 刷新 ── */}
-      <Card
-        title={
-          <Space>
-            <BookOutlined />
-            <span>学情进度总览</span>
-          </Space>
-        }
-        extra={
-          <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>
-            刷新
-          </Button>
-        }
-        style={{ marginBottom: 16 }}
-      >
-        <Space wrap style={{ marginBottom: 16 }}>
-          <span>课程：</span>
-          <Select
-            value={courseId}
-            onChange={setCourseId}
-            style={{ width: 160 }}
-            placeholder="选择课程"
-            allowClear
-          >
-            {courses.map((c) => (
-              <Option key={c.id} value={c.id}>{c.name}</Option>
-            ))}
-          </Select>
-
-          <span>年级：</span>
-          <Select
-            value={grade}
-            onChange={setGrade}
-            style={{ width: 120 }}
-            placeholder="全部年级"
-            allowClear
-          >
-            {gradeOptions.map((g) => (
-              <Option key={g} value={g}>{g}</Option>
-            ))}
-          </Select>
-
-          <span>班级：</span>
-          <Select
-            value={className}
-            onChange={setClassName}
-            style={{ width: 120 }}
-            placeholder="全部班级"
-            allowClear
-          >
-            {classOptions.map((c) => (
-              <Option key={c} value={c}>{c}</Option>
-            ))}
-          </Select>
-        </Space>
-
-        {/* ── 状态图例 ── */}
-        <Space style={{ marginBottom: 12 }}>
-          <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>
-          <Tag icon={<ClockCircleOutlined />} color="processing">学习中</Tag>
-          <Tag icon={<StopOutlined />} color="default">未开始</Tag>
-        </Space>
-
-        {/* ── 进度表格 ── */}
-        <Table
-          dataSource={students}
-          columns={columns}
-          rowKey="username"
-          loading={loading}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生` }}
-          expandable={{
-            expandedRowRender: renderExpandedRow,
-            expandedRowKeys,
-            onExpandedRowsChange: (keys: readonly React.Key[]) => setExpandedRowKeys([...keys]),
-            rowExpandable: () => true,
-          }}
-          scroll={{ x: 600 }}
-          size="middle"
+      <Card>
+        <Tabs
+          defaultActiveKey="curriculum"
+          items={[
+            {
+              key: 'curriculum',
+              label: <span><BookOutlined /> 课程进度</span>,
+              children: renderCurriculumTab(),
+            },
+            {
+              key: 'overall',
+              label: <span><BarChartOutlined /> 学习进度</span>,
+              children: <LearningProgress />,
+            },
+          ]}
         />
       </Card>
     </Layout>

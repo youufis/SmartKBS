@@ -119,7 +119,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
     { type: 'group', icon: <BarChartOutlined />, label: '学情分析', key: 'analytics', children: [
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情总览' },
       { key: '/class-summary', icon: <RobotOutlined />, label: '课堂总结' },
-      { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '课程进度' },
+      { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '进度详情' },
       { key: '/activity-monitor', icon: <BarChartOutlined />, label: '活动监控' },
       { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
     ]},

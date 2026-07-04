@@ -8,7 +8,7 @@ from typing import Optional, Dict, List, Any, Tuple
 from fastapi import APIRouter, HTTPException, Request, Query
 
 from backend.api.dependencies import get_current_user
-from backend.database import execute_query_dict as db_query_dict
+from backend.database import execute_query_dict as db_query_dict, execute_query as db_execute
 from backend.question_db import execute_query as qdb_query
 from backend.permission_service import (
     get_students_in_scope,
@@ -802,3 +802,227 @@ async def get_teacher_grades_classes(request: Request):
         })
 
     return {"grades": result}
+
+
+def _calc_student_progress(username: str) -> dict[str, Any]:
+    """计算单个学生的学习进度统计（与 dashboard task-todo 一致）"""
+    from datetime import datetime, date, timedelta
+    stats: dict[str, Any] = {
+        "username": username,
+        "course_progress": 0,
+        "completion_rate": 0,
+        "accuracy_rate": 0,
+        "streak_days": 0,
+        "course_done": 0,
+        "course_total": 0,
+        "exam_done": 0,
+        "practice_done": 0,
+        "code_done": 0,
+    }
+    try:
+        # 学生年级
+        grade_rows = db_execute(
+            "SELECT grade FROM users WHERE username=?", (username,),
+        )
+        grade = str(grade_rows[0][0] or "").strip() if grade_rows else ""
+
+        # 课程进度
+        if grade:
+            total_rows = db_execute(
+                """SELECT COUNT(*) FROM curriculum_bindings cb
+                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                   JOIN chapters ch ON kp.chapter_id = ch.id
+                   JOIN courses c ON ch.course_id = c.id
+                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+                   WHERE cb.resource_type='html' AND c.status='active'
+                     AND (c.grade = '' OR INSTR(c.grade, ?) > 0)
+                     AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
+                          OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
+                (grade,),
+            )
+        else:
+            total_rows = db_execute(
+                """SELECT COUNT(*) FROM curriculum_bindings cb
+                   JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                   JOIN chapters ch ON kp.chapter_id = ch.id
+                   JOIN courses c ON ch.course_id = c.id
+                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+                   WHERE cb.resource_type='html' AND c.status='active' AND c.grade=''
+                     AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
+                          OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
+            )
+        stats["course_total"] = total_rows[0][0] if total_rows else 0
+
+        done_rows = qdb_query(
+            "SELECT COUNT(DISTINCT kp_id) as cnt FROM ai_practice_results WHERE student_username=?",
+            (username,),
+        )
+        stats["course_done"] = done_rows[0]["cnt"] if done_rows else 0
+        stats["course_progress"] = round(stats["course_done"] / stats["course_total"] * 100) if stats["course_total"] > 0 else 0
+
+        # 完成率
+        exam_done_rows = qdb_query(
+            "SELECT COUNT(*) as cnt FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
+            (username,),
+        )
+        stats["exam_done"] = exam_done_rows[0]["cnt"] if exam_done_rows else 0
+
+        practice_done_rows = qdb_query(
+            "SELECT COUNT(*) as cnt FROM practice_attempts WHERE student_username=? AND status='submitted'",
+            (username,),
+        )
+        stats["practice_done"] = practice_done_rows[0]["cnt"] if practice_done_rows else 0
+
+        code_done_rows = qdb_query(
+            "SELECT COUNT(*) as cnt FROM code_submissions WHERE student_username=? AND status='submitted'",
+            (username,),
+        )
+        stats["code_done"] = code_done_rows[0]["cnt"] if code_done_rows else 0
+
+        completed = stats["exam_done"] + stats["practice_done"] + stats["course_done"] + stats["code_done"]
+        # 待完成数：从各表查询未完成的记录
+        exam_pending_rows = qdb_query(
+            """SELECT COUNT(*) as cnt FROM exams e
+               WHERE e.status='published'
+                 AND e.id NOT IN (
+                   SELECT exam_id FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')
+                 )""",
+            (username,),
+        )
+        pending = exam_pending_rows[0]["cnt"] if exam_pending_rows else 0
+
+        stats["completion_rate"] = round(completed / (completed + pending) * 100) if (completed + pending) > 0 else 0
+
+        # 正确率
+        exam_rows = qdb_query(
+            """SELECT ea.score, e.total_score
+               FROM exam_attempts ea
+               JOIN exams e ON ea.exam_id = e.id
+               WHERE ea.student_username=? AND ea.status IN ('submitted','graded') AND e.total_score > 0""",
+            (username,),
+        )
+        exam_acc = 0.0
+        exam_count = len(exam_rows) if exam_rows else 0
+        if exam_rows:
+            total_score_sum = sum(r["total_score"] for r in exam_rows)
+            actual_score_sum = sum(r["score"] for r in exam_rows)
+            exam_acc = actual_score_sum / total_score_sum * 100 if total_score_sum > 0 else 0
+
+        course_rows = qdb_query(
+            "SELECT accuracy FROM ai_practice_results WHERE student_username=? AND accuracy IS NOT NULL",
+            (username,),
+        )
+        course_acc = 0.0
+        course_count = len(course_rows) if course_rows else 0
+        if course_rows:
+            course_acc = sum(r["accuracy"] for r in course_rows) / course_count
+
+        total_acc_count = exam_count + course_count
+        if total_acc_count > 0:
+            weighted_acc = (exam_acc * exam_count + course_acc * course_count) / total_acc_count
+            stats["accuracy_rate"] = round(weighted_acc * 100, 1) if max(exam_acc, course_acc) <= 1 else round(weighted_acc, 1)
+
+        # 连续学习天数
+        streak_rows = db_execute(
+            """SELECT DISTINCT DATE(login_time) as d FROM login_logs
+               WHERE username=? ORDER BY d DESC LIMIT 60""",
+            (username,),
+        )
+        if streak_rows:
+            streak_days = 0
+            check_date = date.today()
+            for row in streak_rows:
+                log_date_str = str(row[0]) if row[0] else ""
+                if log_date_str:
+                    try:
+                        log_date = datetime.strptime(log_date_str[:10], "%Y-%m-%d").date()
+                        if log_date == check_date:
+                            streak_days += 1
+                            check_date -= timedelta(days=1)
+                        elif log_date < check_date:
+                            break
+                    except ValueError:
+                        continue
+            stats["streak_days"] = streak_days
+
+        # 学生姓名
+        name_rows = db_execute(
+            "SELECT COALESCE(NULLIF(name,''), username) FROM users WHERE username=?",
+            (username,),
+        )
+        stats["student_name"] = name_rows[0][0] if name_rows else username
+    except Exception as e:
+        logger.warning(f"[learning-progress] 计算学生进度失败 ({username}): {e}")
+
+    return stats
+
+
+@router.get("/activity-monitor/learning-progress", summary="获取学习进度统计")
+async def get_learning_progress(
+    request: Request,
+    grade: str = Query(default=""),
+    class_name: str = Query(default=""),
+    username: str = Query(default=""),
+):
+    """获取学习进度统计，支持按班级汇总或单个学生查询
+
+    教师仅能查看自己班级的学生，管理员可查看全部。
+    """
+    user = get_current_user(request)
+    current_user = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
+
+    # 单个学生查询
+    if username:
+        # 校验权限：管理员可查全部，教师只能查自己班级的学生
+        if role == 1:
+            students = get_students_in_scope(current_user)
+            if not any(s.get("username") == username for s in students):
+                raise HTTPException(status_code=403, detail="无权查看该学生的数据")
+        return {"summary": {"total_students": 1}, "students": [_calc_student_progress(username)]}
+
+    # 按班级查询
+    if not grade or not class_name:
+        raise HTTPException(status_code=400, detail="请指定年级和班级，或指定学生用户名")
+
+    # 获取该班级的学生列表
+    students = db_query_dict(
+        """SELECT u.username, COALESCE(NULLIF(u.name,''), u.username) as name
+           FROM users u
+           WHERE u.role=2 AND u.grade=? AND u.class=?
+           ORDER BY u.name""",
+        (grade, class_name),
+    )
+
+    # 教师只能查看自己班级的学生
+    if role == 1:
+        allowed = get_students_in_scope(current_user)
+        allowed_usernames = {s.get("username") for s in allowed}
+        students = [s for s in students if s["username"] in allowed_usernames]
+
+    results = []
+    for s in students:
+        st = _calc_student_progress(s["username"])
+        st["student_name"] = s["name"]
+        results.append(st)
+
+    # 班级汇总
+    if results:
+        total = len(results)
+        avg_course_progress = sum(r["course_progress"] for r in results) / total
+        avg_completion = sum(r["completion_rate"] for r in results) / total
+        avg_accuracy = sum(r["accuracy_rate"] for r in results) / total
+        avg_streak = sum(r["streak_days"] for r in results) / total
+        summary = {
+            "total_students": total,
+            "avg_course_progress": round(avg_course_progress),
+            "avg_completion_rate": round(avg_completion, 1),
+            "avg_accuracy_rate": round(avg_accuracy, 1),
+            "avg_streak_days": round(avg_streak, 1),
+        }
+    else:
+        summary = {"total_students": 0}
+
+    return {"summary": summary, "students": results}

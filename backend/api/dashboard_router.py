@@ -1992,10 +1992,13 @@ async def get_task_todo(request: Request):
                      AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
                           OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
             )
-        done_kp = _q_count(
-            "SELECT COUNT(DISTINCT kp_id) FROM ai_practice_results WHERE student_username=?",
+        done_kp = 0
+        kp_rows = q_execute_query(
+            "SELECT COUNT(DISTINCT kp_id) as cnt FROM ai_practice_results WHERE student_username=?",
             (username,),
         )
+        if kp_rows:
+            done_kp = kp_rows[0]["cnt"]
         stats["course_progress"] = round(done_kp / total_kp * 100) if total_kp > 0 else 0
 
         # 总体完成率：已完成的各类活动 / (已完成 + 待完成)

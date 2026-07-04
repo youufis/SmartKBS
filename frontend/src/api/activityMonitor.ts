@@ -118,3 +118,40 @@ export async function getTeacherGradesClasses(): Promise<{ grades: GradeClassInf
   const { data } = await apiClient.get('/api/activity-monitor/grades-classes');
   return data;
 }
+
+/** 学习进度统计（单个学生或班级） */
+export interface StudentProgress {
+  username: string
+  student_name: string
+  course_progress: number
+  completion_rate: number
+  accuracy_rate: number
+  streak_days: number
+  course_done: number
+  course_total: number
+  exam_done: number
+  practice_done: number
+  code_done: number
+}
+
+export interface ClassProgressSummary {
+  total_students: number
+  avg_course_progress: number
+  avg_completion_rate: number
+  avg_accuracy_rate: number
+  avg_streak_days: number
+}
+
+export interface LearningProgressResponse {
+  summary: ClassProgressSummary
+  students: StudentProgress[]
+}
+
+export async function getLearningProgress(params: {
+  grade?: string
+  class_name?: string
+  username?: string
+}): Promise<LearningProgressResponse> {
+  const { data } = await apiClient.get('/api/activity-monitor/learning-progress', { params });
+  return data;
+}
