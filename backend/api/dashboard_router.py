@@ -1955,17 +1955,20 @@ async def get_task_todo(request: Request):
     }
     try:
         # 课程进度：已完成课程练习数 / 总课程练习数
-        # 总练习数 = curriculum_bindings 中匹配学生年级的 html 资源数
-        # 已完成数 = ai_practice_results 中学生已完成记录数
+        # 总练习数 = curriculum_bindings 中匹配学生年级且文件名含 _练习.html 的资源数
+        # 已完成数 = ai_practice_results 中学生完成的去重知识点数
         if grade:
             total_kp = _db_count(
                 """SELECT COUNT(*) FROM curriculum_bindings cb
                    JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
                    JOIN chapters ch ON kp.chapter_id = ch.id
                    JOIN courses c ON ch.course_id = c.id
+                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
                    WHERE cb.resource_type='html'
                      AND c.status='active'
-                     AND (c.grade = '' OR INSTR(c.grade, ?) > 0)""",
+                     AND (c.grade = '' OR INSTR(c.grade, ?) > 0)
+                     AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
+                          OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
                 (grade,),
             )
         else:
@@ -1974,30 +1977,69 @@ async def get_task_todo(request: Request):
                    JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
                    JOIN chapters ch ON kp.chapter_id = ch.id
                    JOIN courses c ON ch.course_id = c.id
-                   WHERE cb.resource_type='html' AND c.status='active' AND c.grade=''""",
+                   LEFT JOIN shared_resources sr ON sr.id = cb.resource_id AND sr.resource_type='html'
+                   WHERE cb.resource_type='html' AND c.status='active' AND c.grade=''
+                     AND (COALESCE(sr.file_name, '') LIKE '%_练习.html'
+                          OR COALESCE(sr.file_path, '') LIKE '%_练习.html')""",
             )
         done_kp = _q_count(
-            "SELECT COUNT(*) FROM ai_practice_results WHERE student_username=?",
+            "SELECT COUNT(DISTINCT kp_id) FROM ai_practice_results WHERE student_username=?",
             (username,),
         )
         stats["course_progress"] = round(done_kp / total_kp * 100) if total_kp > 0 else 0
 
-        # 总体完成率：已提交考试 / (已提交+待考试)
-        # 注意 counts["exam"] 包含考核测评全部分类，不能直接用
-        # 需要从 items 中只筛选 type='exam' 的待考试数量
-        exam_submitted = _q_count(
+        # 总体完成率：已完成的各类活动 / (已完成 + 待完成)
+        # 涵盖考试、智能练习、课程练习、代码练习
+        completed = _q_count(
             "SELECT COUNT(*) FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
             (username,),
         )
-        exam_pending = sum(1 for it in items if it["type"] == "exam")
-        stats["completion_rate"] = round(exam_submitted / (exam_submitted + exam_pending) * 100) if (exam_submitted + exam_pending) > 0 else 0
-
-        # 总体正确率
-        acc_row = q_execute_query(
-            """SELECT COALESCE(AVG(accuracy), 0) FROM ai_practice_results WHERE student_username=?""",
+        completed += _q_count(
+            "SELECT COUNT(*) FROM practice_attempts WHERE student_username=? AND status='submitted'",
             (username,),
         )
-        stats["accuracy_rate"] = round(acc_row[0]["COALESCE(AVG(accuracy), 0)"], 1) if acc_row else 0
+        completed += done_kp
+        completed += _q_count(
+            "SELECT COUNT(*) FROM code_submissions WHERE student_username=? AND status='submitted'",
+            (username,),
+        )
+        # 待完成数取自 items 中对应类型的数量
+        pending = sum(1 for it in items if it["type"] in ("exam", "practice", "course_practice", "code"))
+        stats["completion_rate"] = round(completed / (completed + pending) * 100) if (completed + pending) > 0 else 0
+
+        # 总体正确率：综合考试得分率 + 课程练习正确率的加权平均（统一为百分比）
+        exam_acc = 0.0
+        exam_count = 0
+        exam_rows = q_execute_query(
+            """SELECT ea.score, e.total_score
+               FROM exam_attempts ea
+               JOIN exams e ON ea.exam_id = e.id
+               WHERE ea.student_username=? AND ea.status IN ('submitted','graded') AND e.total_score > 0""",
+            (username,),
+        )
+        if exam_rows:
+            exam_count = len(exam_rows)
+            total_score_sum = sum(r["total_score"] for r in exam_rows)
+            actual_score_sum = sum(r["score"] for r in exam_rows)
+            exam_acc = actual_score_sum / total_score_sum * 100 if total_score_sum > 0 else 0
+
+        course_acc = 0.0
+        course_count = 0
+        course_rows = q_execute_query(
+            "SELECT accuracy FROM ai_practice_results WHERE student_username=? AND accuracy IS NOT NULL",
+            (username,),
+        )
+        if course_rows:
+            course_count = len(course_rows)
+            course_acc = sum(r["accuracy"] for r in course_rows) / course_count
+
+        total_acc_count = exam_count + course_count
+        if total_acc_count > 0:
+            weighted_acc = (exam_acc * exam_count + course_acc * course_count) / total_acc_count
+            # accuracy 可能是小数(0.85)或百分比(85)，统一为百分比
+            stats["accuracy_rate"] = round(weighted_acc * 100, 1) if max(exam_acc, course_acc) <= 1 else round(weighted_acc, 1)
+        else:
+            stats["accuracy_rate"] = 0
 
         # 连续学习天数（从 login_logs 计算）
         streak = execute_query(
