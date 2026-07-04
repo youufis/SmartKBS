@@ -873,14 +873,17 @@ def _calc_student_progress(username: str) -> dict[str, Any]:
         )
         stats["practice_done"] = practice_done_rows[0]["cnt"] if practice_done_rows else 0
 
+        # 已完成代码练习数：统计状态为 accepted 且为最佳提交的题目数
         code_done_rows = qdb_query(
-            "SELECT COUNT(*) as cnt FROM code_submissions WHERE student_username=? AND status='submitted'",
+            "SELECT COUNT(DISTINCT problem_id) as cnt FROM code_submissions WHERE student_username=? AND status='accepted' AND is_best=1",
             (username,),
         )
         stats["code_done"] = code_done_rows[0]["cnt"] if code_done_rows else 0
 
         completed = stats["exam_done"] + stats["practice_done"] + stats["course_done"] + stats["code_done"]
-        # 待完成数：从各表查询未完成的记录
+
+        # 待完成数：从各表查询未完成的记录（与 dashboard task-todo 逻辑保持一致）
+        # 考试待完成
         exam_pending_rows = qdb_query(
             """SELECT COUNT(*) as cnt FROM exams e
                WHERE e.status='published'
@@ -890,6 +893,32 @@ def _calc_student_progress(username: str) -> dict[str, Any]:
             (username,),
         )
         pending = exam_pending_rows[0]["cnt"] if exam_pending_rows else 0
+
+        # 智能练习待完成
+        practice_pending_rows = qdb_query(
+            """SELECT COUNT(*) as cnt FROM practice_sessions ps
+               WHERE ps.status='active'
+                 AND ps.id NOT IN (
+                   SELECT session_id FROM practice_attempts WHERE student_username=?
+                 )""",
+            (username,),
+        )
+        pending += practice_pending_rows[0]["cnt"] if practice_pending_rows else 0
+
+        # 课程练习待完成
+        pending += max(0, stats["course_total"] - stats["course_done"])
+
+        # 代码练习待完成
+        code_pending_rows = qdb_query(
+            """SELECT COUNT(*) as cnt FROM code_problems cp
+               WHERE cp.status='active'
+                 AND cp.id NOT IN (
+                   SELECT cs.problem_id FROM code_submissions cs
+                   WHERE cs.student_username=? AND cs.is_best=1 AND cs.status='accepted'
+                 )""",
+            (username,),
+        )
+        pending += code_pending_rows[0]["cnt"] if code_pending_rows else 0
 
         stats["completion_rate"] = round(completed / (completed + pending) * 100) if (completed + pending) > 0 else 0
 

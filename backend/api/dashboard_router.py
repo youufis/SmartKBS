@@ -2012,10 +2012,11 @@ async def get_task_todo(request: Request):
             (username,),
         )
         completed += done_kp
-        completed += _q_count(
-            "SELECT COUNT(*) FROM code_submissions WHERE student_username=? AND status='submitted'",
+        code_done_rows = q_execute_query(
+            "SELECT COUNT(DISTINCT problem_id) as cnt FROM code_submissions WHERE student_username=? AND status='accepted' AND is_best=1",
             (username,),
         )
+        completed += code_done_rows[0]["cnt"] if code_done_rows else 0
         # 待完成数取自 items 中对应类型的数量
         pending = sum(1 for it in items if it["type"] in ("exam", "practice", "course_practice", "code"))
         stats["completion_rate"] = round(completed / (completed + pending) * 100) if (completed + pending) > 0 else 0
