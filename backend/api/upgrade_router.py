@@ -1094,7 +1094,7 @@ _AUTO_PREFETCH_KEY = "_prefetched_version"  # 预缓存标记：记录已预拉�
 
 async def _auto_check_worker():
     """后台循环：定期检测远程是否有新版本，发现更新时通知所有管理员"""
-    logger.info(f"[auto-upgrade] 后台版本检测线程已启动，每 {_AUTO_CHECK_INTERVAL//3600} 小时检测一次")
+    logger.debug(f"[auto-upgrade] 后台版本检测线程已启动，每 {_AUTO_CHECK_INTERVAL//3600} 小时检测一次")
     while True:
         try:
             await _perform_version_check()

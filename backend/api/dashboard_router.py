@@ -1532,12 +1532,18 @@ async def get_task_todo(request: Request):
             # 条件2：该知识点未完成练习
             if kp_id in done_kp_ids:
                 continue
+            # 用实际资源文件名作为显示名称
+            practice_name = fn
+            if practice_name.endswith('_练习.html'):
+                practice_name = practice_name[:-len('_练习.html')]
+            if not practice_name:
+                practice_name = f"{b[3] or ''} - {b[2]}"
             file_path = fp.lstrip('/')
             resource_url = f"/api/files/{file_path}" if file_path else "/curriculum"
             items.append({
                 "id": f"course_practice-{b[0]}",
                 "type": "course_practice",
-                "title": f"{b[3] or ''} - {b[2]}",
+                "title": practice_name,
                 "description": "知识点练习 · HTML 资源",
                 "subject": "",
                 "status": "pending",
