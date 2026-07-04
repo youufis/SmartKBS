@@ -22,6 +22,7 @@ from backend.auth import is_admin
 from backend.database import execute_query as user_query, execute_insert_update as db_update
 from backend.logger import logger
 from backend.api.ai_service import call_ai_async
+from backend.permission_service import check_activity_visibility
 
 router = APIRouter()
 
@@ -220,7 +221,6 @@ async def list_exams(
         )
 
         # 逐条判断学生是否有权限看到该考试（使用统一的活动范围检查）
-        from backend.permission_service import check_activity_visibility
         filtered = []
         for exam in all_rows:
             if check_activity_visibility(
@@ -302,7 +302,6 @@ async def get_exam(exam_id: int, request: Request):
         if exam["status"] != "published":
             raise HTTPException(status_code=403, detail="考试未发布")
         # 学生还需检查活动范围
-        from backend.permission_service import check_activity_visibility
         student_rows = user_query(
             "SELECT grade, class FROM users WHERE username=?", (username,)
         )
@@ -926,7 +925,6 @@ async def start_exam(exam_id: int, request: Request):
         raise HTTPException(status_code=400, detail="考试未发布或已结束")
 
     # 检查活动范围
-    from backend.permission_service import check_activity_visibility
     student_rows = user_query(
         "SELECT grade, class FROM users WHERE username=?", (username,)
     )

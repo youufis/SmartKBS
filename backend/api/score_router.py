@@ -285,8 +285,8 @@ async def api_my_score(request: Request):
     try:
         rows = execute_query("SELECT username FROM users WHERE role IN (0, 1)")
         teachers_list = ["root"] + [row[0] for row in rows if row[0] != "root"]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"查询教师列表失败: {e}")
 
     total_score = 0
     found_grade = ""

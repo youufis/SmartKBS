@@ -73,8 +73,8 @@ def _record_discussion_rejection(username: str, content: str):
     try:
         from backend.reward_engine import deduct_points
         deduct_points(username, "讨论发言审核不通过", 2)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"讨论审核扣分失败 (user={username}): {e}")
 
     if tracker["rejection_count"] >= _DT_MAX_REJECTIONS:
         tracker["blocked_until"] = now + _DT_BLOCK_SECONDS
@@ -133,16 +133,6 @@ def _call_review_sync(prompt: str, api_key: str) -> str:
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _get_user_grade_class(username: str) -> tuple[Any, ...]:
-    rows = execute_query(
-        "SELECT grade, class FROM users WHERE username = ?",
-        (username,),
-    )
-    if rows and rows[0]:
-        return rows[0][0] or "", rows[0][1] or ""
-    return "", ""
 
 
 # ── 请求/响应模型 ──
@@ -853,8 +843,8 @@ async def join_discussion(disc_id: int, request: Request):
         disc_title = execute_query("SELECT title FROM discussions WHERE id=?", (disc_id,))
         title = disc_title[0][0] if disc_title else f"讨论#{disc_id}"
         award_participation(username, "discussion", str(disc_id), title)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"讨论积分发放失败 (user={username}, disc_id={disc_id}): {e}")
 
     return {"status": "joined", "group_id": group_id}
 

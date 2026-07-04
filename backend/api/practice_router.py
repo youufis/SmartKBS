@@ -20,6 +20,7 @@ from backend.api.ai_service import call_ai_async
 from backend.api.config_router import get_config_value
 from backend.logger import logger
 from backend.prompts import build_ai_role
+from backend.permission_service import get_teacher_classes, get_grade_by_name
 
 router = APIRouter()
 

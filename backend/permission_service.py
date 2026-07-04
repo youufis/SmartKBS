@@ -41,6 +41,17 @@ def get_all_stages() -> list[str]:
     return [r[0] for r in rows]
 
 
+def get_user_grade_class(username: str) -> tuple[str, str]:
+    """查询用户的年级(grade)和班级(class)"""
+    rows = execute_query(
+        "SELECT grade, class FROM users WHERE username=?",
+        (username,),
+    )
+    if rows and rows[0]:
+        return str(rows[0][0] or ""), str(rows[0][1] or "")
+    return "", ""
+
+
 def upsert_grade(name: str, stage: str = "", sort_order: int = 0) -> int:
     """查找或创建年级，返回 grade_id"""
     rows = execute_query("SELECT id FROM grades WHERE name=?", (name,))

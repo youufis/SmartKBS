@@ -13,6 +13,7 @@ from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.logger import logger
+from backend.permission_service import get_students_by_scope, filter_activities_by_scope
 
 router = APIRouter()
 
@@ -123,8 +124,6 @@ def notify_users_by_scope(
     根据目标范围参数向对应的学生发送通知
     复用 permission_service.get_students_by_scope 获取目标学生列表
     """
-    from backend.permission_service import get_students_by_scope
-
     students = get_students_by_scope(
         creator_username,
         target_scope=target_scope,
@@ -447,7 +446,6 @@ async def list_announcements(
             })
 
         # 按目标范围过滤
-        from backend.permission_service import filter_activities_by_scope
         announcements = filter_activities_by_scope(announcements, user["username"])
 
         # 内存分页

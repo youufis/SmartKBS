@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { ConfigProvider, Spin } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import App from './App'
+import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 import './styles/theme.css'
 import { loadQuestionTypes } from './constants/questionTypes'
@@ -43,6 +44,8 @@ function ThemedApp() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ThemedApp />
+    <ErrorBoundary>
+      <ThemedApp />
+    </ErrorBoundary>
   </React.StrictMode>,
 )

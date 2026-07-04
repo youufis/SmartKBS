@@ -201,8 +201,8 @@ def _save_to_student_chat(student_name, cls, content):
         rows = execute_query("SELECT username FROM users WHERE name=?", (student_name,))
         if rows:
             username = rows[0][0]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"点名-查找学生用户名失败 (name={student_name}): {e}")
     if not username:
         return None
     # 安全校验：只允许字母数字下划线
@@ -448,8 +448,8 @@ async def api_mark(request: Request):
             )
             if student_user:
                 award_participation(student_user[0][0], "rollcall", f"{grade}_{cls}_{student}", f"点名-{student}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"点名积分奖励发放失败 (student={student}): {e}")
 
     state.setdefault("history", []).append({
         "student": student,

@@ -537,31 +537,43 @@ def _notify_unshare_sync(owner: str, file_name: str, resource_type: str,
 
 @router.get("/my-shares")
 async def my_shares(request: Request):
-    """获取我创建的共享列表"""
+    """获取我的共享列表（管理员可查看全部）"""
     user = get_current_user(request)
     username = user["username"]
+    role = user.get("role", 2)
 
-    rows = execute_query(
-        """SELECT id, file_path, file_name, resource_type, share_scope,
-                  target_users, target_grade, target_class, created_at
-           FROM shared_resources WHERE owner_username=?
-           ORDER BY created_at DESC""",
-        (username,),
-    )
+    if role == 0:
+        # 管理员：查看全部共享资源
+        rows = execute_query(
+            """SELECT id, owner_username, file_path, file_name, resource_type,
+                      share_scope, target_users, target_grade, target_class, created_at
+               FROM shared_resources
+               ORDER BY created_at DESC""",
+        )
+    else:
+        # 教师/学生：仅查看自己的
+        rows = execute_query(
+            """SELECT id, owner_username, file_path, file_name, resource_type,
+                      share_scope, target_users, target_grade, target_class, created_at
+               FROM shared_resources WHERE owner_username=?
+               ORDER BY created_at DESC""",
+            (username,),
+        )
 
     return {
         "shares": [
             {
                 "id": r[0],
-                "file_path": r[1],
-                "file_name": r[2],
-                "resource_type": r[3],
-                "share_scope": r[4],
-                "target_users": r[5] or "",
-                "target_grade": r[6] or "",
-                "target_class": r[7] or "",
-                "created_at": r[8],
-                "url_path": _build_url_path(username, r[3], r[1]),
+                "owner_username": r[1],
+                "file_path": r[2],
+                "file_name": r[3],
+                "resource_type": r[4],
+                "share_scope": r[5],
+                "target_users": r[6] or "",
+                "target_grade": r[7] or "",
+                "target_class": r[8] or "",
+                "created_at": r[9],
+                "url_path": _build_url_path(r[1], r[4], r[2]),
             }
             for r in rows
         ]

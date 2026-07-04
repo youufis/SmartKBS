@@ -15,6 +15,7 @@ from backend.api.dependencies import get_current_user
 from backend.auth import can_create_task, is_teacher, is_admin
 from backend.api.chat_router import get_api_keys, upload_file_to_dashscope
 from backend.prompts import build_ai_role
+from backend.permission_service import check_activity_visibility
 from backend.api.config_router import get_config_value
 from backend.config import (
     SUMMARY_DIR_NAME,
@@ -118,7 +119,6 @@ def get_user_relevant_tasks(student_user: str, active_tasks: list[dict[str, Any]
 
     优先使用任务的 target_scope 过滤；兼容旧数据（无 target_scope 时回退到任教范围匹配）。
     """
-    from backend.permission_service import check_activity_visibility
 
     # 查询学生的年级班级
     student_rows = execute_query(
@@ -255,7 +255,6 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
 
     # 权限校验：学生只能提交到可见范围内的任务
     if user.get("role") == 2:
-        from backend.permission_service import check_activity_visibility
         s_grade = user.get("grade", "")
         s_class = user.get("class", "")
         rows_grade = execute_query(

@@ -82,7 +82,6 @@ async def ranking(
     if role == 1:
         # 教师只能看自己任教的班级
         t = teacher or user["username"]
-        from backend.permission_service import get_teacher_classes, get_grade_by_name
         grade_info = get_grade_by_name(grade)
         allowed = []
         if grade_info:

@@ -416,8 +416,8 @@ def _release_lock():
                 # 如果 PID 不匹配，说明是其他 worker 的锁，不删除
             except (json.JSONDecodeError, OSError):
                 LOCK_FILE.unlink()  # 损坏的锁文件直接清理
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"升级锁文件清理失败: {e}")
 
 
 def _get_client_ip(request: Request) -> str:

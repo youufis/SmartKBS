@@ -209,7 +209,8 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
                   kp.name as kp_name, c.name as course_name, c.id as course_id,
                   c.subject, c.status as course_status, c.grade as course_grade,
                   c.created_at, c.updated_at,
-                  COALESCE(sr.file_path, '') as fp, COALESCE(sr.file_name, '') as fn
+                  COALESCE(sr.file_path, '') as fp, COALESCE(sr.file_name, '') as fn,
+                  sr.owner_username
            FROM curriculum_bindings cb
            JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
            JOIN chapters ch ON kp.chapter_id = ch.id
@@ -226,8 +227,10 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
             continue
 
         course_grade = (b.get("course_grade") or "").strip()
-        # 管理员：显示全部；教师：仅显示 grade 匹配任教年级的课程
+        # 管理员：显示全部课程练习；教师：仅显示自己共享的 + 匹配任教年级的课程
         if not is_admin(teacher_username):
+            if b.get("owner_username") != teacher_username:
+                continue
             if not course_grade or not course_grade_set or course_grade not in course_grade_set:
                 continue
 
@@ -237,9 +240,28 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
             (b["knowledge_point_id"],),
         )
 
+        # 用练习资源文件名作为活动名称（去掉 _练习.html 后缀更友好）
+        practice_name = b["fn"]
+        if practice_name.endswith("_练习.html"):
+            practice_name = practice_name[:-len("_练习.html")]
+        if not practice_name:
+            practice_name = f"{b['course_name']} - {b['kp_name']}"
+
+        # 查询共享资源拥有者的姓名
+        _owner_name = _creator_name
+        owner = b.get("owner_username")
+        if owner:
+            owner_rows = db_query_dict(
+                "SELECT COALESCE(NULLIF(name,''), username) as display_name FROM users WHERE username=?",
+                (owner,),
+            )
+            if owner_rows:
+                _owner_name = owner_rows[0]["display_name"]
+
         activities.append({
             "id": b["binding_id"],
-            "title": f"{b['course_name']} - {b['kp_name']}",
+            "title": practice_name,
+            "creator_name": _owner_name,
             "status": b["course_status"],
             "created_at": b["created_at"],
             "updated_at": b["updated_at"],
@@ -273,9 +295,10 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
         p["submitted_count"] = sub[0]["cnt"] if sub else 0
         activities.append(p)
 
-    # 统一设置创建者姓名
+    # 统一设置创建者姓名（课程练习已有独立的 creator_name，不覆盖）
     for act in activities:
-        act["creator_name"] = _creator_name
+        if act.get("activity_type") != "course":
+            act["creator_name"] = _creator_name
     return activities
 
 

@@ -25,19 +25,9 @@ from backend.question_db import (
     execute_update as qb_execute_update,
 )
 from backend.config import BASE_DIR
+from backend.permission_service import get_user_grade_class, check_activity_visibility
 
 router = APIRouter()
-
-
-def _get_user_grade_class(username: str) -> tuple[str, str]:
-    """查询用户的年级(grade)和班级(class)"""
-    rows = execute_query(
-        "SELECT grade, class FROM users WHERE username = ?",
-        (username,),
-    )
-    if rows and rows[0]:
-        return str(rows[0][0] or ""), str(rows[0][1] or "")
-    return "", ""
 
 
 # ── 请求模型 ──
@@ -815,8 +805,7 @@ async def list_quizzes(
 
     if role == 2:
         # 学生：获取所有活跃测验后按目标范围过滤
-        from backend.permission_service import check_activity_visibility
-        s_grade, s_class = _get_user_grade_class(username)
+        s_grade, s_class = get_user_grade_class(username)
         # 注意：列顺序必须与后续索引访问一致
         all_rows = execute_query(
             f"""SELECT q.id, q.creator_username, q.title, q.description, q.questions, q.status,
@@ -914,8 +903,7 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
 
     # 学生只能回答自己权限范围内的测验
     if role == 2:
-        from backend.permission_service import check_activity_visibility
-        s_grade, s_class = _get_user_grade_class(username)
+        s_grade, s_class = get_user_grade_class(username)
         if not check_activity_visibility(
             student_username=username,
             student_grade=s_grade,
@@ -1020,8 +1008,8 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         quiz_title = quiz[0][2] if len(quiz[0]) > 2 else f"测验#{quiz_id}"
         award_participation(username, "quiz", str(quiz_id), quiz_title)
         award_grade(username, "quiz", str(quiz_id), total_score, q_score, quiz_title)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"测验积分发放失败 (user={username}, quiz_id={quiz_id}): {e}")
 
     return {
         "message": "提交成功",
@@ -1271,8 +1259,7 @@ async def list_polls(request: Request):
 
     if role == 2:
         # 学生：获取所有活跃投票后按目标范围过滤
-        from backend.permission_service import check_activity_visibility
-        s_grade, s_class = _get_user_grade_class(username)
+        s_grade, s_class = get_user_grade_class(username)
         # 注意：列顺序必须与后续索引访问一致
         all_rows = execute_query(
             """SELECT p.id, p.creator_username, p.question, p.options, p.poll_type, p.status, p.created_at,
@@ -1389,8 +1376,7 @@ async def submit_vote(
     # 学生只能参与自己权限范围内的投票
     role = user.get("role", 2)
     if role == 2:
-        from backend.permission_service import check_activity_visibility
-        s_grade, s_class = _get_user_grade_class(username)
+        s_grade, s_class = get_user_grade_class(username)
         if not check_activity_visibility(
             student_username=username,
             student_grade=s_grade,

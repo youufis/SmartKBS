@@ -331,8 +331,8 @@ def _get_resource_info(resource_type: str, resource_id: int, include_stats: bool
             if rows:
                 result["name"] = rows[0]["name"]
                 result["url"] = f"/tasks?highlight={resource_id}"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"解析资源绑定失败 (type={resource_type}, id={resource_id}): {e}")
     if not result["name"]:
         result["name"] = f"[{resource_type}:{resource_id}]"
     return result

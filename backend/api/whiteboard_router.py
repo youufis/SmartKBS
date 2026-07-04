@@ -16,6 +16,7 @@ from backend.api.config_router import get_config_value
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.whiteboard_ws import whiteboard_manager
 from backend.logger import logger
+from backend.permission_service import get_teacher_grades, parse_legacy_teacher_grade_class
 
 router = APIRouter()
 
@@ -91,7 +92,6 @@ async def create_room(req: CreateRoomRequest, request: Request):
     grade = req.grade
     class_name = req.class_name
     if _get_user_role(user) == 1 and not grade:
-        from backend.permission_service import get_teacher_grades
         grades = get_teacher_grades(user["username"])
         if grades:
             grade = grades[0]["name"]
@@ -169,8 +169,6 @@ async def list_rooms(
         # 管理员列表
         admin_rows = execute_query("SELECT username FROM users WHERE role=0")
         admin_set = set(row[0] for row in admin_rows) if admin_rows else set()
-
-        from backend.permission_service import parse_legacy_teacher_grade_class
 
         filtered = []
         for room in all_rows:
@@ -363,7 +361,6 @@ async def join_by_code(req: JoinByCodeRequest, request: Request):
                     t_grade = (t_rows[0][0] or "").strip()
                     t_class = str(t_rows[0][1] or "").strip()
                     if t_grade or t_class:
-                        from backend.permission_service import parse_legacy_teacher_grade_class
                         gcm = parse_legacy_teacher_grade_class(t_grade, t_class)
                         matched = False
                         if s_grade and s_grade in gcm:

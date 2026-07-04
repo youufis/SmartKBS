@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Select, Radio, Space, Tag, Divider, Typography, Checkbox } from 'antd'
 import { BookOutlined, GlobalOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
-import apiClient from '../api/client'
+import { fetchGrades, fetchAllGradeClasses } from '../api/gradeClass'
 import { useAuthStore } from '../stores/authStore'
 
 const { Text } = Typography
@@ -45,25 +45,14 @@ const ActivityScopeSelector: React.FC<Props> = ({
     }
   }, [value])
 
-  // 加载年级列表
+  // 使用共享 gradeClass 服务加载年级/班级
   useEffect(() => {
-    apiClient.get('/api/rollcall/grades').then((res) => {
-      const gs: string[] = Array.isArray(res.data) ? res.data : []
-      setGrades(gs)
-    }).catch(() => {})
+    fetchGrades().then(setGrades).catch(() => {})
   }, [])
 
-  // 加载班级列表
   useEffect(() => {
     if (grades.length > 0) {
-      Promise.all(
-        grades.map((g) =>
-          apiClient
-            .get('/api/rollcall/classes', { params: { grade: g } })
-            .then((res) => ({ grade: g, classes: Array.isArray(res.data) ? res.data : [] }))
-            .catch(() => ({ grade: g, classes: [] }))
-        )
-      ).then(setClassOptions)
+      fetchAllGradeClasses().then(setClassOptions).catch(() => {})
     }
   }, [grades])
 

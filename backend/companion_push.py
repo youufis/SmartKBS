@@ -326,6 +326,6 @@ def _analyze_weakness_summary(username: str) -> Optional[dict[str, Any]]:
         )
         if rows:
             return {"kp": str(rows[0][0]), "wrong_count": rows[0][1]}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"学伴推送-薄弱知识点查询失败 (user={username}): {e}")
     return None

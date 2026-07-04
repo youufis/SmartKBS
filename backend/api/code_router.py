@@ -26,6 +26,7 @@ from backend.api.ai_service import call_ai_async
 from backend.prompts import build_ai_role
 from backend.code_runner import run_python, run_javascript, get_supported_languages
 from backend.code_grader import grade_submission
+from backend.permission_service import check_activity_visibility
 
 router = APIRouter()
 
@@ -261,7 +262,6 @@ async def list_code_problems(
             f"SELECT cp.id,cp.id as problem_id,cp.title,cp.subject,cp.knowledge_points,cp.difficulty,cp.created_at,cp.creator_username,cp.creator_name,cp.language,cp.time_limit,cp.starter_code,cp.description,cp.template_code,cp.target_scope,cp.target_grade,cp.target_class,cp.target_users,cp.status FROM code_problems cp WHERE {student_where} ORDER BY cp.id DESC",
             tuple(student_params),
         )
-        from backend.permission_service import check_activity_visibility
         si = db_query_dict("SELECT grade,class FROM users WHERE username=?", (username,))
         s_grade = str(si[0]["grade"] or "") if si else ""
         s_class = str(si[0]["class"] or "") if si else ""
@@ -314,7 +314,6 @@ async def get_code_problem(problem_id: int, request: Request):
         raise HTTPException(status_code=404, detail="不存在")
     # 学生需检查活动范围
     if role == 2:
-        from backend.permission_service import check_activity_visibility
         si = db_query_dict("SELECT grade,class FROM users WHERE username=?", (username,))
         s_grade = str(si[0]["grade"] or "") if si else ""
         s_class = str(si[0]["class"] or "") if si else ""

@@ -166,6 +166,14 @@ const ResourceViewStatsPage: React.FC = () => {
       render: (t: string) => t === 'html' ? <Tag icon={<FileOutlined />} color="blue">HTML</Tag> : <Tag icon={<DownloadOutlined />} color="green">文件</Tag>,
     },
     {
+      title: '共享者',
+      dataIndex: 'owner',
+      key: 'owner',
+      width: 100,
+      ellipsis: true,
+      render: (v: string) => v ? <Tag color="default">{v}</Tag> : '-',
+    },
+    {
       title: '浏览次数',
       dataIndex: 'total_views',
       key: 'total_views',

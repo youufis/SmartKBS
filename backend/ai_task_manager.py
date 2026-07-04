@@ -8,6 +8,7 @@ import asyncio
 import json
 import time
 import uuid
+from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
 
 from backend.logger import logger
@@ -33,10 +34,6 @@ async def create_ai_task(description: str, prompt: str, api_key: str) -> str:
         return {"result": result}
 
     return await task_manager.create_task(description=description, coro_factory=_do_call)
-from enum import Enum
-from typing import Any, Callable, Coroutine, Optional
-
-from backend.logger import logger
 
 
 class TaskStatus(str, Enum):

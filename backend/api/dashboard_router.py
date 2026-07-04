@@ -21,6 +21,7 @@ from backend.title_system import (
     get_or_init_student_title,
 )
 from backend.reward_engine import get_student_total as get_reward_total
+from backend.permission_service import get_user_grade_class
 
 router = APIRouter()
 
@@ -52,17 +53,6 @@ def _q_count(sql: str, params: tuple[Any, ...] = ()) -> int:
     """执行 question_db 的 COUNT 查询并返回数值（返回 dict，按列名访问）"""
     rows = q_execute_query(sql, params)
     return rows[0]['COUNT(*)'] if rows else 0
-
-
-def _get_user_grade_class(username: str) -> tuple[str, str]:
-    """查询用户的年级(grade)和班级(class)"""
-    rows = execute_query(
-        "SELECT grade, class FROM users WHERE username = ?",
-        (username,),
-    )
-    if rows and rows[0]:
-        return str(rows[0][0] or ""), str(rows[0][1] or "")
-    return "", ""
 
 
 def _db_count(sql: str, params: tuple[Any, ...] = ()) -> int:
@@ -1348,7 +1338,7 @@ async def get_task_todo(request: Request):
     items: list[dict[str, Any]] = []
 
     # 获取学生年级班级信息
-    grade, cls = _get_user_grade_class(username)
+    grade, cls = get_user_grade_class(username)
     grade_row = execute_query("SELECT grade_id, class_id FROM users WHERE username=?", (username,))
     grade_id = grade_row[0][0] if grade_row else None
     class_id = grade_row[0][1] if grade_row and len(grade_row[0]) > 1 else None
