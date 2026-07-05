@@ -199,6 +199,16 @@ def _delete_user_completely(username: str):
         ("DELETE FROM ai_companion_push_log WHERE student_username=?", (username,)),
         # 错题本
         ("DELETE FROM wrong_book WHERE student_username=?", (username,)),
+        # 每日精选
+        ("DELETE FROM discovery_viewed WHERE username=?", (username,)),
+        ("DELETE FROM discovery_view_log WHERE username=?", (username,)),
+        ("DELETE FROM discovery_favorites WHERE username=?", (username,)),
+        ("DELETE FROM discovery_daily_stats WHERE username=?", (username,)),
+        ("DELETE FROM discovery_refresh_cards WHERE username=?", (username,)),
+        # 热点新闻
+        ("DELETE FROM news_view_log WHERE username=?", (username,)),
+        ("DELETE FROM news_favorites WHERE username=?", (username,)),
+        ("DELETE FROM news_daily_stats WHERE username=?", (username,)),
         # 协作白板：先清理用户在他人房间的痕迹，再删除自己创建的房间
         ("DELETE FROM whiteboard_operations WHERE username=?", (username,)),
         ("DELETE FROM whiteboard_room_members WHERE username=?", (username,)),
