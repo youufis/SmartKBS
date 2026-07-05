@@ -63,6 +63,20 @@ DEFAULT_BADGE_CONFIG = [
     {"id": "quest_legend",   "name": "闯关传奇", "icon": "👑", "desc": "累计 50 次闯关成功", "condition_type": "quest_milestone", "condition_value": 50},
     {"id": "quest_all_15",   "name": "一站到底", "icon": "💯", "desc": "单轮 15 题全对", "condition_type": "quest_honor"},
     {"id": "quest_10_plus",  "name": "十连斩", "icon": "🔟", "desc": "单轮答对 10 题以上", "condition_type": "quest_honor"},
+    # ── 每日精选徽章 ──
+    {"id": "discovery_explorer_50",  "name": "知识探险家", "icon": "🔭",
+     "desc": "累计浏览 50 条每日精选", "condition_type": "discovery_views", "condition_value": 50},
+    {"id": "discovery_master_200",   "name": "百科达人",    "icon": "📖",
+     "desc": "累计浏览 200 条每日精选", "condition_type": "discovery_views", "condition_value": 200},
+    {"id": "discovery_collector_30", "name": "收藏家",      "icon": "💎",
+     "desc": "累计收藏 30 条精选",   "condition_type": "discovery_favorites", "condition_value": 30},
+    # ── 热点新闻徽章 ──
+    {"id": "news_reader_30",   "name": "时事新人",    "icon": "📰",
+     "desc": "累计阅读 30 篇新闻", "condition_type": "news_views", "condition_value": 30},
+    {"id": "news_reader_100",  "name": "时事通",       "icon": "🌐",
+     "desc": "累计阅读 100 篇新闻", "condition_type": "news_views", "condition_value": 100},
+    {"id": "news_reader_365",  "name": "百晓生",       "icon": "🧠",
+     "desc": "累计阅读 365 篇新闻", "condition_type": "news_views", "condition_value": 365},
 ]
 
 # ── 主题科目列表（动态加载） ──

@@ -14,3 +14,4 @@ PyPDF2>=3.0.0            # PDF 文本提取（AI 导入课程用）
 python-docx>=1.1.0       # Word 文档生成（组卷导出）
 latex2mathml>=3.80       # LaTeX 公式转 MathML（Word 公式渲染备选）
 svglib>=1.6.0            # SVG 转 PNG（题目配图导出）
+feedparser>=6.0.0        # RSS 新闻源解析（热点新闻模块）

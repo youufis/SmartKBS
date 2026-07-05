@@ -26,6 +26,7 @@ import {
   EditOutlined,
   SafetyCertificateOutlined,
   PictureOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -48,6 +49,10 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
     { key: '/chat', icon: <MessageOutlined />, label: '知识问答' },
     { key: '/wrong-book', icon: <BookOutlined />, label: '错题巩固' },
     { key: '/shared-center', icon: <FileOutlined />, label: '共享中心' },
+  ]},
+  { icon: <StarOutlined />, label: '知识拓展', key: 'explore', children: [
+    { key: '/daily-discovery', icon: <StarOutlined />, label: '每日精选' },
+    { key: '/news-hub', icon: <GlobalOutlined />, label: '热点新闻' },
   ]},
   { icon: <FileAddOutlined />, label: '考核测评', key: 'exam-practice', children: [
     { key: '/exam', icon: <FileAddOutlined />, label: '考试中心' },
@@ -101,6 +106,10 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
       { key: '/wrong-book', icon: <BookOutlined />, label: '错题管理' },
       { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
+    ]},
+    { type: 'group', icon: <StarOutlined />, label: '知识拓展', key: 'explore', children: [
+      { key: '/daily-discovery', icon: <StarOutlined />, label: '每日精选' },
+      { key: '/news-hub', icon: <GlobalOutlined />, label: '热点新闻' },
     ]},
     { type: 'group', icon: <FileAddOutlined />, label: '编程实践', key: 'coding', children: [
       { key: '/code-practice', icon: <FileAddOutlined />, label: '代码练习' },

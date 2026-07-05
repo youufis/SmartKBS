@@ -1521,6 +1521,182 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ═══════════════════════════════════════════════
+            # 每日精选 — 智能知识池（按需补充，不过期）
+            # ═══════════════════════════════════════════════
+
+            # 1. 精选内容知识池（全局共享，持续积累）
+            c.execute("""CREATE TABLE IF NOT EXISTS discovery_pool (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                emoji TEXT DEFAULT '💡',
+                category TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                detail TEXT NOT NULL,
+                source TEXT DEFAULT '',
+                fun_level INTEGER DEFAULT 3,
+                related_subject TEXT DEFAULT '',
+                tags TEXT DEFAULT '[]',
+                grade_level TEXT DEFAULT 'all',
+                pool_status TEXT DEFAULT 'active',
+                view_count INTEGER DEFAULT 0,
+                favorite_count INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(title, detail)
+            )""")
+            for idx in [
+                "CREATE INDEX IF NOT EXISTS idx_dp_category ON discovery_pool(category)",
+                "CREATE INDEX IF NOT EXISTS idx_dp_created ON discovery_pool(created_at)",
+            ]:
+                try: c.execute(idx)
+                except sqlite3.OperationalError: pass
+
+            # 2. 学生看过哪些卡片 + 何时看的（7天窗口排除用）
+            c.execute("""CREATE TABLE IF NOT EXISTS discovery_viewed (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                pool_card_id INTEGER NOT NULL REFERENCES discovery_pool(id),
+                viewed_at TEXT NOT NULL,
+                UNIQUE(username, pool_card_id)
+            )""")
+            for idx in [
+                "CREATE INDEX IF NOT EXISTS idx_dv_user ON discovery_viewed(username)",
+                "CREATE INDEX IF NOT EXISTS idx_dv_user_date ON discovery_viewed(username, viewed_at)",
+            ]:
+                try: c.execute(idx)
+                except sqlite3.OperationalError: pass
+
+            # 3. 浏览记录（积分用，按天统计）
+            c.execute("""CREATE TABLE IF NOT EXISTS discovery_view_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                pool_card_id INTEGER NOT NULL,
+                points_awarded INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dvl_user_date ON discovery_view_log(username, date(created_at))")
+            except sqlite3.OperationalError: pass
+
+            # 4. 收藏表
+            c.execute("""CREATE TABLE IF NOT EXISTS discovery_favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                pool_card_id INTEGER NOT NULL REFERENCES discovery_pool(id),
+                created_at TEXT NOT NULL,
+                UNIQUE(username, pool_card_id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_df_user ON discovery_favorites(username)")
+            except sqlite3.OperationalError: pass
+
+            # 5. 每日统计（积分上限控制）
+            c.execute("""CREATE TABLE IF NOT EXISTS discovery_daily_stats (
+                username TEXT NOT NULL,
+                date TEXT NOT NULL,
+                view_count INTEGER DEFAULT 0,
+                refresh_count INTEGER DEFAULT 0,
+                points_earned INTEGER DEFAULT 0,
+                PRIMARY KEY (username, date)
+            )""")
+
+            # 6. 刷新专属卡片（非池中卡片）
+            c.execute("""CREATE TABLE IF NOT EXISTS discovery_refresh_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                date TEXT NOT NULL,
+                card_data TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_drc_user_date ON discovery_refresh_cards(username, date)")
+            except sqlite3.OperationalError: pass
+
+            # ═══════════════════════════════════════════════
+            # 热点新闻 — 按需懒加载 + 时效窗口
+            # ═══════════════════════════════════════════════
+
+            # 1. 新闻文章表（72小时滚动窗口）
+            c.execute("""CREATE TABLE IF NOT EXISTS news_articles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
+                source_name TEXT DEFAULT '',
+                summary TEXT DEFAULT '',
+                ai_summary TEXT DEFAULT '',
+                ai_one_liner TEXT DEFAULT '',
+                full_text TEXT DEFAULT '',
+                category TEXT DEFAULT '国内',
+                image_url TEXT DEFAULT '',
+                related_subjects TEXT DEFAULT '',
+                tags TEXT DEFAULT '',
+                published_at TEXT DEFAULT '',
+                fetched_at TEXT NOT NULL,
+                fetch_batch_id TEXT DEFAULT '',
+                is_ai_summarized INTEGER DEFAULT 0,
+                ai_view_count INTEGER DEFAULT 0
+            )""")
+            for idx in [
+                "CREATE INDEX IF NOT EXISTS idx_news_category ON news_articles(category)",
+                "CREATE INDEX IF NOT EXISTS idx_news_fetched ON news_articles(fetched_at)",
+                "CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles(published_at)",
+            ]:
+                try: c.execute(idx)
+                except sqlite3.OperationalError: pass
+
+            # 2. 学生浏览记录
+            c.execute("""CREATE TABLE IF NOT EXISTS news_view_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                news_id INTEGER NOT NULL REFERENCES news_articles(id),
+                points_awarded INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(username, news_id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_nvl_user ON news_view_log(username)")
+            except sqlite3.OperationalError: pass
+
+            # 3. 学生收藏
+            c.execute("""CREATE TABLE IF NOT EXISTS news_favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                news_id INTEGER NOT NULL REFERENCES news_articles(id),
+                created_at TEXT NOT NULL,
+                UNIQUE(username, news_id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_nf_user ON news_favorites(username)")
+            except sqlite3.OperationalError: pass
+
+            # 4. 学生每日新闻统计
+            c.execute("""CREATE TABLE IF NOT EXISTS news_daily_stats (
+                username TEXT NOT NULL,
+                date TEXT NOT NULL,
+                view_count INTEGER DEFAULT 0,
+                points_earned INTEGER DEFAULT 0,
+                PRIMARY KEY (username, date)
+            )""")
+
+            # 5. 抓取缓存元数据
+            c.execute("""CREATE TABLE IF NOT EXISTS news_fetch_meta (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                batch_id TEXT NOT NULL UNIQUE,
+                fetched_at TEXT NOT NULL,
+                article_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'success',
+                message TEXT DEFAULT ''
+            )""")
+
+            # 6. 每日简报缓存
+            c.execute("""CREATE TABLE IF NOT EXISTS news_daily_briefing (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL UNIQUE,
+                brief_content TEXT NOT NULL,
+                news_ids TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )""")
+
             conn.commit()
             logger.debug("数据库初始化完成")
 

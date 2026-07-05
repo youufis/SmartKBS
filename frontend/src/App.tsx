@@ -56,6 +56,8 @@ import WhiteboardPage from './pages/WhiteboardPage'
 import WhiteboardRoomPage from './pages/WhiteboardRoomPage'
 import TaskTodoPage from './pages/TaskTodoPage'
 import PortraitPage from './pages/PortraitPage'
+import DailyDiscoveryPage from './pages/DailyDiscoveryPage'
+import NewsHubPage from './pages/NewsHubPage'
 
 function App() {
   const navigate = useNavigate()
@@ -149,6 +151,8 @@ function App() {
             <Route path="activity-monitor" element={user?.role === 'admin' || user?.role === 'teacher' ? <ActivityMonitorPage /> : <Navigate to="/chat" />} />
             <Route path="companion-settings" element={<CompanionSettings />} />
             <Route path="whiteboard" element={<WhiteboardPage />} />
+            <Route path="daily-discovery" element={<DailyDiscoveryPage />} />
+            <Route path="news-hub" element={<NewsHubPage />} />
             <Route path="whiteboard-room/:roomId" element={<WhiteboardRoomPage />} />
             <Route path="portrait" element={<PortraitPage />} />
             <Route path="about" element={<AboutPage />} />

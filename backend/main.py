@@ -141,6 +141,8 @@ from backend.api.whiteboard_router import router as whiteboard_router
 from backend.api.portrait_router import router as portrait_router
 from backend.api.tracking_router import router as tracking_router
 from backend.api.upgrade_router import router as upgrade_router
+from backend.api.daily_discovery_router import router as daily_discovery_router
+from backend.api.news_router import router as news_router
 
 app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
 app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
@@ -176,6 +178,8 @@ app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白
 app.include_router(portrait_router, prefix="/api/portrait", tags=["自我画像"])
 app.include_router(tracking_router, prefix="/api", tags=["资源追踪"])
 app.include_router(upgrade_router, prefix="/api/system/upgrade", tags=["系统升级"])
+app.include_router(daily_discovery_router, prefix="/api", tags=["每日精选"])
+app.include_router(news_router, prefix="/api", tags=["热点新闻"])
 # 配置同步服务接口（不出现在文档中）
 from backend.api.sync_service import router as sync_service_router
 app.include_router(sync_service_router, prefix="/api", tags=[])
