@@ -19,6 +19,16 @@
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
 ![许可证](https://img.shields.io/badge/许可证-AGPL--3.0-red)
 
+---
+
+<div align="center">
+
+[📋 项目简介](#项目简介) &nbsp;·&nbsp; [🎮 演示环境](#演示环境) &nbsp;·&nbsp; [✨ 功能总览](#完整功能总览) &nbsp;·&nbsp; [📦 更新日志](#更新日志) &nbsp;·&nbsp; [📦 部署指引](#部署安装指引) &nbsp;·&nbsp; [🚀 快速开始](#快速开始) &nbsp;·&nbsp; [📁 项目结构](#项目结构) &nbsp;·&nbsp; [🗄️ 数据存储](#数据存储) &nbsp;·&nbsp; [👥 权限总览](#权限总览) &nbsp;·&nbsp; [🛠️ 技术栈](#技术栈) &nbsp;·&nbsp; [❓ 常见问题](#常见问题) &nbsp;·&nbsp; [📬 关于](#关于)
+
+</div>
+
+---
+
 > **📌 V7.3.0 更新亮点**：
 > 📖 **知识拓展模块**：新增「每日精选」— AI 趣味知识卡片池，按需补充零浪费
 > 📰 **知识拓展模块**：新增「热点新闻」聚合 — RSS 免费抓取 + AI 按需摘要 + 学科关联
