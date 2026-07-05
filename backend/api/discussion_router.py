@@ -141,10 +141,10 @@ class DiscussionCreate(BaseModel):
     title: str
     description: str = ""
     subject: str = ""
-    group_mode: str = "auto"       # auto / manual / random
+    group_mode: str = "none"       # auto / manual / random / none
     group_count: int = 0
     members_per_group: int = 4
-    ai_role: str = "guide"         # observer / guide / proactive / judge
+    ai_role: str = "mixed"         # observer / guide / proactive / judge / mixed
     duration_minutes: int = 30
     grade: str = ""
     classes: str = ""
@@ -175,7 +175,8 @@ class BroadcastMessage(BaseModel):
 class AiGenerateDiscussion(BaseModel):
     topic: str
     subject: str = ""  # 由前端传递
-    ai_role: str = "guide"
+    group_mode: str = "none"
+    ai_role: str = "mixed"
     duration_minutes: int = 30
 
 
@@ -231,6 +232,7 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
         "guide": "适时引导讨论方向的引导者",
         "proactive": "主动参与讨论并提供观点的参与者",
         "judge": "辩论裁判，分析各方论点",
+        "mixed": "综合角色：根据讨论情况自动切换角色——需要观察时保持旁观，需要引导时提出启发式问题，需要参与时主动提供观点，需要裁判时分析各方论点",
     }.get(req.ai_role, "引导者")
 
     from backend.prompts.discussion import DISCUSSION_PLAN_PROMPT
@@ -238,6 +240,7 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
     prompt = f"{ai_role}\n" + DISCUSSION_PLAN_PROMPT.format(
         subject=req.subject,
         topic=req.topic,
+        group_mode=req.group_mode,
         ai_role_desc=ai_role_desc,
         duration_minutes=req.duration_minutes,
     )
@@ -531,13 +534,17 @@ async def start_discussion(disc_id: int, request: Request):
         raise HTTPException(status_code=400, detail="讨论已开始或已结束")
 
     # 计算分组数量
+    group_mode = disc["group_mode"]
     group_count = disc["group_count"]
     members_per_group = disc["members_per_group"]
 
-    if group_count <= 0 and members_per_group > 0:
+    if group_mode == "none":
+        # 不分组模式：只创建 1 个自由讨论区
+        group_count = 1
+    elif group_count <= 0 and members_per_group > 0:
         # 根据 members_per_group 估算组数（后续自动分配）
         group_count = members_per_group * 2  # 默认按每组人数*2 估算组数
-    if group_count <= 0:
+    elif group_count <= 0:
         group_count = 4  # 默认 4 组
 
     # 删除旧的临时分组（如果有）
@@ -549,9 +556,10 @@ async def start_discussion(disc_id: int, request: Request):
     # 创建空分组，学生后续加入时会自动分配到人数最少的组
     now = _now()
     for idx in range(group_count):
+        group_name = "自由讨论区" if group_mode == "none" else f"第{idx + 1}组"
         gid = execute_insert_update(
             "INSERT INTO discussion_groups (discussion_id, group_index, name) VALUES (?, ?, ?)",
-            (disc_id, idx + 1, f"第{idx + 1}组"),
+            (disc_id, idx + 1, group_name),
         )
 
     # 更新状态
@@ -561,6 +569,8 @@ async def start_discussion(disc_id: int, request: Request):
     )
 
     logger.info(f"教师 {user['username']} 开始了讨论 {disc['title']}, 共 {group_count} 个小组")
+    if group_mode == "none":
+        return {"status": "ok", "message": "讨论已开始，自由讨论区已创建"}
     return {"status": "ok", "message": f"讨论已开始，共 {group_count} 个小组"}
 
 
@@ -1045,6 +1055,7 @@ async def ai_suggest(group_id: int, request: Request):
         "guide": "适时引导讨论方向，提出启发式问题",
         "proactive": "主动参与讨论，提供观点和论据",
         "judge": "作为辩论裁判，分析各方论点",
+        "mixed": "综合角色，根据讨论情况自动切换：观察、引导、主动参与、辩论裁判四种角色",
     }.get(ai_role, "适时引导讨论")
 
     ai_role_text = build_ai_role()

@@ -16,6 +16,8 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -31,6 +33,7 @@ const AI_ROLE_MAP: Record<string, string> = {
   guide: '引导者',
   proactive: '主动参与',
   judge: '辩论裁判',
+  mixed: '综合角色',
 }
 
 const DiscussionPage: React.FC = () => {
@@ -207,7 +210,7 @@ const DiscussionPage: React.FC = () => {
     }
   }
 
-  // 进入聊天室（教师视角）
+  // 进入讨论区（教师视角）
   const handleEnterGroup = (groupId: number, discussionId: number) => {
     navigate(`/discussion-room/${groupId}?discussion_id=${discussionId}`)
   }
@@ -232,8 +235,9 @@ const DiscussionPage: React.FC = () => {
             <Select.Option value="人工智能通识">人工智能通识</Select.Option>
           </Select>
       </Form.Item>
-      <Form.Item name="group_mode" label="分组方式" initialValue="auto">
+      <Form.Item name="group_mode" label="分组方式" initialValue="none">
         <Select>
+          <Select.Option value="none">不分组（自由讨论区）</Select.Option>
           <Select.Option value="auto">自动分组（按每组人数）</Select.Option>
           <Select.Option value="random">随机分组（按组数）</Select.Option>
         </Select>
@@ -241,6 +245,7 @@ const DiscussionPage: React.FC = () => {
       <Form.Item noStyle shouldUpdate={(prev, cur) => prev.group_mode !== cur.group_mode}>
         {({ getFieldValue }) => {
           const mode = getFieldValue('group_mode')
+          if (mode === 'none') return null
           return mode === 'auto' ? (
             <Form.Item name="members_per_group" label="每组人数" initialValue={4}
               rules={[{ required: true, message: '请输入每组人数' }]}>
@@ -254,12 +259,13 @@ const DiscussionPage: React.FC = () => {
           )
         }}
       </Form.Item>
-      <Form.Item name="ai_role" label="AI 助教角色" initialValue="guide">
+      <Form.Item name="ai_role" label="AI 助教角色" initialValue="mixed">
         <Select>
           <Select.Option value="observer">👀 旁观者（不主动发言）</Select.Option>
           <Select.Option value="guide">💡 引导者（适时引导讨论）</Select.Option>
           <Select.Option value="proactive">🗣️ 主动参与（提供观点）</Select.Option>
           <Select.Option value="judge">⚖️ 辩论裁判（分析论点）</Select.Option>
+          <Select.Option value="mixed">🎭 综合角色（智能切换四种角色）</Select.Option>
         </Select>
       </Form.Item>
       <Form.Item name="duration_minutes" label="讨论时长 (分钟)" initialValue={30}>
@@ -306,7 +312,7 @@ const DiscussionPage: React.FC = () => {
               ]
             : [
                 ...(disc.has_joined && disc.status === 'active'
-                  ? [<Tooltip title="进入小组"><TeamOutlined onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)} /></Tooltip>]
+                  ? [<Tooltip title={disc.group_mode === 'none' ? '进入讨论区' : '进入小组'}><TeamOutlined onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)} /></Tooltip>]
                   : disc.status === 'active' && !disc.has_joined
                   ? [<Tooltip title="加入讨论"><MessageOutlined onClick={() => handleJoin(disc.id)} /></Tooltip>]
                   : []),
@@ -316,12 +322,16 @@ const DiscussionPage: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <Space>
-              <Text strong>{disc.title}</Text>
+              <div className="markdown-content" style={{ fontWeight: 600 }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{disc.title}</ReactMarkdown>
+              </div>
               <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
               {disc.subject && <Tag>{disc.subject}</Tag>}
             </Space>
             {disc.description && (
-              <div style={{ color: '#666', fontSize: 13, marginTop: 4 }}>{disc.description}</div>
+              <div className="markdown-content" style={{ color: '#666', fontSize: 13, marginTop: 4 }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{disc.description}</ReactMarkdown>
+              </div>
             )}
           </div>
         </div>
@@ -335,7 +345,7 @@ const DiscussionPage: React.FC = () => {
         </div>
         {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (
           <div style={{ marginTop: 4 }}>
-            <Tag color="blue">你的小组: {disc.my_group.name || `第${disc.my_group.group_index}组`}</Tag>
+            <Tag color="blue">{disc.group_mode === 'none' ? '已加入聊天室' : `你的小组: ${disc.my_group.name || `第${disc.my_group.group_index}组`}`}</Tag>
           </div>
         )}
       </Card>
@@ -381,8 +391,8 @@ const DiscussionPage: React.FC = () => {
                 expandedRowRender: (disc: any) => (
                   <div style={{ padding: '8px 0 4px 32px' }}>
                     {disc.description && (
-                      <div style={{ marginBottom: 10 }}>
-                        <Text style={{ fontSize: 13, color: '#555' }}>{disc.description}</Text>
+                      <div className="markdown-content" style={{ marginBottom: 10 }}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{disc.description}</ReactMarkdown>
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 24, fontSize: 13, color: '#888', flexWrap: 'wrap' }}>
@@ -396,7 +406,7 @@ const DiscussionPage: React.FC = () => {
                       {disc.grade && <span>适用年级：{disc.grade}</span>}
                       {disc.classes && <span>适用班级：{disc.classes}</span>}
                       {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (
-                        <Tag color="blue" style={{ margin: 0 }}>你的小组: {disc.my_group.name || `第${disc.my_group.group_index}组`}</Tag>
+                        <Tag color="blue" style={{ margin: 0 }}>{disc.group_mode === 'none' ? '已加入聊天室' : `你的小组: ${disc.my_group.name || `第${disc.my_group.group_index}组`}`}</Tag>
                       )}
                     </div>
                     {isTeacherOrAdmin && (
@@ -427,12 +437,14 @@ const DiscussionPage: React.FC = () => {
               }}
               columns={[
                 {
-                  title: '讨论主题', dataIndex: 'title', key: 'title', ellipsis: true,
+                  title: '讨论主题', dataIndex: 'title', key: 'title',
                   render: (title: string, disc: any) => {
                     const statusInfo = STATUS_MAP[disc.status] || { label: '未知', color: 'default' }
                     return (
                       <Space>
-                        <Text strong style={{ cursor: 'pointer' }} onClick={() => handleDetail(disc.id)}>{title}</Text>
+                        <div className="markdown-content" style={{ fontWeight: 600, cursor: 'pointer' }} onClick={() => handleDetail(disc.id)}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{title}</ReactMarkdown>
+                        </div>
                         <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
                         {disc.subject && <Tag>{disc.subject}</Tag>}
                       </Space>
@@ -480,7 +492,7 @@ const DiscussionPage: React.FC = () => {
                           {disc.has_joined && disc.status === 'active' && (
                             <Button type="link" size="small" icon={<TeamOutlined />}
                               onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)}>
-                              进入小组{disc.my_group ? `(${disc.my_group.name || `第${disc.my_group.group_index}组`})` : ''}
+                              {disc.group_mode === 'none' ? '进入讨论区' : `进入小组${disc.my_group ? `(${disc.my_group.name || `第${disc.my_group.group_index}组`})` : ''}`}
                             </Button>
                           )}
                           {disc.status === 'active' && !disc.has_joined && (
@@ -513,7 +525,7 @@ const DiscussionPage: React.FC = () => {
 
       {/* 讨论详情弹窗（教师） */}
       <Modal
-        title={detailModal?.title || '讨论详情'}
+        title={<span className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{detailModal?.title || '讨论详情'}</ReactMarkdown></span>}
         open={!!detailModal}
         onCancel={() => setDetailModal(null)}
         footer={null}
@@ -532,7 +544,9 @@ const DiscussionPage: React.FC = () => {
             </div>
 
             {detailModal.description && (
-              <div style={{ marginBottom: 16, color: '#666' }}>{detailModal.description}</div>
+              <div className="markdown-content" style={{ marginBottom: 16, color: '#666' }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{detailModal.description}</ReactMarkdown>
+              </div>
             )}
 
             {isTeacherOrAdmin && (
@@ -595,16 +609,24 @@ const DiscussionPage: React.FC = () => {
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="ai_role" label="AI 助教角色" initialValue="guide">
+          <Form.Item name="ai_role" label="AI 助教角色" initialValue="mixed">
             <Select>
               <Select.Option value="observer">👀 旁观者</Select.Option>
               <Select.Option value="guide">💡 引导者</Select.Option>
               <Select.Option value="proactive">🗣️ 主动参与</Select.Option>
               <Select.Option value="judge">⚖️ 辩论裁判</Select.Option>
+              <Select.Option value="mixed">🎭 综合角色</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item name="duration_minutes" label="预计时长 (分钟)" initialValue={30}>
             <InputNumber min={5} max={120} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="group_mode" label="分组方式" initialValue="none">
+            <Select>
+              <Select.Option value="none">不分组（自由讨论区）</Select.Option>
+              <Select.Option value="auto">自动分组（按每组人数）</Select.Option>
+              <Select.Option value="random">随机分组（按组数）</Select.Option>
+            </Select>
           </Form.Item>
         </Form>
       </Modal>

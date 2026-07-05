@@ -188,6 +188,8 @@ const QuestionBankPage: React.FC = () => {
   // ── 删除重复试题 ──
   const [dedupResult, setDedupResult] = useState<{
     total_deleted: number;
+    total_skipped_owner?: number;
+    total_skipped_ref?: number;
     groups: { question_text: string; count: number }[];
     message: string;
   } | null>(null)
@@ -393,7 +395,11 @@ const QuestionBankPage: React.FC = () => {
   // ── 删除题目 ──
   const handleDelete = async (id: number) => {
     try {
-      await questionsApi.deleteQuestion(id)
+      const res = await questionsApi.deleteQuestion(id) as any
+      if (res?.status === 'error') {
+        message.warning(res.message + (res.refs ? `\n${res.refs}` : ''))
+        return
+      }
       message.success('已删除')
       loadQuestions()
     } catch (err: any) {
@@ -1276,6 +1282,16 @@ const QuestionBankPage: React.FC = () => {
                 ? `已删除 ${dedupResult.total_deleted} 条重复试题`
                 : '未发现重复试题'}
             </Typography.Title>
+            {(dedupResult.total_skipped_owner ?? 0) > 0 || (dedupResult.total_skipped_ref ?? 0) > 0 ? (
+              <div style={{ marginBottom: 12 }}>
+                {(dedupResult.total_skipped_owner ?? 0) > 0 && (
+                  <Tag color="orange">{dedupResult.total_skipped_owner} 条因权限不足跳过</Tag>
+                )}
+                {(dedupResult.total_skipped_ref ?? 0) > 0 && (
+                  <Tag color="blue">{dedupResult.total_skipped_ref} 条因被活动引用跳过</Tag>
+                )}
+              </div>
+            ) : null}
             {dedupResult.groups.length > 0 && (
               <>
                 <Divider />

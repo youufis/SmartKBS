@@ -7,6 +7,7 @@ import asyncio
 import json
 import random
 import re
+import shutil
 from datetime import datetime
 from typing import Any, Optional
 
@@ -1535,6 +1536,16 @@ async def delete_quest_bank_question(question_id: int, request: Request):
         "DELETE FROM quest_question_bank WHERE id=?",
         (question_id,),
     )
+
+    # 清理配图目录
+    try:
+        from backend.config import BASE_DIR
+        from pathlib import Path
+        media_dir = BASE_DIR / "question_media" / str(question_id)
+        if media_dir.exists():
+            shutil.rmtree(media_dir)
+    except Exception:
+        pass
 
     return {"success": True, "message": "删除成功"}
 

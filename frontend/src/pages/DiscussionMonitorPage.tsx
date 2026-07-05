@@ -10,6 +10,8 @@ import {
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const { Title, Text } = Typography
 
@@ -126,7 +128,9 @@ const DiscussionMonitorPage: React.FC = () => {
         <Space style={{ marginBottom: 16 }}>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/discussion')} />
           <Title level={4} style={{ margin: 0 }}>📊 讨论监控</Title>
-          <Text>— {data.title}</Text>
+          <span className="markdown-content" style={{ display: 'inline-block' }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{`— ${data.title}`}</ReactMarkdown>
+          </span>
           <Tag color={data.status === 'active' ? 'green' : 'red'}>
             {data.status === 'active' ? '进行中' : '已结束'}
           </Tag>

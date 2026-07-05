@@ -726,6 +726,8 @@ async def delete_room(room_id: int, request: Request):
     execute_insert_update("DELETE FROM quick_quiz_answers WHERE room_id=?", (room_id,))
     execute_insert_update("DELETE FROM quick_quiz_questions WHERE room_id=?", (room_id,))
     execute_insert_update("DELETE FROM quick_quiz_players WHERE room_id=?", (room_id,))
+    execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='quick_quiz' AND activity_id=?", (str(room_id),))
+    execute_insert_update("DELETE FROM notifications WHERE source_type='quick_quiz' AND source_id=?", (str(room_id),))
     execute_insert_update("DELETE FROM quick_quiz_rooms WHERE id=?", (room_id,))
 
     game_manager.remove_room(room_id)

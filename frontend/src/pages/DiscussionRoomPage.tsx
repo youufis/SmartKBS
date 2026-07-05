@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Card, Button, Space, Typography, Input, Tag, message,
-  Spin, Empty, Tooltip, Modal, Divider, Rate,
+  Spin, Empty, Tooltip, Modal, Divider, Rate, Collapse,
 } from 'antd'
 import {
   SendOutlined, RobotOutlined, ArrowLeftOutlined,
@@ -11,6 +11,8 @@ import {
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -333,10 +335,12 @@ const DiscussionRoomPage: React.FC = () => {
             <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack} />
             <div>
               <Text strong style={{ fontSize: 16 }}>
-                {groupInfo?.name || `小组讨论`}
+                {groupInfo?.name || (discussionInfo?.group_mode === 'none' ? '自由讨论区' : '小组讨论')}
               </Text>
               {discussionInfo && (
-                <div style={{ fontSize: 13, color: '#888' }}>{discussionInfo.title}</div>
+                <div className="markdown-content" style={{ fontSize: 13, color: '#888' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{discussionInfo.title}</ReactMarkdown>
+                </div>
               )}
             </div>
           </Space>
@@ -406,6 +410,26 @@ const DiscussionRoomPage: React.FC = () => {
           </Space>
         </div>
       </Card>
+
+      {/* 讨论主题折叠面板 */}
+      {discussionInfo?.description && (
+        <Collapse
+          ghost
+          size="small"
+          items={[
+            {
+              key: 'topic',
+              label: <span style={{ fontSize: 13, color: '#888' }}>📋 查看讨论主题</span>,
+              children: (
+                <div className="markdown-content" style={{ fontSize: 13, color: '#555', padding: '4px 0 8px 0' }}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{discussionInfo.description}</ReactMarkdown>
+                </div>
+              ),
+            },
+          ]}
+          style={{ background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}
+        />
+      )}
 
       {/* 消息列表 */}
       <div

@@ -8,6 +8,7 @@ import os
 import io
 import time
 import re
+import shutil
 from datetime import datetime
 from typing import Any
 
@@ -535,11 +536,55 @@ async def delete_question(question_id: int, request: Request):
     if role != 0 and row["creator_username"] != username:
         raise HTTPException(status_code=403, detail="只能删除自己创建的试题")
 
+    # 检查是否有考试引用该题
+    exam_refs = execute_query(
+        """SELECT e.id, e.title FROM exams e
+           JOIN exam_questions eq ON eq.exam_id = e.id
+           WHERE eq.question_id = ?""",
+        (question_id,),
+    )
+    # 检查是否有智能练习引用该题
+    practice_refs = []
+    try:
+        from backend.database import execute_query_dict as db_query
+        practice_refs = db_query(
+            """SELECT ps.id, ps.title FROM practice_sessions ps
+               JOIN practice_session_questions psq ON psq.session_id = ps.id
+               WHERE psq.question_id = ?""",
+            (question_id,),
+        )
+    except Exception:
+        pass
+
+    if exam_refs or practice_refs:
+        details = []
+        if exam_refs:
+            exam_names = "、".join([f"「{r['title']}」" for r in exam_refs])
+            details.append(f"考试({len(exam_refs)}个)：{exam_names}")
+        if practice_refs:
+            practice_names = "、".join([f"「{r['title']}」" for r in practice_refs])
+            details.append(f"智能练习({len(practice_refs)}个)：{practice_names}")
+        return {
+            "status": "error",
+            "message": "该试题正在被使用中，无法删除。请先在相关活动中移除该题后再试。",
+            "refs": "；".join(details),
+        }
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update(
         "UPDATE question_bank SET status = 'deleted', updated_at = ? WHERE id = ?",
         (now, question_id),
     )
+
+    # 清理配图目录
+    try:
+        from backend.config import BASE_DIR
+        media_dir = BASE_DIR / "question_media" / str(question_id)
+        if media_dir.exists():
+            shutil.rmtree(media_dir)
+            logger.info(f"已清理试题配图目录: question_media/{question_id}")
+    except Exception as e:
+        logger.warning(f"清理试题配图目录失败 (id={question_id}): {e}")
 
     return {"message": "删除成功"}
 
@@ -565,7 +610,8 @@ async def dedup_questions(request: Request):
 
     results = []
     total_deleted = 0
-    total_skipped = 0
+    total_skipped_owner = 0
+    total_skipped_ref = 0
 
     for row in rows:
         question_text = row["question_text"]
@@ -574,15 +620,36 @@ async def dedup_questions(request: Request):
         delete_ids = id_list[1:]
 
         allowed_delete = []
-        skipped = 0
+        skipped_owner = 0
+        skipped_ref = 0
         for did in delete_ids:
             q = execute_query_one(
                 "SELECT creator_username FROM question_bank WHERE id = ?", (did,)
             )
-            if q and (role == 0 or q["creator_username"] == username):
-                allowed_delete.append(did)
-            else:
-                skipped += 1
+            if not q or (role != 0 and q["creator_username"] != username):
+                skipped_owner += 1
+                continue
+            # 检查是否被考试引用
+            ref_exam = execute_query_one(
+                "SELECT COUNT(*) as cnt FROM exam_questions WHERE question_id=?",
+                (did,),
+            )
+            if ref_exam and ref_exam["cnt"] > 0:
+                skipped_ref += 1
+                continue
+            # 检查是否被智能练习引用
+            try:
+                from backend.database import execute_query_dict as db_query
+                ref_practice = db_query(
+                    "SELECT 1 FROM practice_session_questions WHERE question_id=? LIMIT 1",
+                    (did,),
+                )
+                if ref_practice:
+                    skipped_ref += 1
+                    continue
+            except Exception:
+                pass
+            allowed_delete.append(did)
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for did in allowed_delete:
@@ -590,25 +657,42 @@ async def dedup_questions(request: Request):
                 "UPDATE question_bank SET status = 'deleted', updated_at = ? WHERE id = ?",
                 (now, did),
             )
+            # 清理配图目录
+            try:
+                from backend.config import BASE_DIR
+                media_dir = BASE_DIR / "question_media" / str(did)
+                if media_dir.exists():
+                    shutil.rmtree(media_dir)
+            except Exception:
+                pass
 
-        if allowed_delete or skipped:
+        if allowed_delete or skipped_owner or skipped_ref:
             results.append({
                 "question_text": question_text[:60] + ("..." if len(question_text) > 60 else ""),
                 "keep_id": keep_id,
                 "deleted_ids": allowed_delete,
                 "count": len(allowed_delete),
-                "skipped": skipped,
+                "skipped_owner": skipped_owner,
+                "skipped_ref": skipped_ref,
             })
             total_deleted += len(allowed_delete)
-            total_skipped += skipped
+            total_skipped_owner += skipped_owner
+            total_skipped_ref += skipped_ref
 
     msg = f"共删除 {total_deleted} 条重复试题"
-    if total_skipped:
-        msg += f"，{total_skipped} 条因权限不足跳过"
-    logger.info(f"去重完成: 删除 {total_deleted}, 跳过 {total_skipped}, by={username}")
+    parts = []
+    if total_deleted:
+        parts.append(f"删除 {total_deleted} 条")
+    if total_skipped_owner:
+        parts.append(f"{total_skipped_owner} 条因权限不足跳过")
+    if total_skipped_ref:
+        parts.append(f"{total_skipped_ref} 条因被活动引用跳过")
+    msg = "，".join(parts) if parts else "未发现重复试题"
+    logger.info(f"去重完成: {msg}, by={username}")
     return {
         "total_deleted": total_deleted,
-        "total_skipped": total_skipped,
+        "total_skipped_owner": total_skipped_owner,
+        "total_skipped_ref": total_skipped_ref,
         "groups": results,
         "message": msg,
     }

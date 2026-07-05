@@ -9,23 +9,24 @@ DISCUSSION_PLAN_PROMPT = """请根据以下要求设计一个课堂分组讨论�
 
 主题：{topic}
 AI 助教角色：{ai_role_desc}
+分组方式：{group_mode}（"none"=不分组自由讨论区，"auto"=按人数分组，"random"=按组数分组）
 预计时长：{duration_minutes} 分钟
 
 请输出一个完整的讨论方案，包含以下内容（用 JSON 格式）：
 
-1. title: 讨论标题（简洁明了）
-2. description: 讨论详细说明，包含讨论背景、目标、具体讨论要点/问题（至少3个引导性问题）
-3. group_mode: 建议的分组方式（"auto" 表示按每组人数自动分组）
-4. members_per_group: 建议每组人数（4-6人）
+1. title: 讨论标题（简洁明了，**请使用 Markdown 格式**突出关键词，如 **加粗** 核心概念）
+2. description: 讨论详细说明，包含讨论背景、目标、具体讨论要点/问题（至少3个引导性问题，**请使用 Markdown 格式**，如列表、**加粗**等）
+3. group_mode: 分组方式（与上方指定的分组方式一致，"none" 表示不分组自由讨论区）
+4. members_per_group: 建议每组人数（4-6人），group_mode 为 "none" 时设为 0
 5. duration_minutes: 建议时长（分钟）
 6. subject: 学科
 
 请严格按照以下 JSON 格式输出，不要包含任何其他文字：
 {{
-  "title": "讨论标题",
-  "description": "讨论说明",
-  "group_mode": "auto",
-  "members_per_group": 4,
+  "title": "**讨论标题**（可含 Markdown 格式）",
+  "description": "讨论说明（可含 Markdown 格式，如 \\n\\n- 要点1\\n- 要点2\\n- 要点3）",
+  "group_mode": "{group_mode}",
+  "members_per_group": 0,
   "duration_minutes": 30,
   "subject": "{subject}"
 }}
