@@ -62,6 +62,14 @@ def _get_dashscope_api_key() -> str:
 
 def _row_to_card(r) -> dict:
     """将数据库行转为卡片字典"""
+    tags = r[9]
+    if tags and isinstance(tags, str) and tags != "[]":
+        try:
+            tags = json.loads(tags)
+        except (json.JSONDecodeError, ValueError):
+            tags = []
+    else:
+        tags = []
     return {
         "id": r[0],
         "emoji": r[1] or "💡",
@@ -72,7 +80,7 @@ def _row_to_card(r) -> dict:
         "source": r[6] or "",
         "fun_level": r[7] or 3,
         "related_subject": r[8] or "",
-        "tags": json.loads(r[9]) if r[9] and r[9] != "[]" else [],
+        "tags": tags,
     }
 
 def _parse_ai_response(text: str) -> list[dict]:
@@ -135,8 +143,84 @@ def _parse_ai_response(text: str) -> list[dict]:
     except Exception:
         pass
 
-    logger.error(f"AI响应解析彻底失败，前200字: {text[:200]}")
+    # 5. 最后尝试：从 Markdown 格式降级解析
+    try:
+        cards = _parse_markdown_cards(text)
+        if cards:
+            return cards
+    except Exception:
+        pass
+
     raise ValueError("AI 返回格式错误")
+
+
+def _parse_markdown_cards(text: str) -> list:
+    """从 Markdown 格式降级解析卡片（当 AI 没按 JSON 输出时）"""
+    import re
+
+    # 按分隔线或连续换行拆分段落块
+    blocks = re.split(r"\n---+\n|\n{3,}", text)
+    cards = []
+    for block in blocks:
+        block = block.strip()
+        if not block or len(block) < 20:
+            continue
+
+        # 提取键值对行: **领域：物理学** 或 **标题:** xxx
+        lines = block.split("\n")
+        fields = {}
+        detail_parts = []
+        for line in lines:
+            line = line.strip()
+            # 匹配 **键：值** 或 **键:** 值
+            m = re.match(r'\*\*(.+?)[：:]\s*(.+?)\*\*$', line)
+            if m:
+                key = m.group(1).strip()
+                val = m.group(2).strip()
+                # 规范化字段名
+                for k, alias in [("领域", "category"), ("类别", "category"),
+                                 ("卡片标题", "title"), ("标题", "title"),
+                                 ("摘要", "summary"), ("一句话摘要", "summary"),
+                                 ("详细", "detail"), ("详细知识", "detail"),
+                                 ("趣味等级", "fun_level"), ("趣味", "fun_level"),
+                                 ("来源", "source"), ("知识来源", "source"),
+                                 ("关联学科", "related_subject"), ("学科", "related_subject"),
+                                 ("emoji", "emoji"), ("标签", "tags")]:
+                    if k in key or key in k:
+                        fields[alias] = val
+                        break
+                else:
+                    detail_parts.append(line)
+            else:
+                # 非字段行 → 归入详情
+                if line and not line.startswith("---"):
+                    detail_parts.append(line)
+
+        if not fields:
+            continue
+
+        # 用段落作为 detail
+        if "detail" not in fields and detail_parts:
+            fields["detail"] = " ".join(detail_parts)
+        if "summary" not in fields and detail_parts:
+            fields["summary"] = detail_parts[0][:80] if detail_parts else ""
+        if "title" not in fields:
+            continue  # 无标题则跳过
+
+        # 类型转换
+        for nk in ("fun_level",):
+            if nk in fields:
+                try:
+                    m = re.search(r"\d", str(fields[nk]))
+                    fields[nk] = int(m.group()) if m else 3
+                except Exception:
+                    fields[nk] = 3
+        if "tags" in fields and isinstance(fields["tags"], str):
+            fields["tags"] = [t.strip() for t in re.split(r"[、,，]", fields["tags"]) if t.strip()]
+
+        cards.append(fields)
+
+    return cards
 
 
 # ═══════════════════════════════════════════════
@@ -246,8 +330,7 @@ class DiscoveryService:
         if len(cards) >= DAILY_CARD_COUNT:
             return cards
 
-        # 彻底放开：直接从池中随机抽
-        logger.info(f"学生{username}已将池中大部分卡片看完，触发池补充")
+        # 池中不足，触发异步补充后再抽
         DiscoveryService._trigger_refill_if_needed(grade)
         rows = execute_query(
             "SELECT id, emoji, category, title, summary, detail, "
@@ -312,7 +395,7 @@ class DiscoveryService:
                              card.get("title", ""), card.get("summary", ""),
                              card.get("detail", ""), card.get("source", ""),
                              card.get("fun_level", 3), card.get("related_subject", ""),
-                             json.dumps(card.get("tags", []), ensure_ascii=False),
+                             json.dumps(card.get("tags") if isinstance(card.get("tags"), list) else [], ensure_ascii=False),
                              card.get("grade_level", "all"), _now())
                         )
                         saved += 1  # INSERT OR IGNORE 幂等，不影响真实新增数
@@ -354,7 +437,7 @@ class DiscoveryService:
             text = call_ai_sync_direct(prompt, api_key)
             new_cards = _parse_ai_response(text)
         except Exception as e:
-            logger.error(f"AI 刷新失败: {e}")
+            logger.warning(f"AI 刷新失败: {e}")
             raise HTTPException(502, "AI 生成失败，请稍后重试")
 
         # 存入刷新记录

@@ -71,6 +71,19 @@ def _get_dashscope_api_key() -> str:
     key, _ = get_api_keys("")
     return key
 
+def _safe_json_loads(val: Any, default: Any = None) -> Any:
+    """安全解析 JSON 字符串，失败返回默认值"""
+    if val is None:
+        return default
+    if isinstance(val, (list, dict)):
+        return val
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return default
+
 
 # ── 内存锁（防并发重复抓取） ──
 _fetch_lock: dict[str, float] = {}
@@ -189,8 +202,8 @@ class NewsService:
             "ai_summary": r[5] or "",
             "ai_one_liner": r[6] or "",
             "category": r[7], "image_url": r[8] or "",
-            "related_subjects": json.loads(r[9]) if r[9] else [],
-            "tags": json.loads(r[10]) if r[10] else [],
+            "related_subjects": _safe_json_loads(r[9], []),
+            "tags": _safe_json_loads(r[10], []),
             "published_at": r[11] or "",
             "points_awarded": points,
         }
@@ -223,13 +236,12 @@ class NewsService:
         """异步RSS抓取（免费，不调用AI）"""
         batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
-            logger.info(f"[新闻] 开始按需抓取 batch={batch_id}")
             articles = NewsService._fetch_from_rss()
 
             new_count = 0
             for art in articles:
                 try:
-                    execute_insert_update(
+                    rid = execute_insert_update(
                         """INSERT OR IGNORE INTO news_articles
                            (title, url, source_name, summary, category,
                             image_url, published_at, fetched_at, fetch_batch_id)
@@ -241,7 +253,7 @@ class NewsService:
                          art.get("published_at", ""),
                          _now(), batch_id)
                     )
-                    if execute_query("SELECT changes()")[0][0] > 0:
+                    if rid and rid > 0:
                         new_count += 1
                 except Exception as e:
                     logger.warning(f"[新闻] 入库失败: {art.get('title','')} {e}")
@@ -252,7 +264,6 @@ class NewsService:
                 (batch_id, _now(), new_count)
             )
             NewsService._cleanup_old()
-            logger.info(f"[新闻] 按需抓取完成: batch={batch_id}, 新增={new_count}")
         except Exception as e:
             logger.error(f"[新闻] 按需抓取失败: {e}")
             execute_insert_update(
@@ -343,17 +354,22 @@ class NewsService:
                 title=title, content=summary
             )
             text = call_ai_sync_direct(prompt, api_key)
-            result = json.loads(text)
+
+            # 安全解析 AI 返回的 JSON
+            try:
+                result = json.loads(text) if isinstance(text, str) else {}
+            except json.JSONDecodeError:
+                result = {}
 
             execute_insert_update(
                 """UPDATE news_articles SET
                    ai_summary=?, ai_one_liner=?, related_subjects=?,
                    tags=?, is_ai_summarized=1
                    WHERE id=?""",
-                (result.get("summary", ""),
-                 result.get("one_liner", ""),
-                 json.dumps(result.get("related_subjects", []), ensure_ascii=False),
-                 json.dumps(result.get("tags", []), ensure_ascii=False),
+                (result.get("summary", "") if isinstance(result, dict) else "",
+                 result.get("one_liner", "") if isinstance(result, dict) else "",
+                 json.dumps(result.get("related_subjects", []), ensure_ascii=False) if isinstance(result, dict) else "[]",
+                 json.dumps(result.get("tags", []), ensure_ascii=False) if isinstance(result, dict) else "[]",
                  news_id)
             )
             execute_insert_update(
@@ -445,8 +461,10 @@ class NewsService:
             (today_str,)
         )
         if row:
+            news_ids = _safe_json_loads(row[0][1], [])
+            news_ids = news_ids if isinstance(news_ids, list) else []
             return {"date": today_str, "brief_content": row[0][0],
-                    "article_count": len(json.loads(row[0][1])),
+                    "article_count": len(news_ids),
                     "generated_at": row[0][2]}
 
         # 获取当前新闻列表
@@ -557,7 +575,6 @@ class NewsService:
     def _cleanup_old():
         cutoff = (datetime.now() - timedelta(hours=NEWS_WINDOW_HOURS)).isoformat()
         execute_insert_update("DELETE FROM news_articles WHERE fetched_at < ?", (cutoff,))
-        logger.info(f"[新闻] 已清理 {NEWS_WINDOW_HOURS} 小时前的过期数据")
 
     @staticmethod
     def get_categories() -> list[str]:

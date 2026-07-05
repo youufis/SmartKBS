@@ -15,7 +15,7 @@ DAILY_DISCOVERY_GENERATE_PROMPT = """请为{grade}学生生成今日精选知识
 
 {extra_instructions}
 
-按 JSON 格式输出，只返回纯 JSON 数组：
+【极其重要】必须只输出纯 JSON 数组，不要有任何多余文字、开头语、结束语或 markdown 包裹：
 [
   {{
     "emoji": "🔭",
