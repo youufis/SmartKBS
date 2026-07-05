@@ -1,5 +1,7 @@
 {
   "dependencies": {
-    "acorn": "^8.16.0"
+    "acorn": "^8.16.0",
+    "markdown-it": "^14.3.0",
+    "markdown-it-anchor": "^9.2.0"
   }
 }

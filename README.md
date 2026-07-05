@@ -23,9 +23,10 @@
 
 <div align="center">
 
-<a href="#项目简介">📋 项目简介</a> &nbsp;·&nbsp; <a href="#演示环境">🎮 演示环境</a> &nbsp;·&nbsp; <a href="#完整功能总览">✨ 功能总览</a> &nbsp;·&nbsp; <a href="#更新日志">📦 更新日志</a><br>
-<a href="#部署安装指引">📦 部署指引</a> &nbsp;·&nbsp; <a href="#快速开始">🚀 快速开始</a> &nbsp;·&nbsp; <a href="#项目结构">📁 项目结构</a> &nbsp;·&nbsp; <a href="#数据存储">🗄️ 数据存储</a><br>
-<a href="#权限总览">👥 权限总览</a> &nbsp;·&nbsp; <a href="#技术栈">🛠️ 技术栈</a> &nbsp;·&nbsp; <a href="#许可证">📄 许可证</a><br>
+<a href="#项目简介">📋 项目简介</a> &nbsp;·&nbsp; <a href="#演示环境">🎮 演示环境</a> &nbsp;·&nbsp; <a href="#完整功能总览">✨ 功能总览</a><br>
+<a href="#更新日志">📦 更新日志</a> &nbsp;·&nbsp; <a href="#部署安装指引">📦 部署指引</a> &nbsp;·&nbsp; <a href="#快速开始">🚀 快速开始</a><br>
+<a href="#项目结构">📁 项目结构</a> &nbsp;·&nbsp; <a href="#数据存储">🗄️ 数据存储</a> &nbsp;·&nbsp; <a href="#权限总览">👥 权限总览</a><br>
+<a href="#技术栈">🛠️ 技术栈</a> &nbsp;·&nbsp; <a href="#许可证">📄 许可证</a><br>
 <a href="#常见问题">❓ 常见问题</a> &nbsp;·&nbsp; <a href="#关于">📬 关于</a>
 
 </div>
