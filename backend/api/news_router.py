@@ -605,7 +605,11 @@ async def get_news_list(
 ):
     """获取新闻列表"""
     user = get_current_user(request)
-    return NewsService.get_news_list(category, page, page_size, user["username"])
+    try:
+        return NewsService.get_news_list(category, page, page_size, user["username"])
+    except Exception as e:
+        logger.warning(f"获取新闻列表异常: {e}")
+        return {"articles": [], "total": 0, "page": page, "page_size": page_size, "cache_fresh": False}
 
 
 @router.get("/news/categories")
@@ -619,7 +623,13 @@ async def get_news_detail(news_id: int, request: Request):
     """获取新闻详情（触发AI摘要和积分，仅学生计分）"""
     user = get_current_user(request)
     role = user.get("role", 2)
-    return NewsService.get_article_detail(news_id, user["username"], role)
+    try:
+        return NewsService.get_article_detail(news_id, user["username"], role)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"获取新闻详情异常 id={news_id}: {e}")
+        raise HTTPException(500, "获取新闻详情失败")
 
 
 @router.post("/news/favorite")

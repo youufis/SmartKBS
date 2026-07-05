@@ -339,6 +339,19 @@ class DiscoveryService:
             "ORDER BY view_count ASC, RANDOM() LIMIT ?",
             (DAILY_CARD_COUNT,)
         )
+        cards = [_row_to_card(r) for r in rows]
+        if len(cards) >= DAILY_CARD_COUNT:
+            return cards
+
+        # 池仍空 → 同步首次填充（确保首访用户有内容，不走 async）
+        DiscoveryService._sync_initial_fill(grade)
+        rows = execute_query(
+            "SELECT id, emoji, category, title, summary, detail, "
+            "source, fun_level, related_subject, tags "
+            "FROM discovery_pool WHERE pool_status='active' "
+            "ORDER BY RANDOM() LIMIT ?",
+            (DAILY_CARD_COUNT,)
+        )
         return [_row_to_card(r) for r in rows]
 
     # ── 池补充 ──
@@ -356,6 +369,47 @@ class DiscoveryService:
             asyncio.ensure_future(DiscoveryService._refill_pool_async(grade))
         except Exception as e:
             logger.warning(f"检查知识池状态失败: {e}")
+
+    @staticmethod
+    def _sync_initial_fill(grade: str):
+        """同步首次填充（池空时调用，确保首访用户有内容）"""
+        api_key = _get_dashscope_api_key()
+        if not api_key:
+            return
+
+        # 双重检查：可能已被并发请求填充
+        row = execute_query(
+            "SELECT COUNT(*) FROM discovery_pool WHERE pool_status='active'"
+        )
+        if row and row[0][0] > 0:
+            return
+
+        try:
+            prompt = DAILY_DISCOVERY_GENERATE_PROMPT.format(
+                grade=grade or "中学生",
+                count=8,
+                extra_instructions="请生成8条有趣的知识卡片，涵盖不同领域。"
+            )
+            text = call_ai_sync_direct(prompt, api_key)
+            cards = _parse_ai_response(text)
+            for card in cards:
+                try:
+                    execute_insert_update(
+                        """INSERT OR IGNORE INTO discovery_pool
+                           (emoji, category, title, summary, detail, source,
+                            fun_level, related_subject, tags, grade_level, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (card.get("emoji", "💡"), card.get("category", ""),
+                         card.get("title", ""), card.get("summary", ""),
+                         card.get("detail", ""), card.get("source", ""),
+                         card.get("fun_level", 3), card.get("related_subject", ""),
+                         json.dumps(card.get("tags") if isinstance(card.get("tags"), list) else [], ensure_ascii=False),
+                         card.get("grade_level", "all"), _now())
+                    )
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"首次同步填充失败: {e}")
 
     @staticmethod
     async def _refill_pool_async(grade: str):
@@ -647,7 +701,19 @@ async def get_feed(request: Request):
     username = user["username"]
     grade = user.get("grade", "")
     role = user.get("role", 2)
-    result = DiscoveryService.get_feed(username, grade)
+    try:
+        result = DiscoveryService.get_feed(username, grade)
+    except Exception as e:
+        logger.warning(f"获取精选Feed异常: {e}")
+        result = {
+            "date": _today(),
+            "cards": [],
+            "pool_size": 0,
+            "refresh_remaining": 99 if role != 2 else DAILY_REFRESH_LIMIT,
+            "today_view_count": 0,
+            "today_points_earned": 0,
+            "today_points_max": DAILY_POINTS_MAX,
+        }
 
     # 非学生隐藏积分信息
     if role != 2:
@@ -664,7 +730,13 @@ async def refresh_feed(request: Request):
     username = user["username"]
     grade = user.get("grade", "")
     role = user.get("role", 2)
-    return DiscoveryService.refresh(username, grade, role)
+    try:
+        return DiscoveryService.refresh(username, grade, role)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"手动刷新异常: {e}")
+        raise HTTPException(500, "刷新失败，请稍后重试")
 
 
 @router.post("/discovery/favorite")
