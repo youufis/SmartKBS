@@ -21,13 +21,9 @@
 
 ---
 
-<div align="center">
+<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 6px;">
 
-<a href="#项目简介">📋 项目简介</a> &nbsp;·&nbsp; <a href="#演示环境">🎮 演示环境</a> &nbsp;·&nbsp; <a href="#完整功能总览">✨ 功能总览</a><br>
-<a href="#更新日志">📦 更新日志</a> &nbsp;·&nbsp; <a href="#部署安装指引">📦 部署指引</a> &nbsp;·&nbsp; <a href="#快速开始">🚀 快速开始</a><br>
-<a href="#项目结构">📁 项目结构</a> &nbsp;·&nbsp; <a href="#数据存储">🗄️ 数据存储</a> &nbsp;·&nbsp; <a href="#权限总览">👥 权限总览</a><br>
-<a href="#技术栈">🛠️ 技术栈</a> &nbsp;·&nbsp; <a href="#许可证">📄 许可证</a><br>
-<a href="#常见问题">❓ 常见问题</a> &nbsp;·&nbsp; <a href="#关于">📬 关于</a>
+<a href="#-项目简介">📋 项目简介</a> · <a href="#-演示环境">🎮 演示环境</a> · <a href="#-完整功能总览">✨ 功能总览</a> · <a href="#-更新日志">📦 更新日志</a> · <a href="#-部署安装指引">📦 部署指引</a> · <a href="#-快速开始">🚀 快速开始</a> · <a href="#-项目结构">📁 项目结构</a> · <a href="#-数据存储">🗄️ 数据存储</a> · <a href="#-权限总览">👥 权限总览</a> · <a href="#-技术栈">🛠️ 技术栈</a> · <a href="#-许可证">📄 许可证</a> · <a href="#-常见问题">❓ 常见问题</a> · <a href="#-关于">📬 关于</a>
 
 </div>
 
