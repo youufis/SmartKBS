@@ -193,6 +193,20 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
             )
             week_resource_views = rv_week[0][0] if rv_week else 0
 
+            # 每日精选浏览
+            disc_rows = execute_query(
+                "SELECT COUNT(*) FROM discovery_view_log WHERE username=?",
+                (username,),
+            )
+            total_discovery = disc_rows[0][0] if disc_rows else 0
+
+            # 热点新闻阅读
+            news_rows = execute_query(
+                "SELECT COUNT(*) FROM news_view_log WHERE username=?",
+                (username,),
+            )
+            total_news = news_rows[0][0] if news_rows else 0
+
             profile["student_stats"] = {
                 "total_exams": total_exams,
                 "week_points": week_points,
@@ -204,6 +218,8 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
                 "total_discussions": total_discussions,
                 "total_resource_views": total_resource_views,
                 "week_resource_views": week_resource_views,
+                "total_discovery": total_discovery,
+                "total_news": total_news,
             }
 
         elif role == 1:  # 教师累计数据

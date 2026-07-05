@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
-from backend.api.ai_service import _ai_thread_pool, call_ai_sync
+from backend.api.ai_service import call_ai_sync_direct
 from backend.database import execute_query, execute_insert_update, execute_query_one
 from backend.prompts.news import NEWS_SUMMARIZE_PROMPT, NEWS_DAILY_BRIEFING_PROMPT
 from backend.logger import logger
@@ -342,8 +342,7 @@ class NewsService:
             prompt = NEWS_SUMMARIZE_PROMPT.format(
                 title=title, content=summary
             )
-            future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
-            text = future.result(timeout=30)
+            text = call_ai_sync_direct(prompt, api_key)
             result = json.loads(text)
 
             execute_insert_update(
@@ -398,8 +397,8 @@ class NewsService:
             from backend.reward_engine import award_participation
             award_participation(username, "news_view",
                               f"{today_str}_{news_id}", "热点新闻")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"新闻积分发放失败: {e}")
 
         return POINTS_PER_VIEW
 
@@ -470,8 +469,7 @@ class NewsService:
             date=today_str, news_list=news_text
         )
         try:
-            future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
-            content = future.result(timeout=60)
+            content = call_ai_sync_direct(prompt, api_key)
 
             # AI返回空时的备用简报
             if not content or not content.strip():
@@ -558,7 +556,7 @@ class NewsService:
     @staticmethod
     def _cleanup_old():
         cutoff = (datetime.now() - timedelta(hours=NEWS_WINDOW_HOURS)).isoformat()
-        execute_query("DELETE FROM news_articles WHERE fetched_at < ?", (cutoff,))
+        execute_insert_update("DELETE FROM news_articles WHERE fetched_at < ?", (cutoff,))
         logger.info(f"[新闻] 已清理 {NEWS_WINDOW_HOURS} 小时前的过期数据")
 
     @staticmethod

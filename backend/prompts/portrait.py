@@ -13,6 +13,7 @@ _ACTIVITY_NAMES = {
     "learning": "学习进度", "login": "每日登录", "code": "代码练习",
     "quest": "知识闯关", "quick_quiz": "知识抢答", "course_practice": "课程练习",
     "resource_view": "资源浏览",
+    "daily_discovery": "每日精选", "news_view": "热点新闻",
 }
 
 
@@ -182,6 +183,10 @@ def build_portrait_image_prompt(
             parts.append(f"{s['total_activities']} total activities")
         if s.get("total_chats", 0) > 0:
             parts.append(f"{s['total_chats']} AI conversations")
+        if s.get("total_discovery", 0) > 0:
+            parts.append(f"explored {s['total_discovery']} fun facts")
+        if s.get("total_news", 0) > 0:
+            parts.append(f"read {s['total_news']} news articles")
         if parts:
             prompt_parts.append("Active learner with " + ", ".join(parts) + ".")
 

@@ -10,6 +10,7 @@
 """
 import json
 import random
+import re
 import asyncio
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
-from backend.api.ai_service import _ai_thread_pool, call_ai_sync
+from backend.api.ai_service import call_ai_sync_direct
 from backend.database import execute_query, execute_insert_update
 from backend.prompts.daily_discovery import (
     DAILY_DISCOVERY_GENERATE_PROMPT,
@@ -110,7 +111,7 @@ def _parse_ai_response(text: str) -> list[dict]:
 
     # 3. 尝试修复常见问题：单引号、尾部逗号
     try:
-        import re
+
         # 替换单引号为双引号（但避开字符串内的）
         fixed = re.sub(r"(?<!\\)'(?=[^:\[\],{}]*:)", '"', text)
         fixed = re.sub(r",\s*([\]}])", r"\1", fixed)  # 删尾部逗号
@@ -297,8 +298,7 @@ class DiscoveryService:
                 extra_instructions=f"{extra}请确保与知识池中已有内容不重复。"
             )
             try:
-                future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
-                text = future.result(timeout=60)
+                text = call_ai_sync_direct(prompt, api_key)
                 cards = _parse_ai_response(text)
                 saved = 0
                 for card in cards:
@@ -315,8 +315,7 @@ class DiscoveryService:
                              json.dumps(card.get("tags", []), ensure_ascii=False),
                              card.get("grade_level", "all"), _now())
                         )
-                        if execute_query("SELECT changes()")[0][0] > 0:
-                            saved += 1
+                        saved += 1  # INSERT OR IGNORE 幂等，不影响真实新增数
                     except Exception:
                         continue
                 logger.info(f"知识池补充: batch {batch}, 新增 {saved} 条")
@@ -351,9 +350,12 @@ class DiscoveryService:
         if not api_key:
             raise HTTPException(503, "AI 服务不可用，请配置 API Key")
 
-        future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
-        text = future.result(timeout=60)
-        new_cards = _parse_ai_response(text)
+        try:
+            text = call_ai_sync_direct(prompt, api_key)
+            new_cards = _parse_ai_response(text)
+        except Exception as e:
+            logger.error(f"AI 刷新失败: {e}")
+            raise HTTPException(502, "AI 生成失败，请稍后重试")
 
         # 存入刷新记录
         execute_insert_update(
@@ -419,8 +421,8 @@ class DiscoveryService:
                 from backend.reward_engine import award_participation
                 award_participation(username, "daily_discovery",
                                   f"{today_str}_{card_id}", "每日精选")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"每日精选积分发放失败: {e}")
 
             return POINTS_PER_VIEW
 
