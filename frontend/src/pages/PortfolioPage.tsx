@@ -208,7 +208,7 @@ const PortfolioPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
-        <Spin size="large" tip="加载成长档案..." />
+        <Spin size="large" description="加载成长档案..." />
       </div>
     )
   }
@@ -341,7 +341,7 @@ const PortfolioPage: React.FC = () => {
         {totalDataPoints.map((item) => (
           <Col xs={12} sm={8} lg={4} key={item.label}>
             <Card hoverable size="small" style={{ textAlign: 'center' }}>
-              <Space direction="vertical" size={2}>
+              <Space orientation="vertical" size={2}>
                 <span style={{ fontSize: 22, color: item.color }}>{item.icon}</span>
                 <Text strong style={{ fontSize: 20, color: item.color }}>{item.value}</Text>
                 <Text type="secondary" style={{ fontSize: 12 }}>{item.label}</Text>
@@ -358,9 +358,9 @@ const PortfolioPage: React.FC = () => {
           {exams?.results && exams.results.length > 0 && (
             <Card title={<Space><FileAddOutlined />考试成绩</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={6}><Statistic title="平均分" value={examStats?.avg_percentage ?? 0} suffix="%" valueStyle={{ color: '#1677ff' }} /></Col>
-                <Col span={6}><Statistic title="最高分" value={examStats?.max_score ?? 0} valueStyle={{ color: '#52c41a' }} /></Col>
-                <Col span={6}><Statistic title="通过" value={examStats?.passed_count ?? 0} suffix={`/ ${examStats?.total_exams ?? 0}`} valueStyle={{ color: '#52c41a' }} /></Col>
+                <Col span={6}><Statistic title="平均分" value={examStats?.avg_percentage ?? 0} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
+                <Col span={6}><Statistic title="最高分" value={examStats?.max_score ?? 0} styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col span={6}><Statistic title="通过" value={examStats?.passed_count ?? 0} suffix={`/ ${examStats?.total_exams ?? 0}`} styles={{ content: { color: '#52c41a' } }} /></Col>
                 <Col span={6}>
                   <Statistic title="正确率" value={rollcall?.accuracy ?? 0} suffix="%" prefix={<AuditOutlined />} />
                 </Col>
@@ -423,7 +423,7 @@ const PortfolioPage: React.FC = () => {
           {scores?.records && scores.records.length > 0 && (
             <Card title={<Space><TrophyOutlined />课堂积分</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={8}><Statistic title="累计积分" value={scores.total_score} valueStyle={{ color: '#faad14' }} prefix={<TrophyOutlined />} /></Col>
+                <Col span={8}><Statistic title="累计积分" value={scores.total_score} styles={{ content: { color: '#faad14' } }} prefix={<TrophyOutlined />} /></Col>
                 <Col span={8}><Statistic title="授课教师" value={scores.teacher_count} suffix="人" /></Col>
                 <Col span={8}><Statistic title="班级数" value={scores.class_count} suffix="个" /></Col>
               </Row>
@@ -470,7 +470,7 @@ const PortfolioPage: React.FC = () => {
             <Card title={<Space><TrophyOutlined style={{ color: '#eb2f96' }} />奖励积分</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={24}>
-                  <Statistic title="累计奖励积分" value={reward_points} valueStyle={{ color: '#eb2f96' }} prefix={<TrophyOutlined />} />
+                  <Statistic title="累计奖励积分" value={reward_points} styles={{ content: { color: '#eb2f96' } }} prefix={<TrophyOutlined />} />
                 </Col>
               </Row>
               {reward_history?.length > 0 && (
@@ -535,9 +535,9 @@ const PortfolioPage: React.FC = () => {
           {course_practice?.records && course_practice.records.length > 0 && (
             <Card title={<Space><ExperimentOutlined style={{ color: '#52c41a' }} />课程练习</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={8}><Statistic title="完成数" value={course_practice.total_count} suffix="个知识点" valueStyle={{ color: '#52c41a' }} /></Col>
-                <Col span={8}><Statistic title="平均正确率" value={course_practice.avg_accuracy} suffix="%" valueStyle={{ color: '#1677ff' }} /></Col>
-                <Col span={8}><Statistic title="累计得分" value={course_practice.total_score} valueStyle={{ color: '#faad14' }} /></Col>
+                <Col span={8}><Statistic title="完成数" value={course_practice.total_count} suffix="个知识点" styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col span={8}><Statistic title="平均正确率" value={course_practice.avg_accuracy} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
+                <Col span={8}><Statistic title="累计得分" value={course_practice.total_score} styles={{ content: { color: '#faad14' } }} /></Col>
               </Row>
               <Table
                 dataSource={course_practice.records}
@@ -590,7 +590,7 @@ const PortfolioPage: React.FC = () => {
               <Timeline
                 items={timeline.slice(-30).reverse().map((ev: any) => ({
                   color: ev.type === 'exam' ? '#1677ff' : ev.type === 'score' ? '#faad14' : ev.type === 'rollcall' ? '#722ed1' : '#52c41a',
-                  children: (
+                  content: (
                     <div>
                       <Space>
                         {TYPE_ICONS[ev.type]}

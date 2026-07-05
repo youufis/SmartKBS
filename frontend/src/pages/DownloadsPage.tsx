@@ -329,7 +329,7 @@ const DownloadsPage: React.FC = () => {
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Typography.Title level={4} style={{ margin: 0 }}>📥 文件中心</Typography.Title>
           <Space>
@@ -489,7 +489,7 @@ const DownloadsPage: React.FC = () => {
           title={<><FolderOpenOutlined style={{ color: '#faad14', marginRight: 8 }} />{browseDirInfo?.dirName || '共享目录'}</>}
           open={browseDirOpen}
           onClose={() => setBrowseDirOpen(false)}
-          width={600}
+          size={600}
           extra={
             <Button type="text" icon={<ReloadOutlined />} onClick={() => {
               if (browseDirInfo) openBrowseDir(browseDirInfo.owner, browseDirInfo.dirPath, browseDirInfo.dirName)

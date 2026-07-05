@@ -97,7 +97,7 @@ function App() {
     <>
       {sessionRestoring ? (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-          <Spin size="large" tip="加载中..." />
+          <Spin size="large" description="加载中..." />
         </div>
       ) : (
         <Routes>

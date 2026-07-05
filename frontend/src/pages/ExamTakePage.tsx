@@ -194,7 +194,7 @@ const ExamTakePage: React.FC = () => {
 
         {q.type === 'single' && q.options && (
           <Radio.Group value={answer} onChange={(e) => setAnswer(qId, e.target.value)}>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               {Object.entries(q.options).map(([key, val]) => (
                 <Radio key={key} value={key}
                   style={{ padding: '8px 12px', borderRadius: 6, border: answer === key ? '1px solid #1677ff' : '1px solid #eee', width: '100%', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
@@ -207,7 +207,7 @@ const ExamTakePage: React.FC = () => {
 
         {q.type === 'multiple' && q.options && (
           <Checkbox.Group value={answer ? answer.split(',') : []}>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               {Object.entries(q.options).map(([key, val]) => (
                 <Checkbox key={key} value={key}
                   onChange={(e) => handleMultipleChange(qId, key, e.target.checked)}
@@ -253,7 +253,7 @@ const ExamTakePage: React.FC = () => {
             status={result.passed ? 'success' : 'error'}
             title={result.passed ? '考试通过！' : '未通过'}
             subTitle={
-              <Space direction="vertical" size={8}>
+              <Space orientation="vertical" size={8}>
                 <Typography.Title level={2}
                   style={{ color: result.passed ? '#52c41a' : '#ff4d4f', margin: 0 }}>
                   {result.score} 分
@@ -283,7 +283,7 @@ const ExamTakePage: React.FC = () => {
                   return (
                     <Card key={qId} size="small"
                       style={{ marginTop: 8, background: detail.is_correct ? '#f6ffed' : '#fff2f0' }}>
-                      <Space direction="vertical" style={{ width: '100%' }}>
+                      <Space orientation="vertical" style={{ width: '100%' }}>
                         <Space>
                           {detail.is_correct
                             ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />
@@ -375,7 +375,7 @@ const ExamTakePage: React.FC = () => {
   if (loading) {
     return (
       <Layout style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f5f5f5' }}>
-        <Spin size="large" tip="加载考试中..." />
+        <Spin size="large" description="加载考试中..." />
       </Layout>
     )
   }

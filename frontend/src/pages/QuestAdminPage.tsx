@@ -694,7 +694,7 @@ const QuestBankTab: React.FC = () => {
   // ── 展开行渲染 ──
   const expandedRowRender = (r: QuestBankQuestion) => (
     <div style={{ padding: '8px 0', maxWidth: '100%', overflow: 'auto' }}>
-      <Space direction="vertical" style={{ width: '100%' }} size={8}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={8}>
         <div>
           <Text strong style={{ fontSize: 13 }}>📝 题目：</Text>
           <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>

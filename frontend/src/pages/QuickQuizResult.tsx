@@ -52,7 +52,7 @@ const QuickQuizResult: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" description="加载中..." />
       </div>
     )
   }

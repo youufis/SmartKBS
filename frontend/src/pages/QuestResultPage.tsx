@@ -102,7 +102,7 @@ const QuestResultPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" tip="加载结算中..." />
+        <Spin size="large" description="加载结算中..." />
       </div>
     )
   }
@@ -167,7 +167,7 @@ const QuestResultPage: React.FC = () => {
           border: 'none',
         }}
       >
-        <Space direction="vertical" size={12}>
+        <Space orientation="vertical" size={12}>
           {isSuccess && (
             <div>
               {confettiEmojis.map((emoji, i) => (
@@ -279,7 +279,7 @@ const QuestResultPage: React.FC = () => {
                     hasSvg={q.has_svg}
                     mediaFiles={q.media_files}
                   />
-                  <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                  <Space orientation="vertical" style={{ width: '100%' }} size={4}>
                     {Object.entries(q.options).map(([k, v]) => {
                       const isStudentAns = q.student_answer === k
                       const isCorrectAns = q.correct_answer === k

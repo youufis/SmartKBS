@@ -423,7 +423,7 @@ const TaskPage: React.FC = () => {
         onCancel={() => { setSubmitModal(false); setSelectedTask(null) }}
         okText="确认提交" cancelText="取消"
       >
-        <Space direction="vertical">
+        <Space orientation="vertical">
           <Typography.Text>
             将当前 AI 对话内容提交到任务 <strong>{selectedTask?.name}</strong>？
           </Typography.Text>
@@ -442,7 +442,7 @@ const TaskPage: React.FC = () => {
       <Drawer
         title={`📋 ${submissionsData.task_name || '加载中...'}`}
         placement="right"
-        width={760}
+        size={760}
         open={submissionsDrawer}
         onClose={() => { setSubmissionsDrawer(false); setContentDrawer(false) }}
       >
@@ -466,7 +466,7 @@ const TaskPage: React.FC = () => {
 
           {classSummary && (
             <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
-              <Space direction="vertical" style={{ width: '100%' }} size={4}>
+              <Space orientation="vertical" style={{ width: '100%' }} size={4}>
                 <Typography.Text strong style={{ color: '#1d39c4' }}>
                   <RobotOutlined /> 全班批改总结
                 </Typography.Text>
@@ -608,7 +608,7 @@ const TaskPage: React.FC = () => {
         <Drawer
           title="提交内容"
           placement="right"
-          width={520}
+          size={520}
           open={contentDrawer}
           onClose={() => setContentDrawer(false)}
           getContainer={false}
@@ -640,7 +640,7 @@ const TaskPage: React.FC = () => {
       >
         <Spin spinning={myGradeLoading}>
           {myGrade ? (
-            <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Space orientation="vertical" style={{ width: '100%' }} size={12}>
               <Card size="small" style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
                 <Space align="center" size={16}>
                   <div style={{ textAlign: 'center' }}>

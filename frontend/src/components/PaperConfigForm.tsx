@@ -40,7 +40,7 @@ const PaperConfigForm: React.FC<PaperConfigFormProps> = ({
   totalScore,
 }) => {
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={16}>
+    <Space orientation="vertical" style={{ width: '100%' }} size={16}>
       {/* 基本信息 */}
       <CardSection title="基本信息">
         <Row gutter={16}>

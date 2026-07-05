@@ -893,7 +893,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
             key: 'basic',
             label: '基本信息',
             children: (
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Input
                   placeholder="题目标题"
                   value={createForm.title}
@@ -965,7 +965,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               <>
                 {/* 新增测试用例 */}
                 <Card size="small" style={{ marginBottom: 12 }}>
-                  <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space orientation="vertical" style={{ width: '100%' }}>
                     <Text strong>添加测试用例</Text>
                     <Space>
                       <Input
@@ -1075,7 +1075,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         footer={null}
         width={500}
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Text>输入一个主题，AI 会自动生成完整的代码题目（含描述、模板、测试用例）。</Text>
           <Space>
             <Input
@@ -1138,7 +1138,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
             key: 'basic',
             label: '基本信息',
             children: (
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Input placeholder="题目标题" value={editForm.title}
                   onChange={e => setEditForm({ ...editForm, title: e.target.value })} />
                 <Input.TextArea rows={4} placeholder="题目描述（支持 Markdown）" value={editForm.description}
@@ -1383,17 +1383,17 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                           <Statistic
                             title="状态"
                             value={statusInfo?.label || submissionResult.status}
-                            valueStyle={{ fontSize: 16, color: statusInfo?.color === 'success' ? '#52c41a' : '#ff4d4f' }}
+                            styles={{ content: { fontSize: 16, color: statusInfo?.color === 'success' ? '#52c41a' : '#ff4d4f' } }}
                           />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="得分" value={submissionResult.score} suffix={`/ ${submissionResult.total_cases}`} valueStyle={{ fontSize: 16 }} />
+                          <Statistic title="得分" value={submissionResult.score} suffix={`/ ${submissionResult.total_cases}`} styles={{ content: { fontSize: 16 } }} />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="通过用例" value={`${submissionResult.passed_cases || 0} / ${submissionResult.total_cases || 0}`} valueStyle={{ fontSize: 16 }} />
+                          <Statistic title="通过用例" value={`${submissionResult.passed_cases || 0} / ${submissionResult.total_cases || 0}`} styles={{ content: { fontSize: 16 } }} />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="运行时间" value={submissionResult.execution_time || 0} suffix="s" valueStyle={{ fontSize: 16 }} />
+                          <Statistic title="运行时间" value={submissionResult.execution_time || 0} suffix="s" styles={{ content: { fontSize: 16 } }} />
                         </Col>
                       </Row>
 
@@ -1431,10 +1431,10 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                     <div>
                       <Row gutter={16} style={{ marginBottom: 12 }}>
                         <Col span={6}>
-                          <Statistic title="综合评分" value={aiReview.overall_score} suffix="/100" valueStyle={{ fontSize: 16 }} />
+                          <Statistic title="综合评分" value={aiReview.overall_score} suffix="/100" styles={{ content: { fontSize: 16 } }} />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="评价" value={aiReview.overall_rating} valueStyle={{ fontSize: 16 }} />
+                          <Statistic title="评价" value={aiReview.overall_rating} styles={{ content: { fontSize: 16 } }} />
                         </Col>
                       </Row>
 

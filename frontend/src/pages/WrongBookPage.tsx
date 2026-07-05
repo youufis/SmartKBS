@@ -233,7 +233,7 @@ const WrongBookPage: React.FC = () => {
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <Title level={4} style={{ margin: 0 }}>📕 错题本</Title>
@@ -287,7 +287,7 @@ const WrongBookPage: React.FC = () => {
           <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
         ) : !data || data.exams.length === 0 ? (
           <Card>
-            <Space direction="vertical" style={{ width: '100%', textAlign: 'center', padding: 40 }}>
+            <Space orientation="vertical" style={{ width: '100%', textAlign: 'center', padding: 40 }}>
               <BookOutlined style={{ fontSize: 48, color: '#d9d9d9' }} />
               <Text type="secondary">暂无错题，继续保持！</Text>
             </Space>
@@ -327,7 +327,7 @@ const WrongBookPage: React.FC = () => {
                           render: (_: any, r: WrongQuestion) => {
                           const opts = r.options || {}
                           return (
-                            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                            <Space orientation="vertical" size={2} style={{ width: '100%' }}>
                               {Object.entries(opts).map(([k, v]) => {
                                 const isStudent = r.student_answer === k
                                 const isCorrect = r.correct_answer === k
@@ -421,7 +421,7 @@ const WrongBookPage: React.FC = () => {
             开始生成
           </Button>,
         ]}>
-        <Space direction="vertical" style={{ width: '100%', padding: '20px 0' }}>
+        <Space orientation="vertical" style={{ width: '100%', padding: '20px 0' }}>
           <Text>生成题目数量：</Text>
           <InputNumber min={1} max={20} value={practiceCount} onChange={v => setPracticeCount(v || 5)}
             style={{ width: 120 }} />
@@ -457,7 +457,7 @@ const WrongBookPage: React.FC = () => {
               </Card>
             ))}
             <Divider />
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Input placeholder="练习标题（如：错题巩固练习）" value={pubTitle} onChange={e => setPubTitle(e.target.value)} />
               <Card size="small" style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
                 <Space>

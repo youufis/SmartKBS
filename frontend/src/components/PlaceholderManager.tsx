@@ -283,7 +283,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
             ) : undefined
           }
         >
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             {/* 占位符条目 */}
             {placeholders.map(ph =>
               renderMediaItem(ph.key, ph.description, ph.status, ph.purpose)
@@ -299,7 +299,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
       {/* 仅有 wanxiang 配图时，也保留展示（已被上面合并，这里兜底） */}
       {!showPlaceholderSection && !showWanxiangSection && wanxiangEntries.length > 0 && (
         <Card size="small" title="📷 图片配图">
-          <Space direction="vertical" style={{ width: '100%' }}>
+          <Space orientation="vertical" style={{ width: '100%' }}>
             {wanxiangEntries.map(f =>
               renderMediaItem(f.key, f.alt || '配图')
             )}

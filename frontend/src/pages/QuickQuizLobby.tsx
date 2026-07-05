@@ -179,7 +179,7 @@ const QuickQuizLobby: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" description="加载中..." />
       </div>
     )
   }
@@ -285,7 +285,7 @@ const QuickQuizLobby: React.FC = () => {
       {/* 操作区 */}
       {isTeacherOrAdmin && room.status === 'waiting' && (
         <div style={{ marginTop: 16, textAlign: 'center' }}>
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
             <Space>
               <Button
                 type="primary"

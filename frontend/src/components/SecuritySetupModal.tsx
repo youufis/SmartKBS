@@ -103,8 +103,8 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
       }}
       footer={null}
       width={520}
-      destroyOnClose
-      maskClosable={false}
+      destroyOnHidden
+      mask={{ closable: false }}
       closable={true}
     >
       {/* ═══ 已设置 → 查看模式 ═══ */}

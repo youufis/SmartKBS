@@ -402,11 +402,12 @@ const WhiteboardRoomPage: React.FC = () => {
           {readOnly ? '👁 只读模式' : '✏️ 可编辑'}
           {' '}|{' '}
           {mode === 'demo' && '教师演示中 — 学生只读'}
+          {mode === 'demo' && isTeacher && <span style={{ color: '#faad14' }}>（学生看不到内容时，切互动再切回）</span>}
           {mode === 'interactive' && '互动模式 — 教师授权后可操作'}
           {mode === 'self_study' && '自习模式 — 各自独立白板'}
         </span>
         <span>
-          {ws.isConnected ? '🟢 已连接' : '⚡ 已连接（HTTP轮询）'}
+          {ws.isConnected ? '🟢 已连接' : <Tooltip title="HTTP轮询模式不稳定，延迟严重，建议使用WebSocket模式">⚡ 已连接（HTTP轮询）</Tooltip>}
         </span>
       </div>
 

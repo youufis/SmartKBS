@@ -202,7 +202,7 @@ const ExamComposePage: React.FC = () => {
         onCancel={() => setWizardVisible(false)}
         width={900}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <ComposeWizard
           examId={Number(examId)}

@@ -336,7 +336,7 @@ const InteractionPage: React.FC = () => {
             <div style={{ marginTop: 8, paddingLeft: 8 }}>
               {q.type === 'single' && q.options ? (
                 <Radio.Group onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}>
-                  <Space direction="vertical">
+                  <Space orientation="vertical">
                     {q.options.map((opt: string, j: number) => (
                       <Radio key={j} value={opt.charAt(0)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><FormulaRenderer content={opt} inline /></Radio>
                     ))}
@@ -344,7 +344,7 @@ const InteractionPage: React.FC = () => {
                 </Radio.Group>
               ) : q.type === 'multiple' && q.options ? (
                 <Checkbox.Group onChange={(vals) => setQuizAnswers({ ...quizAnswers, [i]: (vals as string[]).sort().join(',') })}>
-                  <Space direction="vertical">
+                  <Space orientation="vertical">
                     {q.options.map((opt: string, j: number) => (
                       <Checkbox key={j} value={opt.charAt(0)} style={{ lineHeight: 2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><FormulaRenderer content={opt} inline /></Checkbox>
                     ))}

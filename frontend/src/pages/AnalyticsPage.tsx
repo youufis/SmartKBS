@@ -377,7 +377,7 @@ const AnalyticsPage: React.FC = () => {
 
                   {loading && (
                     <div style={{ textAlign: 'center', padding: 40 }}>
-                      <Spin size="large" tip="AI 分析中，请稍候..." />
+                      <Spin size="large" description="AI 分析中，请稍候..." />
                     </div>
                   )}
 
@@ -389,7 +389,7 @@ const AnalyticsPage: React.FC = () => {
                       <Col span={4}>
                         <Statistic title="点名正确" value={rawData.rollcall_correct}
                           suffix={`/ ${rawData.rollcall_total}`}
-                          valueStyle={{ color: rawData.rollcall_total > 0 ? '#52c41a' : '#999' }} />
+                          styles={{ content: { color: rawData.rollcall_total > 0 ? '#52c41a' : '#999' } }} />
                       </Col>
                       <Col span={4}><Statistic title="活跃任务" value={rawData.active_tasks} /></Col>
                       <Col span={4}><Statistic title="已提交学生" value={rawData.submitted_students} /></Col>
@@ -463,7 +463,7 @@ const AnalyticsPage: React.FC = () => {
 
                   {examLoading && (
                     <div style={{ textAlign: 'center', padding: 40 }}>
-                      <Spin size="large" tip="AI 分析中，请稍候..." />
+                      <Spin size="large" description="AI 分析中，请稍候..." />
                     </div>
                   )}
 
@@ -530,7 +530,7 @@ const AnalyticsPage: React.FC = () => {
                     <Col span={6}><Statistic title="筛选学生数" value={progressStats.totalStudents} prefix={<TeamOutlined />} /></Col>
                     <Col span={6}>
                       <Statistic title="平均完成率" value={progressStats.avgRate} suffix="%"
-                        precision={1} valueStyle={{ color: progressStats.avgRate >= 60 ? '#52c41a' : '#faad14' }} />
+                        precision={1} styles={{ content: { color: progressStats.avgRate >= 60 ? '#52c41a' : '#faad14' } }} />
                     </Col>
                   </Row>
 

@@ -486,10 +486,10 @@ const ActivityMonitorPage: React.FC = () => {
                   <Statistic title="应完成人数" value={statusDetail.statistics.total_students} suffix="人" />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="已完成" value={statusDetail.statistics.completed_count} suffix="人" valueStyle={{ color: '#52c41a' }} />
+                  <Statistic title="已完成" value={statusDetail.statistics.completed_count} suffix="人" styles={{ content: { color: '#52c41a' } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="未完成" value={statusDetail.statistics.incomplete_count} suffix="人" valueStyle={{ color: '#f5222d' }} />
+                  <Statistic title="未完成" value={statusDetail.statistics.incomplete_count} suffix="人" styles={{ content: { color: '#f5222d' } }} />
                 </Col>
                 <Col span={4}>
                   <Statistic title="完成率" value={statusDetail.statistics.completion_rate} suffix="%" precision={1} />

@@ -373,7 +373,7 @@ const RollcallTool: React.FC = () => {
       {/* 纸屑容器 */}
       <div id="rollcall-confetti" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 9999, overflow: 'hidden' }} />
 
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         {/* 选择器 */}
         <Space wrap>
           <Select
@@ -421,9 +421,9 @@ const RollcallTool: React.FC = () => {
           {/* 统计 */}
           {total > 0 && (
             <Row gutter={48} justify="center" style={{ marginTop: 8 }}>
-              <Col><Statistic title="已点人数" value={covered} suffix={`/ ${total}`} valueStyle={{ color: '#4fc3f7' }} /></Col>
-              <Col><Statistic title="覆盖率" value={coverageRate} suffix="%" valueStyle={{ color: '#faad14' }} /></Col>
-              <Col><Statistic title="答对次数" value={correctCount} valueStyle={{ color: '#52c41a' }} prefix={<TrophyOutlined />} /></Col>
+              <Col><Statistic title="已点人数" value={covered} suffix={`/ ${total}`} styles={{ content: { color: '#4fc3f7' } }} /></Col>
+              <Col><Statistic title="覆盖率" value={coverageRate} suffix="%" styles={{ content: { color: '#faad14' } }} /></Col>
+              <Col><Statistic title="答对次数" value={correctCount} styles={{ content: { color: '#52c41a' } }} prefix={<TrophyOutlined />} /></Col>
             </Row>
           )}
         </div>
@@ -1097,7 +1097,7 @@ const AttendanceStats: React.FC = () => {
             <UserOutlined style={{ color: '#52c41a', fontSize: 20 }} />
             <span>📋 考勤统计</span>
             {isAdmin && (
-              <Button.Group size="small" style={{ marginLeft: 12 }}>
+              <Space.Compact size="small" style={{ marginLeft: 12 }}>
                 <Button
                   type={viewMode === 'student' ? 'primary' : 'default'}
                   icon={<TeamOutlined />}
@@ -1112,7 +1112,7 @@ const AttendanceStats: React.FC = () => {
                 >
                   教职工登录
                 </Button>
-              </Button.Group>
+              </Space.Compact>
             )}
           </Space>
         }
@@ -1152,7 +1152,7 @@ const AttendanceStats: React.FC = () => {
         }
         style={{ marginBottom: 16 }}
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           {/* ── 学生考勤模式 ── */}
           {viewMode === 'student' && (
             <>
@@ -1189,25 +1189,25 @@ const AttendanceStats: React.FC = () => {
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#f6ffed' }}>
                         <Statistic title="班级总人数" value={summary.total_count}
-                          prefix={<TeamOutlined />} valueStyle={{ color: '#52c41a' }} />
+                          prefix={<TeamOutlined />} styles={{ content: { color: '#52c41a' } }} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#e6f7ff' }}>
                         <Statistic title="已登录" value={summary.logged_in_count}
-                          prefix={<LoginOutlined />} valueStyle={{ color: '#1890ff' }} />
+                          prefix={<LoginOutlined />} styles={{ content: { color: '#1890ff' } }} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#fff7e6' }}>
                         <Statistic title="未登录" value={summary.not_logged_in_count}
-                          prefix={<StopOutlined />} valueStyle={{ color: '#faad14' }} />
+                          prefix={<StopOutlined />} styles={{ content: { color: '#faad14' } }} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#f0f5ff' }}>
                         <Statistic title="登录率" value={summary.login_rate} suffix="%"
-                          prefix={<BarChartOutlined />} valueStyle={{ color: '#722ed1' }} />
+                          prefix={<BarChartOutlined />} styles={{ content: { color: '#722ed1' } }} />
                       </Card>
                     </Col>
                   </Row>
@@ -1246,7 +1246,7 @@ const AttendanceStats: React.FC = () => {
 
               {(loading || onlineLoading) && (
                 <div style={{ textAlign: 'center', padding: 40 }}>
-                  <Spin tip="加载考勤数据..." />
+                  <Spin description="加载考勤数据..." />
                 </div>
               )}
             </>
@@ -1269,7 +1269,7 @@ const AttendanceStats: React.FC = () => {
               )}
               {staffLoading && (
                 <div style={{ textAlign: 'center', padding: 40 }}>
-                  <Spin tip="加载教职工登录信息..." />
+                  <Spin description="加载教职工登录信息..." />
                 </div>
               )}
             </>
@@ -1288,7 +1288,7 @@ const AttendanceStats: React.FC = () => {
         cancelText="取消"
         okButtonProps={{ danger: true }}
       >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <p>
             {clearAll
               ? `确定要清除登录日志吗？你可以选择保留最近 N 天的记录，仅清除更早的日志。`

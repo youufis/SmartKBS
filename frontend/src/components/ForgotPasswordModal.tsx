@@ -141,8 +141,8 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
       onCancel={onClose}
       footer={null}
       width={480}
-      destroyOnClose
-      maskClosable={false}
+      destroyOnHidden
+      mask={{ closable: false }}
     >
       <Steps
         current={step}

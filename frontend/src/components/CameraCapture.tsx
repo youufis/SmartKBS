@@ -276,7 +276,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture 
       onCancel={handleClose}
       footer={null}
       width={640}
-      destroyOnClose
+      destroyOnHidden
       centered
     >
       <div style={{ textAlign: 'center' }}>

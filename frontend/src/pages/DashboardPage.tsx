@@ -215,7 +215,7 @@ const DashboardPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" description="加载中..." />
       </div>
     )
   }
@@ -239,7 +239,7 @@ const DashboardPage: React.FC = () => {
           borderRadius: 8,
           border: 'none',
         }}
-        bodyStyle={{ padding: '10px 20px' }}
+        styles={{ body: { padding: '10px 20px' } }}
       >
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap' }}>
@@ -321,7 +321,7 @@ const DashboardPage: React.FC = () => {
                   value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
                   prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
                   suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成 · 待考{summary.pending_exam_count ?? 0}场 · 错题{summary.wrong_exam_count ?? 0}场</Text>}
-                  valueStyle={{ color: '#1677ff', fontSize: 22 }}
+                  styles={{ content: { color: '#1677ff', fontSize: 22 } }}
                 />
               </Card>
             </Col>
@@ -332,7 +332,7 @@ const DashboardPage: React.FC = () => {
                   value={summary.total_score ?? 0}
                   prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
                   suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名{summary.rank ?? '-'} · 任务{summary.active_task_count ?? 0}个</Text>}
-                  valueStyle={{ color: '#faad14', fontSize: 22 }}
+                  styles={{ content: { color: '#faad14', fontSize: 22 } }}
                 />
               </Card>
             </Col>
@@ -343,7 +343,7 @@ const DashboardPage: React.FC = () => {
                   value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
                   prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
                   suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0}次 · 练习{summary.pending_practice_count ?? 0}项</Text>}
-                  valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+                  styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
                 />
               </Card>
             </Col>
@@ -354,7 +354,7 @@ const DashboardPage: React.FC = () => {
                   value={summary.quest_completed_count ?? 0}
                   prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
                   suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关{summary.quest_completed_count ?? 0}关 · 抢答{summary.quick_quiz_participated ?? 0}次</Text>}
-                  valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+                  styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
                 />
               </Card>
             </Col>
@@ -373,7 +373,7 @@ const DashboardPage: React.FC = () => {
                     草稿{summary.exam_stats?.draft ?? 0} · 发布{summary.exam_stats?.published ?? 0} · 结束{summary.exam_stats?.ended ?? 0}
                   </Text>
                 }
-                valueStyle={{ color: '#1677ff', fontSize: 22 }}
+                styles={{ content: { color: '#1677ff', fontSize: 22 } }}
               />
             </Card>
           </Col>
@@ -388,7 +388,7 @@ const DashboardPage: React.FC = () => {
                     {isAdmin ? `教师${summary.total_teachers ?? 0}` : '名学生'} · 提交{summary.total_submissions ?? 0} · 点名{summary.rollcall_this_week ?? 0}次
                   </Text>
                 }
-                valueStyle={{ color: '#722ed1', fontSize: 22 }}
+                styles={{ content: { color: '#722ed1', fontSize: 22 } }}
               />
             </Card>
           </Col>
@@ -399,7 +399,7 @@ const DashboardPage: React.FC = () => {
                 value={(summary.teacher_quiz_count ?? 0) + (summary.practice_published ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
                 suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.teacher_quiz_count ?? 0} · 练习{summary.practice_published ?? 0} · 提问{summary.teacher_question_count ?? 0} · 回答{summary.teacher_student_answer_count ?? 0}</Text>}
-                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+                styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
               />
             </Card>
           </Col>
@@ -410,7 +410,7 @@ const DashboardPage: React.FC = () => {
                 value={summary.quest_total_count ?? 0}
                 prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
                 suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关总{summary.quest_total_count ?? 0} · 完成{summary.quest_completed_count_t ?? 0} · 抢答{summary.quick_quiz_total ?? 0}结束{summary.quick_quiz_ended ?? 0}</Text>}
-                valueStyle={{ color: '#ff4d4f', fontSize: 22 }}
+                styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
               />
             </Card>
           </Col>
@@ -470,13 +470,13 @@ const DashboardPage: React.FC = () => {
                     title="今日对话"
                     value={summary.today_chat_count ?? 0}
                     prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
-                    valueStyle={{ color: '#13c2c2', fontSize: 20 }}
+                    styles={{ content: { color: '#13c2c2', fontSize: 20 } }}
                   />
                   <Statistic
                     title="本周点名"
                     value={summary.rollcall_this_week ?? 0}
                     prefix={<AuditOutlined style={{ color: '#fa8c16' }} />}
-                    valueStyle={{ color: '#fa8c16', fontSize: 20 }}
+                    styles={{ content: { color: '#fa8c16', fontSize: 20 } }}
                   />
                 </Space>
               </Card>
@@ -572,13 +572,13 @@ const DashboardPage: React.FC = () => {
                     title="当前在线"
                     value={summary.online_count ?? 0}
                     prefix={<TeamOutlined style={{ color: '#52c41a' }} />}
-                    valueStyle={{ color: '#52c41a', fontSize: 20 }}
+                    styles={{ content: { color: '#52c41a', fontSize: 20 } }}
                   />
                   <Statistic
                     title="今日对话"
                     value={summary.today_chat_count ?? 0}
                     prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
-                    valueStyle={{ color: '#13c2c2', fontSize: 20 }}
+                    styles={{ content: { color: '#13c2c2', fontSize: 20 } }}
                   />
                 </Space>
               </Card>
@@ -710,7 +710,7 @@ const DashboardPage: React.FC = () => {
               <Timeline
                 items={activities.slice(0, 30).map((act) => ({
                   color: TYPE_CONFIG[act.type]?.color || '#999',
-                  children: (
+                  content: (
                     <div>
                       <Space>
                         {TYPE_CONFIG[act.type]?.icon}

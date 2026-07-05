@@ -357,7 +357,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       onCancel={handleClose}
       width={780}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <Steps
         current={step >= 2 ? 2 : step}

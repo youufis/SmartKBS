@@ -74,7 +74,7 @@ const CompanionSettings: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" description="加载中..." />
       </div>
     )
   }
@@ -127,7 +127,7 @@ const CompanionSettings: React.FC = () => {
             <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>不同人格有不同的对话风格</Text>
             <div style={{ marginTop: 10 }}>
               <Radio.Group value={personality} onChange={(e) => setPersonality(e.target.value)} style={{ width: '100%' }}>
-                <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                <Space orientation="vertical" style={{ width: '100%' }} size={8}>
                   {[
                     { value: 'encouraging', emoji: '🎉', label: '鼓励型', desc: '「加油，你是最棒的！」温暖热情，充满正能量' },
                     { value: 'rigorous', emoji: '📐', label: '严谨型', desc: '「这道题我们来一步步分析」严谨细致，逻辑清晰' },

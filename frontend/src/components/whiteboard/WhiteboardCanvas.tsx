@@ -216,6 +216,8 @@ if (readOnlyRef.current && !httpSyncedRef.current) {
     })
     .catch(() => {})
 }
+// 主动请求服务端推送最新快照（解决初始演示模式学生端收不到内容的问题）
+ws.send({ type: 'request_sync' })
   }, [readOnly, ws, store.currentPage, roomId])
 
   // readOnly 变化时实时更新编辑器状态（如互动模式授权）

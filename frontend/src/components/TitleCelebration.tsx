@@ -151,7 +151,7 @@ const TitleCelebration: React.FC = () => {
         width={420}
         centered
         closable={false}
-        maskClosable
+        mask={{ closable: true }}
       >
         <div style={{ textAlign: 'center', padding: '24px 0' }}>
           {/* 大图标 */}

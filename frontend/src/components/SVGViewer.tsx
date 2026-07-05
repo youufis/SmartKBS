@@ -97,7 +97,7 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
         title={description || 'SVG 配图'}
         open={previewOpen}
         onCancel={() => setPreviewOpen(false)}
-        footer={null} width={700} destroyOnClose
+        footer={null} width={700} destroyOnHidden
       >
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
           <img src={svgDataUri} alt={description || 'SVG'} style={{ maxWidth: '100%' }} />

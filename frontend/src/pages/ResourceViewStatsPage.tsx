@@ -193,7 +193,7 @@ const ResourceViewStatsPage: React.FC = () => {
       key: 'last_view_time',
       width: 180,
       render: (t: string, r: ResourceViewItem) => t ? (
-        <Space size={2} direction="vertical" style={{ gap: 0 }}>
+        <Space size={2} orientation="vertical" style={{ gap: 0 }}>
           <Text style={{ fontSize: 12 }}>{t}</Text>
           <Text type="secondary" style={{ fontSize: 11 }}>{r.last_view_student}</Text>
         </Space>
@@ -236,7 +236,7 @@ const ResourceViewStatsPage: React.FC = () => {
 
       {/* 按知识点查看 */}
       <Card size="small" title="📖 按知识点查看浏览统计" style={{ marginBottom: 16 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size={12}>
+        <Space orientation="vertical" style={{ width: '100%' }} size={12}>
           <Space>
             <Select
               value={selectedCourseId}

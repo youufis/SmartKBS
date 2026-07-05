@@ -1095,7 +1095,7 @@ const CurriculumPage: React.FC = () => {
       {/* ── 加载中 ── */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
-          <Spin size="large" tip="加载中..." />
+          <Spin size="large" description="加载中..." />
         </div>
       )}
 
@@ -1109,7 +1109,7 @@ const CurriculumPage: React.FC = () => {
             }
           >
             {isTeacherOrAdmin && (
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 {subjectOptions.length === 0 && user?.role === 'admin' && (
                   <Button
                     icon={<SettingOutlined />}
@@ -1514,7 +1514,7 @@ const CurriculumPage: React.FC = () => {
                       {kpResources.length === 0 ? (
                         <Typography.Text type="secondary">暂无关联资源</Typography.Text>
                       ) : (
-                        <Space direction="vertical" style={{ width: '100%' }}>
+                        <Space orientation="vertical" style={{ width: '100%' }}>
                           {kpResources.map((r) => {
                             const isFileType = r.resource_type === 'html' || r.resource_type === 'download'
                             const handleClick = () => {
@@ -1808,7 +1808,7 @@ const CurriculumPage: React.FC = () => {
               const relevanceLabel = r.relevance === 'high' ? '高度相关' : r.relevance === 'medium' ? '中度相关' : '低度相关'
               return (
                 <Card key={i} size="small" style={{ marginBottom: 8 }}>
-                  <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space orientation="vertical" style={{ width: '100%' }}>
                     <Space>
                       <span style={{ fontSize: 18 }}>{r.resource_icon}</span>
                       <Typography.Text strong>{r.title}</Typography.Text>
@@ -1876,7 +1876,7 @@ const CurriculumPage: React.FC = () => {
         onCancel={() => { if (practiceLoading) return; setPracticeModal(false); setPracticeDone(null); setPracticeHtmlUrl(''); }}
         width={620}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         {practiceLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
@@ -1891,7 +1891,7 @@ const CurriculumPage: React.FC = () => {
             <Typography.Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 16 }}>
               ✅ 练习已生成
             </Typography.Text>
-            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
               <Button type="primary" size="large" icon={<EyeOutlined />}
                 href={practiceDone.fileUrl} target="_blank" rel="noopener noreferrer"
                 block>
@@ -1906,7 +1906,7 @@ const CurriculumPage: React.FC = () => {
             </Space>
           </div>
         ) : (
-          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={16}>
             {/* 知识点 */}
             <div>
               <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>知识点 <span style={{ color: '#ff4d4f' }}>*</span></Typography.Text>

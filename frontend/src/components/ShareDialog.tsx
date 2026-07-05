@@ -513,7 +513,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
       }
       width={560}
     >
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <Typography.Text ellipsis style={{ maxWidth: 520 }}>
           <strong>文件：</strong>{fileName}
         </Typography.Text>
@@ -629,7 +629,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
               }}
               style={{ width: '100%' }}
             >
-              <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Space orientation="vertical" style={{ width: '100%' }} size={8}>
                 {scopeOptions.map(opt => {
                   const disabled = isTeacher && opt.value === 'all'
                   return (

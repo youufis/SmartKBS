@@ -161,7 +161,7 @@ const SubjectTitleCards: React.FC<{ titles: SubjectTitle[] }> = ({ titles }) => 
       return (
         <Col xs={24} sm={8} key={st.subject}>
           <Card size="small" style={{ borderLeft: `4px solid ${color}`, borderRadius: 8 }}>
-            <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={2} style={{ width: '100%' }}>
               <Space><span style={{ fontSize: 20 }}>{emoji}</span><Text strong>{st.subject}</Text></Space>
               <Tag color={st.color !== 'default' ? st.color : undefined} style={{ alignSelf: 'flex-start' }}>
                 {emoji} Lv.{st.level} {st.name}
@@ -528,28 +528,28 @@ const RewardPage: React.FC = () => {
                       <Card size="small">
                         <Statistic title="总积分" value={myPoints}
                           prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-                          valueStyle={{ color: '#faad14', fontSize: 24, fontWeight: 'bold' }} suffix="分" />
+                          styles={{ content: { color: '#faad14', fontSize: 24, fontWeight: 'bold' } }} suffix="分" />
                       </Card>
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
                         <Statistic title="参与活动" value={myHistory.length}
                           prefix={<ThunderboltOutlined style={{ color: '#1677ff' }} />}
-                          valueStyle={{ color: '#1677ff' }} />
+                          styles={{ content: { color: '#1677ff' } }} />
                       </Card>
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
                         <Statistic title="获得奖励" value={myHistory.filter(h => h.reward_type !== 'participation').length}
                           prefix={<StarOutlined style={{ color: '#52c41a' }} />}
-                          valueStyle={{ color: '#52c41a' }} />
+                          styles={{ content: { color: '#52c41a' } }} />
                       </Card>
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
                         <Statistic title="已获徽章" value={titleInfo?.badges?.filter((b: BadgeItem) => b.unlocked).length || 0}
                           prefix={<GiftOutlined style={{ color: '#faad14' }} />}
-                          valueStyle={{ color: '#faad14' }} suffix={`/ ${titleInfo?.badges?.length || 0}`} />
+                          styles={{ content: { color: '#faad14' } }} suffix={`/ ${titleInfo?.badges?.length || 0}`} />
                       </Card>
                     </Col>
                   </Row>
@@ -675,12 +675,12 @@ const RewardPage: React.FC = () => {
         <Row gutter={16} style={{ marginBottom: 24 }}>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="总积分" value={stats.total_points} prefix={<TrophyOutlined />} valueStyle={{ color: '#faad14' }} />
+              <Statistic title="总积分" value={stats.total_points} prefix={<TrophyOutlined />} styles={{ content: { color: '#faad14' } }} />
             </Card>
           </Col>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="参与学生数" value={stats.participant_count} prefix={<TeamOutlined />} valueStyle={{ color: '#1677ff' }} />
+              <Statistic title="参与学生数" value={stats.participant_count} prefix={<TeamOutlined />} styles={{ content: { color: '#1677ff' } }} />
             </Card>
           </Col>
           <Col span={12}>

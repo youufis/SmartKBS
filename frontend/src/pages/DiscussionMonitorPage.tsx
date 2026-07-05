@@ -159,7 +159,7 @@ const DiscussionMonitorPage: React.FC = () => {
                 title="在线人数"
                 value={data.online_count}
                 prefix={<FieldTimeOutlined />}
-                valueStyle={{ color: data.online_count > 0 ? '#52c41a' : '#999' }}
+                styles={{ content: { color: data.online_count > 0 ? '#52c41a' : '#999' } }}
               />
             </Card>
           </Col>
@@ -169,7 +169,7 @@ const DiscussionMonitorPage: React.FC = () => {
                 title="冷场小组"
                 value={data.cold_groups}
                 prefix={<WarningOutlined />}
-                valueStyle={{ color: data.cold_groups > 0 ? '#ff4d4f' : '#52c41a' }}
+                styles={{ content: { color: data.cold_groups > 0 ? '#ff4d4f' : '#52c41a' } }}
                 suffix={`/ ${data.total_groups}`}
               />
             </Card>

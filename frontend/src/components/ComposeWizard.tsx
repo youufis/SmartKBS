@@ -133,7 +133,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
                   borderColor: '#b7eb8f',
                 }}
               >
-                <Space direction="vertical">
+                <Space orientation="vertical">
                   <Typography.Text style={{ fontSize: 16 }}>
                     ✅ <strong>组卷完成！</strong>
                   </Typography.Text>
@@ -175,7 +175,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
             请选择要导出的文档类型
           </Typography.Text>
 
-          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={16}>
             <ExportCard
               icon={<FileTextOutlined style={{ fontSize: 32, color: '#1677ff' }} />}
               title="学生试卷"

@@ -328,7 +328,7 @@ const DiscussionRoomPage: React.FC = () => {
       {/* 顶部栏 */}
       <Card
         style={{ marginBottom: 0, borderRadius: '8px 8px 0 0' }}
-        bodyStyle={{ padding: '12px 16px' }}
+        styles={{ body: { padding: '12px 16px' } }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
@@ -524,7 +524,7 @@ const DiscussionRoomPage: React.FC = () => {
       {/* 输入区 */}
       <Card
         style={{ borderRadius: '0 0 8px 8px', borderTop: '1px solid #f0f0f0' }}
-        bodyStyle={{ padding: '12px 16px' }}
+        styles={{ body: { padding: '12px 16px' } }}
       >
         <Space.Compact style={{ width: '100%' }}>
           <TextArea

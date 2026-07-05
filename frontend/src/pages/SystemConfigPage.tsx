@@ -357,7 +357,7 @@ const UpgradePanel: React.FC = () => {
             <>
               <Divider />
               <Title level={5}>📋 更新日志</Title>
-              <Timeline items={verInfo.changelog.map((c: string) => ({ children: c }))} />
+              <Timeline items={verInfo.changelog.map((c: string) => ({ content: c }))} />
             </>
           )}
 
@@ -856,7 +856,7 @@ const SystemConfigPage: React.FC = () => {
                 包括 AI 对话中上传的文件。清理后不会影响系统运行，
                 但正在进行的对话中引用的文件可能需要重新上传。
               </Text>
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Alert
                   message="此操作将删除所有用户上传的临时文件，不可恢复！"
                   type="warning"

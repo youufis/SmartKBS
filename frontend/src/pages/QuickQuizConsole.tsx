@@ -328,7 +328,7 @@ const QuickQuizConsole: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" description="加载中..." />
       </div>
     )
   }
@@ -396,7 +396,7 @@ const QuickQuizConsole: React.FC = () => {
               title="当前题号"
               value={currentQuestion}
               suffix={`/ ${totalQuestions}`}
-              valueStyle={{ color: '#1677ff' }}
+              styles={{ content: { color: '#1677ff' } }}
               prefix={<BarChartOutlined />}
             />
           </Card>
@@ -406,9 +406,9 @@ const QuickQuizConsole: React.FC = () => {
             <Statistic
               title="状态"
               value={phase === 'question' ? '答题中' : phase === 'reveal' ? '已公布' : phase === 'ended' ? '已结束' : '等待中'}
-              valueStyle={{
+              styles={{ content: {
                 color: phase === 'question' ? '#faad14' : phase === 'reveal' ? '#52c41a' : phase === 'ended' ? '#888' : '#1677ff'
-              }}
+              } }}
               prefix={<ClockCircleOutlined />}
             />
           </Card>
@@ -419,7 +419,7 @@ const QuickQuizConsole: React.FC = () => {
               title="已作答"
               value={answeredCount}
               suffix={`/ ${totalPlayers}`}
-              valueStyle={{ color: answeredColor }}
+              styles={{ content: { color: answeredColor } }}
               prefix={<TeamOutlined />}
             />
           </Card>
@@ -429,7 +429,7 @@ const QuickQuizConsole: React.FC = () => {
             <Statistic
               title="玩家数"
               value={players.length}
-              valueStyle={{ color: '#722ed1' }}
+              styles={{ content: { color: '#722ed1' } }}
               prefix={<TeamOutlined />}
             />
           </Card>

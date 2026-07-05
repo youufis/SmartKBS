@@ -40,7 +40,7 @@ const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ su
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography.Title level={4} style={{ margin: 0 }}>📂 {displayTitle}</Typography.Title>
           <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>

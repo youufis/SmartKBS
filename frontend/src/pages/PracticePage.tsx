@@ -128,7 +128,7 @@ const StudentView: React.FC = () => {
             <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} />
             {q.type === 'single' && q.options && (
               <Radio.Group value={answers[String(q.id)]} onChange={e => setAnswers(p => ({...p, [String(q.id)]: e.target.value}))}>
-                <Space direction="vertical">
+                <Space orientation="vertical">
                   {Object.entries(q.options).map(([k, v]) => (
                     <Radio key={k} value={k} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{k}. <FormulaRenderer content={v as string} inline /></Radio>
                   ))}
@@ -375,7 +375,7 @@ const TeacherView: React.FC = () => {
       {tab === 'generate' && (
         <>
           <Card size="small" style={{ marginBottom: 16 }}>
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <TextArea rows={2} placeholder="输入知识点，如：算法与程序设计、数据结构..."
                 value={kpInput} onChange={e => setKpInput(e.target.value)} />
               <Space wrap>
@@ -402,7 +402,7 @@ const TeacherView: React.FC = () => {
             </Space>
           </Card>
 
-          {generating && <Spin tip="AI 正在出题..." style={{ display: 'block', margin: '40px auto' }} />}
+          {generating && <Spin description="AI 正在出题..." style={{ display: 'block', margin: '40px auto' }} />}
 
           {questions.map((q, i) => (
             <Card key={q.id} size="small" title={`第 ${i+1} 题 [${typeLabel[q.type] || q.type}]`}
@@ -421,7 +421,7 @@ const TeacherView: React.FC = () => {
 
           {questions.length > 0 && (
             <Card size="small" style={{ marginTop: 16 }}>
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Input placeholder="练习标题（自动生成）" value={title} onChange={e => setTitle(e.target.value)} />
                 <Space>
                   <Select value={targetGrade} onChange={setTargetGrade} placeholder="目标年级" style={{ width: 150 }}>

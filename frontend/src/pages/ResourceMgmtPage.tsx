@@ -416,7 +416,7 @@ const ResourceMgmtPage: React.FC = () => {
           key: 'files',
           label: <Space><FolderOutlined />文件管理</Space>,
           children: (
-            <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            <Space orientation="vertical" style={{ width: '100%' }} size={16}>
               {/* 顶部栏：标题 + 搜索 + 视图切换 + 刷新 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
                 <Typography.Title level={4} style={{ margin: 0 }}>⚙️ 资源管理</Typography.Title>
@@ -569,8 +569,8 @@ const ResourceMgmtPage: React.FC = () => {
         onCancel={() => setAiModalOpen(false)}
         width={640}
         footer={null}
-        destroyOnClose>
-        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+        destroyOnHidden>
+        <Space orientation="vertical" style={{ width: '100%' }} size={16}>
           {/* 类型选择 */}
           <div>
             <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>资源类型</Typography.Text>
@@ -750,7 +750,7 @@ const ResourceMgmtPage: React.FC = () => {
       <Modal title="重命名" open={renameModal}
         onOk={handleRename} onCancel={() => setRenameModal(false)}
         okText="确认" cancelText="取消">
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Typography.Text type="secondary">原名称：{renameOld}</Typography.Text>
           <Input value={renameNew} onChange={(e) => setRenameNew(e.target.value)}
             onPressEnter={handleRename} placeholder="输入新名称" />

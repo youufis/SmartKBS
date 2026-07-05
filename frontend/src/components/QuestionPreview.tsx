@@ -168,7 +168,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
   }
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+    <Space orientation="vertical" style={{ width: '100%' }} size={12}>
       {/* 统计卡片 */}
       <Row gutter={12}>
         <Col span={6}>
@@ -177,7 +177,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
               title="总题数"
               value={questions.length}
               suffix="道"
-              valueStyle={{ color: '#1677ff' }}
+              styles={{ content: { color: '#1677ff' } }}
             />
           </Card>
         </Col>
@@ -188,7 +188,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
               value={totalScore}
               suffix="分"
               precision={1}
-              valueStyle={{ color: '#52c41a' }}
+              styles={{ content: { color: '#52c41a' } }}
             />
           </Card>
         </Col>

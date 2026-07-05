@@ -1001,7 +1001,7 @@ const ChatPage: React.FC = () => {
         onCancel={() => setPushModalOpen(false)}
         footer={null}
         width={420}
-        bodyStyle={{ padding: 0 }}
+        styles={{ body: { padding: 0 } }}
       >
         <div style={{ maxHeight: 420, display: 'flex', flexDirection: 'column' }}>
           {/* 头部 */}
@@ -1116,7 +1116,7 @@ const ChatPage: React.FC = () => {
         background: companionMode ? 'linear-gradient(0deg, #f8f6ff 0%, #ffffff 100%)' : '#fff',
         transition: 'all 0.3s ease',
       }}>
-        <Space direction="vertical" style={{ width: '100%' }} size={6}>
+        <Space orientation="vertical" style={{ width: '100%' }} size={6}>
           {/* 图片预览 */}
           {imagePreviewHtml && (
             <div dangerouslySetInnerHTML={{ __html: imagePreviewHtml }} style={{ borderBottom: '1px solid #f0f0f0', padding: '4px 0' }} />
@@ -1265,7 +1265,7 @@ const ChatPage: React.FC = () => {
       <Drawer
         title="📋 历史记录"
         placement="left"
-        width={360}
+        size={360}
         open={historyOpen}
         onClose={() => { setHistoryOpen(false); }}
       >
@@ -1319,7 +1319,7 @@ const ChatPage: React.FC = () => {
         onCancel={() => setShowPreview(false)}
         width="90%"
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <iframe
           srcDoc={previewHtml}
@@ -1335,12 +1335,12 @@ const ChatPage: React.FC = () => {
         open={taskSelectOpen}
         onCancel={() => setTaskSelectOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Typography.Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
           检测到多个活动任务，请选择要提交到的任务：
         </Typography.Text>
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           {pendingTasks.map(task => (
             <Card
               key={task.id}

@@ -498,7 +498,7 @@ const ScorePage: React.FC = () => {
               <Divider type="vertical" style={{ height: 40 }} />
               <Col>
                 <Statistic title="总积分" value={stats.total} prefix={<TrophyOutlined />}
-                  valueStyle={{ color: '#faad14' }} />
+                  styles={{ content: { color: '#faad14' } }} />
               </Col>
               <Col>
                 <Statistic title="平均分" value={stats.avg} suffix="/ 人" />
@@ -760,7 +760,7 @@ const ScorePage: React.FC = () => {
         okText="保存"
         cancelText="取消"
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <div>
             <Text>姓名</Text>
             <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="学生姓名" />

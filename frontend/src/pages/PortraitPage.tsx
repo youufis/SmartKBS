@@ -270,7 +270,7 @@ const PortraitPage: React.FC = () => {
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 60 }}>
-          <Spin size="large" tip="加载中..." />
+          <Spin size="large" description="加载中..." />
         </div>
       ) : todayExists && todayPortrait ? (
         <>
@@ -315,7 +315,7 @@ const PortraitPage: React.FC = () => {
                 )
               }
             >
-              <Space direction="vertical" style={{ width: '100%' }} size="small">
+              <Space orientation="vertical" style={{ width: '100%' }} size="small">
                 <Space>
                   <Tag icon={<CalendarOutlined />}>{todayPortrait.created_date}</Tag>
                   <Tag icon={STYLE_EMOJI[todayPortrait.style] || '🎨'}>
@@ -730,7 +730,7 @@ const PortraitPage: React.FC = () => {
                       </Space>
                     }
                     description={
-                      <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                      <Space orientation="vertical" size={2} style={{ width: '100%' }}>
                         <Space>
                           <Tag>{portrait.created_date}</Tag>
                           <Tag>{STYLE_EMOJI[portrait.style] || '🎨'}{' '}
@@ -777,7 +777,7 @@ const PortraitPage: React.FC = () => {
       footer={null}
       width={720}
       centered
-      destroyOnClose
+      destroyOnHidden
     >
       {detailPortrait && (() => {
         const dt = getTheme(detailPortrait.portrait_theme || themeKey, detailPortrait.style)
@@ -830,7 +830,7 @@ const PortraitPage: React.FC = () => {
               </div>
             </Col>
             <Col xs={24} md={12}>
-              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              <Space orientation="vertical" style={{ width: '100%' }} size="middle">
                 <div>
                   <Text strong style={{ fontSize: 16 }}>📅 {detailPortrait.created_date}</Text>
                   <br />
@@ -926,7 +926,7 @@ const PortraitPage: React.FC = () => {
       {sharingPortrait && (() => {
         const st = getTheme(sharingPortrait.portrait_theme || themeKey, sharingPortrait.style)
         return (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -970,7 +970,7 @@ const PortraitPage: React.FC = () => {
             onChange={(e) => setShareScope(e.target.value)}
             style={{ width: '100%' }}
           >
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               <Radio.Button value="public" style={{ display: 'block', height: 44, lineHeight: '44px', marginBottom: 8 }}>
                 <GlobalOutlined /> 分享中心 — 全校可见
               </Radio.Button>

@@ -246,7 +246,7 @@ const CurriculumProgressPage: React.FC = () => {
   if (initLoading) {
     return (
       <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
-        <Card><div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" tip="正在加载数据..." /></div></Card>
+        <Card><div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" description="正在加载数据..." /></div></Card>
       </Layout>
     )
   }
@@ -285,9 +285,9 @@ const CurriculumProgressPage: React.FC = () => {
           <>
             <Row gutter={16} style={{ marginBottom: 16 }}>
               <Col span={6}><Card><Statistic title="学生总数" value={stats.totalStudents} prefix={<TeamOutlined />} /></Card></Col>
-              <Col span={6}><Card><Statistic title="平均完成率" value={stats.avgRate} suffix="%" precision={1} valueStyle={{ color: stats.avgRate >= 60 ? '#52c41a' : '#faad14' }} /></Card></Col>
-              <Col span={6}><Card><Statistic title="最高课程" value={stats.bestCourse || '—'} valueStyle={{ fontSize: 18 }} /></Card></Col>
-              <Col span={6}><Card><Statistic title="最高完成率" value={stats.bestRate} suffix="%" precision={1} valueStyle={{ color: '#52c41a' }} /></Card></Col>
+              <Col span={6}><Card><Statistic title="平均完成率" value={stats.avgRate} suffix="%" precision={1} styles={{ content: { color: stats.avgRate >= 60 ? '#52c41a' : '#faad14' } }} /></Card></Col>
+              <Col span={6}><Card><Statistic title="最高课程" value={stats.bestCourse || '—'} styles={{ content: { fontSize: 18 } }} /></Card></Col>
+              <Col span={6}><Card><Statistic title="最高完成率" value={stats.bestRate} suffix="%" precision={1} styles={{ content: { color: '#52c41a' } }} /></Card></Col>
             </Row>
 
             <Card

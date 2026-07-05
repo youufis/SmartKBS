@@ -619,7 +619,7 @@ const UserMgmtPage: React.FC = () => {
       key: 'search',
       label: '查询用户',
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Form form={searchForm} layout="inline" onFinish={handleSearch}>
             <Form.Item name="keyword" rules={[{ required: true }]}>
               <Input placeholder="用户名/姓名" style={{ width: 240 }} />
@@ -643,7 +643,7 @@ const UserMgmtPage: React.FC = () => {
       key: 'list',
       label: '用户列表',
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>刷新列表</Button>
           {allUsers.length > 0 && (
             <Table dataSource={allUsers} columns={userColumns} rowKey="username"
@@ -656,7 +656,7 @@ const UserMgmtPage: React.FC = () => {
       key: 'import',
       label: '批量操作',
       children: (
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <Card size="small" title="导入用户">
             <Space>
               <Upload beforeUpload={handleImport} showUploadList={false} accept=".csv" disabled={importProgress.visible}>
@@ -696,10 +696,10 @@ const UserMgmtPage: React.FC = () => {
                   : null
               }
               closable={importProgress.done}
-              maskClosable={importProgress.done}
+              mask={{ closable: importProgress.done }}
               onCancel={handleImportDone}
             >
-              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              <Space orientation="vertical" style={{ width: '100%' }} size="middle">
                 <Progress percent={importProgress.percent} status={importProgress.done ? (importProgress.errorCount > 0 ? 'exception' : 'success') : 'active'} />
                 <Typography.Text>{importProgress.message}</Typography.Text>
                 {importProgress.total > 0 && (
@@ -739,10 +739,10 @@ const UserMgmtPage: React.FC = () => {
                   : null
               }
               closable={bulkDeleteProgress.done}
-              maskClosable={bulkDeleteProgress.done}
+              mask={{ closable: bulkDeleteProgress.done }}
               onCancel={handleBulkDeleteDone}
             >
-              <Space direction="vertical" style={{ width: '100%' }} size="middle">
+              <Space orientation="vertical" style={{ width: '100%' }} size="middle">
                 <Progress percent={bulkDeleteProgress.percent} status={bulkDeleteProgress.done ? (bulkDeleteProgress.errorCount > 0 ? 'exception' : 'success') : 'active'} />
                 <Typography.Text>{bulkDeleteProgress.message}</Typography.Text>
                 {bulkDeleteProgress.total > 0 && (
@@ -767,7 +767,7 @@ const UserMgmtPage: React.FC = () => {
           <Card size="small" title={<span><RiseOutlined /> 批量升年级</span>}
             extra={isAdmin ? null : <Typography.Text type="warning">仅管理员可用</Typography.Text>}>
             {isAdmin ? (
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space orientation="vertical" style={{ width: '100%' }}>
                 <Typography.Text type="secondary">
                   按学段自动升级：一年级→二年级→…→六年级→（毕业），初一→初二→初三→（毕业），高一→高二→高三→（毕业）。
                   毕业年级学生保留账号但不再升级。
@@ -811,7 +811,7 @@ const UserMgmtPage: React.FC = () => {
 
                     {/* 选项 */}
                     <Card size="small" type="inner" title="升级选项" style={{ marginBottom: 12 }}>
-                      <Space direction="vertical">
+                      <Space orientation="vertical">
                         <Checkbox
                           checked={promoteOptions.sync_scores}
                           onChange={(e) => setPromoteOptions(prev => ({ ...prev, sync_scores: e.target.checked }))}
@@ -863,7 +863,7 @@ const UserMgmtPage: React.FC = () => {
                       </span>
                     }
                     style={{ marginTop: 12, background: promoteResult.success ? '#f6ffed' : '#fff2f0' }}>
-                    <Space direction="vertical">
+                    <Space orientation="vertical">
                       {!promoteResult.success && (
                         <Typography.Text type="danger">❌ 升年级失败，数据已全部回滚</Typography.Text>
                       )}

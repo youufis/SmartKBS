@@ -809,7 +809,7 @@ const ExamPage: React.FC = () => {
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 20 }}>
-      <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         {/* ── 标题和操作栏 ── */}
         <Row justify="space-between" align="middle">
           <Col>
@@ -1454,7 +1454,7 @@ const ExamPage: React.FC = () => {
               <Card size="small" style={{ marginBottom: 16 }}>
                 <Space>
                   <Statistic title="得分" value={detailData.attempt.score} suffix={`/ ${detailData.attempt.total_score}`}
-                    valueStyle={{ color: detailData.attempt.score >= (detailData.attempt.total_score || 100) * 0.6 ? '#52c41a' : '#ff4d4f' }} />
+                    styles={{ content: { color: detailData.attempt.score >= (detailData.attempt.total_score || 100) * 0.6 ? '#52c41a' : '#ff4d4f' } }} />
                 </Space>
               </Card>
               {(!detailData.questions || detailData.questions.length === 0) ? (
@@ -1498,7 +1498,7 @@ const ExamPage: React.FC = () => {
                         })}
                       </div>
                     )}
-                    <Space direction="vertical" style={{ width: '100%' }} size={4}>
+                    <Space orientation="vertical" style={{ width: '100%' }} size={4}>
                       <Typography.Text><strong>你的答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
                       <Typography.Text><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
                       <Typography.Text><strong>得分：</strong>
@@ -1694,7 +1694,7 @@ const StudentExamDetail: React.FC<{
               </div>
             )}
 
-            <Space direction="vertical" size={2} style={{ fontSize: 13, width: '100%' }}>
+            <Space orientation="vertical" size={2} style={{ fontSize: 13, width: '100%' }}>
               <Typography.Text style={{ fontSize: 13 }}><strong>学生答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
               <Typography.Text style={{ fontSize: 13 }}><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
               <Typography.Text style={{ fontSize: 13 }}><strong>得分：</strong>
@@ -1760,7 +1760,7 @@ const StudentExamDetail: React.FC<{
       <Modal title="复核 AI 批改" open={reviewModal} onCancel={() => setReviewModal(false)}
         onOk={handleReviewSubmit} confirmLoading={reviewing}
         okText="确认复核" cancelText="取消">
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <div>
             <Typography.Text>当前 AI 评分：</Typography.Text>
             <Tag color="blue">{detail.attempt.score} / {detail.attempt.total_score}</Tag>

@@ -221,7 +221,7 @@ const QuestPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 120 }}>
-        <Spin size="large" tip="加载中..." />
+        <Spin size="large" description="加载中..." />
       </div>
     )
   }
@@ -313,7 +313,7 @@ const QuestPage: React.FC = () => {
             value={stats?.badge_count || 0}
             prefix={<CrownOutlined style={{ color: '#faad14' }} />}
             suffix="枚"
-            valueStyle={{ color: '#faad14' }}
+            styles={{ content: { color: '#faad14' } }}
           />
         </Card>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
@@ -330,7 +330,7 @@ const QuestPage: React.FC = () => {
             value={stats?.best_correct || 0}
             prefix={<StarOutlined style={{ color: '#1677ff' }} />}
             suffix={`/ ${15} 题`}
-            valueStyle={{ color: getScoreColor(stats?.best_correct || 0) }}
+            styles={{ content: { color: getScoreColor(stats?.best_correct || 0) } }}
           />
         </Card>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
@@ -339,7 +339,7 @@ const QuestPage: React.FC = () => {
               value={bankStats?.total_questions || 0}
               prefix={<DatabaseOutlined style={{ color: '#722ed1' }} />}
               suffix="题"
-              valueStyle={{ color: '#722ed1', fontSize: 22 }}
+              styles={{ content: { color: '#722ed1', fontSize: 22 } }}
             />
             {bankStats?.by_category && bankStats.by_category.length > 0 && (
               <div style={{ marginTop: 4, fontSize: 11, color: '#999' }}>
@@ -391,7 +391,7 @@ const QuestPage: React.FC = () => {
         footer={<Button onClick={() => setRulesOpen(false)}>知道了</Button>}
         width={600}
       >
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <div>
             <Title level={5}>🎯 玩法</Title>
             <Paragraph>
