@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNewsStore } from '../stores/newsStore';
+import { useAuthStore } from '../stores/authStore';
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -21,6 +22,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 const NewsHubPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const user = useAuthStore((s) => s.user);
+  const isTeacherOrAdmin = user?.role === 'teacher' || user?.role === 'admin';
   const {
     articles, categories, loading, stats,
     loadList, loadCategories, getDetail, toggleFavorite, loadStats,
@@ -113,9 +116,11 @@ const NewsHubPage: React.FC = () => {
             <Text strong style={{ fontSize: 16 }}>热点新闻</Text>
           </Space>
           <Space>
-            <Button size="small" onClick={handleOpenBriefing}>
-              📋 今日简报
-            </Button>
+            {isTeacherOrAdmin && (
+              <Button size="small" onClick={handleOpenBriefing}>
+                📋 今日简报
+              </Button>
+            )}
             <Button
               size="small"
               icon={<ReloadOutlined />}
