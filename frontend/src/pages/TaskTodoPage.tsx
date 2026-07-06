@@ -268,7 +268,7 @@ const TaskTodoPage: React.FC = () => {
   const totalCount = data.items.length
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       {/* ─── 页头 ─── */}
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
         <Col>
@@ -410,7 +410,7 @@ const TaskTodoPage: React.FC = () => {
           </Row>
         </Card>
       )}
-    </div>
+    </Card>
   )
 }
 

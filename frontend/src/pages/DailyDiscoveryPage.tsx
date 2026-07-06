@@ -112,7 +112,7 @@ const DailyDiscoveryPage: React.FC = () => {
   );
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       {/* 顶部栏 */}
       <Card
         size="small"
@@ -249,7 +249,7 @@ const DailyDiscoveryPage: React.FC = () => {
           </div>
         )}
       </Modal>
-    </div>
+    </Card>
   );
 };
 

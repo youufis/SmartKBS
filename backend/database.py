@@ -1697,6 +1697,53 @@ def init_db():
                 created_at TEXT NOT NULL
             )""")
 
+            # ═══════════════════════════════════════════════
+            # 学子风采·荣誉展示墙（v7.0）
+            # ═══════════════════════════════════════════════
+
+            # ── 展示卡主表（每学生仅一张，重新生成时覆盖更新） ──
+            c.execute("""CREATE TABLE IF NOT EXISTS student_showcase (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_username TEXT NOT NULL UNIQUE,
+                generated_by TEXT NOT NULL,
+                snapshot_data TEXT NOT NULL,
+                theme_style TEXT DEFAULT 'auto',
+                like_count INTEGER DEFAULT 0,
+                view_count INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                sort_order INTEGER DEFAULT 0,
+                batch_id TEXT NOT NULL,
+                generated_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_showcase_active ON student_showcase(is_active, sort_order)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_showcase_batch ON student_showcase(batch_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 展示卡点赞表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS showcase_likes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                showcase_id INTEGER NOT NULL REFERENCES student_showcase(id) ON DELETE CASCADE,
+                username TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(showcase_id, username)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_showcase_likes ON showcase_likes(showcase_id)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 展示卡浏览去重表 ──
+            c.execute("""CREATE TABLE IF NOT EXISTS showcase_view_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                showcase_id INTEGER NOT NULL REFERENCES student_showcase(id) ON DELETE CASCADE,
+                username TEXT NOT NULL,
+                viewed_at TEXT NOT NULL,
+                UNIQUE(showcase_id, username)
+            )""")
+
             conn.commit()
             logger.debug("数据库初始化完成")
 

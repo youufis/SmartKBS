@@ -1,0 +1,372 @@
+/* ═══════════════════════════════════════════════
+   学子风采·荣誉展示墙 样式表
+   12 套称号主题皮肤 + 卡片布局 + 动画
+   ═══════════════════════════════════════════════ */
+
+/* ── 卡片网格布局 ── */
+.showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  padding: 4px;
+}
+
+@media (max-width: 640px) {
+  .showcase-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (min-width: 641px) and (max-width: 1024px) {
+  .showcase-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (min-width: 1025px) and (max-width: 1400px) {
+  .showcase-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+@media (min-width: 1401px) {
+  .showcase-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ── 卡片基础样式 ── */
+.showcase-card {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+}
+.showcase-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* 卡片顶部称号横幅 */
+.showcase-card-banner {
+  padding: 14px 16px 10px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.showcase-card-banner .banner-emoji {
+  font-size: 22px;
+  margin-right: 6px;
+}
+.showcase-card-banner .banner-level {
+  opacity: 0.85;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 卡片主体内容区 */
+.showcase-card-body {
+  padding: 12px 16px 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 学生姓名 + 班级 */
+.showcase-card-header {
+  text-align: center;
+  margin-bottom: 10px;
+}
+.showcase-card-header .student-name {
+  font-size: 20px;
+  font-weight: 700;
+}
+.showcase-card-header .student-class {
+  font-size: 12px;
+  opacity: 0.65;
+  margin-top: 2px;
+}
+
+/* 积分星级 */
+.showcase-points {
+  text-align: center;
+  margin-bottom: 8px;
+}
+.showcase-points .stars {
+  font-size: 16px;
+  letter-spacing: 2px;
+}
+.showcase-points .points-number {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 4px 0 2px;
+}
+.showcase-points .points-label {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* 进度条 */
+.showcase-progress {
+  margin-bottom: 10px;
+}
+.showcase-progress .progress-label {
+  font-size: 11px;
+  opacity: 0.65;
+  margin-bottom: 3px;
+}
+.showcase-progress .progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+.showcase-progress .progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.8s ease;
+}
+.showcase-progress .progress-text {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 2px;
+  text-align: right;
+}
+
+/* 徽章墙 */
+.showcase-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  min-height: 32px;
+}
+.showcase-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  position: relative;
+}
+/* 徽章流光动画 */
+.showcase-badge.glowing::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 50%;
+  background: linear-gradient(45deg, #ffd700, #ffec8b, #ffd700);
+  background-size: 200% 200%;
+  animation: shimmer 2s ease-in-out infinite;
+  z-index: -1;
+  opacity: 0.6;
+}
+@keyframes shimmer {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* 学科称号标签 */
+.showcase-subject-titles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.showcase-subject-tag {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+}
+
+/* 互动栏 */
+.showcase-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  margin-top: auto;
+}
+.showcase-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+.showcase-stat .anticon {
+  font-size: 15px;
+}
+
+/* ── 点赞按钮 ── */
+.like-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  background: transparent;
+}
+.like-btn:hover {
+  background: rgba(255, 77, 79, 0.08);
+}
+.like-btn.liked {
+  color: #ff4d4f;
+}
+.like-btn .anticon {
+  font-size: 16px;
+  transition: transform 0.2s ease;
+}
+.like-btn:hover .anticon {
+  transform: scale(1.2);
+}
+
+/* 点赞粒子动画 */
+@keyframes like-particle {
+  0% { opacity: 1; transform: translate(0, 0) scale(1); }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0); }
+}
+.like-particle {
+  position: fixed;
+  pointer-events: none;
+  font-size: 18px;
+  z-index: 999;
+  animation: like-particle 0.7s ease-out forwards;
+}
+
+/* ── 10 套预设主题皮肤 ── */
+/* 通过 .theme-{key} 作用于 .showcase-card 容器 */
+
+/* 1. 晨曦金 */
+.theme-golden .showcase-card {
+  background: linear-gradient(145deg, #fffbe6 0%, #ffffff 100%);
+  border: 1px solid #ffe58f;
+  box-shadow: 0 4px 16px rgba(250, 173, 20, 0.15);
+}
+.theme-golden .showcase-card-banner { background: linear-gradient(135deg, #faad14 0%, #ffe58f 100%); color: #7a6100; }
+.theme-golden .progress-bar { background: #faad14; }
+
+/* 2. 海洋蓝 */
+.theme-ocean .showcase-card {
+  background: linear-gradient(145deg, #e6f7ff 0%, #ffffff 100%);
+  border: 1px solid #91d5ff;
+  box-shadow: 0 4px 16px rgba(22, 119, 255, 0.15);
+}
+.theme-ocean .showcase-card-banner { background: linear-gradient(135deg, #1677ff 0%, #91d5ff 100%); color: #003a8c; }
+.theme-ocean .progress-bar { background: #1677ff; }
+
+/* 3. 森林绿 */
+.theme-forest .showcase-card {
+  background: linear-gradient(145deg, #f6ffed 0%, #ffffff 100%);
+  border: 1px solid #95de64;
+  box-shadow: 0 4px 16px rgba(82, 196, 26, 0.15);
+}
+.theme-forest .showcase-card-banner { background: linear-gradient(135deg, #52c41a 0%, #b7eb8f 100%); color: #1f5a00; }
+.theme-forest .progress-bar { background: #52c41a; }
+
+/* 4. 樱花粉 */
+.theme-cherry .showcase-card {
+  background: linear-gradient(145deg, #fff0f6 0%, #ffffff 100%);
+  border: 1px solid #ffadd2;
+  box-shadow: 0 4px 16px rgba(235, 47, 150, 0.15);
+}
+.theme-cherry .showcase-card-banner { background: linear-gradient(135deg, #eb2f96 0%, #ffadd2 100%); color: #7a0048; }
+.theme-cherry .progress-bar { background: #eb2f96; }
+
+/* 5. 极光紫 */
+.theme-aurora .showcase-card {
+  background: linear-gradient(145deg, #f9f0ff 0%, #ffffff 100%);
+  border: 1px solid #d3adf7;
+  box-shadow: 0 4px 16px rgba(114, 46, 209, 0.15);
+}
+.theme-aurora .showcase-card-banner { background: linear-gradient(135deg, #722ed1 0%, #d3adf7 100%); color: #3c0a6e; }
+.theme-aurora .progress-bar { background: #722ed1; }
+
+/* 6. 日落橙 */
+.theme-sunset .showcase-card {
+  background: linear-gradient(145deg, #fff7e6 0%, #ffffff 100%);
+  border: 1px solid #ffd591;
+  box-shadow: 0 4px 16px rgba(250, 140, 22, 0.15);
+}
+.theme-sunset .showcase-card-banner { background: linear-gradient(135deg, #fa8c16 0%, #ffd591 100%); color: #7a4200; }
+.theme-sunset .progress-bar { background: #fa8c16; }
+
+/* 7. 星空黑 */
+.theme-cosmic .showcase-card {
+  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
+  border: 1px solid #5a5a8a;
+  box-shadow: 0 4px 20px rgba(114, 46, 209, 0.25);
+  color: #e0e0f0;
+}
+.theme-cosmic .showcase-card-banner {
+  background: linear-gradient(135deg, #722ed1 0%, #1a1a2e 100%);
+  color: #e0d0ff;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.theme-cosmic .student-name { color: #d0c0ff; }
+.theme-cosmic .points-number { color: #ffd700; }
+.theme-cosmic .progress-track { background: rgba(255,255,255,0.1); }
+.theme-cosmic .showcase-card-footer { border-top-color: rgba(255,255,255,0.08); }
+.theme-cosmic .showcase-stat { color: #aaa; }
+.theme-cosmic .progress-bar { background: #722ed1; }
+.theme-cosmic .showcase-subject-tag {
+  background: rgba(114, 46, 209, 0.2);
+  border-color: rgba(114, 46, 209, 0.3);
+  color: #c0b0e0;
+}
+
+/* 8. 薄荷青 */
+.theme-mint .showcase-card {
+  background: linear-gradient(145deg, #e6fffb 0%, #ffffff 100%);
+  border: 1px solid #87e8de;
+  box-shadow: 0 4px 16px rgba(19, 194, 194, 0.15);
+}
+.theme-mint .showcase-card-banner { background: linear-gradient(135deg, #13c2c2 0%, #87e8de 100%); color: #006060; }
+.theme-mint .progress-bar { background: #13c2c2; }
+
+/* 9. 烈焰红 */
+.theme-flame .showcase-card {
+  background: linear-gradient(145deg, #fff1f0 0%, #ffffff 100%);
+  border: 1px solid #ffa39e;
+  box-shadow: 0 4px 16px rgba(245, 34, 45, 0.15);
+}
+.theme-flame .showcase-card-banner { background: linear-gradient(135deg, #f5222d 0%, #ffa39e 100%); color: #7a0010; }
+.theme-flame .progress-bar { background: #f5222d; }
+
+/* 10. 极简灰 */
+.theme-minimal .showcase-card {
+  background: linear-gradient(145deg, #fafafa 0%, #ffffff 100%);
+  border: 1px solid #d9d9d9;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.theme-minimal .showcase-card-banner { background: linear-gradient(135deg, #8c8c8c 0%, #d9d9d9 100%); color: #333; }
+.theme-minimal .progress-bar { background: #8c8c8c; }
+
+/* 默认 fallback（无匹配主题时） */
+.showcase-card.default-theme {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.showcase-card.default-theme .showcase-card-banner {
+  background: #f5f5f5;
+  color: #666;
+}
+.showcase-card.default-theme .progress-bar { background: #faad14; }

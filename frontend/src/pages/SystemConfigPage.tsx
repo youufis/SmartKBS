@@ -815,11 +815,10 @@ const SystemConfigPage: React.FC = () => {
   }
 
   return (
-    <div>
-      <Card>
-        <Space style={{ marginBottom: 16 }}>
-          <SettingOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-          <Title level={4} style={{ margin: 0 }}>系统配置</Title>
+    <Card style={{ borderRadius: 8 }}>
+      <Space style={{ marginBottom: 16 }}>
+        <SettingOutlined style={{ fontSize: 24, color: '#1677ff' }} />
+        <Title level={4} style={{ margin: 0 }}>系统配置</Title>
         </Space>
 
         {apikeyStatus && !apikeyStatus.configured && (
@@ -937,9 +936,7 @@ const SystemConfigPage: React.FC = () => {
           </Tabs.TabPane>
 
         </Tabs>
-      </Card>
-
-    </div>
+    </Card>
   )
 }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Layout, Menu, Dropdown, Avatar, Space, Typography } from 'antd'
+import { Layout, Menu, Dropdown, Avatar, Space, Typography, Card } from 'antd'
 import {
   HomeOutlined,
   MessageOutlined,
@@ -27,6 +27,7 @@ import {
   SafetyCertificateOutlined,
   PictureOutlined,
   GlobalOutlined,
+  CrownOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
@@ -72,6 +73,7 @@ const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; ch
     { key: '/student-questions', icon: <MessageOutlined />, label: '课堂提问' },
   ]},
   { icon: <TrophyOutlined />, label: '成长档案', key: 'growth', children: [
+    { key: '/showcase', icon: <CrownOutlined />, label: '荣耀殿堂' },
     { key: '/score', icon: <StarOutlined />, label: '积分中心' },
     { key: '/portfolio', icon: <UserOutlined />, label: '个人档案' },
     { key: '/portrait', icon: <PictureOutlined />, label: '每周画像' },
@@ -126,6 +128,7 @@ const teacherMenuItems: TeacherMenuItem[] = [
       { key: '/quest-records', icon: <TrophyOutlined />, label: '闯关管理', adminOrTeacherOnly: true },
     ]},
     { type: 'group', icon: <BarChartOutlined />, label: '学情分析', key: 'analytics', children: [
+      { key: '/showcase', icon: <CrownOutlined />, label: '荣耀殿堂' },
       { key: '/analytics', icon: <BarChartOutlined />, label: '学情总览' },
       { key: '/class-summary', icon: <RobotOutlined />, label: '课堂总结' },
       { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '进度详情' },
@@ -345,7 +348,7 @@ const AppLayout: React.FC = () => {
         </Space>
       </Header>
 
-      <Layout style={{ height: 'calc(100vh - 64px)' }}>
+      <Layout style={{ height: 'calc(100vh - 64px)', padding: 12, gap: 12, background: 'var(--bg-layout)' }}>
         <Sider
           width={200}
           collapsedWidth={64}
@@ -361,6 +364,7 @@ const AppLayout: React.FC = () => {
             position: 'sticky',
             top: 0,
             left: 0,
+            borderRadius: 8,
           }}
         >
           {/* 折叠/展开切换按钮 */}
@@ -387,30 +391,11 @@ const AppLayout: React.FC = () => {
             onClick={({ key }) => navigate(key)}
             openKeys={collapsed ? [] : openKeys}
             onOpenChange={setOpenKeys}
-            style={{ height: '100%', borderRight: 0 }}
+            style={{ height: '100%', borderRight: 0, padding: '4px 0' }}
           />
         </Sider>
 
-        <Content style={{ padding: '8px 0', background: 'var(--bg-layout)', overflow: 'auto', height: '100%' }}>
-          {location.pathname === '/code-practice' && (
-            <div style={{
-              padding: '12px 24px',
-              background: 'linear-gradient(135deg, var(--login-gradient-start) 0%, var(--login-gradient-end) 100%)',
-              marginBottom: 8,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}>
-              <div style={{ color: '#fff' }}>
-                <span style={{ fontSize: 15, fontWeight: 500, opacity: 0.95 }}>
-                  {codeQuote}
-                </span>
-              </div>
-              <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>
-                {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-              </div>
-            </div>
-          )}
+        <Content style={{ padding: 24, background: 'var(--bg-layout)', overflow: 'auto', height: '100%', borderRadius: 8, flex: 1 }}>
           <Outlet />
           <div style={{ textAlign: 'center', padding: '16px 0 0', color: 'var(--footer-text)', fontSize: 12 }}>
             © 2026 UNET. All rights reserved.

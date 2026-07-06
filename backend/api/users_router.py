@@ -193,6 +193,12 @@ def _delete_user_completely(username: str):
         # 自我画像数据
         ("DELETE FROM portrait_likes WHERE portrait_id IN (SELECT id FROM student_portraits WHERE username=?)", (username,)),
         ("DELETE FROM student_portraits WHERE username=?", (username,)),
+        # 荣耀殿堂展示墙数据
+        ("DELETE FROM showcase_likes WHERE showcase_id IN (SELECT id FROM student_showcase WHERE student_username=?)", (username,)),
+        ("DELETE FROM showcase_view_logs WHERE showcase_id IN (SELECT id FROM student_showcase WHERE student_username=?)", (username,)),
+        ("DELETE FROM student_showcase WHERE student_username=?", (username,)),
+        ("DELETE FROM showcase_likes WHERE username=?", (username,)),
+        ("DELETE FROM showcase_view_logs WHERE username=?", (username,)),
         # 学伴数据
         ("DELETE FROM ai_companion_config WHERE username=?", (username,)),
         ("DELETE FROM ai_companion_memory WHERE student_username=?", (username,)),

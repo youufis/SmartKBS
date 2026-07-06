@@ -257,7 +257,7 @@ const PortraitPage: React.FC = () => {
   // Tab 1: 本周创作
   // ─────────────────────────────────────────
   const renderTodayTab = () => (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       {/* 头部信息 */}
       <Card style={{ marginBottom: 16, borderRadius: 12, textAlign: 'center' }}>
         <Title level={4}>
@@ -493,7 +493,7 @@ const PortraitPage: React.FC = () => {
             </>
         </Card>
       )}
-    </div>
+    </Card>
   )
 
   // ─────────────────────────────────────────
@@ -510,7 +510,7 @@ const PortraitPage: React.FC = () => {
     const end = start + historyPageSize
     const paged = filtered.slice(start, end)
     return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Title level={4} style={{ margin: 0 }}><StarOutlined /> 我的画展 · 共 {filtered.length} 幅</Title>
         <Input.Search
@@ -620,7 +620,7 @@ const PortraitPage: React.FC = () => {
         </div>
         </>
       )}
-    </div>
+    </Card>
   )
   }
 
@@ -991,7 +991,7 @@ const PortraitPage: React.FC = () => {
   // 主渲染
   // ─────────────────────────────────────────
   return (
-    <div style={{ padding: '8px 0' }}>
+    <Card style={{ borderRadius: 8 }}>
       {/* ── 主题选择器 ── */}
       <div style={{
         display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
@@ -1080,7 +1080,7 @@ const PortraitPage: React.FC = () => {
 
       {renderDetailModal()}
       {renderShareModal()}
-    </div>
+    </Card>
   )
 }
 

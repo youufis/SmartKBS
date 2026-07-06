@@ -243,7 +243,7 @@ const WhiteboardPage: React.FC = () => {
   ]
 
   return (
-    <div style={{ padding: '8px 16px', maxWidth: '100%', margin: 0 }}>
+    <Card style={{ borderRadius: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Title level={3} style={{ margin: 0 }}>🎨 白板</Title>
         <Space>
@@ -379,7 +379,7 @@ const WhiteboardPage: React.FC = () => {
           </div>
         </Space>
       </Modal>
-    </div>
+    </Card>
   )
 }
 

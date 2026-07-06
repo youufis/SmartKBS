@@ -80,7 +80,7 @@ const CompanionSettings: React.FC = () => {
   }
 
   return (
-    <div style={{ maxWidth: '100%', margin: '0 auto', padding: '16px' }}>
+    <Card style={{ borderRadius: 8 }}>
       {/* ── 顶部导航 ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/chat?companion=1')}>
@@ -294,7 +294,7 @@ const CompanionSettings: React.FC = () => {
           </Card>
         </Col>
       </Row>
-    </div>
+    </Card>
   )
 }
 

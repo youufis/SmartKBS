@@ -968,15 +968,15 @@ const QuestAdminPage: React.FC = () => {
   ]
 
   return (
-    <div style={{ padding: '12px 16px', width: '100%' }}>
-      <Title level={3} style={{ marginBottom: 12 }}>
+    <Card style={{ borderRadius: 8 }}>
+      <Title level={4} style={{ marginBottom: 12 }}>
         <TrophyOutlined style={{ marginRight: 8 }} />
         闯关管理
       </Title>
       <Card style={{ borderRadius: 8 }}>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </Card>
-    </div>
+    </Card>
   )
 }
 

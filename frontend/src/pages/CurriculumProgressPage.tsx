@@ -235,7 +235,7 @@ const CurriculumProgressPage: React.FC = () => {
 
   if (!isTeacherOrAdmin) {
     return (
-      <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
+      <Layout style={{ background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
         <Card>
           <Typography.Text type="secondary">权限不足，仅教师和管理员可查看学情进度</Typography.Text>
         </Card>
@@ -245,7 +245,7 @@ const CurriculumProgressPage: React.FC = () => {
 
   if (initLoading) {
     return (
-      <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
+      <Layout style={{ background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
         <Card><div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" description="正在加载数据..." /></div></Card>
       </Layout>
     )
@@ -326,7 +326,7 @@ const CurriculumProgressPage: React.FC = () => {
   }
 
   return (
-    <Layout style={{ padding: 24, background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
+    <Layout style={{ background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
       <Card>
         <Tabs
           defaultActiveKey="curriculum"

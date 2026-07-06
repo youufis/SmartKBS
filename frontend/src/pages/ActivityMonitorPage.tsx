@@ -367,7 +367,7 @@ const ActivityMonitorPage: React.FC = () => {
   }
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       <Tabs defaultActiveKey="activity" items={[
         {
           key: 'activity',
@@ -546,7 +546,7 @@ const ActivityMonitorPage: React.FC = () => {
           children: <ResourceViewStatsPage />,
         },
       ]} />
-    </div>
+    </Card>
   );
 };
 

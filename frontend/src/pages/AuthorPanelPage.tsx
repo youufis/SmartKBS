@@ -162,8 +162,8 @@ const AuthorPanelPage: React.FC = () => {
   ]
 
   return (
-    <div style={{ padding: 24 }}>
-      <Typography.Title level={3} style={{ marginBottom: 8 }}>
+    <Card style={{ borderRadius: 8 }}>
+      <Typography.Title level={4} style={{ marginBottom: 8 }}>
         <ApiOutlined /> 控制台
       </Typography.Title>
       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
@@ -273,7 +273,7 @@ const AuthorPanelPage: React.FC = () => {
           />
         )}
       </Modal>
-    </div>
+    </Card>
   )
 }
 

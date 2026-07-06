@@ -340,7 +340,7 @@ const HtmlFilesPage: React.FC = () => {
     }))
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 20, fontSize: 14 }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={14}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>

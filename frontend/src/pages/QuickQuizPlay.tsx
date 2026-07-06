@@ -364,7 +364,7 @@ const QuickQuizPlay: React.FC = () => {
   const myRank = getMyRank()
 
   return (
-    <div style={{ width: '100%', maxWidth: 900, margin: '0 auto', padding: 16 }}>
+    <Card style={{ borderRadius: 8 }}>
       {/* 顶部状态栏 */}
       <Card style={{ borderRadius: 12, marginBottom: 16, background: '#fafafa' }}
         styles={{ body: { padding: '12px 16px' } }}>
@@ -560,7 +560,7 @@ const QuickQuizPlay: React.FC = () => {
         </Card>
       )}
 
-    </div>
+    </Card>
   )
 }
 

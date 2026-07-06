@@ -292,7 +292,7 @@ const QuestBattlePage: React.FC = () => {
   const timerPercent = (timer / TIMER_SECONDS) * 100
 
   return (
-    <div style={{ maxWidth: 780, margin: '0 auto', padding: 16 }}>
+    <div>
       {/* ── 顶部状态栏 ── */}
       <Card
         style={{ borderRadius: 12, marginBottom: 16, background: '#fafafa' }}

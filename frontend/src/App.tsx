@@ -58,6 +58,7 @@ import TaskTodoPage from './pages/TaskTodoPage'
 import PortraitPage from './pages/PortraitPage'
 import DailyDiscoveryPage from './pages/DailyDiscoveryPage'
 import NewsHubPage from './pages/NewsHubPage'
+import ShowcasePage from './pages/ShowcasePage'
 
 function App() {
   const navigate = useNavigate()
@@ -155,6 +156,7 @@ function App() {
             <Route path="news-hub" element={<NewsHubPage />} />
             <Route path="whiteboard-room/:roomId" element={<WhiteboardRoomPage />} />
             <Route path="portrait" element={<PortraitPage />} />
+            <Route path="showcase" element={<ShowcasePage />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="console" element={<AuthorPanelPage />} />
           </Route>

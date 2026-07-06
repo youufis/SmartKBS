@@ -227,7 +227,7 @@ const QuestPage: React.FC = () => {
   }
 
   return (
-    <div style={{ width: '100%', padding: 24 }}>
+    <Card style={{ borderRadius: 8 }}>
       {/* ── 顶部大卡片（一行显示） ── */}
       <Card
         style={{
@@ -427,7 +427,7 @@ const QuestPage: React.FC = () => {
           </div>
         </Space>
       </Modal>
-    </div>
+    </Card>
   )
 }
 

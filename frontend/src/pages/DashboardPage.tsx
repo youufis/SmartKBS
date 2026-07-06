@@ -229,7 +229,7 @@ const DashboardPage: React.FC = () => {
   const timeOfDay = new Date().getHours() < 12 ? '上午' : new Date().getHours() < 18 ? '下午' : '晚上'
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       {/* ─── 欢迎横幅 ─── */}
       <Card
         size="small"
@@ -734,7 +734,7 @@ const DashboardPage: React.FC = () => {
           </Card>
         </Col>
       </Row>
-    </div>
+    </Card>
   )
 }
 

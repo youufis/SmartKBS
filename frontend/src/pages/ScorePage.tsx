@@ -454,7 +454,7 @@ const ScorePage: React.FC = () => {
   ]
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       {/* ── 顶栏：年级/班级选择 + 统计 ── */}
       {isStudent ? null : (
       <Card style={{ marginBottom: 16 }}>
@@ -778,7 +778,7 @@ const ScorePage: React.FC = () => {
           </div>
         </Space>
       </Modal>
-    </div>
+    </Card>
   )
 }
 

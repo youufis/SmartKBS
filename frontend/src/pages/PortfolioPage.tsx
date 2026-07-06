@@ -262,7 +262,7 @@ const PortfolioPage: React.FC = () => {
   ]
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       {/* ─── 页面标题 + 学生信息合并行 ─── */}
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: '#fff' }}>
@@ -647,7 +647,7 @@ const PortfolioPage: React.FC = () => {
           </div>
         ) : null}
       </Modal>
-    </div>
+    </Card>
   )
 }
 

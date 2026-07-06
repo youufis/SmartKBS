@@ -1100,7 +1100,7 @@ const CurriculumPage: React.FC = () => {
       )}
 
       {!loading && courses.length === 0 && (
-        <Card style={{ margin: 24 }}>
+        <Card>
           <Empty
             description={
               subjectOptions.length === 0

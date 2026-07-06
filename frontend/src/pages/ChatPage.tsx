@@ -582,7 +582,7 @@ const ChatPage: React.FC = () => {
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
       {/* 顶部模式切换 */}
       <div style={{
-        padding: '8px 16px',
+        padding: '8px 24px',
         borderBottom: companionMode ? '1px solid #d6d0f0' : '1px solid #f0f0f0',
         display: 'flex', alignItems: 'center', gap: 12,
         background: companionMode

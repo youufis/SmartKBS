@@ -487,9 +487,9 @@ const PracticePage: React.FC = () => {
   const user = useAuthStore(s => s.user)
   const isTeacher = user?.role === 'admin' || user?.role === 'teacher'
   return (
-    <div style={{ padding: '0 24px' }}>
+    <Card style={{ borderRadius: 8 }}>
       {isTeacher ? <TeacherView /> : <StudentView />}
-    </div>
+    </Card>
   )
 }
 

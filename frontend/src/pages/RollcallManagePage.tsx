@@ -1358,7 +1358,7 @@ const AttendanceStats: React.FC = () => {
 
 const RollcallManagePage: React.FC = () => {
   return (
-    <div style={{ padding: 24 }}>
+    <Card style={{ borderRadius: 8 }}>
       <Tabs
         defaultActiveKey="tool"
         items={[
@@ -1379,7 +1379,7 @@ const RollcallManagePage: React.FC = () => {
           },
         ]}
       />
-    </div>
+    </Card>
   )
 }
 

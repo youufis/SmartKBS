@@ -102,7 +102,7 @@ const NewsHubPage: React.FC = () => {
   );
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       {/* 顶部栏 */}
       <Card
         size="small"
@@ -378,7 +378,7 @@ const NewsHubPage: React.FC = () => {
           <Spin />
         )}
       </Drawer>
-    </div>
+    </Card>
   );
 };
 

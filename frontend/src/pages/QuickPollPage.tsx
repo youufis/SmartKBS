@@ -71,7 +71,6 @@ const QuickPollPage: React.FC = () => {
 
   useEffect(() => {
     loadPolls()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── AI 生成投票 ──
@@ -197,7 +196,7 @@ const QuickPollPage: React.FC = () => {
   }
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
@@ -442,7 +441,7 @@ const QuickPollPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </Card>
   )
 }
 

@@ -41,9 +41,17 @@ def _get_teacher(request: Request) -> str:
 async def api_classes(request: Request):
     grade = request.query_params.get("grade", "")
     teacher = _get_teacher(request)
-    # 教师用权限服务过滤，管理员返回实际学生班级
+    from backend.auth import is_admin
     grade_info = get_grade_by_name(grade)
     if grade_info:
+        # 管理员/学生 → 直接查班级表
+        if is_admin(teacher):
+            all_classes = execute_query_dict(
+                "SELECT display_name FROM classes WHERE grade_id=? ORDER BY sort_order",
+                (grade_info["id"],),
+            )
+            return [c["display_name"] for c in all_classes]
+        # 教师 → 任教班级
         classes = get_teacher_classes(teacher, grade_info["id"])
         if classes:
             return [c["display_name"] for c in classes]
@@ -53,16 +61,23 @@ async def api_classes(request: Request):
 
 
 async def api_my_grades(request: Request):
-    """返回当前教师可查看的年级列表 - 管理员基于实际学生数据"""
-    from backend.auth import is_admin
+    """返回当前用户可查看的年级列表"""
+    from backend.auth import is_admin, ROLE_STUDENT
     teacher = _get_teacher(request)
     if is_admin(teacher):
         rows = execute_query(
             "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
         )
         return [row[0] for row in rows]
+    # 教师 → 任教年级
     grades = get_teacher_grades(teacher)
-    return [g["name"] for g in grades]
+    if grades:
+        return [g["name"] for g in grades]
+    # 学生 → 返回全校有学生的年级
+    rows = execute_query(
+        "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+    )
+    return [row[0] for row in rows]
 
 
 async def api_teacher_info(request: Request):

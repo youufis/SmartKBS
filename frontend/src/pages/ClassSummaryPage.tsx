@@ -72,7 +72,7 @@ const ClassSummaryPage: React.FC = () => {
   }
 
   return (
-    <div>
+    <Card style={{ borderRadius: 8 }}>
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
@@ -146,7 +146,7 @@ const ClassSummaryPage: React.FC = () => {
           <Empty description="点击「AI 课堂总结」生成综合分析报告" />
         )}
       </Card>
-    </div>
+    </Card>
   )
 }
 

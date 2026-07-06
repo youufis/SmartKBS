@@ -70,7 +70,7 @@ const QuickQuizResult: React.FC = () => {
   const myRank = ranking?.findIndex((r: any) => r.student_username === user?.username) + 1
 
   return (
-    <div style={{ width: '100%', margin: '0 auto', padding: 16 }}>
+    <Card style={{ borderRadius: 8 }}>
       {/* 顶部统计 — 一行显示 */}
       <Card style={{
         borderRadius: 12, marginBottom: 16,
@@ -296,7 +296,7 @@ const QuickQuizResult: React.FC = () => {
           </Button>
         </Space>
       </div>
-    </div>
+    </Card>
   )
 }
 

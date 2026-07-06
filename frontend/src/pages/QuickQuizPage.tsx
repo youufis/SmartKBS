@@ -310,7 +310,7 @@ const QuickQuizPage: React.FC = () => {
   ]
 
   return (
-    <div style={{ width: '100%', margin: '0 auto', padding: 16 }}>
+    <Card style={{ borderRadius: 8 }}>
       {/* 顶栏 */}
       <Card style={{ borderRadius: 12, marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}
         styles={{ body: { padding: '16px 24px' } }}>
@@ -610,7 +610,7 @@ const QuickQuizPage: React.FC = () => {
           </Row>
         </Form>
       </Modal>
-    </div>
+    </Card>
   )
 }
 

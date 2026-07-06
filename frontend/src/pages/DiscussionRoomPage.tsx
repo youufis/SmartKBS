@@ -324,7 +324,7 @@ const DiscussionRoomPage: React.FC = () => {
   }, [groupId])
 
   return (
-    <div style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}>
+    <Card style={{ borderRadius: 8, height: 'calc(100vh - 120px)' }}>
       {/* 顶部栏 */}
       <Card
         style={{ marginBottom: 0, borderRadius: '8px 8px 0 0' }}
@@ -688,7 +688,7 @@ const DiscussionRoomPage: React.FC = () => {
           )}
         </Spin>
       </Modal>
-    </div>
+    </Card>
   )
 }
 

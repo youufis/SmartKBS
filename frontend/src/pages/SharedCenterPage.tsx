@@ -12,7 +12,7 @@ const SharedCenterPage: React.FC = () => {
 
   if (isTeacherOrAdmin) {
     return (
-      <Card style={{ margin: 24, borderRadius: 8 }}>
+      <Card style={{ borderRadius: 8 }}>
         <Tabs
           defaultActiveKey="browse"
           items={[
@@ -38,7 +38,7 @@ const SharedCenterPage: React.FC = () => {
   }
 
   return (
-    <Card style={{ margin: 24, borderRadius: 8 }}>
+    <Card style={{ borderRadius: 8 }}>
       <Tabs
         defaultActiveKey="html"
         items={[

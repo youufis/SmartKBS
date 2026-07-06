@@ -347,7 +347,7 @@ const QuickQuizConsole: React.FC = () => {
     : '#1677ff'
 
   return (
-    <div style={{ width: '100%', margin: '0 auto', padding: 16 }}>
+    <Card style={{ borderRadius: 8 }}>
       {/* 顶栏 */}
       <Card style={{
         borderRadius: 12, marginBottom: 16,
@@ -754,7 +754,7 @@ const QuickQuizConsole: React.FC = () => {
           </>
         )}
       </Modal>
-    </div>
+    </Card>
   )
 }
 

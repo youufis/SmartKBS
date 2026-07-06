@@ -1511,11 +1511,48 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
     )
   }
 
+  // ── 代码随机名言 ──
+  const codeQuotes = [
+    'Talk is cheap. Show me the code.',
+    '代码如诗，简洁为美',
+    '写好每一行代码，解决每一个问题',
+    '编程是思考的艺术',
+    'Debug 是一种修行',
+    '用代码改变世界',
+    '每一次提交，都是进步',
+    'Clear code, clear mind',
+    'Code. Eat. Sleep. Repeat.',
+    '键盘敲烂，月入过万 💪',
+    '编译器不会骗你，但 debug 会 🐛',
+    '先跑起来，再优化',
+    'Programming is the art of logic',
+    '简单的代码最优雅',
+  ]
+  const [codeQuote] = useState(() => codeQuotes[Math.floor(Math.random() * codeQuotes.length)])
+
   // ── 主渲染 ──
   return (
-    <div style={{ padding: inTab ? 0 : 24, height: '100%' }}>
+    <Card style={{ borderRadius: 8, height: '100%' }}>
+      <div style={{
+        padding: '12px 24px',
+        marginBottom: 16,
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        borderRadius: 6,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+      }}>
+        <div style={{ color: '#fff' }}>
+          <span style={{ fontSize: 15, fontWeight: 500, opacity: 0.95 }}>
+            {codeQuote}
+          </span>
+        </div>
+        <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>
+          {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+        </div>
+      </div>
       {currentProblem ? renderCodeEditor() : renderProblemList()}
-    </div>
+    </Card>
   )
 }
 
