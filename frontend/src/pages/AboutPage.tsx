@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Typography, Alert, Button, message } from 'antd'
 import { LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
 
 const AboutPage: React.FC = () => {
   const navigate = useNavigate()
@@ -30,6 +31,34 @@ const AboutPage: React.FC = () => {
       .then(setContent)
       .catch(() => setContent('# 关于与帮助\n\n系统帮助文档加载失败。'))
   }, [])
+
+  // 导航锚点点击处理：提取中文名称，滚动到对应标题
+  const navClickRef = useCallback((e: MouseEvent) => {
+    const link = (e.target as HTMLElement).closest('a')
+    if (!link) return
+    const href = link.getAttribute('href')
+    if (!href || !href.startsWith('#-')) return
+    e.preventDefault()
+    const name = href.replace('#-', '')
+    const container = document.querySelector('.markdown-content')
+    if (!container) return
+    const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6, strong')
+    for (const el of headings) {
+      if (el.textContent?.includes(name)) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        break
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!content) return
+    const container = document.querySelector('.markdown-content')
+    if (!container) return
+    const handler = navClickRef as EventListener
+    container.addEventListener('click', handler)
+    return () => container.removeEventListener('click', handler)
+  }, [content, navClickRef])
 
   return (
     <div onClick={handlePageClick} style={{
@@ -63,7 +92,7 @@ const AboutPage: React.FC = () => {
       )}
 
       <div className="markdown-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
           {content}
         </ReactMarkdown>
       </div>
