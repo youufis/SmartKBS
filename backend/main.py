@@ -198,11 +198,18 @@ if _question_media_dir.exists():
 # 必须放在所有 API 路由之后，否则会拦截 API 请求
 _frontend_dist = Path(FRONTEND_DIST_DIR)
 if _frontend_dist.exists() and _frontend_dist.is_dir():
+    import re
+    _HASHED_FILE_RE = re.compile(r'^assets/.+\.[a-fA-F0-9]{8}\.(js|css|woff2?|png|svg)$')
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         file_path = _frontend_dist / full_path
         if file_path.is_file():
-            return FileResponse(str(file_path))
+            # 带 hash 的静态资源（assets/*.xxx.js/css 等）设置一年强缓存
+            headers = {}
+            if _HASHED_FILE_RE.match(full_path):
+                headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            return FileResponse(str(file_path), headers=headers)
         # SPA fallback: 所有非 API、非文件路径返回 index.html
         return FileResponse(str(_frontend_dist / "index.html"))
 else:
