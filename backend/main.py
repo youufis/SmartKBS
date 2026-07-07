@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from starlette.middleware.gzip import GZipMiddleware
 
 from backend.config import SERVER_HOST, SERVER_PORT, FRONTEND_DIST_DIR, BASE_DIR
 from backend.database import init_db
@@ -92,6 +93,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Gzip 压缩（所有大于 1KB 的响应自动压缩）
+app.add_middleware(GZipMiddleware, minimum_size=100000)
 
 # 注册认证中间件
 register_middleware(app)
