@@ -16,7 +16,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import apiClient from '../api/client'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
-import { useTranslation } from 'react-i18next'
+import { useTranslation, Trans } from 'react-i18next'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -55,9 +55,9 @@ const CATEGORY_COLORS: Record<string, string> = {
 }
 
 const LIFELINE_NAMES: Record<string, string> = {
-  remove_one: '去伪存真',
-  phone_friend: '远程连线',
-  audience_vote: '群策群力',
+  remove_one: '🎯去伪存真',
+  phone_friend: '📞远程连线',
+  audience_vote: '👥群策群力',
 }
 
 const LIFELINE_ICONS: Record<string, React.ReactNode> = {
@@ -204,7 +204,7 @@ const QuestBattlePage: React.FC = () => {
         }, 2000)
       }
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '提交答案失败')
+      message.error(e?.response?.data?.detail || t('quest.submitFailed'))
     } finally {
       setAnswering(false)
     }
@@ -213,7 +213,7 @@ const QuestBattlePage: React.FC = () => {
   const handleLifeline = useCallback(async (type: string) => {
     if (answeringRef.current || showResult || terminatedRef.current) return
     if (usedLifelines.includes(type)) {
-      message.warning(`「${LIFELINE_NAMES[type]}」已使用过`)
+      message.warning(t('quest.lifelineUsed', { name: LIFELINE_NAMES[type] }))
       return
     }
     setAnswering(true)
@@ -233,7 +233,7 @@ const QuestBattlePage: React.FC = () => {
         setLifelineModal(true)
       }
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '锦囊使用失败')
+      message.error(e?.response?.data?.detail || t('quest.lifelineFailed'))
     } finally {
       setAnswering(false)
     }
@@ -273,7 +273,7 @@ const QuestBattlePage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" description="加载中..." />
+        <Spin size="large" description={t('loading')} />
       </div>
     )
   }
@@ -281,8 +281,8 @@ const QuestBattlePage: React.FC = () => {
   if (!question || !questInfo) {
     return (
       <div style={{ textAlign: 'center', paddingTop: 120 }}>
-        <Title level={4}>题目加载失败</Title>
-        <Button type="primary" onClick={() => navigate('/quest')}>返回闯关</Button>
+        <Title level={4}>{t('quest.loadFailed')}</Title>
+        <Button type="primary" onClick={() => navigate('/quest')}>{t('quest.backBtn')}</Button>
       </div>
     )
   }
@@ -301,21 +301,21 @@ const QuestBattlePage: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 20, flex: 1, flexWrap: 'wrap' }}>
             <div>
-              <div style={{ fontSize: 12, color: '#888' }}>回合</div>
+              <div style={{ fontSize: 12, color: '#888' }}>{t('quest.round')}</div>
               <div style={{ fontSize: 18, fontWeight: 600 }}>
                 <ThunderboltOutlined style={{ marginRight: 4 }} />
                 {currentIdx} / {questInfo.total_questions}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: 12, color: '#888' }}>得分</div>
+              <div style={{ fontSize: 12, color: '#888' }}>{t('score')}</div>
               <div style={{ fontSize: 18, fontWeight: 600, color: '#faad14' }}>
                 <TrophyOutlined style={{ marginRight: 4 }} />
                 {questInfo.score}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: 12, color: '#888' }}>答对</div>
+              <div style={{ fontSize: 12, color: '#888' }}>{t('quest.totalCorrect')}</div>
               <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a' }}>
                 <CheckCircleOutlined style={{ marginRight: 4 }} />
                 {questInfo.correct_count}
@@ -380,9 +380,9 @@ const QuestBattlePage: React.FC = () => {
             {question.category}
           </Tag>
           <Tag style={{ borderRadius: 12 }}>
-            本题基础分：{getScoreForCurrent()} 分
+            {t('quest.baseScore', { score: getScoreForCurrent() })}
           </Tag>
-          {removedOption && <Tag color="red">已移除选项 {removedOption}</Tag>}
+          {removedOption && <Tag color="red">{t('quest.optionRemoved', { option: removedOption })}</Tag>}
         </div>
 
         {/* 题目内容 */}
@@ -464,11 +464,11 @@ const QuestBattlePage: React.FC = () => {
               }
               <div>
                 <Text strong style={{ fontSize: 16, color: isCorrect ? '#52c41a' : '#ff4d4f' }}>
-                  {isCorrect ? '✓ 答对了！' : '✗ 答错了！'}
+                  {isCorrect ? t('quest.answerCorrect') : t('quest.answerWrong')}
                 </Text>
                 {!isCorrect && question.correct_answer && (
                   <div>
-                    <Text>正确答案：{question.correct_answer}. </Text>
+                    <Text>{t('quest.correctAnswerText', { answer: question.correct_answer })}. </Text>
                     <FormulaRenderer content={options[question.correct_answer] as string} inline />
                   </div>
                 )}
@@ -486,7 +486,7 @@ const QuestBattlePage: React.FC = () => {
         {terminated && (
           <div style={{ textAlign: 'center', marginTop: 16 }}>
             <Text strong style={{ fontSize: 18, color: '#ff4d4f' }}>
-              🚫 闯关结束！正在结算...
+              {t('quest.gameOver')}
             </Text>
           </div>
         )}
@@ -496,12 +496,12 @@ const QuestBattlePage: React.FC = () => {
       <Modal
         title={
           lifelineData?.type === 'phone_friend'
-            ? '📞 远程连线 — 朋友的建议'
-            : '👥 群策群力 — 观众投票结果'
+            ? t('quest.lifelinePhoneTitle')
+            : t('quest.lifelineVoteTitle')
         }
         open={lifelineModal}
         onCancel={() => setLifelineModal(false)}
-        footer={<Button type="primary" onClick={() => setLifelineModal(false)}>知道了</Button>}
+        footer={<Button type="primary" onClick={() => setLifelineModal(false)}>{t('quest.lifelineOk')}</Button>}
       >
         {lifelineData?.type === 'phone_friend' && (
           <div style={{ padding: 16, background: '#f6f8fa', borderRadius: 10 }}>

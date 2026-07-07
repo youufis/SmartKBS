@@ -170,7 +170,7 @@ const PortfolioPage: React.FC = () => {
         })
       })
       .catch((err) => {
-        dispatch({ type: 'FETCH_ERROR', error: err.response?.data?.detail || '加载失败' })
+        dispatch({ type: 'FETCH_ERROR', error: err.response?.data?.detail || t('queryFail') })
       })
   }, [targetUsername])
 
@@ -191,7 +191,7 @@ const PortfolioPage: React.FC = () => {
     setReportModal(true)
     try {
       const { data } = await apiClient.get(`/api/portfolio/${targetUsername}/report`, {
-        params: { days: reportDays, period: `近${reportDays}天` },
+        params: { days: reportDays, period: t('portfolio.recentDays', { days: reportDays }) },
       })
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
@@ -201,7 +201,7 @@ const PortfolioPage: React.FC = () => {
         setReportData(data)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '生成报告失败')
+      message.error(err?.response?.data?.detail || t('portfolio.reportFailed'))
       setReportModal(false)
     }
     setReportLoading(false)
@@ -325,9 +325,9 @@ const PortfolioPage: React.FC = () => {
             <Space>
               <Select value={reportDays} onChange={setReportDays} style={{ width: 100 }} size="small"
                 options={[
-                  { value: 7, label: '近7天' },
-                  { value: 30, label: '近30天' },
-                  { value: 90, label: '近90天' },
+                  { value: 7, label: t('portfolio.recentDays', { days: 7 }) },
+                  { value: 30, label: t('portfolio.recentDays', { days: 30 }) },
+                  { value: 90, label: t('portfolio.recentDays', { days: 90 }) },
                 ]} />
               <Button type="primary" size="small" icon={<RobotOutlined />}
                 loading={reportLoading} onClick={handleGenerateReport}>
@@ -371,7 +371,7 @@ const PortfolioPage: React.FC = () => {
               {/* 简易成绩走势图（纯 CSS 条形） */}
               {examStats?.trend && examStats.trend.length > 1 && (
                 <div style={{ marginBottom: 12 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>成绩走势</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{t('portfolio.scoreTrend')}</Text>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 60, paddingTop: 8 }}>
                     {examStats.trend.map((pct: number, i: number) => (
                       <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -392,11 +392,11 @@ const PortfolioPage: React.FC = () => {
                 dataSource={exams.results}
                 rowKey="id"
                 size="small"
-                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 场考试`, pageSizeOptions: ['5', '10', '20'] }}
+                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
                 columns={[
-                  { title: '考试', dataIndex: 'title', ellipsis: true },
+                  { title: t('exam'), dataIndex: 'title', ellipsis: true },
                   {
-                    title: '得分', key: 'score',
+                    title: t('score'), key: 'score',
                     render: (_: any, r: any) => (
                       <Text strong style={{ color: r.score >= r.pass_score ? '#52c41a' : '#ff4d4f' }}>
                         {r.score} / {r.total_score}
@@ -404,16 +404,16 @@ const PortfolioPage: React.FC = () => {
                     ),
                   },
                   {
-                    title: '结果', key: 'result',
+                    title: t('portfolio.result'), key: 'result',
                     render: (_: any, r: any) => (
                       <Tag color={r.score >= r.pass_score ? 'green' : 'red'}>
-                        {r.score >= r.pass_score ? '通过' : '未通过'}
+                        {r.score >= r.pass_score ? t('portfolio.passed') : t('portfolio.failed')}
                       </Tag>
                     ),
                   },
                   {
-                    title: '时间', dataIndex: 'submitted_at',
-                    render: (t: string) => t ? t.slice(0, 10) : '-',
+                    title: t('time'), dataIndex: 'submitted_at',
+                    render: (val: string) => val ? val.slice(0, 10) : '-',
                     width: 100,
                   },
                 ]}
@@ -426,14 +426,14 @@ const PortfolioPage: React.FC = () => {
             <Card title={<Space><TrophyOutlined />{t('classScore')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={8}><Statistic title={t('totalScore')} value={scores.total_score} styles={{ content: { color: '#faad14' } }} prefix={<TrophyOutlined />} /></Col>
-                <Col span={8}><Statistic title={t('teacherCount')} value={scores.teacher_count} suffix="人" /></Col>
-                <Col span={8}><Statistic title={t('classCount')} value={scores.class_count} suffix="个" /></Col>
+                <Col span={8}><Statistic title={t('teacherCount')} value={scores.teacher_count} suffix={t('portfolio.peopleSuffix')} /></Col>
+                <Col span={8}><Statistic title={t('classCount')} value={scores.class_count} suffix={t('portfolio.classesSuffix')} /></Col>
               </Row>
 
               {/* 积分趋势 */}
               {scores.trend && scores.trend.length > 1 && (
                 <div style={{ marginBottom: 12 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>积分趋势</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{t('portfolio.scoreTrend')}</Text>
                   <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 50, paddingTop: 8 }}>
                     {scores.trend.map((point, i) => {
                       const maxVal = Math.max(...scores.trend.map((p) => p.score), 1)
@@ -455,13 +455,13 @@ const PortfolioPage: React.FC = () => {
                 dataSource={scores.records}
                 rowKey={(_, i) => String(i)}
                 size="small"
-                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条记录`, pageSizeOptions: ['5', '10', '20'] }}
+                pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
                 columns={[
-                  { title: '教师', dataIndex: 'teacher', width: 80 },
-                  { title: '年级', dataIndex: 'grade', width: 60 },
-                  { title: '班级', dataIndex: 'class', width: 80 },
-                  { title: '积分', dataIndex: 'score', width: 60 },
-                  { title: '时间', dataIndex: 'updated_at', render: (t: string) => t ? t.slice(0, 10) : '-' },
+                  { title: t('portfolio.teacher'), dataIndex: 'teacher', width: 80 },
+                  { title: t('grade'), dataIndex: 'grade', width: 60 },
+                  { title: t('class_'), dataIndex: 'class', width: 80 },
+                  { title: t('score'), dataIndex: 'score', width: 60 },
+                  { title: t('time'), dataIndex: 'updated_at', render: (val: string) => val ? val.slice(0, 10) : '-' },
                 ]}
               />
             </Card>
@@ -472,7 +472,7 @@ const PortfolioPage: React.FC = () => {
             <Card title={<Space><TrophyOutlined style={{ color: '#eb2f96' }} />{t('rewardPoints')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={24}>
-                  <Statistic title="累计奖励积分" value={reward_points} styles={{ content: { color: '#eb2f96' } }} prefix={<TrophyOutlined />} />
+                  <Statistic title={t('portfolio.totalRewardPoints')} value={reward_points} styles={{ content: { color: '#eb2f96' } }} prefix={<TrophyOutlined />} />
                 </Col>
               </Row>
               {reward_history?.length > 0 && (
@@ -480,19 +480,19 @@ const PortfolioPage: React.FC = () => {
                   dataSource={reward_history}
                   rowKey={(_, i) => String(i)}
                   size="small"
-                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条记录`, pageSizeOptions: ['5', '10', '20'] }}
+                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
                   columns={[
-                    { title: '活动类型', dataIndex: 'activity_type', width: 80 },
-                    { title: '活动', dataIndex: 'activity_title', ellipsis: true },
-                    { title: '奖励类型', dataIndex: 'reward_type', width: 80 },
-                    { title: '积分', dataIndex: 'points', width: 60 },
+                    { title: t('portfolio.activityType'), dataIndex: 'activity_type', width: 80 },
+                    { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
+                    { title: t('rewardType'), dataIndex: 'reward_type', width: 80 },
+                    { title: t('points'), dataIndex: 'points', width: 60 },
                     {
-                      title: '说明', dataIndex: 'reason', ellipsis: true,
+                      title: t('description'), dataIndex: 'reason', ellipsis: true,
                       render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text>,
                     },
                     {
-                      title: '时间', dataIndex: 'created_at',
-                      render: (t: string) => t ? t.slice(0, 10) : '-', width: 90,
+                      title: t('time'), dataIndex: 'created_at',
+                      render: (val: string) => val ? val.slice(0, 10) : '-', width: 90,
                     },
                   ]}
                 />
@@ -512,7 +512,7 @@ const PortfolioPage: React.FC = () => {
                       title={item.name}
                       description={
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          {item.description} | 提交于 {item.submitted_at?.slice(0, 10) || '未知'}
+                          {item.description} | {t('portfolio.submittedAt', { date: item.submitted_at?.slice(0, 10) || t('portfolio.unknown') })}
                         </Text>
                       }
                     />
@@ -526,9 +526,9 @@ const PortfolioPage: React.FC = () => {
           {chats?.total_days != null && (
             <Card title={<Space><MessageOutlined />{t('aiChatActivity')}</Space>} size="small">
               <Row gutter={16}>
-                <Col span={8}><Statistic title="对话天数" value={chats.total_days} suffix="天" /></Col>
-                <Col span={8}><Statistic title="总对话数" value={chats.total_chats} suffix="次" /></Col>
-                <Col span={8}><Statistic title="日均" value={chats.avg_daily} suffix="次" /></Col>
+                <Col span={8}><Statistic title={t('chatDays')} value={chats.total_days} suffix={t('portfolio.daysSuffix')} /></Col>
+                <Col span={8}><Statistic title={t('portfolio.totalChats')} value={chats.total_chats} suffix={t('portfolio.timesSuffix')} /></Col>
+                <Col span={8}><Statistic title={t('portfolio.dailyAvg')} value={chats.avg_daily} suffix={t('portfolio.timesSuffix')} /></Col>
               </Row>
             </Card>
           )}
@@ -537,19 +537,19 @@ const PortfolioPage: React.FC = () => {
           {course_practice?.records && course_practice.records.length > 0 && (
             <Card title={<Space><ExperimentOutlined style={{ color: '#52c41a' }} />{t('coursePractice')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={8}><Statistic title="完成数" value={course_practice.total_count} suffix="个知识点" styles={{ content: { color: '#52c41a' } }} /></Col>
-                <Col span={8}><Statistic title="平均正确率" value={course_practice.avg_accuracy} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
-                <Col span={8}><Statistic title="累计得分" value={course_practice.total_score} styles={{ content: { color: '#faad14' } }} /></Col>
+                <Col span={8}><Statistic title={t('portfolio.completedCount')} value={course_practice.total_count} suffix={t('portfolio.knowledgePointsSuffix')} styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col span={8}><Statistic title={t('portfolio.avgAccuracy')} value={course_practice.avg_accuracy} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
+                <Col span={8}><Statistic title={t('totalScore')} value={course_practice.total_score} styles={{ content: { color: '#faad14' } }} /></Col>
               </Row>
               <Table
                 dataSource={course_practice.records}
                 rowKey="id"
                 size="small"
-                pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条记录` }}
+                pagination={{ pageSize: 10, showTotal: (total) => t('totalRecords', { count: total }) }}
                 columns={[
-                  { title: '知识点', dataIndex: 'kp_name', ellipsis: true },
+                  { title: t('portfolio.knowledgePoint'), dataIndex: 'kp_name', ellipsis: true },
                   {
-                    title: '得分', key: 'score',
+                    title: t('score'), key: 'score',
                     render: (_: any, r: any) => (
                       <Text strong style={{ color: r.accuracy >= 60 ? '#52c41a' : '#ff4d4f' }}>
                         {r.score} / {r.total_score}
@@ -557,21 +557,21 @@ const PortfolioPage: React.FC = () => {
                     ),
                   },
                   {
-                    title: '正确率', dataIndex: 'accuracy',
+                    title: t('portfolio.accuracyRate'), dataIndex: 'accuracy',
                     render: (v: number) => (
                       <Tag color={v >= 90 ? 'green' : v >= 60 ? 'blue' : 'red'}>{v}%</Tag>
                     ),
                   },
                   {
-                    title: '评价', dataIndex: 'evaluation',
+                    title: t('portfolio.evaluation'), dataIndex: 'evaluation',
                     ellipsis: true,
                     render: (v: string) => (
                       <Text type="secondary" style={{ fontSize: 12 }}>{v?.slice(0, 20)}</Text>
                     ),
                   },
                   {
-                    title: '时间', dataIndex: 'submitted_at',
-                    render: (t: string) => t ? t.slice(0, 10) : '-',
+                    title: t('time'), dataIndex: 'submitted_at',
+                    render: (val: string) => val ? val.slice(0, 10) : '-',
                     width: 90,
                   },
                 ]}
@@ -611,7 +611,7 @@ const PortfolioPage: React.FC = () => {
 
       {/* ── AI 学习报告弹窗 ── */}
       <Modal
-        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 学习报告 - {student.name}（{reportData?.period || '生成中...'}）</>}
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> {t('aiReport')} - {student.name}（{reportData?.period || t('portfolio.generatingReport')}）</>}
         open={reportModal}
         onCancel={() => { if (reportLoading) return; setReportModal(false) }}
         width={700}
@@ -621,9 +621,9 @@ const PortfolioPage: React.FC = () => {
               <Button icon={<DownloadOutlined />} onClick={() => {
                 if (!targetUsername) return
                 const token = localStorage.getItem('smartkb_token')
-                window.open(`/api/portfolio/${targetUsername}/report/export?days=${reportDays}&period=近${reportDays}天&token=${token}`, '_blank')
-              }}>导出 Word</Button>
-              <Button onClick={() => setReportModal(false)}>关闭</Button>
+                window.open(`/api/portfolio/${targetUsername}/report/export?days=${reportDays}&period=${encodeURIComponent(t('portfolio.recentDays', { days: reportDays }))}&token=${token}`, '_blank')
+              }}>{t('portfolio.exportWord')}</Button>
+              <Button onClick={() => setReportModal(false)}>{t('cancel')}</Button>
             </Space>
           )
         }
@@ -631,16 +631,16 @@ const PortfolioPage: React.FC = () => {
         {reportLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>AI 正在生成学习报告，请稍候...</div>
+            <div style={{ marginTop: 16, color: '#666' }}>{t('portfolio.generatingReport')}</div>
           </div>
         ) : reportData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
             {reportData.data && (
               <Row gutter={12} style={{ marginBottom: 16 }}>
-                <Col span={6}><Statistic title="考试次数" value={reportData.data.exams} suffix="次" /></Col>
-                <Col span={6}><Statistic title="累计积分" value={reportData.data.total_score} /></Col>
-                <Col span={6}><Statistic title="点名正确率" value={reportData.data.rollcall_rate} suffix="%" /></Col>
-                <Col span={6}><Statistic title="对话天数" value={reportData.data.chat_days} suffix="天" /></Col>
+                <Col span={6}><Statistic title={t('portfolio.examCount')} value={reportData.data.exams} suffix={t('portfolio.timesSuffix')} /></Col>
+                <Col span={6}><Statistic title={t('totalScore')} value={reportData.data.total_score} /></Col>
+                <Col span={6}><Statistic title={t('portfolio.rollcallRate')} value={reportData.data.rollcall_rate} suffix="%" /></Col>
+                <Col span={6}><Statistic title={t('chatDays')} value={reportData.data.chat_days} suffix={t('portfolio.daysSuffix')} /></Col>
               </Row>
             )}
             <div className="markdown-content">

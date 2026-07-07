@@ -104,15 +104,15 @@ const QuestResultPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" description="加载结算中..." />
+        <Spin size="large" description={t('quest.loadingResult')} />
       </div>
     )
   }
 
   if (!result) {
     return (
-      <Empty description="结算数据不存在" style={{ paddingTop: 80 }}>
-        <Button type="primary" onClick={() => navigate('/quest')}>返回闯关</Button>
+      <Empty description={t('quest.resultNotFound')} style={{ paddingTop: 80 }}>
+        <Button type="primary" onClick={() => navigate('/quest')}>{t('quest.backBtn')}</Button>
       </Empty>
     )
   }
@@ -123,12 +123,12 @@ const QuestResultPage: React.FC = () => {
   const scoreColor = getScoreColor(result.correct_count)
 
   const getGradeTag = () => {
-    if (result.correct_count >= 15) return <Tag color="gold" style={{ fontSize: 16, padding: '4px 16px' }}>💎 一站到底！</Tag>
-    if (result.correct_count >= 12) return <Tag color="purple" style={{ fontSize: 14, padding: '4px 14px' }}>🏆 优秀</Tag>
-    if (result.correct_count >= 8) return <Tag color="blue" style={{ fontSize: 14, padding: '4px 14px' }}>🥈 良好</Tag>
-    if (result.correct_count >= 4) return <Tag color="green" style={{ fontSize: 14, padding: '4px 14px' }}>🥉 及格</Tag>
-    if (result.correct_count >= 1) return <Tag color="orange" style={{ fontSize: 14, padding: '4px 14px' }}>📖 初次挑战</Tag>
-    return <Tag color="red" style={{ fontSize: 14, padding: '4px 14px' }}>💪 再接再厉</Tag>
+    if (result.correct_count >= 15) return <Tag color="gold" style={{ fontSize: 16, padding: '4px 16px' }}>{t('quest.gradeStandTough')}</Tag>
+    if (result.correct_count >= 12) return <Tag color="purple" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeExcellent')}</Tag>
+    if (result.correct_count >= 8) return <Tag color="blue" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeGood')}</Tag>
+    if (result.correct_count >= 4) return <Tag color="green" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradePass')}</Tag>
+    if (result.correct_count >= 1) return <Tag color="orange" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeFirstTry')}</Tag>
+    return <Tag color="red" style={{ fontSize: 14, padding: '4px 14px' }}>{t('quest.gradeKeepTrying')}</Tag>
   }
 
   const confettiEmojis = ['🎉', '⭐', '🌟', '✨', '🎊', '💫', '🏅']
@@ -178,7 +178,7 @@ const QuestResultPage: React.FC = () => {
             </div>
           )}
           <Title level={2} style={{ color: isSuccess ? '#fff' : '#666', margin: 0 }}>
-            {isSuccess ? '🎉 闯关成功！' : '💪 闯关结束'}
+            {isSuccess ? t('quest.resultSuccess') : t('quest.resultEnd')}
           </Title>
           {getGradeTag()}
 
@@ -187,32 +187,32 @@ const QuestResultPage: React.FC = () => {
               {result.correct_count}
             </Title>
             <Text style={{ color: isSuccess ? 'rgba(255,255,255,0.8)' : '#999', fontSize: 18 }}>
-              答对 / {result.answered_count} 题
+              {t('quest.correctOf', { count: result.answered_count })}
             </Text>
           </div>
 
           <Row gutter={[24, 16]} justify="center" style={{ marginTop: 8 }}>
             <Col>
               <StatisticItem
-                title="总得分"
+                title={t('quest.totalScore')}
                 value={result.total_score}
-                suffix="分"
+                suffix={t('quest.points')}
                 color="#ffd700"
               />
             </Col>
             <Col>
               <StatisticItem
-                title="🏅 闯关徽章"
+                title={t('quest.badgeCount')}
                 value={result.badge_count}
-                suffix="枚"
+                suffix={t('quest.units')}
                 color="#ffd700"
               />
             </Col>
             <Col>
               <StatisticItem
-                title="总徽章"
+                title={t('quest.totalBadges')}
                 value={result.total_badges}
-                suffix="枚"
+                suffix={t('quest.units')}
                 color="#ffd700"
               />
             </Col>
@@ -230,7 +230,7 @@ const QuestResultPage: React.FC = () => {
             onClick={() => navigate('/quest')}
             style={{ borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
           >
-            再来一次
+            {t('quest.playAgain')}
           </Button>
         </Col>
         <Col>
@@ -240,29 +240,29 @@ const QuestResultPage: React.FC = () => {
             onClick={() => navigate('/quest')}
             style={{ borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
           >
-            返回闯关主页
+            {t('quest.backToHome')}
           </Button>
         </Col>
       </Row>
 
       {/* ── 每题回顾 ── */}
-      <Card title="📋 答题回顾" style={{ borderRadius: 12 }}>
+      <Card title={t('quest.reviewTitle')} style={{ borderRadius: 12 }}>
         {result.questions.length === 0 ? (
-          <Empty description="暂无答题记录" />
+          <Empty description={t('quest.noRecords')} />
         ) : (
           <Collapse
             items={result.questions.map((q, idx) => ({
               key: String(idx),
               label: (
                 <Space>
-                  <Text strong>第{q.sort_order}题</Text>
+                  <Text strong>{t('questionNo', { n: q.sort_order })}</Text>
                   <Tag color={CATEGORY_COLORS[q.category] || '#1677ff'}>{q.category}</Tag>
                   {q.is_correct === 1 ? (
-                    <Tag color="success" icon={<CheckCircleOutlined />}>正确 +{q.score}分</Tag>
+                    <Tag color="success" icon={<CheckCircleOutlined />}>{t('quest.correctScore', { score: q.score })}</Tag>
                   ) : q.is_correct === 0 ? (
-                    <Tag color="error" icon={<CloseCircleOutlined />}>错误</Tag>
+                    <Tag color="error" icon={<CloseCircleOutlined />}>{t('quest.wrong')}</Tag>
                   ) : (
-                    <Tag color="default">未作答</Tag>
+                    <Tag color="default">{t('quest.notAnswered')}</Tag>
                   )}
                   {q.lifeline_used && (
                     <Tag color="orange">
@@ -298,7 +298,7 @@ const QuestResultPage: React.FC = () => {
                     })}
                   </Space>
                   {q.student_answer === '__timeout__' && (
-                    <Tag color="warning" style={{ marginTop: 8 }}>⏱ 超时未答</Tag>
+                    <Tag color="warning" style={{ marginTop: 8 }}>{t('quest.timeout')}</Tag>
                   )}
                   <div style={{ marginTop: 8, padding: 8, background: '#f6f8fa', borderRadius: 6 }}>
                     <Text type="secondary">💡 </Text>

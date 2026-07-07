@@ -588,5 +588,6 @@
   "delete": "删除",
   "allCount": "全部 ({{count}})",
   "submittedCount": "已提交",
-  "cacheManagement": "缓存管理"
+  "cacheManagement": "缓存管理",
+  "companion": "AI 学伴"
 }

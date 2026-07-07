@@ -76,6 +76,7 @@ interface TitleInfo {
 
 // ── 主称号卡片 ──
 const TitleCard: React.FC<{ info: TitleInfo }> = ({ info }) => {
+  const { t } = useTranslation('score')
   const { main_title, progress } = info
   const color = COLOR_MAP[main_title.color] || '#d9d9d9'
   const bgColor = main_title.color === 'default' ? '#f5f5f5' : `${color}15`
@@ -99,18 +100,18 @@ const TitleCard: React.FC<{ info: TitleInfo }> = ({ info }) => {
               <Row align="middle" gutter={12}>
                 <Col flex="auto">
                   <Progress percent={progress.progress_percent} strokeColor={color}
-                    trailColor={`${color}20`} format={(pct) => `${pct}%`} size="small" />
+                    trailColor={`${color}20`} format={(percent) => `${percent}%`} size="small" />
                 </Col>
                 <Col>
                   <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-                    还需 <Text strong style={{ color, fontSize: 16 }}>{progress.points_needed}</Text> 分升级
+                    {t('reward.pointsToNext', { points: progress.points_needed })}
                   </Text>
                 </Col>
               </Row>
-              <Text type="secondary" style={{ fontSize: 12 }}>下一级：{progress.next.emoji} {progress.next.name}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.nextLevel', { emoji: progress.next.emoji, name: progress.next.name })}</Text>
             </>
           ) : (
-            <Text type="secondary" style={{ fontSize: 13 }}>✨ 已达到最高等级！你是至高无上的学习传奇！</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>{t('reward.maxLevel')}</Text>
           )}
         </Col>
       </Row>
@@ -119,30 +120,32 @@ const TitleCard: React.FC<{ info: TitleInfo }> = ({ info }) => {
 }
 
 // ── 称号一览 ──
-const TitleDirectory: React.FC<{ titleConfig: MainTitle[]; currentLevel: number }> = ({ titleConfig, currentLevel }) => (
+const TitleDirectory: React.FC<{ titleConfig: MainTitle[]; currentLevel: number }> = ({ titleConfig, currentLevel }) => {
+  const { t } = useTranslation('score')
+  return (
   <Collapse ghost items={[{
     key: 'titles',
-    label: <Text strong><CrownOutlined /> 全部称号一览（共 {titleConfig.length} 级）</Text>,
+    label: <Text strong><CrownOutlined /> {t('reward.allTitles', { count: titleConfig.length })}</Text>,
     children: (
       <Row gutter={[8, 8]}>
-        {titleConfig.map((t) => {
-          const unlocked = currentLevel >= t.level
-          const color = COLOR_MAP[t.color] || '#d9d9d9'
+        {titleConfig.map((title) => {
+          const unlocked = currentLevel >= title.level
+          const color = COLOR_MAP[title.color] || '#d9d9d9'
           return (
-            <Col xs={12} sm={8} md={6} key={t.level}>
+            <Col xs={12} sm={8} md={6} key={title.level}>
               <Card size="small" style={{
                 opacity: unlocked ? 1 : 0.5,
                 border: unlocked ? `1px solid ${color}40` : '1px dashed #d9d9d9',
                 background: unlocked ? `${color}08` : '#fafafa', textAlign: 'center',
               }}>
-                <div style={{ fontSize: 28, marginBottom: 4 }}>{t.emoji}</div>
-                <Tag color={unlocked && t.color !== 'default' ? t.color : undefined} style={{ fontSize: 11, margin: 0 }}>Lv.{t.level}</Tag>
-                <div style={{ fontSize: 13, fontWeight: unlocked ? 600 : 400, marginTop: 2 }}>{t.name}</div>
+                <div style={{ fontSize: 28, marginBottom: 4 }}>{title.emoji}</div>
+                <Tag color={unlocked && title.color !== 'default' ? title.color : undefined} style={{ fontSize: 11, margin: 0 }}>Lv.{title.level}</Tag>
+                <div style={{ fontSize: 13, fontWeight: unlocked ? 600 : 400, marginTop: 2 }}>{title.name}</div>
                 {unlocked
                   ? <CheckCircleFilled style={{ color: '#52c41a', fontSize: 14, marginTop: 2 }} />
                   : <LockFilled style={{ color: '#d9d9d9', fontSize: 14, marginTop: 2 }} />}
                 <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
-                  {unlocked ? '已解锁' : `${t.min_points || '?'}分解锁`}
+                  {unlocked ? t('reward.unlocked') : t('reward.unlockAt', { points: title.min_points || '?' })}
                 </div>
               </Card>
             </Col>
@@ -151,10 +154,13 @@ const TitleDirectory: React.FC<{ titleConfig: MainTitle[]; currentLevel: number 
       </Row>
     ),
   }]} />
-)
+  )
+}
 
 // ── 学科称号卡片 ──
-const SubjectTitleCards: React.FC<{ titles: SubjectTitle[] }> = ({ titles }) => (
+const SubjectTitleCards: React.FC<{ titles: SubjectTitle[] }> = ({ titles }) => {
+  const { t } = useTranslation('score')
+  return (
   <Row gutter={[12, 12]}>
     {titles.map((st) => {
       const color = COLOR_MAP[st.color] || '#d9d9d9'
@@ -167,22 +173,24 @@ const SubjectTitleCards: React.FC<{ titles: SubjectTitle[] }> = ({ titles }) => 
               <Tag color={st.color !== 'default' ? st.color : undefined} style={{ alignSelf: 'flex-start' }}>
                 {emoji} Lv.{st.level} {st.name}
               </Tag>
-              <Text type="secondary" style={{ fontSize: 12 }}>已答 {st.question_count} 题</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.answeredQuestions', { count: st.question_count })}</Text>
             </Space>
           </Card>
         </Col>
       )
     })}
   </Row>
-)
+  )
+}
 
 // ── 成就徽章墙 ──
 const BadgeWall: React.FC<{ badges: BadgeItem[] }> = ({ badges }) => {
+  const { t } = useTranslation('score')
   const unlockedCount = badges.filter((b) => b.unlocked).length
   return (
     <div>
       <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-        已解锁 <Text strong>{unlockedCount}</Text> / {badges.length} 枚徽章
+        {t('reward.badgesUnlocked', { unlocked: unlockedCount, total: badges.length })}
       </Text>
       <Row gutter={[12, 12]}>
         {badges.map((badge) => (
@@ -197,8 +205,8 @@ const BadgeWall: React.FC<{ badges: BadgeItem[] }> = ({ badges }) => {
                 <div style={{ fontSize: 36, marginBottom: 4, filter: badge.unlocked ? 'none' : 'grayscale(100%)' }}>{badge.icon}</div>
                 <Text strong style={{ fontSize: 12 }}>{badge.name}</Text><br />
                 {badge.unlocked
-                  ? <Text style={{ fontSize: 10, color: '#52c41a' }}>✅ 已解锁</Text>
-                  : <Text style={{ fontSize: 10, color: '#999' }}>🔒 未解锁</Text>}
+                  ? <Text style={{ fontSize: 10, color: '#52c41a' }}>{t('reward.unlocked')}</Text>
+                  : <Text style={{ fontSize: 10, color: '#999' }}>{t('reward.locked')}</Text>}
               </Card>
             </Tooltip>
           </Col>
@@ -210,7 +218,8 @@ const BadgeWall: React.FC<{ badges: BadgeItem[] }> = ({ badges }) => {
 
 // ── 升级历程 ──
 const UpgradeTimeline: React.FC<{ upgrades: TitleInfo['recent_upgrades'] }> = ({ upgrades }) => {
-  if (upgrades.length === 0) return <Empty description="暂无升级记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+  const { t } = useTranslation('score')
+  if (upgrades.length === 0) return <Empty description={t('reward.noUpgrades')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
   return (
     <div style={{ maxHeight: 300, overflowY: 'auto' }}>
       {upgrades.map((u, i) => {
@@ -228,9 +237,9 @@ const UpgradeTimeline: React.FC<{ upgrades: TitleInfo['recent_upgrades'] }> = ({
               marginTop: 6, flexShrink: 0,
             }} />
             <div>
-              {isMain && <Text style={{ fontSize: 13 }}>🏆 <Text strong>{u.old_title}</Text> → <Text strong>{u.new_title}</Text></Text>}
-              {isSubject && <Text style={{ fontSize: 13 }}>📚 <Text strong>{u.subject}</Text>：{u.old_title} → <Text strong>{u.new_title}</Text></Text>}
-              {isBadge && <Text style={{ fontSize: 13 }}>🏅 解锁徽章：<Text strong>{u.new_title}</Text></Text>}
+              {isMain && <Text style={{ fontSize: 13 }}>{t('reward.upgradeMain', { old: u.old_title, newTitle: u.new_title })}</Text>}
+              {isSubject && <Text style={{ fontSize: 13 }}>{t('reward.upgradeSubject', { subject: u.subject, old: u.old_title, newTitle: u.new_title })}</Text>}
+              {isBadge && <Text style={{ fontSize: 13 }}>{t('reward.upgradeBadge', { newTitle: u.new_title })}</Text>}
               <br /><Text type="secondary" style={{ fontSize: 11 }}>{u.created_at?.slice(0, 16) || ''}</Text>
             </div>
           </div>
@@ -266,6 +275,7 @@ const pointsToTitle = (points: number, config: MainTitle[]): MainTitle => {
 
 // ── 教师个人积分面板（独立组件避免 IIFE 中调用 hooks） ──
 const TeacherMyPoints: React.FC = () => {
+  const { t } = useTranslation('score')
   const [tMyPoints, setTMyPoints] = useState(0)
   const [tMyHistory, setTMyHistory] = useState<any[]>([])
   useEffect(() => {
@@ -290,18 +300,18 @@ const TeacherMyPoints: React.FC = () => {
       <Row gutter={16} style={{ marginBottom: 24 }}>
         <Col span={8}>
           <Card>
-            <Statistic title="我的总积分" value={tMyPoints} prefix={<TrophyOutlined style={{ color: '#faad14' }} />} />
+            <Statistic title={t('reward.myTotalPoints')} value={tMyPoints} prefix={<TrophyOutlined style={{ color: '#faad14' }} />} />
           </Card>
         </Col>
       </Row>
       <Table dataSource={tMyHistory} rowKey="id" size="small" pagination={{ pageSize: 15 }}
         columns={[
-          { title: '时间', dataIndex: 'created_at', render: (t: string) => t?.slice(0, 16) || '', width: 140 },
-          { title: '活动', dataIndex: 'activity_type_name', width: 80 },
-          { title: '活动名称', dataIndex: 'activity_title', ellipsis: true },
-          { title: '奖励类型', dataIndex: 'reward_type_name', width: 100 },
-          { title: '积分', dataIndex: 'points', width: 70, render: (p: number) => <Text strong style={{ color: '#52c41a' }}>+{p}</Text> },
-          { title: '说明', dataIndex: 'reason', ellipsis: true },
+          { title: t('time'), dataIndex: 'created_at', render: (val: string) => val?.slice(0, 16) || '', width: 140 },
+          { title: t('activity'), dataIndex: 'activity_type_name', width: 80 },
+          { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
+          { title: t('rewardType'), dataIndex: 'reward_type_name', width: 100 },
+          { title: t('points'), dataIndex: 'points', width: 70, render: (p: number) => <Text strong style={{ color: '#52c41a' }}>+{p}</Text> },
+          { title: t('description'), dataIndex: 'reason', ellipsis: true },
         ]}
       />
     </>
@@ -491,20 +501,20 @@ const RewardPage: React.FC = () => {
   // 学生视图：称号 + 积分
   // ── 积分规则弹窗 ──
   const renderRulesModal = () => (
-    <Modal title="📋 积分奖励规则" open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={640}>
+    <Modal title={t('reward.rulesTitle')} open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={640}>
       <Table dataSource={RULES} rowKey="activity" size="small" pagination={false}
         columns={[
-          { title: '活动类型', dataIndex: 'activity', width: 140 },
-          { title: '参与基础分', dataIndex: 'base', width: 100, render: (v: number) => <Tag color="blue">+{v}</Tag> },
-          { title: '成绩等级奖励', dataIndex: 'grade', render: (v: string) => v === '—' ? <Text type="secondary">无</Text> : <Text style={{ color: '#52c41a' }}>{v}</Text> },
+          { title: t('activity'), dataIndex: 'activity', width: 140 },
+          { title: t('reward.basePoints'), dataIndex: 'base', width: 100, render: (v: number) => <Tag color="blue">+{v}</Tag> },
+          { title: t('reward.gradeReward'), dataIndex: 'grade', render: (v: string) => v === '—' ? <Text type="secondary">{t('reward.none')}</Text> : <Text style={{ color: '#52c41a' }}>{v}</Text> },
         ]} />
       <Divider />
-      <Text strong style={{ fontSize: 14 }}>🌱 等级头像·成长进化</Text>
+      <Text strong style={{ fontSize: 14 }}>{t('reward.levelAvatarEvolution')}</Text>
       <Table dataSource={LEVEL_AVATARS} rowKey="level" size="small" pagination={false} style={{ marginTop: 8 }}
         columns={[
-          { title: '等级', dataIndex: 'level', width: 60, render: (lvl: string) => <Tag>{lvl}</Tag> },
-          { title: '头像', dataIndex: 'emoji', width: 60, render: (em: string) => <span style={{ fontSize: 22 }}>{em}</span> },
-          { title: '称号区间', dataIndex: 'range', render: (r: string) => <Text style={{ fontSize: 13 }}>{r}</Text> },
+          { title: t('levelLabel'), dataIndex: 'level', width: 60, render: (lvl: string) => <Tag>{lvl}</Tag> },
+          { title: t('reward.avatar'), dataIndex: 'emoji', width: 60, render: (em: string) => <span style={{ fontSize: 22 }}>{em}</span> },
+          { title: t('reward.titleRange'), dataIndex: 'range', render: (_: string, record: any) => <Text style={{ fontSize: 13 }}>{t(`reward.levelRange${record.level.replace('Lv.', '')}`)}</Text> },
         ]} />
     </Modal>
   )
@@ -522,34 +532,34 @@ const RewardPage: React.FC = () => {
           items={[
             {
               key: 'main',
-              label: <span><CrownOutlined /> 主称号</span>,
+              label: <span><CrownOutlined /> {t('reward.mainTitle')}</span>,
               children: (
                 <div>
                   <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
                     <Col xs={12} sm={6}>
                       <Card size="small">
-                        <Statistic title="总积分" value={myPoints}
+                        <Statistic title={t('totalScore')} value={myPoints}
                           prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-                          styles={{ content: { color: '#faad14', fontSize: 24, fontWeight: 'bold' } }} suffix="分" />
+                          styles={{ content: { color: '#faad14', fontSize: 24, fontWeight: 'bold' } }} suffix={t('portfolio.pointsSuffix')} />
                       </Card>
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
-                        <Statistic title="参与活动" value={myHistory.length}
+                        <Statistic title={t('reward.participationCount')} value={myHistory.length}
                           prefix={<ThunderboltOutlined style={{ color: '#1677ff' }} />}
                           styles={{ content: { color: '#1677ff' } }} />
                       </Card>
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
-                        <Statistic title="获得奖励" value={myHistory.filter(h => h.reward_type !== 'participation').length}
+                        <Statistic title={t('reward.rewardCount')} value={myHistory.filter(h => h.reward_type !== 'participation').length}
                           prefix={<StarOutlined style={{ color: '#52c41a' }} />}
                           styles={{ content: { color: '#52c41a' } }} />
                       </Card>
                     </Col>
                     <Col xs={12} sm={6}>
                       <Card size="small">
-                        <Statistic title="已获徽章" value={titleInfo?.badges?.filter((b: BadgeItem) => b.unlocked).length || 0}
+                        <Statistic title={t('reward.badgeCount')} value={titleInfo?.badges?.filter((b: BadgeItem) => b.unlocked).length || 0}
                           prefix={<GiftOutlined style={{ color: '#faad14' }} />}
                           styles={{ content: { color: '#faad14' } }} suffix={`/ ${titleInfo?.badges?.length || 0}`} />
                       </Card>
@@ -559,7 +569,7 @@ const RewardPage: React.FC = () => {
                     <TitleDirectory titleConfig={titleConfig} currentLevel={titleInfo?.main_title?.level || 1} />
                   )}
                   {titleInfo?.recent_upgrades && titleInfo.recent_upgrades.length > 0 && (
-                    <Card size="small" title={<Space><HistoryOutlined /> 升级历程</Space>} style={{ marginTop: 12 }}>
+                    <Card size="small" title={<Space><HistoryOutlined /> {t('reward.upgradeHistory')}</Space>} style={{ marginTop: 12 }}>
                       <UpgradeTimeline upgrades={titleInfo.recent_upgrades} />
                     </Card>
                   )}
@@ -568,7 +578,7 @@ const RewardPage: React.FC = () => {
             },
             {
               key: 'subject',
-              label: <span><BookOutlined /> 学科称号</span>,
+              label: <span><BookOutlined /> {t('reward.subjectTitle')}</span>,
               children: (
                 <div>
                   {titleInfo?.subject_titles ? (
@@ -578,20 +588,20 @@ const RewardPage: React.FC = () => {
                         onClick={async () => {
                           try {
                             const { data } = await apiClient.post('/api/rewards/update-subject-counts')
-                            if (data?.upgrades?.length > 0) message.success(`🎉 ${data.upgrades.length} 个学科称号升级！`)
+                            if (data?.upgrades?.length > 0) message.success(t('reward.subjectUpgraded', { count: data.upgrades.length }))
                             await fetchTitleInfo()
                           } catch { message.error(t('updateFailed')) }
                         }}>
-                        刷新学科数据
+                        {t('reward.refreshSubjectData')}
                       </Button>
                     </>
-                  ) : <Empty description="暂无学科称号数据" />}
+                  ) : <Empty description={t('reward.noSubjectData')} />}
                 </div>
               ),
             },
             {
               key: 'badges',
-              label: <span><GiftOutlined /> 成就徽章</span>,
+              label: <span><GiftOutlined /> {t('reward.achievementBadges')}</span>,
               children: (
                 <div>
                   {titleInfo?.badges ? (
@@ -606,10 +616,10 @@ const RewardPage: React.FC = () => {
                             await fetchTitleInfo()
                           } catch { message.error(t('detectFailed')) }
                         }}>
-                        重新检测徽章
+                        {t('reward.redetectBadges')}
                       </Button>
                     </>
-                  ) : <Empty description="暂无徽章数据" />}
+                  ) : <Empty description={t('reward.noBadgeData')} />}
                 </div>
               ),
             },
@@ -617,26 +627,26 @@ const RewardPage: React.FC = () => {
       </Card>
 
       {/* 积分流水 */}
-      <Card title={<Space><HistoryOutlined /> 积分明细</Space>}>
+      <Card title={<Space><HistoryOutlined /> {t('reward.pointDetails')}</Space>}>
         {myHistory.length === 0 ? (
-          <Empty description="暂无积分记录，快参与活动获取积分吧！" />
+          <Empty description={t('reward.noPointRecords')} />
         ) : (
           <Table dataSource={myHistory} rowKey="id" size="small"
-            pagination={{ pageSize: 15, showTotal: (t) => `共 ${t} 条记录` }}
+            pagination={{ pageSize: 15, showTotal: (total) => t('totalRecords', { count: total }) }}
             columns={[
-              { title: '时间', dataIndex: 'created_at', width: 140, render: (t: string) => t ? t.slice(0, 16) : '' },
-              { title: '活动', dataIndex: 'activity_type', width: 80,
+              { title: t('time'), dataIndex: 'created_at', width: 140, render: (val: string) => val ? val.slice(0, 16) : '' },
+              { title: t('activity'), dataIndex: 'activity_type', width: 80,
                 render: (type: string) => <Tag icon={ACTIVITY_ICONS[type]}>{type ? (type.charAt(0).toUpperCase() + type.slice(1)) : ''}</Tag> },
-              { title: '活动名称', dataIndex: 'activity_title', ellipsis: true },
-              { title: '奖励类型', dataIndex: 'reward_type_name', width: 100,
+              { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
+              { title: t('rewardType'), dataIndex: 'reward_type_name', width: 100,
                 render: (name: string, record: any) => {
                   const colors: Record<string, string> = { participation: 'default', excellent: 'success', good: 'processing', pass: 'warning' }
                   return <Tag color={colors[record.reward_type] || 'default'}>{name}</Tag>
                 },
               },
-              { title: '积分', dataIndex: 'points', width: 70,
+              { title: t('points'), dataIndex: 'points', width: 70,
                 render: (points: number) => <Text strong style={{ color: points > 2 ? '#52c41a' : '#1677ff', fontSize: 15 }}>+{points}</Text> },
-              { title: '说明', dataIndex: 'reason', ellipsis: true },
+              { title: t('description'), dataIndex: 'reason', ellipsis: true },
             ]} />
         )}
       </Card>
@@ -653,7 +663,7 @@ const RewardPage: React.FC = () => {
             value={selectedGrade}
             onChange={v => { setSelectedGrade(v); setSelectedClass('') }}
             style={{ width: 150 }}
-            placeholder="选择年级"
+            placeholder={t('selectGrade')}
           >
             {grades.map(g => <Select.Option key={g} value={g}>{g}</Select.Option>)}
           </Select>
@@ -661,13 +671,13 @@ const RewardPage: React.FC = () => {
             value={selectedClass}
             onChange={setSelectedClass}
             style={{ width: 180 }}
-            placeholder="选择班级（全部）"
+            placeholder={t('reward.selectClassAll')}
             allowClear
           >
             {classes.map(c => <Select.Option key={c} value={c}>{c}</Select.Option>)}
           </Select>
           <Button type="primary" icon={<RiseOutlined />} onClick={loadRanking}>
-            刷新排名
+            {t('reward.refreshRanking')}
           </Button>
         </Space>
       </Card>
@@ -677,20 +687,20 @@ const RewardPage: React.FC = () => {
         <Row gutter={16} style={{ marginBottom: 24 }}>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="总积分" value={stats.total_points} prefix={<TrophyOutlined />} styles={{ content: { color: '#faad14' } }} />
+              <Statistic title={t('totalScore')} value={stats.total_points} prefix={<TrophyOutlined />} styles={{ content: { color: '#faad14' } }} />
             </Card>
           </Col>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="参与学生数" value={stats.participant_count} prefix={<TeamOutlined />} styles={{ content: { color: '#1677ff' } }} />
+              <Statistic title={t('reward.participantCount')} value={stats.participant_count} prefix={<TeamOutlined />} styles={{ content: { color: '#1677ff' } }} />
             </Card>
           </Col>
           <Col span={12}>
-            <Card size="small" title="活动类型分布">
+            <Card size="small" title={t('reward.activityDistribution')}>
               <Space wrap>
                 {Object.entries(stats.activity_breakdown || {}).map(([type, info]: any) => (
                   <Tag key={type} icon={ACTIVITY_ICONS[type]} color="processing">
-                    {info.name}: {info.points}分
+                    {info.name}: {info.points}{t('score')}
                   </Tag>
                 ))}
               </Space>
@@ -701,20 +711,20 @@ const RewardPage: React.FC = () => {
 
       {/* 排名表 */}
       <Card title={
-        <Space><TrophyOutlined style={{ color: '#faad14' }} /> 学生积分排名</Space>
+        <Space><TrophyOutlined style={{ color: '#faad14' }} /> {t('reward.studentRanking')}</Space>
       }>
         <Spin spinning={rankingLoading}>
           {ranking.length === 0 ? (
-            <Empty description={selectedGrade ? '暂无数据' : '请先选择年级'} />
+            <Empty description={selectedGrade ? t('noData') : t('reward.selectGradeFirst')} />
           ) : (
             <Table
               dataSource={ranking}
               rowKey="username"
               size="small"
-              pagination={{ pageSize: 30, showTotal: (t) => `共 ${t} 名学生` }}
+              pagination={{ pageSize: 30, showTotal: (total) => t('totalStudents', { count: total }) }}
               columns={[
                 {
-                  title: '排名', dataIndex: 'rank', key: 'rank', width: 60,
+                  title: t('rank'), dataIndex: 'rank', key: 'rank', width: 60,
                   render: (rank: number) => {
                     if (rank === 1) return <Tag color="gold">🥇 1</Tag>
                     if (rank === 2) return <Tag color="silver">🥈 2</Tag>
@@ -723,16 +733,16 @@ const RewardPage: React.FC = () => {
                   },
                 },
                 {
-                  title: '姓名', dataIndex: 'name', key: 'name',
+                  title: t('name'), dataIndex: 'name', key: 'name',
                   render: (name: string, record: any) => (
                     <Text strong>{name || record.username}</Text>
                   ),
                 },
                 {
-                  title: '用户名', dataIndex: 'username', key: 'username',
+                  title: t('username'), dataIndex: 'username', key: 'username',
                 },
                 {
-                  title: '总积分', dataIndex: 'total_points', key: 'total_points', width: 100,
+                  title: t('totalScore'), dataIndex: 'total_points', key: 'total_points', width: 100,
                   render: (points: number) => (
                     <Text strong style={{ color: '#fa8c16', fontSize: 16 }}>{points}</Text>
                   ),
@@ -740,21 +750,21 @@ const RewardPage: React.FC = () => {
                   defaultSortOrder: 'descend' as const,
                 },
                 {
-                  title: '称号等级', key: 'level', width: 140,
+                  title: t('levelLabel'), key: 'level', width: 140,
                   render: (_: any, record: any) => {
-                    const t = pointsToTitle(record.total_points, titleConfig)
-                    return <Tooltip title={`Lv.${t.level} ${t.name}`}>
-                      <Tag color={t.color !== 'default' ? t.color : undefined}>{t.emoji} Lv.{t.level} {t.name}</Tag>
+                    const title = pointsToTitle(record.total_points, titleConfig)
+                    return <Tooltip title={`Lv.${title.level} ${title.name}`}>
+                      <Tag color={title.color !== 'default' ? title.color : undefined}>{title.emoji} Lv.{title.level} {title.name}</Tag>
                     </Tooltip>
                   },
                 },
                 {
-                  title: '下一级', key: 'next', width: 100,
+                  title: t('reward.nextLevel'), key: 'next', width: 100,
                   render: (_: any, record: any) => {
-                    const t = pointsToTitle(record.total_points, titleConfig)
-                    const next = titleConfig.find(c => c.level === t.level + 1)
-                    if (!next) return <Text type="secondary">已满级</Text>
-                    return <Text type="secondary" style={{ fontSize: 12 }}>还需 {next.min_points! - record.total_points} 分</Text>
+                    const title = pointsToTitle(record.total_points, titleConfig)
+                    const next = titleConfig.find(c => c.level === title.level + 1)
+                    if (!next) return <Text type="secondary">{t('reward.maxLevelReached')}</Text>
+                    return <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.nextPointsNeeded', { points: next.min_points! - record.total_points })}</Text>
                   },
                 },
               ]}
@@ -771,19 +781,19 @@ const RewardPage: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <Space>
             <TrophyOutlined style={{ fontSize: 24, color: '#faad14' }} />
-            <Title level={4} style={{ margin: 0 }}>🏆 积分奖励</Title>
+            <Title level={4} style={{ margin: 0 }}>{t('reward.pageTitle')}</Title>
           </Space>
           <Button type="link" icon={<TrophyOutlined />} onClick={() => setRulesOpen(true)}>
-            积分规则
+            {t('scoreRules')}
           </Button>
         </div>
 
         {isStudent ? renderStudentView() : (
           <Tabs activeKey={activeTab} onChange={setActiveTab}>
-            <Tabs.TabPane tab={<span><TrophyOutlined /> 积分排名</span>} key="my">
+            <Tabs.TabPane tab={<span><TrophyOutlined /> {t('scoreRank')}</span>} key="my">
               {renderTeacherView()}
             </Tabs.TabPane>
-            <Tabs.TabPane tab={<span><HistoryOutlined /> 我的积分</span>} key="history">
+            <Tabs.TabPane tab={<span><HistoryOutlined /> {t('myScore')}</span>} key="history">
               <TeacherMyPoints />
             </Tabs.TabPane>
           </Tabs>

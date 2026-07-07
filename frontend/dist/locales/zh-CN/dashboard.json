@@ -225,5 +225,70 @@
       "learning": "学习中",
       "notStarted": "未开始"
     }
+  },
+  "todo": {
+    "title": "📋 我的任务清单",
+    "itemCount": "{{count}} 项待办",
+    "refresh": "刷新",
+    "loading": "加载中...",
+    "loadFailed": "无法加载任务清单",
+    "empty": "暂无待办事项，太棒了！🎉",
+    "paginationTotal": "共 {{count}} 条",
+    "type": {
+      "exam": "考试",
+      "task": "任务",
+      "practice": "练习",
+      "code": "代码练习",
+      "course_practice": "课程练习",
+      "quiz": "随堂测验",
+      "poll": "投票",
+      "discussion": "讨论",
+      "whiteboard": "白板",
+      "quick_quiz": "抢答",
+      "quest": "闯关",
+      "wrong_book": "错题巩固",
+      "question_waiting": "待回答",
+      "question_can_answer": "可回答",
+      "shared_resource": "共享资源",
+      "notification": "通知"
+    },
+    "category": {
+      "exam": "考核测评",
+      "curriculum": "课程学习",
+      "interactive": "互动课堂",
+      "challenge": "共享资源",
+      "service": "系统服务"
+    },
+    "filter": {
+      "all": "全部",
+      "allCount": "全部 ({{count}})",
+      "urgent": "即将截止",
+      "exam": "考核测评",
+      "curriculum": "课程学习",
+      "interactive": "互动课堂",
+      "challenge": "共享资源",
+      "service": "系统服务"
+    },
+    "deadline": {
+      "overdue": "已逾期 {{days}} 天",
+      "today": "今天 {{hours}} 时后截止",
+      "remaining": "剩余 {{days}} 天"
+    },
+    "group": {
+      "overdue": "🔴 已逾期",
+      "urgent": "⏰ 即将截止",
+      "pending": "📝 待完成",
+      "inProgress": "🎯 进行中"
+    },
+    "stats": {
+      "title": "学习进度概览",
+      "courseProgress": "课程进度",
+      "completionRate": "总体完成率",
+      "accuracyRate": "总体正确率",
+      "streakDays": "连续学习",
+      "streakDaysUnit": "天",
+      "streakActive": "🔥 继续加油",
+      "streakInactive": "今天开始学习吧"
+    }
   }
 }

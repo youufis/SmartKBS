@@ -16,7 +16,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
-import { useTranslation } from 'react-i18next'
+import { useTranslation, Trans } from 'react-i18next'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -97,7 +97,7 @@ const QuestPage: React.FC = () => {
       const { data } = await apiClient.post('/api/quest/start')
       navigate(`/quest/battle/${data.quest_id}`, { state: { initialData: data } })
     } catch (e: any) {
-      const detail = e?.response?.data?.detail || '启动闯关失败'
+      const detail = e?.response?.data?.detail || t('quest.submitFailed')
       message.error(detail)
     } finally {
       setStarting(false)
@@ -115,9 +115,9 @@ const QuestPage: React.FC = () => {
   }
 
   const getStatusTag = (record: QuestRecord) => {
-    if (record.completed === 0) return <Tag color="processing">进行中</Tag>
-    if (record.completed === 1 && record.correct_count >= 1) return <Tag color="success">成功</Tag>
-    return <Tag color="error">终止</Tag>
+    if (record.completed === 0) return <Tag color="processing">{t('inProgress')}</Tag>
+    if (record.completed === 1 && record.correct_count >= 1) return <Tag color="success">{t('success')}</Tag>
+    return <Tag color="error">{t('terminated')}</Tag>
   }
 
   const loadQuestions = async (questId: number) => {
@@ -136,7 +136,7 @@ const QuestPage: React.FC = () => {
       return <Spin size="small" style={{ display: 'block', padding: 12 }} />
     }
     if (questions.length === 0) {
-      return <Text type="secondary" style={{ padding: 12 }}>暂无题目详情</Text>
+      return <Text type="secondary" style={{ padding: 12 }}>{t('noQuestionDetails')}</Text>
     }
     return (
       <Table
@@ -148,15 +148,15 @@ const QuestPage: React.FC = () => {
         columns={[
           { title: '#', dataIndex: 'sort_order', key: 's', width: 36 },
           {
-            title: '领域', dataIndex: 'category', key: 'c', width: 70,
+            title: t('quest.categoryLabel'), dataIndex: 'category', key: 'c', width: 70,
             render: (c: string) => <Tag style={{ fontSize: 11 }}>{c}</Tag>,
           },
           {
-            title: '题目', dataIndex: 'question_text', key: 'q', width: 240,
-            render: (t: string) => <Text style={{ fontSize: 12 }}>{t}</Text>,
+            title: t('quest.question'), dataIndex: 'question_text', key: 'q', width: 240,
+            render: (qText: string) => <Text style={{ fontSize: 12 }}>{qText}</Text>,
           },
           {
-            title: '你的答案', dataIndex: 'student_answer', key: 'sa', width: 80,
+            title: t('studentAnswer'), dataIndex: 'student_answer', key: 'sa', width: 80,
             render: (ans: string, q: any) => {
               if (q.is_correct === 1) return <Tag color="success">{ans || '✓'}</Tag>
               if (q.is_correct === 0) return <Tag color="error">{ans || '✗'}</Tag>
@@ -164,24 +164,24 @@ const QuestPage: React.FC = () => {
             },
           },
           {
-            title: '正确答案', key: 'ca', width: 80,
+            title: t('quest.correctAnswer'), key: 'ca', width: 80,
             render: (_: any, q: any) => (
               <Text style={{ fontSize: 12, color: '#52c41a' }}>{q.correct_answer}</Text>
             ),
           },
           {
-            title: '得分', dataIndex: 'score', key: 'sc', width: 44,
+            title: t('score'), dataIndex: 'score', key: 'sc', width: 44,
             render: (s: number) => <Text strong style={{ fontSize: 12 }}>{s}</Text>,
           },
           {
-            title: '用时', dataIndex: 'time_spent', key: 'ts', width: 50,
-            render: (t: number) => (
-              <Space size={2}><ClockCircleOutlined style={{ fontSize: 11 }} />{t || 0}s</Space>
+            title: t('timeSpent'), dataIndex: 'time_spent', key: 'ts', width: 50,
+            render: (spent: number) => (
+              <Space size={2}><ClockCircleOutlined style={{ fontSize: 11 }} />{spent || 0}s</Space>
             ),
           },
           {
-            title: '解析', dataIndex: 'explanation', key: 'exp', width: 200,
-            render: (e: string) => <Text type="secondary" style={{ fontSize: 11 }}>{e}</Text>,
+            title: t('quest.explanationCol'), dataIndex: 'explanation', key: 'exp', width: 200,
+            render: (exp: string) => <Text type="secondary" style={{ fontSize: 11 }}>{exp}</Text>,
           },
         ]}
         scroll={{ x: 800 }}
@@ -191,15 +191,15 @@ const QuestPage: React.FC = () => {
 
   const columns = [
     {
-      title: '回合', dataIndex: 'id', key: 'id', width: 70,
+      title: t('quest.round'), dataIndex: 'id', key: 'id', width: 70,
       render: (id: number) => `#${id}`,
     },
     {
-      title: '结果', key: 'status', width: 70,
+      title: t('result'), key: 'status', width: 70,
       render: (_: any, r: QuestRecord) => getStatusTag(r),
     },
     {
-      title: '答对/总题', key: 'count', width: 100,
+      title: t('correctTotal'), key: 'count', width: 100,
       render: (_: any, r: QuestRecord) => (
         <Text strong style={{ color: getScoreColor(r.correct_count) }}>
           {r.correct_count} / {r.answered_count}
@@ -207,23 +207,23 @@ const QuestPage: React.FC = () => {
       ),
     },
     {
-      title: '得分', dataIndex: 'score', key: 'score', width: 60,
+      title: t('score'), dataIndex: 'score', key: 'score', width: 60,
       render: (s: number) => <Text strong>{s}</Text>,
     },
     {
-      title: '终止', dataIndex: 'wrong_question_index', key: 'wrong', width: 60,
-      render: (idx: number) => idx > 0 ? `第${idx}题` : '-',
+      title: t('wrongQuestion'), dataIndex: 'wrong_question_index', key: 'wrong', width: 60,
+      render: (idx: number) => idx > 0 ? t('questionNo', { n: idx }) : '-',
     },
     {
-      title: '时间', dataIndex: 'created_at', key: 'time', width: 130,
-      render: (t: string) => t?.slice(0, 16) || '-',
+      title: t('quest.timeLabel'), dataIndex: 'created_at', key: 'time', width: 130,
+      render: (timeVal: string) => timeVal?.slice(0, 16) || '-',
     },
   ]
 
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 120 }}>
-        <Spin size="large" description="加载中..." />
+        <Spin size="large" description={t('loading')} />
       </div>
     )
   }
@@ -244,10 +244,10 @@ const QuestPage: React.FC = () => {
           {/* 左侧：标题 + 描述 + 切换 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
             <Title level={3} style={{ color: '#fff', margin: 0, whiteSpace: 'nowrap' }}>
-              ⚡ 知识闯关
+              {t('quest.title')}
             </Title>
             <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 14, whiteSpace: 'nowrap' }}>
-              12 大领域 · 答错即止
+              {t('quest.subtitle')}
             </Text>
             <Space size={4}>
               {questConfig?.use_bank ? (
@@ -256,11 +256,11 @@ const QuestPage: React.FC = () => {
                 <RobotOutlined style={{ fontSize: 13, color: '#fff' }} />
               )}
               <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: 500 }}>
-                {questConfig?.use_bank ? '📚 题库出题' : '🤖 AI 出题'}
+                {questConfig?.use_bank ? t('quest.bankMode') : t('quest.aiMode')}
               </Text>
               {bankStats && (
                 <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>
-                  {bankStats.total_questions}题
+                  {bankStats.total_questions}{t('quest.questions')}
                 </Text>
               )}
             </Space>
@@ -286,14 +286,14 @@ const QuestPage: React.FC = () => {
                 boxShadow: '0 4px 14px rgba(255, 215, 0, 0.4)',
               }}
             >
-              {starting ? '生成题目中...' : '🎯 开始闯关'}
+              {starting ? t('quest.startingBtn') : t('quest.startBtn')}
             </Button>
             <Button
               ghost
               icon={<QuestionCircleOutlined />}
               onClick={() => setRulesOpen(true)}
             >
-              规则
+              {t('quest.rulesBtn')}
             </Button>
           </Space>
         </div>
@@ -303,50 +303,50 @@ const QuestPage: React.FC = () => {
       <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
           <Statistic
-            title="累计闯关"
+            title={t('quest.totalQuests')}
             value={stats?.total_quests || 0}
             prefix={<HistoryOutlined />}
-            suffix="次"
+            suffix={t('quest.times')}
           />
         </Card>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
           <Statistic
-            title="🏅 闯关徽章"
+            title={t('quest.badgeTitle')}
             value={stats?.badge_count || 0}
             prefix={<CrownOutlined style={{ color: '#faad14' }} />}
-            suffix="枚"
+            suffix={t('quest.badgeUnit')}
             styles={{ content: { color: '#faad14' } }}
           />
         </Card>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
           <Statistic
-            title="累计答对"
+            title={t('quest.totalCorrect')}
             value={stats?.total_correct || 0}
             prefix={<FireOutlined />}
-            suffix="题"
+            suffix={t('quest.questions')}
           />
         </Card>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
           <Statistic
-            title="最佳战绩"
+            title={t('quest.bestRecord')}
             value={stats?.best_correct || 0}
             prefix={<StarOutlined style={{ color: '#1677ff' }} />}
-            suffix={`/ ${15} 题`}
+            suffix={t('quest.bestSuffix', { max: 15 })}
             styles={{ content: { color: getScoreColor(stats?.best_correct || 0) } }}
           />
         </Card>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
           <Statistic
-            title="题库储备"
+            title={t('quest.bankQuestions')}
               value={bankStats?.total_questions || 0}
               prefix={<DatabaseOutlined style={{ color: '#722ed1' }} />}
-              suffix="题"
+              suffix={t('quest.questions')}
               styles={{ content: { color: '#722ed1', fontSize: 22 } }}
             />
             {bankStats?.by_category && bankStats.by_category.length > 0 && (
               <div style={{ marginTop: 4, fontSize: 11, color: '#999' }}>
                 {bankStats.by_category.slice(0, 3).map((c: any) =>
-                  `${c.category}${c.count}题`
+                  `${c.category}${c.count}${t('quest.questions')}`
                 ).join(' · ')}
               </div>
             )}
@@ -354,14 +354,14 @@ const QuestPage: React.FC = () => {
       </div>
 
       {/* ── 历史记录（分页 + 展开） ── */}
-      <Card title={<Space><HistoryOutlined /> 闯关记录</Space>}>
+      <Card title={<Space><HistoryOutlined /> {t('questRecords')}</Space>}>
         <Table
           dataSource={records}
           columns={columns}
           rowKey="id"
           size="small"
           loading={loading}
-          locale={{ emptyText: '还没有闯关记录，开始你的第一次挑战吧！' }}
+          locale={{ emptyText: t('quest.emptyText') }}
           pagination={{
             current: page,
             pageSize,
@@ -369,7 +369,7 @@ const QuestPage: React.FC = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             hideOnSinglePage: false,
-            showTotal: (t, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${t} 条`,
+            showTotal: (total, range) => t('pageInfo', { start: range[0], end: range[1], total }),
             onChange: (p, ps) => { setPage(p); setPageSize(ps) },
           }}
           expandable={{
@@ -387,44 +387,55 @@ const QuestPage: React.FC = () => {
 
       {/* ── 规则说明弹窗 ── */}
       <Modal
-        title="📋 闯关规则"
+        title={t('quest.rulesTitle')}
         open={rulesOpen}
         onCancel={() => setRulesOpen(false)}
-        footer={<Button onClick={() => setRulesOpen(false)}>知道了</Button>}
+        footer={<Button onClick={() => setRulesOpen(false)}>{t('quest.rulesGotIt')}</Button>}
         width={600}
       >
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <div>
-            <Title level={5}>🎯 玩法</Title>
+            <Title level={5}>{t('quest.rules.gameTitle')}</Title>
             <Paragraph>
-              AI 即时生成百科单选题，涵盖 12 大知识领域。每轮最多 15 题，
-              <Text strong>答错一题即终止</Text>！
+              <Trans ns="questions" i18nKey="quest.rules.gameDesc">
+                AI 即时生成百科单选题，涵盖 12 大知识领域。每轮最多 15 题，<Text strong>答错一题即终止</Text>！
+              </Trans>
             </Paragraph>
           </div>
           <div>
-            <Title level={5}>⏱ 计时</Title>
-            <Paragraph>每题限时 <Text strong>30 秒</Text>，超时视为答错。</Paragraph>
-          </div>
-          <div>
-            <Title level={5}>🎯 三大锦囊（每轮各用一次）</Title>
+            <Title level={5}>{t('quest.rules.timerTitle')}</Title>
             <Paragraph>
-              <Text strong>去伪存真</Text>：去掉一个错误选项，变 3 选 1（得分 ×85%）<br />
-              <Text strong>远程连线</Text>：AI 朋友给提示线索（得分 ×70%）<br />
-              <Text strong>群策群力</Text>：100 位观众投票分布（得分 ×70%）
+              <Trans ns="questions" i18nKey="quest.rules.timerDesc">
+                每题限时 <Text strong>30 秒</Text>，超时视为答错。
+              </Trans>
             </Paragraph>
           </div>
           <div>
-            <Title level={5}>🏆 计分</Title>
+            <Title level={5}>{t('quest.rules.lifelineTitle')}</Title>
             <Paragraph>
-              第 1 题：10 分 → 2-3 题：15 分 → 4-6 题：20 分 →<br />
-              7-9 题：25 分 → 10-12 题：30 分 → 13-15 题：<Text strong>50 分</Text>
+              <Trans ns="questions" i18nKey="quest.rules.lifelineDesc">
+                <Text strong>去伪存真</Text>：去掉一个错误选项，变 3 选 1（得分 ×85%）<br />
+                <Text strong>远程连线</Text>：AI 朋友给提示线索（得分 ×70%）<br />
+                <Text strong>群策群力</Text>：100 位观众投票分布（得分 ×70%）
+              </Trans>
             </Paragraph>
           </div>
           <div>
-            <Title level={5}>🏅 徽章</Title>
+            <Title level={5}>{t('quest.rules.scoreTitle')}</Title>
             <Paragraph>
-              每次闯关答对1题即可积累积分，全部通关获得 <Text strong>🏅 闯关徽章 ×1</Text>，可无限累积！<br />
-              集齐里程碑还可解锁专属称号：🥉初出茅庐 → 🥈闯关新秀 → 🥇闯关达人 → 💎闯关大师 → 👑闯关传奇
+              <Trans ns="questions" i18nKey="quest.rules.scoreDesc">
+                第 1 题：10 分 → 2-3 题：15 分 → 4-6 题：20 分 →<br />
+                7-9 题：25 分 → 10-12 题：30 分 → 13-15 题：<Text strong>50 分</Text>
+              </Trans>
+            </Paragraph>
+          </div>
+          <div>
+            <Title level={5}>{t('quest.rules.badgeTitle')}</Title>
+            <Paragraph>
+              <Trans ns="questions" i18nKey="quest.rules.badgeDesc">
+                每次闯关答对1题即可积累积分，全部通关获得 <Text strong>🏅 闯关徽章 ×1</Text>，可无限累积！<br />
+                集齐里程碑还可解锁专属称号：🥉初出茅庐 → 🥈闯关新秀 → 🥇闯关达人 → 💎闯关大师 → 👑闯关传奇
+              </Trans>
             </Paragraph>
           </div>
         </Space>

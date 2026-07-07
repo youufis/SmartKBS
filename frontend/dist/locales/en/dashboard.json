@@ -225,5 +225,70 @@
       "learning": "In Progress",
       "notStarted": "Not Started"
     }
+  },
+  "todo": {
+    "title": "📋 My Task List",
+    "itemCount": "{{count}} items",
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "loadFailed": "Failed to load task list",
+    "empty": "No pending items, awesome! 🎉",
+    "paginationTotal": "Total {{count}} items",
+    "type": {
+      "exam": "Exam",
+      "task": "Task",
+      "practice": "Practice",
+      "code": "Code Practice",
+      "course_practice": "Course Exercise",
+      "quiz": "Quiz",
+      "poll": "Poll",
+      "discussion": "Discussion",
+      "whiteboard": "Whiteboard",
+      "quick_quiz": "Quick Quiz",
+      "quest": "Quest",
+      "wrong_book": "Wrong Answer Review",
+      "question_waiting": "Pending",
+      "question_can_answer": "Can Answer",
+      "shared_resource": "Shared Resources",
+      "notification": "Notification"
+    },
+    "category": {
+      "exam": "Assessment",
+      "curriculum": "Course Learning",
+      "interactive": "Interactive",
+      "challenge": "Shared Resources",
+      "service": "System Services"
+    },
+    "filter": {
+      "all": "All",
+      "allCount": "All ({{count}})",
+      "urgent": "Due Soon",
+      "exam": "Assessment",
+      "curriculum": "Course Learning",
+      "interactive": "Interactive",
+      "challenge": "Shared Resources",
+      "service": "System Services"
+    },
+    "deadline": {
+      "overdue": "{{days}} days overdue",
+      "today": "Due in {{hours}} hrs",
+      "remaining": "{{days}} days left"
+    },
+    "group": {
+      "overdue": "🔴 Overdue",
+      "urgent": "⏰ Due Soon",
+      "pending": "📝 Pending",
+      "inProgress": "🎯 In Progress"
+    },
+    "stats": {
+      "title": "Learning Progress Overview",
+      "courseProgress": "Course Progress",
+      "completionRate": "Completion Rate",
+      "accuracyRate": "Accuracy Rate",
+      "streakDays": "Learning Streak",
+      "streakDaysUnit": "days",
+      "streakActive": "🔥 Keep going",
+      "streakInactive": "Start learning today"
+    }
   }
 }

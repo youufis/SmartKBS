@@ -580,5 +580,6 @@
   "delete": "Delete",
   "allCount": "All ({{count}})",
   "submittedCount": "Submitted",
-  "cacheManagement": "Cache Management"
+  "cacheManagement": "Cache Management",
+  "companion": "AI Companion"
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   Card, Row, Col, Tag, Space, Typography, Spin, Empty,
   Button, List, Progress, Segmented, Badge, Tooltip,
@@ -17,36 +18,7 @@ import type { TaskTodoItem, TaskTodoResponse } from '../api/taskTodo'
 
 const { Text, Paragraph } = Typography
 
-// ── 类型配置映射 ──
-const TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
-  exam:            { icon: <FileAddOutlined />, color: '#1677ff', label: '考试' },
-  task:            { icon: <CheckCircleOutlined />, color: '#faad14', label: '任务' },
-  practice:        { icon: <ExperimentOutlined />, color: '#52c41a', label: '练习' },
-  code:            { icon: <CodeOutlined />, color: '#2f54eb', label: '代码练习' },
-  course_practice: { icon: <BookOutlined />, color: '#13c2c2', label: '课程练习' },
-  quiz:            { icon: <ThunderboltOutlined />, color: '#ff4d4f', label: '随堂测验' },
-  poll:            { icon: <BarChartOutlined />, color: '#722ed1', label: '投票' },
-  discussion:      { icon: <TeamOutlined />, color: '#1677ff', label: '讨论' },
-  whiteboard:      { icon: <EditOutlined />, color: '#eb2f96', label: '白板' },
-  quick_quiz:      { icon: <CustomerServiceOutlined />, color: '#fa8c16', label: '抢答' },
-  quest:           { icon: <FireOutlined />, color: '#ff4d4f', label: '闯关' },
-  wrong_book:      { icon: <BookOutlined />, color: '#fa8c16', label: '错题巩固' },
-  question_waiting:{ icon: <MessageOutlined />, color: '#fa541c', label: '待回答' },
-  question_can_answer:{ icon: <MessageOutlined />, color: '#52c41a', label: '可回答' },
-  shared_resource:{ icon: <FolderOutlined />, color: '#52c41a', label: '共享资源' },
-  notification:    { icon: <BellOutlined />, color: '#eb2f96', label: '通知' },
-}
-
-// ── 分类汇总（与导航菜单保持一致的 5 大分类） ──
-// 📝 考核测评 | 📖 课程学习 | 🎯 互动课堂 | 🎮 趣味挑战 | 📂 系统服务
-const CATEGORY_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  exam:        { label: '考核测评', color: '#1677ff', icon: <FileAddOutlined /> },
-  curriculum:  { label: '课程学习', color: '#13c2c2', icon: <BookOutlined /> },
-  interactive: { label: '互动课堂', color: '#ff4d4f', icon: <ThunderboltOutlined /> },
-  challenge:   { label: '共享资源', color: '#52c41a', icon: <FolderOutlined /> },
-  service:     { label: '系统服务', color: '#8c8c8c', icon: <BellOutlined /> },
-}
-
+// ── 类型→分类映射（无需翻译） ──
 const TYPE_CATEGORY: Record<string, string> = {
   exam: 'exam', task: 'exam', practice: 'exam', code: 'exam',
   course_practice: 'curriculum',
@@ -57,19 +29,9 @@ const TYPE_CATEGORY: Record<string, string> = {
   shared_resource: 'challenge', notification: 'service',
 }
 
-// ── 筛选选项（与导航分类对齐） ──
-const FILTER_OPTIONS = [
-  { key: 'all', label: '全部' },
-  { key: 'urgent', label: '即将截止' },
-  { key: 'exam', label: '考核测评' },
-  { key: 'curriculum', label: '课程学习' },
-  { key: 'interactive', label: '互动课堂' },
-  { key: 'challenge', label: '共享资源' },
-  { key: 'service', label: '系统服务' },
-]
-
 const TaskTodoPage: React.FC = () => {
   const navigate = useNavigate()
+  const { t } = useTranslation('dashboard')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<TaskTodoResponse | null>(null)
   const [filter, setFilter] = useState('all')
@@ -77,6 +39,46 @@ const TaskTodoPage: React.FC = () => {
   const [groupPages, setGroupPages] = useState<Record<string, number>>({
     overdue: 1, urgent: 1, pending: 1, inProgress: 1,
   })
+
+  // ── 类型配置映射 ──
+  const TYPE_CONFIG: Record<string, { icon: React.ReactNode; color: string; label: string }> = {
+    exam:            { icon: <FileAddOutlined />, color: '#1677ff', label: t('todo.type.exam') },
+    task:            { icon: <CheckCircleOutlined />, color: '#faad14', label: t('todo.type.task') },
+    practice:        { icon: <ExperimentOutlined />, color: '#52c41a', label: t('todo.type.practice') },
+    code:            { icon: <CodeOutlined />, color: '#2f54eb', label: t('todo.type.code') },
+    course_practice: { icon: <BookOutlined />, color: '#13c2c2', label: t('todo.type.course_practice') },
+    quiz:            { icon: <ThunderboltOutlined />, color: '#ff4d4f', label: t('todo.type.quiz') },
+    poll:            { icon: <BarChartOutlined />, color: '#722ed1', label: t('todo.type.poll') },
+    discussion:      { icon: <TeamOutlined />, color: '#1677ff', label: t('todo.type.discussion') },
+    whiteboard:      { icon: <EditOutlined />, color: '#eb2f96', label: t('todo.type.whiteboard') },
+    quick_quiz:      { icon: <CustomerServiceOutlined />, color: '#fa8c16', label: t('todo.type.quick_quiz') },
+    quest:           { icon: <FireOutlined />, color: '#ff4d4f', label: t('todo.type.quest') },
+    wrong_book:      { icon: <BookOutlined />, color: '#fa8c16', label: t('todo.type.wrong_book') },
+    question_waiting:{ icon: <MessageOutlined />, color: '#fa541c', label: t('todo.type.question_waiting') },
+    question_can_answer:{ icon: <MessageOutlined />, color: '#52c41a', label: t('todo.type.question_can_answer') },
+    shared_resource:{ icon: <FolderOutlined />, color: '#52c41a', label: t('todo.type.shared_resource') },
+    notification:    { icon: <BellOutlined />, color: '#eb2f96', label: t('todo.type.notification') },
+  }
+
+  // ── 分类汇总 ──
+  const CATEGORY_LABELS: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+    exam:        { label: t('todo.category.exam'), color: '#1677ff', icon: <FileAddOutlined /> },
+    curriculum:  { label: t('todo.category.curriculum'), color: '#13c2c2', icon: <BookOutlined /> },
+    interactive: { label: t('todo.category.interactive'), color: '#ff4d4f', icon: <ThunderboltOutlined /> },
+    challenge:   { label: t('todo.category.challenge'), color: '#52c41a', icon: <FolderOutlined /> },
+    service:     { label: t('todo.category.service'), color: '#8c8c8c', icon: <BellOutlined /> },
+  }
+
+  // ── 筛选选项 ──
+  const FILTER_OPTIONS = [
+    { key: 'all', label: t('todo.filter.all') },
+    { key: 'urgent', label: t('todo.filter.urgent') },
+    { key: 'exam', label: t('todo.filter.exam') },
+    { key: 'curriculum', label: t('todo.filter.curriculum') },
+    { key: 'interactive', label: t('todo.filter.interactive') },
+    { key: 'challenge', label: t('todo.filter.challenge') },
+    { key: 'service', label: t('todo.filter.service') },
+  ]
 
   const fetchData = async () => {
     setLoading(true)
@@ -148,13 +150,13 @@ const TaskTodoPage: React.FC = () => {
     if (item.deadline) {
       const diff = (new Date(item.deadline).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
       if (diff < 0) {
-        deadlineText = `已逾期 ${Math.abs(Math.round(diff))} 天`
+        deadlineText = t('todo.deadline.overdue', { days: Math.abs(Math.round(diff)) })
         deadlineColor = '#ff4d4f'
       } else if (diff < 1) {
-        deadlineText = `今天 ${Math.round(diff * 24)} 时后截止`
+        deadlineText = t('todo.deadline.today', { hours: Math.round(diff * 24) })
         deadlineColor = '#fa8c16'
       } else if (diff <= 3) {
-        deadlineText = `剩余 ${Math.round(diff)} 天`
+        deadlineText = t('todo.deadline.remaining', { days: Math.round(diff) })
         deadlineColor = '#faad14'
       } else {
         deadlineText = `${item.deadline.slice(0, 10)}`
@@ -243,7 +245,7 @@ const TaskTodoPage: React.FC = () => {
             pageSize: PAGE_SIZE,
             total: items.length,
             showSizeChanger: true,
-            showTotal: (t) => `共 ${t} 条`,
+            showTotal: (total) => t('todo.paginationTotal', { count: total }),
             pageSizeOptions: ['10', '20', '50'],
             onChange: (p) => setGroupPages(prev => ({ ...prev, [groupKey]: p })),
             size: 'small',
@@ -256,13 +258,13 @@ const TaskTodoPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
-        <Spin size="large" description="加载中..." />
+        <Spin size="large" description={t('todo.loading')} />
       </div>
     )
   }
 
   if (!data) {
-    return <Empty description="无法加载任务清单" />
+    return <Empty description={t('todo.loadFailed')} />
   }
 
   const totalCount = data.items.length
@@ -273,16 +275,16 @@ const TaskTodoPage: React.FC = () => {
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
         <Col>
           <Space>
-            <span style={{ fontSize: 20, fontWeight: 600 }}>📋 我的任务清单</span>
+            <span style={{ fontSize: 20, fontWeight: 600 }}>{t('todo.title')}</span>
             <Tag style={{ fontSize: 13, padding: '0 12px', borderRadius: 8 }}>
-              {totalCount} 项待办
+              {t('todo.itemCount', { count: totalCount })}
             </Tag>
           </Space>
         </Col>
         <Col>
           <Space>
             <Button icon={<ReloadOutlined />} onClick={fetchData} size="small">
-              刷新
+              {t('todo.refresh')}
             </Button>
           </Space>
         </Col>
@@ -326,7 +328,7 @@ const TaskTodoPage: React.FC = () => {
           onChange={(val) => setFilter(val as string)}
           options={FILTER_OPTIONS.map(opt => ({
             label: opt.key === 'all'
-              ? `全部 (${totalCount})`
+              ? t('todo.filter.allCount', { count: totalCount })
               : opt.label,
             value: opt.key,
           }))}
@@ -337,14 +339,14 @@ const TaskTodoPage: React.FC = () => {
       {/* ─── 待办列表 ─── */}
       {filteredItems.length === 0 ? (
         <Card style={{ borderRadius: 8 }}>
-          <Empty description="暂无待办事项，太棒了！🎉" />
+          <Empty description={t('todo.empty')} />
         </Card>
       ) : (
         <>
-          {renderGroup('overdue', '🔴 已逾期', <AlertOutlined />, '#ff4d4f', groupedItems.overdue)}
-          {renderGroup('urgent', '⏰ 即将截止', <ClockCircleOutlined />, '#fa8c16', groupedItems.urgent)}
-          {renderGroup('pending', '📝 待完成', <FileAddOutlined />, '#1677ff', groupedItems.pending)}
-          {renderGroup('inProgress', '🎯 进行中', <FireOutlined />, '#722ed1', groupedItems.inProgress)}
+          {renderGroup('overdue', t('todo.group.overdue'), <AlertOutlined />, '#ff4d4f', groupedItems.overdue)}
+          {renderGroup('urgent', t('todo.group.urgent'), <ClockCircleOutlined />, '#fa8c16', groupedItems.urgent)}
+          {renderGroup('pending', t('todo.group.pending'), <FileAddOutlined />, '#1677ff', groupedItems.pending)}
+          {renderGroup('inProgress', t('todo.group.inProgress'), <FireOutlined />, '#722ed1', groupedItems.inProgress)}
         </>
       )}
 
@@ -356,14 +358,14 @@ const TaskTodoPage: React.FC = () => {
           title={
             <Space>
               <TrophyOutlined style={{ color: '#faad14' }} />
-              <Text strong>学习进度概览</Text>
+              <Text strong>{t('todo.stats.title')}</Text>
             </Space>
           }
         >
           <Row gutter={[16, 16]}>
             <Col xs={12} sm={6}>
               <div style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>课程进度</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.courseProgress')}</Text>
                 <Progress
                   type="dashboard"
                   percent={data.stats.course_progress || 0}
@@ -374,7 +376,7 @@ const TaskTodoPage: React.FC = () => {
             </Col>
             <Col xs={12} sm={6}>
               <div style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>总体完成率</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.completionRate')}</Text>
                 <Progress
                   type="dashboard"
                   percent={data.stats.completion_rate || 0}
@@ -385,7 +387,7 @@ const TaskTodoPage: React.FC = () => {
             </Col>
             <Col xs={12} sm={6}>
               <div style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>总体正确率</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.accuracyRate')}</Text>
                 <Progress
                   type="dashboard"
                   percent={data.stats.accuracy_rate || 0}
@@ -397,13 +399,13 @@ const TaskTodoPage: React.FC = () => {
             </Col>
             <Col xs={12} sm={6}>
               <div style={{ textAlign: 'center', paddingTop: 8 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>连续学习</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('todo.stats.streakDays')}</Text>
                 <div style={{ fontSize: 28, fontWeight: 700, color: '#fa8c16' }}>
                   {data.stats.streak_days || 0}
-                  <Text style={{ fontSize: 14, color: '#fa8c16', marginLeft: 4 }}>天</Text>
+                  <Text style={{ fontSize: 14, color: '#fa8c16', marginLeft: 4 }}>{t('todo.stats.streakDaysUnit')}</Text>
                 </div>
                 <Text type="secondary" style={{ fontSize: 11 }}>
-                  {data.stats.streak_days > 0 ? '🔥 继续加油' : '今天开始学习吧'}
+                  {data.stats.streak_days > 0 ? t('todo.stats.streakActive') : t('todo.stats.streakInactive')}
                 </Text>
               </div>
             </Col>
