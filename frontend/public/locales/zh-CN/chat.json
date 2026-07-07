@@ -144,5 +144,9 @@
   "createFailed": "创建任务失败",
   "deleteFailed": "删除失败",
   "operationFailed": "e?.response?.data?.detail || e?.message || 保存失败",
-  "Failed": "刷新失败"
+  "Failed": "刷新失败",
+  "useAgent": "智能体",
+  "useAgentTip": "连接智能体应用", 
+  "useAgentDisabledTip": "未配置APPID，仅支持直连大模型",
+  "directModel": "直连大模型"
 }

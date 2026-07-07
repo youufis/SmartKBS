@@ -19,11 +19,15 @@ _ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
 )
 
 
-def get_ai_config():
-    """获取 AI 调用配置"""
+def get_ai_config(use_agent: bool = True):
+    """获取 AI 调用配置
+
+    Args:
+        use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
+    """
     from backend.api.config_router import get_config_value
     app_id = get_config_value("APPID", "")
-    if app_id:
+    if app_id and use_agent:
         return {"mode": "agent", "app_id": app_id}
     return {
         "mode": "direct",
@@ -31,6 +35,13 @@ def get_ai_config():
         "api_base": get_config_value("QWEN_OPENAI_API_BASE",
                                       "https://dashscope.aliyuncs.com/compatible-mode/v1"),
     }
+
+
+def is_appid_configured() -> bool:
+    """检查是否配置了 APPID（智能体应用 ID）"""
+    from backend.api.config_router import get_config_value
+    app_id = get_config_value("APPID", "")
+    return bool(app_id)
 
 
 # ── 非流式调用（同步，返回完整文本） ──
@@ -177,9 +188,14 @@ def call_ai_sync_direct(prompt: str, api_key: str) -> str:
 
 # ── 流式调用（返回事件生成器） ──
 
-def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None):
-    """流式调用 AI，返回 (text_generator, get_session_id)"""
-    cfg = get_ai_config()
+def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
+                   use_agent: bool = True):
+    """流式调用 AI，返回 (text_generator, get_session_id)
+
+    Args:
+        use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
+    """
+    cfg = get_ai_config(use_agent=use_agent)
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
     if cfg["mode"] == "agent":

@@ -172,8 +172,8 @@ const ChatPage: React.FC = () => {
   // 智能教育助手 - SmartKB
   const {
     messages, isStreaming, currentText, filePaths,
-    contextEnhance, ragEnabled, sendMessage, stopStreaming, newTopic,
-    setFilePaths, setContextEnhance, setRagEnabled,
+    contextEnhance, ragEnabled, useAgent, sendMessage, stopStreaming, newTopic,
+    setFilePaths, setContextEnhance, setRagEnabled, setUseAgent,
     historyTree, historyLoading,
     loadHistoryTree,
   } = useChatStore()
@@ -1238,6 +1238,22 @@ const ChatPage: React.FC = () => {
                 }}>
                   {usage.multimodal_enabled ? t('multimodal') : t('textOnly')}
                 </span>
+              </Tooltip>
+            )}
+            {usage && (
+              <Tooltip
+                title={usage.appid_configured ? t('useAgentTip') : t('useAgentDisabledTip')}
+              >
+                <Checkbox
+                  checked={usage.appid_configured ? useAgent : false}
+                  disabled={!usage.appid_configured}
+                  onChange={(e) => setUseAgent(e.target.checked)}
+                  style={{ fontSize: 12, marginLeft: 4 }}
+                >
+                  <span style={{ fontSize: 12, color: usage.appid_configured ? '#666' : '#bbb' }}>
+                    {usage.appid_configured && useAgent ? t('useAgent') : t('directModel')}
+                  </span>
+                </Checkbox>
               </Tooltip>
             )}
             <div style={{ flex: 1, minWidth: 0 }} />

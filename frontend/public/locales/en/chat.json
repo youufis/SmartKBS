@@ -142,5 +142,9 @@
   "companionDisabled": "Companion is disabled, please enable in ⚙️ settings",
   "submitFailed": "Submit failed",
   "createFailed": "Failed to create task",
-  "deleteFailed": "Delete failed"
+  "deleteFailed": "Delete failed",
+  "useAgent": "Agent",
+  "useAgentTip": "Connect via AI Agent",
+  "useAgentDisabledTip": "APPID not configured, direct model connection only",
+  "directModel": "Direct Model"
 }

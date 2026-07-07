@@ -8,6 +8,7 @@ export interface UsageInfo {
   remaining: number;
   multimodal_enabled?: boolean;
   model_name?: string;
+  appid_configured?: boolean;
 }
 
 /** 获取当前用户的每日用量 */
@@ -41,6 +42,7 @@ export interface ChatParams {
   file_paths?: string[];
   session_id?: string | null;
   context_enhance?: boolean;
+  use_agent?: boolean;
 }
 
 /**

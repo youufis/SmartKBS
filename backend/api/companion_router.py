@@ -48,6 +48,7 @@ class CompanionChatRequest(BaseModel):
     file_paths: list[str] = []
     session_id: Optional[str] = None
     context_enhance: bool = False
+    use_agent: bool = True
 
 
 class CompanionConfigUpdate(BaseModel):
@@ -135,6 +136,7 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
             user_payload=None,  # 学伴/助手已有自己的系统提示词，避免 enhance 二次包装
             dashscope_api_key=dashscope_api_key,
             context_enhance=req.context_enhance,
+            use_agent=req.use_agent,
         ),
         media_type="text/event-stream",
     )

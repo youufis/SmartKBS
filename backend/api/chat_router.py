@@ -44,6 +44,7 @@ class ChatRequest(BaseModel):
     file_paths: list[str] = []
     session_id: Optional[str] = None
     context_enhance: bool = False
+    use_agent: bool = True  # True=优先使用智能体(有APPID时)；False=强制直连大模型
 
 
 # ── API Key 获取 ──
@@ -245,6 +246,9 @@ async def get_usage(request: Request):
     used = get_user_daily_usage(username)
 
     # 管理员不受限
+    from backend.api.ai_service import is_appid_configured
+    appid_configured = is_appid_configured()
+
     if role_val == 0:
         multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
         model_name = get_config_value("MODEL_NAME", "deepseek-v4-flash")
@@ -252,6 +256,7 @@ async def get_usage(request: Request):
             "enabled": enabled, "used": 0, "max": 0, "remaining": -1,
             "multimodal_enabled": multimodal_enabled,
             "model_name": model_name,
+            "appid_configured": appid_configured,
         }
 
     multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
@@ -264,6 +269,7 @@ async def get_usage(request: Request):
         "remaining": max(0, max_req - used),
         "multimodal_enabled": multimodal_enabled,
         "model_name": model_name,
+        "appid_configured": appid_configured,
     }
 
 
@@ -321,6 +327,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             user_payload=user,
             dashscope_api_key=dashscope_api_key,
             context_enhance=req.context_enhance,
+            use_agent=req.use_agent,
         ),
         media_type="text/event-stream",
     )
@@ -330,6 +337,7 @@ def _chat_event_generator(
     prompt: str, file_paths: list[str], session_id: Optional[str],
     username: str, user_payload: dict[str, Any] | None,
     dashscope_api_key: str, context_enhance: bool,
+    use_agent: bool = True,
 ):
     """SSE 事件生成器（同步）"""
     try:
@@ -411,7 +419,7 @@ def _chat_event_generator(
             return
 
         if not valid_file_paths:
-            for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key, username):
+            for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key, username, use_agent=use_agent):
                 yield f"data: {json.dumps({'type': 'delta', 'content': chunk['text']})}\n\n"
                 session_id = chunk.get("session_id") or session_id
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
@@ -447,12 +455,13 @@ def _chat_event_generator(
         yield f"data: {json.dumps({'type': 'error', 'content': f'对话生成失败：{str(e)}'})}\n\n"
 
 
-def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = ""):
+def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = "",
+                        use_agent: bool = True):
     """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式"""
     from backend.api.ai_service import call_ai_stream
 
     try:
-        for chunk in call_ai_stream(prompt, api_key, session_id):
+        for chunk in call_ai_stream(prompt, api_key, session_id, use_agent=use_agent):
             yield chunk
     except Exception as e:
         logger.error(f"AI chat error: {e}")

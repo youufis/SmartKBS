@@ -83,9 +83,11 @@ Built with **FastAPI + React**, the system adopts a modern front-end/back-end se
 
 ## 🎮 Demo Environment
 
-> **🌐 Demo URL:** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
+> **🌐 Demo URL:**
 >
-> **⏰ Availability:** Open during daytime (closed at night)
+> **Development Environment:** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
+>
+> **Deployment Environment:** [http://183.239.51.37:8086](http://183.239.51.37:8086) / [https://183.239.51.37:8085](https://183.239.51.37:8085)
 >
 > **👤 Test Accounts:**
 >

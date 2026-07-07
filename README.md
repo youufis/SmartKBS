@@ -85,9 +85,11 @@ DashScope（通义千问/通义万相）与 DeepSeek 等大语言模型能力，
 
 ## 🎮 演示环境
 
-> **🌐 演示地址：** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
+> **🌐 演示地址：**
 >
-> **⏰ 开放时间：** 日间开放（晚间关机）
+> **开发环境：** [http://youufis.oicp.net:8086](http://youufis.oicp.net:8086) / [https://youufis.oicp.net:8085](https://youufis.oicp.net:8085)
+>
+> **部署环境：** [http://183.239.51.37:8086](http://183.239.51.37:8086) / [https://183.239.51.37:8085](https://183.239.51.37:8085)
 >
 > **👤 测试账号：**
 >
