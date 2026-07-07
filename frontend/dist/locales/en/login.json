@@ -1,0 +1,35 @@
+{
+  "pageTitle": "Welcome to SmartKBS",
+  "username": "Username",
+  "usernameOrName": "Username or Name",
+  "password": "Password",
+  "login": "Login",
+  "loggingIn": "Logging in...",
+  "loginBtn": "Log In",
+  "forgotPassword": "Forgot password?",
+  "logout": "Logout",
+  "logoutConfirm": "Confirm logout?",
+  "onlineCount": "{{count}} online",
+  "onlineCountText": "{{count}} online",
+  "usernameRequired": "Please enter username",
+  "passwordRequired": "Please enter password",
+  "defaultAgentName": "Smart Learning Platform",
+  "quotePrefix": "— ",
+  "theme": {
+    "switch": "Switch Theme",
+    "default": "Default Blue",
+    "forest": "Forest Green",
+    "sunset": "Sunset Orange",
+    "midnight": "Midnight Dark",
+    "lavender": "Lavender Purple"
+  },
+  "language": {
+    "switch": "Switch Language",
+    "zh-CN": "中文",
+    "en": "English"
+  },
+  "welcome": "Welcome back",
+  "loginSuccess": "Login successful",
+  "loginFailed": "Login failed",
+  "sessionExpired": "Session expired, please login again"
+}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
@@ -25,75 +26,55 @@ const { Title, Text } = Typography
 
 const GLOBAL_CONFIG_FIELDS = [
   // 品牌信息
-  { key: 'AGENT_EDITION', label: '平台版本', type: 'text', group: 'brand',
-    desc: '显示在登录页面 "智慧教学平台-" 之后的版本名称，留空则只显示"智慧教学平台"。例如可设为"数学版"、"生物版"等' },
-  { key: 'ORG_NAME', label: '单位名称', type: 'text', group: 'brand', required: false,
-    desc: '显示在登录页面和界面顶部的单位/学校名称，为空则不显示' },
+  { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', type: 'text', group: 'brand' },
+  { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', required: false },
   // API 密钥
-  { key: 'dashscope_api_key', label: 'DashScope API Key', type: 'password', group: 'api',
-    desc: '全局兜底密钥，用户未配置时使用。如已设置环境变量 DASHSCOPE_API_KEY 则优先使用，此处可不填' },
+  { key: 'dashscope_api_key', labelKey: 'field_dashscope_api_key', descKey: 'field_dashscope_api_key_desc', type: 'password', group: 'api' },
   // 模型与应用配置
-  { key: 'APPID', label: 'APPID', type: 'text', group: 'model', required: false,
-    desc: '【可选】留空则直接调用大模型（使用下方「默认对话模型」）；填写后调用百炼智能体应用。注意：APPID 必须与上方的 DASHSCOPE_API_KEY 归属于同一个阿里云账号，否则无法调用。创建路径：百炼 → 应用中心 → 我的应用 → 创建智能体应用 → 复制 APPID' },
-  { key: 'QWEN_OPENAI_API_BASE', label: 'API 基础地址', type: 'text', group: 'model',
-    desc: 'DashScope API 调用地址，通常无需修改' },
-  { key: 'MODEL_LONG_NAME', label: '长文本模型', type: 'text', group: 'model',
-    desc: '用于长文档处理的模型名称，如 qwen-long' },
-  { key: 'MODEL_VL_NAME', label: '视觉模型', type: 'text', group: 'model',
-    desc: '用于图像理解的模型名称，如 qwen3-vl-plus' },
-  { key: 'MODEL_NAME', label: '默认对话模型', type: 'text', group: 'model',
-    desc: '推荐: deepseek-v4-flash、qwen3.5-flash 等' },
-  { key: 'ENABLE_MULTIMODAL', label: '多模态', type: 'multimodal_toggle', group: 'model',
-    desc: '开启后对话中发送图片时使用多模态格式（图片+文本同时输入）。请确认模型是支持多模态，勾选后将视为多模态模型处理' },
+  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'model', required: false },
+  { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', type: 'text', group: 'model' },
+  { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'model' },
+  { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'text', group: 'model' },
+  { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'text', group: 'model' },
+  { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'model' },
   // AI 对话权限
-  { key: 'ENABLE_AI_CHAT_FOR_ROLES', label: 'AI 对话权限', type: 'roles', group: 'ai',
-    desc: '选择可使用 AI 对话的角色（管理员始终可用）' },
+  { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'ai' },
   // 系统限制
-  { key: 'MAX_DOC_SIZE_MB', label: '文档大小限制 (MB)', type: 'number', group: 'limit' },
-  { key: 'MAX_IMAGE_SIZE_MB', label: '图片大小限制 (MB)', type: 'number', group: 'limit' },
-  { key: 'JWT_EXPIRATION_HOURS', label: 'Token 有效期 (小时)', type: 'number', group: 'limit' },
-  { key: 'ONLINE_USER_TIMEOUT_SECONDS', label: '在线超时 (秒)', type: 'number', group: 'limit' },
-  { key: 'ENABLE_REQUEST_LIMIT', label: '启用请求频率限制', type: 'boolean', group: 'limit' },
-  { key: 'MAX_ALLOWED_REQUESTS', label: '每日最大请求数', type: 'number', group: 'limit' },
-  { key: 'TEACHER_DOWNLOAD_QUOTA_GB', label: '教师下载配额 (GB)', type: 'number', group: 'limit',
-    desc: '每位教师下载中心的最大存储空间' },
+  { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', type: 'number', group: 'limit' },
+  { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', type: 'number', group: 'limit' },
+  { key: 'JWT_EXPIRATION_HOURS', labelKey: 'field_JWT_EXPIRATION_HOURS', type: 'number', group: 'limit' },
+  { key: 'ONLINE_USER_TIMEOUT_SECONDS', labelKey: 'field_ONLINE_USER_TIMEOUT_SECONDS', type: 'number', group: 'limit' },
+  { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', type: 'boolean', group: 'limit' },
+  { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', type: 'number', group: 'limit' },
+  { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'limit' },
   // 课程设置
-  { key: 'SUBJECTS', label: '课程名称列表', type: 'tags', group: 'subjects',
-    desc: '系统中使用的课程名称，多个用逗号分隔（示例：数学,语文,英语）。修改后需重启服务生效' },
+  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'subjects' },
   // 题型设置
-  { key: 'QUESTION_TYPES', label: '试题题型列表', type: 'question_types', group: 'subjects',
-    desc: '每行一个题型，格式为 "key:标签"，如 single:单选题。增删改后刷新页面即可生效，无需重启' },
+  { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'subjects' },
   // 消息通知
-  { key: 'enabled_notification_types', label: '启用的通知类型', type: 'notifications', group: 'notify',
-    desc: '关闭的通知类型将不会推送给任何用户' },
+  { key: 'enabled_notification_types', labelKey: 'field_enabled_notification_types', descKey: 'field_enabled_notification_types_desc', type: 'notifications', group: 'notify' },
   // 文件类型白名单
-  { key: 'IMAGE_EXTENSIONS', label: '图片文件扩展名', type: 'tags', group: 'filetype',
-    desc: '允许上传的图片格式，多个用逗号分隔，如 .jpg,.jpeg,.png' },
-  { key: 'DOCUMENT_EXTENSIONS', label: '文档文件扩展名', type: 'tags', group: 'filetype',
-    desc: '允许上传的文档格式，多个用逗号分隔，如 .txt,.md,.pdf' },
+  { key: 'IMAGE_EXTENSIONS', labelKey: 'field_IMAGE_EXTENSIONS', descKey: 'field_IMAGE_EXTENSIONS_desc', type: 'tags', group: 'filetype' },
+  { key: 'DOCUMENT_EXTENSIONS', labelKey: 'field_DOCUMENT_EXTENSIONS', descKey: 'field_DOCUMENT_EXTENSIONS_desc', type: 'tags', group: 'filetype' },
   // 图片生成
-  { key: 'IMAGE_GEN_ENABLED', label: '启用AI生图功能', type: 'boolean', group: 'imagegen',
-    desc: '关闭后试题的图片占位符不会自动调用生图模型，仅保留占位符描述' },
-  { key: 'IMAGE_GEN_MODEL', label: '生图模型', type: 'text', group: 'imagegen',
-    desc: '通义万相：wanx2.1-t2i-turbo(快速,0.02元/张) / wanx2.1-t2i-plus(高清,0.08元/张)' },
-  { key: 'IMAGE_GEN_SIZE', label: '生图尺寸', type: 'text', group: 'imagegen',
-    desc: 'DashScope格式：1024*1024(方形) / 720*1280(竖屏) / 1280*720(横屏)' },
+  { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen' },
+  { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', type: 'text', group: 'imagegen' },
+  { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'text', group: 'imagegen' },
   // 闯关挑战
-  { key: 'QUEST_USE_BANK', label: '闯关出题模式', type: 'boolean', group: 'quest',
-    desc: '🟢 开启（ON）→ 题库出题模式，从闯关题库中随机抽题\n🔴 关闭（OFF）→ AI 出题模式，由 AI 即时生成百科题目' },
+  { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'boolean', group: 'quest' },
 ]
 
 const GROUP_LABELS: Record<string, string> = {
-  brand: '🏷️ 品牌信息',
-  api: '🔑 API 密钥',
-  model: '🤖 模型与应用配置',
-  ai: '💬 AI 对话设置',
-  subjects: '📚 课程设置',
-  limit: '⚙️ 系统限制',
-  notify: '🔔 消息通知',
-  filetype: '📁 文件类型白名单',
-  imagegen: '🎨 图片生成',
-  quest: '⚡ 闯关挑战',
+  brand: 'group_brand',
+  api: 'group_api',
+  model: 'group_model',
+  ai: 'group_ai',
+  subjects: 'group_subjects',
+  limit: 'group_limit',
+  notify: 'group_notify',
+  filetype: 'group_filetype',
+  imagegen: 'group_imagegen',
+  quest: 'group_quest',
 }
 
 // ═══════════════════════════════════════════════
@@ -101,6 +82,7 @@ const GROUP_LABELS: Record<string, string> = {
 // ═══════════════════════════════════════════════
 
 const UpgradePanel: React.FC = () => {
+  const { t } = useTranslation('system')
   const [verInfo, setVerInfo] = useState<VersionInfo | null>(null)
   const [verLoading, setVerLoading] = useState(true) // 初始为 true，首次挂载即加载
   const [upgrading, setUpgrading] = useState(false)
@@ -119,10 +101,10 @@ const UpgradePanel: React.FC = () => {
       const info = await checkVersion()
       setVerInfo(info)
     } catch (e: any) {
-      message.error('版本检测失败: ' + (e?.response?.data?.detail || e.message))
+      message.error(t('versionCheckFailed') + ': ' + (e?.response?.data?.detail || e.message))
     }
     setVerLoading(false)
-  }, [])
+  }, [t])
 
   const loadHistory = useCallback(async (page = 1, pageSize = 10) => {
     try {
@@ -136,29 +118,29 @@ const UpgradePanel: React.FC = () => {
   const handleUpgrade = () => {
     const isPrefetched = verInfo?.prefetched
     Modal.confirm({
-      title: '确认执行升级?',
+      title: t('confirmUpgrade'),
       icon: <WarningOutlined />,
       content: (
         <div>
           {isPrefetched && (
             <Alert type="success" showIcon icon={<DownloadOutlined />}
-              message="代码已预缓存到本地"
-              description="后台已自动将更新代码下载到服务器本地缓存，升级过程无需网络拉取，速度更快。"
+              message={t('upgradeCodeCached')}
+              description={t('upgradeCodeCachedDesc')}
               style={{ marginBottom: 12 }}
             />
           )}
-          <p>系统将自动完成以下操作：</p>
+          <p>{t('upgradeStepsTitle')}</p>
           <ol>
-            <li>{isPrefetched ? '应用本地缓存的代码（无需网络拉取）' : '从 GitHub 下载最新代码'}</li>
-            <li>更新本地文件</li>
-            <li>更新数据库结构（如有需要）</li>
-            <li>安装新增的依赖包</li>
+            <li>{isPrefetched ? t('upgradeStep1Cached') : t('upgradeStep1Download')}</li>
+            <li>{t('upgradeStep2')}</li>
+            <li>{t('upgradeStep3')}</li>
+            <li>{t('upgradeStep4')}</li>
           </ol>
-          <p>💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理</p>
+          <p>{t('upgradeAutoRecover')}</p>
         </div>
       ),
-      okText: '确认升级',
-      cancelText: '取消',
+      okText: t('confirmUpgradeOk'),
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await startUpgrade()
@@ -174,9 +156,9 @@ const UpgradePanel: React.FC = () => {
                 clearInterval(pollRef.current)
                 setUpgrading(false)
                 if (st.error) {
-                  message.error('升级失败: ' + st.error)
+                  message.error(t('upgradeFailed') + ': ' + st.error)
                 } else {
-                  message.success('🎉 升级完成！如需加载新代码请手动重启服务')
+                  message.success(t('upgradeSuccess'))
                 }
                 loadHistory()
               }
@@ -187,7 +169,7 @@ const UpgradePanel: React.FC = () => {
             }
           }, 2000)
         } catch (e: any) {
-          message.error('启动升级失败: ' + (e?.response?.data?.detail || e.message))
+          message.error(t('upgradeStartFailed') + ': ' + (e?.response?.data?.detail || e.message))
         }
       },
     })
@@ -195,38 +177,38 @@ const UpgradePanel: React.FC = () => {
 
   const handleRollback = () => {
     Modal.confirm({
-      title: '⚠️ 确认执行回滚操作?',
+      title: t('confirmRollback'),
       icon: <ExclamationCircleOutlined />,
       content: (
         <div>
           <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 6, padding: '12px 16px', marginBottom: 12 }}>
-            <Text strong style={{ color: '#cf1322' }}>回滚操作将执行以下步骤：</Text>
+            <Text strong style={{ color: '#cf1322' }}>{t('rollbackStepsTitle')}</Text>
             <ol style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#555' }}>
-              <li>将代码回退到最近一次升级前的版本（git reset --hard HEAD@{'{'}1{'}'}）</li>
-              <li>升级历史中将新增一条回滚记录</li>
+              <li>{t('rollbackStep1')}</li>
+              <li>{t('rollbackStep2')}</li>
             </ol>
           </div>
           <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '12px 16px' }}>
-            <Text strong style={{ color: '#d48806' }}>请注意：</Text>
+            <Text strong style={{ color: '#d48806' }}>{t('rollbackNoteTitle')}</Text>
             <ul style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#555' }}>
-              <li>回滚仅恢复代码文件，<strong>数据库和用户数据不受影响</strong></li>
-              <li>回滚后最近一次升级的新功能将不可用</li>
-              <li>如需再次升级，可重新点击「增量升级」按钮</li>
+              <li><Trans i18nKey="rollbackNote1">回滚仅恢复代码文件，<strong>数据库和用户数据不受影响</strong></Trans></li>
+              <li>{t('rollbackNote2')}</li>
+              <li>{t('rollbackNote3')}</li>
             </ul>
           </div>
         </div>
       ),
-      okText: '确认回滚',
+      okText: t('confirmRollbackOk'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await apiRollback()
-          message.success('🎉 回滚完成，请刷新页面')
+          message.success(t('rollbackSuccess'))
           loadHistory()
           loadVersion()
         } catch (e: any) {
-          message.error('回滚失败: ' + (e?.response?.data?.detail || e.message))
+          message.error(t('rollbackFailed') + ': ' + (e?.response?.data?.detail || e.message))
         }
       },
     })
@@ -234,19 +216,19 @@ const UpgradePanel: React.FC = () => {
 
   const handleBackup = () => {
     Modal.confirm({
-      title: '确认创建备份?',
+      title: t('confirmBackup'),
       icon: <ExclamationCircleOutlined />,
-      content: '系统将备份当前代码（git archive）以及数据库和配置文件，备份文件保存在服务器 .upgrade_backups 目录中。',
-      okText: '创建备份',
-      cancelText: '取消',
+      content: t('backupContent'),
+      okText: t('backupOk'),
+      cancelText: t('cancel'),
       onOk: async () => {
         setBackingUp(true)
         try {
           const res = await createBackup()
-          message.success(`✅ 备份创建成功（版本 ${res.version}）`)
+          message.success(t('backupSuccess', { version: res.version }))
           loadHistory()
         } catch (e: any) {
-          message.error('备份失败: ' + (e?.response?.data?.detail || e.message))
+          message.error(t('backupFailed') + ': ' + (e?.response?.data?.detail || e.message))
         }
         setBackingUp(false)
       },
@@ -259,7 +241,7 @@ const UpgradePanel: React.FC = () => {
         const info = await checkVersion()
         setVerInfo(info)
       } catch (e: any) {
-        message.error('版本检测失败: ' + (e?.response?.data?.detail || e.message))
+        message.error(t('versionCheckFailed') + ': ' + (e?.response?.data?.detail || e.message))
       }
       try {
         const res = await getHistory()
@@ -273,23 +255,23 @@ const UpgradePanel: React.FC = () => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
     }
-  }, [])
+  }, [t])
 
   const handleDeleteHistory = (task_id: string) => {
     Modal.confirm({
-      title: '确认删除该条升级记录?',
+      title: t('confirmDeleteHistory'),
       icon: <ExclamationCircleOutlined />,
-      content: '删除后不可恢复。',
-      okText: '确认删除',
+      content: t('confirmDeleteHistoryContent'),
+      okText: t('confirmUpgradeOk'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await deleteHistory(task_id)
-          message.success('已删除')
+          message.success(t('upgradeDeleteSuccess'))
           loadHistory(histPage, histPageSize)
         } catch (e: any) {
-          message.error('删除失败: ' + (e?.response?.data?.detail || e.message))
+          message.error(t('upgradeDeleteFailed') + ': ' + (e?.response?.data?.detail || e.message))
         }
       },
     })
@@ -302,16 +284,16 @@ const UpgradePanel: React.FC = () => {
         <Alert
           type="error"
           showIcon
-          message="🛠️ Git 环境异常，无法在线升级"
+          message={t('gitEnvError')}
           description={
             <div>
               {!verInfo.git_available ? (
                 <span>
-                  未检测到 Git 命令。请安装 Git 后重试。<br />
+                  {t('gitNotFound')}<br />
                   <a href={verInfo.git_download_url} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 'bold' }}>
-                    点击下载 Git for Windows ⏬
+                    {t('downloadGit')}
                   </a>
-                  &nbsp;（安装后需回收 IIS 应用池使 PATH 生效）
+                  &nbsp;{t('gitInstallNote')}
                 </span>
               ) : (
                 <div>
@@ -331,24 +313,24 @@ const UpgradePanel: React.FC = () => {
       {verInfo && (
         <Card style={{ marginBottom: 16 }}>
           <Descriptions column={1} bordered size="small">
-            <Descriptions.Item label="当前版本">
+            <Descriptions.Item label={t('currentVersion')}>
               <Tag color="blue">{verInfo.current_version}</Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="最新版本">
+            <Descriptions.Item label={t('latestVersionLabel')}>
               <Tag color={verInfo.has_update ? 'green' : 'default'}>{verInfo.latest_version}</Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="状态">
+            <Descriptions.Item label={t('status')}>
               {verInfo.has_update
                 ? <Tag color="green">📥 {verInfo.latest_version !== verInfo.current_version
-                    ? `新版本 ${verInfo.latest_version} 可用`
-                    : `有 ${verInfo.behind_commits} 个新提交可更新`}（落后 {verInfo.behind_commits} 个提交）</Tag>
-                : <Tag>✅ 已是最新版本</Tag>}
+                    ? t('newVersionAvailable', { version: verInfo.latest_version })
+                    : t('newCommitsAvailable', { count: verInfo.behind_commits })} {t('behindCommits', { count: verInfo.behind_commits })}</Tag>
+                : <Tag>{t('upToDate')}</Tag>}
               {verInfo.prefetched && (
-                <Tag color="cyan" style={{ marginLeft: 8 }}>📦 代码已预缓存到本地，升级无需网络拉取</Tag>
+                <Tag color="cyan" style={{ marginLeft: 8 }}>{t('codePrecached')}</Tag>
               )}
             </Descriptions.Item>
             {verInfo.release_date && (
-              <Descriptions.Item label="发布日期">{verInfo.release_date}</Descriptions.Item>
+              <Descriptions.Item label={t('releaseDate')}>{verInfo.release_date}</Descriptions.Item>
             )}
           </Descriptions>
 
@@ -356,7 +338,7 @@ const UpgradePanel: React.FC = () => {
           {verInfo.changelog && verInfo.changelog.length > 0 && (
             <>
               <Divider />
-              <Title level={5}>📋 更新日志</Title>
+              <Title level={5}>{t('changelogTitle')}</Title>
               <Timeline items={verInfo.changelog.map((c: string) => ({ content: c }))} />
             </>
           )}
@@ -365,7 +347,7 @@ const UpgradePanel: React.FC = () => {
           {verInfo.breaking_changes && verInfo.breaking_changes.length > 0 && (
             <Alert
               type="warning"
-              message="⚠️ 不兼容变更"
+              message={t('breakingChanges')}
               description={verInfo.breaking_changes.join('；')}
               showIcon
               style={{ marginTop: 16 }}
@@ -375,7 +357,7 @@ const UpgradePanel: React.FC = () => {
           <Divider />
           <Space>
             <Button icon={<SearchOutlined />} onClick={loadVersion}>
-              检测更新
+              {t('checkUpdate')}
             </Button>
             <Button
               type="primary"
@@ -383,19 +365,19 @@ const UpgradePanel: React.FC = () => {
               disabled={!verInfo?.has_update || upgrading || !verInfo?.git_available}
               loading={upgrading}
               title={
-                !verInfo?.git_available ? '请先安装 Git'
-                : verInfo?.prefetched ? '代码已预缓存到本地，升级速度更快'
+                !verInfo?.git_available ? t('installGitFirst')
+                : verInfo?.prefetched ? t('codePrecachedTitle')
                 : ''
               }
               onClick={handleUpgrade}
             >
-              {upgrading ? '升级中...' : verInfo?.prefetched ? '📥 快速升级（已缓存）' : '📥 增量升级'}
+              {upgrading ? t('upgrading') : verInfo?.prefetched ? t('quickUpgrade') : t('incrementalUpgrade')}
             </Button>
             <Button icon={<RollbackOutlined />} onClick={handleRollback} disabled={!verInfo?.git_available}>
-              回滚
+              {t('rollback')}
             </Button>
             <Button icon={<SaveOutlined />} onClick={handleBackup} loading={backingUp} disabled={!verInfo?.git_available}>
-              创建备份
+              {t('createBackup')}
             </Button>
           </Space>
         </Card>
@@ -403,13 +385,13 @@ const UpgradePanel: React.FC = () => {
 
       {/* 升级进度 */}
       {(upgradeProg && upgradeProg.running) && (
-        <Card title="🔄 升级进度" style={{ marginBottom: 16 }}
+        <Card title={t('upgradeProgress')} style={{ marginBottom: 16 }}
           extra={
             <Button size="small" danger
               onClick={async () => {
                 try {
                   await cancelUpgrade()
-                  message.warning('升级已取消')
+                  message.warning(t('cancelSuccess'))
                   setUpgrading(false)
                   setUpgradeProg(null)
                   setRestarting(false)
@@ -417,11 +399,11 @@ const UpgradePanel: React.FC = () => {
                   loadVersion()
                   loadHistory()
                 } catch (e: any) {
-                  message.error('取消失败: ' + (e?.response?.data?.detail || e.message))
+                  message.error(t('cancelFailed') + ': ' + (e?.response?.data?.detail || e.message))
                 }
               }}
             >
-              取消升级
+              {t('cancelUpgradeBtn')}
             </Button>
           }
         >
@@ -432,13 +414,13 @@ const UpgradePanel: React.FC = () => {
               type="warning"
               showIcon
               icon={<SyncOutlined spin />}
-              message="⏳ 等待服务恢复..."
-              description="服务暂时无响应，请稍后刷新页面重试。如果您正在远程操作，切勿关闭此页面。"
+              message={t('waitingServiceRecovery')}
+              description={t('serviceUnavailable')}
               style={{ marginTop: 8, marginBottom: 8 }}
             />
           )}
           <p style={{ fontSize: 12, color: '#999' }}>
-            {restarting ? '正在等待服务恢复...' : '如长时间无响应可点击右上角「取消升级」'}
+            {restarting ? t('waitingServiceHint') : t('noResponseHint')}
           </p>
           {upgradeProg.error && (
             <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
@@ -447,32 +429,31 @@ const UpgradePanel: React.FC = () => {
       )}
 
       {/* 升级历史 */}
-      <Card title="📜 升级历史">
+      <Card title={t('upgradeHistory')}>
         <Table
           dataSource={histList}
           columns={[
-            { title: '时间', dataIndex: 'timestamp', key: 'ts', width: 170 },
+            { title: t('timestamp'), dataIndex: 'timestamp', key: 'ts', width: 170 },
             {
-              title: '版本变化', key: 'ver',
+              title: t('versionChange'), key: 'ver',
               render: (_: any, r: any) => `${r.from_version || '-'} → ${r.to_version || '-'}`,
             },
-            { title: '执行人', dataIndex: 'admin', key: 'admin', width: 90 },
-            { title: '来源 IP', dataIndex: 'client_ip', key: 'client_ip', width: 130,
+            { title: t('executor'), dataIndex: 'admin', key: 'admin', width: 90 },
+            { title: t('sourceIP'), dataIndex: 'client_ip', key: 'client_ip', width: 130,
               render: (ip: string) => ip ? <Tag>{ip}</Tag> : '-' },
-            {
-              title: '状态', dataIndex: 'status', key: 'status', width: 120,
+            { title: t('status'), dataIndex: 'status', key: 'status', width: 120,
               render: (s: string) => {
                 const map: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-                  success: { color: 'green', icon: <CheckCircleOutlined />, label: '成功' },
-                  failed: { color: 'red', icon: <CloseCircleOutlined />, label: '失败' },
-                  rolled_back: { color: 'orange', icon: <RollbackOutlined />, label: '已回滚' },
+                  success: { color: 'green', icon: <CheckCircleOutlined />, label: t('statusSuccess') },
+                  failed: { color: 'red', icon: <CloseCircleOutlined />, label: t('statusFailed') },
+                  rolled_back: { color: 'orange', icon: <RollbackOutlined />, label: t('statusRolledBack') },
                 }
                 const item = map[s] || { color: 'default', icon: null, label: s }
                 return <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
               },
             },
             {
-              title: '操作', key: 'action', width: 90,
+              title: t('actions'), key: 'action', width: 90,
               render: (_: any, r: any) => (
                 <Space size={0}>
                   <Button type="link" size="small"
@@ -481,16 +462,16 @@ const UpgradePanel: React.FC = () => {
                       const fileList = r.changed_files
                       const isError = r.status === 'failed' && r.error
                       Modal.info({
-                        title: `📋 升级详情 — ${r.from_version || ''} → ${r.to_version || ''}`,
+                        title: t('upgradeDetailTitle', { from: r.from_version || '', to: r.to_version || '' }),
                         width: 560,
                         content: (
                           <div style={{ marginTop: 8 }}>
                             <p style={{ color: '#888', marginBottom: 8 }}>
-                              执行人：{r.admin} ｜ 来源 IP：{r.client_ip || '未知'} ｜ 时间：{r.timestamp}
+                              {t('executor')}：{r.admin} ｜ {t('sourceIP')}：{r.client_ip || t('unknown')} ｜ {t('timestamp')}：{r.timestamp}
                             </p>
                             {r.commits !== undefined && (
                               <p style={{ color: '#888', marginBottom: 12 }}>
-                                提交数：{r.commits}
+                                {t('commitsCount', { count: r.commits })}
                               </p>
                             )}
                             {isError && (
@@ -498,7 +479,7 @@ const UpgradePanel: React.FC = () => {
                                 background: '#fff2f0', border: '1px solid #ffccc7',
                                 borderRadius: 6, padding: '12px 16px', marginBottom: 12,
                               }}>
-                                <Text strong style={{ color: '#cf1322' }}>❌ 错误信息</Text>
+                                <Text strong style={{ color: '#cf1322' }}>{t('errorInfo')}</Text>
                                 <pre style={{
                                   marginTop: 8, marginBottom: 0, whiteSpace: 'pre-wrap',
                                   wordBreak: 'break-word', fontSize: 13,
@@ -509,7 +490,7 @@ const UpgradePanel: React.FC = () => {
                             {fileList && fileList.length > 0 ? (
                               <div>
                                 <div style={{ fontWeight: 600, marginBottom: 8 }}>
-                                  📄 变更文件（{fileList.length} 个）
+                                  {t('changedFiles', { count: fileList.length })}
                                 </div>
                                 <div style={{
                                   maxHeight: 300, overflow: 'auto',
@@ -524,7 +505,7 @@ const UpgradePanel: React.FC = () => {
                             ) : null}
                           </div>
                         ),
-                        okText: '关闭',
+                        okText: t('close'),
                       })
                     }}
                   />
@@ -547,11 +528,11 @@ const UpgradePanel: React.FC = () => {
               setHistPageSize(ps)
               loadHistory(p, ps)
             },
-            showTotal: (t) => `共 ${t} 条`,
+            showTotal: (total) => t('totalRecords', { count: total }),
           }}
           size="small"
           rowKey="task_id"
-          locale={{ emptyText: '暂无升级记录' }}
+          locale={{ emptyText: t('noUpgradeHistory') }}
         />
       </Card>
     </Spin>
@@ -559,6 +540,7 @@ const UpgradePanel: React.FC = () => {
 }
 
 const SystemConfigPage: React.FC = () => {
+  const { t } = useTranslation('system')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const [activeTab, setActiveTab] = useState('global')
@@ -601,11 +583,11 @@ const SystemConfigPage: React.FC = () => {
       // 同时刷新 API Key 状态
       loadApikeyStatus()
     } catch {
-      message.error('加载系统配置失败')
+      message.error(t('loadConfigFailed'))
     } finally {
       setLoading(false)
     }
-  }, [form, loadApikeyStatus])
+  }, [t, form, loadApikeyStatus])
 
   // ── 保存全局配置 ──
   const handleSave = async () => {
@@ -632,12 +614,12 @@ const SystemConfigPage: React.FC = () => {
           })
       }
       await apiClient.put('/api/config', { config: allValues })
-      message.success('系统配置已保存（部分配置需重启服务生效）')
+      message.success(t('configSavedMsg'))
       loadConfig()
     } catch (err: unknown) {
       const e = err as { errorFields?: unknown; response?: { data?: { detail?: string } }; message?: string }
       if (e?.errorFields) return // 表单校验未通过
-      message.error('保存失败: ' + (e?.response?.data?.detail || e?.message || '未知错误'))
+      message.error(t('saveFailed') + ': ' + (e?.response?.data?.detail || e?.message || t('unknownError')))
     } finally {
       setSaving(false)
     }
@@ -668,13 +650,13 @@ const SystemConfigPage: React.FC = () => {
         form.setFieldsValue(formValues)
         loadApikeyStatus()
       } catch {
-        message.error('加载系统配置失败')
+        message.error(t('loadConfigFailed'))
       } finally {
         setLoading(false)
       }
     }
     init()
-  }, [user, form, loadApikeyStatus])
+  }, [t, user, form, loadApikeyStatus])
 
   // 非管理员重定向到 AI 对话
   if (user?.role !== 'admin') {
@@ -685,26 +667,30 @@ const SystemConfigPage: React.FC = () => {
   // ── 全局配置表单各分组 ──
   const renderGroup = (group: string) => {
     const fields = GLOBAL_CONFIG_FIELDS.filter((f) => f.group === group)
+    const getLabel = (field: typeof GLOBAL_CONFIG_FIELDS[number]) => t(field.labelKey)
+    const getDesc = (field: typeof GLOBAL_CONFIG_FIELDS[number]) => field.descKey ? t(field.descKey) : undefined
+    const getRule = (field: typeof GLOBAL_CONFIG_FIELDS[number]) =>
+      field.required !== false ? [{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }] : undefined
     return (
       <div key={group} style={{ marginBottom: 32 }}>
-        <Title level={5}>{GROUP_LABELS[group]}</Title>
+        <Title level={5}>{t(GROUP_LABELS[group])}</Title>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16 }}>
           {fields.map((field) => (
             <div key={field.key}>
               {field.type === 'boolean' ? (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
+                  label={getLabel(field)}
                   valuePropName="checked"
-                  extra={field.desc}
+                  extra={getDesc(field)}
                 >
                   <Switch />
                 </Form.Item>
               ) : field.type === 'number' ? (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
-                  rules={[{ required: true, message: `请输入${field.label}` }]}
+                  label={getLabel(field)}
+                  rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
                 >
                   <InputNumber style={{ width: '100%' }} min={0} />
                 </Form.Item>
@@ -713,95 +699,95 @@ const SystemConfigPage: React.FC = () => {
                   name={field.key}
                   label={
                     <Space size={4}>
-                      <span>{field.label}</span>
+                      <span>{getLabel(field)}</span>
                       {field.key === 'dashscope_api_key' && apikeyStatus && (
                         apikeyStatus.status === 'env' ? (
                           <Tag color="green" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 4 }}>
-                            ✅ 环境变量
+                            {t('envVarTag')}
                           </Tag>
                         ) : apikeyStatus.status === 'config' ? (
                           <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 4 }}>
-                            📋 系统配置
+                            {t('configTag')}
                           </Tag>
                         ) : (
                           <Tag color="red" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 4 }}>
-                            ❌ 未配置
+                            {t('notConfiguredTag')}
                           </Tag>
                         )
                       )}
                     </Space>
                   }
-                  extra={field.desc}
+                  extra={getDesc(field)}
                 >
-                  <Input.Password placeholder={apikeyStatus?.configured ? '留空则不覆盖已有值' : '请输入 API Key'} />
+                  <Input.Password placeholder={apikeyStatus?.configured ? t('placeholder_notCover') : t('placeholder_enterApiKey')} />
                 </Form.Item>
               ) : field.type === 'tags' ? (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
-                  rules={[{ required: true, message: `请输入${field.label}` }]}
-                  extra={field.desc}
+                  label={getLabel(field)}
+                  rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
+                  extra={getDesc(field)}
                   getValueFromEvent={(e) => e.target.value}
                 >
-                  <Input placeholder="多个扩展名用逗号分隔，如 .jpg,.png" />
+                  <Input placeholder={t('placeholder_extensions')} />
                 </Form.Item>
               ) : field.type === 'question_types' ? (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
-                  rules={[{ required: true, message: `请输入${field.label}` }]}
-                  extra={field.desc}
+                  label={getLabel(field)}
+                  rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
+                  extra={getDesc(field)}
                   getValueFromEvent={(e) => e.target.value}
                 >
-                  <Input.TextArea rows={7} placeholder={'格式：每行一个 "key:标签"\nsingle:单选题\nmultiple:多选题\ntrue_false:判断题\nshort:简答题\nfill:填空题\nessay:作文\nsubjective:主观题'} />
+                  <Input.TextArea rows={7} placeholder={t('placeholder_questionTypes')} />
                 </Form.Item>
               ) : field.type === 'roles' ? (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
-                  extra={field.desc}
+                  label={getLabel(field)}
+                  extra={getDesc(field)}
                 >
                   <Checkbox.Group>
-                    <Checkbox value={1}>教师</Checkbox>
-                    <Checkbox value={2}>学生</Checkbox>
+                    <Checkbox value={1}>{t('teacher')}</Checkbox>
+                    <Checkbox value={2}>{t('student')}</Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
               ) : field.type === 'notifications' ? (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
-                  extra={field.desc}
+                  label={getLabel(field)}
+                  extra={getDesc(field)}
                 >
                   <Checkbox.Group>
-                    <Checkbox value="exam">📝 考试通知</Checkbox>
-                    <Checkbox value="share">📤 资源共享通知</Checkbox>
-                    <Checkbox value="score">🏆 积分变动通知</Checkbox>
-                    <Checkbox value="task">✅ 任务提交通知</Checkbox>
-                    <Checkbox value="rollcall">📋 点名通知</Checkbox>
-                    <Checkbox value="system">🔄 版本更新通知</Checkbox>
-                    <Checkbox value="info">ℹ️ 系统信息通知</Checkbox>
+                    <Checkbox value="exam">{t('notifExam')}</Checkbox>
+                    <Checkbox value="share">{t('notifShare')}</Checkbox>
+                    <Checkbox value="score">{t('notifScore')}</Checkbox>
+                    <Checkbox value="task">{t('notifTask')}</Checkbox>
+                    <Checkbox value="rollcall">{t('notifRollcall')}</Checkbox>
+                    <Checkbox value="system">{t('notifSystem')}</Checkbox>
+                    <Checkbox value="info">{t('notifInfo')}</Checkbox>
                   </Checkbox.Group>
                 </Form.Item>
               ) : field.type === 'multimodal_toggle' ? (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
+                  label={getLabel(field)}
                   valuePropName="checked"
-                  extra={field.desc}
+                  extra={getDesc(field)}
                 >
                   <Checkbox>
-                    启用多模态对话（支持图片+文本同时输入）
+                    {t('multimodalCheckbox')}
                   </Checkbox>
                 </Form.Item>
               ) : (
                 <Form.Item
                   name={field.key}
-                  label={field.label}
-                  rules={field.required !== false ? [{ required: true, message: `请输入${field.label}` }] : undefined}
-                  extra={field.key === 'AGENT_EDITION' ? '填写版本名称即可，系统会自动拼接为完整名称（如 "数学版"、"生物版"），留空则只显示"智慧教学平台"' : field.desc}
+                  label={getLabel(field)}
+                  rules={getRule(field)}
+                  extra={field.key === 'AGENT_EDITION' ? t('agentEditionExtra') : getDesc(field)}
                 >
                   {field.key === 'AGENT_EDITION' ? (
-                    <Input placeholder="例如：通用版" />
+                    <Input placeholder={t('placeholder_agentEdition')} />
                   ) : (
                     <Input />
                   )}
@@ -818,16 +804,16 @@ const SystemConfigPage: React.FC = () => {
     <Card style={{ borderRadius: 8 }}>
       <Space style={{ marginBottom: 16 }}>
         <SettingOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-        <Title level={4} style={{ margin: 0 }}>系统配置</Title>
+        <Title level={4} style={{ margin: 0 }}>{t('systemConfig')}</Title>
         </Space>
 
         {apikeyStatus && !apikeyStatus.configured && (
           <Alert
-            message="API Key 未配置"
+            message={t('apiKeyNotConfigured')}
             description={
               <span>
-                {apikeyStatus.hint}。配置后 AI 对话功能方可正常使用。
-                {user?.role === 'admin' && ' 也可在服务器设置环境变量 DASHSCOPE_API_KEY 以全局生效。'}
+                {apikeyStatus.hint}。{t('apiKeyHint')}
+                {user?.role === 'admin' && t('apiKeyEnvHint')}
               </span>
             }
             type="warning"
@@ -836,7 +822,7 @@ const SystemConfigPage: React.FC = () => {
             style={{ marginBottom: 16 }}
             action={
               <Button size="small" onClick={() => setActiveTab('global')}>
-                去配置
+                {t('goConfig')}
               </Button>
             }
           />
@@ -846,18 +832,16 @@ const SystemConfigPage: React.FC = () => {
           {/* ── 全局配置 Tab ── */}
           {/* ── 缓存管理 Tab ── */}
           <Tabs.TabPane
-            tab={<span><ReloadOutlined /> 缓存管理</span>}
+            tab={<span><ReloadOutlined /> {t('cacheManagement')}</span>}
             key="cache"
           >
-            <Card title="清理临时文件">
+            <Card title={t('clearTempFiles')}>
               <Text style={{ display: 'block', marginBottom: 16 }}>
-                临时文件是用户上传的图片和文档在服务器上生成的缓存，
-                包括 AI 对话中上传的文件。清理后不会影响系统运行，
-                但正在进行的对话中引用的文件可能需要重新上传。
+                {t('tempFileDesc')}
               </Text>
               <Space orientation="vertical" style={{ width: '100%' }}>
                 <Alert
-                  message="此操作将删除所有用户上传的临时文件，不可恢复！"
+                  message={t('cleanupWarning')}
                   type="warning"
                   showIcon
                 />
@@ -867,32 +851,32 @@ const SystemConfigPage: React.FC = () => {
                   icon={<ReloadOutlined />}
                   onClick={() => {
                     Modal.confirm({
-                      title: '确认清理所有临时缓存？',
+                      title: t('confirmCleanup'),
                       icon: <ExclamationCircleOutlined />,
-                      content: '所有用户上传的临时文件将被永久删除，此操作不可恢复！',
-                      okText: '确认清理',
+                      content: t('confirmCleanupContent'),
+                      okText: t('confirmCleanupOk'),
                       okType: 'danger',
-                      cancelText: '取消',
+                      cancelText: t('cancel'),
                       onOk: async () => {
                         try {
                           await apiClient.delete('/api/files/cleanup-temp', { params: { all: true } })
-                          message.success('所有临时缓存已清理')
+                          message.success(t('cleanupSuccess'))
                         } catch (e: unknown) {
                           const err = e as { response?: { data?: { detail?: string } }; message?: string }
-                          message.error('清理失败: ' + (err?.response?.data?.detail || err?.message || '未知错误'))
+                          message.error(t('cleanupFailed') + ': ' + (err?.response?.data?.detail || err?.message || t('unknownError')))
                         }
                       },
                     })
                   }}
                 >
-                  清理所有缓存
+                  {t('cleanAllCache')}
                 </Button>
               </Space>
             </Card>
           </Tabs.TabPane>
 
           <Tabs.TabPane
-            tab={<span><SettingOutlined /> 全局配置</span>}
+            tab={<span><SettingOutlined /> {t('systemConfig')}</span>}
             key="global"
           >
             <Spin spinning={loading}>
@@ -912,15 +896,15 @@ const SystemConfigPage: React.FC = () => {
                     loading={saving}
                     onClick={handleSave}
                   >
-                    保存配置
+                    {t('saveConfig')}
                   </Button>
                   <Button icon={<ReloadOutlined />} onClick={loadConfig}>
-                    重新加载
+                    {t('reload')}
                   </Button>
                 </Space>
                 <div style={{ marginTop: 8 }}>
                   <Text type="secondary">
-                    ⚠️ 部分配置项（如 APPID、模型名称）需重启服务方可生效
+                    {t('restartNote')}
                   </Text>
                 </div>
               </Form>
@@ -929,7 +913,7 @@ const SystemConfigPage: React.FC = () => {
 
           {/* ── 版本管理 Tab ── */}
           <Tabs.TabPane
-            tab={<span><SyncOutlined /> 版本管理</span>}
+            tab={<span><SyncOutlined /> {t('version')}</span>}
             key="upgrade"
           >
             <UpgradePanel />

@@ -3,6 +3,7 @@ import { Layout, Card, Space, Button, Typography, message } from 'antd'
 import { ReloadOutlined, FileOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import type { ResourceFile } from '../types'
+import { useTranslation } from 'react-i18next'
 
 // 子目录名 → 中文标题映射
 const CATEGORY_MAP: Record<string, string> = {
@@ -15,6 +16,7 @@ const CATEGORY_MAP: Record<string, string> = {
 }
 
 const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ subdir, title }) => {
+  const { t } = useTranslation('system')
   const displayTitle = title || CATEGORY_MAP[subdir] || subdir
   const [files, setFiles] = useState<ResourceFile[]>([])
   const [loading, setLoading] = useState(false)
@@ -30,7 +32,6 @@ const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ su
       // 也包含子目录下 index.html 但不显示目录本身
       setFiles(filtered)
     } catch {
-      message.error('加载失败')
     } finally {
       setLoading(false)
     }
@@ -43,7 +44,7 @@ const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ su
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography.Title level={4} style={{ margin: 0 }}>📂 {displayTitle}</Typography.Title>
-          <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {files.map((f) => {
@@ -62,7 +63,7 @@ const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ su
             </Card>
             )
           })}
-          {files.length === 0 && <Typography.Text type="secondary">暂无文件</Typography.Text>}
+          {files.length === 0 && <Typography.Text type="secondary">{t('noFiles')}</Typography.Text>}
         </div>
       </Space>
     </Layout>

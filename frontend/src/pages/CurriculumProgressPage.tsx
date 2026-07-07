@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Table, Select, Button, message, Tag, Space, Typography,
   Row, Col, Statistic, Tooltip, Spin, Tabs,
@@ -15,6 +16,7 @@ import LearningProgress from '../components/LearningProgress'
 const { Option } = Select
 
 const CurriculumProgressPage: React.FC = () => {
+  const { t } = useTranslation('curriculum')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
@@ -112,7 +114,7 @@ const CurriculumProgressPage: React.FC = () => {
       setStats({ totalStudents: total, avgRate: totalRate, bestCourse, bestRate })
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '加载学情数据失败')
+      message.error(detail || t('loadDataFailed'))
     } finally {
       setLoading(false)
     }
@@ -129,7 +131,7 @@ const CurriculumProgressPage: React.FC = () => {
   const renderExpandedRow = (record: Record<string, unknown>) => {
     const stuCourses = (record.courses as Record<string, unknown>[] | undefined) || []
     if (stuCourses.length === 0) {
-      return <Typography.Text type="secondary">暂无可选课程</Typography.Text>
+      return <Typography.Text type="secondary">{t('noCourses')}</Typography.Text>
     }
 
     // 找当前选中课程的详情
@@ -157,7 +159,7 @@ const CurriculumProgressPage: React.FC = () => {
           ))}
         </Space>
         {details.length === 0 && (
-          <Typography.Text type="secondary">该课程暂无知识点</Typography.Text>
+          <Typography.Text type="secondary">{t('noProgress')}</Typography.Text>
         )}
       </div>
     )
@@ -166,7 +168,7 @@ const CurriculumProgressPage: React.FC = () => {
   // ── 表格列定义 ──
   const columns = [
     {
-      title: '姓名',
+      title: t('studentName'),
       dataIndex: 'name',
       key: 'name',
       width: 100,
@@ -179,19 +181,19 @@ const CurriculumProgressPage: React.FC = () => {
       ),
     },
     {
-      title: '年级',
+      title: t('grade'),
       dataIndex: 'grade',
       key: 'grade',
       width: 80,
     },
     {
-      title: '班级',
+      title: t('studentClass'),
       dataIndex: 'class',
       key: 'class',
       width: 80,
     },
     {
-      title: '课程完成率',
+      title: t('progress'),
       key: 'courses',
       render: (_: any, record: any) => {
         if (!record.courses || record.courses.length === 0) {
@@ -237,7 +239,7 @@ const CurriculumProgressPage: React.FC = () => {
     return (
       <Layout style={{ background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
         <Card>
-          <Typography.Text type="secondary">权限不足，仅教师和管理员可查看学情进度</Typography.Text>
+          <Typography.Text type="secondary">{t('permissionDenied')}</Typography.Text>
         </Card>
       </Layout>
     )
@@ -246,7 +248,7 @@ const CurriculumProgressPage: React.FC = () => {
   if (initLoading) {
     return (
       <Layout style={{ background: '#f5f5f5', minHeight: 'calc(100vh - 64px)' }}>
-        <Card><div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" description="正在加载数据..." /></div></Card>
+        <Card><div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" description={t('loadingData')} /></div></Card>
       </Layout>
     )
   }
@@ -257,24 +259,24 @@ const CurriculumProgressPage: React.FC = () => {
         {/* ── 筛选条件（始终显示） ── */}
         <Card size="small" style={{ marginBottom: 16 }}>
           <Space wrap>
-            <span>课程：</span>
+            <span>{t('courseLabel')}：</span>
             <Select
               value={courseId} onChange={setCourseId}
-              style={{ width: 200 }} placeholder="选择课程" allowClear
+              style={{ width: 200 }} placeholder={t('selectCourse')} allowClear
             >
               {courses.map((c) => (<Option key={c.id} value={c.id}>{c.name}</Option>))}
             </Select>
-            <span>年级：</span>
+            <span>{t('gradeLabel')}：</span>
             <Select
               value={grade} onChange={setGrade}
-              style={{ width: 120 }} placeholder="全部年级" allowClear
+              style={{ width: 120 }} placeholder={t('allGrades')} allowClear
             >
               {gradeOptions.map((g) => (<Option key={g} value={g}>{g}</Option>))}
             </Select>
-            <span>班级：</span>
+            <span>{t('classLabel')}：</span>
             <Select
               value={className} onChange={setClassName}
-              style={{ width: 120 }} placeholder="全部班级" allowClear
+              style={{ width: 120 }} placeholder={t('allClasses')} allowClear
             >
               {classOptions.map((c) => (<Option key={c} value={c}>{c}</Option>))}
             </Select>
@@ -284,27 +286,27 @@ const CurriculumProgressPage: React.FC = () => {
         {courseId ? (
           <>
             <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={6}><Card><Statistic title="学生总数" value={stats.totalStudents} prefix={<TeamOutlined />} /></Card></Col>
-              <Col span={6}><Card><Statistic title="平均完成率" value={stats.avgRate} suffix="%" precision={1} styles={{ content: { color: stats.avgRate >= 60 ? '#52c41a' : '#faad14' } }} /></Card></Col>
-              <Col span={6}><Card><Statistic title="最高课程" value={stats.bestCourse || '—'} styles={{ content: { fontSize: 18 } }} /></Card></Col>
-              <Col span={6}><Card><Statistic title="最高完成率" value={stats.bestRate} suffix="%" precision={1} styles={{ content: { color: '#52c41a' } }} /></Card></Col>
+              <Col span={6}><Card><Statistic title={t('totalStudents')} value={stats.totalStudents} prefix={<TeamOutlined />} /></Card></Col>
+              <Col span={6}><Card><Statistic title={t('avgCompletionRate')} value={stats.avgRate} suffix="%" precision={1} styles={{ content: { color: stats.avgRate >= 60 ? '#52c41a' : '#faad14' } }} /></Card></Col>
+              <Col span={6}><Card><Statistic title={t('bestCourse')} value={stats.bestCourse || '—'} styles={{ content: { fontSize: 18 } }} /></Card></Col>
+              <Col span={6}><Card><Statistic title={t('bestCompletionRate')} value={stats.bestRate} suffix="%" precision={1} styles={{ content: { color: '#52c41a' } }} /></Card></Col>
             </Row>
 
             <Card
-              extra={<Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>}
+              extra={<Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>}
               style={{ marginBottom: 16 }}
             >
               <Space style={{ marginBottom: 12 }}>
-                <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>
-                <Tag icon={<ClockCircleOutlined />} color="processing">学习中</Tag>
-                <Tag icon={<StopOutlined />} color="default">未开始</Tag>
+                <Tag icon={<CheckCircleOutlined />} color="success">{t('completed')}</Tag>
+                <Tag icon={<ClockCircleOutlined />} color="processing">{t('inProgress')}</Tag>
+                <Tag icon={<StopOutlined />} color="default">{t('notStarted')}</Tag>
               </Space>
               <Table
                 dataSource={students}
                 columns={columns}
                 rowKey="username"
                 loading={loading}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => '共 ' + t + ' 名学生' }}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudentsCount', { count: total }) }}
                 expandable={{
                   expandedRowRender: renderExpandedRow,
                   expandedRowKeys,
@@ -318,7 +320,7 @@ const CurriculumProgressPage: React.FC = () => {
           </>
         ) : (
           <div style={{ textAlign: 'center', padding: 80 }}>
-            <Typography.Text type="secondary" style={{ fontSize: 16 }}>请选择课程查看学生进度数据</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 16 }}>{t('selectCoursePrompt')}</Typography.Text>
           </div>
         )}
       </>
@@ -333,12 +335,12 @@ const CurriculumProgressPage: React.FC = () => {
           items={[
             {
               key: 'curriculum',
-              label: <span><BookOutlined /> 课程进度</span>,
+              label: <span><BookOutlined /> {t('progress')}</span>,
               children: renderCurriculumTab(),
             },
             {
               key: 'overall',
-              label: <span><BarChartOutlined /> 学习进度</span>,
+              label: <span><BarChartOutlined /> {t('progress')}</span>,
               children: <LearningProgress />,
             },
           ]}

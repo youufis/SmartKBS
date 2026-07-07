@@ -16,6 +16,7 @@ import {
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -32,6 +33,7 @@ interface RankingEntry {
 }
 
 const QuickQuizConsole: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -131,7 +133,7 @@ const QuickQuizConsole: React.FC = () => {
         loadCurrentQuestion()
       }
     } catch {
-      message.error('加载房间失败')
+      message.error(t('loadRoomFailed'))
       navigate('/quick-quiz')
     } finally {
       setLoading(false)
@@ -240,7 +242,7 @@ const QuickQuizConsole: React.FC = () => {
       case 'game_end':
         setPhase('ended')
         setRanking(msg.data.final_ranking || [])
-        message.success('🎉 抢答活动已结束！')
+        message.success(t('quizEnded'))
         break
     }
   }
@@ -251,7 +253,7 @@ const QuickQuizConsole: React.FC = () => {
     try {
       await apiClient.post(`/api/quick-quiz/room/${roomId}/next`)
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '操作失败')
+      message.error(err.response?.data?.detail || t('operationFailed'))
     } finally {
       setActionLoading(false)
     }
@@ -260,17 +262,17 @@ const QuickQuizConsole: React.FC = () => {
   const handleEnd = () => {
     if (autoNextRef.current) clearTimeout(autoNextRef.current)
     Modal.confirm({
-      title: '确定结束抢答活动？',
-      content: '结束后的结果将不可更改，系统会自动发放积分奖励。',
-      okText: '确定结束',
-      cancelText: '取消',
+      title: t('confirmEndQuiz'),
+      content: t('endQuizHint'),
+      okText: t('confirmEnd'),
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await apiClient.post(`/api/quick-quiz/room/${roomId}/end`)
           setPhase('ended')
-          message.success('活动已结束')
+          message.success(t('activityEnded'))
         } catch (err: any) {
-          message.error(err.response?.data?.detail || '结束失败')
+          message.error(err.response?.data?.detail || t('endFailed'))
         }
       },
     })
@@ -300,14 +302,14 @@ const QuickQuizConsole: React.FC = () => {
       setBankQuestions(data.questions || [])
       setBankTotal(data.total || 0)
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '加载题库失败')
+      message.error(err.response?.data?.detail || t('loadBankFailed'))
     } finally {
       setBankLoading(false)
     }
   }
 
   const handleAddBankQuestions = async () => {
-    if (selectedBankIds.length === 0) { message.warning('请选择题目'); return }
+    if (selectedBankIds.length === 0) { message.warning(t('selectQuestionsFirst')); return }
     setAddingBankQ(true)
     try {
       const { data } = await apiClient.post(`/api/quick-quiz/room/${roomId}/add-bank-questions`, {
@@ -315,11 +317,11 @@ const QuickQuizConsole: React.FC = () => {
         bank_type: bankType,
       })
       setTotalQuestions(data.total_questions)
-      message.success(`已添加 ${data.added_count} 题到抢答列表`)
+      message.success(t('questionsAdded', { count: data.added_count }))
       setBankModalOpen(false)
       setSelectedBankIds([])
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '添加失败')
+      message.error(err.response?.data?.detail || t('addFailed'))
     } finally {
       setAddingBankQ(false)
     }
@@ -328,7 +330,7 @@ const QuickQuizConsole: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" description="加载中..." />
+        <Spin size="large" description={t('loading')} />
       </div>
     )
   }
@@ -336,8 +338,8 @@ const QuickQuizConsole: React.FC = () => {
   if (!room) {
     return (
       <div style={{ textAlign: 'center', paddingTop: 120 }}>
-        <Title level={4}>房间不存在</Title>
-        <Button type="primary" onClick={() => navigate('/quick-quiz')}>返回</Button>
+        <Title level={4}>{t('roomNotFound')}</Title>
+        <Button type="primary" onClick={() => navigate('/quick-quiz')}>{t('back')}</Button>
       </div>
     )
   }
@@ -359,7 +361,7 @@ const QuickQuizConsole: React.FC = () => {
             <div>
               <Title level={4} style={{ color: '#fff', margin: 0 }}>{room.title}</Title>
               <Text style={{ color: 'rgba(255,255,255,0.8)' }}>
-                房间码: <Text code style={{ color: '#fff', background: 'rgba(255,255,255,0.2)' }}>{room.room_code}</Text>
+                {t('roomCodeLabel')}<Text code style={{ color: '#fff', background: 'rgba(255,255,255,0.2)' }}>{room.room_code}</Text>
               </Text>
             </div>
           </Space>
@@ -370,18 +372,18 @@ const QuickQuizConsole: React.FC = () => {
                   <Button type="primary" ghost icon={<StepForwardOutlined />}
                     onClick={handleNext} loading={actionLoading}
                     style={{ borderColor: '#fff', color: '#fff' }}>
-                    下一题
+                    {t('nextQuestion')}
                   </Button>
                 )}
                 <Button danger icon={<StopOutlined />} onClick={handleEnd}
                   style={{ borderColor: '#ff4d4f', color: '#ff4d4f' }}>
-                  结束活动
+                  {t('endActivity')}
                 </Button>
               </>
             ) : (
               <Button icon={<TrophyOutlined />} onClick={handleViewResult}
                 style={{ borderColor: '#fff', color: '#fff' }} ghost>
-                查看结果
+                {t('viewResults')}
               </Button>
             )}
           </Space>
@@ -393,7 +395,7 @@ const QuickQuizConsole: React.FC = () => {
         <Col span={6}>
           <Card size="small" style={{ borderRadius: 8, textAlign: 'center' }}>
             <Statistic
-              title="当前题号"
+              title={t('currentQuestionNumber')}
               value={currentQuestion}
               suffix={`/ ${totalQuestions}`}
               styles={{ content: { color: '#1677ff' } }}
@@ -404,8 +406,8 @@ const QuickQuizConsole: React.FC = () => {
         <Col span={6}>
           <Card size="small" style={{ borderRadius: 8, textAlign: 'center' }}>
             <Statistic
-              title="状态"
-              value={phase === 'question' ? '答题中' : phase === 'reveal' ? '已公布' : phase === 'ended' ? '已结束' : '等待中'}
+              title={t('statusTitle')}
+              value={phase === 'question' ? t('phaseAnswering') : phase === 'reveal' ? t('phaseRevealed') : phase === 'ended' ? t('ended') : t('phaseWaiting')}
               styles={{ content: {
                 color: phase === 'question' ? '#faad14' : phase === 'reveal' ? '#52c41a' : phase === 'ended' ? '#888' : '#1677ff'
               } }}
@@ -416,7 +418,7 @@ const QuickQuizConsole: React.FC = () => {
         <Col span={6}>
           <Card size="small" style={{ borderRadius: 8, textAlign: 'center' }}>
             <Statistic
-              title="已作答"
+              title={t('answeredTitle')}
               value={answeredCount}
               suffix={`/ ${totalPlayers}`}
               styles={{ content: { color: answeredColor } }}
@@ -427,7 +429,7 @@ const QuickQuizConsole: React.FC = () => {
         <Col span={6}>
           <Card size="small" style={{ borderRadius: 8, textAlign: 'center' }}>
             <Statistic
-              title="玩家数"
+              title={t('players')}
               value={players.length}
               styles={{ content: { color: '#722ed1' } }}
               prefix={<TeamOutlined />}
@@ -438,7 +440,7 @@ const QuickQuizConsole: React.FC = () => {
 
       {/* 当前题目 */}
       {phase !== 'waiting' && (
-        <Card title={`📝 第 ${currentQuestion} 题`} style={{ borderRadius: 12, marginBottom: 16 }}>
+        <Card title={t('currentQuestionTitle', { n: currentQuestion })} style={{ borderRadius: 12, marginBottom: 16 }}>
           {questionText && (
             <Title level={5} style={{ marginBottom: 12 }}>
               <FormulaRenderer content={questionText} />
@@ -468,12 +470,12 @@ const QuickQuizConsole: React.FC = () => {
                 <Space>
                   <CheckCircleOutlined style={{ color: '#52c41a' }} />
                   <Text strong style={{ color: '#52c41a', fontSize: 16 }}>
-                    正确答案：{correctAnswer}
+                    {t('correctAnswerColon')}{correctAnswer}
                   </Text>
                 </Space>
                 {firstBlood && (
                   <div style={{ marginTop: 4 }}>
-                    <Text>⚡ 首杀：</Text>
+                    <Text>{t('firstBloodLabel')}</Text>
                     <Text strong style={{ color: '#fa8c16' }}>{firstBlood}</Text>
                   </div>
                 )}
@@ -488,7 +490,7 @@ const QuickQuizConsole: React.FC = () => {
               {/* 选项统计 */}
               {Object.keys(optionStats).length > 0 && (
                 <div style={{ marginTop: 12 }}>
-                  <Text strong>📊 选项分布：</Text>
+                  <Text strong>{t('optionDistribution')}</Text>
                   {Object.entries(optionStats).map(([k, v]) => {
                     const total = Object.values(optionStats).reduce((a, b) => a + b, 0)
                     const pct = total > 0 ? Math.round(v / total * 100) : 0
@@ -518,9 +520,9 @@ const QuickQuizConsole: React.FC = () => {
       )}
 
       {/* 实时排行榜 */}
-      <Card title={<Space><TrophyOutlined /> 实时排行榜</Space>}
+      <Card title={<Space><TrophyOutlined /> {t('liveLeaderboard')}</Space>}
         style={{ borderRadius: 12, marginBottom: 16 }}
-        extra={phase === 'ended' ? <Button type="primary" onClick={handleViewResult}>查看完整结果</Button> : null}
+        extra={phase === 'ended' ? <Button type="primary" onClick={handleViewResult}>{t('viewFullResults')}</Button> : null}
       >
         <Table
           dataSource={ranking.length > 0 ? ranking : players.map((p: any, i: number) => ({
@@ -535,24 +537,24 @@ const QuickQuizConsole: React.FC = () => {
           size="small"
           columns={[
             {
-              title: '名次', key: 'rank', width: 60,
+              title: t('rank'), key: 'rank', width: 60,
               render: (_: any, __: any, idx: number) => (
                 <Text strong style={{ fontSize: 16, color: idx < 3 ? ['#ff4d4f', '#fa8c16', '#faad14'][idx] : '#666' }}>
                   {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
                 </Text>
               ),
             },
-            { title: '姓名', dataIndex: 'student_name', key: 'name' },
+            { title: t('name'), dataIndex: 'student_name', key: 'name' },
             {
-              title: '总分', dataIndex: 'total_score', key: 'score',
+              title: t('totalScore'), dataIndex: 'total_score', key: 'score',
               render: (s: number) => <Text strong style={{ color: '#faad14' }}>{s}</Text>,
             },
             {
-              title: '答对', dataIndex: 'correct_count', key: 'correct',
+              title: t('correct'), dataIndex: 'correct_count', key: 'correct',
               render: (c: number) => <Text style={{ color: '#52c41a' }}>{c}</Text>,
             },
             {
-              title: '答错', dataIndex: 'wrong_count', key: 'wrong',
+              title: t('wrong'), dataIndex: 'wrong_count', key: 'wrong',
               render: (w: number) => <Text style={{ color: '#ff4d4f' }}>{w}</Text>,
             },
           ]}
@@ -560,7 +562,7 @@ const QuickQuizConsole: React.FC = () => {
       </Card>
 
       {/* 玩家列表 */}
-      <Card title={<Space><TeamOutlined /> 玩家列表 ({players.length})</Space>}
+      <Card title={<Space><TeamOutlined /> {t('playerListWithCount', { count: players.length })}</Space>}
         style={{ borderRadius: 12 }} size="small">
         <Space wrap>
           {players.map((p: any, i: number) => (
@@ -569,7 +571,7 @@ const QuickQuizConsole: React.FC = () => {
               {p.student_name || p.student_username}
             </Tag>
           ))}
-          {players.length === 0 && <Text type="secondary">暂无玩家</Text>}
+          {players.length === 0 && <Text type="secondary">{t('noPlayers')}</Text>}
         </Space>
       </Card>
 
@@ -581,35 +583,35 @@ const QuickQuizConsole: React.FC = () => {
               <Button type="primary" size="large" icon={<StepForwardOutlined />}
                 onClick={handleNext} loading={actionLoading}
                 style={{ height: 44, borderRadius: 22, paddingLeft: 24, paddingRight: 24 }}>
-                下一题（{currentQuestion}/{totalQuestions}）
+                {t('nextQuestionProgress', { current: currentQuestion, total: totalQuestions })}
               </Button>
             )}
             {phase === 'reveal' && currentQuestion >= totalQuestions && (
               <Button type="primary" size="large" icon={<TrophyOutlined />}
                 onClick={handleViewResult}
                 style={{ height: 44, borderRadius: 22, paddingLeft: 24, paddingRight: 24 }}>
-                查看最终结果
+                {t('viewFinalResults')}
               </Button>
             )}
-            <Button icon={<StopOutlined />} danger onClick={handleEnd}>结束活动</Button>
+            <Button icon={<StopOutlined />} danger onClick={handleEnd}>{t('endActivity')}</Button>
           </Space>
         </div>
       )}
 
       {/* ── 从题库选题弹窗 ── */}
       <Modal
-        title={<Space><DatabaseOutlined style={{ color: '#1677ff' }} /> 从题库选题</Space>}
+        title={<Space><DatabaseOutlined style={{ color: '#1677ff' }} /> {t('selectFromBank')}</Space>}
         open={bankModalOpen}
         onCancel={() => { setBankModalOpen(false); setSelectedBankIds([]) }}
         onOk={handleAddBankQuestions}
-        okText={`添加所选题目（${selectedBankIds.length}题）`}
+        okText={t('bankTotalSelected', { total: '?', selected: selectedBankIds.length })}
         okButtonProps={{ disabled: selectedBankIds.length === 0, loading: addingBankQ }}
         width={800}
       >
         {/* 题库来源切换 + 筛选区 */}
         <div style={{ marginBottom: 12 }}>
           <Space>
-            <Text strong>题目来源：</Text>
+            <Text strong>{t('questionSource')}：</Text>
             <Select
               value={bankType}
               onChange={v => {
@@ -620,8 +622,8 @@ const QuickQuizConsole: React.FC = () => {
               }}
               style={{ width: 160 }}
               options={[
-                { value: 'academic', label: '📚 学科题库' },
-                { value: 'general', label: '🧠 百科题库' },
+                { value: 'academic', label: t('bankAcademicLabel') },
+                { value: 'general', label: t('bankGeneralLabel') },
               ]}
             />
           </Space>
@@ -631,7 +633,7 @@ const QuickQuizConsole: React.FC = () => {
             <>
               <Select
                 style={{ width: 140 }}
-                placeholder="全部学科"
+                placeholder={t('allSubjects')}
                 allowClear
                 value={bankFilter.subject || undefined}
                 onChange={v => setBankFilter(f => ({ ...f, subject: v || '' }))}
@@ -639,21 +641,21 @@ const QuickQuizConsole: React.FC = () => {
               />
               <Select
                 style={{ width: 100 }}
-                placeholder="全部难度"
+                placeholder={t('allDifficulties')}
                 allowClear
                 value={bankFilter.difficulty || undefined}
                 onChange={v => setBankFilter(f => ({ ...f, difficulty: v || '' }))}
                 options={[
-                  { value: 'easy', label: '简单' },
-                  { value: 'medium', label: '中等' },
-                  { value: 'hard', label: '困难' },
+                  { value: 'easy', label: t('difficultyEasy') },
+                  { value: 'medium', label: t('difficultyMedium') },
+                  { value: 'hard', label: t('difficultyHard') },
                 ]}
               />
             </>
           ) : (
             <Input
               style={{ width: 200 }}
-              placeholder="分类筛选（如：文学、历史）"
+              placeholder={t('categoryFilterPlaceholder')}
               value={bankFilter.category}
               onChange={e => setBankFilter(f => ({ ...f, category: e.target.value }))}
               onPressEnter={() => loadBankQuestions(1)}
@@ -661,24 +663,24 @@ const QuickQuizConsole: React.FC = () => {
           )}
           <Input
             style={{ flex: 1 }}
-            placeholder="搜索题目关键词..."
+            placeholder={t('searchKeywordPlaceholder')}
             value={bankFilter.keyword}
             onChange={e => setBankFilter(f => ({ ...f, keyword: e.target.value }))}
             onPressEnter={() => loadBankQuestions(1)}
           />
-          <Button onClick={() => loadBankQuestions(1)}>搜索</Button>
+          <Button onClick={() => loadBankQuestions(1)}>{t('search')}</Button>
         </div>
 
         {bankLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         ) : bankQuestions.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
-            {bankTotal === 0 ? '题库暂无符合条件的单选题' : '没有更多题目'}
+            {bankTotal === 0 ? t('noMatchingQuestions') : t('noMoreQuestions')}
           </div>
         ) : (
           <>
             <div style={{ marginBottom: 8 }}>
-              <Text type="secondary">共 {bankTotal} 题，已选 {selectedBankIds.length} 题</Text>
+              <Text type="secondary">{t('bankTotalSelected', { total: bankTotal, selected: selectedBankIds.length })}</Text>
             </div>
             <div style={{ maxHeight: 420, overflowY: 'auto' }}>
               {bankQuestions.map((q: any) => {
@@ -727,7 +729,7 @@ const QuickQuizConsole: React.FC = () => {
                         <div style={{ marginTop: 4 }}>
                           {q.difficulty && (
                             <Tag color={q.difficulty === 'easy' ? 'green' : q.difficulty === 'medium' ? 'orange' : 'red'}>
-                              {q.difficulty === 'easy' ? '简单' : q.difficulty === 'medium' ? '中等' : '困难'}
+                              {q.difficulty === 'easy' ? t('difficultyEasy') : q.difficulty === 'medium' ? t('difficultyMedium') : t('difficultyHard')}
                             </Tag>
                           )}
                           {q.subject && <Tag>{q.subject}</Tag>}
@@ -744,10 +746,10 @@ const QuickQuizConsole: React.FC = () => {
               <div style={{ textAlign: 'center', marginTop: 12 }}>
                 <Space>
                   <Button size="small" disabled={bankPage <= 1}
-                    onClick={() => loadBankQuestions(bankPage - 1)}>上一页</Button>
-                  <Text>第 {bankPage} / {Math.ceil(bankTotal / 20)} 页</Text>
+                    onClick={() => loadBankQuestions(bankPage - 1)}>{t('prevPage')}</Button>
+                  <Text>{t('pageInfo', { page: bankPage, total: Math.ceil(bankTotal / 20) })}</Text>
                   <Button size="small" disabled={bankPage * 20 >= bankTotal}
-                    onClick={() => loadBankQuestions(bankPage + 1)}>下一页</Button>
+                    onClick={() => loadBankQuestions(bankPage + 1)}>{t('nextPage')}</Button>
                 </Space>
               </div>
             )}

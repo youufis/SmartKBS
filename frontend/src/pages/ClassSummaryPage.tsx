@@ -14,10 +14,12 @@ import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text } = Typography
 
 const ClassSummaryPage: React.FC = () => {
+  const { t } = useTranslation('system')
   const user = useAuthStore((s) => s.user)
 
   const [grades, setGrades] = useState<string[]>([])
@@ -50,7 +52,6 @@ const ClassSummaryPage: React.FC = () => {
 
   const handleClassSummary = async () => {
     if (!grade || !cls) {
-      message.warning('请先选择年级和班级')
       return
     }
     setClassSummaryLoading(true)
@@ -66,7 +67,7 @@ const ClassSummaryPage: React.FC = () => {
         setClassSummaryData(data)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '生成课堂总结失败')
+      message.error(err?.response?.data?.detail || t('generateSummaryFailed'))
     }
     setClassSummaryLoading(false)
   }
@@ -77,9 +78,9 @@ const ClassSummaryPage: React.FC = () => {
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
             <RobotOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>AI 课堂总结</Title>
+            <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('aiClassSummary')}</Title>
             <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              综合分析课堂活动数据
+              {t('classSummaryDesc')}
             </Text>
           </Space>
         </div>
@@ -88,14 +89,14 @@ const ClassSummaryPage: React.FC = () => {
       <Card>
         <Space style={{ marginBottom: 16 }}>
           <Select
-            placeholder="选择年级"
+            placeholder={t('selectGrade')}
             value={selectedGrade || undefined}
             onChange={setSelectedGrade}
             style={{ width: 140 }}
             options={grades.map(g => ({ value: g, label: g }))}
           />
           <Select
-            placeholder="选择班级"
+            placeholder={t('selectClass')}
             value={selectedClass || undefined}
             onChange={setSelectedClass}
             style={{ width: 140 }}
@@ -103,7 +104,7 @@ const ClassSummaryPage: React.FC = () => {
             options={classes.map(c => ({ value: c, label: c }))}
           />
           <Button icon={<RobotOutlined />} onClick={handleClassSummary} loading={classSummaryLoading}>
-            AI 课堂总结
+            {t('aiClassSummary')}
           </Button>
         </Space>
 
@@ -111,10 +112,10 @@ const ClassSummaryPage: React.FC = () => {
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
               <Row gutter={12} style={{ flex: 1 }}>
-                <Col span={6}><Statistic title="测验数" value={classSummaryData.data?.quiz_count || 0} /></Col>
-                <Col span={6}><Statistic title="投票数" value={classSummaryData.data?.poll_count || 0} /></Col>
-                <Col span={6}><Statistic title="提问数" value={classSummaryData.data?.question_count || 0} /></Col>
-                <Col span={6}><Statistic title="参与学生" value={classSummaryData.data?.student_count || 0} /></Col>
+                <Col span={6}><Statistic title={t('quizCount')} value={classSummaryData.data?.quiz_count || 0} /></Col>
+                <Col span={6}><Statistic title={t('pollCount')} value={classSummaryData.data?.poll_count || 0} /></Col>
+                <Col span={6}><Statistic title={t('questionCount')} value={classSummaryData.data?.question_count || 0} /></Col>
+                <Col span={6}><Statistic title={t('studentCount')} value={classSummaryData.data?.student_count || 0} /></Col>
               </Row>
               <Button
                 icon={<DownloadOutlined />}
@@ -132,7 +133,7 @@ const ClassSummaryPage: React.FC = () => {
                   window.open(`/api/interaction/class-summary/export?${params.toString()}`, '_blank')
                 }}
               >
-                导出 Word
+                {t('exportWord')}
               </Button>
             </div>
             <Card style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
@@ -143,7 +144,7 @@ const ClassSummaryPage: React.FC = () => {
           </>
         )}
         {!classSummaryData && !classSummaryLoading && (
-          <Empty description="点击「AI 课堂总结」生成综合分析报告" />
+          <Empty description={t('classSummaryEmpty')} />
         )}
       </Card>
     </Card>

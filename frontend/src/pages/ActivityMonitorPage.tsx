@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Card, Table, Select, Input, Tag, Space, Typography, Row, Col,
   Statistic, message, Button, Radio, Empty, Spin, Tabs,
@@ -20,17 +21,17 @@ import ResourceViewStatsPage from './ResourceViewStatsPage';
 
 const { Title, Text } = Typography;
 
-const ACTIVITY_TYPE_OPTIONS = [
-  { value: 'all', label: '全部类型' },
-  { value: 'exam', label: '考试' },
-  { value: 'practice', label: '智能练习' },
-  { value: 'quick_quiz', label: '知识抢答' },
-  { value: 'task', label: '在线任务' },
-  { value: 'quiz', label: '随堂测验' },
-  { value: 'code', label: '代码练习' },
-  { value: 'discussion', label: '分组讨论' },
-  { value: 'poll', label: '快速投票' },
-  { value: 'course', label: '课程练习' },
+const getActivityTypeOptions = (t: (key: string) => string) => [
+  { value: 'all', label: t('activityMonitor.activityType.all') },
+  { value: 'exam', label: t('activityMonitor.activityType.exam') },
+  { value: 'practice', label: t('activityMonitor.activityType.practice') },
+  { value: 'quick_quiz', label: t('activityMonitor.activityType.quickQuiz') },
+  { value: 'task', label: t('activityMonitor.activityType.task') },
+  { value: 'quiz', label: t('activityMonitor.activityType.quiz') },
+  { value: 'code', label: t('activityMonitor.activityType.code') },
+  { value: 'discussion', label: t('activityMonitor.activityType.discussion') },
+  { value: 'poll', label: t('activityMonitor.activityType.poll') },
+  { value: 'course', label: t('activityMonitor.activityType.course') },
 ];
 
 const ACTIVITY_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -57,17 +58,17 @@ const ACTIVITY_TYPE_COLORS: Record<string, string> = {
   course: 'lime',
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  draft: '草稿',
-  published: '已发布',
-  ended: '已结束',
-  active: '进行中',
-  inactive: '已停用',
-  waiting: '等待中',
-  playing: '进行中',
-  finished: '已结束',
-  pending: '待开始',
-};
+const getStatusLabels = (t: (key: string) => string): Record<string, string> => ({
+  draft: t('activityMonitor.status.draft'),
+  published: t('activityMonitor.status.published'),
+  ended: t('activityMonitor.status.ended'),
+  active: t('activityMonitor.status.active'),
+  inactive: t('activityMonitor.status.inactive'),
+  waiting: t('activityMonitor.status.waiting'),
+  playing: t('activityMonitor.status.playing'),
+  finished: t('activityMonitor.status.finished'),
+  pending: t('activityMonitor.status.pending'),
+});
 
 const STATUS_COLORS: Record<string, string> = {
   draft: 'default',
@@ -83,6 +84,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 const ActivityMonitorPage: React.FC = () => {
   const user = useAuthStore((s) => s.user);
+  const { t } = useTranslation('dashboard');
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher';
 
   // ── 活动列表状态 ──
@@ -136,7 +138,7 @@ const ActivityMonitorPage: React.FC = () => {
         }
       } catch (err: any) {
         if (!cancelled) {
-          message.error(err?.response?.data?.detail || '加载活动列表失败');
+          message.error(err?.response?.data?.detail || t('activityMonitor.loadFailed'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -164,7 +166,7 @@ const ActivityMonitorPage: React.FC = () => {
       setStatusDetail(res);
       setStatusPage(p);
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载完成情况失败');
+      message.error(err?.response?.data?.detail || t('activityMonitor.loadStatusFailed'));
     } finally {
       setStatusLoading(false);
     }
@@ -213,7 +215,7 @@ const ActivityMonitorPage: React.FC = () => {
   // ── 活动列表列定义 ──
   const activityColumns: ColumnsType<ActivityItem> = [
     {
-      title: '活动名称',
+      title: t('activityMonitor.columns.activityName'),
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -222,53 +224,52 @@ const ActivityMonitorPage: React.FC = () => {
           {ACTIVITY_TYPE_ICONS[record.activity_type]}
           <Text strong>{text}</Text>
           <Tag color={ACTIVITY_TYPE_COLORS[record.activity_type]}>
-            {ACTIVITY_TYPE_OPTIONS.find(o => o.value === record.activity_type)?.label || record.activity_type}
+            {getActivityTypeOptions(t).find(o => o.value === record.activity_type)?.label || record.activity_type}
           </Tag>
         </Space>
       ),
     },
     {
-      title: '科目',
+      title: t('activityMonitor.columns.subject'),
       dataIndex: 'subject',
       key: 'subject',
       width: 120,
       render: (v: string) => v || '-',
     },
     {
-      title: '发布者',
+      title: t('activityMonitor.columns.creator'),
       dataIndex: 'creator_name',
       key: 'creator_name',
       width: 100,
       ellipsis: true,
     },
     {
-      title: '状态',
+      title: t('activityMonitor.columns.status'),
       dataIndex: 'status',
       key: 'status',
       width: 100,
       render: (status: string) => (
         <Tag color={STATUS_COLORS[status] || 'default'}>
-          {STATUS_LABELS[status] || status}
+          {getStatusLabels(t)[status] || status}
         </Tag>
       ),
     },
     {
-      title: '已提交',
+      title: t('activityMonitor.columns.submitted'),
       dataIndex: 'submitted_count',
       key: 'submitted_count',
       width: 100,
       sorter: (a, b) => a.submitted_count - b.submitted_count,
       render: (count: number) => <Text strong>{count}</Text>,
-
     },
     {
-      title: '创建时间',
+      title: t('activityMonitor.columns.createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 170,
     },
     {
-      title: '操作',
+      title: t('activityMonitor.columns.action'),
       key: 'action',
       width: 120,
       render: (_: any, record: ActivityItem) => (
@@ -278,7 +279,7 @@ const ActivityMonitorPage: React.FC = () => {
           icon={<BarChartOutlined />}
           onClick={() => handleViewStatus(record)}
         >
-          完成情况
+          {t('activityMonitor.viewCompletion')}
         </Button>
       ),
     },
@@ -287,44 +288,44 @@ const ActivityMonitorPage: React.FC = () => {
   // ── 学生状态列定义 ──
   const studentColumns: ColumnsType<StudentStatus> = [
     {
-      title: '序号',
+      title: t('activityMonitor.columns.index'),
       key: 'index',
       width: 60,
       render: (_: any, __: any, index: number) =>
         (statusPage - 1) * 20 + index + 1,
     },
     {
-      title: '姓名',
+      title: t('activityMonitor.columns.name'),
       dataIndex: 'name',
       key: 'name',
       width: 120,
     },
     {
-      title: '年级',
+      title: t('activityMonitor.columns.grade'),
       dataIndex: 'grade',
       key: 'grade',
       width: 100,
     },
     {
-      title: '班级',
+      title: t('activityMonitor.columns.class'),
       dataIndex: 'class_name',
       key: 'class_name',
       width: 100,
     },
     {
-      title: '完成状态',
+      title: t('activityMonitor.columns.completionStatus'),
       dataIndex: 'status',
       key: 'status',
       width: 100,
       render: (status: string) =>
         status === 'completed' ? (
-          <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>
+          <Tag icon={<CheckCircleOutlined />} color="success">{t('activityMonitor.completed')}</Tag>
         ) : (
-          <Tag icon={<CloseCircleOutlined />} color="error">未完成</Tag>
+          <Tag icon={<CloseCircleOutlined />} color="error">{t('activityMonitor.incomplete')}</Tag>
         ),
     },
     {
-      title: '得分',
+      title: t('activityMonitor.columns.score'),
       dataIndex: 'score',
       key: 'score',
       width: 120,
@@ -338,7 +339,7 @@ const ActivityMonitorPage: React.FC = () => {
         ),
     },
     {
-      title: '提交时间',
+      title: t('activityMonitor.columns.submittedAt'),
       dataIndex: 'submitted_at',
       key: 'submitted_at',
       width: 170,
@@ -361,7 +362,7 @@ const ActivityMonitorPage: React.FC = () => {
   if (!isTeacherOrAdmin) {
     return (
       <Card>
-        <Empty description="仅教师和管理员可访问" />
+        <Empty description={t('activityMonitor.restricted')} />
       </Card>
     );
   }
@@ -371,29 +372,29 @@ const ActivityMonitorPage: React.FC = () => {
       <Tabs defaultActiveKey="activity" items={[
         {
           key: 'activity',
-          label: <span><BarChartOutlined /> 活动监控</span>,
+          label: <span><BarChartOutlined />{t('activityMonitor.tabActivity')}</span>,
           children: (<>
       <Title level={4} style={{ marginBottom: 16 }}>
-        <BarChartOutlined /> 活动完成监控
+        <BarChartOutlined /> {t('activityMonitor.title')}
       </Title>
 
       {/* ── 顶部筛选栏 ── */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row gutter={[16, 12]} align="middle">
           <Col>
-            <Text strong>活动类型：</Text>
+            <Text strong>{t('activityMonitor.filters.activityType')}</Text>
             <Select
               value={activityType}
               onChange={(v) => { setActivityType(v); setPage(1); }}
               style={{ width: 140 }}
-              options={ACTIVITY_TYPE_OPTIONS}
+              options={getActivityTypeOptions(t)}
             />
           </Col>
           <Col>
-            <Text strong>年级：</Text>
+            <Text strong>{t('activityMonitor.filters.grade')}</Text>
             <Select
               allowClear
-              placeholder="选择年级"
+              placeholder={t('activityMonitor.filters.selectGrade')}
               value={selectedGradeId}
               onChange={handleGradeChange}
               style={{ width: 120 }}
@@ -401,10 +402,10 @@ const ActivityMonitorPage: React.FC = () => {
             />
           </Col>
           <Col>
-            <Text strong>班级：</Text>
+            <Text strong>{t('activityMonitor.filters.class')}</Text>
             <Select
               allowClear
-              placeholder="选择班级"
+              placeholder={t('activityMonitor.filters.selectClass')}
               value={selectedClassId}
               onChange={handleClassChange}
               style={{ width: 120 }}
@@ -414,7 +415,7 @@ const ActivityMonitorPage: React.FC = () => {
           </Col>
           <Col flex="auto">
             <Input.Search
-              placeholder="搜索活动名称"
+              placeholder={t('activityMonitor.filters.searchActivity')}
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onSearch={() => { setPage(1); handleRefresh(); }}
@@ -423,13 +424,13 @@ const ActivityMonitorPage: React.FC = () => {
             />
           </Col>
           <Col>
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>{t('activityMonitor.refresh')}</Button>
           </Col>
         </Row>
       </Card>
 
       {/* ── 活动列表 ── */}
-      <Card title="活动列表" size="small" style={{ marginBottom: 16 }}>
+      <Card title={t('activityMonitor.activityList')} size="small" style={{ marginBottom: 16 }}>
         <Table
           dataSource={activities}
           columns={activityColumns}
@@ -441,7 +442,7 @@ const ActivityMonitorPage: React.FC = () => {
             pageSize,
             total,
             showSizeChanger: true,
-            showTotal: (t) => `共 ${t} 个活动`,
+            showTotal: (total) => t('activityMonitor.pagination.totalActivities', { count: total }),
             onChange: (p, ps) => { setPage(p); setPageSize(ps); },
           }}
         />
@@ -452,16 +453,16 @@ const ActivityMonitorPage: React.FC = () => {
         <Card
           title={
             <Space>
-              <span>完成详情：{selectedActivity.title}</span>
+              <span>{t('activityMonitor.completionDetail')}{selectedActivity.title}</span>
               <Tag color={ACTIVITY_TYPE_COLORS[selectedActivity.activity_type]}>
-                {ACTIVITY_TYPE_OPTIONS.find(o => o.value === selectedActivity.activity_type)?.label}
+                {getActivityTypeOptions(t).find(o => o.value === selectedActivity.activity_type)?.label}
               </Tag>
             </Space>
           }
           size="small"
           extra={
             <Button size="small" onClick={() => { setSelectedActivity(null); setStatusDetail(null); }}>
-              关闭
+              {t('activityMonitor.close')}
             </Button>
           }
         >
@@ -469,13 +470,13 @@ const ActivityMonitorPage: React.FC = () => {
             /* ── 未选定年级/班级时提示 ── */
             <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
               <BarChartOutlined style={{ fontSize: 48, marginBottom: 16 }} />
-              <div>请在顶部筛选栏中选择<Text strong>年级</Text>和<Text strong>班级</Text>查看完成情况</div>
+              <div>{t('activityMonitor.selectHint')}</div>
             </div>
           ) : statusLoading ? (
             /* ── 加载中 ── */
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <Spin />
-              <div style={{ marginTop: 8, color: '#999' }}>加载中...</div>
+              <div style={{ marginTop: 8, color: '#999' }}>{t('activityMonitor.loading')}</div>
             </div>
           ) : statusDetail ? (
             /* ── 有数据时 ── */
@@ -483,34 +484,34 @@ const ActivityMonitorPage: React.FC = () => {
               {/* 统计概览 */}
               <Row gutter={24} style={{ marginBottom: 16 }}>
                 <Col span={4}>
-                  <Statistic title="应完成人数" value={statusDetail.statistics.total_students} suffix="人" />
+                  <Statistic title={t('activityMonitor.stats.totalStudents')} value={statusDetail.statistics.total_students} suffix={t('activityMonitor.stats.personSuffix')} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="已完成" value={statusDetail.statistics.completed_count} suffix="人" styles={{ content: { color: '#52c41a' } }} />
+                  <Statistic title={t('activityMonitor.stats.completed')} value={statusDetail.statistics.completed_count} suffix={t('activityMonitor.stats.personSuffix')} styles={{ content: { color: '#52c41a' } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="未完成" value={statusDetail.statistics.incomplete_count} suffix="人" styles={{ content: { color: '#f5222d' } }} />
+                  <Statistic title={t('activityMonitor.stats.incomplete')} value={statusDetail.statistics.incomplete_count} suffix={t('activityMonitor.stats.personSuffix')} styles={{ content: { color: '#f5222d' } }} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="完成率" value={statusDetail.statistics.completion_rate} suffix="%" precision={1} />
+                  <Statistic title={t('activityMonitor.stats.completionRate')} value={statusDetail.statistics.completion_rate} suffix="%" precision={1} />
                 </Col>
                 <Col span={4}>
-                  <Statistic title="平均分" value={statusDetail.statistics.avg_score} precision={1} />
+                  <Statistic title={t('activityMonitor.stats.avgScore')} value={statusDetail.statistics.avg_score} precision={1} />
                 </Col>
               </Row>
 
               {/* 状态筛选 */}
               <Space style={{ marginBottom: 12 }}>
-                <Text strong>筛选：</Text>
+                <Text strong>{t('activityMonitor.filter')}</Text>
                 <Radio.Group
                   value={statusFilter}
                   onChange={(e) => handleStatusFilterChange(e.target.value)}
                   optionType="button"
                   buttonStyle="solid"
                 >
-                  <Radio.Button value="all">全部</Radio.Button>
-                  <Radio.Button value="completed"><CheckCircleOutlined /> 已完成</Radio.Button>
-                  <Radio.Button value="incomplete"><CloseCircleOutlined /> 未完成</Radio.Button>
+                  <Radio.Button value="all">{t('activityMonitor.all')}</Radio.Button>
+                  <Radio.Button value="completed"><CheckCircleOutlined /> {t('activityMonitor.completed')}</Radio.Button>
+                  <Radio.Button value="incomplete"><CloseCircleOutlined /> {t('activityMonitor.incomplete')}</Radio.Button>
                 </Radio.Group>
               </Space>
 
@@ -525,7 +526,7 @@ const ActivityMonitorPage: React.FC = () => {
                   pageSize: statusDetail.page_size,
                   total: statusDetail.total,
                   showSizeChanger: true,
-                  showTotal: (t) => `共 ${t} 名学生`,
+                  showTotal: (total) => t('activityMonitor.pagination.totalStudents', { count: total }),
                   onChange: (p) => {
                     setStatusPage(p);
                     if (selectedActivity && selectedGradeId && selectedClassId) {
@@ -542,7 +543,7 @@ const ActivityMonitorPage: React.FC = () => {
         },
         {
           key: 'resource-views',
-          label: <span><EyeOutlined /> 浏览统计</span>,
+          label: <span><EyeOutlined />{t('activityMonitor.tabResourceViews')}</span>,
           children: <ResourceViewStatsPage />,
         },
       ]} />

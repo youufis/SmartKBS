@@ -8,19 +8,11 @@ import {
   BookOutlined, NodeIndexOutlined, InboxOutlined,
   CloseCircleOutlined, LoadingOutlined,
 } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 
 const { Option } = Select
 const { Dragger } = Upload
-
-// ── 进度阶段定义 ──
-const PROGRESS_STAGES = [
-  { key: 'sending', label: '发送请求...', duration: 3000 },
-  { key: 'analyzing', label: 'AI 正在分析内容...', duration: 5000 },
-  { key: 'extracting', label: '提取章节结构...', duration: 5000 },
-  { key: 'building', label: '构建知识点树...', duration: 4000 },
-  { key: 'parsing', label: '解析生成结果...', duration: 2000 },
-]
 
 const TIMEOUT_MS = 300_000 // 300 秒超时（5 分钟）
 
@@ -66,6 +58,7 @@ interface Props {
 }
 
 const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) => {
+  const { t } = useTranslation('curriculum')
   const [step, setStep] = useState(0) // 0=输入, 1=生成中, 2=预览, 3=错误
   const [loading, setLoading] = useState(false)
   const [form] = Form.useForm()
@@ -106,8 +99,14 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const startProgress = () => {
     clearTimers()
     setProgressPercent(5)
-    setProgressText('正在准备请求...')
-    const stageDurations = PROGRESS_STAGES
+    setProgressText(t('aiGenerator.preparing'))
+    const stageDurations = [
+      { key: 'sending', label: t('aiGenerator.sending'), duration: 3000 },
+      { key: 'analyzing', label: t('aiGenerator.analyzing'), duration: 5000 },
+      { key: 'extracting', label: t('aiGenerator.extracting'), duration: 5000 },
+      { key: 'building', label: t('aiGenerator.building'), duration: 4000 },
+      { key: 'parsing', label: t('aiGenerator.parsing'), duration: 2000 },
+    ]
     const totalDuration = stageDurations.reduce((s, st) => s + st.duration, 0)
     let elapsed = 0
     const stepMs = 300
@@ -117,7 +116,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       setProgressPercent(pct)
       // 根据进度显示对应的阶段文字
       let accDuration = 0
-      let currentLabel = 'AI 处理中...'
+      let currentLabel = t('aiGenerator.processing')
       for (const st of stageDurations) {
         accDuration += st.duration
         if (elapsed <= accDuration) {
@@ -133,7 +132,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const stopProgress = (success: boolean) => {
     clearTimers()
     setProgressPercent(success ? 100 : 0)
-    setProgressText(success ? '生成完成' : '生成失败')
+    setProgressText(success ? t('aiGenerator.completed') : t('aiGenerator.failed'))
   }
 
   // ── 通用错误处理 ──
@@ -149,7 +148,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     } else if (typeof err === 'string') {
       detail = err
     }
-    if (!detail) detail = 'AI 生成失败，请检查 API Key 配置或稍后重试'
+    if (!detail) detail = t('aiGenerator.errorDefault')
     setErrorMsg(detail)
     setStep(3) // 错误步骤
   }
@@ -170,7 +169,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     } catch (err: unknown) {
       const e = err as { code?: string; name?: string; message?: string }
       if (e?.code === 'ERR_CANCELED' || e?.name === 'AbortError' || e?.message?.includes('aborted')) {
-        throw new Error('请求超时，AI 响应时间过长，请稍后重试或缩短输入内容', { cause: err })
+        throw new Error(t('aiGenerator.errorTimeout'), { cause: err })
       }
       throw err
     } finally {
@@ -181,12 +180,12 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   // ── 文件上传生成 ──
   const handleGenerateFromFile = async () => {
     if (!uploadFile) {
-      message.warning('请先选择文件')
+      message.warning(t('aiGenerator.selectFileFirst'))
       return
     }
     const values = form.getFieldsValue(['subject', 'grade', 'course_name'])
     if (!values.subject) {
-      message.warning('请选择科目')
+      message.warning(t('aiGenerator.selectSubjectFirst'))
       setLoading(false)
       return
     }
@@ -207,7 +206,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       setTreeData(buildPreviewTree(data))
       setStep(2)
     } catch (err: unknown) {
-      handleError(err, '文件生成失败')
+      handleError(err, t('aiGenerator.errorFileGen'))
     } finally {
       setLoading(false)
       clearTimers()
@@ -230,10 +229,10 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       const data = await callApi('/api/curriculum/ai-generate-from-file', formData)
       setResult(data)
       setSaveDone(true)
-      message.success(`课程「${result.course_name}」已成功创建！共 ${result.saved?.chapters || 0} 章、${result.saved?.knowledge_points || 0} 个知识点`)
+      message.success(t('aiGenerator.saveSuccess', { name: result.course_name, chapters: result.saved?.chapters || 0, kps: result.saved?.knowledge_points || 0 }))
       onSuccess?.()
     } catch (err: unknown) {
-      handleError(err, '保存失败')
+      handleError(err, t('aiGenerator.errorSaveFailed'))
     } finally {
       setLoading(false)
     }
@@ -269,10 +268,10 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
                 <NodeIndexOutlined style={{ fontSize: 12 }} />
                 <Typography.Text>{kp.name}</Typography.Text>
                 <Tag color={kp.difficulty === 'easy' ? 'green' : kp.difficulty === 'hard' ? 'red' : 'gold'} style={{ fontSize: 11 }}>
-                  {kp.difficulty === 'easy' ? '简单' : kp.difficulty === 'hard' ? '困难' : '中等'}
+                  {kp.difficulty === 'easy' ? t('easy') : kp.difficulty === 'hard' ? t('hard') : t('medium')}
                 </Tag>
                 {kp.estimated_minutes && (
-                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>{kp.estimated_minutes}分钟</Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('aiGenerator.minutes', { minutes: kp.estimated_minutes })}</Typography.Text>
                 )}
               </Space>
             ),
@@ -291,10 +290,10 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
               <NodeIndexOutlined style={{ fontSize: 12 }} />
               <Typography.Text>{kp.name}</Typography.Text>
               <Tag color={kp.difficulty === 'easy' ? 'green' : kp.difficulty === 'hard' ? 'red' : 'gold'} style={{ fontSize: 11 }}>
-                {kp.difficulty === 'easy' ? '简单' : kp.difficulty === 'hard' ? '困难' : '中等'}
+                {kp.difficulty === 'easy' ? t('easy') : kp.difficulty === 'hard' ? t('hard') : t('medium')}
               </Tag>
               {kp.estimated_minutes && (
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{kp.estimated_minutes}分钟</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('aiGenerator.minutes', { minutes: kp.estimated_minutes })}</Typography.Text>
               )}
             </Space>
           ),
@@ -311,10 +310,10 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
   const handleClose = () => {
     if (!saveDone && result && !loading) {
       Modal.confirm({
-        title: '确认关闭？',
-        content: '生成的课程尚未保存，关闭后将丢失。',
-        okText: '确认关闭',
-        cancelText: '继续编辑',
+        title: t('aiGenerator.confirmCloseTitle'),
+        content: t('aiGenerator.confirmCloseContent'),
+        okText: t('aiGenerator.confirmCloseOk'),
+        cancelText: t('aiGenerator.confirmCloseCancel'),
         onOk: () => {
           clearTimers(); abortRef.current?.abort()
           setStep(0); setResult(null); setTreeData([]); setSaveDone(false)
@@ -350,7 +349,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       title={
         <Space>
           <RobotOutlined style={{ color: '#1677ff' }} />
-          <span>AI 生成课程大纲</span>
+          <span>{t('aiGenerator.title')}</span>
         </Space>
       }
       open={open}
@@ -364,16 +363,16 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
         size="small"
         style={{ marginBottom: 24 }}
         items={[
-          { title: '输入内容', icon: step === 3 ? <CloseCircleOutlined /> : <FileTextOutlined /> },
-          { title: 'AI 生成中...', icon: step === 1 ? <LoadingOutlined /> : <RobotOutlined /> },
-          { title: '预览与保存', icon: step === 2 ? <CheckCircleOutlined /> : <CheckCircleOutlined /> },
+          { title: t('aiGenerator.stepInput'), icon: step === 3 ? <CloseCircleOutlined /> : <FileTextOutlined /> },
+          { title: t('aiGenerator.stepGenerating'), icon: step === 1 ? <LoadingOutlined /> : <RobotOutlined /> },
+          { title: t('aiGenerator.stepPreview'), icon: step === 2 ? <CheckCircleOutlined /> : <CheckCircleOutlined /> },
         ]}
       />
 
       {/* ── 步骤 0：输入 ── */}
       {step === 0 && (
         <Form form={form} layout="vertical" initialValues={{ subject: '', grade: '' }}>
-          <Form.Item label="上传文档（txt/md/pdf/docx）" required>
+          <Form.Item label={t('aiGenerator.uploadLabel')} required>
             <Dragger
               accept=".txt,.md,.pdf,.docx"
               maxCount={1}
@@ -381,39 +380,39 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
                 const valid = ['.txt', '.md', '.pdf', '.docx'].some(ext =>
                   file.name.toLowerCase().endsWith(ext)
                 )
-                if (!valid) { message.error('仅支持 txt/md/pdf/docx 格式'); return Upload.LIST_IGNORE }
-                if (file.size > 20 * 1024 * 1024) { message.error('文件大小不能超过 20MB'); return Upload.LIST_IGNORE }
+                if (!valid) { message.error(t('aiGenerator.uploadInvalidFormat')); return Upload.LIST_IGNORE }
+                if (file.size > 20 * 1024 * 1024) { message.error(t('aiGenerator.uploadTooLarge')); return Upload.LIST_IGNORE }
                 setUploadFile(file)
                 return false
               }}
               onRemove={() => setUploadFile(null)}
             >
               <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-              <p className="ant-upload-text">点击或拖拽文件到此区域上传</p>
-              <p className="ant-upload-hint">支持 txt、md、pdf、docx 格式，最大 20MB</p>
+              <p className="ant-upload-text">{t('aiGenerator.uploadDragText')}</p>
+              <p className="ant-upload-hint">{t('aiGenerator.uploadHint')}</p>
             </Dragger>
           </Form.Item>
 
           <Space style={{ width: '100%' }} align="start" wrap>
-            <Form.Item name="subject" label="科目" style={{ width: 160 }} rules={[{ required: true, message: '请选择科目' }]}>
-              <Select placeholder="选择科目">
+            <Form.Item name="subject" label={t('aiGenerator.subjectLabel')} style={{ width: 160 }} rules={[{ required: true, message: t('aiGenerator.subjectRequired') }]}>
+              <Select placeholder={t('aiGenerator.subjectPlaceholder')}>
                 {subjects.length > 0 ? subjects.map(s => <Option key={s} value={s}>{s}</Option>) : (
-                  <Option value="" disabled>⚠️ 请先在系统配置中设置课程名称</Option>
+                  <Option value="" disabled>{t('aiGenerator.noSubjectConfig')}</Option>
                 )}
               </Select>
             </Form.Item>
-            <Form.Item name="grade" label="年级" style={{ width: 160 }}>
-              <Select placeholder="选择年级" allowClear>
+            <Form.Item name="grade" label={t('aiGenerator.gradeLabel')} style={{ width: 160 }}>
+              <Select placeholder={t('aiGenerator.gradePlaceholder')} allowClear>
                 {gradeOptions.map(g => <Option key={g} value={g}>{g}</Option>)}
               </Select>
             </Form.Item>
-            <Form.Item name="course_name" label="课程名称（留空由 AI 推断）" style={{ width: 280 }}>
-              <Input placeholder="例如：信息科技必修1" />
+            <Form.Item name="course_name" label={t('aiGenerator.courseNameLabel')} style={{ width: 280 }}>
+              <Input placeholder={t('aiGenerator.courseNamePlaceholder')} />
             </Form.Item>
           </Space>
 
           <Alert
-            message="提示：AI 会根据内容自动提取章、节、知识点结构。生成过程约需 1-3 分钟，请耐心等待。"
+            message={t('aiGenerator.alertHint')}
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
@@ -426,7 +425,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
             block
             size="large"
           >
-            {`上传并生成${uploadFile ? `（${uploadFile.name}）` : ''}`}
+            {uploadFile ? t('aiGenerator.uploadAndGenerateWithFile', { name: uploadFile.name }) : t('aiGenerator.uploadAndGenerate')}
           </Button>
         </Form>
       )}
@@ -437,10 +436,10 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           <div style={{ textAlign: 'center', marginBottom: 16 }}>
             <Spin indicator={<LoadingOutlined style={{ fontSize: 36 }} />} />
             <Typography.Title level={5} style={{ marginTop: 16, marginBottom: 4 }}>
-              AI 正在生成课程大纲
+              {t('aiGenerator.generatingTitle')}
             </Typography.Title>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {progressText || '处理中...'}
+              {progressText || t('aiGenerator.generatingText')}
             </Typography.Text>
           </div>
           <Progress
@@ -453,7 +452,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
             style={{ padding: '0 16px' }}
           />
           <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', marginTop: 8, fontSize: 12 }}>
-            预计 1-3 分钟，请勿关闭弹窗
+            {t('aiGenerator.estimatedTime')}
           </Typography.Text>
         </div>
       )}
@@ -469,19 +468,19 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
                 <Typography.Text type="secondary">
                   {result.course_code && `[${result.course_code}] `}
                   {result.course_description}
-                  {result.source_file && `（来源：${result.source_file}）`}
+                  {result.source_file && t('aiGenerator.sourceFrom', { file: result.source_file })}
                 </Typography.Text>
               </div>
             </Space>
           </div>
 
           <Space style={{ marginBottom: 12 }}>
-            <Tag icon={<BookOutlined />} color="blue">{chapterCount} 章</Tag>
-            <Tag icon={<NodeIndexOutlined />} color="geekblue">{kpCount} 个知识点</Tag>
+            <Tag icon={<BookOutlined />} color="blue">{t('aiGenerator.chapterCount', { count: chapterCount })}</Tag>
+            <Tag icon={<NodeIndexOutlined />} color="geekblue">{t('aiGenerator.kpCount', { count: kpCount })}</Tag>
           </Space>
 
           <Divider style={{ margin: '8px 0' }} />
-          <Typography.Text strong>生成的结构预览：</Typography.Text>
+          <Typography.Text strong>{t('aiGenerator.previewTitle')}</Typography.Text>
           <div style={{ maxHeight: 360, overflow: 'auto', marginTop: 8 }}>
             <Tree
               treeData={treeData}
@@ -494,12 +493,12 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           <Divider />
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
             <Button onClick={() => { setStep(0); setResult(null); setTreeData([]); setUploadFile(null) }}>
-              返回修改
+              {t('aiGenerator.backToEdit')}
             </Button>
             {saveDone ? (
-              <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleClose}>完成</Button>
+              <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleClose}>{t('aiGenerator.done')}</Button>
             ) : (
-              <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleSave} loading={loading}>保存课程</Button>
+              <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleSave} loading={loading}>{t('aiGenerator.saveCourse')}</Button>
             )}
           </Space>
         </div>
@@ -509,18 +508,18 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       {step === 3 && (
         <div style={{ padding: '16px 0' }}>
           <Alert
-            message="生成失败"
+            message={t('aiGenerator.errorTitle')}
             description={
               <div>
                 <Typography.Paragraph style={{ marginBottom: 8 }}>{errorMsg}</Typography.Paragraph>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  可能的原因：
+                  {t('aiGenerator.possibleReasons')}
                 </Typography.Text>
                 <ul style={{ fontSize: 12, color: '#888', marginTop: 4, paddingLeft: 20 }}>
-                  <li>API Key 未配置或已失效 — 请在系统配置中检查 API Key</li>
-                  <li>输入内容过少或格式不规范 — 建议提供完整的教材章节文本</li>
-                  <li>AI 服务超时 — 请稍后重试，或缩短输入内容</li>
-                  <li>网络连接异常 — 请检查服务器网络</li>
+                  <li>{t('aiGenerator.reasonApiKey')}</li>
+                  <li>{t('aiGenerator.reasonContent')}</li>
+                  <li>{t('aiGenerator.reasonTimeout')}</li>
+                  <li>{t('aiGenerator.reasonNetwork')}</li>
                 </ul>
               </div>
             }
@@ -529,9 +528,9 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
             style={{ marginBottom: 16 }}
           />
           <Space style={{ width: '100%', justifyContent: 'center' }}>
-            <Button onClick={handleRetry}>返回修改</Button>
+            <Button onClick={handleRetry}>{t('aiGenerator.backToEdit')}</Button>
             <Button type="primary" icon={<RobotOutlined />} onClick={handleGenerateFromFile} loading={loading}>
-              重新生成
+              {t('aiGenerator.retry')}
             </Button>
           </Space>
         </div>

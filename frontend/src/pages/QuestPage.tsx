@@ -16,6 +16,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -41,6 +42,7 @@ interface QuestRecord {
 }
 
 const QuestPage: React.FC = () => {
+  const { t } = useTranslation('questions')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isStudent = user?.role === 'student'
@@ -73,7 +75,7 @@ const QuestPage: React.FC = () => {
       setQuestConfig(configRes.data)
     } catch (e: any) {
       if (e?.response?.status !== 403) {
-        message.error('加载闯关数据失败')
+        message.error(t('loadQuestDataFailed'))
       }
     } finally {
       setLoading(false)
@@ -87,7 +89,7 @@ const QuestPage: React.FC = () => {
 
   const handleStart = async () => {
     if (!isStudent) {
-      message.warning('仅学生可以参与闯关')
+      message.warning(t('studentsOnly'))
       return
     }
     setStarting(true)
@@ -124,7 +126,7 @@ const QuestPage: React.FC = () => {
       const { data } = await apiClient.get(`/api/quest/${questId}/result`)
       setExpandedQuestions((prev) => ({ ...prev, [questId]: data.questions || [] }))
     } catch {
-      message.error('加载题目详情失败')
+      message.error(t('loadQuestionDetailFailed'))
     }
   }
 

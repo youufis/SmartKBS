@@ -18,6 +18,7 @@ import apiClient from '../api/client'
 import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import PlaceholderManager from '../components/PlaceholderManager'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -72,12 +73,6 @@ interface QuestBankQuestion {
   created_at: string
 }
 
-const LIFELINE_LABELS: Record<string, string> = {
-  remove_one: '🎯去伪存真',
-  phone_friend: '📞远程连线',
-  audience_vote: '👥群策群力',
-}
-
 const SCORE_COLORS = ['#ff4d4f', '#fa8c16', '#fadb14', '#52c41a', '#1677ff', '#722ed1']
 
 // ════════════════════════════════════════════
@@ -99,6 +94,13 @@ const QuestRecordsTab: React.FC = () => {
   const [classes, setClasses] = useState<string[]>([])
   const [gradesLoading, setGradesLoading] = useState(true)
   const [classesLoading, setClassesLoading] = useState(false)
+  const { t } = useTranslation('questions')
+
+  const lifelineLabels: Record<string, string> = {
+    remove_one: t('lifelineRemoveOne'),
+    phone_friend: t('lifelinePhoneFriend'),
+    audience_vote: t('lifelineAudienceVote'),
+  }
 
   // 加载年级列表
   useEffect(() => {
@@ -144,7 +146,7 @@ const QuestRecordsTab: React.FC = () => {
       setRecords(data.records || [])
       setTotal(data.total || 0)
     } catch {
-      message.error('加载闯关记录失败')
+      // ignore
     } finally {
       setLoading(false)
     }
@@ -156,19 +158,23 @@ const QuestRecordsTab: React.FC = () => {
 
   const handleDelete = (record: QuestRecord) => {
     Modal.confirm({
-      title: '确认删除',
+      title: t('confirmDelete'),
       icon: <ExclamationCircleOutlined />,
-      content: `确定删除 ${record.student_name} 的闯关记录 #${record.id}（答对 ${record.correct_count}/${record.answered_count} 题）？此操作不可恢复。`,
-      okText: '删除',
+      content: t('confirmDeleteRecord', {
+        name: record.student_name,
+        id: record.id,
+        correct: record.correct_count,
+        total: record.answered_count,
+      }),
+      okText: t('delete'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await apiClient.delete(`/api/quest/admin/records/${record.id}`)
-          message.success('删除成功')
           loadRecords()
         } catch (e: any) {
-          message.error(e?.response?.data?.detail || '删除失败')
+          message.error(e?.response?.data?.detail || t('deleteFailed'))
         }
       },
     })
@@ -176,7 +182,7 @@ const QuestRecordsTab: React.FC = () => {
 
   const columns = [
     {
-      title: '学生',
+      title: t('student'),
       key: 'student',
       width: 120,
       render: (_: any, r: QuestRecord) => (
@@ -184,7 +190,7 @@ const QuestRecordsTab: React.FC = () => {
       ),
     },
     {
-      title: '班级',
+      title: t('class'),
       key: 'class',
       width: 120,
       render: (_: any, r: QuestRecord) => (
@@ -192,17 +198,17 @@ const QuestRecordsTab: React.FC = () => {
       ),
     },
     {
-      title: '结果',
+      title: t('result'),
       key: 'status',
       width: 80,
       render: (_: any, r: QuestRecord) => {
-        if (r.completed === 0) return <Tag color="processing">进行中</Tag>
-        if (r.completed === 1 && r.correct_count >= 1) return <Tag color="success">成功</Tag>
-        return <Tag color="error">终止</Tag>
+        if (r.completed === 0) return <Tag color="processing">{t('inProgress')}</Tag>
+        if (r.completed === 1 && r.correct_count >= 1) return <Tag color="success">{t('success')}</Tag>
+        return <Tag color="error">{t('terminated')}</Tag>
       },
     },
     {
-      title: '答对/总题',
+      title: t('correctTotal'),
       key: 'count',
       width: 100,
       render: (_: any, r: QuestRecord) => {
@@ -211,21 +217,21 @@ const QuestRecordsTab: React.FC = () => {
       },
     },
     {
-      title: '得分',
+      title: t('score'),
       dataIndex: 'score',
       key: 'score',
       width: 70,
       render: (s: number) => <Text strong>{s}</Text>,
     },
     {
-      title: '终止题号',
+      title: t('wrongQuestion'),
       key: 'wrong',
       width: 80,
       render: (_: any, r: QuestRecord) =>
-        r.wrong_question_index > 0 ? `第${r.wrong_question_index}题` : '-',
+        r.wrong_question_index > 0 ? t('questionNo', { n: r.wrong_question_index }) : '-',
     },
     {
-      title: '锦囊',
+      title: t('lifeline'),
       key: 'lifelines',
       width: 160,
       render: (_: any, r: QuestRecord) => (
@@ -233,23 +239,23 @@ const QuestRecordsTab: React.FC = () => {
           {r.lifelines_used.length > 0
             ? r.lifelines_used.map((l) => (
                 <Tag key={l} color="orange" style={{ fontSize: 11 }}>
-                  {LIFELINE_LABELS[l] || l}
+                  {lifelineLabels[l] || l}
                 </Tag>
               ))
-            : <Text type="secondary">未使用</Text>
+            : <Text type="secondary">{t('notUsed')}</Text>
           }
         </Space>
       ),
     },
     {
-      title: '时间',
+      title: t('time'),
       dataIndex: 'created_at',
       key: 'time',
       width: 140,
-      render: (t: string) => t?.slice(0, 16) || '-',
+      render: (v: string) => v?.slice(0, 16) || '-',
     },
     {
-      title: '操作',
+      title: t('actions'),
       key: 'action',
       width: 70,
       render: (_: any, r: QuestRecord) => (
@@ -267,7 +273,7 @@ const QuestRecordsTab: React.FC = () => {
   const expandedRowRender = (record: QuestRecord) => (
     <div style={{ maxWidth: '100%', overflow: 'auto' }}>
       {record.questions.length === 0 ? (
-        <Text type="secondary">暂无题目详情</Text>
+        <Text type="secondary">{t('noQuestionDetails')}</Text>
       ) : (
         <Table
           dataSource={record.questions}
@@ -283,25 +289,25 @@ const QuestRecordsTab: React.FC = () => {
               width: 40,
             },
             {
-              title: '领域',
+              title: t('category'),
               dataIndex: 'category',
               key: 'cat',
               width: 80,
               render: (c: string) => <Tag>{c}</Tag>,
             },
             {
-              title: '题目',
+              title: t('question'),
               dataIndex: 'question_text',
               key: 'q',
               width: 280,
-              render: (t: string) => (
+              render: (text: string) => (
                 <div style={{ maxWidth: 280, wordBreak: 'break-word' }}>
-                  <Text style={{ fontSize: 13 }}>{t}</Text>
+                  <Text style={{ fontSize: 13 }}>{text}</Text>
                 </div>
               ),
             },
             {
-              title: '学生答案',
+              title: t('studentAnswer'),
               dataIndex: 'student_answer',
               key: 'sa',
               width: 100,
@@ -312,7 +318,7 @@ const QuestRecordsTab: React.FC = () => {
               },
             },
             {
-              title: '正确答案',
+              title: t('correctAnswer'),
               key: 'ca',
               width: 100,
               render: (_: any, q: QuestionDetail) => (
@@ -320,34 +326,34 @@ const QuestRecordsTab: React.FC = () => {
               ),
             },
             {
-              title: '得分',
+              title: t('score'),
               dataIndex: 'score',
               key: 's',
               width: 50,
               render: (s: number) => <Text strong>{s}</Text>,
             },
             {
-              title: '用时',
+              title: t('timeSpent'),
               dataIndex: 'time_spent',
               key: 'ts',
               width: 60,
-              render: (t: number) => (
+              render: (sec: number) => (
                 <Space>
                   <ClockCircleOutlined style={{ fontSize: 12 }} />
-                  {t || 0}s
+                  {sec || 0}s
                 </Space>
               ),
             },
             {
-              title: '锦囊',
+              title: t('lifeline'),
               dataIndex: 'lifeline_used',
               key: 'll',
               width: 80,
               render: (l: string) =>
-                l ? <Tag color="orange" style={{ fontSize: 11 }}>{LIFELINE_LABELS[l.split(',')[0]] || l}</Tag> : '-',
+                l ? <Tag color="orange" style={{ fontSize: 11 }}>{lifelineLabels[l.split(',')[0]] || l}</Tag> : '-',
             },
             {
-              title: '解析',
+              title: t('explanation'),
               dataIndex: 'explanation',
               key: 'exp',
               width: 200,
@@ -368,7 +374,7 @@ const QuestRecordsTab: React.FC = () => {
       <Card style={{ marginBottom: 8, borderRadius: 8 }} size="small">
         <Space wrap>
           <Input
-            placeholder="学生姓名"
+            placeholder={t('studentNamePlaceholder')}
             prefix={<SearchOutlined />}
             style={{ width: 160 }}
             value={nameFilter}
@@ -377,7 +383,7 @@ const QuestRecordsTab: React.FC = () => {
             onPressEnter={loadRecords}
           />
           <Select
-            placeholder="选择年级"
+            placeholder={t('selectGrade')}
             style={{ width: 120 }}
             value={gradeFilter || undefined}
             onChange={(v) => {
@@ -389,7 +395,7 @@ const QuestRecordsTab: React.FC = () => {
             options={grades.map((g) => ({ label: g, value: g }))}
           />
           <Select
-            placeholder="选择班级"
+            placeholder={t('selectClass')}
             style={{ width: 120 }}
             value={classFilter || undefined}
             onChange={(v) => setClassFilter(v || '')}
@@ -398,8 +404,8 @@ const QuestRecordsTab: React.FC = () => {
             disabled={!gradeFilter}
             options={classes.map((c) => ({ label: c, value: c }))}
           />
-          <Button type="primary" icon={<SearchOutlined />} onClick={loadRecords}>查询</Button>
-          <Text type="secondary" style={{ fontSize: 13 }}>共 {total} 条记录</Text>
+          <Button type="primary" icon={<SearchOutlined />} onClick={loadRecords}>{t('search')}</Button>
+          <Text type="secondary" style={{ fontSize: 13 }}>{t('totalRecords', { count: total })}</Text>
         </Space>
       </Card>
 
@@ -418,7 +424,7 @@ const QuestRecordsTab: React.FC = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             hideOnSinglePage: false,
-            showTotal: (t, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${t} 条`,
+            showTotal: (totalItems, range) => t('pageInfo', { start: range[0], end: range[1], total: totalItems }),
             onChange: (p, ps) => { setPage(p); setPageSize(ps) },
           }}
           expandable={{
@@ -438,6 +444,7 @@ const QuestRecordsTab: React.FC = () => {
 // ════════════════════════════════════════════
 
 const QuestBankTab: React.FC = () => {
+  const { t } = useTranslation('questions')
   const [questions, setQuestions] = useState<QuestBankQuestion[]>([])
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
@@ -473,12 +480,11 @@ const QuestBankTab: React.FC = () => {
     setSvgLoading(true)
     try {
       await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-svg`)
-      message.success('SVG 已重新生成')
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || 'SVG 生成失败')
+      message.error(e?.response?.data?.detail || t('svgGenerateFailed'))
     } finally {
       setSvgLoading(false)
     }
@@ -488,12 +494,11 @@ const QuestBankTab: React.FC = () => {
     if (!mediaQuestion) return
     try {
       await apiClient.delete(`/api/quest/admin/bank/${mediaQuestion.id}/svg`)
-      message.success('SVG 配图已删除')
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '删除失败')
+      message.error(e?.response?.data?.detail || t('deleteFailed'))
     }
   }
 
@@ -502,12 +507,11 @@ const QuestBankTab: React.FC = () => {
     setWanxiangLoading(true)
     try {
       await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-image`)
-      message.success('配图已生成')
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '生图失败')
+      message.error(e?.response?.data?.detail || t('imageGenerateFailed'))
     } finally {
       setWanxiangLoading(false)
     }
@@ -517,12 +521,11 @@ const QuestBankTab: React.FC = () => {
     if (!mediaQuestion) return
     try {
       await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-media/${key}`)
-      message.success('图片已生成')
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '图片生成失败')
+      message.error(e?.response?.data?.detail || t('imageGenFailed'))
     }
   }
 
@@ -534,12 +537,11 @@ const QuestBankTab: React.FC = () => {
       await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/upload-media/${key}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      message.success('图片已上传')
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '上传失败')
+      message.error(e?.response?.data?.detail || t('uploadFailed'))
     }
   }
 
@@ -547,12 +549,11 @@ const QuestBankTab: React.FC = () => {
     if (!mediaQuestion) return
     try {
       await apiClient.delete(`/api/quest/admin/bank/${mediaQuestion.id}/media/${key}`)
-      message.success('配图已删除')
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '删除失败')
+      message.error(e?.response?.data?.detail || t('deleteFailed'))
     }
   }
 
@@ -567,7 +568,7 @@ const QuestBankTab: React.FC = () => {
       setTotal(data.total || 0)
       if (data.categories) setCategories(data.categories)
     } catch {
-      message.error('加载闯关题库失败')
+      // ignore
     } finally {
       setLoading(false)
     }
@@ -580,19 +581,18 @@ const QuestBankTab: React.FC = () => {
   // ── 删除 ──
   const handleDelete = (q: QuestBankQuestion) => {
     Modal.confirm({
-      title: '确认删除',
+      title: t('confirmDelete'),
       icon: <ExclamationCircleOutlined />,
-      content: `确定删除题目 #${q.id}：「${q.question_text.slice(0, 50)}」？此操作不可恢复。`,
-      okText: '删除',
+      content: t('confirmDeleteQuestion', { id: q.id, text: q.question_text.slice(0, 50) }),
+      okText: t('delete'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await apiClient.delete(`/api/quest/admin/bank/${q.id}`)
-          message.success('删除成功')
           loadQuestions()
         } catch (e: any) {
-          message.error(e?.response?.data?.detail || '删除失败')
+          message.error(e?.response?.data?.detail || t('deleteFailed'))
         }
       },
     })
@@ -632,12 +632,11 @@ const QuestBankTab: React.FC = () => {
         correct_answer: values.correct_answer,
         explanation: values.explanation,
       })
-      message.success('更新成功')
       setEditModalOpen(false)
       loadQuestions()
     } catch (e: any) {
       if (e?.errorFields) return // 表单验证失败
-      message.error(e?.response?.data?.detail || '更新失败')
+      message.error(e?.response?.data?.detail || t('updateFailed'))
     } finally {
       setSaving(false)
     }
@@ -648,10 +647,10 @@ const QuestBankTab: React.FC = () => {
     setAiGenerating(true)
     try {
       const { data } = await apiClient.post('/api/quest/admin/bank/ai-generate', { count: aiCount })
-      message.success(`AI 成功生成 ${data.saved}/${data.total} 道题目`)
+      message.success(t('aiGenerateSuccess', { saved: data.saved, total: data.total }))
       loadQuestions()
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || 'AI 生题失败')
+      message.error(e?.response?.data?.detail || t('aiGenerateFailed'))
     } finally {
       setAiGenerating(false)
     }
@@ -666,7 +665,7 @@ const QuestBankTab: React.FC = () => {
       try { mf = JSON.parse(r.media_files) } catch { /* ignore */ }
     }
     if (r.has_svg && r.svg_content) {
-      return <SVGViewer svgCode={r.svg_content} description="预览" thumbHeight={50} />
+      return <SVGViewer svgCode={r.svg_content} description={t('preview')} thumbHeight={50} />
     }
     if (mf.length > 0 && mf[0].url) {
       return (
@@ -683,12 +682,12 @@ const QuestBankTab: React.FC = () => {
     }
     if (ph.length > 0) {
       return (
-        <Tooltip title={`${ph.length} 个占位符`}>
+        <Tooltip title={t('placeholderCount', { count: ph.length })}>
           <Tag color="orange">📷 {ph.length}</Tag>
         </Tooltip>
       )
     }
-    return <span style={{ color: '#ddd' }}>—</span>
+    return <span style={{ color: '#ddd' }}>{t('dash')}</span>
   }
 
   // ── 展开行渲染 ──
@@ -696,13 +695,13 @@ const QuestBankTab: React.FC = () => {
     <div style={{ padding: '8px 0', maxWidth: '100%', overflow: 'auto' }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={8}>
         <div>
-          <Text strong style={{ fontSize: 13 }}>📝 题目：</Text>
+          <Text strong style={{ fontSize: 13 }}>{t('questionLabel')}</Text>
           <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
             <FormulaRenderer content={r.question_text} />
           </div>
         </div>
         <div>
-          <Text strong style={{ fontSize: 13 }}>🔤 选项：</Text>
+          <Text strong style={{ fontSize: 13 }}>{t('optionsLabel')}</Text>
           <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
             {Object.entries(r.options || {}).map(([k, v]) => (
               <div key={k} style={{ marginBottom: 4 }}>
@@ -713,12 +712,12 @@ const QuestBankTab: React.FC = () => {
           </div>
         </div>
         <div>
-          <Text strong style={{ fontSize: 13 }}>✅ 正确答案：</Text>
+          <Text strong style={{ fontSize: 13 }}>{t('correctAnswerLabel')}</Text>
           <Tag color="green" style={{ marginLeft: 8 }}>{r.correct_answer}</Tag>
         </div>
         {r.explanation && (
           <div>
-            <Text strong style={{ fontSize: 13 }}>💡 解析：</Text>
+            <Text strong style={{ fontSize: 13 }}>{t('explanationLabel')}</Text>
             <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
               <FormulaRenderer content={r.explanation} />
             </div>
@@ -726,9 +725,9 @@ const QuestBankTab: React.FC = () => {
         )}
         {(r.has_svg && r.svg_content) && (
           <div>
-            <Text strong style={{ fontSize: 13 }}>🖼️ SVG 配图：</Text>
+            <Text strong style={{ fontSize: 13 }}>{t('svgLabel')}</Text>
             <div style={{ marginTop: 4 }}>
-              <SVGViewer svgCode={r.svg_content} description="配图" expandable={false} />
+              <SVGViewer svgCode={r.svg_content} description={t('media')} expandable={false} />
             </div>
           </div>
         )}
@@ -738,63 +737,63 @@ const QuestBankTab: React.FC = () => {
 
   const columns = [
     {
-      title: 'ID',
+      title: t('id'),
       dataIndex: 'id',
       key: 'id',
       width: 60,
     },
     {
-      title: '分类',
+      title: t('categoryColon'),
       dataIndex: 'category',
       key: 'category',
       width: 90,
       render: (c: string) => <Tag color="blue">{c}</Tag>,
     },
     {
-      title: '题目',
+      title: t('question'),
       dataIndex: 'question_text',
       key: 'question_text',
       width: 220,
-      render: (t: string) => (
+      render: (text: string) => (
         <div style={{ maxWidth: 220, wordBreak: 'break-word' }}>
-          <Text>{t.length > 50 ? t.slice(0, 50) + '…' : t}</Text>
+          <Text>{text.length > 50 ? text.slice(0, 50) + '…' : text}</Text>
         </div>
       ),
     },
     {
-      title: '配图',
+      title: t('media'),
       key: 'media',
       width: 80,
       render: renderMediaCell,
     },
     {
-      title: '使用次数',
+      title: t('usedCount'),
       dataIndex: 'used_count',
       key: 'used_count',
       width: 70,
-      render: (c: number) => <Text>{c} 次</Text>,
+      render: (c: number) => <Text>{t('times', { count: c })}</Text>,
     },
     {
-      title: '创建时间',
+      title: t('createdTime'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 130,
-      render: (t: string) => t?.slice(0, 16) || '-',
+      render: (v: string) => v?.slice(0, 16) || '-',
     },
     {
-      title: '操作',
+      title: t('actions'),
       key: 'action',
       width: 180,
       render: (_: any, r: QuestBankQuestion) => (
         <Space size="small">
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
-            编辑
+            {t('edit')}
           </Button>
-          <Tooltip title="配图管理">
+          <Tooltip title={t('mediaManage')}>
             <Button type="link" size="small" icon={<span>🎨</span>} onClick={() => handleManageMedia(r)} />
           </Tooltip>
           <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={() => handleDelete(r)}>
-            删除
+            {t('delete')}
           </Button>
         </Space>
       ),
@@ -807,17 +806,17 @@ const QuestBankTab: React.FC = () => {
       <Card style={{ marginBottom: 8, borderRadius: 8 }} size="small">
         <Space wrap>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAiGenerate} loading={aiGenerating}>
-            AI生题 {aiGenerating ? '中...' : `(${aiCount}道)`}
+            {t('aiGenerateQuest')}{aiGenerating ? t('generatingQuest') : t('questionCount', { count: aiCount })}
           </Button>
           <Select
             value={aiCount}
             onChange={setAiCount}
             style={{ width: 76 }}
             size="small"
-            options={[1, 3, 5, 10, 15, 20].map(n => ({ label: `${n}道`, value: n }))}
+            options={[1, 3, 5, 10, 15, 20].map(n => ({ label: t('questionCount', { count: n }), value: n }))}
           />
           <Input
-            placeholder="搜索题目"
+            placeholder={t('searchQuestion')}
             prefix={<SearchOutlined />}
             style={{ width: 200 }}
             value={keyword}
@@ -826,15 +825,15 @@ const QuestBankTab: React.FC = () => {
             onPressEnter={loadQuestions}
           />
           <Select
-            placeholder="按分类筛选"
+            placeholder={t('filterByCategory')}
             style={{ width: 140 }}
             value={categoryFilter || undefined}
             onChange={(v) => setCategoryFilter(v || '')}
             allowClear
-            options={categories.map((c) => ({ label: `${c.name} (${c.count})`, value: c.name }))}
+            options={categories.map((c) => ({ label: t('categoryOption', { name: c.name, count: c.count }), value: c.name }))}
           />
-          <Button icon={<ReloadOutlined />} onClick={loadQuestions}>刷新</Button>
-          <Text type="secondary" style={{ fontSize: 13 }}>共 {total} 道题</Text>
+          <Button icon={<ReloadOutlined />} onClick={loadQuestions}>{t('refresh')}</Button>
+          <Text type="secondary" style={{ fontSize: 13 }}>{t('totalQuestions', { count: total })}</Text>
         </Space>
       </Card>
 
@@ -853,7 +852,7 @@ const QuestBankTab: React.FC = () => {
             showSizeChanger: true,
             showQuickJumper: true,
             hideOnSinglePage: false,
-            showTotal: (t, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${t} 条`,
+            showTotal: (totalItems, range) => t('pageInfo', { start: range[0], end: range[1], total: totalItems }),
             onChange: (p, ps) => { setPage(p); setPageSize(ps) },
           }}
           expandable={{
@@ -866,7 +865,7 @@ const QuestBankTab: React.FC = () => {
 
       {/* ── 编辑弹窗 ── */}
       <Modal
-        title="编辑闯关题目"
+        title={t('editQuestTitle')}
         open={editModalOpen}
         onOk={handleEditSave}
         onCancel={() => setEditModalOpen(false)}
@@ -874,38 +873,38 @@ const QuestBankTab: React.FC = () => {
         width={700}
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item name="category" label="分类" rules={[{ required: true }]}>
-            <Input placeholder="例如：科学、历史、地理" />
+          <Form.Item name="category" label={t('categoryLabel')} rules={[{ required: true }]}>
+            <Input placeholder={t('categoryPlaceholder')} />
           </Form.Item>
-          <Form.Item name="question_text" label="题目" rules={[{ required: true }]}>
-            <TextArea rows={3} placeholder="请输入题目内容" />
+          <Form.Item name="question_text" label={t('questionLabelForm')} rules={[{ required: true }]}>
+            <TextArea rows={3} placeholder={t('questionPlaceholder')} />
           </Form.Item>
           <Space style={{ width: '100%' }} align="start">
-            <Form.Item name="option_a" label="选项 A" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 A" />
+            <Form.Item name="option_a" label={t('optionALabel')} rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder={t('optionAPlaceholder')} />
             </Form.Item>
-            <Form.Item name="option_b" label="选项 B" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 B" />
+            <Form.Item name="option_b" label={t('optionBLabel')} rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder={t('optionBPlaceholder')} />
             </Form.Item>
           </Space>
           <Space style={{ width: '100%' }} align="start">
-            <Form.Item name="option_c" label="选项 C" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 C" />
+            <Form.Item name="option_c" label={t('optionCLabel')} rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder={t('optionCPlaceholder')} />
             </Form.Item>
-            <Form.Item name="option_d" label="选项 D" rules={[{ required: true }]} style={{ width: 240 }}>
-              <Input placeholder="选项 D" />
+            <Form.Item name="option_d" label={t('optionDLabel')} rules={[{ required: true }]} style={{ width: 240 }}>
+              <Input placeholder={t('optionDPlaceholder')} />
             </Form.Item>
           </Space>
-          <Form.Item name="correct_answer" label="正确答案" rules={[{ required: true }]}>
-            <Select placeholder="选择正确答案">
+          <Form.Item name="correct_answer" label={t('correctAnswerSelect')} rules={[{ required: true }]}>
+            <Select placeholder={t('selectCorrectAnswer')}>
               <Select.Option value="A">A</Select.Option>
               <Select.Option value="B">B</Select.Option>
               <Select.Option value="C">C</Select.Option>
               <Select.Option value="D">D</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="explanation" label="解析">
-            <TextArea rows={3} placeholder="题目解析（可选）" />
+          <Form.Item name="explanation" label={t('explanationFormLabel')}>
+            <TextArea rows={3} placeholder={t('explanationPlaceholder')} />
           </Form.Item>
         </Form>
       </Modal>
@@ -913,10 +912,10 @@ const QuestBankTab: React.FC = () => {
 
       {/* ── 配图管理弹窗 ── */}
       <Modal
-        title={`🎨 配图管理 #${mediaQuestion?.id}`}
+        title={t('mediaManageTitle', { id: mediaQuestion?.id })}
         open={mediaModalOpen}
         onCancel={() => setMediaModalOpen(false)}
-        footer={<Button onClick={() => setMediaModalOpen(false)}>关闭</Button>}
+        footer={<Button onClick={() => setMediaModalOpen(false)}>{t('close')}</Button>}
         width={700}
       >
         {mediaQuestion && (
@@ -947,6 +946,7 @@ const QuestBankTab: React.FC = () => {
 // ════════════════════════════════════════════
 
 const QuestAdminPage: React.FC = () => {
+  const { t } = useTranslation('questions')
   // 根据 URL 路径自动切换默认标签
   const [activeTab, setActiveTab] = useState('records')
 
@@ -954,14 +954,14 @@ const QuestAdminPage: React.FC = () => {
     {
       key: 'records',
       label: (
-        <span><TrophyOutlined /> 闯关记录</span>
+        <span><TrophyOutlined /> {t('questRecords')}</span>
       ),
       children: <QuestRecordsTab />,
     },
     {
       key: 'bank',
       label: (
-        <span><DatabaseOutlined /> 题库管理</span>
+        <span><DatabaseOutlined /> {t('questBank')}</span>
       ),
       children: <QuestBankTab />,
     },
@@ -971,7 +971,7 @@ const QuestAdminPage: React.FC = () => {
     <Card style={{ borderRadius: 8 }}>
       <Title level={4} style={{ marginBottom: 12 }}>
         <TrophyOutlined style={{ marginRight: 8 }} />
-        闯关管理
+        {t('questManagement')}
       </Title>
       <Card style={{ borderRadius: 8 }}>
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />

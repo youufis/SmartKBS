@@ -11,6 +11,7 @@ import {
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -26,6 +27,7 @@ interface Message {
 }
 
 const DiscussionRoomPage: React.FC = () => {
+  const { t } = useTranslation('discussion')
   const { groupId } = useParams<{ groupId: string }>()
   const [searchParams] = useSearchParams()
   const discussionId = searchParams.get('discussion_id')
@@ -139,7 +141,7 @@ const DiscussionRoomPage: React.FC = () => {
               const msgId = data.id || Date.now()
               const newMsg: Message = {
                 id: msgId,
-                username: data.username || 'AI助教',
+                username: data.username || t('aiAssistant'),
                 content: data.content,
                 msg_type: data.msg_type || 'text',
                 created_at: data.created_at || new Date().toISOString(),
@@ -231,7 +233,7 @@ const DiscussionRoomPage: React.FC = () => {
       // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
     } catch (err: any) {
       const detail = err?.response?.data?.detail
-      message.error(detail || '发送失败')
+      message.error(detail || t('sendFailed'))
     } finally {
       setSending(false)
     }
@@ -253,12 +255,12 @@ const DiscussionRoomPage: React.FC = () => {
       const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-suggest`)
       if (data.status === 'ok' && data.content) {
         // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
-        message.success('AI 助教已回复')
+        message.success(t('aiTutorReplied'))
       } else {
-        message.info(data.content || 'AI 暂无建议')
+        message.info(data.content || t('aiNoSuggestions'))
       }
     } catch {
-      message.error('AI 调用失败')
+      message.error(t('aiCallFailed'))
     } finally {
       setAiLoading(false)
     }
@@ -271,14 +273,14 @@ const DiscussionRoomPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`)
       if (data.status === 'ok') {
-        message.success('AI 总结生成成功')
+        message.success(t('aiSummarySuccess'))
         setSummaryData(data)
         setSummaryModal(true)
       } else {
-        message.error(data.content || 'AI 总结生成失败')
+        message.error(data.content || t('summaryGenerateFailed'))
       }
     } catch (err: any) {
-      message.error('AI 总结失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('aiSummaryFailed') + ': ' + (err?.response?.data?.detail || err?.message))
     } finally {
       setGeneratingSummary(false)
     }
@@ -335,7 +337,7 @@ const DiscussionRoomPage: React.FC = () => {
             <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack} />
             <div>
               <Text strong style={{ fontSize: 16 }}>
-                {groupInfo?.name || (discussionInfo?.group_mode === 'none' ? '自由讨论区' : '小组讨论')}
+                {groupInfo?.name || (discussionInfo?.group_mode === 'none' ? t('noGroup') : `${t('groupMode')}${t('roomList')}`)}
               </Text>
               {discussionInfo && (
                 <div className="markdown-content" style={{ fontSize: 13, color: '#888' }}>
@@ -348,11 +350,11 @@ const DiscussionRoomPage: React.FC = () => {
             {/* 成员列表 */}
             <Tooltip title={
               members.length > 0
-                ? `成员: ${members.map((m: any) => m.username).join(', ')}`
-                : '暂无成员'
+                ? `${t('members')}: ${members.map((m: any) => m.username).join(', ')}`
+                : t('noMembers')
             }>
               <Tag icon={<UserOutlined />}>
-                {members.length} 人
+                {members.length}{t('people')}
               </Tag>
             </Tooltip>
 
@@ -364,7 +366,7 @@ const DiscussionRoomPage: React.FC = () => {
                 loading={aiLoading}
                 onClick={handleAiSuggest}
               >
-                AI 助教
+                AI {t('teacher')}
               </Button>
             )}
 
@@ -374,18 +376,18 @@ const DiscussionRoomPage: React.FC = () => {
                 size="small"
                 icon={<BellOutlined />}
                 onClick={async () => {
-                  const val = prompt('请输入广播消息:')
+                  const val = prompt(t('broadcast') + ':')
                   if (val && val.trim()) {
                     try {
                       await apiClient.post(`/api/interaction/discussions/${discussionId}/broadcast`, { content: val.trim() })
-                      message.success('广播已发送')
+                      message.success(t('broadcastSent'))
                     } catch {
-                      message.error('广播发送失败')
+                      message.error(t('broadcastFailed'))
                     }
                   }
                 }}
               >
-                广播
+                {t('broadcast')}
               </Button>
             )}
 
@@ -404,7 +406,7 @@ const DiscussionRoomPage: React.FC = () => {
                   }
                 }}
               >
-                {generatingSummary ? '生成中...' : hasExistingSummary ? '查看总结' : 'AI 总结'}
+                {generatingSummary ? t('generating') : hasExistingSummary ? t('viewSummary') : t('aiSummary')}
               </Button>
             )}
           </Space>
@@ -419,7 +421,7 @@ const DiscussionRoomPage: React.FC = () => {
           items={[
             {
               key: 'topic',
-              label: <span style={{ fontSize: 13, color: '#888' }}>📋 查看讨论主题</span>,
+              label: <span style={{ fontSize: 13, color: '#888' }}>{t('viewTopic')}</span>,
               children: (
                 <div className="markdown-content" style={{ fontSize: 13, color: '#555', padding: '4px 0 8px 0' }}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{discussionInfo.description}</ReactMarkdown>
@@ -442,10 +444,10 @@ const DiscussionRoomPage: React.FC = () => {
       >
         <Spin spinning={loading}>
           {messages.length === 0 ? (
-            <Empty description="暂无消息，开始讨论吧！" style={{ marginTop: 60 }} />
+            <Empty description={t('noMessages')} style={{ marginTop: 60 }} />
           ) : (
             messages.map((msg) => {
-              const isAi = msg.msg_type === 'ai_suggest' || msg.username === 'AI助教'
+              const isAi = msg.msg_type === 'ai_suggest' || msg.username === t('aiAssistant')
               const isMe = msg.username === user?.username
               const isBroadcast = msg.msg_type === 'broadcast'
               const isSystem = msg.msg_type === 'system'
@@ -454,7 +456,7 @@ const DiscussionRoomPage: React.FC = () => {
                 return (
                   <div key={msg.id} style={{ textAlign: 'center', margin: '8px 0' }}>
                     <Tag color="gold" style={{ fontSize: 12, padding: '2px 12px' }}>
-                      📢 教师广播: {msg.content}
+                      {t('teacherBroadcast', { message: msg.content })}
                     </Tag>
                   </div>
                 )
@@ -493,7 +495,7 @@ const DiscussionRoomPage: React.FC = () => {
                     {!isMe && (
                       <div style={{ fontSize: 12, marginBottom: 4 }}>
                         {isAi ? (
-                          <Tag icon={<RobotOutlined />} color="orange" style={{ fontSize: 11 }}>AI助教</Tag>
+                          <Tag icon={<RobotOutlined />} color="orange" style={{ fontSize: 11 }}>{t('aiAssistant')}</Tag>
                         ) : (
                           <Text type="secondary" style={{ fontSize: 12 }}>{msg.username}</Text>
                         )}
@@ -531,7 +533,7 @@ const DiscussionRoomPage: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
+            placeholder={`${t('inputPlaceholder')} (Enter ${t('send')}, Shift+Enter ${t('send')})`}
             rows={2}
             disabled={sending}
           />
@@ -542,7 +544,7 @@ const DiscussionRoomPage: React.FC = () => {
             loading={sending}
             style={{ height: 50 }}
           >
-            发送
+            {t('send')}
           </Button>
         </Space.Compact>
       </Card>
@@ -552,25 +554,25 @@ const DiscussionRoomPage: React.FC = () => {
         title={
           <Space>
             <BulbOutlined style={{ color: '#faad14' }} />
-            <span>AI 讨论归纳总结</span>
+            <span>{t('aiSummaryTitle')}</span>
           </Space>
         }
         open={summaryModal}
         onCancel={() => setSummaryModal(false)}
         footer={[
-          <Button key="close" onClick={() => setSummaryModal(false)}>关闭</Button>,
+          <Button key="close" onClick={() => setSummaryModal(false)}>{t('close')}</Button>,
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!summaryData?.content}
             onClick={() => {
               const token = localStorage.getItem('smartkb_token')
               window.open(`/api/interaction/groups/${groupId}/summary/export?token=${token}`, '_blank')
             }}>
-            导出 Word
+            {t('exportWord')}
           </Button>,
           <Button key="regenerate" type="primary" icon={<ThunderboltOutlined />}
             loading={generatingSummary}
             onClick={handleAiSummary}>
-            重新生成
+            {t('regenerate')}
           </Button>,
         ]}
         width={700}
@@ -580,20 +582,20 @@ const DiscussionRoomPage: React.FC = () => {
             <div style={{ padding: '8px 0' }}>
               {/* 总体总结 */}
               <div style={{ marginBottom: 20 }}>
-                <Text strong style={{ fontSize: 16, color: '#1677ff' }}>📝 总体归纳</Text>
+                <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallSummary')}</Text>
                 <div style={{
                   marginTop: 8, padding: 12, background: '#f6ffed',
                   borderRadius: 8, border: '1px solid #b7eb8f', lineHeight: 1.8,
                   fontSize: 14, color: '#333',
                 }}>
-                  {summaryData.content.parsed.summary || '（暂无内容）'}
+                  {summaryData.content.parsed.summary || t('noContent')}
                 </div>
               </div>
 
               {/* 关键观点 */}
               {summaryData.content.parsed.key_points?.length > 0 && (
                 <div style={{ marginBottom: 20 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>💡 关键观点</Text>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('keyPoints')}</Text>
                   <div style={{ marginTop: 8 }}>
                     {summaryData.content.parsed.key_points.map((point: string, i: number) => (
                       <div key={i} style={{
@@ -602,7 +604,7 @@ const DiscussionRoomPage: React.FC = () => {
                         border: '1px solid #ffd591',
                         fontSize: 14,
                       }}>
-                        <Text strong style={{ color: '#fa8c16' }}>观点{i + 1}：</Text>
+                        <Text strong style={{ color: '#fa8c16' }}>{t('pointN', { n: i + 1 })}</Text>
                         {point}
                       </div>
                     ))}
@@ -613,7 +615,7 @@ const DiscussionRoomPage: React.FC = () => {
               {/* AI 评价 */}
               {summaryData.content.parsed.ai_comment && (
                 <div style={{ marginBottom: 20 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>🤖 AI 评价与建议</Text>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('aiComment')}</Text>
                   <div style={{
                     marginTop: 8, padding: 12, background: '#e6f7ff',
                     borderRadius: 8, border: '1px solid #91d5ff',
@@ -627,7 +629,7 @@ const DiscussionRoomPage: React.FC = () => {
               {/* 评分 */}
               {summaryData.content.parsed.score && (
                 <div style={{ marginBottom: 12 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>⭐ 综合评分</Text>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallScore')}</Text>
                   <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
                     <Rate
                       disabled
@@ -645,7 +647,7 @@ const DiscussionRoomPage: React.FC = () => {
               {/* 原始 AI 回复 */}
               <details style={{ marginTop: 16 }}>
                 <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>
-                  查看原始 AI 回复
+                  {t('viewRawAIResponse')}
                 </summary>
                 <pre style={{
                   marginTop: 8, padding: 12, background: '#f5f5f5',
@@ -683,7 +685,7 @@ const DiscussionRoomPage: React.FC = () => {
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
-              <Text type="secondary">暂无总结，点击「生成总结」按钮开始生成</Text>
+              <Text type="secondary">{t('noSummaryHint')}</Text>
             </div>
           )}
         </Spin>

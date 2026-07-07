@@ -5,6 +5,7 @@ import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
 import type { TreeNode } from '../types'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 // 展平树节点为文件列表
 function flattenTree(nodes: TreeNode[], basePath = ''): { name: string; path: string; isLeaf: boolean }[] {
@@ -55,6 +56,7 @@ function getFileIcon(name: string) {
 
 
 const ResourceMgmtPage: React.FC = () => {
+  const { t } = useTranslation('common')
   const user = useAuthStore((s: { user: { role: string; username: string } | null }) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const username = user?.username || ''
@@ -69,7 +71,7 @@ const ResourceMgmtPage: React.FC = () => {
       const res = await resourcesApi.getResourceTree()
       setTreeData(res.tree)
     } catch {
-      message.error('加载失败')
+      message.error(t('loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -82,7 +84,7 @@ const ResourceMgmtPage: React.FC = () => {
         const res = await resourcesApi.getResourceTree()
         setTreeData(res.tree)
       } catch {
-        message.error('加载失败')
+        message.error(t('loadFailed'))
       } finally {
         setLoading(false)
       }
@@ -106,13 +108,13 @@ const ResourceMgmtPage: React.FC = () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       if (data.errors?.length > 0) {
-        message.warning(`${data.message}，${data.errors.length} 个错误`)
+        message.warning(t('resource.uploadErrors', { msg: data.message, count: data.errors.length }))
       } else {
-        message.success(data.message || `成功上传 ${total} 个文件`)
+        message.success(data.message || t('resource.uploadSuccess', { count: total }))
       }
       loadTree()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '上传失败')
+      message.error(err?.response?.data?.detail || t('uploadFailed'))
     }
   }
 
@@ -132,15 +134,15 @@ const ResourceMgmtPage: React.FC = () => {
 
   const handleDelete = (path: string) => {
     Modal.confirm({
-      title: '确认删除',
-      content: '确定删除此文件/目录？',
+      title: t('resource.confirmDeleteTitle'),
+      content: t('resource.confirmDeleteContent'),
       onOk: async () => {
         try {
           const msg = await resourcesApi.deleteResource(path)
           message.success(msg)
           loadTree()
         } catch (err: any) {
-          message.error(err?.response?.data?.detail || '删除失败')
+          message.error(err?.response?.data?.detail || t('deleteFailed'))
         }
       },
     })
@@ -153,14 +155,14 @@ const ResourceMgmtPage: React.FC = () => {
   const [renameNew, setRenameNew] = useState('')
 
   const handleRename = async () => {
-    if (!renameNew.trim()) { message.warning('名称不能为空'); return }
+    if (!renameNew.trim()) { message.warning(t('nameRequired')); return }
     try {
       const msg = await resourcesApi.renameResource(renamePath, renameNew.trim())
       message.success(msg)
       setRenameModal(false)
       loadTree()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '重命名失败')
+      message.error(err?.response?.data?.detail || t('renameFailed'))
     }
   }
 
@@ -264,15 +266,15 @@ const ResourceMgmtPage: React.FC = () => {
           const elapsed = Math.round((Date.now() - startTime) / 1000)
           const stage = taskResult.status === 'running'
             ? elapsed < 60
-              ? '第一阶段：AI 构思内容...'
+              ? t('resource.stage1')
               : elapsed < 180
-                ? '第二阶段：生成 HTML 代码...'
-                : '第三阶段：保存文件 + 生成配图...'
+                ? t('resource.stage2')
+                : t('resource.stage3')
             : ''
           if (stage && stage !== lastStage) {
             lastStage = stage
             message.loading({
-              content: `⏳ ${stage}（已等待 ${Math.round(elapsed / 60)} 分钟）`,
+              content: t('resource.waitingStage', { stage, minutes: Math.round(elapsed / 60) }),
               key: 'ai_async', duration: 0,
             })
           }
@@ -282,7 +284,7 @@ const ResourceMgmtPage: React.FC = () => {
           // 超时保护：超过 20 分钟强制终止
           if (Date.now() - startTime > maxWaitMs) {
             message.destroy('ai_async')
-            message.error('⏰ 生成超时（超过 20 分钟），请简化描述后重试')
+            message.error(t('genTimeout'))
             return
           }
         }
@@ -291,13 +293,13 @@ const ResourceMgmtPage: React.FC = () => {
         // 检查错误（兼容 status='failed' 和 result.error 两种情况）
         const errMsg = taskResult.error || taskResult.result?.error
         if (taskResult.status === 'failed' || errMsg) {
-          message.error(errMsg || 'AI 生成失败')
+          message.error(errMsg || t('aiGenerateFailed'))
           return
         }
 
         const saved = taskResult.result?.saved
         if (!saved) {
-          message.error('生成结果异常：未获取到保存信息')
+          message.error(t('genResultError'))
           return
         }
 
@@ -305,11 +307,11 @@ const ResourceMgmtPage: React.FC = () => {
         if (saved.is_subdir) {
           const fileUrl = `/api/files/${saved.url_path}`
           setAiDone({ fileUrl, fileName: saved.main_entry || 'index.html' })
-          message.success(`✅ 资源已生成 — 包含 ${saved.file_count} 个文件，保存在 ${saved.dir_name}/ 目录`)
+          message.success(t('resource.generatedWithCount', { count: saved.file_count, dir: saved.dir_name }))
         } else {
           const fileUrl = `/api/files/${saved.url_path}`
           setAiDone({ fileUrl, fileName: saved.file_name || '' })
-          message.success('✅ 资源已生成并保存')
+          message.success(t('resource.generatedSuccess'))
         }
         loadTree()
         return
@@ -318,11 +320,11 @@ const ResourceMgmtPage: React.FC = () => {
       // 简单资源 → 同步生成（原有逻辑）
       const genResult = await resourcesApi.aiPreviewHtml(params)
       if (!genResult.html_content || genResult.html_content.length < 50) {
-        message.error('AI 返回内容为空或过短，请重试')
+          message.error(t('aiContentEmpty'))
         return
       }
       if (genResult.db_saved && genResult.db_saved > 0) {
-        message.success(`📚 ${genResult.db_saved} 道新题目已存入题库`)
+        message.success(t('resource.questionsSaved', { count: genResult.db_saved }))
       }
       // 尝试解析多文件格式保存
       const fileName = genResult.suggested_name.replace(/\.html$/i, '')
@@ -332,11 +334,11 @@ const ResourceMgmtPage: React.FC = () => {
       if (saveResult.is_subdir) {
         const fileUrl = `/api/files/${saveResult.url_path}`
         setAiDone({ fileUrl, fileName: saveResult.main_entry || 'index.html' })
-        message.success(`✅ 资源已生成 — ${saveResult.file_count} 个文件，保存在 ${saveResult.dir_name}/`)
+        message.success(t('resource.generatedWithCount', { count: saveResult.file_count, dir: saveResult.dir_name }))
       } else {
         const fileUrl = `/api/files/${saveResult.url_path}`
         setAiDone({ fileUrl, fileName: saveResult.file_name || fileName })
-        message.success('✅ 资源已生成并保存')
+        message.success(t('resource.generatedSuccess'))
       }
       loadTree()
     } catch (err: any) {
@@ -345,17 +347,17 @@ const ResourceMgmtPage: React.FC = () => {
       const status = err?.response?.status
       const detail = err?.response?.data?.detail || ''
       if (status === 400 && detail.includes('API Key')) {
-        message.error('⚠️ API Key 未配置，请在系统设置中填写')
+        message.error(t('apiKeyNotConfigured'))
       } else if (status === 504) {
-        message.error('⚠️ AI 生成超时（复杂资源已改为异步模式，请重试）')
+        message.error(t('aiGenTimeout'))
       } else if (status === 502) {
-        message.error('⚠️ AI 服务调用失败: ' + (detail.replace('AI 生成失败: ', '') || '请稍后重试'))
+        message.error(t('aiServiceFailed') + ': ' + (detail.replace('AI 生成失败: ', '') || t('retryLater')))
       } else if (status === 401) {
-        message.error('⚠️ 登录已过期，请刷新页面重新登录')
+        message.error(t('sessionExpired'))
       } else if (detail) {
         message.error('⚠️ ' + detail)
       } else {
-        message.error('⚠️ 请求失败，请检查后端服务是否正常')
+        message.error(t('requestFailed'))
       }
     } finally {
       setAiWorking(false)
@@ -404,7 +406,7 @@ const ResourceMgmtPage: React.FC = () => {
   if (!isAdminOrTeacher) {
     return (
       <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, padding: 24 }}>
-        <Typography.Text type="secondary">仅管理员和教师可访问资源管理</Typography.Text>
+        <Typography.Text type="secondary">{t('resource.accessDenied')}</Typography.Text>
       </Layout>
     )
   }
@@ -414,15 +416,15 @@ const ResourceMgmtPage: React.FC = () => {
       <Tabs defaultActiveKey="files" items={[
         {
           key: 'files',
-          label: <Space><FolderOutlined />文件管理</Space>,
+          label: <Space><FolderOutlined />{t('resource.fileManagement')}</Space>,
           children: (
             <Space orientation="vertical" style={{ width: '100%' }} size={16}>
               {/* 顶部栏：标题 + 搜索 + 视图切换 + 刷新 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-                <Typography.Title level={4} style={{ margin: 0 }}>⚙️ 资源管理</Typography.Title>
+                <Typography.Title level={4} style={{ margin: 0 }}>{t('resource.title')}</Typography.Title>
                 <Space wrap>
                   <Input
-                    placeholder="搜索文件/目录..."
+                    placeholder={t('resource.searchPlaceholder')}
                     prefix={<SearchOutlined />}
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
@@ -437,7 +439,7 @@ const ResourceMgmtPage: React.FC = () => {
                       { value: 'grid', icon: <AppstoreOutlined /> },
                     ]}
                   />
-                  <Button icon={<ReloadOutlined />} onClick={loadTree} loading={loading}>刷新</Button>
+                  <Button icon={<ReloadOutlined />} onClick={loadTree} loading={loading}>{t('refresh')}</Button>
                 </Space>
               </div>
 
@@ -451,14 +453,14 @@ const ResourceMgmtPage: React.FC = () => {
                     onChange={handleDirSelect} style={{ display: 'none' }} />
                   <Dropdown.Button type="primary" icon={<UploadOutlined />}
                     menu={{
-                      items: [{ key: 'dir', icon: <FolderOpenOutlined />, label: '上传目录' }],
+                      items: [{ key: 'dir', icon: <FolderOpenOutlined />, label: t('resource.uploadDir') }],
                       onClick: ({ key }) => { if (key === 'dir') dirInputRef.current?.click() },
                     }}
                     onClick={() => fileInputRef.current?.click()}
-                  >上传文件</Dropdown.Button>
+                  >{t('resource.uploadFiles')}</Dropdown.Button>
                   <Button type="primary" ghost icon={<BulbOutlined />}
                     onClick={() => { setAiModalOpen(true); setAiDone(null); }}>
-                    🤖 AI 生成
+                    {t('resource.aiGenerate')}
                   </Button>
                 </Space>
               </Card>
@@ -466,16 +468,14 @@ const ResourceMgmtPage: React.FC = () => {
               {/* 搜索结果提示 */}
               {searchText.trim() && (
                 <Typography.Text type="secondary">
-                  搜索 &quot;{searchText.trim()}&quot; 共 {viewMode === 'tree'
-                    ? filteredTree.reduce((n, node) => n + (node.children?.length || 0) + 1, 0)
-                    : allFiles.length} 个结果
+                  {t('resource.searchResult', { keyword: searchText.trim(), count: viewMode === 'tree' ? filteredTree.reduce((n, node) => n + (node.children?.length || 0) + 1, 0) : allFiles.length })}
                 </Typography.Text>
               )}
 
               {/* 树视图 */}
               {viewMode === 'tree' && (
                 filteredTree.length > 0 ? (
-                  <Card size="small" title="📁 目录结构">
+                  <Card size="small" title={t('resource.dirStructure')}>
                     <Tree treeData={filteredTree} showLine defaultExpandAll={!!searchText.trim()}
                       titleRender={(node: any) => (
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', overflow: 'hidden' }} className="resource-tree-node">
@@ -487,11 +487,11 @@ const ResourceMgmtPage: React.FC = () => {
                             </Tag>
                           )}
                           <span onClick={(e) => e.stopPropagation()} className="resource-tree-actions" style={{ flexShrink: 0, whiteSpace: 'nowrap', opacity: 0, transition: 'opacity 0.2s' }}>
-                            <Tooltip title="重命名">
+                            <Tooltip title={t('resource.rename')}>
                               <Button type="link" size="small" icon={<EditOutlined />}
                                 onClick={() => openRename(node.key, node.title)} />
                             </Tooltip>
-                            <Tooltip title="删除">
+                            <Tooltip title={t('resource.delete')}>
                               <Button type="link" size="small" danger icon={<DeleteOutlined />}
                                 onClick={() => handleDelete(node.key)} />
                             </Tooltip>
@@ -507,7 +507,7 @@ const ResourceMgmtPage: React.FC = () => {
                     />
                   </Card>
                 ) : (
-                  <Empty description={searchText ? '未找到匹配的文件' : '暂无文件'} />
+                  <Empty description={searchText ? t('resource.noMatch') : t('resource.noFiles')} />
                 )
               )}
 
@@ -524,10 +524,10 @@ const ResourceMgmtPage: React.FC = () => {
                           hoverable
                           styles={{ body: { padding: 16, textAlign: 'center' as const } }}
                           actions={[
-                            <Tooltip title="重命名" key="rename">
+                            <Tooltip title={t('resource.rename')} key="rename">
                               <EditOutlined onClick={() => openRename(file.path, file.name)} />
                             </Tooltip>,
-                            <Tooltip title="删除" key="delete">
+                            <Tooltip title={t('resource.delete')} key="delete">
                               <DeleteOutlined style={{ color: '#ff4d4f' }} onClick={() => handleDelete(file.path)} />
                             </Tooltip>,
                           ]}
@@ -549,14 +549,14 @@ const ResourceMgmtPage: React.FC = () => {
                         total={allFiles.length}
                         pageSize={GRID_PAGE_SIZE}
                         showSizeChanger
-                        showTotal={(t) => `共 ${t} 个文件`}
+                        showTotal={(total) => t('resource.totalFiles', { count: total })}
                         pageSizeOptions={['10', '20', '30', '50']}
                         onChange={(p) => setGridPage(p)}
                       />
                     </div>
                   </>
                 ) : (
-                  <Empty description={searchText ? '未找到匹配的文件' : '暂无文件'} />
+                  <Empty description={searchText ? t('resource.noMatch') : t('resource.noFiles')} />
                 )
               )}
             </Space>
@@ -565,7 +565,7 @@ const ResourceMgmtPage: React.FC = () => {
       ]} />
 
       {/* ── AI 生成 HTML 弹窗 ── */}
-      <Modal title="🤖 AI 生成 HTML 资源" open={aiModalOpen}
+      <Modal title={t('resource.aiModalTitle')} open={aiModalOpen}
         onCancel={() => setAiModalOpen(false)}
         width={640}
         footer={null}
@@ -573,14 +573,14 @@ const ResourceMgmtPage: React.FC = () => {
         <Space orientation="vertical" style={{ width: '100%' }} size={16}>
           {/* 类型选择 */}
           <div>
-            <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>资源类型</Typography.Text>
+            <Typography.Text strong style={{ marginBottom: 8, display: 'block' }}>{t('resource.resourceType')}</Typography.Text>
               <Radio.Group value={aiGenType} onChange={(e) => handleAiTypeChange(e.target.value)}
               className="ai-gen-type-group">
-              <Radio.Button value="animation">🎬 动画讲解</Radio.Button>
-              <Radio.Button value="quiz">🎮 互动答题</Radio.Button>
-              <Radio.Button value="practice">📝 章节练习</Radio.Button>
-              <Radio.Button value="interactive">🧪 实验交互</Radio.Button>
-              <Radio.Button value="custom">🎨 自定义</Radio.Button>
+              <Radio.Button value="animation">{t('resource.typeAnimation')}</Radio.Button>
+              <Radio.Button value="quiz">{t('resource.typeQuiz')}</Radio.Button>
+              <Radio.Button value="practice">{t('resource.typePractice')}</Radio.Button>
+              <Radio.Button value="interactive">{t('resource.typeInteractive')}</Radio.Button>
+              <Radio.Button value="custom">{t('resource.typeCustom')}</Radio.Button>
             </Radio.Group>
           </div>
 
@@ -589,13 +589,13 @@ const ResourceMgmtPage: React.FC = () => {
             <>
               <div>
                 <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                  实验分类 <span style={{ color: '#ff4d4f' }}>*</span>
+                  {t('resource.expCategory')} <span style={{ color: '#ff4d4f' }}>*</span>
                 </Typography.Text>
                 <Select
                   value={aiExpCategory}
                   onChange={(v) => setAiExpCategory(v)}
                   style={{ width: '100%' }}
-                  placeholder="选择实验分类"
+                  placeholder={t('resource.expCategoryPlaceholder')}
                   options={resourcesApi.EXPERIMENT_CATEGORIES.map(cat => ({
                     value: cat.value,
                     label: `${cat.label} — ${cat.desc}`,
@@ -604,21 +604,21 @@ const ResourceMgmtPage: React.FC = () => {
               </div>
               <div>
                 <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                  实验主题/具体内容 <span style={{ color: '#ff4d4f' }}>*</span>
+                  {t('resource.expTopic')} <span style={{ color: '#ff4d4f' }}>*</span>
                 </Typography.Text>
                 <Input
-                  placeholder="例如：冒泡排序算法可视化、光的折射仿真、CNN 卷积过程演示"
+                  placeholder={t('resource.expTopicPlaceholder')}
                   value={aiTopic}
                   onChange={(e) => setAiTopic(e.target.value)}
                 />
               </div>
               <div>
                 <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                  参数要求/自定义需求 <span style={{ color: '#888', fontWeight: 400 }}>（可选）</span>
+                  {t('resource.expCustomReq')} <span style={{ color: '#888', fontWeight: 400 }}>{t('resource.expCustomReqOptional')}</span>
                 </Typography.Text>
                 <Input.TextArea
                   rows={3}
-                  placeholder="例如：数据量可在 10-100 调节、速度可调、需要显示当前步骤说明。如无特殊要求可留空，AI 将自动设计。"
+                  placeholder={t('resource.expCustomReqPlaceholder')}
                   value={aiCustomPrompt}
                   onChange={(e) => setAiCustomPrompt(e.target.value)}
                 />
@@ -630,10 +630,10 @@ const ResourceMgmtPage: React.FC = () => {
           {aiGenType !== 'custom' && aiGenType !== 'interactive' ? (
             <div>
               <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                知识点/主题 <span style={{ color: '#ff4d4f' }}>*</span>
-              </Typography.Text>
+                {t('resource.topicLabel')} <span style={{ color: '#ff4d4f' }}>*</span>
+                </Typography.Text>
               <Input
-                placeholder="例如：技术的性质、设计的一般原则、技术世界中的设计"
+                placeholder={t('resource.topicPlaceholder')}
                 value={aiTopic}
                 onChange={(e) => setAiTopic(e.target.value)}
               />
@@ -644,11 +644,11 @@ const ResourceMgmtPage: React.FC = () => {
           {aiGenType === 'custom' ? (
             <div>
               <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                自定义需求 <span style={{ color: '#ff4d4f' }}>*</span>
+                {t('resource.customReqLabel')} <span style={{ color: '#ff4d4f' }}>*</span>
               </Typography.Text>
               <Input.TextArea
                 rows={5}
-                placeholder="请描述你想要的 HTML 页面内容和功能..."
+                placeholder={t('resource.customReqPlaceholder')}
                 value={aiCustomPrompt}
                 onChange={(e) => setAiCustomPrompt(e.target.value)}
               />
@@ -658,24 +658,24 @@ const ResourceMgmtPage: React.FC = () => {
           {/* 学科 & 年级 */}
           <Space>
             <div>
-              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>学科</Typography.Text>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('resource.subjectLabel')}</Typography.Text>
               <Select
                 value={aiSubject || undefined}
                 onChange={(v) => setAiSubject(v || '')}
                 allowClear
-                placeholder="选择学科（可选）"
+                placeholder={t('resource.subjectPlaceholder')}
                 style={{ width: 180 }}
                 loading={aiSubjectOptions.length === 0}
                 options={aiSubjectOptions.map(s => ({ value: s, label: s }))}
               />
             </div>
             <div>
-              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>年级</Typography.Text>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('resource.gradeLabel')}</Typography.Text>
               <Select
                 value={aiGrade || undefined}
                 onChange={(v) => setAiGrade(v || '')}
                 allowClear
-                placeholder="选择年级（可选）"
+                placeholder={t('resource.gradePlaceholder')}
                 style={{ width: 140 }}
                 loading={aiGradeOptions.length === 0}
                 options={aiGradeOptions.map(g => ({ value: g, label: g }))}
@@ -686,12 +686,12 @@ const ResourceMgmtPage: React.FC = () => {
           {/* 主题选择 */}
           {aiThemes.length > 0 && (
             <div>
-              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>视觉主题</Typography.Text>
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('resource.themeLabel')}</Typography.Text>
               <Select
                 value={aiTheme || undefined}
                 onChange={(v) => setAiTheme(v || '')}
                 style={{ width: '100%' }}
-                placeholder="选择视觉主题"
+                placeholder={t('resource.themePlaceholder')}
                 options={aiThemes.map(t => ({
                   value: t.id,
                   label: `${t.icon} ${t.name} — ${t.desc}`,
@@ -704,9 +704,9 @@ const ResourceMgmtPage: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '10px 14px', background: '#f6f8fa', borderRadius: 8, border: '1px solid #e8ecf0' }}>
             <div>
-              <Typography.Text strong style={{ fontSize: 13 }}>🎨 自动配图增强</Typography.Text>
+              <Typography.Text strong style={{ fontSize: 13 }}>{t('resource.autoMediaLabel')}</Typography.Text>
               <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
-                开启后 AI 会自动生成 SVG 示意图和配图，丰富页面视觉效果
+                {t('resource.autoMediaDesc')}
               </Typography.Text>
             </div>
             <Switch checked={enableMediaGen} onChange={setEnableMediaGen} size="small" />
@@ -716,21 +716,21 @@ const ResourceMgmtPage: React.FC = () => {
           {aiDone ? (
             <div style={{ textAlign: 'center', padding: '16px 0' }}>
               <Typography.Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 8 }}>
-                ✅ 资源已生成并保存
+                {t('resource.generatedSuccess')}
               </Typography.Text>
               {aiDone.fileName && aiDone.fileName !== 'index.html' && (
                 <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
-                  文件：{aiDone.fileName}
+                  {t('resource.fileLabel')}{aiDone.fileName}
                 </Typography.Text>
               )}
               <Button type="primary" size="large" icon={<EyeOutlined />}
                 href={aiDone.fileUrl} target="_blank" rel="noopener noreferrer"
                 style={{ marginBottom: 12 }}>
-                打开预览
+                {t('resource.openPreview')}
               </Button>
               <br />
               <Button onClick={() => { setAiModalOpen(false); setAiDone(null) }}>
-                完成
+                {t('resource.finish')}
               </Button>
             </div>
           ) : (
@@ -740,20 +740,20 @@ const ResourceMgmtPage: React.FC = () => {
               disabled={aiWorking || (aiGenType === 'custom' ? !aiCustomPrompt : aiGenType === 'interactive' ? !aiTopic : !aiTopic)}
               onClick={handleAiGenerate}
             >
-              {aiWorking ? 'AI 生成中...（约 30-180 秒）' : '🚀 生成并保存'}
+              {aiWorking ? t('resource.generating') : t('resource.generateAndSave')}
             </Button>
           )}
         </Space>
       </Modal>
 
       {/* 重命名弹窗 */}
-      <Modal title="重命名" open={renameModal}
+      <Modal title={t('resource.renameModalTitle')} open={renameModal}
         onOk={handleRename} onCancel={() => setRenameModal(false)}
-        okText="确认" cancelText="取消">
+        okText={t('resource.renameOk')} cancelText={t('resource.renameCancel')}>
         <Space orientation="vertical" style={{ width: '100%' }}>
-          <Typography.Text type="secondary">原名称：{renameOld}</Typography.Text>
+          <Typography.Text type="secondary">{t('resource.renameOriginalName')}{renameOld}</Typography.Text>
           <Input value={renameNew} onChange={(e) => setRenameNew(e.target.value)}
-            onPressEnter={handleRename} placeholder="输入新名称" />
+            onPressEnter={handleRename} placeholder={t('resource.renamePlaceholder')} />
         </Space>
       </Modal>
 

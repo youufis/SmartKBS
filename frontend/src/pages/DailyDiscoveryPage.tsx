@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDiscoveryStore } from '../stores/discoveryStore';
+import { useTranslation } from 'react-i18next'
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -20,6 +21,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const DailyDiscoveryPage: React.FC = () => {
+  const { t } = useTranslation('common')
   const navigate = useNavigate();
   const {
     cards, favorites, loading, stats, poolSize,
@@ -38,15 +40,15 @@ const DailyDiscoveryPage: React.FC = () => {
 
   const handleRefresh = async () => {
     if (stats.refreshRemaining <= 0) {
-      message.warning('今日刷新次数已用完，明天再来吧！');
+      message.warning(t('refreshLimitReached'))
       return;
     }
     setRefreshing(true);
     try {
       await refreshCards();
-      message.success('已刷新一批新知识 ✨');
+      message.success(t('refreshed'));
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '刷新失败');
+      message.error(e?.response?.data?.detail || t('refreshFailed'));
     } finally {
       setRefreshing(false);
     }
@@ -90,12 +92,12 @@ const DailyDiscoveryPage: React.FC = () => {
           {card.summary}
         </Paragraph>
         <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
-          <Tooltip title="查看详情">
+          <Tooltip title={t('viewDetail')}>
             <Button size="small" icon={<EyeOutlined />} onClick={() => handleView(card)}>
-              详情
+              {t('detail')}
             </Button>
           </Tooltip>
-          <Tooltip title={card.is_favorited ? '取消收藏' : '收藏'}>
+          <Tooltip title={card.is_favorited ? t('unfavorite') : t('favorite')}>
             <Button
               size="small"
               icon={card.is_favorited ? <HeartFilled style={{ color: '#ff4d4f' }} /> : <HeartOutlined />}
@@ -123,8 +125,8 @@ const DailyDiscoveryPage: React.FC = () => {
           <Space>
             <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} />
             <StarOutlined style={{ color: '#faad14', fontSize: 18 }} />
-            <Text strong style={{ fontSize: 16 }}>每日精选</Text>
-            <Tag>知识池 {poolSize} 条</Tag>
+            <Text strong style={{ fontSize: 16 }}>{t('dailyDiscovery')}</Text>
+            <Tag>{t('knowledgePool', { count: poolSize })}</Tag>
           </Space>
           <Space>
             <Button
@@ -132,7 +134,7 @@ const DailyDiscoveryPage: React.FC = () => {
               size="small"
               onClick={() => setActiveTab('feed')}
             >
-              精选推荐
+              {t('recommended')}
             </Button>
             <Button
               type={activeTab === 'favorites' ? 'primary' : 'default'}
@@ -142,14 +144,14 @@ const DailyDiscoveryPage: React.FC = () => {
                 if (activeTab !== 'favorites') loadFavorites();
               }}
             >
-              我的收藏 ({favorites.length})
+              {t('myFavorites', { count: favorites.length })}
             </Button>
             <Button
               icon={<ReloadOutlined spin={refreshing} />}
               onClick={handleRefresh}
               disabled={refreshing || stats.refreshRemaining <= 0}
             >
-              换一批 ({stats.refreshRemaining})
+              {t('refreshBatch', { count: stats.refreshRemaining })}
             </Button>
           </Space>
         </div>
@@ -159,10 +161,10 @@ const DailyDiscoveryPage: React.FC = () => {
       <Card size="small" style={{ marginBottom: 16, borderRadius: 8 }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Text type="secondary">
-            📊 今日已浏览 {stats.viewCount} 条，获得 {stats.pointsEarned}/{stats.pointsMax} 积分
+            {t('todayViewedStats', { viewCount: stats.viewCount, pointsEarned: stats.pointsEarned, pointsMax: stats.pointsMax })}
           </Text>
           <Text type="secondary">
-            还剩余 {stats.refreshRemaining} 次刷新机会
+            {t('refreshChanceRemaining', { count: stats.refreshRemaining })}
           </Text>
         </Space>
         <Progress
@@ -180,7 +182,7 @@ const DailyDiscoveryPage: React.FC = () => {
         </div>
       ) : activeTab === 'feed' ? (
         cards.length === 0 ? (
-          <Empty description="暂无精选内容，试试点击换一批按钮" />
+          <Empty description={t('noDiscoveryContent')} />
         ) : (
           <Row gutter={[16, 16]}>
             {cards.map(renderCard)}
@@ -188,7 +190,7 @@ const DailyDiscoveryPage: React.FC = () => {
         )
       ) : (
         favorites.length === 0 ? (
-          <Empty description="还没有收藏的精选卡片" />
+          <Empty description={t('noFavorites')} />
         ) : (
           <Row gutter={[16, 16]}>
             {favorites.map(renderCard)}
@@ -220,12 +222,12 @@ const DailyDiscoveryPage: React.FC = () => {
             <Space style={{ marginTop: 12 }}>
               {detailCard.source && (
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  来源：{detailCard.source}
+                  {t('sourceFrom', { source: detailCard.source })}
                 </Text>
               )}
               {detailCard.source && <Text type="secondary">·</Text>}
               <Text type="secondary" style={{ fontSize: 12 }}>
-                趣味等级：{'⭐'.repeat(detailCard.fun_level || 1)}
+                {t('funLevel')}{'⭐'.repeat(detailCard.fun_level || 1)}
               </Text>
             </Space>
             {detailCard.tags?.length > 0 && (
@@ -243,7 +245,7 @@ const DailyDiscoveryPage: React.FC = () => {
                   setDetailCard({ ...detailCard, is_favorited: !detailCard.is_favorited });
                 }}
               >
-                {detailCard.is_favorited ? '已收藏' : '收藏'}
+                {detailCard.is_favorited ? t('favorited') : t('favorite')}
               </Button>
             </div>
           </div>

@@ -11,6 +11,7 @@ import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
+import { useTranslation } from 'react-i18next'
 import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -27,14 +28,15 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 }
 
 const DIFFICULTY_LABELS: Record<string, string> = {
-  easy: '简单',
-  medium: '中等',
-  hard: '困难',
+  easy: 'easy',
+  medium: 'medium',
+  hard: 'hard',
 }
 
 let subjectOptions: string[] = []
 
 const QuestionBankPage: React.FC = () => {
+  const { t } = useTranslation('questions')
   const user = useAuthStore((s) => s.user)
 
   // 从后端加载课程列表
@@ -99,7 +101,7 @@ const QuestionBankPage: React.FC = () => {
       setQuestions(res.questions)
       setTotal(res.total)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载题库失败')
+      message.error(err?.response?.data?.detail || t('loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -120,10 +122,10 @@ const QuestionBankPage: React.FC = () => {
       setGeneratedQuestions([])
 
       const totalCount = values.count || 5
-      setGenProgress({ step: 1, text: '正在连接 AI 服务...', count: 0, total: totalCount })
+      setGenProgress({ step: 1, text: t('generating'), count: 0, total: totalCount })
 
       await new Promise(r => setTimeout(r, 100))
-      setGenProgress({ step: 2, text: `AI 正在生成 ${totalCount} 道试题...`, count: 0, total: totalCount })
+      setGenProgress({ step: 2, text: `${t('aiGenerating')} ${totalCount}...`, count: 0, total: totalCount })
 
       const res = await questionsApi.generateQuestionsWithMedia({
         subject: values.subject,
@@ -139,7 +141,7 @@ const QuestionBankPage: React.FC = () => {
       loadQuestions()
       setGenerating(false)
     } catch (err: any) {
-      const errMsg = err?.response?.data?.detail || err?.message || '生成失败，请重试'
+      const errMsg = err?.response?.data?.detail || err?.message || t('generateFailedRetry')
       if (!err?.errorFields) {
         setGenError(errMsg)
         setGenProgress({ step: -1, text: '', count: 0, total: 0 })
@@ -153,7 +155,7 @@ const QuestionBankPage: React.FC = () => {
   // ── 提取试题 ──
   const handleExtract = async () => {
     if (!extractText.trim() && !extractFile) {
-      message.warning('请粘贴文本或上传文档（docx/txt/md/pdf/json）')
+      message.warning(t('uploadDocument'))
       return
     }
     setExtracting(true)
@@ -177,7 +179,7 @@ const QuestionBankPage: React.FC = () => {
       message.success(res.message)
       loadQuestions()
     } catch (err: any) {
-      const errMsg = err?.response?.data?.detail || err?.message || '提取失败，请重试'
+      const errMsg = err?.response?.data?.detail || err?.message || t('extractFail')
       setExtractError(errMsg)
     } finally {
       if (extractTimerRef.current) clearInterval(extractTimerRef.current)
@@ -197,8 +199,8 @@ const QuestionBankPage: React.FC = () => {
 
   const handleDedup = async () => {
     Modal.confirm({
-      title: '确认去重',
-      content: '将查找并删除完全重复的试题（基于题目文本），仅保留最早创建的那条。确定继续？',
+      title: t('dedupTitle'),
+      content: t('dedupConfirm'),
       onOk: async () => {
         setDedupLoading(true)
         try {
@@ -208,7 +210,7 @@ const QuestionBankPage: React.FC = () => {
             loadQuestions()
           }
         } catch {
-          message.error('去重失败')
+          message.error(t('dedupFail'))
         } finally {
           setDedupLoading(false)
         }
@@ -230,13 +232,13 @@ const QuestionBankPage: React.FC = () => {
     setSvgLoading(true)
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-svg`)
-      message.success('SVG 已重新生成')
+      message.success(t('svgRegenerated'))
       await loadQuestions()
       // 更新弹窗中的 mediaQuestion
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || 'SVG 生成失败')
+      message.error(e?.response?.data?.detail || t('svgGenFail'))
     } finally {
       setSvgLoading(false)
     }
@@ -247,12 +249,12 @@ const QuestionBankPage: React.FC = () => {
     setWanxiangLoading(true)
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-image`)
-      message.success('配图已生成')
+      message.success(t('imageGenerated'))
       await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '生图失败')
+      message.error(e?.response?.data?.detail || t('imageGenFail'))
     } finally {
       setWanxiangLoading(false)
     }
@@ -262,12 +264,12 @@ const QuestionBankPage: React.FC = () => {
     if (!mediaQuestion) return
     try {
       await apiClient.delete(`/api/questions/${mediaQuestion.id}/svg`)
-      message.success('SVG 配图已删除')
+      message.success(t('svgDeleted'))
       await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '删除失败')
+      message.error(e?.response?.data?.detail || t('deleteFail'))
     }
   }
 
@@ -276,12 +278,12 @@ const QuestionBankPage: React.FC = () => {
     // PlaceholderManager 内部管理 per-key loading，父组件仅调用接口
     try {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-media/${key}`)
-      message.success('图片已生成')
+      message.success(t('imageGenerated'))
       await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '图片生成失败')
+      message.error(e?.response?.data?.detail || t('imageGenFail'))
     }
   }
 
@@ -293,12 +295,12 @@ const QuestionBankPage: React.FC = () => {
       await apiClient.post(`/api/questions/${mediaQuestion.id}/upload-media/${key}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      message.success('图片已上传')
+      message.success(t('imageUploaded'))
       await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '上传失败')
+      message.error(e?.response?.data?.detail || t('uploadFail'))
     }
   }
 
@@ -306,12 +308,12 @@ const QuestionBankPage: React.FC = () => {
     if (!mediaQuestion) return
     try {
       await apiClient.delete(`/api/questions/${mediaQuestion.id}/media/${key}`)
-      message.success('配图已删除')
+      message.success(t('imageDeleted'))
       await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)
       setMediaQuestion(data)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '删除失败')
+      message.error(e?.response?.data?.detail || t('deleteFail'))
     }
   }
 
@@ -380,7 +382,7 @@ const QuestionBankPage: React.FC = () => {
       }
 
       await questionsApi.updateQuestion(editingQuestion.id, updates)
-      message.success('修改成功')
+      message.success(t('editSuccess'))
       setEditModal(false)
       loadQuestions()
     } catch (err: any) {
@@ -400,10 +402,10 @@ const QuestionBankPage: React.FC = () => {
         message.warning(res.message + (res.refs ? `\n${res.refs}` : ''))
         return
       }
-      message.success('已删除')
+      message.success(t('deleteSuccess'))
       loadQuestions()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '删除失败')
+      message.error(err?.response?.data?.detail || t('deleteFail'))
     }
   }
 
@@ -419,7 +421,7 @@ const QuestionBankPage: React.FC = () => {
       ),
     },
     {
-      title: '题型',
+      title: t('questionType'),
       dataIndex: 'type',
       key: 'type',
       width: 80,
@@ -428,7 +430,7 @@ const QuestionBankPage: React.FC = () => {
       ),
     },
     {
-      title: '题目内容',
+      title: t('questionContent'),
       dataIndex: 'question_text',
       key: 'question_text',
       ellipsis: true,
@@ -448,7 +450,7 @@ const QuestionBankPage: React.FC = () => {
       ),
     },
     {
-      title: '知识点',
+      title: t('knowledgePoints'),
       dataIndex: 'knowledge_points',
       key: 'knowledge_points',
       width: 150,
@@ -458,16 +460,16 @@ const QuestionBankPage: React.FC = () => {
       ) : '-',
     },
     {
-      title: '难度',
+      title: t('difficulty'),
       dataIndex: 'difficulty',
       key: 'difficulty',
       width: 80,
       render: (d: string) => (
-        <Tag color={DIFFICULTY_COLORS[d]}>{DIFFICULTY_LABELS[d] || d}</Tag>
+        <Tag color={DIFFICULTY_COLORS[d]}>{t(DIFFICULTY_LABELS[d]) || d}</Tag>
       ),
     },
     {
-      title: '创建者',
+      title: t('creator'),
       dataIndex: 'creator_name',
       key: 'creator_name',
       width: 100,
@@ -478,7 +480,7 @@ const QuestionBankPage: React.FC = () => {
       ),
     },
     {
-      title: '配图',
+      title: t('media'),
       dataIndex: 'has_svg',
       key: 'has_svg',
       width: 80,
@@ -515,38 +517,38 @@ const QuestionBankPage: React.FC = () => {
       },
     },
     {
-      title: '创建时间',
+      title: t('time'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 150,
       render: (t: string) => t ? t.slice(0, 16) : '-',
     },
     {
-      title: '操作',
+      title: t('actions'),
       key: 'action',
       width: 100,
       render: (_: any, record: QuestionInfo) => {
         // 权限：管理员（role=0）可操作全部，教师只能操作自己的
         const canEdit = user?.role === 'admin' || record.creator_username === user?.username
-        if (!canEdit) return <span style={{ color: '#ccc', fontSize: 12 }}>仅创建者可操作</span>
+        if (!canEdit) return <span style={{ color: '#ccc', fontSize: 12 }}>{t('onlyCreatorCanOperate')}</span>
         return (
           <Space size="small">
-            <Tooltip title="编辑">
+            <Tooltip title={t('editQuestion')}>
               <Button type="link" size="small" icon={<EditOutlined />}
                 onClick={() => handleEdit(record)} />
             </Tooltip>
-            <Tooltip title="配图管理">
+            <Tooltip title={t('imageManagement')}>
               <Button type="link" size="small" icon={<span>🎨</span>}
                 onClick={() => handleManageMedia(record)} />
             </Tooltip>
             <Popconfirm
-              title="确认删除？"
-              description="删除后将无法恢复"
+              title={t('confirmDelete')}
+              description={t('confirmDeleteDesc')}
               onConfirm={() => handleDelete(record.id)}
-              okText="确认"
-              cancelText="取消"
+              okText={t('confirm')}
+              cancelText={t('cancel')}
             >
-              <Tooltip title="删除">
+              <Tooltip title={t('deleteQuestion')}>
                 <Button type="link" size="small" danger icon={<DeleteOutlined />} />
               </Tooltip>
             </Popconfirm>
@@ -563,10 +565,10 @@ const QuestionBankPage: React.FC = () => {
         <Row justify="space-between" align="middle">
           <Col>
             <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-              📝 试题管理
+              📝 {t('title')}
             </Typography.Title>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              通过 AI 生成或从文本/Word 文档提取试题，统一管理题库
+              {t('title')}
             </Typography.Text>
           </Col>
           <Col>
@@ -576,13 +578,13 @@ const QuestionBankPage: React.FC = () => {
                 icon={<PlusOutlined />}
                 onClick={() => setShowGeneratePanel(!showGeneratePanel)}
               >
-                {showGeneratePanel ? '收起面板' : '生成/提取试题'}
+                {showGeneratePanel ? t('collapsePanel') : t('generateExtract')}
               </Button>
               <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}>
-                刷新
+                {t('refresh')}
               </Button>
               <Button icon={<ClearOutlined />} onClick={handleDedup} loading={dedupLoading}>
-                去重
+                {t('dedup')}
               </Button>
             </Space>
           </Col>
@@ -597,7 +599,7 @@ const QuestionBankPage: React.FC = () => {
               items={[
                 {
                   key: 'generate',
-                  label: <Space><BookOutlined />AI 生成</Space>,
+                  label: <Space><BookOutlined />{t('aiGenerate')}</Space>,
                   children: (
                     <>
                       <Form
@@ -614,14 +616,14 @@ const QuestionBankPage: React.FC = () => {
                       >
                         <Row gutter={16}>
                           <Col span={8}>
-                            <Form.Item label="科目" name="subject" rules={[{ required: true }]}>
+                            <Form.Item label={t('subject')} name="subject" rules={[{ required: true }]}>
                               <Select>
                                 {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
                               </Select>
                             </Form.Item>
                           </Col>
                           <Col span={8}>
-                            <Form.Item label="题型" name="question_type" rules={[{ required: true }]}>
+                            <Form.Item label={t('questionType')} name="question_type" rules={[{ required: true }]}>
                               <Select>
                                 {TYPE_OPTIONS.map(opt => (
                                   <Option key={opt.value} value={opt.value}>{opt.label}</Option>
@@ -630,32 +632,32 @@ const QuestionBankPage: React.FC = () => {
                             </Form.Item>
                           </Col>
                           <Col span={4}>
-                            <Form.Item label="数量" name="count" rules={[{ required: true }]}>
+                            <Form.Item label={t('count')} name="count" rules={[{ required: true }]}>
                               <InputNumber min={1} max={100} style={{ width: '100%' }}
                                 onChange={(v) => {
-                                  if (v && v > 20) message.warning('超过 20 题生成时间较长，建议减少数量')
+                                  if (v && v > 20) message.warning(t('generateMoreThan20Warn'))
                                 }}
                               />
                             </Form.Item>
                           </Col>
                           <Col span={4}>
-                            <Form.Item label="难度" name="difficulty">
+                            <Form.Item label={t('difficulty')} name="difficulty">
                               <Select>
-                                <Option value="easy">简单</Option>
-                                <Option value="medium">中等</Option>
-                                <Option value="hard">困难</Option>
+                                <Option value="easy">{t('easy')}</Option>
+                                <Option value="medium">{t('medium')}</Option>
+                                <Option value="hard">{t('hard')}</Option>
                               </Select>
                             </Form.Item>
                           </Col>
                         </Row>
                         <Form.Item
-                          label="知识点"
+                          label={t('knowledgePoints')}
                           name="knowledge_points"
-                          rules={[{ required: true, message: '请输入知识点' }]}
+                          rules={[{ required: true, message: t('enterQuestionContent') }]}
                         >
                           <TextArea
                             rows={2}
-                            placeholder="输入知识点，如：TCP/IP协议、IP地址分类、子网掩码（多个知识点用逗号分隔）"
+                            placeholder={t('inputKnowledgePoints')}
                           />
                         </Form.Item>
                         <Form.Item>
@@ -667,7 +669,7 @@ const QuestionBankPage: React.FC = () => {
                               icon={generating ? <LoadingOutlined /> : <BookOutlined />}
                               disabled={generating}
                             >
-                              {generating ? 'AI 生成中...' : '开始生成'}
+                              {generating ? t('aiGenerating') : t('startGenerate')}
                             </Button>
                             {generating && genProgress.text && (
                               <Typography.Text type="secondary" style={{ fontSize: 13 }}>
@@ -687,7 +689,7 @@ const QuestionBankPage: React.FC = () => {
                       {generatedQuestions.length > 0 && (
                         <>
                           <Divider style={{ fontSize: 14 }}>
-                            ✅ 已生成 {generatedQuestions.length} 道题（已自动保存到题库）
+                            {t('generatedCount', { count: generatedQuestions.length })}
                           </Divider>
                           {generatedQuestions.map((q, idx) => (
                             <Card
@@ -704,12 +706,12 @@ const QuestionBankPage: React.FC = () => {
                               ))}
                               {q.has_svg === 1 && q.svg_content && (
                                 <div style={{ margin: '8px 0' }}>
-                                  <SVGViewer svgCode={q.svg_content} description="试题配图" expandable={false} />
+                                  <SVGViewer svgCode={q.svg_content} description={t('imageManagement')} expandable={false} />
                                 </div>
                               )}
                               <MediaDisplay svgContent={null} hasSvg={0} mediaFiles={(q as any).media_files} />
                               <div style={{ marginTop: 8, fontSize: 13 }}>
-                                <Tag color="green">答案：{q.correct_answer}</Tag>
+                                <Tag color="green">{t('answerColon')}{q.correct_answer}</Tag>
                                 {q.explanation && (
                                   <div style={{ marginTop: 4 }}>
                                     <FormulaRenderer content={q.explanation} />
@@ -725,15 +727,15 @@ const QuestionBankPage: React.FC = () => {
                 },
                 {
                   key: 'extract',
-                  label: <Space><FileTextOutlined />智能提取</Space>,
+                  label: <Space><FileTextOutlined />{t('smartExtract')}</Space>,
                   children: (
                     <>
                       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-                        从粘贴文本或上传文档（docx/txt/md/pdf/json）中智能提取试题，自动识别入库。
+                        {t('smartExtract')}
                       </Typography.Text>
                       <Row gutter={16}>
                         <Col span={8}>
-                          <Typography.Text strong style={{ fontSize: 13 }}>科目</Typography.Text>
+                          <Typography.Text strong style={{ fontSize: 13 }}>{t('subject')}</Typography.Text>
                           <Select
                             value={extractSubject}
                             onChange={setExtractSubject}
@@ -743,19 +745,19 @@ const QuestionBankPage: React.FC = () => {
                           </Select>
                         </Col>
                         <Col span={8}>
-                          <Typography.Text strong style={{ fontSize: 13 }}>难度</Typography.Text>
+                          <Typography.Text strong style={{ fontSize: 13 }}>{t('difficulty')}</Typography.Text>
                           <Select
                             value={extractDifficulty}
                             onChange={setExtractDifficulty}
                             style={{ width: '100%', marginTop: 4 }}
                           >
-                            <Option value="easy">简单</Option>
-                            <Option value="medium">中等</Option>
-                            <Option value="hard">困难</Option>
+                            <Option value="easy">{t('easy')}</Option>
+                            <Option value="medium">{t('medium')}</Option>
+                            <Option value="hard">{t('hard')}</Option>
                           </Select>
                         </Col>
                         <Col span={8}>
-                          <Typography.Text strong style={{ fontSize: 13 }}>上传文档（支持 docx/txt/md/pdf/json）</Typography.Text>
+                          <Typography.Text strong style={{ fontSize: 13 }}>{t('uploadDocument')}</Typography.Text>
                           <div style={{ marginTop: 4 }}>
                             <Upload
                               accept=".docx,.txt,.md,.pdf,.json"
@@ -764,7 +766,7 @@ const QuestionBankPage: React.FC = () => {
                               beforeUpload={(file) => {
                                 const ext = file.name.toLowerCase().split('.').pop()
                                 if (!['docx', 'txt', 'md', 'pdf', 'json'].includes(ext || '')) {
-                                  message.warning('仅支持 docx/txt/md/pdf/json 格式')
+                                  message.warning(t('formatSupport'))
                                   return Upload.LIST_IGNORE
                                 }
                                 setExtractFile(file)
@@ -773,14 +775,14 @@ const QuestionBankPage: React.FC = () => {
                               onRemove={() => setExtractFile(null)}
                             >
                               <Button icon={<UploadOutlined />}>
-                                {extractFile ? '更换文件' : '选择文件'}
+                                {extractFile ? t('fileReplace') : t('selectFile')}
                               </Button>
                             </Upload>
                           </div>
                         </Col>
                       </Row>
                       <div style={{ marginTop: 12 }}>
-                        <Typography.Text strong style={{ fontSize: 13 }}>📷 从图片提取（截图/扫描件，使用视觉模型识别）</Typography.Text>
+                        <Typography.Text strong style={{ fontSize: 13 }}>📷 {t('imageExtract')}</Typography.Text>
                         <div style={{ marginTop: 4 }}>
                           <Upload
                             accept=".jpg,.jpeg,.png,.gif,.webp,.bmp"
@@ -802,9 +804,9 @@ const QuestionBankPage: React.FC = () => {
                                   timeout: 120000,
                                 })
                                 setExtractedQuestions(data.questions || [])
-                                message.success(data.message || `成功提取 ${data.total || 0} 道试题`)
+                                message.success(data.message || t('extractedCount', { count: data.total || 0 }))
                               } catch (err: any) {
-                                setExtractError(err.response?.data?.detail || err.message || '提取失败，请检查图片是否清晰或联系管理员')
+                                setExtractError(err.response?.data?.detail || err.message || t('extractFail'))
                               } finally {
                                 clearInterval(timer)
                                 setExtracting(false)
@@ -812,12 +814,12 @@ const QuestionBankPage: React.FC = () => {
                               return false
                             }}
                           >
-                            <Button icon={<UploadOutlined />}>选择图片</Button>
+                            <Button icon={<UploadOutlined />}>{t('selectImage')}</Button>
                           </Upload>
                         </div>
                       </div>
                       <div style={{ marginTop: 16 }}>
-                        <Typography.Text strong style={{ fontSize: 13 }}>或粘贴文本内容</Typography.Text>
+                        <Typography.Text strong style={{ fontSize: 13 }}>{t('orPasteText')}</Typography.Text>
                         <TextArea
                           rows={6}
                           value={extractText}
@@ -843,7 +845,7 @@ const QuestionBankPage: React.FC = () => {
                           icon={extracting ? <LoadingOutlined /> : <FileTextOutlined />}
                           disabled={extracting || (!extractText.trim() && !extractFile)}
                         >
-                          {extracting ? `AI 提取中... ${extractElapsed}s` : '开始提取'}
+                          {extracting ? t('extractingWithTime', { time: extractElapsed }) : t('startExtract')}
                         </Button>
                         {extractError && (
                           <Typography.Text type="danger" style={{ fontSize: 13 }}>
@@ -856,7 +858,7 @@ const QuestionBankPage: React.FC = () => {
                       {extractedQuestions.length > 0 && (
                         <>
                           <Divider style={{ fontSize: 14 }}>
-                            ✅ 已提取 {extractedQuestions.length} 道题（已自动保存到题库）
+                            {t('extractedCount', { count: extractedQuestions.length })}
                           </Divider>
                           {extractedQuestions.map((q, idx) => (
                             <Card
@@ -872,7 +874,7 @@ const QuestionBankPage: React.FC = () => {
                                 </div>
                               ))}
                               <div style={{ marginTop: 8, fontSize: 13 }}>
-                                <Tag color="green">答案：{q.correct_answer}</Tag>
+                                <Tag color="green">{t('answerColon')}{q.correct_answer}</Tag>
                                 {q.explanation && (
                                   <div style={{ marginTop: 4 }}>
                                     <FormulaRenderer content={q.explanation} />
@@ -894,12 +896,12 @@ const QuestionBankPage: React.FC = () => {
         {/* ── 筛选栏 ── */}
         <Row gutter={12} align="middle" style={{ marginTop: 8 }}>
           <Col>
-            <span style={{ fontSize: 13, color: '#888' }}><FilterOutlined /> 筛选：</span>
+            <span style={{ fontSize: 13, color: '#888' }}><FilterOutlined /> {t('filter')}：</span>
           </Col>
           <Col span={3}>
             <Select
               allowClear
-              placeholder="题型"
+              placeholder={t('questionType')}
               style={{ width: '100%' }}
               value={filters.type}
               onChange={(val) => { setFilters(f => ({ ...f, type: val })); setPage(1) }}
@@ -912,20 +914,20 @@ const QuestionBankPage: React.FC = () => {
           <Col span={3}>
             <Select
               allowClear
-              placeholder="难度"
+              placeholder={t('difficulty')}
               style={{ width: '100%' }}
               value={filters.difficulty}
               onChange={(val) => { setFilters(f => ({ ...f, difficulty: val })); setPage(1) }}
             >
-              <Option value="easy">简单</Option>
-              <Option value="medium">中等</Option>
-              <Option value="hard">困难</Option>
+              <Option value="easy">{t('easy')}</Option>
+              <Option value="medium">{t('medium')}</Option>
+              <Option value="hard">{t('hard')}</Option>
             </Select>
           </Col>
           <Col span={3}>
             <Select
               allowClear
-              placeholder="科目"
+              placeholder={t('subject')}
               style={{ width: '100%' }}
               value={filters.subject}
               onChange={(val) => { setFilters(f => ({ ...f, subject: val })); setPage(1) }}
@@ -935,14 +937,14 @@ const QuestionBankPage: React.FC = () => {
           </Col>
           <Col span={6}>
             <Input.Search
-              placeholder="搜索题目内容或知识点..."
+              placeholder={t('searchContentOrKp')}
               allowClear
               onSearch={(val) => { setFilters(f => ({ ...f, keyword: val || undefined })); setPage(1) }}
             />
           </Col>
           <Col>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              共 {total} 题
+              {t('totalQuestions', { count: total })}
             </Typography.Text>
           </Col>
         </Row>
@@ -959,10 +961,10 @@ const QuestionBankPage: React.FC = () => {
             pageSize,
             total,
             showSizeChanger: true,
-            showTotal: (t) => `共 ${t} 题`,
+            showTotal: (total) => t('totalQuestions', { count: total }),
             onChange: (p, ps) => { setPage(p); setPageSize(ps) },
           }}
-          locale={{ emptyText: <Empty description="题库为空，点击上方「生成试题」开始创建" /> }}
+          locale={{ emptyText: <Empty description={t('emptyQuestions')} /> }}
           expandable={{
             expandedRowRender: (record) => (
               <div style={{ padding: '8px 0', maxWidth: 800 }}>
@@ -977,11 +979,11 @@ const QuestionBankPage: React.FC = () => {
                 ))}
                 {record.type === 'short' && (
                   <div style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
-                    参考答案：<FormulaRenderer content={record.correct_answer} inline />
+                    {t('referenceAnswer')}：<FormulaRenderer content={record.correct_answer} inline />
                   </div>
                 )}
                 <div style={{ marginTop: 8 }}>
-                  <Tag color="green">正确答案：</Tag>
+                  <Tag color="green">{t('correctAnswerColon')}</Tag>
                   <FormulaRenderer content={record.correct_answer} inline />
                   {record.explanation && (
                     <div style={{ marginTop: 4 }}>
@@ -990,7 +992,7 @@ const QuestionBankPage: React.FC = () => {
                   )}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#aaa' }}>
-                  知识点：{record.knowledge_points || '-'} | 创建者：{record.creator_name || record.creator_username}
+                  {t('knowledgePointColon')}{record.knowledge_points || '-'} | {t('creator')}：{record.creator_name || record.creator_username}
                 </div>
               </div>
             ),
@@ -1000,18 +1002,18 @@ const QuestionBankPage: React.FC = () => {
 
       {/* ── 编辑弹窗 ── */}
       <Modal
-        title={`编辑题目 #${editingQuestion?.id}`}
+        title={t('editQuestion_', { id: editingQuestion?.id })}
         open={editModal}
         onOk={handleSaveEdit}
         onCancel={() => setEditModal(false)}
         confirmLoading={saving}
         width={760}
-        okText="保存"
-        cancelText="取消"
+        okText={t('save')}
+        cancelText={t('cancel')}
         destroyOnHidden
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item label="题型">
+          <Form.Item label={t('questionType')}>
             <Typography.Text>
               <Tag color={TYPE_COLORS[editingQuestion?.type || '']}>
                 {TYPE_LABELS[editingQuestion?.type || '']}
@@ -1021,10 +1023,10 @@ const QuestionBankPage: React.FC = () => {
 
           {/* ── 题目内容（含公式预览） ── */}
           <Form.Item
-            label="题目内容"
+            label={t('questionContent')}
             name="question_text"
-            rules={[{ required: true, message: '请输入题目内容' }]}
-            extra="支持 Markdown 和 LaTeX 公式：行内 $E=mc^2$、独立 $$\sum_{i=1}^n i$$"
+            rules={[{ required: true, message: t('enterQuestionContent') }]}
+            extra={t('formulaSupport')}
           >
             <TextArea rows={3} />
           </Form.Item>
@@ -1038,7 +1040,7 @@ const QuestionBankPage: React.FC = () => {
                   marginTop: -16, marginBottom: 16, padding: '8px 12px',
                   background: '#f9f9f9', borderRadius: 6, border: '1px solid #e8e8e8',
                 }}>
-                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>📐 实时预览：</div>
+                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>📐 {t('livePreview')}：</div>
                   <div style={{ fontSize: 14, lineHeight: 1.8 }}>
                     <FormulaRenderer content={qt} />
                   </div>
@@ -1049,12 +1051,12 @@ const QuestionBankPage: React.FC = () => {
 
           {/* ── 选项编辑（非简答题） ── */}
           {editingQuestion?.type !== 'short' && (
-            <Form.Item label="选项" required>
+            <Form.Item label={t('options')} required>
               <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: 12, background: '#fafafa' }}>
                 {optionEntries.length === 0 && (
                   <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                    暂无选项，请添加
-                  </Typography.Text>
+                    {t('noOptionsYet')}
+                  </Typography.Text> 
                 )}
                 {optionEntries.map((entry, idx) => (
                   <div key={idx} style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -1100,7 +1102,7 @@ const QuestionBankPage: React.FC = () => {
                   onClick={handleAddOption}
                   style={{ marginTop: 4 }}
                 >
-                  添加选项
+                  {t('addOption')}
                 </Button>
               </div>
             </Form.Item>
@@ -1108,11 +1110,11 @@ const QuestionBankPage: React.FC = () => {
 
           {/* ── 正确答案（含公式预览） ── */}
           <Form.Item
-            label={editingQuestion?.type === 'short' ? '参考答案' : '正确答案'}
+            label={editingQuestion?.type === 'short' ? t('referenceAnswer') : t('correctAnswer')}
             name="correct_answer"
-            rules={[{ required: true, message: '请输入正确答案' }]}
+            rules={[{ required: true, message: t('enterQuestionContent') }]}
           >
-            <Input placeholder={editingQuestion?.type === 'short' ? '输入参考答案（支持 LaTeX 公式）' : '输入正确答案（如 A 或 A,B,C 或 对）'} />
+            <Input placeholder={editingQuestion?.type === 'short' ? t('referenceAnswer') : t('correctAnswer')} />
           </Form.Item>
           {/* 答案预览 */}
           <Form.Item shouldUpdate={(prev, cur) => prev.correct_answer !== cur.correct_answer} noStyle>
@@ -1132,8 +1134,8 @@ const QuestionBankPage: React.FC = () => {
           </Form.Item>
 
           {/* ── 解析（含公式预览） ── */}
-          <Form.Item label="解析" name="explanation" extra="选填，支持 Markdown 和 LaTeX 公式">
-            <TextArea rows={2} placeholder="选填，题目的解析说明" />
+          <Form.Item label={t('explanation')} name="explanation">
+            <TextArea rows={2} placeholder={t('explanation')} />
           </Form.Item>
           {/* 解析预览 */}
           <Form.Item shouldUpdate={(prev, cur) => prev.explanation !== cur.explanation} noStyle>
@@ -1155,16 +1157,16 @@ const QuestionBankPage: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label="知识点" name="knowledge_points">
-                <Input placeholder="逗号分隔" />
+              <Form.Item label={t('knowledgePoint')} name="knowledge_points">
+                <Input placeholder={t('knowledgePoint')} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="难度" name="difficulty">
+              <Form.Item label={t('difficulty')} name="difficulty">
                 <Select>
-                  <Option value="easy">简单</Option>
-                  <Option value="medium">中等</Option>
-                  <Option value="hard">困难</Option>
+                  <Option value="easy">{t('easy')}</Option>
+                  <Option value="medium">{t('medium')}</Option>
+                  <Option value="hard">{t('hard')}</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -1177,17 +1179,17 @@ const QuestionBankPage: React.FC = () => {
               border: '1px solid #ffe58f', marginBottom: 12,
             }}>
               <Space>
-                <span>🖼️ 配图管理</span>
+                <span>🖼️ {t('imageManagement')}</span>
                 <Button size="small" onClick={() => {
                   handleManageMedia(editingQuestion)
                 }}>
-                  打开配图管理
+                  {t('imageManagement')}
                 </Button>
                 {editingQuestion.has_svg === 1 && (
                   <Tag color="blue">有 SVG</Tag>
                 )}
                 {editingQuestion.media_files && Array.isArray(editingQuestion.media_files) && editingQuestion.media_files.length > 0 && (
-                  <Tag color="green">{editingQuestion.media_files.length} 张配图</Tag>
+                  <Tag color="green">{t('imageCount', { count: editingQuestion.media_files.length })}</Tag>
                 )}
                 {(editingQuestion.media_placeholders?.length || 0) > 0 && (
                   <Tag color="orange">{editingQuestion.media_placeholders?.length} 个占位符</Tag>
@@ -1204,7 +1206,7 @@ const QuestionBankPage: React.FC = () => {
               onClick={() => setShowFormulaHelp(!showFormulaHelp)}
               style={{ fontSize: 12 }}
             >
-              {showFormulaHelp ? '收起' : '展开'} LaTeX 公式帮助 📐
+              {showFormulaHelp ? t('collapsePanel') : t('preview')} LaTeX 📐
             </Button>
           </div>
           {showFormulaHelp && (
@@ -1240,10 +1242,10 @@ const QuestionBankPage: React.FC = () => {
 
       {/* ── 配图管理弹窗 ── */}
       <Modal
-        title={`配图管理 #${mediaQuestion?.id}`}
+        title={`${t('imageManagement')} #${mediaQuestion?.id}`}
         open={mediaModal}
         onCancel={() => setMediaModal(false)}
-        footer={<Button onClick={() => setMediaModal(false)}>关闭</Button>}
+        footer={<Button onClick={() => setMediaModal(false)}>{t('close')}</Button>}
         width={700}
       >
         {mediaQuestion && (
@@ -1269,18 +1271,18 @@ const QuestionBankPage: React.FC = () => {
 
       {/* ── 去重结果弹窗 ── */}
       <Modal
-        title="🧹 去重结果"
+        title="🧹"
         open={dedupResult !== null}
         onCancel={() => setDedupResult(null)}
-        footer={<Button onClick={() => setDedupResult(null)}>关闭</Button>}
+        footer={<Button onClick={() => setDedupResult(null)}>{t('close')}</Button>}
         width={600}
       >
         {dedupResult && (
           <div>
             <Typography.Title level={4} style={{ color: dedupResult.total_deleted > 0 ? '#52c41a' : '#999' }}>
               {dedupResult.total_deleted > 0
-                ? `已删除 ${dedupResult.total_deleted} 条重复试题`
-                : '未发现重复试题'}
+                ? `${t('deleteSuccess')} ${dedupResult.total_deleted} ${t('dedupTitle')}`
+                : t('noQuestions')}
             </Typography.Title>
             {(dedupResult.total_skipped_owner ?? 0) > 0 || (dedupResult.total_skipped_ref ?? 0) > 0 ? (
               <div style={{ marginBottom: 12 }}>

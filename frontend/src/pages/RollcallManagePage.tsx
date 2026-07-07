@@ -12,6 +12,7 @@ import {
   TrophyOutlined, UserOutlined, ClockCircleOutlined,
   LoginOutlined, StopOutlined,
 } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 
@@ -55,6 +56,7 @@ interface HistoryItem {
 // ============================================================
 
 const RollcallTool: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
   const teacherUsername = user?.username || 'root'
 
@@ -144,7 +146,7 @@ const RollcallTool: React.FC = () => {
   }
 
   // ── 加载点名历史和统计 ──
-  const loadHistoryData = async (g: string, c: string) => {
+  const loadHistoryData = useCallback(async (g: string, c: string) => {
     if (!g || !c) return
     try {
       const { data } = await apiClient.get('/api/rollcall/history', {
@@ -157,13 +159,13 @@ const RollcallTool: React.FC = () => {
         setCorrectCount(data.correct_count || 0)
       }
     } catch { /* ignore */ }
-  }
+  }, [teacherUsername])
 
-  const refreshHistory = () => loadHistoryData(grade, cls)
+  const refreshHistory = useCallback(() => loadHistoryData(grade, cls), [grade, cls, loadHistoryData])
 
   // ── 点名（老虎机动画） ──
-  const pickStudent = async () => {
-    if (!grade || !cls) { message.warning('请先选择年级和班级'); return }
+  const pickStudent = useCallback(async () => {
+    if (!grade || !cls) { message.warning(t('selectGradeClass')); return }
     setPicking(true)
     setRevealed(false)
     setResultType('')
@@ -192,7 +194,7 @@ const RollcallTool: React.FC = () => {
       setRolling(false)
       setDisplayName('😅')
       setPicking(false)
-      message.error('抽取失败')
+      message.error(t('rollFailed'))
       return
     }
 
@@ -201,7 +203,7 @@ const RollcallTool: React.FC = () => {
       setRolling(false)
       setDisplayName('😅')
       setPicking(false)
-      message.error(data?.error || '抽取失败')
+      message.error(data?.error || t('rollFailed'))
       return
     }
 
@@ -234,7 +236,7 @@ const RollcallTool: React.FC = () => {
         setPicking(false)
         setCovered(data.covered || 0)
         setTotal(data.total || 0)
-        message.success(`🎯 抽中：${data.student}`)
+        message.success(t('picked', { student: data.student }))
         refreshHistory()
         return
       }
@@ -267,51 +269,11 @@ const RollcallTool: React.FC = () => {
       setResultType('')
       setLastPicked(data.student)
       setPicking(false)
-      message.success(`🎯 抽中：${data.student}`)
+      message.success(t('picked', { student: data.student }))
       refreshHistory()
     }, 5000)
     decelTimers.current.push(safetyTimer)
-  }
-
-  // ── 标记结果 ──
-  const markResult = async (result: string) => {
-    if (!lastPicked) return
-    try {
-      await apiClient.post('/api/rollcall/mark', {
-        grade, class: cls, student: lastPicked, result, teacher: teacherUsername,
-      })
-      if (result === 'correct') {
-        setResultType('correct')
-        message.success(`✅ ${lastPicked} +5 ⭐`)
-        launchConfetti()
-      } else if (result === 'incorrect') {
-        setResultType('participated')
-        message.info(`💬 ${lastPicked} 参与 +2`)
-      } else {
-        message.info('⏭ 已跳过')
-      }
-      setLastPicked('')
-      setRevealed(false)
-      refreshHistory()
-    } catch {
-      message.error('标记失败')
-    }
-  }
-
-  // ── 重置 ──
-  const resetCurrent = async () => {
-    if (!grade || !cls) { message.warning('请先选择班级'); return }
-    await apiClient.post('/api/rollcall/reset', {
-      grade, class: cls, teacher: teacherUsername,
-    })
-    setDisplayName('🎯')
-    setDisplayClass('')
-    setRevealed(false)
-    setResultType('')
-    setLastPicked('')
-    message.info('🔄 已重置')
-    refreshHistory()
-  }
+  }, [grade, cls, studentNames, teacherUsername, t, clearAllTimers, refreshHistory])
 
   // ── 纸屑动画 ──
   const launchConfetti = () => {
@@ -335,6 +297,46 @@ const RollcallTool: React.FC = () => {
     }
   }
 
+  // ── 标记结果 ──
+  const markResult = useCallback(async (result: string) => {
+    if (!lastPicked) return
+    try {
+      await apiClient.post('/api/rollcall/mark', {
+        grade, class: cls, student: lastPicked, result, teacher: teacherUsername,
+      })
+      if (result === 'correct') {
+        setResultType('correct')
+        message.success(t('scorePlus', { name: lastPicked, points: 5 }))
+        launchConfetti()
+      } else if (result === 'incorrect') {
+        setResultType('participated')
+        message.info(t('scorePlus', { name: lastPicked, points: 2 }))
+      } else {
+        message.info(t('skipped'))
+      }
+      setLastPicked('')
+      setRevealed(false)
+      refreshHistory()
+    } catch {
+      message.error(t('markFailed'))
+    }
+  }, [lastPicked, grade, cls, teacherUsername, t, refreshHistory])
+
+  // ── 重置 ──
+  const resetCurrent = useCallback(async () => {
+    if (!grade || !cls) { message.warning(t('selectClassFirst')); return }
+    await apiClient.post('/api/rollcall/reset', {
+      grade, class: cls, teacher: teacherUsername,
+    })
+    setDisplayName('🎯')
+    setDisplayClass('')
+    setRevealed(false)
+    setResultType('')
+    setLastPicked('')
+    message.info(t('resetDone'))
+    refreshHistory()
+  }, [grade, cls, teacherUsername, t, refreshHistory])
+
   // ── 键盘快捷键 ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -348,7 +350,7 @@ const RollcallTool: React.FC = () => {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [grade, cls, lastPicked, picking, teacherUsername, studentNames])
+  }, [grade, cls, lastPicked, picking, teacherUsername, studentNames, pickStudent, markResult, resetCurrent])
 
   // ── 统计 ──
   const coverageRate = total > 0 ? Math.round((covered / total) * 100) : 0
@@ -358,14 +360,14 @@ const RollcallTool: React.FC = () => {
       title={
         <Space>
           <AimOutlined style={{ color: '#4fc3f7', fontSize: 20 }} />
-          <span>🎯 智能随机点名</span>
-          <Tag color="geekblue" style={{ fontSize: 11 }}>公平算法 · 服务端持久化</Tag>
+          <span>{t('smartRollcall')}</span>
+          <Tag color="geekblue" style={{ fontSize: 11 }}>{t('fairAlgorithm')}</Tag>
         </Space>
       }
       extra={
         <Space>
-          <Button size="small" icon={<RollbackOutlined />} onClick={resetCurrent}>重置本班权重</Button>
-          <Button size="small" icon={<ReloadOutlined />} onClick={refreshHistory}>刷新数据</Button>
+          <Button size="small" icon={<RollbackOutlined />} onClick={resetCurrent}>{t('resetWeights')}</Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={refreshHistory}>{t('refreshData')}</Button>
         </Space>
       }
       style={{ marginBottom: 16, position: 'relative', overflow: 'hidden' }}
@@ -377,7 +379,7 @@ const RollcallTool: React.FC = () => {
         {/* 选择器 */}
         <Space wrap>
           <Select
-            placeholder="— 选择年级 —"
+            placeholder={t('selectGradePlaceholder')}
             value={grade || undefined}
             onChange={handleGradeChange}
             options={grades.map(g => ({ label: g, value: g }))}
@@ -385,7 +387,7 @@ const RollcallTool: React.FC = () => {
             size="large"
           />
           <Select
-            placeholder="— 选择班级 —"
+            placeholder={t('selectClassPlaceholder')}
             value={cls || undefined}
             onChange={handleClassChange}
             options={classes.map(c => ({ label: c, value: c }))}
@@ -397,7 +399,7 @@ const RollcallTool: React.FC = () => {
 
         {/* 名称展示区 */}
         <div style={{ textAlign: 'center', padding: '12px 0' }}>
-          <Text type="secondary" style={{ fontSize: 14 }}>{displayClass || '请先选择年级和班级'}</Text>
+          <Text type="secondary" style={{ fontSize: 14 }}>{displayClass || t('selectGradeClass')}</Text>
           <div style={{
             fontSize: rolling ? 64 : 80,
             fontWeight: 800,
@@ -421,9 +423,9 @@ const RollcallTool: React.FC = () => {
           {/* 统计 */}
           {total > 0 && (
             <Row gutter={48} justify="center" style={{ marginTop: 8 }}>
-              <Col><Statistic title="已点人数" value={covered} suffix={`/ ${total}`} styles={{ content: { color: '#4fc3f7' } }} /></Col>
-              <Col><Statistic title="覆盖率" value={coverageRate} suffix="%" styles={{ content: { color: '#faad14' } }} /></Col>
-              <Col><Statistic title="答对次数" value={correctCount} styles={{ content: { color: '#52c41a' } }} prefix={<TrophyOutlined />} /></Col>
+              <Col><Statistic title={t('calledCount')} value={covered} suffix={`/ ${total}`} styles={{ content: { color: '#4fc3f7' } }} /></Col>
+              <Col><Statistic title={t('coverageRate')} value={coverageRate} suffix="%" styles={{ content: { color: '#faad14' } }} /></Col>
+              <Col><Statistic title={t('correctTimes')} value={correctCount} styles={{ content: { color: '#52c41a' } }} prefix={<TrophyOutlined />} /></Col>
             </Row>
           )}
         </div>
@@ -441,7 +443,7 @@ const RollcallTool: React.FC = () => {
                 background: 'linear-gradient(135deg,#4fc3f7,#2196f3)',
                 borderColor: '#4fc3f7' }}
             >
-              🎲 开始点名
+              {t('startRollcallEmoji')}
             </Button>
             <Button
               size="large"
@@ -452,7 +454,7 @@ const RollcallTool: React.FC = () => {
                 background: lastPicked ? 'linear-gradient(135deg,#66bb6a,#43a047)' : undefined,
                 borderColor: '#66bb6a', color: lastPicked ? '#fff' : undefined }}
             >
-              ✅ 答对
+              {t('correctWithEmoji')}
             </Button>
             <Button
               size="large"
@@ -463,7 +465,7 @@ const RollcallTool: React.FC = () => {
                 background: lastPicked ? 'linear-gradient(135deg,#ef5350,#e53935)' : undefined,
                 borderColor: '#ef5350', color: lastPicked ? '#fff' : undefined }}
             >
-              💬 参与
+              {t('participateWithEmoji')}
             </Button>
             <Button
               size="large"
@@ -472,7 +474,7 @@ const RollcallTool: React.FC = () => {
               disabled={!lastPicked}
               style={{ height: 48, minWidth: 100 }}
             >
-              ⏭ 跳过
+              {t('skipWithEmoji')}
             </Button>
           </Space>
         </div>
@@ -481,11 +483,11 @@ const RollcallTool: React.FC = () => {
         <div style={{ textAlign: 'center' }}>
           <Space wrap size={8}>
             {[
-              { key: 'Space', label: '抽人' },
-              { key: '1', label: '答对' },
-              { key: '2', label: '参与' },
-              { key: '3', label: '跳过' },
-              { key: 'R', label: '重置' },
+              { key: 'Space', label: t('pickPerson') },
+              { key: '1', label: t('correct') },
+              { key: '2', label: t('participate') },
+              { key: '3', label: t('skip') },
+              { key: 'R', label: t('reset') },
             ].map(k => (
               <kbd key={k.key} style={{
                 background: '#f5f5f5', border: '1px solid #d9d9d9',
@@ -502,18 +504,18 @@ const RollcallTool: React.FC = () => {
         <Divider style={{ margin: '8px 0' }}>
           <Button type="link" onClick={() => setHistoryVisible(!historyVisible)} style={{ fontSize: 14 }}>
             <span style={{ display: 'inline-block', transition: 'transform 0.2s', transform: historyVisible ? 'rotate(90deg)' : 'none' }}>▶</span>
-            {' '}📋 点名记录 {history.length > 0 && <Text type="secondary">（共 {history.length} 次 · 答对 {correctCount} 次）</Text>}
+            {' '}📋 {t('rollcallRecords')} {history.length > 0 && <Text type="secondary">({t('totalCount', { count: history.length })} · {t('correctCount', { count: correctCount })})</Text>}
           </Button>
         </Divider>
 
         {historyVisible && (
           history.length === 0 ? (
-            <Empty description="暂无记录 🎯" />
+            <Empty description={t('noRecords')} />
           ) : (
             <div style={{ maxHeight: 400, overflow: 'auto' }}>
               {[...history].reverse().map((h, i) => {
                 const idx = history.length - i
-                const label = { correct: '✅ 答对', incorrect: '💬 参与', skip: '⏭ 跳过' }[h.result] || h.result
+                const label = { correct: t('correctWithEmoji'), incorrect: t('participateWithEmoji'), skip: t('skipWithEmoji') }[h.result] || h.result
                 const pts = h.points > 0 ? <span style={{ color: '#52c41a', fontWeight: 700 }}>+{h.points}</span> : <span style={{ color: '#999' }}>-</span>
                 return (
                   <div key={i} style={{
@@ -542,6 +544,7 @@ const RollcallTool: React.FC = () => {
 // ============================================================
 
 const SessionsManager: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
   const [detailVisible, setDetailVisible] = useState(false)
@@ -553,11 +556,11 @@ const SessionsManager: React.FC = () => {
       const { data } = await apiClient.get('/api/rollcall/admin/sessions')
       setSessions(data.sessions || [])
     } catch {
-      message.error('加载点名会话列表失败')
+      message.error(t('loadSessionFailed'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     loadSessions()
@@ -572,7 +575,7 @@ const SessionsManager: React.FC = () => {
       })
       setDetail(data)
     } catch {
-      message.error('加载详情失败')
+      message.error(t('loadDetailFailed'))
       setDetailVisible(false)
     } finally {
       setDetailLoading(false)
@@ -584,42 +587,42 @@ const SessionsManager: React.FC = () => {
       await apiClient.post('/api/rollcall/admin/reset', {
         teacher: s.teacher, grade: s.grade, class: s.class,
       })
-      message.success(`已重置 ${s.grade}·${s.class}`)
+      message.success(t('resetDoneFor', { grade: s.grade, cls: s.class }))
       loadSessions()
       if (detailVisible) setDetailVisible(false)
     } catch {
-      message.error('重置失败')
+      message.error(t('resetFailed'))
     }
   }
 
   const columns = [
     {
-      title: '教师', dataIndex: 'teacher', key: 'teacher',
-      render: (t: string) => <Tag color={t === 'root' ? 'blue' : 'default'}>{t}</Tag>,
+      title: t('teacher'), dataIndex: 'teacher', key: 'teacher',
+      render: (teacher: string) => <Tag color={teacher === 'root' ? 'blue' : 'default'}>{teacher}</Tag>,
     },
-    { title: '年级', dataIndex: 'grade', key: 'grade' },
-    { title: '班级', dataIndex: 'class', key: 'class' },
+    { title: t('grade'), dataIndex: 'grade', key: 'grade' },
+    { title: t('classLabel'), dataIndex: 'class', key: 'class' },
     {
-      title: '学生数', dataIndex: 'student_count', key: 'student_count',
+      title: t('studentCount'), dataIndex: 'student_count', key: 'student_count',
       sorter: (a: Session, b: Session) => a.student_count - b.student_count,
     },
     {
-      title: '抽取次数', dataIndex: 'history_count', key: 'history_count',
+      title: t('drawCount'), dataIndex: 'history_count', key: 'history_count',
       sorter: (a: Session, b: Session) => a.history_count - b.history_count,
     },
     {
-      title: '操作', key: 'actions',
+      title: t('actions'), key: 'actions',
       render: (_: unknown, record: Session) => (
         <Space>
-          <Tooltip title="查看详情">
+          <Tooltip title={t('viewDetails')}>
             <Button icon={<EyeOutlined />} size="small" onClick={() => viewDetail(record)} />
           </Tooltip>
-          <Tooltip title="重置数据">
+          <Tooltip title={t('resetData')}>
             <Button icon={<DeleteOutlined />} size="small" danger
               onClick={() => {
                 Modal.confirm({
-                  title: '确认重置',
-                  content: `确定要重置 ${record.grade}·${record.class} 的全部点名数据吗？`,
+                  title: t('confirmReset'),
+                  content: t('confirmResetContent', { grade: record.grade, class: record.class }),
                   onOk: () => handleReset(record),
                 })
               }}
@@ -641,9 +644,9 @@ const SessionsManager: React.FC = () => {
 
   const resultLabel = (r: string) => {
     switch (r) {
-      case 'correct': return '正确'
-      case 'incorrect': return '错误'
-      case 'skip': return '跳过'
+      case 'correct': return t('correct')
+      case 'incorrect': return t('wrong')
+      case 'skip': return t('skip')
       default: return r
     }
   }
@@ -654,28 +657,28 @@ const SessionsManager: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <Space>
             <HistoryOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-            <Title level={4} style={{ margin: 0 }}>点名数据管理</Title>
+            <Title level={4} style={{ margin: 0 }}>{t('rollcall')}</Title>
           </Space>
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={loading}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={loading}>{t('refresh')}</Button>
             <Button icon={<DownloadOutlined />} onClick={() => {
               const token = localStorage.getItem('smartkb_token')
               window.open(`/api/export/rollcall?token=${token}`, '_blank')
             }}>
-              导出记录
+              {t('exportRecords')}
             </Button>
           </Space>
         </div>
 
         {sessions.length === 0 && !loading ? (
-          <Empty description="暂无点名数据" />
+          <Empty description={t('noRollcallData')} />
         ) : (
           <Table
             dataSource={sessions}
             columns={columns}
             rowKey={(r) => `${r.teacher}|${r.grade}|${r.class}`}
             loading={loading}
-            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 个会话`, pageSizeOptions: ['10', '20', '50'] }}
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalSessionsCount', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
             size="middle"
           />
         )}
@@ -683,33 +686,33 @@ const SessionsManager: React.FC = () => {
         <Divider />
         <Row gutter={16}>
           <Col span={8}>
-            <Statistic title="总会话数" value={sessions.length} prefix={<TeamOutlined />} />
+            <Statistic title={t('totalSessions')} value={sessions.length} prefix={<TeamOutlined />} />
           </Col>
           <Col span={8}>
-            <Statistic title="总学生数" value={sessions.reduce((s, x) => s + x.student_count, 0)} prefix={<TeamOutlined />} />
+            <Statistic title={t('totalStudents')} value={sessions.reduce((s, x) => s + x.student_count, 0)} prefix={<TeamOutlined />} />
           </Col>
           <Col span={8}>
-            <Statistic title="总抽取次数" value={sessions.reduce((s, x) => s + x.history_count, 0)} prefix={<BarChartOutlined />} />
+            <Statistic title={t('totalDraws')} value={sessions.reduce((s, x) => s + x.history_count, 0)} prefix={<BarChartOutlined />} />
           </Col>
         </Row>
       </Card>
 
       {/* 详情弹窗 */}
       <Modal
-        title={detail ? `点名详情 · ${detail.teacher} · ${detail.grade} ${detail.class}` : '加载中...'}
+        title={detail ? t('rollcallDetailTitle', { teacher: detail.teacher, grade: detail.grade, class: detail.class }) : t('loading')}
         open={detailVisible}
         onCancel={() => setDetailVisible(false)}
         footer={[
-          <Button key="close" onClick={() => setDetailVisible(false)}>关闭</Button>,
+          <Button key="close" onClick={() => setDetailVisible(false)}>{t('close')}</Button>,
           detail && (
             <Button key="reset" danger onClick={() => {
               Modal.confirm({
-                title: '确认重置',
-                content: `确定要重置 ${detail.grade}·${detail.class} 的全部数据？`,
+                title: t('confirmReset'),
+                content: t('confirmResetContent', { grade: detail.grade, class: detail.class }),
                 onOk: () => handleReset(detail),
               })
             }}>
-              重置本班数据
+              {t('resetClassData')}
             </Button>
           ),
         ]}
@@ -718,25 +721,25 @@ const SessionsManager: React.FC = () => {
         {detailLoading ? <Spin style={{ display: 'block', padding: 60 }} /> : detail ? (
           <div>
             <Descriptions column={3} size="small" bordered>
-              <Descriptions.Item label="教师"><Tag>{detail.teacher}</Tag></Descriptions.Item>
-              <Descriptions.Item label="年级">{detail.grade}</Descriptions.Item>
-              <Descriptions.Item label="班级">{detail.class}</Descriptions.Item>
-              <Descriptions.Item label="学生数">{detail.student_count}</Descriptions.Item>
-              <Descriptions.Item label="抽取次数">{detail.history_count}</Descriptions.Item>
-              <Descriptions.Item label="本轮已抽">{detail.picked_in_round.length} 人</Descriptions.Item>
-              <Descriptions.Item label="最后更新">{detail.updated}</Descriptions.Item>
+              <Descriptions.Item label={t('teacher')}><Tag>{detail.teacher}</Tag></Descriptions.Item>
+              <Descriptions.Item label={t('grade')}>{detail.grade}</Descriptions.Item>
+              <Descriptions.Item label={t('classLabel')}>{detail.class}</Descriptions.Item>
+              <Descriptions.Item label={t('studentCount')}>{detail.student_count}</Descriptions.Item>
+              <Descriptions.Item label={t('drawCount')}>{detail.history_count}</Descriptions.Item>
+              <Descriptions.Item label={t('pickedInRound')}>{detail.picked_in_round.length} {t('people')}</Descriptions.Item>
+              <Descriptions.Item label={t('lastUpdated')}>{detail.updated}</Descriptions.Item>
             </Descriptions>
 
-            <Divider>⚖️ 权重分布</Divider>
+            <Divider>{t('weightDistribution')}</Divider>
             {Object.keys(detail.weights).length === 0 ? (
-              <Text type="secondary">暂无权重数据</Text>
+              <Text type="secondary">{t('noWeightData')}</Text>
             ) : (
               <div style={{ maxHeight: 200, overflow: 'auto', marginBottom: 16 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#fafafa' }}>
-                      <th style={thStyle}>学生</th>
-                      <th style={thStyle}>权重</th>
+                      <th style={thStyle}>{t('student')}</th>
+                      <th style={thStyle}>{t('weight')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -755,18 +758,18 @@ const SessionsManager: React.FC = () => {
               </div>
             )}
 
-            <Divider>📜 抽取历史 ({detail.history.length} 条)</Divider>
+            <Divider>{t('drawHistory', { count: detail.history.length })}</Divider>
             {detail.history.length === 0 ? (
-              <Text type="secondary">暂无历史记录</Text>
+              <Text type="secondary">{t('noHistoryRecords')}</Text>
             ) : (
               <div style={{ maxHeight: 300, overflow: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ background: '#fafafa' }}>
-                      <th style={thStyle}>时间</th>
-                      <th style={thStyle}>学生</th>
-                      <th style={thStyle}>结果</th>
-                      <th style={thStyle}>积分</th>
+                      <th style={thStyle}>{t('time')}</th>
+                      <th style={thStyle}>{t('student')}</th>
+                      <th style={thStyle}>{t('result')}</th>
+                      <th style={thStyle}>{t('points')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -829,6 +832,7 @@ interface StaffLoginInfo {
 }
 
 const AttendanceStats: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
 
   const [grades, setGrades] = useState<string[]>([])
@@ -850,11 +854,7 @@ const AttendanceStats: React.FC = () => {
   const [staffLoading, setStaffLoading] = useState(false)
 
   // 默认加载全部在线学生
-  useEffect(() => {
-    loadOnlineStudents()
-  }, [])
-
-  const loadOnlineStudents = async () => {
+  const loadOnlineStudents = useCallback(async () => {
     setOnlineLoading(true)
     try {
       const { data } = await apiClient.get('/api/rollcall/attendance/online-students')
@@ -864,7 +864,11 @@ const AttendanceStats: React.FC = () => {
     } finally {
       setOnlineLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    loadOnlineStudents()
+  }, [loadOnlineStudents])
 
   // ── 加载教职工登录信息（管理员） ──
   const loadStaffLogins = async () => {
@@ -873,7 +877,7 @@ const AttendanceStats: React.FC = () => {
       const { data } = await apiClient.get('/api/rollcall/attendance/staff-logins')
       setStaffList(data.staff || [])
     } catch {
-      message.error('加载教职工登录信息失败')
+      message.error(t('loadStaffFailed'))
       setStaffList([])
     } finally {
       setStaffLoading(false)
@@ -920,7 +924,7 @@ const AttendanceStats: React.FC = () => {
       })
       setSummary(data)
     } catch {
-      message.error('加载考勤数据失败')
+      message.error(t('loadAttendanceFailed'))
     } finally {
       setLoading(false)
     }
@@ -952,10 +956,12 @@ const AttendanceStats: React.FC = () => {
       }
       await apiClient.delete('/api/rollcall/attendance/login-logs', { params })
       const msg = keepDays > 0
-        ? `已清除 ${keepDays} 天前的${clearAll ? '' : `用户「${clearTargetUsername}」的`}登录日志`
+        ? (clearAll
+          ? t('clearLogSuccessKeep', { keepDays })
+          : t('clearLogSuccessUserKeep', { keepDays, username: clearTargetUsername }))
         : clearAll
-          ? '已清除全部登录日志'
-          : `已清除用户「${clearTargetUsername}」的全部登录日志`
+          ? t('clearLogSuccessAll')
+          : t('clearLogSuccessUser', { username: clearTargetUsername })
       message.success(msg)
       setClearModalVisible(false)
       // 刷新数据
@@ -963,7 +969,7 @@ const AttendanceStats: React.FC = () => {
         loadStaffLogins()
       }
     } catch {
-      message.error('清除登录日志失败')
+      message.error(t('clearLogFailed'))
     } finally {
       setClearing(false)
     }
@@ -971,7 +977,7 @@ const AttendanceStats: React.FC = () => {
 
   const viewStudentLogs = async (student: AttendanceStudent) => {
     if (!student.username) {
-      message.info('该学生暂无用户名记录')
+      message.info(t('noStudentRecord'))
       return
     }
     setViewLogs(student)
@@ -983,7 +989,7 @@ const AttendanceStats: React.FC = () => {
       })
       setLogRecords(data.logs || [])
     } catch {
-      message.error('加载登录明细失败')
+      message.error(t('loadLoginDetailFailed'))
       setLogRecords([])
     } finally {
       setLogLoading(false)
@@ -992,11 +998,11 @@ const AttendanceStats: React.FC = () => {
 
   const columns = [
     {
-      title: '序号', key: 'index', width: 60,
+      title: t('index'), key: 'index', width: 60,
       render: (_: unknown, __: unknown, i: number) => i + 1,
     },
     {
-      title: '姓名', dataIndex: 'name', key: 'name',
+      title: t('name'), dataIndex: 'name', key: 'name',
       render: (name: string, record: AttendanceStudent) => (
         <Space>
           <span>{name}</span>
@@ -1005,38 +1011,38 @@ const AttendanceStats: React.FC = () => {
       ),
     },
     {
-      title: '年级', dataIndex: 'grade', key: 'grade',
+      title: t('grade'), dataIndex: 'grade', key: 'grade',
       render: (g: string) => g || <Text type="secondary">-</Text>,
     },
     {
-      title: '班级', dataIndex: 'class', key: 'class',
+      title: t('classLabel'), dataIndex: 'class', key: 'class',
       render: (c: string) => c || <Text type="secondary">-</Text>,
     },
     {
-      title: '用户名', dataIndex: 'username', key: 'username',
+      title: t('username'), dataIndex: 'username', key: 'username',
       render: (u: string) => u ? <Text copyable={{ text: u }} style={{ fontSize: 12 }}>{u}</Text> : <Text type="secondary">-</Text>,
     },
     {
-      title: '登录状态', dataIndex: 'has_logged_in', key: 'has_logged_in',
+      title: t('loginStatus'), dataIndex: 'has_logged_in', key: 'has_logged_in',
       render: (logged: boolean) => logged
-        ? <Tag icon={<LoginOutlined />} color="success">已登录</Tag>
-        : <Tag icon={<StopOutlined />} color="default">未登录</Tag>,
+        ? <Tag icon={<LoginOutlined />} color="success">{t('loggedIn')}</Tag>
+        : <Tag icon={<StopOutlined />} color="default">{t('notLoggedIn')}</Tag>,
     },
     {
-      title: '最近登录时间', dataIndex: 'last_login_time', key: 'last_login_time',
+      title: t('lastLoginTime'), dataIndex: 'last_login_time', key: 'last_login_time',
       render: (t: string) => t || <Text type="secondary">-</Text>,
     },
     {
-      title: '登录 IP', dataIndex: 'last_login_ip', key: 'last_login_ip',
+      title: t('loginIP'), dataIndex: 'last_login_ip', key: 'last_login_ip',
       render: (ip: string) => ip || <Text type="secondary">-</Text>,
     },
     {
-      title: '操作', key: 'actions', width: 100,
+      title: t('actions'), key: 'actions', width: 100,
       render: (_: unknown, record: AttendanceStudent) => (
         <Button type="link" size="small" icon={<ClockCircleOutlined />}
           disabled={!record.has_logged_in}
           onClick={() => viewStudentLogs(record)}>
-          明细
+          {t('details')}
         </Button>
       ),
     },
@@ -1045,43 +1051,43 @@ const AttendanceStats: React.FC = () => {
   // ── 教职工登录表格列 ──
   const staffColumns = [
     {
-      title: '序号', key: 'index', width: 60,
+      title: t('index'), key: 'index', width: 60,
       render: (_: unknown, __: unknown, i: number) => i + 1,
     },
     {
-      title: '姓名', dataIndex: 'name', key: 'name',
+      title: t('name'), dataIndex: 'name', key: 'name',
       render: (n: string) => n || <Text type="secondary">-</Text>,
     },
     {
-      title: '角色', dataIndex: 'role', key: 'role',
+      title: t('role'), dataIndex: 'role', key: 'role',
       render: (r: string) => r === '管理员'
         ? <Tag color="red">{r}</Tag>
         : <Tag color="blue">{r}</Tag>,
     },
     {
-      title: '用户名', dataIndex: 'username', key: 'username',
+      title: t('username'), dataIndex: 'username', key: 'username',
       render: (u: string) => u ? <Text copyable={{ text: u }} style={{ fontSize: 12 }}>{u}</Text> : <Text type="secondary">-</Text>,
     },
     {
-      title: '在线状态', dataIndex: 'is_online', key: 'is_online',
+      title: t('onlineStatus'), dataIndex: 'is_online', key: 'is_online',
       render: (online: boolean) => online
-        ? <Tag icon={<LoginOutlined />} color="success">在线</Tag>
-        : <Tag icon={<StopOutlined />} color="default">离线</Tag>,
+        ? <Tag icon={<LoginOutlined />} color="success">{t('online')}</Tag>
+        : <Tag icon={<StopOutlined />} color="default">{t('offline')}</Tag>,
     },
     {
-      title: '最近登录时间', dataIndex: 'last_login_time', key: 'last_login_time',
+      title: t('lastLoginTime'), dataIndex: 'last_login_time', key: 'last_login_time',
       render: (t: string) => t || <Text type="secondary">-</Text>,
     },
     {
-      title: '登录 IP', dataIndex: 'last_login_ip', key: 'last_login_ip',
+      title: t('loginIP'), dataIndex: 'last_login_ip', key: 'last_login_ip',
       render: (ip: string) => ip || <Text type="secondary">-</Text>,
     },
     {
-      title: '操作', key: 'actions', width: 80,
+      title: t('actions'), key: 'actions', width: 80,
       render: (_: unknown, record: StaffLoginInfo) => (
         <Button type="link" size="small" danger
           onClick={() => showClearModal(false, record.username)}>
-          清除记录
+          {t('clearRecord')}
         </Button>
       ),
     },
@@ -1095,7 +1101,7 @@ const AttendanceStats: React.FC = () => {
         title={
           <Space>
             <UserOutlined style={{ color: '#52c41a', fontSize: 20 }} />
-            <span>📋 考勤统计</span>
+            <span>📋 {t('attendanceStats')}</span>
             {isAdmin && (
               <Space.Compact size="small" style={{ marginLeft: 12 }}>
                 <Button
@@ -1103,14 +1109,14 @@ const AttendanceStats: React.FC = () => {
                   icon={<TeamOutlined />}
                   onClick={() => { setViewMode('student'); setSummary(null); loadOnlineStudents() }}
                 >
-                  学生考勤
+                  {t('studentAttendance')}
                 </Button>
                 <Button
                   type={viewMode === 'staff' ? 'primary' : 'default'}
                   icon={<UserOutlined />}
                   onClick={() => { setViewMode('staff'); loadStaffLogins() }}
                 >
-                  教职工登录
+                  {t('staffLogin')}
                 </Button>
               </Space.Compact>
             )}
@@ -1125,18 +1131,18 @@ const AttendanceStats: React.FC = () => {
             )}
             {viewMode === 'student' && !grade && !cls && onlineStudents.length > 0 && (
               <Tag icon={<LoginOutlined />} color="success" style={{ fontSize: 13 }}>
-                全部在线 · {onlineStudents.length} 人
+                {t('allOnline', { count: onlineStudents.length })}
               </Tag>
             )}
             {viewMode === 'staff' && staffList.length > 0 && (
               <Tag icon={<UserOutlined />} color="purple" style={{ fontSize: 13 }}>
-                教职工 · {staffList.length} 人
+                {t('staffCount', { count: staffList.length })}
               </Tag>
             )}
             {isAdmin && (
               <Button icon={<DeleteOutlined />} danger
                 onClick={() => showClearModal(true)}>
-                清除全部记录
+                {t('clearAllRecords')}
               </Button>
             )}
             <Button icon={<ReloadOutlined />}
@@ -1146,7 +1152,7 @@ const AttendanceStats: React.FC = () => {
                 else loadOnlineStudents()
               }}
               loading={loading || onlineLoading || staffLoading}>
-              刷新数据
+              {t('refreshData')}
             </Button>
           </Space>
         }
@@ -1159,7 +1165,7 @@ const AttendanceStats: React.FC = () => {
               {/* 选择器 */}
               <Space wrap>
                 <Select
-                  placeholder="— 选择年级 —"
+                  placeholder={t('selectGradePlaceholder')}
                   value={grade || undefined}
                   onChange={handleGradeChange}
                   options={grades.map(g => ({ label: g, value: g }))}
@@ -1168,7 +1174,7 @@ const AttendanceStats: React.FC = () => {
                   allowClear
                 />
                 <Select
-                  placeholder="— 选择班级 —"
+                  placeholder={t('selectClassPlaceholder')}
                   value={cls || undefined}
                   onChange={handleClassChange}
                   options={classes.map(c => ({ label: c, value: c }))}
@@ -1178,7 +1184,7 @@ const AttendanceStats: React.FC = () => {
                   allowClear
                 />
                 <Text type="secondary" style={{ fontSize: 13 }}>
-                  （默认显示全部在线学生，选择年级/班级可查看班级详情）
+                  {t('attendanceHelperText')}
                 </Text>
               </Space>
 
@@ -1188,38 +1194,38 @@ const AttendanceStats: React.FC = () => {
                   <Row gutter={24}>
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#f6ffed' }}>
-                        <Statistic title="班级总人数" value={summary.total_count}
+                        <Statistic title={t('classTotalCount')} value={summary.total_count}
                           prefix={<TeamOutlined />} styles={{ content: { color: '#52c41a' } }} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#e6f7ff' }}>
-                        <Statistic title="已登录" value={summary.logged_in_count}
+                        <Statistic title={t('loggedInCount')} value={summary.logged_in_count}
                           prefix={<LoginOutlined />} styles={{ content: { color: '#1890ff' } }} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#fff7e6' }}>
-                        <Statistic title="未登录" value={summary.not_logged_in_count}
+                        <Statistic title={t('notLoggedInCount')} value={summary.not_logged_in_count}
                           prefix={<StopOutlined />} styles={{ content: { color: '#faad14' } }} />
                       </Card>
                     </Col>
                     <Col span={6}>
                       <Card size="small" style={{ textAlign: 'center', background: '#f0f5ff' }}>
-                        <Statistic title="登录率" value={summary.login_rate} suffix="%"
+                        <Statistic title={t('loginRate')} value={summary.login_rate} suffix="%"
                           prefix={<BarChartOutlined />} styles={{ content: { color: '#722ed1' } }} />
                       </Card>
                     </Col>
                   </Row>
 
-                  <Divider>📋 学生考勤明细</Divider>
+                  <Divider>{t('attendanceDetails')}</Divider>
 
                   <Table
                     dataSource={summary.students}
                     columns={columns}
                     rowKey={(r) => r.username || r.name}
                     loading={loading}
-                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生` }}
+                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudentsWithCount', { count: total }) }}
                     size="middle"
                   />
                 </>
@@ -1228,25 +1234,25 @@ const AttendanceStats: React.FC = () => {
               {/* 全部在线学生模式（默认） */}
               {!summary && onlineStudents.length > 0 && (
                 <>
-                  <Divider>📋 当前全部在线学生</Divider>
+                  <Divider>{t('currentOnlineStudents')}</Divider>
                   <Table
                     dataSource={onlineStudents}
                     columns={columns}
                     rowKey={(r) => r.username || r.name}
                     loading={onlineLoading}
-                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名在线学生` }}
+                    pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalOnlineStudents', { count: total }) }}
                     size="middle"
                   />
                 </>
               )}
 
               {!summary && onlineStudents.length === 0 && !onlineLoading && !loading && (
-                <Empty description={grade || cls ? '请先选择年级和班级查看考勤统计' : '当前没有在线学生'} />
+                <Empty description={grade || cls ? t('selectGradeClassHint') : t('noOnlineStudents')} />
               )}
 
               {(loading || onlineLoading) && (
                 <div style={{ textAlign: 'center', padding: 40 }}>
-                  <Spin description="加载考勤数据..." />
+                  <Spin>{t('loadingAttendance')}</Spin>
                 </div>
               )}
             </>
@@ -1255,21 +1261,21 @@ const AttendanceStats: React.FC = () => {
           {/* ── 教职工登录模式 ── */}
           {viewMode === 'staff' && (
             <>
-              <Divider>📋 教职工登录信息</Divider>
+              <Divider>{t('staffLoginInfo')}</Divider>
               <Table
                 dataSource={staffList}
                 columns={staffColumns}
                 rowKey="username"
                 loading={staffLoading}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名教职工` }}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStaffCount', { count: total }) }}
                 size="middle"
               />
               {staffList.length === 0 && !staffLoading && (
-                <Empty description="暂无教职工登录记录" />
+                <Empty description={t('noStaffRecords')} />
               )}
               {staffLoading && (
                 <div style={{ textAlign: 'center', padding: 40 }}>
-                  <Spin description="加载教职工登录信息..." />
+                  <Spin>{t('loadingStaffInfo')}</Spin>
                 </div>
               )}
             </>
@@ -1279,38 +1285,38 @@ const AttendanceStats: React.FC = () => {
 
       {/* 清除确认弹窗 */}
       <Modal
-        title={clearAll ? '确认清除登录日志' : `确认清除登录日志`}
+        title={t('confirmClearLogTitle')}
         open={clearModalVisible}
         onOk={handleClearLogs}
         onCancel={() => setClearModalVisible(false)}
         confirmLoading={clearing}
-        okText="确认清除"
-        cancelText="取消"
+        okText={t('confirmClear')}
+        cancelText={t('cancel')}
         okButtonProps={{ danger: true }}
       >
         <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <p>
             {clearAll
-              ? `确定要清除登录日志吗？你可以选择保留最近 N 天的记录，仅清除更早的日志。`
-              : `确定要清除用户「${clearTargetUsername}」的登录日志吗？`
+              ? t('confirmClearLogContent')
+              : t('confirmClearUserLogContent', { username: clearTargetUsername })
             }
           </p>
           {clearAll && (
             <Space>
-              <span style={{ whiteSpace: 'nowrap' }}>仅清除</span>
+              <span style={{ whiteSpace: 'nowrap' }}>{t('clearOnly')}</span>
               <Select
                 value={keepDays}
                 onChange={setKeepDays}
                 style={{ width: 120 }}
                 options={[
-                  { label: '全部记录', value: 0 },
-                  { label: '保留近 7 天', value: 7 },
-                  { label: '保留近 15 天', value: 15 },
-                  { label: '保留近 30 天', value: 30 },
-                  { label: '保留近 90 天', value: 90 },
+                  { label: t('allRecords'), value: 0 },
+                  { label: t('keep7Days'), value: 7 },
+                  { label: t('keep15Days'), value: 15 },
+                  { label: t('keep30Days'), value: 30 },
+                  { label: t('keep90Days'), value: 90 },
                 ]}
               />
-              <span style={{ whiteSpace: 'nowrap' }}>之前的旧记录</span>
+              <span style={{ whiteSpace: 'nowrap' }}>{t('beforeOldRecords')}</span>
             </Space>
           )}
         </Space>
@@ -1318,30 +1324,30 @@ const AttendanceStats: React.FC = () => {
 
       {/* 登录明细弹窗 */}
       <Modal
-        title={viewLogs ? `${viewLogs.name} 的登录记录` : '登录明细'}
+        title={viewLogs ? t('loginRecordOf', { name: viewLogs.name }) : t('loginDetails')}
         open={logModalVisible}
         onCancel={() => setLogModalVisible(false)}
-        footer={<Button onClick={() => setLogModalVisible(false)}>关闭</Button>}
+        footer={<Button onClick={() => setLogModalVisible(false)}>{t('close')}</Button>}
         width={700}
       >
         {logLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         ) : logRecords.length === 0 ? (
-          <Empty description="暂无登录记录" />
+          <Empty description={t('noLoginRecords')} />
         ) : (
           <Table
             dataSource={logRecords}
             rowKey="id"
             size="small"
-            pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条记录` }}
+            pagination={{ pageSize: 10, showTotal: (total) => t('totalRecordCount', { count: total }) }}
             columns={[
-              { title: '序号', key: 'idx', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
-              { title: '登录时间', dataIndex: 'login_time', key: 'login_time' },
-              { title: '登录 IP', dataIndex: 'login_ip', key: 'login_ip' },
-              { title: '浏览器', dataIndex: 'user_agent', key: 'user_agent', ellipsis: true },
+              { title: t('index'), key: 'idx', width: 60, render: (_: unknown, __: unknown, i: number) => i + 1 },
+              { title: t('loginTime'), dataIndex: 'login_time', key: 'login_time' },
+              { title: t('loginIP'), dataIndex: 'login_ip', key: 'login_ip' },
+              { title: t('browser'), dataIndex: 'user_agent', key: 'user_agent', ellipsis: true },
               {
-                title: '登出时间', dataIndex: 'logout_time', key: 'logout_time',
-                render: (t: string) => t || <Tag color="processing">在线</Tag>,
+                title: t('logoutTime'), dataIndex: 'logout_time', key: 'logout_time',
+                render: (val: string) => val || <Tag color="processing">{t('online')}</Tag>,
               },
             ]}
           />
@@ -1357,6 +1363,7 @@ const AttendanceStats: React.FC = () => {
 // ============================================================
 
 const RollcallManagePage: React.FC = () => {
+  const { t } = useTranslation('interaction')
   return (
     <Card style={{ borderRadius: 8 }}>
       <Tabs
@@ -1364,17 +1371,17 @@ const RollcallManagePage: React.FC = () => {
         items={[
           {
             key: 'tool',
-            label: <span><AimOutlined /> 🎯 随机点名</span>,
+            label: <span><AimOutlined /> 🎯 {t('randomRollcall')}</span>,
             children: <RollcallTool />,
           },
           {
             key: 'manage',
-            label: <span><HistoryOutlined /> 📊 数据管理</span>,
+            label: <span><HistoryOutlined /> 📊 {t('dataManagement')}</span>,
             children: <SessionsManager />,
           },
           {
             key: 'attendance',
-            label: <span><UserOutlined /> 📋 考勤统计</span>,
+            label: <span><UserOutlined /> 📋 {t('attendanceStats')}</span>,
             children: <AttendanceStats />,
           },
         ]}

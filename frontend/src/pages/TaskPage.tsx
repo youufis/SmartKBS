@@ -6,10 +6,11 @@ import {
 import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
   CheckCircleOutlined, EyeOutlined, UndoOutlined,
-  RobotOutlined, StarOutlined, BarChartOutlined,
+  RobotOutlined, BarChartOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 import type { TaskInfo } from '../types'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
@@ -18,6 +19,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 const TaskPage: React.FC = () => {
+  const { t } = useTranslation('system')
   const user = useAuthStore((s) => s.user)
   const messages = useChatStore((s) => s.messages)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
@@ -26,11 +28,11 @@ const TaskPage: React.FC = () => {
 
   // ── 等级辅助函数 ──
   const getGradeLevel = (score: number): { label: string; color: string } => {
-    if (score >= 90) return { label: '优秀', color: 'green' }
-    if (score >= 75) return { label: '良好', color: 'blue' }
-    if (score >= 60) return { label: '及格', color: 'orange' }
-    if (score >= 40) return { label: '较差', color: 'red' }
-    return { label: '未达标', color: 'default' }
+    if (score >= 90) return { label: t('excellent'), color: 'green' }
+    if (score >= 75) return { label: t('good'), color: 'blue' }
+    if (score >= 60) return { label: t('pass'), color: 'orange' }
+    if (score >= 40) return { label: t('poor'), color: 'red' }
+    return { label: t('fail'), color: 'default' }
   }
 
   const [tasks, setTasks] = useState<TaskInfo[]>([])
@@ -78,17 +80,17 @@ const TaskPage: React.FC = () => {
       const { tasks: list } = await tasksApi.getActiveTasks()
       setTasks(list)
     } catch {
-      message.error('加载任务列表失败')
+      message.error(t('loadTaskListFailed'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
   // ── 创建任务 ──
   const handleCreate = async () => {
-    if (!taskName.trim()) { message.warning('请输入任务名称'); return }
+    if (!taskName.trim()) { message.warning(t('enterTaskName')); return }
     try {
       const res = await tasksApi.createTask(taskName.trim(), taskDesc.trim(), taskScope)
       message.success(res.message)
@@ -98,7 +100,7 @@ const TaskPage: React.FC = () => {
       setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       loadTasks()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '创建失败')
+      message.error(err?.response?.data?.detail || t('createFailed'))
     }
   }
 
@@ -109,7 +111,7 @@ const TaskPage: React.FC = () => {
       message.success(res.message)
       loadTasks()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '结束失败')
+      message.error(err?.response?.data?.detail || t('endFailed'))
     }
   }
 
@@ -120,7 +122,7 @@ const TaskPage: React.FC = () => {
       message.success(res.message)
       loadTasks()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '删除失败')
+      message.error(err?.response?.data?.detail || t('taskDeleteFailed'))
     }
   }
 
@@ -128,10 +130,10 @@ const TaskPage: React.FC = () => {
   const handleSubmit = async () => {
     if (!selectedTask) return
     const content = messages.map(m =>
-      `**${m.role === 'user' ? '用户' : '助手'}**: ${m.content}`
+      `**${m.role === 'user' ? t('user') : t('assistant')}**: ${m.content}`
     ).join('\n\n---\n\n')
     if (!content.trim()) {
-      message.warning('当前对话为空，请先进行对话')
+      message.warning(t('emptyChatWarning'))
       return
     }
     try {
@@ -142,7 +144,7 @@ const TaskPage: React.FC = () => {
       setSelectedTask(null)
       loadTasks()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '提交失败')
+      message.error(err?.response?.data?.detail || t('submitFailed'))
     }
   }
 
@@ -151,12 +153,12 @@ const TaskPage: React.FC = () => {
     if (!viewTask) return
     setContentLoading(true)
     setContentDrawer(true)
-    setStudentContent('加载中...')
+    setStudentContent(t('loading'))
     try {
       const data = await tasksApi.getTaskSubmissions(viewTask.id, studentUsername)
-      setStudentContent(data.student_content || '（无提交内容）')
+      setStudentContent(data.student_content || t('noSubmissionContent'))
     } catch (err: any) {
-      setStudentContent(`❌ 加载失败: ${err?.response?.data?.detail || err.message}`)
+      setStudentContent(`❌ ${err?.response?.data?.detail || err.message}`)
     } finally {
       setContentLoading(false)
     }
@@ -171,7 +173,7 @@ const TaskPage: React.FC = () => {
       if (viewTask) handleViewSubmissions(viewTask)
       loadTasks()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '回退失败')
+      message.error(err?.response?.data?.detail || t('taskRollbackFailed'))
     }
   }
 
@@ -186,11 +188,11 @@ const TaskPage: React.FC = () => {
         res.grades.forEach(g => { map[g.student] = g })
         setGradesMap(map)
       } else {
-        message.warning('AI 未返回有效的批改结果，请检查任务说明或重试')
+        message.warning(t('aiGradingFailed'))
       }
       if (res.summary) setClassSummary(res.summary)
     } catch (err: any) {
-      message.error(`AI 批改失败: ${err?.response?.data?.detail || err.message || '未知错误'}`)
+      message.error(t('aiGradeFailed') + ': ' + (err?.response?.data?.detail || err.message || t('unknownError')))
     } finally {
       setAiGradingTaskId(null)
     }
@@ -230,7 +232,7 @@ const TaskPage: React.FC = () => {
       // 同时加载批改结果
       loadGrades(task.id)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载提交详情失败')
+      message.error(err?.response?.data?.detail || t('loadDetailFailed'))
       setSubmissionsData({ task_name: '', task_status: '', submissions: [], count: 0 })
     } finally {
       setSubmissionsLoading(false)
@@ -258,46 +260,46 @@ const TaskPage: React.FC = () => {
 
   // ── 列定义 ──
   const studentStatusColumn = {
-    title: '我的状态', key: 'myStatus', width: 100,
+    title: t('myStatus'), key: 'myStatus', width: 100,
     render: (_: any, record: TaskInfo) => {
       const submitted = record.submissions?.includes(username)
       return submitted
-        ? <Tag color="success">✅ 已提交</Tag>
-        : <Tag color="default">⏳ 未提交</Tag>
+        ? <Tag color="success">{t('submitted')}</Tag>
+        : <Tag color="default">{t('notSubmitted')}</Tag>
     },
   }
 
   const columns = [
-    { title: '任务名称', dataIndex: 'name', key: 'name', width: 180 },
+    { title: t('taskName'), dataIndex: 'name', key: 'name', width: 180 },
     {
-      title: '任务说明', dataIndex: 'description', key: 'description', width: 200,
+      title: t('taskDescription'), dataIndex: 'description', key: 'description', width: 200,
       render: (d: string) => d ? (
         <Typography.Paragraph ellipsis={{ rows: 1 }} style={{ margin: 0, fontSize: 13, color: '#666' }}>
           {d}
         </Typography.Paragraph>
       ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>--</Typography.Text>,
     },
-    { title: '创建者', dataIndex: 'creator', key: 'creator', width: 80 },
+    { title: t('taskCreator'), dataIndex: 'creator', key: 'creator', width: 80 },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 70,
+      title: t('status'), dataIndex: 'status', key: 'status', width: 70,
       render: (s: string) => (
         <Tag color={s === 'active' ? 'green' : 'default'}>
-          {s === 'active' ? '进行中' : '已结束'}
+          {s === 'active' ? t('inProgress') : t('ended')}
         </Tag>
       ),
     },
-    { title: '创建时间', dataIndex: 'created_time', key: 'created_time', width: 160 },
+    { title: t('createdTime'), dataIndex: 'created_time', key: 'created_time', width: 160 },
     ...(isStudent
       ? [studentStatusColumn]
       : [{
-          title: '已提交', key: 'submissions', width: 100,
+          title: t('submittedCount'), key: 'submissions', width: 100,
           render: (_: any, record: TaskInfo) => {
             const names = (record as any).submissions_names || []
             const count = record.submissions?.length || 0
-            if (count === 0) return <Typography.Text type="secondary">0 人</Typography.Text>
+            if (count === 0) return <Typography.Text type="secondary">{t('zeroPeople')}</Typography.Text>
             return (
               <Popover
-                title="已提交学生"
+                title={t('submittedStudents')}
                 content={
                   <div style={{ maxHeight: 200, overflow: 'auto' }}>
                     {names.map((n: string, i: number) => (
@@ -307,56 +309,66 @@ const TaskPage: React.FC = () => {
                 }
                 trigger="click"
               >
-                <Button type="link" size="small">{count} 人 👤</Button>
+                <Button type="link" size="small">{t('peopleCount', { count })} 👤</Button>
               </Popover>
             )
           },
         }]
     ),
     {
-      title: '操作', key: 'action', width: 280,
+      title: t('actions'), key: 'action', width: 280,
       render: (_: any, record: TaskInfo) => (
         <Space size="small" wrap>
           {isStudent && record.status === 'active' && (
-            <Button size="small" type="primary" icon={<SendOutlined />}
-              onClick={() => { setSelectedTask(record); setSubmitModal(true) }}
-            >提交</Button>
+            <Tooltip title={t('submitAction')}>
+              <Button size="small" type="primary" icon={<SendOutlined />}
+                onClick={() => { setSelectedTask(record); setSubmitModal(true) }}
+              />
+            </Tooltip>
           )}
           {isStudent && record.submissions?.includes(username) && (
-            <Button size="small" icon={<BarChartOutlined />}
-              onClick={() => handleViewMyGrade(record)}
-            >成绩</Button>
+            <Tooltip title={t('scoreAction')}>
+              <Button size="small" icon={<BarChartOutlined />}
+                onClick={() => handleViewMyGrade(record)}
+              />
+            </Tooltip>
           )}
           {isAdminOrTeacher && (
-            <Button size="small" icon={<EyeOutlined />}
-              onClick={() => handleViewSubmissions(record)}
-            >详情</Button>
+            <Tooltip title={t('details')}>
+              <Button size="small" icon={<EyeOutlined />}
+                onClick={() => handleViewSubmissions(record)}
+              />
+            </Tooltip>
           )}
           {isAdminOrTeacher && record.submissions && record.submissions.length > 0 && (
-            <Tooltip title="使用 AI 分析所有学生的对话记录并评分">
+            <Tooltip title={t('aiGradeTooltip')}>
               <Button size="small" icon={<RobotOutlined />}
                 loading={aiGradingTaskId === record.id}
                 onClick={() => handleAiGrade(record.id)}
-              >AI 批改</Button>
+              />
             </Tooltip>
           )}
           {isAdminOrTeacher && record.status === 'active' && (
             <Popconfirm
-              title={`确认结束任务「${record.name}」？`}
-              description="结束后学生将无法再提交"
+              title={t('confirmEndTitle', { name: record.name })}
+              description={t('confirmEndDesc')}
               onConfirm={() => handleEnd(record.id)}
-              okText="确认结束" cancelText="取消"
+              okText={t('confirmEndOk')} cancelText={t('cancel')}
             >
-              <Button size="small" icon={<CheckCircleOutlined />}>结束</Button>
+              <Tooltip title={t('endAction')}>
+                <Button size="small" icon={<CheckCircleOutlined />} />
+              </Tooltip>
             </Popconfirm>
           )}
           {isAdminOrTeacher && (
             <Popconfirm
-              title={`确认删除任务「${record.name}」？`}
+              title={t('confirmDeleteTitle', { name: record.name })}
               onConfirm={() => handleDelete(record.id)}
-              okText="确认删除" cancelText="取消"
+              okText={t('confirmDeleteOk')} cancelText={t('cancel')}
             >
-              <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+              <Tooltip title={t('deleteAction')}>
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Tooltip>
             </Popconfirm>
           )}
         </Space>
@@ -368,13 +380,13 @@ const TaskPage: React.FC = () => {
     <div>
       <Card>
         <Space style={{ marginBottom: 16 }}>
-          <Typography.Title level={4} style={{ margin: 0 }}>📋 任务管理</Typography.Title>
+          <Typography.Title level={4} style={{ margin: 0 }}>{t('taskManagement')}</Typography.Title>
           {isAdminOrTeacher && (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
-              创建任务
+              {t('createTask')}
             </Button>
           )}
-          <Button icon={<ReloadOutlined />} onClick={loadTasks}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={loadTasks}>{t('refresh')}</Button>
         </Space>
 
         <Spin spinning={loading}>
@@ -382,29 +394,29 @@ const TaskPage: React.FC = () => {
             dataSource={tasks}
             columns={columns}
             rowKey="id"
-            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 个任务`, pageSizeOptions: ['10', '20', '50'] }}
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalTasks', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
             size="small"
-            locale={{ emptyText: '暂无活动任务' }}
+            locale={{ emptyText: t('noActiveTasks') }}
           />
         </Spin>
       </Card>
 
       {/* 创建任务弹窗 */}
       <Modal
-        title="创建新任务"
+        title={t('createNewTask')}
         open={createModal}
         onOk={handleCreate}
         onCancel={() => { setCreateModal(false); setTaskName(''); setTaskDesc(''); setTaskScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
-        okText="创建" cancelText="取消"
+        okText={t('createTask')} cancelText={t('cancel')}
         width={640}
       >
         <Input
-          placeholder="输入任务名称"
+          placeholder={t('taskNamePlaceholder')}
           value={taskName}
           onChange={(e) => setTaskName(e.target.value)}
         />
         <Input.TextArea
-          placeholder="任务说明（可选，学生可见）"
+          placeholder={t('taskDescPlaceholder')}
           value={taskDesc}
           onChange={(e) => setTaskDesc(e.target.value)}
           rows={3}
@@ -417,30 +429,30 @@ const TaskPage: React.FC = () => {
 
       {/* 提交任务确认弹窗 */}
       <Modal
-        title={`提交到任务: ${selectedTask?.name || ''}`}
+        title={t('submitToTask', { name: selectedTask?.name || '' })}
         open={submitModal}
         onOk={handleSubmit}
         onCancel={() => { setSubmitModal(false); setSelectedTask(null) }}
-        okText="确认提交" cancelText="取消"
+        okText={t('confirmSubmit')} cancelText={t('cancel')}
       >
         <Space orientation="vertical">
           <Typography.Text>
-            将当前 AI 对话内容提交到任务 <strong>{selectedTask?.name}</strong>？
+            {t('submitContentDesc')} <strong>{selectedTask?.name}</strong>？
           </Typography.Text>
           {selectedTask?.description && (
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              📋 任务说明：{selectedTask.description}
+              {t('taskDescLabel')}{selectedTask.description}
             </Typography.Text>
           )}
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            共 {messages.length} 条对话记录
+            {t('totalMessagesCount', { count: messages.length })}
           </Typography.Text>
         </Space>
       </Modal>
 
       {/* 提交详情侧栏 */}
       <Drawer
-        title={`📋 ${submissionsData.task_name || '加载中...'}`}
+        title={`📋 ${submissionsData.task_name || t('loading')}`}
         placement="right"
         size={760}
         open={submissionsDrawer}
@@ -449,18 +461,18 @@ const TaskPage: React.FC = () => {
         <Spin spinning={submissionsLoading || gradesLoading}>
           <Space style={{ marginBottom: 16 }} wrap>
             <Tag color={submissionsData.task_status === 'active' ? 'green' : 'default'}>
-              {submissionsData.task_status === 'active' ? '进行中' : '已结束'}
+              {submissionsData.task_status === 'active' ? t('inProgress') : t('ended')}
             </Tag>
             {Object.keys(gradesMap).length > 0 && (
               <Tag color="blue" icon={<RobotOutlined />}>
-                🤖 已批改 {Object.keys(gradesMap).length}/{submissionsData.count} 人
+                {t('gradedCount', { graded: Object.keys(gradesMap).length, total: submissionsData.count })}
               </Tag>
             )}
             {viewTask && submissionsData.submissions.length > 0 && (
               <Button size="small" icon={<RobotOutlined />}
                 loading={aiGradingTaskId === viewTask.id}
                 onClick={() => handleAiGrade(viewTask.id)}
-              >{Object.keys(gradesMap).length > 0 ? '重新批改' : 'AI 批改'}</Button>
+              >{Object.keys(gradesMap).length > 0 ? t('regrade') : t('aiGradeAction')}</Button>
             )}
           </Space>
 
@@ -468,14 +480,14 @@ const TaskPage: React.FC = () => {
             <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
               <Space orientation="vertical" style={{ width: '100%' }} size={4}>
                 <Typography.Text strong style={{ color: '#1d39c4' }}>
-                  <RobotOutlined /> 全班批改总结
+                  <RobotOutlined /> {t('classGradingSummary')}
                 </Typography.Text>
                 {(classSummary.class_average != null) && (
                   <Space wrap>
-                    <Tag color="blue">平均分：{classSummary.class_average?.toFixed?.(1) ?? classSummary.class_average}</Tag>
-                    <Tag color="green">最高分：{classSummary.highest_score}</Tag>
-                    <Tag color="orange">最低分：{classSummary.lowest_score}</Tag>
-                    <Tag>人数：{classSummary.total_students}</Tag>
+                    <Tag color="blue">{t('avgScore')}{classSummary.class_average?.toFixed?.(1) ?? classSummary.class_average}</Tag>
+                    <Tag color="green">{t('highestScore')}{classSummary.highest_score}</Tag>
+                    <Tag color="orange">{t('lowestScore')}{classSummary.lowest_score}</Tag>
+                    <Tag>{t('totalStudents')}{classSummary.total_students}</Tag>
                   </Space>
                 )}
                 <Typography.Paragraph style={{ fontSize: 13, margin: '4px 0', color: '#595959' }}>
@@ -483,7 +495,7 @@ const TaskPage: React.FC = () => {
                 </Typography.Paragraph>
                 {classSummary.teaching_suggestions && (
                   <Typography.Paragraph style={{ fontSize: 13, margin: 0, color: '#1d39c4', background: '#f0f5ff', padding: '4px 8px', borderRadius: 4 }}>
-                    📌 教学建议：{classSummary.teaching_suggestions}
+                    {t('teachingSuggestions')}{classSummary.teaching_suggestions}
                   </Typography.Paragraph>
                 )}
               </Space>
@@ -491,14 +503,14 @@ const TaskPage: React.FC = () => {
           )}
 
           {submissionsData.submissions.length === 0 ? (
-            <Typography.Text type="secondary">暂无学生提交</Typography.Text>
+            <Typography.Text type="secondary">{t('noSubmissions')}</Typography.Text>
           ) : (
             <>
               <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
-                已提交学生（{submissionsData.count} 人）
+                {t('submittedStudentsCount', { count: submissionsData.count })}
                 {Object.keys(gradesMap).length > 0 && (
                   <Typography.Text style={{ fontSize: 12, marginLeft: 8 }} type="secondary">
-                    （按分数降序排列）
+                    {t('sortedByScoreDesc')}
                   </Typography.Text>
                 )}
               </Typography.Text>
@@ -518,7 +530,7 @@ const TaskPage: React.FC = () => {
                 })()}
                 expandable={{
                   expandedRowRender: (r: any) => {
-                    if (!r.grade) return <Typography.Text type="secondary">暂无批改数据</Typography.Text>
+                    if (!r.grade) return <Typography.Text type="secondary">{t('noGradeData')}</Typography.Text>
                     return (
                       <div style={{ padding: '8px 0 4px 0' }}>
                         <Typography.Paragraph style={{ fontSize: 13, margin: '0 0 8px 0', color: '#595959' }}>
@@ -527,21 +539,21 @@ const TaskPage: React.FC = () => {
                         {r.grade.strengths?.length > 0 && (
                           <div style={{ marginBottom: 6 }}>
                             <Typography.Text style={{ fontSize: 12, color: '#52c41a' }}>
-                              ✅ 优点：{r.grade.strengths.join('、')}
+                              {t('strengths')}{r.grade.strengths.join('、')}
                             </Typography.Text>
                           </div>
                         )}
                         {r.grade.weaknesses?.length > 0 && (
                           <div style={{ marginBottom: 6 }}>
                             <Typography.Text style={{ fontSize: 12, color: '#ff4d4f' }}>
-                              ❌ 不足：{r.grade.weaknesses.join('、')}
+                              {t('weaknesses')}{r.grade.weaknesses.join('、')}
                             </Typography.Text>
                           </div>
                         )}
                         {r.grade.feedback && (
                           <div style={{ padding: '6px 8px', background: '#f0f5ff', borderRadius: 4, marginTop: 4 }}>
                             <Typography.Text style={{ fontSize: 12, color: '#1d39c4' }}>
-                              📝 建议：{r.grade.feedback}
+                              {t('suggestions')}{r.grade.feedback}
                             </Typography.Text>
                           </div>
                         )}
@@ -556,13 +568,13 @@ const TaskPage: React.FC = () => {
                     render: (_: any, __: any, i: number) => i + 1,
                   },
                   {
-                    title: '学生', key: 'student', width: 80,
+                    title: t('student'), key: 'student', width: 80,
                     render: (_: any, r: any) => (
                       <Typography.Text strong style={{ fontSize: 12 }}>{r.name}</Typography.Text>
                     ),
                   },
                   {
-                    title: '分数/等级', key: 'score', width: 110,
+                    title: t('scoreGrade'), key: 'score', width: 110,
                     render: (_: any, r: any) => r.grade ? (
                       <Space align="center" size={2}>
                         <Typography.Text strong style={{ fontSize: 14, color: '#52c41a', minWidth: 24 }}>
@@ -570,24 +582,24 @@ const TaskPage: React.FC = () => {
                         </Typography.Text>
                         <Tag color={r.level.color} style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}>{r.level.label}</Tag>
                       </Space>
-                    ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>待批改</Typography.Text>,
+                    ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('pendingGrading')}</Typography.Text>,
                   },
                   {
-                    title: '操作', key: 'action', width: 66,
+                    title: t('actions'), key: 'action', width: 66,
                     render: (_: any, r: any) => (
                       <Space size={2}>
-                        <Tooltip title="查看提交内容">
+                        <Tooltip title={t('viewSubmissionContent')}>
                           <Button size="small" type="text" icon={<EyeOutlined />}
                             onClick={() => handleViewContent(r.username)}
                           />
                         </Tooltip>
                         <Popconfirm
-                          title={`回退 ${r.name}？`}
-                          description="回退后可重新提交"
+                          title={t('confirmRevert', { name: r.name })}
+                          description={t('revertDesc')}
                           onConfirm={() => handleRevert(viewTask?.id || '', r.username)}
-                          okText="确认" cancelText="取消"
+                          okText={t('confirmOk')} cancelText={t('cancel')}
                         >
-                          <Tooltip title="回退提交">
+                          <Tooltip title={t('revertSubmission')}>
                             <Button size="small" type="text" icon={<UndoOutlined />} />
                           </Tooltip>
                         </Popconfirm>
@@ -598,7 +610,7 @@ const TaskPage: React.FC = () => {
                 rowKey="key"
                 size="small"
                 pagination={false}
-                locale={{ emptyText: '暂无数据' }}
+                locale={{ emptyText: t('emptyData') }}
               />
             </>
           )}
@@ -606,7 +618,7 @@ const TaskPage: React.FC = () => {
 
         {/* 学生提交内容抽屉 */}
         <Drawer
-          title="提交内容"
+          title={t('contentTitle')}
           placement="right"
           size={520}
           open={contentDrawer}
@@ -617,7 +629,7 @@ const TaskPage: React.FC = () => {
           <Spin spinning={contentLoading}>
             <div className="markdown-content">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {studentContent || '（无内容）'}
+                {studentContent || t('noContent')}
               </ReactMarkdown>
             </div>
           </Spin>
@@ -632,10 +644,10 @@ const TaskPage: React.FC = () => {
 
       {/* 学生查看自己的批改结果 */}
       <Modal
-        title={`📊 批改结果 - ${myGradeTaskName}`}
+        title={t('gradingResult', { name: myGradeTaskName })}
         open={myGradeModal}
         onCancel={() => setMyGradeModal(false)}
-        footer={<Button onClick={() => setMyGradeModal(false)}>关闭</Button>}
+        footer={<Button onClick={() => setMyGradeModal(false)}>{t('close')}</Button>}
         width={520}
       >
         <Spin spinning={myGradeLoading}>
@@ -661,7 +673,7 @@ const TaskPage: React.FC = () => {
 
               {myGrade.strengths && myGrade.strengths.length > 0 && (
                 <div>
-                  <Typography.Text strong style={{ color: '#52c41a' }}>✅ 优点</Typography.Text>
+                  <Typography.Text strong style={{ color: '#52c41a' }}>{t('strengthsTitle')}</Typography.Text>
                   <ul style={{ margin: '4px 0 0 0', paddingLeft: 20 }}>
                     {myGrade.strengths.map((s, i) => (
                       <li key={i}><Typography.Text style={{ fontSize: 13 }}>{s}</Typography.Text></li>
@@ -672,7 +684,7 @@ const TaskPage: React.FC = () => {
 
               {myGrade.weaknesses && myGrade.weaknesses.length > 0 && (
                 <div>
-                  <Typography.Text strong style={{ color: '#ff4d4f' }}>❌ 不足</Typography.Text>
+                  <Typography.Text strong style={{ color: '#ff4d4f' }}>{t('weaknessesTitle')}</Typography.Text>
                   <ul style={{ margin: '4px 0 0 0', paddingLeft: 20 }}>
                     {myGrade.weaknesses.map((w, i) => (
                       <li key={i}><Typography.Text style={{ fontSize: 13 }}>{w}</Typography.Text></li>
@@ -683,7 +695,7 @@ const TaskPage: React.FC = () => {
 
               {myGrade.feedback && (
                 <Card size="small" style={{ background: '#f0f5ff', border: '1px solid #adc6ff' }}>
-                  <Typography.Text strong style={{ color: '#1d39c4' }}>📝 改进建议</Typography.Text>
+                  <Typography.Text strong style={{ color: '#1d39c4' }}>{t('improvementSuggestions')}</Typography.Text>
                   <Typography.Paragraph style={{ margin: '4px 0 0 0', fontSize: 13 }}>
                     {myGrade.feedback}
                   </Typography.Paragraph>
@@ -692,12 +704,12 @@ const TaskPage: React.FC = () => {
 
               {myGrade.graded_at && (
                 <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-                  批改时间：{myGrade.graded_at}
+                  {t('gradedAt')}{myGrade.graded_at}
                 </Typography.Text>
               )}
             </Space>
           ) : (
-            <Typography.Text type="secondary">暂无批改结果，请等待教师批改</Typography.Text>
+            <Typography.Text type="secondary">{t('noGradeResult')}</Typography.Text>
           )}
         </Spin>
       </Modal>

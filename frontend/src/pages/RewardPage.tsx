@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text } = Typography
 
@@ -308,6 +309,7 @@ const TeacherMyPoints: React.FC = () => {
 }
 
 const RewardPage: React.FC = () => {
+  const { t } = useTranslation('score')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -578,7 +580,7 @@ const RewardPage: React.FC = () => {
                             const { data } = await apiClient.post('/api/rewards/update-subject-counts')
                             if (data?.upgrades?.length > 0) message.success(`🎉 ${data.upgrades.length} 个学科称号升级！`)
                             await fetchTitleInfo()
-                          } catch { message.error('更新失败') }
+                          } catch { message.error(t('updateFailed')) }
                         }}>
                         刷新学科数据
                       </Button>
@@ -599,10 +601,10 @@ const RewardPage: React.FC = () => {
                         onClick={async () => {
                           try {
                             const { data } = await apiClient.post('/api/rewards/check-badges')
-                            if (data?.newly_unlocked?.length > 0) message.success(`🎉 解锁 ${data.newly_unlocked.length} 枚新徽章！`)
-                            else message.info('没有新徽章可解锁')
+                            if (data?.newly_unlocked?.length > 0) message.success(t('unlockedBadges', { count: data.newly_unlocked.length }))
+                            else message.info(t('noNewBadges'))
                             await fetchTitleInfo()
-                          } catch { message.error('检测失败') }
+                          } catch { message.error(t('detectFailed')) }
                         }}>
                         重新检测徽章
                       </Button>

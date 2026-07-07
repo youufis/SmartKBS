@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   Card, Row, Col, Statistic, Typography, Spin, List, Tag, Space,
   Timeline, Button, Empty, Progress,
@@ -160,6 +161,8 @@ const DashboardPage: React.FC = () => {
   const [activityLoading, setActivityLoading] = useState(true)
   const [todoTotal, setTodoTotal] = useState(0)
 
+  const { t } = useTranslation('dashboard')
+
   const isStudent = user?.role === 'student'
   const isTeacher = user?.role === 'teacher'
   const isAdmin = user?.role === 'admin'
@@ -215,18 +218,20 @@ const DashboardPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
-        <Spin size="large" description="加载中..." />
+        <Spin size="large" description={t('loading')} />
       </div>
     )
   }
 
   if (!summary) {
-    return <Empty description="无法加载仪表盘数据" />
+    return <Empty description={t('loadFailed')} />
   }
 
   // ── 欢迎横幅 ──
-  const roleLabel = isStudent ? '同学' : isTeacher ? '老师' : '管理员'
-  const timeOfDay = new Date().getHours() < 12 ? '上午' : new Date().getHours() < 18 ? '下午' : '晚上'
+  const hour = new Date().getHours()
+  const timeKey = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'
+  const roleKey = isStudent ? 'student' : isTeacher ? 'teacher' : 'admin'
+  const roleLabel = t(`welcome.${roleKey}`)
 
   return (
     <Card style={{ borderRadius: 8 }}>
@@ -243,7 +248,7 @@ const DashboardPage: React.FC = () => {
       >
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 16, fontWeight: 600, whiteSpace: 'nowrap' }}>
-            {timeOfDay}好，{summary.user_name}{roleLabel}！👋
+            {t('welcome.greeting', { time: t(`welcome.${timeKey}`), name: summary.user_name, role: roleLabel })}
           </span>
           {isStudent && summary.title_name && (
             <Tag style={{ fontSize: 13, padding: '0 10px', borderRadius: 10, margin: 0 }}
@@ -252,14 +257,14 @@ const DashboardPage: React.FC = () => {
             </Tag>
           )}
           <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, whiteSpace: 'nowrap' }}>
-            {isStudent ? '继续你的学习之旅吧' : '欢迎使用 SmartKBS 智慧教学平台'}
+            {isStudent ? t('welcome.studentPrompt') : t('welcome.teacherPrompt')}
           </span>
           {isStudent && (
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#fff', whiteSpace: 'nowrap' }}>
               <TrophyOutlined style={{ marginRight: 4 }} />
-              积分 <Text strong style={{ color: '#fff', fontSize: 18 }}>{summary.total_score ?? 0}</Text>
+              {t('welcome.score')} <Text strong style={{ color: '#fff', fontSize: 18 }}>{summary.total_score ?? 0}</Text>
               <Text style={{ color: 'rgba(255,255,255,0.7)', marginLeft: 8, fontSize: 13 }}>
-                · 排名 {summary.rank ?? '-'}
+                · {t('welcome.rank')} {summary.rank ?? '-'}
               </Text>
               {summary.title_name && summary.next_title_name && (
                 <Progress
@@ -279,7 +284,7 @@ const DashboardPage: React.FC = () => {
                 icon={<span>📋</span>}
                 onClick={() => navigate('/task-todo')}
               >
-                任务清单
+                {t('welcome.taskList')}
                 <Tag style={{ marginLeft: 4, fontSize: 10, borderRadius: 8, background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', lineHeight: '16px' }}>
                   {todoTotal || (summary.pending_exam_count ?? 0) + (summary.active_task_count ?? 0) + (summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0) + (summary.shared_files_count ?? 0)}
                 </Tag>
@@ -292,19 +297,19 @@ const DashboardPage: React.FC = () => {
                 icon={<span>🧠</span>}
                 onClick={() => navigate('/chat?companion=1')}
               >
-                AI学伴
+                {t('welcome.aiCompanion')}
               </Button>
             </span>
           )}
           {isTeacher && summary.teacher_grades && (
             <span style={{ marginLeft: 'auto', fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
-              <TeamOutlined /> {summary.teacher_grades} · {summary.teacher_classes}班
+              <TeamOutlined /> {summary.teacher_grades} · {summary.teacher_classes}{t('classUnit')}
             </span>
           )}
           {isTeacher && summary.teacher_subjects && summary.teacher_subjects.length > 0 && (
             <span style={{ marginLeft: 12, fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
               <ExperimentOutlined style={{ marginRight: 4 }} />
-              任教：{summary.teacher_subjects.join('、')}
+              {t('welcome.teaching')}{summary.teacher_subjects.join('、')}
             </span>
           )}
         </div>
@@ -317,10 +322,10 @@ const DashboardPage: React.FC = () => {
             <Col xs={12} sm={6} md={6}>
               <Card hoverable onClick={() => navigate('/exam')} size="small">
                 <Statistic
-                  title="学习考试"
+                  title={t('stats.exam')}
                   value={`${summary.completed_exam_count ?? 0}/${summary.pending_exam_count ?? 0}`}
                   prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>已完成 · 待考{summary.pending_exam_count ?? 0}场 · 错题{summary.wrong_exam_count ?? 0}场</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>{t('stats.examSuffix', { done: summary.completed_exam_count ?? 0, pending: summary.pending_exam_count ?? 0, wrong: summary.wrong_exam_count ?? 0 })}</Text>}
                   styles={{ content: { color: '#1677ff', fontSize: 22 } }}
                 />
               </Card>
@@ -328,10 +333,10 @@ const DashboardPage: React.FC = () => {
             <Col xs={12} sm={6} md={6}>
               <Card hoverable onClick={() => navigate('/score')} size="small">
                 <Statistic
-                  title="积分任务"
+                  title={t('stats.score')}
                   value={summary.total_score ?? 0}
                   prefix={<TrophyOutlined style={{ color: '#faad14' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>排名{summary.rank ?? '-'} · 任务{summary.active_task_count ?? 0}个</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>{t('stats.scoreSuffix', { rank: summary.rank ?? '-', count: summary.active_task_count ?? 0 })}</Text>}
                   styles={{ content: { color: '#faad14', fontSize: 22 } }}
                 />
               </Card>
@@ -339,10 +344,10 @@ const DashboardPage: React.FC = () => {
             <Col xs={12} sm={6} md={6}>
               <Card hoverable onClick={() => navigate('/interaction')} size="small">
                 <Statistic
-                  title="课堂互动"
+                  title={t('stats.interaction')}
                   value={(summary.active_quiz_count ?? 0) + (summary.pending_practice_count ?? 0)}
                   prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.active_quiz_count ?? 0}次 · 练习{summary.pending_practice_count ?? 0}项</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>{t('stats.interactionSuffix', { quiz: summary.active_quiz_count ?? 0, practice: summary.pending_practice_count ?? 0 })}</Text>}
                   styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
                 />
               </Card>
@@ -350,10 +355,10 @@ const DashboardPage: React.FC = () => {
             <Col xs={12} sm={6} md={6}>
               <Card hoverable onClick={() => navigate('/quest')} size="small">
                 <Statistic
-                  title="趣味挑战"
+                  title={t('stats.quest')}
                   value={summary.quest_completed_count ?? 0}
                   prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
-                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关{summary.quest_completed_count ?? 0}关 · 抢答{summary.quick_quiz_participated ?? 0}次</Text>}
+                  suffix={<Text type="secondary" style={{ fontSize: 12 }}>{t('stats.questSuffix', { quest: summary.quest_completed_count ?? 0, quick: summary.quick_quiz_participated ?? 0 })}</Text>}
                   styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
                 />
               </Card>
@@ -365,12 +370,12 @@ const DashboardPage: React.FC = () => {
           <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/exam')} size="small">
               <Statistic
-                title="考试管理"
+                title={t('stats.examManage')}
                 value={summary.exam_stats?.total ?? 0}
                 prefix={<FileAddOutlined style={{ color: '#1677ff' }} />}
                 suffix={
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    草稿{summary.exam_stats?.draft ?? 0} · 发布{summary.exam_stats?.published ?? 0} · 结束{summary.exam_stats?.ended ?? 0}
+                    {t('stats.examManageSuffix', { draft: summary.exam_stats?.draft ?? 0, published: summary.exam_stats?.published ?? 0, ended: summary.exam_stats?.ended ?? 0 })}
                   </Text>
                 }
                 styles={{ content: { color: '#1677ff', fontSize: 22 } }}
@@ -380,12 +385,12 @@ const DashboardPage: React.FC = () => {
           <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate(isAdmin ? '/user-mgmt' : '/score')} size="small">
               <Statistic
-                title="教学概况"
+                title={t('stats.teachingOverview')}
                 value={summary.total_students ?? 0}
                 prefix={<TeamOutlined style={{ color: '#722ed1' }} />}
                 suffix={
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    {isAdmin ? `教师${summary.total_teachers ?? 0}` : '名学生'} · 提交{summary.total_submissions ?? 0} · 点名{summary.rollcall_this_week ?? 0}次
+                    {isAdmin ? t('stats.teachingOverviewSuffix', { teachers: summary.total_teachers ?? 0, submissions: summary.total_submissions ?? 0, rollcall: summary.rollcall_this_week ?? 0 }) : t('stats.teachingOverviewSuffixTeacher', { submissions: summary.total_submissions ?? 0, rollcall: summary.rollcall_this_week ?? 0 })}
                   </Text>
                 }
                 styles={{ content: { color: '#722ed1', fontSize: 22 } }}
@@ -395,10 +400,10 @@ const DashboardPage: React.FC = () => {
           <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/interaction')} size="small">
               <Statistic
-                title="课堂活动"
+                title={t('stats.classActivity')}
                 value={(summary.teacher_quiz_count ?? 0) + (summary.practice_published ?? 0)}
                 prefix={<ThunderboltOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>测验{summary.teacher_quiz_count ?? 0} · 练习{summary.practice_published ?? 0} · 提问{summary.teacher_question_count ?? 0} · 回答{summary.teacher_student_answer_count ?? 0}</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>{t('stats.classActivitySuffix', { quiz: summary.teacher_quiz_count ?? 0, practice: summary.practice_published ?? 0, questions: summary.teacher_question_count ?? 0, answers: summary.teacher_student_answer_count ?? 0 })}</Text>}
                 styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
               />
             </Card>
@@ -406,10 +411,10 @@ const DashboardPage: React.FC = () => {
           <Col xs={12} sm={6} md={6}>
             <Card hoverable onClick={() => navigate('/quest')} size="small">
               <Statistic
-                title="趣味挑战"
+                title={t('stats.funChallenge')}
                 value={summary.quest_total_count ?? 0}
                 prefix={<FireOutlined style={{ color: '#ff4d4f' }} />}
-                suffix={<Text type="secondary" style={{ fontSize: 12 }}>闯关总{summary.quest_total_count ?? 0} · 完成{summary.quest_completed_count_t ?? 0} · 抢答{summary.quick_quiz_total ?? 0}结束{summary.quick_quiz_ended ?? 0}</Text>}
+                suffix={<Text type="secondary" style={{ fontSize: 12 }}>{t('stats.funChallengeSuffix', { total: summary.quest_total_count ?? 0, done: summary.quest_completed_count_t ?? 0, quizTotal: summary.quick_quiz_total ?? 0, quizEnded: summary.quick_quiz_ended ?? 0 })}</Text>}
                 styles={{ content: { color: '#ff4d4f', fontSize: 22 } }}
               />
             </Card>
@@ -422,11 +427,11 @@ const DashboardPage: React.FC = () => {
         <Col xs={24} lg={14}>
           {isStudent && summary.pending_exams && summary.pending_exams.length > 0 && (
             <Card
-              title={<Space><ClockCircleOutlined style={{ color: '#faad14' }} />待参加的考试</Space>}
+              title={<Space><ClockCircleOutlined style={{ color: '#faad14' }} />{t('pendingExams')}</Space>}
               style={{ marginBottom: 16 }}
               extra={
                 <Button type="link" onClick={() => navigate('/exam')}>
-                  查看全部 <RightOutlined />
+                  {t('viewAll')} <RightOutlined />
                 </Button>
               }
             >
@@ -440,7 +445,7 @@ const DashboardPage: React.FC = () => {
                         size="small"
                         onClick={() => navigate(`/exam-take/${exam.id}`)}
                       >
-                        开始考试
+                        {t('startExam')}
                       </Button>,
                     ]}
                   >
@@ -450,8 +455,8 @@ const DashboardPage: React.FC = () => {
                       description={
                         <Space size={16}>
                           <Tag>{exam.subject}</Tag>
-                          <Text type="secondary">时长 {exam.duration} 分钟</Text>
-                          <Text type="secondary">{exam.total_score} 分</Text>
+                          <Text type="secondary">{t('duration', { minutes: exam.duration })}</Text>
+                          <Text type="secondary">{t('points', { score: exam.total_score })}</Text>
                         </Space>
                       }
                     />
@@ -467,13 +472,13 @@ const DashboardPage: React.FC = () => {
               <Card size="small" style={{ marginBottom: 16 }}>
                 <Space>
                   <Statistic
-                    title="今日对话"
+                    title={t('todayChat')}
                     value={summary.today_chat_count ?? 0}
                     prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
                     styles={{ content: { color: '#13c2c2', fontSize: 20 } }}
                   />
                   <Statistic
-                    title="本周点名"
+                    title={t('thisWeekRollcall')}
                     value={summary.rollcall_this_week ?? 0}
                     prefix={<AuditOutlined style={{ color: '#fa8c16' }} />}
                     styles={{ content: { color: '#fa8c16', fontSize: 20 } }}
@@ -482,12 +487,12 @@ const DashboardPage: React.FC = () => {
               </Card>
               {summary.recent_exams && summary.recent_exams.length > 0 && (
                 <Card
-                  title={<Space><FileAddOutlined style={{ color: '#1677ff' }} />最近创建的考试</Space>}
+                  title={<Space><FileAddOutlined style={{ color: '#1677ff' }} />{t('recentCreatedExams')}</Space>}
                   size="small"
                   style={{ marginBottom: 16 }}
                   extra={
                     <Button type="link" size="small" onClick={() => navigate('/exam')}>
-                      管理 <RightOutlined />
+                      {t('manage')} <RightOutlined />
                     </Button>
                   }
                 >
@@ -496,9 +501,9 @@ const DashboardPage: React.FC = () => {
                     dataSource={summary.recent_exams}
                     renderItem={(exam) => {
                       const statusMap: Record<string, { label: string; color: string }> = {
-                        draft: { label: '草稿', color: 'default' },
-                        published: { label: '已发布', color: 'green' },
-                        ended: { label: '已结束', color: 'red' },
+                        draft: { label: t('draft'), color: 'default' },
+                        published: { label: t('published'), color: 'green' },
+                        ended: { label: t('ended'), color: 'red' },
                       }
                       const s = statusMap[exam.status] || { label: exam.status, color: 'default' }
                       return (
@@ -526,11 +531,11 @@ const DashboardPage: React.FC = () => {
           {/* 学生：近期考试成绩 */}
           {isStudent && summary.exam_results && summary.exam_results.length > 0 && (
             <Card
-              title={<Space><BarChartOutlined style={{ color: '#1677ff' }} />近期考试成绩</Space>}
+              title={<Space><BarChartOutlined style={{ color: '#1677ff' }} />{t('recentScores')}</Space>}
               style={{ marginBottom: 16 }}
               extra={
                 <Button type="link" onClick={() => navigate('/exam')}>
-                  查看全部 <RightOutlined />
+                  {t('viewAll')} <RightOutlined />
                 </Button>
               }
             >
@@ -543,13 +548,13 @@ const DashboardPage: React.FC = () => {
                       description={
                         <Space>
                           <Text>
-                            得分：
+                            {t('score')}
                             <Text strong style={{ color: item.passed ? '#52c41a' : '#ff4d4f' }}>
                               {item.score} / {item.total_score}
                             </Text>
                           </Text>
                           <Tag color={item.passed ? 'green' : 'red'}>
-                            {item.passed ? '已通过' : '未通过'}
+                            {item.passed ? t('passed') : t('failed')}
                           </Tag>
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {item.submitted_at ? new Date(item.submitted_at).toLocaleString('zh-CN') : ''}
@@ -569,13 +574,13 @@ const DashboardPage: React.FC = () => {
               <Card size="small" style={{ marginBottom: 16 }}>
                 <Space>
                   <Statistic
-                    title="当前在线"
+                    title={t('currentOnline')}
                     value={summary.online_count ?? 0}
                     prefix={<TeamOutlined style={{ color: '#52c41a' }} />}
                     styles={{ content: { color: '#52c41a', fontSize: 20 } }}
                   />
                   <Statistic
-                    title="今日对话"
+                    title={t('todayChat')}
                     value={summary.today_chat_count ?? 0}
                     prefix={<MessageOutlined style={{ color: '#13c2c2' }} />}
                     styles={{ content: { color: '#13c2c2', fontSize: 20 } }}
@@ -584,12 +589,12 @@ const DashboardPage: React.FC = () => {
               </Card>
               {summary.recent_exams && summary.recent_exams.length > 0 && (
                 <Card
-                  title={<Space><FileAddOutlined style={{ color: '#1677ff' }} />最近创建的考试</Space>}
+                  title={<Space><FileAddOutlined style={{ color: '#1677ff' }} />{t('recentCreatedExams')}</Space>}
                   size="small"
                   style={{ marginBottom: 16 }}
                   extra={
                     <Button type="link" size="small" onClick={() => navigate('/exam')}>
-                      管理 <RightOutlined />
+                      {t('manage')} <RightOutlined />
                     </Button>
                   }
                 >
@@ -598,9 +603,9 @@ const DashboardPage: React.FC = () => {
                     dataSource={summary.recent_exams}
                     renderItem={(exam) => {
                       const statusMap: Record<string, { label: string; color: string }> = {
-                        draft: { label: '草稿', color: 'default' },
-                        published: { label: '已发布', color: 'green' },
-                        ended: { label: '已结束', color: 'red' },
+                        draft: { label: t('draft'), color: 'default' },
+                        published: { label: t('published'), color: 'green' },
+                        ended: { label: t('ended'), color: 'red' },
                       }
                       const s = statusMap[exam.status] || { label: exam.status, color: 'default' }
                       return (
@@ -631,12 +636,12 @@ const DashboardPage: React.FC = () => {
           {/* 系统公告 */}
           {announcements.length > 0 && (
             <Card
-              title={<Space><BellOutlined style={{ color: '#fa8c16' }} />系统公告</Space>}
+              title={<Space><BellOutlined style={{ color: '#fa8c16' }} />{t('announcements')}</Space>}
               style={{ marginBottom: 16 }}
               size="small"
               extra={
                 <Button type="link" onClick={() => navigate('/announcements')}>
-                  查看全部 <RightOutlined />
+                  {t('viewAll')} <RightOutlined />
                 </Button>
               }
             >
@@ -651,7 +656,7 @@ const DashboardPage: React.FC = () => {
                           {item.is_pinned && <BellOutlined style={{ color: '#fa8c16', fontSize: 12 }} />}
                           <Text strong style={{ fontSize: 13 }}>{item.title}</Text>
                           <Tag color={item.priority === 'urgent' ? 'red' : item.priority === 'important' ? 'orange' : 'blue'} style={{ fontSize: 10, lineHeight: '16px' }}>
-                            {item.priority === 'urgent' ? '紧急' : item.priority === 'important' ? '重要' : '普通'}
+                            {item.priority === 'urgent' ? t('urgent') : item.priority === 'important' ? t('important') : t('normal')}
                           </Tag>
                         </Space>
                       }
@@ -672,20 +677,20 @@ const DashboardPage: React.FC = () => {
           )}
 
           {/* 快捷导航 */}
-          <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#faad14' }} />快捷导航</Space>}>
+          <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#faad14' }} />{t('quickNav')}</Space>}>
             <Row gutter={[8, 8]}>
               {isStudent ? (
                 <>
-                  <Col span={8}><Button size="small" block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>AI 对话</Button></Col>
-                  <Col span={8}><Button size="small" block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>在线考试</Button></Col>
-                  <Col span={8}><Button size="small" block icon={<TeamOutlined />} onClick={() => navigate('/discussion')}>分组讨论</Button></Col>
+                  <Col span={8}><Button size="small" block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>{t('aiChat')}</Button></Col>
+                  <Col span={8}><Button size="small" block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>{t('onlineExam')}</Button></Col>
+                  <Col span={8}><Button size="small" block icon={<TeamOutlined />} onClick={() => navigate('/discussion')}>{t('groupDiscussion')}</Button></Col>
                 </>
               ) : (
                 <>
-                  <Col span={6}><Button size="small" block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>AI 对话</Button></Col>
-                  <Col span={6}><Button size="small" block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>考试发布</Button></Col>
-                  <Col span={6}><Button size="small" block icon={<AuditOutlined />} onClick={() => navigate('/rollcall')}>智能点名</Button></Col>
-                  <Col span={6}><Button size="small" block icon={<TeamOutlined />} onClick={() => navigate('/discussion')}>分组讨论</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<MessageOutlined />} onClick={() => navigate('/chat')}>{t('aiChat')}</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<FileAddOutlined />} onClick={() => navigate('/exam')}>{t('examPublish')}</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<AuditOutlined />} onClick={() => navigate('/rollcall')}>{t('smartRollcall')}</Button></Col>
+                  <Col span={6}><Button size="small" block icon={<TeamOutlined />} onClick={() => navigate('/discussion')}>{t('groupDiscussion')}</Button></Col>
                 </>
               )}
             </Row>
@@ -695,7 +700,7 @@ const DashboardPage: React.FC = () => {
         {/* ─── 右侧：最近动态时间线 ─── */}
         <Col xs={24} lg={10}>
           <Card
-            title={<Space><ClockCircleOutlined />最近动态</Space>}
+            title={<Space><ClockCircleOutlined />{t('recentActivity')}</Space>}
             extra={
               <Button type="text" icon={<ReloadOutlined />} onClick={fetchActivities} />
             }
@@ -705,7 +710,7 @@ const DashboardPage: React.FC = () => {
             {activityLoading ? (
               <Spin style={{ display: 'block', margin: '40px auto' }} />
             ) : activities.length === 0 ? (
-              <Empty description="暂无最近动态" />
+              <Empty description={t('noActivity')} />
             ) : (
               <Timeline
                 items={activities.slice(0, 30).map((act) => ({

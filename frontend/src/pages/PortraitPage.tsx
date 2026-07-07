@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, Row, Col, Typography, Spin, Button, Tag, Space, Tabs,
   Select, message, Modal, Empty, Tooltip, Divider,
@@ -36,12 +37,6 @@ const STYLE_EMOJI: Record<string, string> = {
   time_traveler: '⏳',
   creative: '🎨',
   random: '🎲',
-}
-
-const SCOPE_MAP: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-  public: { label: '公开', icon: <GlobalOutlined />, color: 'green' },
-  class: { label: '本班', icon: <TeamOutlined />, color: 'blue' },
-  private: { label: '私密', icon: <LockOutlined />, color: 'default' },
 }
 
 // ── 10 套预设主题外观（用户可自选） ──
@@ -88,6 +83,13 @@ const DEFAULT_THEME_KEY = 'auto'
 const STORAGE_THEME_KEY = 'portrait_theme_key'
 
 const PortraitPage: React.FC = () => {
+  const { t } = useTranslation('score')
+
+  const SCOPE_MAP: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+    public: { label: t('scopePublic'), icon: <GlobalOutlined />, color: 'green' },
+    class: { label: t('scopeClass'), icon: <TeamOutlined />, color: 'blue' },
+    private: { label: t('scopePrivate'), icon: <LockOutlined />, color: 'default' },
+  }
   const currentUser = useAuthStore((s) => s.user)
   const {
     todayPortrait, todayExists, historyList,
@@ -165,20 +167,20 @@ const PortraitPage: React.FC = () => {
     if (todayExists) {
       // 本周已生成过 → 确认是否消耗 100 积分
       Modal.confirm({
-        title: '消耗 100 积分再生成一次？',
+        title: t('confirmRegenerate'),
         icon: <ExclamationCircleOutlined />,
         content: (
           <div>
-            <p>本周画像已生成，消耗 <Text strong style={{ color: '#faad14', fontSize: 18 }}>100</Text> 积分可再生成一次。</p>
-            <p style={{ color: '#888', fontSize: 13 }}>积分不足？参与课堂活动、完成练习等均可获得积分。</p>
+            <p>{t('regenerateDesc', { points: 100 })}</p>
+            <p style={{ color: '#888', fontSize: 13 }}>{t('pointsNotEnough')}</p>
           </div>
         ),
-        okText: '消耗 100 积分生成',
-        cancelText: '算了',
+        okText: t('okRegenerate', { points: 100 }),
+        cancelText: t('cancelRegenerate'),
         onOk: async () => {
           const result = await generate(selectedStyle, true)
           if (result) {
-            message.success('🎉 画像生成成功！已扣除 50 积分')
+            message.success(t('generateSuccess', { points: 50 }))
           }
         },
       })
@@ -186,14 +188,14 @@ const PortraitPage: React.FC = () => {
     }
     const result = await generate(selectedStyle)
     if (result) {
-      message.success('🎉 今日画像生成成功！')
+      message.success(t('generateSuccess', { points: 0 }))
     }
   }
 
   const handleLike = async (id: number) => {
     const res = await toggleLike(id)
     if (res) {
-      message.success(res.action === 'liked' ? '❤️ 已点赞' : '已取消点赞')
+      message.success(res.action === 'liked' ? t('alreadyLiked') : t('unliked'))
     }
   }
 
@@ -203,7 +205,7 @@ const PortraitPage: React.FC = () => {
       if (shareScope === 'private' && sharingPortrait.is_shared) {
         // 取消分享
         await unshare(sharingPortrait.id)
-        message.success('已取消分享')
+        message.success(t('shareCancelled'))
       } else {
         await share(sharingPortrait.id, shareScope)
         message.success(SCOPE_MAP[shareScope]?.label
@@ -218,17 +220,17 @@ const PortraitPage: React.FC = () => {
 
   const handleDelete = (portrait: PortraitData) => {
     Modal.confirm({
-      title: '确认删除',
-      content: `确定删除 ${portrait.created_date} 的画像吗？删除后无法恢复。`,
-      okText: '删除',
+      title: t('confirmDelete'),
+      content: t('confirmDeletePortrait', { date: portrait.created_date }),
+      okText: t('delete'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await deletePortrait(portrait.id)
-          message.success('已删除')
+          message.success(t('deleteSuccess'))
         } catch {
-          message.error('删除失败')
+          message.error(t('deleteFailed'))
         }
       },
     })
@@ -238,7 +240,7 @@ const PortraitPage: React.FC = () => {
     const isOwner = portrait.username === currentUser?.username
     const isAdmin = currentUser?.role === 'admin'
     if (!isOwner && !isAdmin) {
-      message.warning('只能管理自己的画像分享')
+      message.warning(t('selfShareOnly'))
       return
     }
     setSharingPortrait(portrait)
@@ -265,21 +267,20 @@ const PortraitPage: React.FC = () => {
             year: 'numeric', month: 'long', day: 'numeric', weekday: 'long',
           })}
         </Title>
-        <Text type="secondary">每周一次，记录成长的每一步</Text>
+        <Text type="secondary">{t('weeklyPortraitDesc')}</Text>
       </Card>
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 60 }}>
-          <Spin size="large" description="加载中..." />
+          <Spin size="large" description={t('loading')} />
         </div>
       ) : todayExists && todayPortrait ? (
         <>
         {todayPortrait.deleted ? (
           <Card style={{ borderRadius: 12, textAlign: 'center', padding: '40px 0' }}>
-            <Title level={4} type="secondary"><WarningOutlined /> 今日画像已删除</Title>
+            <Title level={4} type="secondary"><WarningOutlined /> {t('todayPortraitDeleted')}</Title>
             <Paragraph type="secondary">
-              你本周已经生成过画像并删除了。每周仅限生成一次，<br />
-              下周一后可再次创作。
+              {t('todayPortraitDeletedDesc')}
             </Paragraph>
           </Card>
         ) : (
@@ -393,7 +394,7 @@ const PortraitPage: React.FC = () => {
           <div style={{ textAlign: 'center', marginTop: 24 }}>
             <Divider />
             <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-              ⏰ 每周免费一次，消耗 100 积分可再生成一次
+              {t('weeklyFreeHint')}
             </Text>
             <Button
               icon={<ThunderboltOutlined />}
@@ -402,7 +403,7 @@ const PortraitPage: React.FC = () => {
               disabled={!canGenerate}
               style={{ height: 40, borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
             >
-              {generating ? '✨ AI 创意中...' : '🔥 消耗 100 积分再生成'}
+              {generating ? '✨ AI 创意中...' : `🔥 ${t('regenerateWithPoints')}`}
             </Button>
             {error && (
               <Alert type="error" message={error} showIcon closable
@@ -418,10 +419,10 @@ const PortraitPage: React.FC = () => {
         <Card style={{ borderRadius: 12, textAlign: 'center', padding: '20px 0' }}>
           <>
               <Title level={3} style={{ marginBottom: 8 }}>
-                🎨 生成今日自我画像
+                🎨 {t('generateTodayPortrait')}
               </Title>
               <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
-                选择风格，AI 将根据你的学习数据生成专属画像和寄语 ✨
+                {t('generateTodayPortraitDesc')}
               </Text>
 
               <div style={{ maxWidth: 400, margin: '0 auto 24px' }}>
@@ -473,7 +474,7 @@ const PortraitPage: React.FC = () => {
                   fontSize: 16,
                 }}
               >
-                {generating ? '✨ AI 创意中...' : todayExists ? '🔥 消耗积分再生成' : '✨ 生成今日画像'}
+                {generating ? '✨ AI 创意中...' : todayExists ? `🔥 ${t('regenerateWithPoints')}` : `✨ ${t('generateTodayPortrait')}`}
               </Button>
 
               {error && (
@@ -488,7 +489,7 @@ const PortraitPage: React.FC = () => {
 
               <Divider />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                ⏰ 每周免费生成一次{todayExists ? '，或消耗 100 积分额外生成' : '，下周一后可再次创作'}
+                {t('weeklyFreeHint')}
               </Text>
             </>
         </Card>
@@ -1062,17 +1063,17 @@ const PortraitPage: React.FC = () => {
         items={[
           {
             key: 'today',
-            label: <span><PictureOutlined /> 本周创作</span>,
+            label: <span><PictureOutlined /> {t('weeklyPortrait')}</span>,
             children: renderTodayTab(),
           },
           {
             key: 'history',
-            label: <span><StarOutlined /> 我的画展</span>,
+            label: <span><StarOutlined /> {t('myGallery')}</span>,
             children: renderGalleryTab(),
           },
           {
             key: 'gallery',
-            label: <span><GlobalOutlined /> 分享画廊</span>,
+            label: <span><GlobalOutlined /> {t('sharedGallery')}</span>,
             children: renderPublicTab(),
           },
         ]}

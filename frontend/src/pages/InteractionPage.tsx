@@ -15,6 +15,7 @@ import {
 import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
@@ -23,6 +24,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 const { Title, Text } = Typography
 
 const InteractionPage: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -62,15 +64,15 @@ const InteractionPage: React.FC = () => {
   const [editQuizForm] = Form.useForm()
   // ── 编辑/删除处理 ──
   const handleDeleteQuiz = async (id: number) => {
-    try { await apiClient.delete(`/api/interaction/quizzes/${id}`); message.success('已删除'); setActiveTab('quizzes'); await loadQuizzes() }
-    catch { message.error('删除失败') }
+    try { await apiClient.delete(`/api/interaction/quizzes/${id}`); message.success(t('deleted')); setActiveTab('quizzes'); await loadQuizzes() }
+    catch { message.error(t('deleteFailed')) }
   }
   const handleEditQuiz = async () => {
     const values = await editQuizForm.validateFields()
     try {
       await apiClient.put(`/api/interaction/quizzes/${editQuizModal.id}`, values)
-      message.success('已更新'); setEditQuizModal(null); setActiveTab('quizzes'); await loadQuizzes()
-    } catch { message.error('更新失败') }
+      message.success(t('updated')); setEditQuizModal(null); setActiveTab('quizzes'); await loadQuizzes()
+    } catch { message.error(t('updateFailed')) }
   }
   // ── 加载数据 ──
   const loadQuizzes = async () => {
@@ -95,11 +97,11 @@ const InteractionPage: React.FC = () => {
       const { data } = await apiClient.post('/api/interaction/quizzes/ai-generate', values)
       setAiQuizResult(data)
       if (data.questions?.length > 0) {
-        message.success(`AI 生成了 ${data.questions.length} 道题目`)
+        message.success(t('aiGeneratedQuestions', { count: data.questions.length }))
       } else if (data.error) {
         message.warning(data.error)
       }
-    } catch { message.error('AI 生成失败') }
+    } catch { message.error(t('aiGenerateFailed')) }
     setAiQuizLoading(false)
   }
 
@@ -115,14 +117,14 @@ const InteractionPage: React.FC = () => {
           target_class: aiQuizScope.target_class,
           target_users: aiQuizScope.target_users,
         })
-        message.success(`成功创建测验，共 ${aiQuizResult.questions.length} 题`)
+        message.success(t('quizCreated', { count: aiQuizResult.questions.length }))
         setAiQuizModal(false)
         setAiQuizResult(null)
         setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
         setActiveTab('quizzes')
         await loadQuizzes()
       } catch (err: any) {
-        message.error(err.response?.data?.detail || '创建失败')
+        message.error(err.response?.data?.detail || t('createFailed'))
       }
     }
   }
@@ -147,12 +149,12 @@ const InteractionPage: React.FC = () => {
         target_class: scope?.target_class || '',
         target_users: scope?.target_users || '',
       })
-      message.success(`测验「${title}」创建成功，共 ${questions.length} 题`)
+      message.success(t('quizCreatedWithTitle', { title, count: questions.length }))
       setQuizEditorOpen(false)
       setActiveTab('quizzes')
       await loadQuizzes()
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '创建失败')
+      message.error(err.response?.data?.detail || t('createFailed'))
       throw err
     }
   }
@@ -174,7 +176,7 @@ const InteractionPage: React.FC = () => {
       const { data } = await apiClient.post(`/api/interaction/quizzes/${takingQuiz.id}/answer`, { answers: JSON.stringify(answers) })
       setQuizResult(data)
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '提交失败')
+      message.error(err.response?.data?.detail || t('submitFailed'))
     }
   }
 
@@ -186,7 +188,7 @@ const InteractionPage: React.FC = () => {
       const { data } = await apiClient.get(url)
       setQuizResultsView(data)
       setQuizAiAnalysis(null)
-    } catch { message.error('加载结果失败') }
+    } catch { message.error(t('loadResultFailed')) }
   }
 
   const handleQuizAiAnalysis = async (quizId: number) => {
@@ -199,13 +201,13 @@ const InteractionPage: React.FC = () => {
         // 异步任务，轮询结果
         const result = await pollAiTask(data.task_id)
         if (result) setQuizAiAnalysis(result.analysis)
-        else message.error('AI 分析超时')
+        else message.error(t('aiAnalyzeTimeout'))
       } else {
         // 兼容旧版同步返回
         setQuizAiAnalysis(data.analysis)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 分析失败')
+      message.error(err?.response?.data?.detail || t('aiAnalyzeFailed'))
     }
     setQuizAiAnalysisLoading(false)
   }
@@ -213,16 +215,16 @@ const InteractionPage: React.FC = () => {
   const tabItems = [
     {
       key: 'quizzes',
-      label: <span><ThunderboltOutlined /> 随堂测验</span>,
+      label: <span><ThunderboltOutlined /> {t('title')}</span>,
       children: (
         <div>
           {isTeacherOrAdmin && (
             <Space style={{ marginBottom: 16 }}>
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setQuizEditorOpen(true)}>
-                创建测验
+                {t('createQuiz')}
               </Button>
               <Button icon={<RobotOutlined />} onClick={() => { setAiQuizModal(true); setAiQuizResult(null); aiQuizForm.resetFields(); }}>
-                AI 生成
+                AI {t('createQuiz')}
               </Button>
             </Space>
           )}
@@ -233,7 +235,7 @@ const InteractionPage: React.FC = () => {
             onSave={handleCreateQuiz}
           />
           <Spin spinning={quizLoading}>
-            {quizzes.length === 0 ? <Empty description="暂无测验" /> : (
+            {quizzes.length === 0 ? <Empty description={t('noPolls')} /> : (
               <>
                 <List
                   dataSource={quizzes.slice((quizPage - 1) * quizPageSize, quizPage * quizPageSize)}
@@ -245,25 +247,25 @@ const InteractionPage: React.FC = () => {
                         <div style={{ marginTop: 4 }}>
                           <Tag>{quiz.questions?.length || 0} 题</Tag>
                           <Tag color={quiz.status === 'active' ? 'green' : 'default'}>
-                            {quiz.status === 'active' ? '进行中' : '已结束'}
+                            {quiz.status === 'active' ? t('started') : t('ended')}
                           </Tag>
                           <Tag color="blue">{quiz.creator_name || quiz.creator_username}</Tag>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{quiz.answer_count || 0} 人参与</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{t('peopleCount', { count: quiz.answer_count || 0 })}</Text>
                         </div>
                       </div>
                       <Space>
                         {quiz.status === 'active' && isStudent && !quiz.answered && (
                           <Button size="small" type="primary" icon={<PlayCircleOutlined />}
-                            onClick={() => handleStartQuiz(quiz)}>开始答题</Button>
+                            onClick={() => handleStartQuiz(quiz)}>{t('startQuiz')}</Button>
                         )}
                         {quiz.status === 'active' && isStudent && quiz.answered && (
                           <Button size="small" icon={<BarChartOutlined />}
-                            onClick={() => handleViewQuizResults(quiz.id)}>查看结果</Button>
+                            onClick={() => handleViewQuizResults(quiz.id)}>{t('results')}</Button>
                         )}
                         {isTeacherOrAdmin && (
                           <>
                             <Button size="small" icon={<BarChartOutlined />}
-                              onClick={() => handleViewQuizResults(quiz.id)}>查看结果</Button>
+                              onClick={() => handleViewQuizResults(quiz.id)}>{t('results')}</Button>
                             <Button size="small" icon={<DownloadOutlined />}
                               onClick={() => {
                                 const token = localStorage.getItem('smartkb_token')
@@ -271,7 +273,7 @@ const InteractionPage: React.FC = () => {
                               }}>导出</Button>
                             <Button size="small" icon={<EditOutlined />}
                               onClick={() => { editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }}>编辑</Button>
-                            <Popconfirm title="删除此测验？" onConfirm={() => handleDeleteQuiz(quiz.id)}>
+                            <Popconfirm title={t('confirmDeleteQuiz')} onConfirm={() => handleDeleteQuiz(quiz.id)}>
                               <Button size="small" danger icon={<DeleteOutlined />} />
                             </Popconfirm>
                           </>
@@ -284,7 +286,7 @@ const InteractionPage: React.FC = () => {
               <div style={{ marginTop: 12, textAlign: 'center' }}>
                 <Pagination
                   current={quizPage} pageSize={quizPageSize} total={quizzes.length}
-                  showSizeChanger showTotal={(t) => `共 ${t} 个测验`}
+                  showSizeChanger showTotal={(total) => t('totalQuizzes', { count: total })}
                   pageSizeOptions={['5', '10', '20', '50']}
                   onChange={(p, ps) => { setQuizPage(p); setQuizPageSize(ps) }}
                   size="small"
@@ -304,9 +306,9 @@ const InteractionPage: React.FC = () => {
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
             <ThunderboltOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>课堂互动</Title>
+            <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('title')}</Title>
             <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              随堂测验
+              {t('title')}
             </Text>
           </Space>
         </div>
@@ -320,7 +322,7 @@ const InteractionPage: React.FC = () => {
       <Modal title={takingQuiz?.title} open={!!takingQuiz && !quizResult}
         onCancel={() => { setTakingQuiz(null); setQuizResult(null) }}
         footer={[
-          <Button key="submit" type="primary" onClick={handleSubmitQuiz}>提交答案</Button>,
+          <Button key="submit" type="primary" onClick={handleSubmitQuiz}>{t('submit')}</Button>,
         ]}
         width={640}>
         {takingQuiz?.questions?.map((q: any, i: number) => (
@@ -328,9 +330,9 @@ const InteractionPage: React.FC = () => {
             <div style={{ marginBottom: 8 }}>
               <Text strong>{i + 1}. </Text>
               <FormulaRenderer content={q.question || q.question_text} />
-              {q.type === 'single' && <Tag color="blue" style={{ fontSize: 11, marginLeft: 8 }}>单选题</Tag>}
-              {q.type === 'multiple' && <Tag color="purple" style={{ fontSize: 11, marginLeft: 8 }}>多选题</Tag>}
-              {q.type === 'true_false' && <Tag color="orange" style={{ fontSize: 11, marginLeft: 8 }}>判断题</Tag>}
+              {q.type === 'single' && <Tag color="blue" style={{ fontSize: 11, marginLeft: 8 }}>{t('single')}</Tag>}
+              {q.type === 'multiple' && <Tag color="purple" style={{ fontSize: 11, marginLeft: 8 }}>{t('multiple')}</Tag>}
+              {q.type === 'true_false' && <Tag color="orange" style={{ fontSize: 11, marginLeft: 8 }}>{t('trueFalse')}</Tag>}
             </div>
             <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="normal" />
             <div style={{ marginTop: 8, paddingLeft: 8 }}>
@@ -359,7 +361,7 @@ const InteractionPage: React.FC = () => {
                 </Radio.Group>
               ) : (
                 <Input onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}
-                  placeholder="输入答案" />
+                  placeholder={t('inputAnswer')} />
               )}
             </div>
           </div>
@@ -367,13 +369,13 @@ const InteractionPage: React.FC = () => {
       </Modal>
 
       {/* ── 答题结果 ── */}
-      <Modal title="答题结果" open={!!quizResult} onCancel={() => { setQuizResult(null); setTakingQuiz(null) }}
-        footer={<Button onClick={() => { setQuizResult(null); setTakingQuiz(null) }}>关闭</Button>}>
+      <Modal title={t('result')} open={!!quizResult} onCancel={() => { setQuizResult(null); setTakingQuiz(null) }}
+        footer={<Button onClick={() => { setQuizResult(null); setTakingQuiz(null) }}>{t('close')}</Button>}>
         {quizResult && (
           <Result
             status={quizResult.percentage >= 60 ? 'success' : 'warning'}
             title={`${quizResult.score} / ${quizResult.total_score} 分`}
-            subTitle={`正确率 ${quizResult.percentage}%`}
+            subTitle={t('accuracyRate', { percent: quizResult.percentage })}
           />
         )}
       </Modal>
@@ -488,7 +490,7 @@ const InteractionPage: React.FC = () => {
                         </div>
                       ),
                     },
-                    { title: '正确率', dataIndex: 'correct_rate', width: 100,
+                    { title: t('correctRate'), dataIndex: 'correct_rate', width: 100,
                       render: (r: number) => (
                         <Text strong style={{ color: r >= 60 ? '#52c41a' : '#ff4d4f' }}>{r}%</Text>
                       ),
@@ -508,41 +510,41 @@ const InteractionPage: React.FC = () => {
       </Modal>
 
       {/* ── AI 生成测验弹窗 ── */}
-      <Modal title={<Space><RobotOutlined />AI 生成随堂测验</Space>} open={aiQuizModal}
+      <Modal title={<Space><RobotOutlined />{t('aiGenerateQuiz')}</Space>} open={aiQuizModal}
         onCancel={() => { setAiQuizModal(false); setAiQuizResult(null); setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         footer={aiQuizResult?.questions?.length > 0 ? [
-          <Button key="cancel" onClick={() => { setAiQuizModal(false); setAiQuizResult(null); setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}>取消</Button>,
-          <Button key="apply" type="primary" onClick={handleApplyAiQuiz}>填入表单</Button>,
+          <Button key="cancel" onClick={() => { setAiQuizModal(false); setAiQuizResult(null); setAiQuizScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}>{t('cancel')}</Button>,
+          <Button key="apply" type="primary" onClick={handleApplyAiQuiz}>{t('fillForm')}</Button>,
         ] : null}>
         <Form form={aiQuizForm} layout="vertical" onFinish={handleAiGenerateQuiz}>
-          <Form.Item name="topic" label="输入主题" rules={[{ required: true, message: '请输入主题' }]}>
-            <Input placeholder="例如：输入课程主题或知识点名称" />
+          <Form.Item name="topic" label={t('inputTopic')} rules={[{ required: true, message: t('pleaseInputTopic') }]}>
+            <Input placeholder={t('topicPlaceholder')} />
           </Form.Item>
-          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || ''}>
+          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
             <Select>
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="question_type" label="出题模式" initialValue="single">
+          <Form.Item name="question_type" label={t('questionMode')} initialValue="single">
             <Select>
-              <Select.Option value="single">仅单选题</Select.Option>
-              <Select.Option value="true_false">仅判断题</Select.Option>
-              <Select.Option value="mixed">混合出题（单选+判断）</Select.Option>
+              <Select.Option value="single">{t('singleOnly')}</Select.Option>
+              <Select.Option value="true_false">{t('trueFalseOnly')}</Select.Option>
+              <Select.Option value="mixed">{t('mixedMode')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="count" label="题目数量" initialValue={5}>
-            <InputNumber min={1} max={50} defaultValue={5} style={{ width: 120 }} /> 题
+          <Form.Item name="count" label={t('questionCount')} initialValue={5}>
+            <InputNumber min={1} max={50} defaultValue={5} style={{ width: 120 }} /> {t('questions')}
           </Form.Item>
-          <Form.Item label="目标范围">
+          <Form.Item label={t('targetScope')}>
             <ActivityScopeSelector value={aiQuizScope} onChange={setAiQuizScope} />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={aiQuizLoading} icon={<RobotOutlined />} block>
-            AI 生成
+            {t('aiGenerate')}
           </Button>
         </Form>
         {aiQuizResult?.questions?.length > 0 && (
           <div style={{ marginTop: 12, maxHeight: 400, overflow: 'auto' }}>
-            <Text strong style={{ fontSize: 15 }}>生成结果（{aiQuizResult.questions.length} 题）：</Text>
+            <Text strong style={{ fontSize: 15 }}>{t('generateResult', { count: aiQuizResult.questions.length })}</Text>
             {aiQuizResult.questions.map((q: any, i: number) => (
               <div key={i} style={{
                 padding: 10, marginTop: 8, borderRadius: 6,
@@ -558,7 +560,7 @@ const InteractionPage: React.FC = () => {
                   </div>
                 )}
                 <div style={{ marginTop: 4 }}>
-                  <Tag color="green">答案：{q.answer}</Tag>
+                  <Tag color="green">{t('answerColon')}{q.answer}</Tag>
                 </div>
                 {q.explanation && (
                   <div style={{ marginTop: 2, fontSize: 12, color: '#888', paddingLeft: 4 }}>

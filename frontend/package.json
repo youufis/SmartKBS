@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "7.4.0",
+  "version": "7.5.0",
   "description": "SmartKBS 智慧教学平台 - 全学段通用 AI 教学管理系统",
   "type": "module",
   "scripts": {
@@ -15,9 +15,13 @@
     "@monaco-editor/react": "^4.7.0",
     "antd": "^6.4.3",
     "axios": "^1.16.1",
+    "i18next": "^26.3.4",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "i18next-http-backend": "^4.0.0",
     "katex": "^0.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "react-i18next": "^17.0.8",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.15.1",
     "rehype-katex": "^7.0.1",

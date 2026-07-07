@@ -4,6 +4,7 @@ import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileO
 import * as sharingApi from '../api/sharing'
 import ShareDialog from '../components/ShareDialog'
 import apiClient from '../api/client'
+import { useTranslation } from 'react-i18next'
 
 interface DownloadFile {
   name: string
@@ -14,6 +15,7 @@ interface DownloadFile {
 }
 
 const DownloadsPage: React.FC = () => {
+  const { t } = useTranslation('system')
   const user = JSON.parse(localStorage.getItem('smartkb_user') || '{}')
   const username: string = user?.username || 'root'
   const [files, setFiles] = useState<DownloadFile[]>([])
@@ -64,7 +66,6 @@ const DownloadsPage: React.FC = () => {
         setBrowseDirFiles(data.files || [])
       }
     } catch {
-      message.error('加载共享目录失败')
       setBrowseDirFiles([])
     } finally {
       setBrowseDirLoading(false)
@@ -126,7 +127,6 @@ const DownloadsPage: React.FC = () => {
       }
       loadShares()
     } catch {
-      message.error('加载文件列表失败')
     } finally {
       setLoading(false)
     }
@@ -153,14 +153,14 @@ const DownloadsPage: React.FC = () => {
       })
       const data = await resp.json()
       if (!resp.ok) {
-        return data.detail || `请求失败 (${resp.status})`
+        return data.detail || t('requestFailed', { status: resp.status })
       }
       if (data.errors && data.errors.length > 0) {
         return data.errors[0]
       }
-      return data.success ? '' : '上传失败'
+      return data.success ? '' : t('uploadFailed')
     } catch (err: unknown) {
-      return err instanceof Error ? err.message : '网络错误'
+      return err instanceof Error ? err.message : t('networkError')
     }
   }
 
@@ -172,7 +172,7 @@ const DownloadsPage: React.FC = () => {
     const total = fileList.length
     let success = 0
     let fail = 0
-    message.loading({ content: `正在上传 ${total} 个文件...`, key: 'fileUpload' })
+    message.loading({ content: t('uploadingFiles', { count: total }), key: 'fileUpload' })
     const errors: string[] = []
     for (let i = 0; i < total; i++) {
       const err = await uploadSingleFile(fileList[i], basePath)
@@ -186,9 +186,9 @@ const DownloadsPage: React.FC = () => {
     e.target.value = ''
     message.destroy('fileUpload')
     if (errors.length > 0) {
-      message.warning(`成功 ${success} 个，失败 ${fail} 个。错误: ${errors[0]}`)
+      message.warning(t('uploadResultWithError', { success, fail, error: errors[0] }))
     } else {
-      message.success(`上传完成：成功 ${success} 个`)
+      message.success(t('uploadComplete', { count: success }))
     }
     loadFiles()
   }
@@ -204,7 +204,7 @@ const DownloadsPage: React.FC = () => {
     let fail = 0
     const errors: string[] = []
 
-    message.loading({ content: `正在上传 ${total} 个文件...`, key: 'dirUpload' })
+    message.loading({ content: t('uploadingFiles', { count: total }), key: 'dirUpload' })
 
     for (let i = 0; i < total; i++) {
       const file = fileList[i]
@@ -230,28 +230,26 @@ const DownloadsPage: React.FC = () => {
     e.target.value = ''
     message.destroy('dirUpload')
     if (errors.length > 0) {
-      message.warning(`成功 ${success} 个，失败 ${fail} 个。错误: ${errors[0]}`)
+      message.warning(t('uploadResultWithError', { success, fail, error: errors[0] }))
     } else {
-      message.success(`上传完成：成功 ${success} 个`)
+      message.success(t('uploadComplete', { count: success }))
     }
     loadFiles()
   }
 
   const handleDelete = (filename: string) => {
     Modal.confirm({
-      title: '确认删除',
-      content: `确定删除「${filename}」？`,
+      title: t('confirmDelete'),
+      content: t('confirmDeleteContent', { filename }),
       onOk: async () => {
         try {
           const { data } = await apiClient.post('/api/downloads/delete', { filename })
           if (data.success) {
-            message.success('已删除')
             loadFiles()
           } else {
-            message.error(data.error || '删除失败')
+            message.error(data.error || t('deleteFailed'))
           }
         } catch {
-          message.error('删除失败')
         }
       },
     })
@@ -268,7 +266,7 @@ const DownloadsPage: React.FC = () => {
 
   const columns = [
     {
-      title: '文件路径',
+      title: t('filePath'),
       dataIndex: 'path',
       key: 'path',
       render: (path: string, record: DownloadFile) => (
@@ -286,7 +284,7 @@ const DownloadsPage: React.FC = () => {
       ),
     },
     {
-      title: '大小',
+      title: t('fileSize'),
       dataIndex: 'size',
       key: 'size',
       width: 100,
@@ -294,31 +292,31 @@ const DownloadsPage: React.FC = () => {
         record.is_dir ? '-' : size < 1024 ? `${size} B` : size < 1048576 ? `${(size/1024).toFixed(1)} KB` : `${(size/1048576).toFixed(1)} MB`,
     },
     {
-      title: '更新时间',
+      title: t('updateTime'),
       dataIndex: 'mtime',
       key: 'mtime',
       width: 150,
     },
     {
-      title: '操作',
+      title: t('actions'),
       key: 'actions',
       width: 180,
       render: (_: unknown, record: DownloadFile) => (
         <Space>
           {!record.is_dir && (
-            <Tooltip title="下载">
+            <Tooltip title={t('download')}>
               <Button type="link" icon={<DownloadOutlined />}
                 href={buildDownloadUrl(record)}
                 target="_blank" />
             </Tooltip>
           )}
-          <Tooltip title={record.is_dir ? '共享整个目录' : (isFileShared(record.path) ? '已共享 - 点击管理' : '点击共享')}>
+          <Tooltip title={record.is_dir ? t('shareDir') : (isFileShared(record.path) ? t('sharedClickManage') : t('clickToShare'))}>
             <Button type="link" size="small"
               icon={<ShareAltOutlined />}
               style={{ color: isFileShared(record.path) ? '#ff4d4f' : '#999' }}
               onClick={() => openShare(record.path, record.name)} />
           </Tooltip>
-          <Tooltip title="删除">
+          <Tooltip title={t('delete')}>
             <Button type="link" danger icon={<DeleteOutlined />}
               onClick={() => handleDelete(record.path)} />
           </Tooltip>
@@ -331,17 +329,17 @@ const DownloadsPage: React.FC = () => {
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Typography.Title level={4} style={{ margin: 0 }}>📥 文件中心</Typography.Title>
+          <Typography.Title level={4} style={{ margin: 0 }}>{t('fileCenter')}</Typography.Title>
           <Space>
             <Input
-              placeholder="搜索文件名..."
+              placeholder={t('searchFileName')}
               prefix={<SearchOutlined />}
               value={searchText}
               onChange={handleSearchChange}
               allowClear
               style={{ width: 220 }}
             />
-            <Button icon={<ReloadOutlined />} onClick={loadFiles} loading={loading}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={loadFiles} loading={loading}>{t('refresh')}</Button>
           </Space>
         </div>
 
@@ -349,12 +347,12 @@ const DownloadsPage: React.FC = () => {
           <>
             <Card size="small">
               <Space wrap>
-                <Typography.Text>上传到子目录：</Typography.Text>
+                <Typography.Text>{t('uploadToSubdir')}</Typography.Text>
                 <Typography.Text
                   editable={{ onChange: (val) => setUploadDir(val) }}
                   style={{ fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 8px', borderRadius: 4 }}
                 >
-                  {uploadDir || '(根目录)'}
+                  {uploadDir || t('rootDir')}
                 </Typography.Text>
                 <input ref={fileInputRef} type="file" multiple onChange={handleUploadFiles} style={{ display: 'none' }} />
                 <input ref={dirInputRef} type="file" multiple
@@ -365,7 +363,7 @@ const DownloadsPage: React.FC = () => {
                   icon={<UploadOutlined />}
                   menu={{
                     items: [
-                      { key: 'dir', icon: <FolderOpenOutlined />, label: '上传目录' },
+                      { key: 'dir', icon: <FolderOpenOutlined />, label: t('uploadDirBtn') },
                     ],
                     onClick: ({ key }) => {
                       if (key === 'dir') dirInputRef.current?.click();
@@ -373,7 +371,7 @@ const DownloadsPage: React.FC = () => {
                   }}
                   onClick={() => fileInputRef.current?.click()}
                 >
-                  上传文件
+                  {t('uploadFileBtn')}
                 </Dropdown.Button>
               </Space>
             </Card>
@@ -392,15 +390,15 @@ const DownloadsPage: React.FC = () => {
               size="small"
               footer={() => (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  已用 {usageStr}
-                  {quota > 0 ? ` / 配额 ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / 配额 ${quotaStr}`}
+                  {t('storageUsed')} {usageStr}
+                  {quota > 0 ? ` / ${t('quota')} ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / ${t('quota')} ${quotaStr}`}
                 </Typography.Text>
               )}
             />
           </>
         ) : (
           <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>
-            以下为共享给您的文件：
+            {t('sharedToYou')}
           </Typography.Text>
         )}
 
@@ -427,7 +425,7 @@ const DownloadsPage: React.FC = () => {
           const pagedDir = pagedAll.filter(x => x.type === 'dir').map(x => x.item)
           const pagedFile = pagedAll.filter(x => x.type === 'file').map(x => x.item)
           return downloadShares.length > 0 ? (
-            <Card size="small" title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> 共享文件 ({downloadShares.length})</>}>
+            <Card size="small" title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> {t('sharedFiles')} ({downloadShares.length})</>}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
                 {pagedDir.map((s) => (
                   <Card key={s.id} size="small" hoverable
@@ -441,7 +439,7 @@ const DownloadsPage: React.FC = () => {
                           📁 {s.file_name}/
                         </Typography.Text>
                       }
-                      description={<span style={{ fontSize: 11 }}>来自 {s.owner_username}（点击浏览）</span>}
+                      description={<span style={{ fontSize: 11 }}>{t('fromUserClickBrowse', { name: s.owner_username })}</span>}
                     />
                   </Card>
                 ))}
@@ -458,7 +456,7 @@ const DownloadsPage: React.FC = () => {
                             {s.file_name}
                           </a>
                         }
-                        description={<span style={{ fontSize: 11 }}>来自 {s.owner_username}</span>}
+                        description={<span style={{ fontSize: 11 }}>{t('fromUser', { name: s.owner_username })}</span>}
                       />
                     </Card>
                   )
@@ -471,7 +469,7 @@ const DownloadsPage: React.FC = () => {
                     total={totalShares}
                     pageSize={SHARED_PAGE_SIZE}
                     showSizeChanger
-                    showTotal={(t) => `共 ${t} 个文件`}
+                    showTotal={(total) => t('totalFiles', { count: total })}
                     pageSizeOptions={['10', '20', '50']}
                     onChange={(p) => setSharedPage(p)}
                   />
@@ -481,28 +479,28 @@ const DownloadsPage: React.FC = () => {
           ) : null;
         })()}
         {!isStudent && receivedShares.filter(s => s.resource_type === 'download').length === 0 && (
-          <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>暂无共享文件</Typography.Text>
+          <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>{t('noSharedFiles')}</Typography.Text>
         )}
 
         {/* 浏览共享目录抽屉 */}
         <Drawer
-          title={<><FolderOpenOutlined style={{ color: '#faad14', marginRight: 8 }} />{browseDirInfo?.dirName || '共享目录'}</>}
+          title={<><FolderOpenOutlined style={{ color: '#faad14', marginRight: 8 }} />{browseDirInfo?.dirName || t('sharedDir')}</>}
           open={browseDirOpen}
           onClose={() => setBrowseDirOpen(false)}
           size={600}
           extra={
             <Button type="text" icon={<ReloadOutlined />} onClick={() => {
               if (browseDirInfo) openBrowseDir(browseDirInfo.owner, browseDirInfo.dirPath, browseDirInfo.dirName)
-            }} loading={browseDirLoading}>刷新</Button>
+            }} loading={browseDirLoading}>{t('refresh')}</Button>
           }
         >
           {browseDirInfo && (
             <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-              来自 <strong>{browseDirInfo.owner}</strong> 的共享目录
+              {t('sharedDirFromPrefix')} <strong>{browseDirInfo.owner}</strong> {t('sharedDirFromSuffix')}
             </Typography.Text>
           )}
           {browseDirFiles.length === 0 && !browseDirLoading ? (
-            <Typography.Text type="secondary">该目录下暂无文件</Typography.Text>
+            <Typography.Text type="secondary">{t('noFilesInDir')}</Typography.Text>
           ) : (
             <List
               loading={browseDirLoading}
@@ -515,7 +513,7 @@ const DownloadsPage: React.FC = () => {
                   <List.Item
                     actions={[
                       <a href={fileUrl} target="_blank" rel="noreferrer">
-                        <DownloadOutlined /> 下载
+                        <DownloadOutlined /> {t('download')}
                       </a>,
                     ]}
                   >

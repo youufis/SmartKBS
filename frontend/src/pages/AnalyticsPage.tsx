@@ -13,6 +13,7 @@ import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { pollAiTask } from '../api/aiTask'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text } = Typography
 
@@ -84,6 +85,7 @@ interface ProgressStudent {
 }
 
 const AnalyticsPage: React.FC = () => {
+  const { t } = useTranslation('dashboard')
   const user = useAuthStore((s) => s.user)
   const isStudent = user?.role === 'student'
 
@@ -229,17 +231,17 @@ const AnalyticsPage: React.FC = () => {
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
         if (result) {
-          setReport(result.result || '暂无分析结果')
+          setReport(result.result || t('analytics.noResult'))
           setRawData(data.data)
         } else {
-          setReport('❌ AI 分析超时，请稍后重试')
+          setReport(t('analytics.aiTimeout'))
         }
       } else {
-        setReport(data.report || '暂无分析结果')
+        setReport(data.report || t('analytics.noResult'))
         setRawData(data.data)
       }
     } catch {
-      setReport('❌ 分析失败，请稍后重试')
+      setReport(t('analytics.analysisFailed'))
     }
     setLoading(false)
   }
@@ -260,13 +262,11 @@ const AnalyticsPage: React.FC = () => {
         if (result) {
           setSuggestionsData({ suggestions: result.result || '', data: data.data })
         } else {
-          message.error('AI 分析超时')
         }
       } else {
         setSuggestionsData(data)
       }
     } catch {
-      message.error('获取教学建议失败')
     }
     setSuggestionsLoading(false)
   }
@@ -283,13 +283,13 @@ const AnalyticsPage: React.FC = () => {
         if (result) {
           setExamAnalytics({ ...(data as any), report: result.result || '' })
         } else {
-          setReport('❌ AI 分析超时')
+          setReport(t('analytics.examAiTimeout'))
         }
       } else {
         setExamAnalytics(data)
       }
     } catch {
-      setReport('❌ 分析失败')
+      setReport(t('analytics.examAnalysisFailed'))
     }
     setExamLoading(false)
   }
@@ -301,7 +301,7 @@ const AnalyticsPage: React.FC = () => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `学情报告_${grade}_${cls}.md`
+    a.download = t('analytics.reportFilename', { grade, cls })
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -325,7 +325,7 @@ const AnalyticsPage: React.FC = () => {
   }
 
   const typeLabel: Record<string, string> = {
-    single: '单选', multiple: '多选', true_false: '判断', short: '简答', fill: '填空', essay: '作文', subjective: '主观题',
+    single: t('analytics.questionType.single'), multiple: t('analytics.questionType.multiple'), true_false: t('analytics.questionType.trueFalse'), short: t('analytics.questionType.short'), fill: t('analytics.questionType.fill'), essay: t('analytics.questionType.essay'), subjective: t('analytics.questionType.subjective'),
   }
   const diffColor: Record<string, string> = {
     easy: 'green', medium: 'orange', hard: 'red',
@@ -334,7 +334,7 @@ const AnalyticsPage: React.FC = () => {
   if (isStudent) {
     return (
       <Card>
-        <Empty description="学情分析仅对教师和管理员开放" />
+        <Empty description={t('analytics.studentRestricted')} />
       </Card>
     )
   }
@@ -344,9 +344,9 @@ const AnalyticsPage: React.FC = () => {
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
           <RobotOutlined style={{ fontSize: 28 }} />
-          <Title level={3} style={{ color: '#fff', margin: 0 }}>AI 学情分析</Title>
+          <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('analytics.title')}</Title>
           <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 4 }}>
-            基于 DashScope AI，对学习数据进行深度分析，生成专业学情报告
+            {t('analytics.description')}
           </Text>
         </div>
       </Card>
@@ -356,43 +356,43 @@ const AnalyticsPage: React.FC = () => {
           items={[
             {
               key: 'class',
-              label: <span><TeamOutlined /> 班级学情</span>,
+              label: <span><TeamOutlined /> {t('analytics.tabs.class')}</span>,
               children: (
                 <div>
                   <Space style={{ marginBottom: 16 }}>
                     <Select value={grade} onChange={(v) => { setGrade(v); setCls('') }}
                       style={{ width: 100 }} options={allowedGrades.map((g) => ({ label: g, value: g }))} />
                     <Select value={cls} onChange={setCls} style={{ width: 160 }}
-                      placeholder="选择班级"
+                      placeholder={t('analytics.selectClass')}
                       options={classes.map((c) => ({ label: c, value: c }))} />
                     <Button type="primary" icon={<RobotOutlined />} onClick={handleClassAnalysis}
                       loading={loading} disabled={!cls}>
-                      AI 分析
+                      {t('analytics.aiAnalyze')}
                     </Button>
                     <Button icon={<BulbOutlined />} onClick={handleTeachingSuggestions}
                       loading={suggestionsLoading} disabled={!cls}>
-                      AI 教学建议
+                      {t('analytics.aiSuggestions')}
                     </Button>
                   </Space>
 
                   {loading && (
                     <div style={{ textAlign: 'center', padding: 40 }}>
-                      <Spin size="large" description="AI 分析中，请稍候..." />
+                      <Spin size="large" description={t('analytics.aiAnalyzing')} />
                     </div>
                   )}
 
                   {rawData && !loading && (
                     <Row gutter={16} style={{ marginBottom: 16 }}>
-                      <Col span={4}><Statistic title="学生人数" value={rawData.total_students} prefix={<TeamOutlined />} /></Col>
-                      <Col span={4}><Statistic title="总积分" value={rawData.score_total} prefix={<ThunderboltOutlined />} /></Col>
-                      <Col span={4}><Statistic title="平均积分" value={rawData.score_avg} /></Col>
+                      <Col span={4}><Statistic title={t('analytics.stats.studentCount')} value={rawData.total_students} prefix={<TeamOutlined />} /></Col>
+                      <Col span={4}><Statistic title={t('analytics.stats.totalScore')} value={rawData.score_total} prefix={<ThunderboltOutlined />} /></Col>
+                      <Col span={4}><Statistic title={t('analytics.stats.avgScore')} value={rawData.score_avg} /></Col>
                       <Col span={4}>
-                        <Statistic title="点名正确" value={rawData.rollcall_correct}
+                        <Statistic title={t('analytics.stats.rollcallCorrect')} value={rawData.rollcall_correct}
                           suffix={`/ ${rawData.rollcall_total}`}
                           styles={{ content: { color: rawData.rollcall_total > 0 ? '#52c41a' : '#999' } }} />
                       </Col>
-                      <Col span={4}><Statistic title="活跃任务" value={rawData.active_tasks} /></Col>
-                      <Col span={4}><Statistic title="已提交学生" value={rawData.submitted_students} /></Col>
+                      <Col span={4}><Statistic title={t('analytics.stats.activeTasks')} value={rawData.active_tasks} /></Col>
+                      <Col span={4}><Statistic title={t('analytics.stats.submittedStudents')} value={rawData.submitted_students} /></Col>
                     </Row>
                   )}
 
@@ -405,8 +405,8 @@ const AnalyticsPage: React.FC = () => {
                             if (!cls) return
                             const token = localStorage.getItem('smartkb_token')
                             window.open(`/api/analytics/class-overview/export?grade=${grade}&cls=${cls}&teacher=${user?.username}&token=${token}`, '_blank')
-                          }}>导出 Word</Button>
-                          <Button icon={<DownloadOutlined />} onClick={exportReportAsMarkdown}>导出报告(.md)</Button>
+                          }}>{t('analytics.exportWord')}</Button>
+                          <Button icon={<DownloadOutlined />} onClick={exportReportAsMarkdown}>{t('analytics.exportMarkdown')}</Button>
                         </Space>
                       </Space>
                       <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
@@ -420,13 +420,13 @@ const AnalyticsPage: React.FC = () => {
                   {/* AI 教学建议 */}
                   {suggestionsData && !suggestionsLoading && (
                     <div style={{ marginTop: 16 }}>
-                      <Typography.Title level={5}><BulbOutlined style={{ color: '#faad14' }} /> AI 教学建议</Typography.Title>
+                      <Typography.Title level={5}><BulbOutlined style={{ color: '#faad14' }} /> {t('analytics.suggestionsTitle')}</Typography.Title>
                       {suggestionsData.data && (
                         <Row gutter={16} style={{ marginBottom: 12 }}>
-                          <Col span={6}><Statistic title="学生人数" value={suggestionsData.data.total_students} /></Col>
-                          <Col span={6}><Statistic title="平均积分" value={suggestionsData.data.score_avg} /></Col>
-                          <Col span={6}><Statistic title="点名正确率" value={suggestionsData.data.rollcall_rate} suffix="%" /></Col>
-                          <Col span={6}><Statistic title="任务参与率" value={suggestionsData.data.task_rate} suffix="%" /></Col>
+                          <Col span={6}><Statistic title={t('analytics.stats.studentCount')} value={suggestionsData.data.total_students} /></Col>
+                          <Col span={6}><Statistic title={t('analytics.stats.avgScore')} value={suggestionsData.data.score_avg} /></Col>
+                          <Col span={6}><Statistic title={t('analytics.stats.rollcallRate')} value={suggestionsData.data.rollcall_rate} suffix="%" /></Col>
+                          <Col span={6}><Statistic title={t('analytics.stats.taskRate')} value={suggestionsData.data.task_rate} suffix="%" /></Col>
                         </Row>
                       )}
                       <Space style={{ marginBottom: 12, justifyContent: 'flex-end', width: '100%' }}>
@@ -434,7 +434,7 @@ const AnalyticsPage: React.FC = () => {
                           if (!cls) return
                           const token = localStorage.getItem('smartkb_token')
                           window.open(`/api/analytics/teaching-suggestions/export?grade=${grade}&cls=${cls}&teacher_username=${user?.username}&token=${token}`, '_blank')
-                        }}>导出 Word</Button>
+                        }}>{t('analytics.exportWord')}</Button>
                       </Space>
                       <Card style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
                         <div className="markdown-report">
@@ -448,33 +448,33 @@ const AnalyticsPage: React.FC = () => {
             },
             {
               key: 'exam',
-              label: <span><BarChartOutlined /> 考试分析</span>,
+              label: <span><BarChartOutlined /> {t('analytics.tabs.exam')}</span>,
               children: (
                 <div>
                   <Space style={{ marginBottom: 16 }}>
                     <Select value={selectedExam} onChange={setSelectedExam} style={{ width: 300 }}
-                      placeholder="选择考试"
+                      placeholder={t('analytics.selectExam')}
                       options={exams.map((e) => ({ label: `${e.title} (${e.subject})`, value: e.id }))} />
                     <Button type="primary" icon={<RobotOutlined />} onClick={handleExamAnalysis}
                       loading={examLoading} disabled={!selectedExam}>
-                      AI 分析
+                      {t('analytics.aiAnalyze')}
                     </Button>
                   </Space>
 
                   {examLoading && (
                     <div style={{ textAlign: 'center', padding: 40 }}>
-                      <Spin size="large" description="AI 分析中，请稍候..." />
+                      <Spin size="large" description={t('analytics.aiAnalyzing')} />
                     </div>
                   )}
 
                   {examAnalytics && (
                     <>
                       <Row gutter={16} style={{ marginBottom: 16 }}>
-                        <Col span={4}><Statistic title="参考人数" value={examAnalytics.statistics.total_students} /></Col>
-                        <Col span={4}><Statistic title="平均分" value={examAnalytics.statistics.avg_score} precision={1} /></Col>
-                        <Col span={4}><Statistic title="最高分" value={examAnalytics.statistics.max_score} /></Col>
-                        <Col span={4}><Statistic title="最低分" value={examAnalytics.statistics.min_score} /></Col>
-                        <Col span={4}><Statistic title="及格率" value={examAnalytics.statistics.pass_rate} suffix="%" precision={1} /></Col>
+                        <Col span={4}><Statistic title={t('analytics.stats.examParticipants')} value={examAnalytics.statistics.total_students} /></Col>
+                        <Col span={4}><Statistic title={t('analytics.stats.examAvgScore')} value={examAnalytics.statistics.avg_score} precision={1} /></Col>
+                        <Col span={4}><Statistic title={t('analytics.stats.examMaxScore')} value={examAnalytics.statistics.max_score} /></Col>
+                        <Col span={4}><Statistic title={t('analytics.stats.examMinScore')} value={examAnalytics.statistics.min_score} /></Col>
+                        <Col span={4}><Statistic title={t('analytics.stats.examPassRate')} value={examAnalytics.statistics.pass_rate} suffix="%" precision={1} /></Col>
                       </Row>
 
                       <Table
@@ -484,19 +484,19 @@ const AnalyticsPage: React.FC = () => {
                         pagination={false}
                         style={{ marginBottom: 16 }}
                         columns={[
-                          { title: '题型', dataIndex: 'type', width: 70, render: (t: string) => typeLabel[t] || t },
-                          { title: '题目', dataIndex: 'text', ellipsis: true },
+                          { title: t('analytics.columns.questionType'), dataIndex: 'type', width: 70, render: (typeVal: string) => typeLabel[typeVal] || typeVal },
+                          { title: t('analytics.columns.question'), dataIndex: 'text', ellipsis: true },
                           {
-                            title: '难度', dataIndex: 'difficulty', width: 70,
-                            render: (d: string) => <Tag color={diffColor[d] || 'default'}>{d === 'easy' ? '易' : d === 'medium' ? '中' : '难'}</Tag>,
+                            title: t('analytics.columns.difficulty'), dataIndex: 'difficulty', width: 70,
+                            render: (d: string) => <Tag color={diffColor[d] || 'default'}>{d === 'easy' ? t('analytics.difficulty.easy') : d === 'medium' ? t('analytics.difficulty.medium') : t('analytics.difficulty.hard')}</Tag>,
                           },
                           {
-                            title: '正确率', dataIndex: 'correct_rate', width: 90,
+                            title: t('analytics.columns.accuracy'), dataIndex: 'correct_rate', width: 90,
                             render: (r: number) => (
                               <Text strong style={{ color: r >= 60 ? '#52c41a' : '#ff4d4f' }}>{r}%</Text>
                             ),
                           },
-                          { title: '知识点', dataIndex: 'knowledge_points', width: 150, ellipsis: true },
+                          { title: t('analytics.columns.knowledgePoints'), dataIndex: 'knowledge_points', width: 150, ellipsis: true },
                         ]}
                       />
 
@@ -507,8 +507,8 @@ const AnalyticsPage: React.FC = () => {
                             if (!selectedExam) return
                             const token = localStorage.getItem('smartkb_token')
                             window.open(`/api/analytics/exam/${selectedExam}/report/export?token=${token}`, '_blank')
-                          }}>导出 Word</Button>
-                          <Button icon={<DownloadOutlined />} onClick={exportExamExcel}>导出Excel</Button>
+                          }}>{t('analytics.exportWord')}</Button>
+                          <Button icon={<DownloadOutlined />} onClick={exportExamExcel}>{t('analytics.exportExcel')}</Button>
                         </Space>
                       </Space>
                       <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
@@ -523,13 +523,13 @@ const AnalyticsPage: React.FC = () => {
             },
             {
               key: 'progress',
-              label: <span><BookOutlined /> 学情进度</span>,
+              label: <span><BookOutlined /> {t('analytics.tabs.progress')}</span>,
               children: (
                 <div>
                   <Row gutter={16} style={{ marginBottom: 16 }}>
-                    <Col span={6}><Statistic title="筛选学生数" value={progressStats.totalStudents} prefix={<TeamOutlined />} /></Col>
+                    <Col span={6}><Statistic title={t('analytics.stats.filteredStudents')} value={progressStats.totalStudents} prefix={<TeamOutlined />} /></Col>
                     <Col span={6}>
-                      <Statistic title="平均完成率" value={progressStats.avgRate} suffix="%"
+                      <Statistic title={t('analytics.stats.avgCompletionRate')} value={progressStats.avgRate} suffix="%"
                         precision={1} styles={{ content: { color: progressStats.avgRate >= 60 ? '#52c41a' : '#faad14' } }} />
                     </Col>
                   </Row>
@@ -537,41 +537,41 @@ const AnalyticsPage: React.FC = () => {
                   <Space wrap style={{ marginBottom: 16 }}>
                     <Select
                       value={courseId} onChange={setCourseId} style={{ width: 160 }}
-                      placeholder="选择课程" allowClear
+                      placeholder={t('analytics.selectCourse')} allowClear
                       options={courses.map((c) => ({ label: c.name, value: c.id }))} />
                     <Select
                       value={progressGrade} onChange={setProgressGrade} style={{ width: 120 }}
-                      placeholder="全部年级" allowClear
+                      placeholder={t('analytics.allGrades')} allowClear
                       options={gradeOptions.map(g => ({ label: g, value: g }))} />
                     <Select
                       value={progressClass} onChange={setProgressClass} style={{ width: 120 }}
-                      placeholder="全部班级" allowClear
+                      placeholder={t('analytics.allClasses')} allowClear
                       options={classOptions.map(c => ({ label: c, value: c }))} />
-                    <Button type="primary" icon={<ReloadOutlined />} onClick={loadProgress} loading={progressLoading}>查询</Button>
+                    <Button type="primary" icon={<ReloadOutlined />} onClick={loadProgress} loading={progressLoading}>{t('analytics.query')}</Button>
                     <Button icon={<DownloadOutlined />} onClick={exportProgressExcel}
-                      disabled={progressStudents.length === 0}>导出Excel</Button>
+                      disabled={progressStudents.length === 0}>{t('analytics.exportExcel')}</Button>
                   </Space>
 
                   <Space style={{ marginBottom: 12 }}>
-                    <Tag icon={<CheckCircleOutlined />} color="success">已完成</Tag>
-                    <Tag icon={<ClockCircleOutlined />} color="processing">学习中</Tag>
-                    <Tag icon={<StopOutlined />} color="default">未开始</Tag>
+                    <Tag icon={<CheckCircleOutlined />} color="success">{t('analytics.status.completed')}</Tag>
+                    <Tag icon={<ClockCircleOutlined />} color="processing">{t('analytics.status.learning')}</Tag>
+                    <Tag icon={<StopOutlined />} color="default">{t('analytics.status.notStarted')}</Tag>
                   </Space>
 
                   {!progressLoading && progressStudents.length === 0 ? (
-                    <Empty description="请选择筛选条件后点击「查询」按钮加载数据" />
+                    <Empty description={t('analytics.emptyProgress')} />
                   ) : (
                   <Table
                     dataSource={progressStudents}
                     rowKey="username"
                     loading={progressLoading}
-                    pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 名学生` }}
+                    pagination={{ pageSize: 20, showTotal: (total) => t('analytics.totalStudentsFormat', { count: total }) }}
                     expandable={{
                       expandedRowRender: (record: ProgressStudent) => {
                         const stuCourses = record.courses || []
                         const detail = stuCourses.find((c) => c.course_id === courseId) || stuCourses[0]
                         const details = detail?.details || []
-                        if (!details.length) return <Text type="secondary">该课程暂无知识点</Text>
+                        if (!details.length) return <Text type="secondary">{t('analytics.noKnowledgePoints')}</Text>
                         return (
                           <Space wrap>
                             {details.map((d) => (
@@ -593,19 +593,19 @@ const AnalyticsPage: React.FC = () => {
                     size="middle"
                     columns={[
                       {
-                        title: '姓名', dataIndex: 'name', key: 'name', width: 100,
+                        title: t('analytics.columns.name'), dataIndex: 'name', key: 'name', width: 100,
                         render: (name: string) => <Text strong><TeamOutlined /> {name}</Text>,
                       },
-                      { title: '年级', dataIndex: 'grade', width: 70 },
-                      { title: '班级', dataIndex: 'class', width: 70 },
+                      { title: t('analytics.columns.grade'), dataIndex: 'grade', width: 70 },
+                      { title: t('analytics.columns.class'), dataIndex: 'class', width: 70 },
                       {
-                        title: '课程完成率', key: 'courses', width: 200,
+                        title: t('analytics.columns.completionRate'), key: 'courses', width: 200,
                         render: (_: unknown, record: ProgressStudent) => {
                           const cd = (record.courses || []).find((c) => c.course_id === courseId) || (record.courses || [])[0]
                           if (!cd) return <Text type="secondary">—</Text>
                           const { completed_kps, total_kps, rate } = cd
                           return (
-                            <Tooltip title={`${completed_kps}/${total_kps} (${rate}%)`}>
+                            <Tooltip title={t('analytics.tooltipFormat', { completed: completed_kps, total: total_kps, rate })}>
                               <Space>
                                 <div style={{ width: 120, height: 20, background: '#f0f0f0', borderRadius: 10, overflow: 'hidden' }}>
                                   <div style={{ width: `${rate}%`, height: '100%', background: rate >= 80 ? '#52c41a' : rate >= 40 ? '#faad14' : '#ff4d4f', borderRadius: 10, transition: 'width 0.3s' }} />

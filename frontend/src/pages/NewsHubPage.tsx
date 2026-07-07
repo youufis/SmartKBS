@@ -11,6 +11,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNewsStore } from '../stores/newsStore';
 import { useAuthStore } from '../stores/authStore';
+import { useTranslation } from 'react-i18next'
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -20,6 +21,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const NewsHubPage: React.FC = () => {
+  const { t } = useTranslation('common')
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const user = useAuthStore((s) => s.user);
@@ -36,8 +38,8 @@ const NewsHubPage: React.FC = () => {
   const [briefing, setBriefing] = useState<any>(null);
   const [briefingOpen, setBriefingOpen] = useState(false);
   const tabsItems = [
-    { key: 'feed', label: '新闻列表' },
-    { key: 'briefing', label: '今日简报' },
+    { key: 'feed', label: t('newsList') },
+    { key: 'briefing', label: t('dailyBriefing') },
   ];
 
   useEffect(() => {
@@ -66,7 +68,7 @@ const NewsHubPage: React.FC = () => {
       const data = await getDetail(newsId);
       setDetailModal(data);
     } catch {
-      message.error('加载新闻详情失败');
+      message.error(t('loadFailed'))
     } finally {
       setDetailLoading(false);
     }
@@ -79,7 +81,7 @@ const NewsHubPage: React.FC = () => {
   };
 
   const handleRefresh = () => {
-    message.info('正在后台刷新新闻列表...');
+    message.success(t('refreshed'));
     loadList(activeCategory, 1);
     loadStats();
   };
@@ -92,7 +94,7 @@ const NewsHubPage: React.FC = () => {
         const data = await getDailyBriefing();
         setBriefing(data);
       } catch {
-        message.error('生成简报失败');
+        message.error(t('loadFailed'));
       }
     }
   };
@@ -113,12 +115,12 @@ const NewsHubPage: React.FC = () => {
           <Space>
             <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate(-1)} />
             <GlobalOutlined style={{ color: '#1677ff', fontSize: 18 }} />
-            <Text strong style={{ fontSize: 16 }}>热点新闻</Text>
+            <Text strong style={{ fontSize: 16 }}>{t('hotNews')}</Text>
           </Space>
           <Space>
             {isTeacherOrAdmin && (
               <Button size="small" onClick={handleOpenBriefing}>
-                📋 今日简报
+                {t('dailyBriefingBtn')}
               </Button>
             )}
             <Button
@@ -126,7 +128,7 @@ const NewsHubPage: React.FC = () => {
               icon={<ReloadOutlined />}
               onClick={handleRefresh}
             >
-              刷新
+              {t('refresh')}
             </Button>
           </Space>
         </div>
@@ -141,7 +143,7 @@ const NewsHubPage: React.FC = () => {
             style={{ cursor: 'pointer', padding: '2px 8px' }}
             onClick={() => handleCategoryChange('')}
           >
-            全部
+            {t('all')}
           </Tag>
           {categories.map((cat) => (
             <Tag
@@ -161,10 +163,10 @@ const NewsHubPage: React.FC = () => {
         styles={{ body: { padding: '6px 16px' } }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            📊 今日已读 {stats.todayViews} 篇，获得 {stats.todayPoints}/{stats.pointsMax} 积分
+            {t('todayReadStats', { todayViews: stats.todayViews, todayPoints: stats.todayPoints, pointsMax: stats.pointsMax })}
           </Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            累计阅读 {stats.totalViews} 篇
+            {t('totalReadCount', { count: stats.totalViews })}
           </Text>
         </Space>
         <Progress
@@ -181,7 +183,7 @@ const NewsHubPage: React.FC = () => {
         styles={{ body: { padding: 0 } }}
       >
         {articles.length === 0 && !loading ? (
-          <Empty description="暂无新闻，点击刷新获取最新资讯" style={{ padding: 40 }} />
+          <Empty description={t('noNews')} style={{ padding: 40 }} />
         ) : (
           <List
             dataSource={articles}
@@ -190,7 +192,7 @@ const NewsHubPage: React.FC = () => {
                 style={{ cursor: 'pointer', padding: '12px 16px' }}
                 onClick={() => handleViewDetail(item.id)}
                 actions={[
-                  <Tooltip title={item.is_favorited ? '取消收藏' : '收藏'}>
+                  <Tooltip title={item.is_favorited ? t('unfavorite') : t('favorite')}>
                     <Button
                       type="text"
                       size="small"
@@ -218,7 +220,7 @@ const NewsHubPage: React.FC = () => {
                       </Text>
                       {item.is_viewed && (
                         <Text type="secondary" style={{ fontSize: 11 }}>
-                          <EyeOutlined /> 已读
+                          <EyeOutlined /> {t('readLabel')}
                         </Text>
                       )}
                     </Space>
@@ -280,7 +282,7 @@ const NewsHubPage: React.FC = () => {
             {/* AI摘要 */}
             {detailModal.ai_one_liner && (
               <Card size="small" style={{ marginBottom: 12, background: '#f6f8fa' }}>
-                <Text strong style={{ fontSize: 13 }}>💡 一句话精要：</Text>
+                <Text strong style={{ fontSize: 13 }}>💡 {t('aiOneLiner')}</Text>
                 <Paragraph style={{ margin: '4px 0 0', fontSize: 14 }}>
                   {detailModal.ai_one_liner}
                 </Paragraph>
@@ -288,7 +290,7 @@ const NewsHubPage: React.FC = () => {
             )}
             {detailModal.ai_summary && (
               <Card size="small" style={{ marginBottom: 12, background: '#f6f8fa' }}>
-                <Text strong style={{ fontSize: 13 }}>📝 AI摘要：</Text>
+                <Text strong style={{ fontSize: 13 }}>📝 {t('aiSummary')}</Text>
                 <Paragraph style={{ margin: '4px 0 0', fontSize: 14 }}>
                   {detailModal.ai_summary}
                 </Paragraph>
@@ -298,7 +300,7 @@ const NewsHubPage: React.FC = () => {
             {/* 学科关联 */}
             {detailModal.related_subjects?.length > 0 && (
               <div style={{ marginBottom: 12 }}>
-                <Text strong style={{ fontSize: 13 }}>📐 关联学科：</Text>
+                <Text strong style={{ fontSize: 13 }}>📐 {t('relatedSubjects')}</Text>
                 <Space style={{ marginLeft: 8 }}>
                   {detailModal.related_subjects.map((subj: string) => (
                     <Tag
@@ -306,7 +308,7 @@ const NewsHubPage: React.FC = () => {
                       color="blue"
                       style={{ cursor: 'pointer' }}
                       onClick={() => {
-                        message.info(`即将跳转到「${subj}」相关学习资源`);
+                        message.info(t('jumpToSubject', { subject: subj }));
                         // 可以跳转到课程或练习页面
                       }}
                     >
@@ -333,7 +335,7 @@ const NewsHubPage: React.FC = () => {
                 icon={<GlobalOutlined />}
                 onClick={() => window.open(detailModal.url, '_blank')}
               >
-                阅读原文
+                {t('readOriginal')}
               </Button>
               <Button
                 icon={detailModal.is_favorited ? <HeartFilled /> : <HeartOutlined />}
@@ -343,11 +345,11 @@ const NewsHubPage: React.FC = () => {
                   setDetailModal({ ...detailModal, is_favorited: newFav });
                 }}
               >
-                {detailModal.is_favorited ? '已收藏' : '收藏'}
+                {detailModal.is_favorited ? t('favorited') : t('favorite')}
               </Button>
               {detailModal.points_awarded > 0 && (
                 <Tag color="green" style={{ marginLeft: 'auto' }}>
-                  +{detailModal.points_awarded} 积分
+                  {t('pointsAwarded', { points: detailModal.points_awarded })}
                 </Tag>
               )}
             </div>
@@ -357,7 +359,7 @@ const NewsHubPage: React.FC = () => {
 
       {/* 今日简报 Drawer */}
       <Drawer
-        title="📋 今日要闻简报"
+        title={t('dailyBriefingTitle')}
         placement="right"
         width={500}
         open={briefingOpen}
@@ -370,7 +372,7 @@ const NewsHubPage: React.FC = () => {
             </div>
             <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
               <Text type="secondary">
-                共 {briefing.article_count} 篇新闻 · 生成于 {briefing.generated_at?.slice(0, 16)}
+                {t('briefingInfo', { count: briefing.article_count, date: briefing.generated_at?.slice(0, 16) })}
               </Text>
             </div>
           </div>

@@ -14,6 +14,7 @@ import {
   UndoOutlined, RedoOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import { useWhiteboardStore } from '../stores/whiteboardStore'
 import { WhiteboardCanvas } from '../components/whiteboard/WhiteboardCanvas'
@@ -27,6 +28,7 @@ import type { WhiteboardMode, WhiteboardMember } from '../types'
 const { Title, Text } = Typography
 
 const WhiteboardRoomPage: React.FC = () => {
+  const { t } = useTranslation('discussion')
   const { roomId } = useParams<{ roomId: string }>()
   const rid = Number(roomId)
   const navigate = useNavigate()
@@ -61,7 +63,7 @@ const WhiteboardRoomPage: React.FC = () => {
         setMode(room.mode as WhiteboardMode)
         setRoom(room)
       } catch {
-        message.error('房间不存在')
+        message.error(t('roomNotFound'))
         navigate('/whiteboard')
       }
     }
@@ -109,21 +111,21 @@ const WhiteboardRoomPage: React.FC = () => {
         setMode(msg.mode as WhiteboardMode)
       }
       if (msg.type === 'student_submitted') {
-        message.success(`学生 ${msg.username} 已提交`)
+        message.success(t('studentSubmitted', { username: msg.username }))
         if (isTeacher) loadMembers()
       }
       if (msg.type === 'room_ended') {
-        message.info('房间已结束')
+        message.info(t('roomEnded'))
         setRoomStatus('ended')
       }
       // 学生：收到授权/收回通知
       if (msg.type === 'control_granted') {
         setGrantedToMe(true)
-        message.success('你已被授权操作白板！')
+        message.success(t('authorizedToEdit'))
       }
       if (msg.type === 'control_revoked') {
         setGrantedToMe(false)
-        message.info('操作权已收回')
+        message.info(t('editRevoked'))
       }
     })
     return unsub
@@ -136,16 +138,16 @@ const WhiteboardRoomPage: React.FC = () => {
       setModeState(newMode as WhiteboardMode)
       setMode(newMode as WhiteboardMode)
       ws.send({ type: 'mode_change', mode: newMode })
-      message.success('模式已切换')
+      message.success(t('modeSwitched'))
     } catch {
-      message.error('切换失败')
+      message.error(t('switchFailed'))
     }
   }
 
   const handleEnd = async () => {
     Modal.confirm({
-      title: '确定结束白板？',
-      content: '结束后所有学生将退出',
+      title: t('confirmEndWhiteboard'),
+      content: t('endWhiteboardHint'),
       onOk: async () => {
         try {
           await whiteboardApi.endRoom(rid)
@@ -162,29 +164,29 @@ const WhiteboardRoomPage: React.FC = () => {
     try {
       await whiteboardApi.spotlightStudent(rid, username)
       setSelectedStudent(username)
-      message.info(`已投屏 ${username} 的白板`)
+      message.info(t('spotlighted', { username: username }))
     } catch {
-      message.error('投屏失败')
+      message.error(t('screenCastFailed'))
     }
   }
 
   const handleGrantControl = async (username: string) => {
     try {
       await whiteboardApi.grantControl(rid, username)
-      message.success(`已授权 ${username} 操作`)
+      message.success(t('grantedControl', { username: username }))
       loadMembers()
     } catch {
-      message.error('授权失败')
+      message.error(t('authFailed'))
     }
   }
 
   const handleRevokeControl = async (username: string) => {
     try {
       await whiteboardApi.revokeControl(rid, username)
-      message.success('已收回操作权')
+      message.success(t('editRevoked'))
       loadMembers()
     } catch {
-      message.error('操作失败')
+      message.error(t('operationFailed'))
     }
   }
 
@@ -198,18 +200,18 @@ const WhiteboardRoomPage: React.FC = () => {
     if (!editor) return
     const shapeIds = editor.getCurrentPageShapeIds()
     if (shapeIds.size === 0) {
-      message.info('白板已经是空的')
+      message.info(t('whiteboardAlreadyEmpty'))
       return
     }
     Modal.confirm({
-      title: '清空白板',
-      content: `确定要删除全部 ${shapeIds.size} 个形状吗？此操作不可撤销。`,
-      okText: '清空',
+      title: t('clearWhiteboard'),
+      content: t('confirmClearShapes', { count: shapeIds.size }),
+      okText: t('clear'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: () => {
         editor.deleteShapes(Array.from(shapeIds))
-        message.success('白板已清空')
+        message.success(t('whiteboardCleared'))
       },
     })
   }, [])
@@ -225,14 +227,14 @@ const WhiteboardRoomPage: React.FC = () => {
 
   // ── 导出板书总结 ──
   const handleExportSummary = useCallback(async () => {
-    message.loading({ content: 'AI 正在生成总结并导出 Word...', key: 'exportBoard' })
+    message.loading({ content: t('exportingBoard'), key: 'exportBoard' })
     try {
       const token = localStorage.getItem('smartkb_token') || ''
       const response = await fetch(`/api/whiteboard/ai/export-summary/${rid}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: '导出失败' }))
+        const err = await response.json().catch(() => ({ detail: t('exportFailed') }))
         throw new Error(err.detail || `HTTP ${response.status}`)
       }
       const blob = await response.blob()
@@ -242,9 +244,9 @@ const WhiteboardRoomPage: React.FC = () => {
       a.download = `板书总结_${roomTitle}.docx`
       a.click()
       window.URL.revokeObjectURL(url)
-      message.success({ content: '板书总结已导出', key: 'exportBoard' })
+      message.success({ content: t('boardExported'), key: 'exportBoard' })
     } catch (err: any) {
-      message.error({ content: err.message || '导出失败', key: 'exportBoard' })
+      message.error({ content: err.message || t('exportFailed'), key: 'exportBoard' })
     }
   }, [rid, roomTitle])
 
@@ -333,7 +335,7 @@ const WhiteboardRoomPage: React.FC = () => {
               icon={<CopyOutlined />}
               onClick={() => {
                 navigator.clipboard.writeText(roomCode)
-                message.success('已复制')
+                message.success(t('copied'))
               }}
             />
           </Tooltip>
@@ -367,7 +369,7 @@ const WhiteboardRoomPage: React.FC = () => {
             </Tooltip>
           )}
           {isTeacher && roomStatus === 'active' && (
-            <Button danger icon={<StopOutlined />} onClick={handleEnd}>结束</Button>
+            <Button danger icon={<StopOutlined />} onClick={handleEnd}>{t('end')}</Button>
           )}
         </Space>
       </div>
@@ -413,7 +415,7 @@ const WhiteboardRoomPage: React.FC = () => {
 
       {/* ── 成员侧栏 ── */}
       <Drawer
-        title="成员列表"
+        title={t('members')}
         open={membersOpen}
         onClose={() => setMembersOpen(false)}
         width={320}
@@ -450,7 +452,7 @@ const WhiteboardRoomPage: React.FC = () => {
             )}
           </div>
         ))}
-        {members.length === 0 && <Text type="secondary">暂无成员</Text>}
+        {members.length === 0 && <Text type="secondary">{t('noMembers')}</Text>}
       </Drawer>
     </div>
   )

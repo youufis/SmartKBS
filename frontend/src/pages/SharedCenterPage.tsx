@@ -1,12 +1,14 @@
 import React from 'react'
 import { Tabs, Card } from 'antd'
 import { FileOutlined, DownloadOutlined, FolderOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import HtmlFilesPage from './HtmlFilesPage'
 import DownloadsPage from './DownloadsPage'
 import ResourceMgmtPage from './ResourceMgmtPage'
 
 const SharedCenterPage: React.FC = () => {
+  const { t } = useTranslation('common')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
@@ -18,17 +20,17 @@ const SharedCenterPage: React.FC = () => {
           items={[
             {
               key: 'browse',
-              label: <span><FileOutlined /> 资源浏览</span>,
+              label: <span><FileOutlined /> {t('resourceBrowse')}</span>,
               children: <HtmlFilesPage />,
             },
             {
               key: 'manage',
-              label: <span><FolderOutlined /> 资源管理</span>,
+              label: <span><FolderOutlined /> {t('resourceManage')}</span>,
               children: <ResourceMgmtPage />,
             },
             {
               key: 'downloads',
-              label: <span><DownloadOutlined /> 文件中心</span>,
+              label: <span><DownloadOutlined /> {t('fileCenter')}</span>,
               children: <DownloadsPage />,
             },
           ]}
@@ -44,12 +46,12 @@ const SharedCenterPage: React.FC = () => {
         items={[
           {
             key: 'html',
-            label: <span><FileOutlined /> 共享资源</span>,
+            label: <span><FileOutlined /> {t('sharedResources')}</span>,
             children: <HtmlFilesPage />,
           },
           {
             key: 'downloads',
-            label: <span><DownloadOutlined /> 共享文件</span>,
+            label: <span><DownloadOutlined /> {t('sharedFiles')}</span>,
             children: <DownloadsPage />,
           },
         ]}

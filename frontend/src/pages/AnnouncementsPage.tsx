@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, Table, Typography, Button, Space, Modal, Form, Input,
-  Select, message, Empty, Spin, Tag, Switch, Popconfirm,
+  Select, message, Empty, Tag, Switch, Popconfirm,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, PushpinOutlined,
@@ -15,7 +16,7 @@ import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 const PRIORITY_COLORS: Record<string, string> = {
@@ -25,14 +26,15 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: 'default',
 }
 
-const PRIORITY_LABELS: Record<string, string> = {
-  urgent: '紧急',
-  important: '重要',
-  normal: '普通',
-  low: '低优先级',
-}
-
 const AnnouncementsPage: React.FC = () => {
+  const { t } = useTranslation('system')
+
+  const PRIORITY_LABELS: Record<string, string> = {
+    urgent: t('urgent'),
+    important: t('important'),
+    normal: t('normal'),
+    low: t('lowPriority'),
+  }
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
@@ -63,7 +65,7 @@ const AnnouncementsPage: React.FC = () => {
       setAnnouncements(data.announcements || [])
       setTotal(data.total || 0)
     } catch {
-      message.error('加载公告失败')
+      message.error(t('loadFailed'))
     }
     setLoading(false)
   }
@@ -97,12 +99,12 @@ const AnnouncementsPage: React.FC = () => {
             target_class: aiClass,
             target_users: '',
           })
-          message.success('AI 已生成公告内容，请确认后发布')
+          message.success(t('aiContentReady'))
           setAiModal(false)
           aiForm.resetFields()
           setCreateModal(true)
         } else {
-          message.error(result?.content || 'AI 生成失败')
+          message.error(result?.content || t('aiGenerateFailed'))
         }
       } else if (data.status === 'ok' && data.data) {
         form.setFieldsValue({
@@ -120,7 +122,7 @@ const AnnouncementsPage: React.FC = () => {
           target_class: aiClass,
           target_users: '',
         })
-        message.success('AI 已生成公告内容，请确认后发布')
+        message.success(t('aiContentReady'))
         setAiModal(false)
         aiForm.resetFields()
         setCreateModal(true)
@@ -129,7 +131,7 @@ const AnnouncementsPage: React.FC = () => {
       }
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return
-      message.error('生成失败')
+      message.error(t('generateFailed'))
     } finally {
       setAiLoading(false)
     }
@@ -146,7 +148,7 @@ const AnnouncementsPage: React.FC = () => {
         target_class: announceScope.target_class,
         target_users: announceScope.target_users,
       })
-      message.success('公告发布成功')
+      message.success(t('publishSuccess'))
       setCreateModal(false)
       form.resetFields()
       setAnnounceScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
@@ -154,7 +156,7 @@ const AnnouncementsPage: React.FC = () => {
       setPage(1)
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return
-      message.error('发布失败')
+      message.error(t('publishFailed'))
     }
     setSubmitting(false)
   }
@@ -164,22 +166,22 @@ const AnnouncementsPage: React.FC = () => {
       const values = await editForm.validateFields()
       setSubmitting(true)
       await notificationsApi.updateAnnouncement(editModal.id, values)
-      message.success('公告已更新')
+      message.success(t('updateSuccess'))
       setEditModal(null)
       fetchAnnouncements(page, pageSize)
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return
-      message.error('更新失败')
+      message.error(t('publishFailed'))
     }
     setSubmitting(false)
   }
   const handleDelete = async (id: number) => {
     try {
       await notificationsApi.deleteAnnouncement(id)
-      message.success('公告已删除')
+      message.success(t('deleteSuccess'))
       fetchAnnouncements(page, pageSize)
     } catch {
-      message.error('删除失败')
+      message.error(t('deleteFailed'))
     }
   }
 
@@ -191,14 +193,14 @@ const AnnouncementsPage: React.FC = () => {
 
   const columns = [
     {
-      title: '置顶',
+      title: t('pinned'),
       dataIndex: 'is_pinned',
       key: 'is_pinned',
       width: 50,
       render: (pinned: boolean) => pinned ? <PushpinOutlined style={{ color: '#fa8c16' }} /> : null,
     },
     {
-      title: '公告标题',
+      title: t('announcementTitle'),
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -212,14 +214,14 @@ const AnnouncementsPage: React.FC = () => {
       ),
     },
     {
-      title: '发布者',
+      title: t('publisher'),
       dataIndex: 'creator_name',
       key: 'creator_name',
       width: 100,
       render: (name: string) => name || '-',
     },
     {
-      title: '范围',
+      title: t('scope'),
       key: 'target',
       width: 120,
       render: (_: any, record: AnnouncementItem) => (
@@ -233,14 +235,14 @@ const AnnouncementsPage: React.FC = () => {
       ),
     },
     {
-      title: '发布时间',
+      title: t('publishTime'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 160,
       render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-',
     },
     {
-      title: '操作',
+      title: t('actions'),
       key: 'actions',
       width: 120,
       render: (_: any, record: AnnouncementItem) => (
@@ -250,7 +252,7 @@ const AnnouncementsPage: React.FC = () => {
             <>
               <Button type="text" icon={<EditOutlined />} size="small"
                 onClick={() => { setEditModal(record); editForm.setFieldsValue(record) }} />
-              <Popconfirm title="确定删除此公告？" onConfirm={() => handleDelete(record.id)}>
+              <Popconfirm title={t('confirmDeleteAnnouncement')} onConfirm={() => handleDelete(record.id)}>
                 <Button type="text" danger icon={<DeleteOutlined />} size="small" />
               </Popconfirm>
             </>
@@ -263,20 +265,20 @@ const AnnouncementsPage: React.FC = () => {
   return (
     <div>
       <Card
-        title={<Space><BellOutlined />系统公告</Space>}
+        title={<Space><BellOutlined />{t('announcements')}</Space>}
         extra={
           <Space>
             {isAdminOrTeacher && (
               <>
                 <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
-                  发布公告
+                  {t('addAnnouncement')}
                 </Button>
                 <Button icon={<BulbOutlined />} onClick={() => { setAiModal(true); aiForm.resetFields(); }}>
-                  AI 起草
+                  {t('aiDraft')}
                 </Button>
               </>
             )}
-            <Button icon={<ReloadOutlined />} onClick={() => fetchAnnouncements(page, pageSize)}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => fetchAnnouncements(page, pageSize)}>{t('refresh')}</Button>
           </Space>
         }
       >
@@ -291,11 +293,11 @@ const AnnouncementsPage: React.FC = () => {
             pageSize,
             total,
             showSizeChanger: true,
-            showTotal: (t) => `共 ${t} 条公告`,
+            showTotal: (total) => t('totalAnnouncements', { count: total }),
             pageSizeOptions: ['10', '20', '50'],
           }}
           onChange={handleTableChange}
-          locale={{ emptyText: <Empty description="暂无公告" /> }}
+          locale={{ emptyText: <Empty description={t('noAnnouncements')} /> }}
         />
       </Card>
 
@@ -304,7 +306,7 @@ const AnnouncementsPage: React.FC = () => {
         title={<Space><BellOutlined />{detailModal?.title}</Space>}
         open={!!detailModal}
         onCancel={() => setDetailModal(null)}
-        footer={<Button onClick={() => setDetailModal(null)}>关闭</Button>}
+        footer={<Button onClick={() => setDetailModal(null)}>{t('close')}</Button>}
         width={640}
       >
         {detailModal && (
@@ -339,7 +341,7 @@ const AnnouncementsPage: React.FC = () => {
         onCancel={() => setAiModal(false)}
         onOk={handleAiGenerate}
         confirmLoading={aiLoading}
-        okText="生成公告"
+        okText={t('generateAnnouncement')} cancelText={t('cancel')}
       >
         <Form form={aiForm} layout="vertical">
           <Form.Item name="topic" label="公告主题" rules={[{ required: true, message: '请输入公告主题' }]}>
@@ -370,19 +372,20 @@ const AnnouncementsPage: React.FC = () => {
 
       {/* ── 发布公告弹窗 ── */}
       <Modal
-        title="发布公告"
+        title={t('addAnnouncement')}
         open={createModal}
         onCancel={() => { setCreateModal(false); setAnnounceScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         onOk={handleCreate}
         confirmLoading={submitting}
+        okText={t('publish')} cancelText={t('cancel')}
         width={640}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="title" label="公告标题" rules={[{ required: true, message: '请输入标题' }]}>
-            <Input placeholder="请输入公告标题" maxLength={100} />
+          <Form.Item name="title" label={t('announcementTitle')} rules={[{ required: true, message: '请输入标题' }]}>
+            <Input placeholder={t('announcementTitle')} maxLength={100} />
           </Form.Item>
-          <Form.Item name="content" label="公告内容" rules={[{ required: true, message: '请输入内容' }]}>
-            <TextArea rows={6} placeholder="请输入公告内容（支持 Markdown 格式）" />
+          <Form.Item name="content" label={t('announcementContent')} rules={[{ required: true, message: '请输入内容' }]}>
+            <TextArea rows={6} placeholder={t('announcementContent')} />
           </Form.Item>
           <Form.Item
             name="target_role"
@@ -408,7 +411,7 @@ const AnnouncementsPage: React.FC = () => {
                 <Select.Option value="low">低</Select.Option>
               </Select>
             </Form.Item>
-            <Form.Item name="is_pinned" label="置顶" valuePropName="checked" initialValue={false}>
+            <Form.Item name="is_pinned" label={t('pinned')} valuePropName="checked" initialValue={false}>
               <Switch />
             </Form.Item>
           </Space>
@@ -416,18 +419,19 @@ const AnnouncementsPage: React.FC = () => {
       </Modal>
       {/* ── 编辑公告弹窗 ── */}
       <Modal
-        title="编辑公告"
+        title={t('editAnnouncement')}
         open={!!editModal}
         onCancel={() => setEditModal(null)}
         onOk={handleEdit}
         confirmLoading={submitting}
+        okText={t('save')} cancelText={t('cancel')}
         width={640}
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item name="title" label="公告标题" rules={[{ required: true, message: '请输入标题' }]}>
+          <Form.Item name="title" label={t('announcementTitle')} rules={[{ required: true, message: '请输入标题' }]}>
             <Input maxLength={100} />
           </Form.Item>
-          <Form.Item name="content" label="公告内容" rules={[{ required: true, message: '请输入内容' }]}>
+          <Form.Item name="content" label={t('announcementContent')} rules={[{ required: true, message: '请输入内容' }]}>
             <TextArea rows={6} />
           </Form.Item>
           <Form.Item name="priority" label="优先级">

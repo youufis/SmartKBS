@@ -15,6 +15,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -78,6 +79,7 @@ const getScoreColor = (correct: number) => {
 }
 
 const QuestResultPage: React.FC = () => {
+  const { t } = useTranslation('questions')
   const { questId } = useParams<{ questId: string }>()
   const navigate = useNavigate()
   const [result, setResult] = useState<QuestResult | null>(null)
@@ -93,7 +95,7 @@ const QuestResultPage: React.FC = () => {
       const { data } = await apiClient.get(`/api/quest/${questId}/result`)
       setResult(data)
     } catch {
-      message.error('加载结算数据失败')
+      message.error(t('loadResultFailed'))
     } finally {
       setLoading(false)
     }

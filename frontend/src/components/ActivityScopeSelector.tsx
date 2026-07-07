@@ -3,6 +3,7 @@ import { Select, Radio, Space, Tag, Divider, Typography, Checkbox } from 'antd'
 import { BookOutlined, GlobalOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
 import { fetchGrades, fetchAllGradeClasses } from '../api/gradeClass'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -27,6 +28,7 @@ const ActivityScopeSelector: React.FC<Props> = ({
   onChange,
   showAllOption = false,
 }) => {
+  const { t } = useTranslation('common')
   const user = useAuthStore((s) => s.user)
   const isAdmin = user?.role === 'admin'
 
@@ -118,18 +120,18 @@ const ActivityScopeSelector: React.FC<Props> = ({
   }, [classOptions, selectedGrades])
 
   const scopeOptions: { value: TargetScope; label: React.ReactNode; desc: string }[] = [
-    { value: 'teacher_classes', label: <><TeamOutlined /> 任教班级</>, desc: '对您任教的所有班级学生可见（默认）' },
-    { value: 'grade', label: <><BookOutlined /> 指定年级</>, desc: '对选中的年级全体学生可见' },
-    { value: 'class', label: <><BookOutlined /> 指定班级</>, desc: '对选中的具体班级学生可见' },
+    { value: 'teacher_classes', label: <><TeamOutlined /> {t('scopeTeacherClasses')}</>, desc: t('scopeTeacherClassesDesc') },
+    { value: 'grade', label: <><BookOutlined /> {t('scopeGrade')}</>, desc: t('scopeGradeDesc') },
+    { value: 'class', label: <><BookOutlined /> {t('scopeClass')}</>, desc: t('scopeClassDesc') },
   ]
   if (showAllOption || isAdmin) {
-    scopeOptions.unshift({ value: 'all', label: <><GlobalOutlined /> 全体学生</>, desc: '对所有学生可见' })
+    scopeOptions.unshift({ value: 'all', label: <><GlobalOutlined /> {t('scopeAll')}</>, desc: t('scopeAllDesc') })
   }
 
   return (
     <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '12px 16px', background: '#fafafa' }}>
       <Text strong style={{ marginBottom: 8, display: 'block' }}>
-        <GlobalOutlined /> 活动目标范围
+        <GlobalOutlined /> {t('activityScopeTitle')}
       </Text>
       <Radio.Group
         value={scope}
@@ -150,26 +152,26 @@ const ActivityScopeSelector: React.FC<Props> = ({
       {(scope === 'grade' || scope === 'class') && (
         <div style={{ marginTop: 8 }}>
           <div style={{ marginBottom: 8 }}>
-            <Text type="secondary" style={{ fontSize: 13 }}>选择年级：</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>{t('selectGradeColon')}</Text>
             <Select
               mode="multiple"
               value={selectedGrades}
               onChange={handleGradeChange}
-              placeholder="选择年级"
+              placeholder={t('selectGrade')}
               style={{ width: '100%', marginTop: 4 }}
               options={grades.map((g) => ({ label: g, value: g }))}
             />
           </div>
           {scope === 'class' && selectedGrades.length > 0 && (
             <div>
-              <Text type="secondary" style={{ fontSize: 13 }}>选择班级：</Text>
+              <Text type="secondary" style={{ fontSize: 13 }}>{t('selectClassColon')}</Text>
               <Select
                 mode="multiple"
                 value={selectedClasses}
                 onChange={handleClassChange}
-                placeholder="选择班级"
+                placeholder={t('selectClass')}
                 style={{ width: '100%', marginTop: 4 }}
-                options={availableClasses.map((c) => ({ label: `${c}班`, value: c }))}
+                options={availableClasses.map((c) => ({ label: t('classUnit', { class: c }), value: c }))}
               />
             </div>
           )}
@@ -178,12 +180,12 @@ const ActivityScopeSelector: React.FC<Props> = ({
 
       {/* 范围说明 */}
       <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
-        {scope === 'teacher_classes' && '活动将对您任教的所有班级学生可见。'}
-        {scope === 'all' && '活动将对全校所有学生可见。'}
-        {scope === 'grade' && selectedGrades.length > 0 && `活动将对 ${selectedGrades.join('、')} 的所有学生可见。`}
-        {scope === 'grade' && selectedGrades.length === 0 && '请选择目标年级。'}
-        {scope === 'class' && selectedClasses.length > 0 && `活动将对 ${selectedClasses.map(c => `${c}班`).join('、')} 的学生可见。`}
-        {scope === 'class' && selectedClasses.length === 0 && '请选择目标年级和班级。'}
+        {scope === 'teacher_classes' && t('scopeDescTeacherClasses')}
+        {scope === 'all' && t('scopeDescAll')}
+        {scope === 'grade' && selectedGrades.length > 0 && t('scopeDescGradeSelected', { grades: selectedGrades.join('、') })}
+        {scope === 'grade' && selectedGrades.length === 0 && t('scopeDescGradeEmpty')}
+        {scope === 'class' && selectedClasses.length > 0 && t('scopeDescClassSelected', { classes: selectedClasses.map(c => t('classUnit', { class: c })).join('、') })}
+        {scope === 'class' && selectedClasses.length === 0 && t('scopeDescClassEmpty')}
       </div>
     </div>
   )

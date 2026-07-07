@@ -20,11 +20,13 @@ import { useAuthStore } from '../stores/authStore'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
 
 const QuickQuizPage: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
@@ -65,7 +67,6 @@ const QuickQuizPage: React.FC = () => {
       setRooms(data.rooms || [])
     } catch (e: any) {
       if (e?.response?.status !== 403) {
-        message.error('加载抢答活动列表失败')
       }
     } finally {
       setLoading(false)
@@ -92,18 +93,18 @@ const QuickQuizPage: React.FC = () => {
         target_users: scope.target_users,
       }
       const { data } = await apiClient.post('/api/quick-quiz/room', payload)
-      message.success(`房间「${data.title}」创建成功！房间码：${data.room_code}`)
+      message.success(t('roomCreated', { title: data.title, code: data.room_code }))
       setCreateModal(false)
       form.resetFields()
       setActivityScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       loadRooms()
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '创建失败')
+      message.error(err.response?.data?.detail || t('createFailed'))
     }
   }
 
   const handleJoin = async () => {
-    if (!joinCode.trim()) { message.warning('请输入房间码'); return }
+    if (!joinCode.trim()) { message.warning(t('enterJoinCode')); return }
     setJoining(true)
     try {
       const { data } = await apiClient.post('/api/quick-quiz/join', { room_code: joinCode.trim().toUpperCase() })
@@ -115,7 +116,7 @@ const QuickQuizPage: React.FC = () => {
         navigate(`/quick-quiz/lobby/${data.room_id}`)
       }
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '加入失败')
+      message.error(err.response?.data?.detail || t('joinFailed'))
     } finally {
       setJoining(false)
     }
@@ -133,23 +134,21 @@ const QuickQuizPage: React.FC = () => {
         target_users: scope.target_users,
       }
       await apiClient.put(`/api/quick-quiz/room/${editRoom.id}`, payload)
-      message.success('活动配置已更新')
       setEditModal(false)
       setEditRoom(null)
       editForm.resetFields()
       loadRooms()
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '更新失败')
+      message.error(err.response?.data?.detail || t('updateFailed'))
     }
   }
 
   const handleDelete = async (roomId: number) => {
     try {
       await apiClient.delete(`/api/quick-quiz/room/${roomId}`)
-      message.success('已删除')
       loadRooms()
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '删除失败')
+      message.error(err.response?.data?.detail || t('deleteFailed'))
     }
   }
 
@@ -158,15 +157,15 @@ const QuickQuizPage: React.FC = () => {
       await apiClient.post(`/api/quick-quiz/room/${roomId}/start`)
       navigate(`/quick-quiz/console/${roomId}`)
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '启动失败')
+      message.error(err.response?.data?.detail || t('startFailed'))
     }
   }
 
   const getStatusTag = (status: string) => {
     const map: Record<string, { color: string; text: string }> = {
-      waiting: { color: 'processing', text: '等待中' },
-      playing: { color: 'success', text: '进行中' },
-      ended: { color: 'default', text: '已结束' },
+      waiting: { color: 'processing', text: t('waiting') },
+      playing: { color: 'success', text: t('playing') },
+      ended: { color: 'default', text: t('ended') },
     }
     const s = map[status] || { color: 'default', text: status }
     return <Tag color={s.color}>{s.text}</Tag>
@@ -174,44 +173,44 @@ const QuickQuizPage: React.FC = () => {
 
   // ── 教师房间列表 ──
   const teacherColumns = [
-    { title: '房间码', dataIndex: 'room_code', key: 'code', width: 100,
+    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 100,
       render: (code: string) => <Text code strong style={{ fontSize: 16 }}>{code}</Text>
     },
-    { title: '标题', dataIndex: 'title', key: 'title', width: 160 },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
-    { title: '题目', dataIndex: 'question_count', key: 'count', width: 60 },
-    { title: '时限', dataIndex: 'time_limit', key: 'time', width: 60,
+    { title: t('title'), dataIndex: 'title', key: 'title', width: 160 },
+    { title: t('status'), dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
+    { title: t('questions'), dataIndex: 'question_count', key: 'count', width: 60 },
+    { title: t('timeLimit'), dataIndex: 'time_limit', key: 'time', width: 60,
       render: (t: number) => `${t}s`
     },
-    { title: '玩家', key: 'players', width: 60,
+    { title: t('players'), key: 'players', width: 60,
       render: (_: any, r: any) => (
         <span><TeamOutlined /> {r.player_count || 0}</span>
       )
     },
-    { title: '创建者', dataIndex: 'creator_name', key: 'creator', width: 80 },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created', width: 150,
+    { title: t('creator'), dataIndex: 'creator_name', key: 'creator', width: 80 },
+    { title: t('createdAt'), dataIndex: 'created_at', key: 'created', width: 150,
       render: (t: string) => t?.split('.')[0]?.replace('T', ' ') || t
     },
     {
-      title: '操作', key: 'action', width: 200,
+      title: t('actions'), key: 'action', width: 200,
       render: (_: any, record: any) => (
         <Space>
           {record.status === 'waiting' && (
             <Button type="primary" size="small" icon={<PlayCircleOutlined />}
               onClick={() => handleStart(record.id)}>
-              开始
+              {t('startGame')}
             </Button>
           )}
           {record.status === 'playing' && (
             <Button type="primary" size="small"
               onClick={() => navigate(`/quick-quiz/console/${record.id}`)}>
-              控制台
+              {t('console')}
             </Button>
           )}
           {record.status === 'ended' && (
             <Button size="small"
               onClick={() => navigate(`/quick-quiz/result/${record.id}`)}>
-              查看结果
+              {t('viewResults')}
             </Button>
           )}
           {record.status === 'waiting' && (
@@ -238,19 +237,19 @@ const QuickQuizPage: React.FC = () => {
                 })
                 setEditModal(true)
               }}>
-              编辑
+              {t('edit')}
             </Button>
           )}
           {record.status !== 'playing' && (
-            <Popconfirm title="确定删除此活动？"
-              description="删除后数据不可恢复"
+            <Popconfirm title={t('confirmDeleteActivity')}
+              description={t('deleteActivityHint')}
               onConfirm={() => handleDelete(record.id)}>
-              <Button size="small" danger>删除</Button>
+              <Button size="small" danger>{t('delete')}</Button>
             </Popconfirm>
           )}
           <Button size="small"
             onClick={() => navigate(`/quick-quiz/lobby/${record.id}`)}>
-            详情
+            {t('details')}
           </Button>
         </Space>
       )
@@ -259,21 +258,21 @@ const QuickQuizPage: React.FC = () => {
 
   // ── 学生房间列表 ──
   const studentColumns = [
-    { title: '房间码', dataIndex: 'room_code', key: 'code', width: 100,
+    { title: t('roomCode'), dataIndex: 'room_code', key: 'code', width: 100,
       render: (code: string) => <Text code strong style={{ fontSize: 16 }}>{code}</Text>
     },
-    { title: '标题', dataIndex: 'title', key: 'title', width: 160 },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
-    { title: '题目', dataIndex: 'question_count', key: 'count', width: 60 },
-    { title: '时限', dataIndex: 'time_limit', key: 'time', width: 60,
+    { title: t('title'), dataIndex: 'title', key: 'title', width: 160 },
+    { title: t('status'), dataIndex: 'status', key: 'status', width: 80, render: getStatusTag },
+    { title: t('questions'), dataIndex: 'question_count', key: 'count', width: 60 },
+    { title: t('timeLimit'), dataIndex: 'time_limit', key: 'time', width: 60,
       render: (t: number) => `${t}s`
     },
-    { title: '教师', dataIndex: 'creator_name', key: 'teacher', width: 80 },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created', width: 150,
+    { title: t('teacher'), dataIndex: 'creator_name', key: 'teacher', width: 80 },
+    { title: t('createdAt'), dataIndex: 'created_at', key: 'created', width: 150,
       render: (t: string) => t?.split('.')[0]?.replace('T', ' ') || t
     },
     {
-      title: '操作', key: 'action', width: 120,
+      title: t('actions'), key: 'action', width: 120,
       render: (_: any, record: any) => (
         <Space>
           {record.status === 'waiting' && (
@@ -284,7 +283,7 @@ const QuickQuizPage: React.FC = () => {
                 } catch { /* 可能已加入 */ }
                 navigate(`/quick-quiz/lobby/${record.id}`)
               }}>
-              加入房间
+              {t('joinRoom')}
             </Button>
           )}
           {record.status === 'playing' && (
@@ -295,13 +294,13 @@ const QuickQuizPage: React.FC = () => {
                 } catch { /* 可能已加入 */ }
                 navigate(`/quick-quiz/play/${record.id}`)
               }}>
-              参与抢答
+              {t('participateQuiz')}
             </Button>
           )}
           {record.status === 'ended' && (
             <Button size="small"
               onClick={() => navigate(`/quick-quiz/result/${record.id}`)}>
-              查看结果
+              {t('viewResults')}
             </Button>
           )}
         </Space>
@@ -317,9 +316,9 @@ const QuickQuizPage: React.FC = () => {
         <Space>
           <ThunderboltOutlined style={{ fontSize: 28, color: '#fff' }} />
           <div>
-            <Title level={4} style={{ color: '#fff', margin: 0 }}>知识抢答</Title>
+            <Title level={4} style={{ color: '#fff', margin: 0 }}>{t('quickQuiz')}</Title>
             <Text style={{ color: 'rgba(255,255,255,0.85)' }}>
-              {isTeacherOrAdmin ? '创建和管理课堂抢答活动' : '参与课堂实时抢答，比速度拼知识'}
+              {isTeacherOrAdmin ? t('quizManageDesc') : t('quizPlayDesc')}
             </Text>
           </div>
         </Space>
@@ -330,24 +329,24 @@ const QuickQuizPage: React.FC = () => {
         <Space wrap>
           {isTeacherOrAdmin && (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
-              创建抢答活动
+              {t('createQuizActivity')}
             </Button>
           )}
           {isStudent && (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setJoinModal(true)}>
-              输入房间码加入
+              {t('enterCodeJoin')}
             </Button>
           )}
-          <Button icon={<HistoryOutlined />} onClick={loadRooms}>刷新列表</Button>
+          <Button icon={<HistoryOutlined />} onClick={loadRooms}>{t('refreshList')}</Button>
         </Space>
       </Card>
 
       {/* 房间列表 */}
-      <Card title={`📋 活动列表 (${rooms.length})`} style={{ borderRadius: 12 }}>
+      <Card title={t('activityList', { count: rooms.length })} style={{ borderRadius: 12 }}>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
         ) : rooms.length === 0 ? (
-          <Empty description={isTeacherOrAdmin ? '暂无活动，点击上方按钮创建' : '暂无可加入的活动'} />
+          <Empty description={isTeacherOrAdmin ? t('noActivitiesTeacher') : t('noActivitiesStudent')} />
         ) : (
           <Table
             dataSource={rooms}
@@ -361,9 +360,9 @@ const QuickQuizPage: React.FC = () => {
 
       {/* 学生历史记录 */}
       {isStudent && (
-        <Card title="📜 我的抢答记录" style={{ borderRadius: 12, marginTop: 16 }}>
+        <Card title={t('myQuizHistory')} style={{ borderRadius: 12, marginTop: 16 }}>
           {historyLoading ? <Spin /> : history.length === 0 ? (
-            <Empty description="暂无参与记录" />
+            <Empty description={t('noHistory')} />
           ) : (
             <Table
               dataSource={history}
@@ -371,22 +370,22 @@ const QuickQuizPage: React.FC = () => {
               size="small"
               pagination={{ pageSize: 10 }}
               columns={[
-                { title: '标题', dataIndex: 'title', key: 'title' },
-                { title: '状态', dataIndex: 'status', key: 'status', render: getStatusTag },
-                { title: '得分', dataIndex: 'total_score', key: 'score',
+                { title: t('title'), dataIndex: 'title', key: 'title' },
+                { title: t('status'), dataIndex: 'status', key: 'status', render: getStatusTag },
+                { title: t('score'), dataIndex: 'total_score', key: 'score',
                   render: (s: number) => <Text strong style={{ color: '#faad14' }}>{s}</Text>
                 },
-                { title: '答对', dataIndex: 'correct_count', key: 'correct' },
-                { title: '答错', dataIndex: 'wrong_count', key: 'wrong' },
-                { title: '最高连击', dataIndex: 'max_streak', key: 'streak',
+                { title: t('correct'), dataIndex: 'correct_count', key: 'correct' },
+                { title: t('wrong'), dataIndex: 'wrong_count', key: 'wrong' },
+                { title: t('maxStreak'), dataIndex: 'max_streak', key: 'streak',
                   render: (s: number) => s > 1 ? <Tag color="volcano">🔥 x{s}</Tag> : '-'
                 },
-                { title: '教师', dataIndex: 'creator_name', key: 'teacher' },
+                { title: t('teacher'), dataIndex: 'creator_name', key: 'teacher' },
                 {
-                  title: '操作', key: 'action',
+                  title: t('actions'), key: 'action',
                   render: (_: any, r: any) => (
                     <Button size="small" onClick={() => navigate(`/quick-quiz/result/${r.id}`)}>
-                      查看详情
+                      {t('viewDetails')}
                     </Button>
                   )
                 },
@@ -398,7 +397,7 @@ const QuickQuizPage: React.FC = () => {
 
       {/* ── 创建房间弹窗 ── */}
       <Modal
-        title="🚀 创建抢答活动"
+        title={t('createQuizModal')}
         open={createModal}
         onCancel={() => {
           setCreateModal(false)
@@ -406,12 +405,12 @@ const QuickQuizPage: React.FC = () => {
           setActivityScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
         }}
         onOk={() => form.submit()}
-        okText="创建"
+        okText={t('create')}
         width={600}
       >
         <Form form={form} layout="vertical" onFinish={handleCreate}
           initialValues={{
-            title: '知识抢答',
+            title: t('quickQuiz'),
             question_source: 'bank_academic',
             question_count: 10,
             time_limit: 15,
@@ -422,73 +421,73 @@ const QuickQuizPage: React.FC = () => {
             difficulty: 'medium',
           }}
         >
-          <Form.Item name="title" label="活动标题" rules={[{ required: true }]}>
-            <Input placeholder="例如：第3章 随堂抢答" />
+          <Form.Item name="title" label={t('activityTitle')} rules={[{ required: true }]}>
+            <Input placeholder={t('activityTitlePlaceholder')} />
           </Form.Item>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="question_source" label="题目来源" rules={[{ required: true }]}>
+              <Form.Item name="question_source" label={t('questionSource')} rules={[{ required: true }]}>
                 <Select options={[
-                  { value: 'bank_academic', label: '📚 学科试题库' },
-                  { value: 'bank_general', label: '🧠 百科知识题库' },
+                  { value: 'bank_academic', label: t('bankAcademic') },
+                  { value: 'bank_general', label: t('bankGeneral') },
                 ]} />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item name="question_count" label="题量">
+              <Form.Item name="question_count" label={t('questionCount')}>
                 <InputNumber min={3} max={30} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item name="time_limit" label="每题时限(秒)">
+              <Form.Item name="time_limit" label={t('timeLimitSeconds')}>
                 <InputNumber min={5} max={60} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="scoring_mode" label="计分模式">
+              <Form.Item name="scoring_mode" label={t('scoringMode')}>
                 <Select options={[
-                  { value: 'speed', label: '速度递减（越快分越高）' },
-                  { value: 'tiered', label: '分段奖励（固定档位）' },
+                  { value: 'speed', label: t('speedScoringDesc') },
+                  { value: 'tiered', label: t('tieredScoringDesc') },
                 ]} />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item name="min_players" label="最少人数">
+              <Form.Item name="min_players" label={t('minPlayers')}>
                 <InputNumber min={1} max={100} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item name="max_players" label="最多人数">
+              <Form.Item name="max_players" label={t('maxPlayers')}>
                 <InputNumber min={2} max={200} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item name="subject" label="学科">
+              <Form.Item name="subject" label={t('subject')}>
                 <Select
                   showSearch
-                  placeholder="选择学科"
+                  placeholder={t('selectSubject')}
                   options={subjectOptions.map(s => ({ value: s, label: s }))}
                 />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="difficulty" label="难度">
+              <Form.Item name="difficulty" label={t('difficulty')}>
                 <Select options={[
-                  { value: 'easy', label: '简单' },
-                  { value: 'medium', label: '中等' },
-                  { value: 'hard', label: '困难' },
+                  { value: 'easy', label: t('difficultyEasy') },
+                  { value: 'medium', label: t('difficultyMedium') },
+                  { value: 'hard', label: t('difficultyHard') },
                 ]} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="knowledge_points" label="知识点（可选，逗号分隔）">
-            <Input placeholder="例如：计算机网络, 数据结构" />
+          <Form.Item name="knowledge_points" label={t('knowledgePoints')}>
+            <Input placeholder={t('kpExample')} />
           </Form.Item>
-          <Form.Item label="活动目标范围" style={{ marginBottom: 16 }}>
+          <Form.Item label={t('activityScope')} style={{ marginBottom: 16 }}>
             <ActivityScopeSelector
               value={activityScope}
               onChange={setActivityScope}
@@ -500,12 +499,12 @@ const QuickQuizPage: React.FC = () => {
 
       {/* ── 加入房间弹窗 ── */}
       <Modal
-        title="🔑 输入房间码加入抢答"
+        title={t('enterJoinCodeModal')}
         open={joinModal}
         onCancel={() => { setJoinModal(false); setJoinCode('') }}
         onOk={handleJoin}
         confirmLoading={joining}
-        okText="加入"
+        okText={t('join')}
       >
         <div style={{ textAlign: 'center', padding: '20px 0' }}>
           <Input
@@ -513,19 +512,19 @@ const QuickQuizPage: React.FC = () => {
             style={{ width: 200, fontSize: 28, textAlign: 'center', letterSpacing: 8 }}
             value={joinCode}
             onChange={e => setJoinCode(e.target.value.toUpperCase())}
-            placeholder="输入房间码"
+            placeholder={t('joinCodePlaceholder')}
             maxLength={6}
             autoFocus
           />
           <div style={{ marginTop: 12, color: '#888' }}>
-            向老师获取 6 位房间码
+            {t('askTeacherForCode')}
           </div>
         </div>
       </Modal>
 
       {/* ── 编辑房间弹窗 ── */}
       <Modal
-        title="✏️ 编辑抢答活动"
+        title={t('editQuizModal')}
         open={editModal}
         onCancel={() => {
           setEditModal(false)
@@ -534,42 +533,42 @@ const QuickQuizPage: React.FC = () => {
           setActivityScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
         }}
         onOk={() => editForm.submit()}
-        okText="保存"
+        okText={t('save')}
         width={600}
       >
         <Form form={editForm} layout="vertical" onFinish={handleEdit}>
-          <Form.Item name="title" label="活动标题" rules={[{ required: true }]}>
+          <Form.Item name="title" label={t('activityTitle')} rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="question_source" label="题目来源">
+          <Form.Item name="question_source" label={t('questionSource')}>
             <Select options={[
-              { value: 'bank_academic', label: '📚 学科试题库' },
-              { value: 'bank_general', label: '🧠 百科知识题库' },
+              { value: 'bank_academic', label: t('bankAcademicLabel') },
+              { value: 'bank_general', label: t('bankGeneralLabel') },
             ]} />
           </Form.Item>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item name="question_count" label="题量">
+              <Form.Item name="question_count" label={t('questionCount')}>
                 <InputNumber min={3} max={30} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="time_limit" label="每题时限(秒)">
+              <Form.Item name="time_limit" label={t('timeLimitSeconds')}>
                 <InputNumber min={5} max={60} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="scoring_mode" label="计分模式">
+              <Form.Item name="scoring_mode" label={t('scoringMode')}>
                 <Select options={[
-                  { value: 'speed', label: '速度递减' },
-                  { value: 'tiered', label: '分段奖励' },
+                  { value: 'speed', label: t('speedScoring') },
+                  { value: 'tiered', label: t('tieredScoring') },
                 ]} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item name="subject" label="学科">
+              <Form.Item name="subject" label={t('subject')}>
                 <Select
                   showSearch
                   options={subjectOptions.map(s => ({ value: s, label: s }))}
@@ -577,19 +576,19 @@ const QuickQuizPage: React.FC = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="difficulty" label="难度">
+              <Form.Item name="difficulty" label={t('difficulty')}>
                 <Select options={[
-                  { value: 'easy', label: '简单' },
-                  { value: 'medium', label: '中等' },
-                  { value: 'hard', label: '困难' },
+                  { value: 'easy', label: t('difficultyEasy') },
+                  { value: 'medium', label: t('difficultyMedium') },
+                  { value: 'hard', label: t('difficultyHard') },
                 ]} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item name="knowledge_points" label="知识点（可选，逗号分隔）">
-            <Input placeholder="例如：计算机网络, 数据结构" />
+          <Form.Item name="knowledge_points" label={t('knowledgePoints')}>
+            <Input placeholder={t('kpExample')} />
           </Form.Item>
-          <Form.Item label="活动目标范围" style={{ marginBottom: 16 }}>
+          <Form.Item label={t('activityScope')} style={{ marginBottom: 16 }}>
             <ActivityScopeSelector
               value={activityScope}
               onChange={setActivityScope}
@@ -598,12 +597,12 @@ const QuickQuizPage: React.FC = () => {
           </Form.Item>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="min_players" label="最少人数">
+              <Form.Item name="min_players" label={t('minPlayers')}>
                 <InputNumber min={1} max={100} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="max_players" label="最多人数">
+              <Form.Item name="max_players" label={t('maxPlayers')}>
                 <InputNumber min={2} max={200} style={{ width: '100%' }} />
               </Form.Item>
             </Col>

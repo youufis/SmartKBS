@@ -16,28 +16,33 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  pending: { label: '待开始', color: 'default' },
-  active: { label: '进行中', color: 'green' },
-  ended: { label: '已结束', color: 'red' },
-}
-
-const AI_ROLE_MAP: Record<string, string> = {
-  observer: '旁观者',
-  guide: '引导者',
-  proactive: '主动参与',
-  judge: '辩论裁判',
-  mixed: '综合角色',
-}
-
 const DiscussionPage: React.FC = () => {
+  const { t } = useTranslation('discussion')
   const navigate = useNavigate()
+
+  const getAiRoleLabel = React.useCallback((role: string) => {
+    const map: Record<string, string> = {
+      observer: t('aiRoleObserver'),
+      guide: t('aiRoleGuide'),
+      proactive: t('aiRoleProactive'),
+      judge: t('aiRoleJudge'),
+      mixed: t('aiRoleMixed'),
+    }
+    return map[role] || role
+  }, [t])
+
+  const STATUS_MAP: Record<string, { label: string; color: string }> = {
+    pending: { label: t('pendingDiscussions'), color: 'default' },
+    active: { label: t('activeDiscussions'), color: 'green' },
+    ended: { label: t('endedDiscussions'), color: 'red' },
+  }
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -74,7 +79,7 @@ const DiscussionPage: React.FC = () => {
       const { data } = await apiClient.get('/api/interaction/discussions')
       setDiscussions(Array.isArray(data) ? data : [])
     } catch {
-      message.error('加载讨论列表失败')
+      message.error(t('loadFail'))
     } finally {
       setLoading(false)
     }
@@ -99,14 +104,14 @@ const DiscussionPage: React.FC = () => {
         target_class: discussionScope.target_class,
         target_users: discussionScope.target_users,
       })
-      message.success('讨论创建成功')
+      message.success(t('createSuccess'))
       setCreateOpen(false)
       createForm.resetFields()
       setDiscussionScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       loadDiscussions()
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error('创建失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('createFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     } finally {
       setCreateLoading(false)
     }
@@ -123,23 +128,23 @@ const DiscussionPage: React.FC = () => {
         const result = await pollAiTask(data.task_id)
         if (result && result.status === 'ok' && result.data) {
           createForm.setFieldsValue(result.data)
-          message.success('AI 已生成讨论方案，请确认后创建')
+          message.success(t('aiPlanGenerated'))
           setAiModal(false)
           setCreateOpen(true)
         } else {
-          message.error(result?.content || 'AI 生成失败')
+          message.error(result?.content || t('aiGenerateFail'))
         }
       } else if (data.status === 'ok' && data.data) {
         createForm.setFieldsValue(data.data)
-        message.success('AI 已生成讨论方案，请确认后创建')
+        message.success(t('aiPlanGenerated'))
         setAiModal(false)
         setCreateOpen(true)
       } else {
-        message.error(data.content || 'AI 生成失败')
+        message.error(data.content || t('aiGenerateFail'))
       }
     } catch (err: any) {
       if (err?.errorFields) return
-      message.error('生成失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('generateFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     } finally {
       setAiLoading(false)
     }
@@ -149,10 +154,10 @@ const DiscussionPage: React.FC = () => {
   const handleStart = async (id: number) => {
     try {
       const { data } = await apiClient.post(`/api/interaction/discussions/${id}/start`)
-      message.success(data.message || '讨论已开始')
+      message.success(data.message || t('startSuccess'))
       loadDiscussions()
     } catch (err: any) {
-      message.error('启动失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('startFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     }
   }
 
@@ -160,10 +165,10 @@ const DiscussionPage: React.FC = () => {
   const handleEnd = async (id: number) => {
     try {
       await apiClient.post(`/api/interaction/discussions/${id}/end`)
-      message.success('讨论已结束')
+      message.success(t('endSuccess'))
       loadDiscussions()
     } catch (err: any) {
-      message.error('操作失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('operationFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     }
   }
 
@@ -171,10 +176,10 @@ const DiscussionPage: React.FC = () => {
   const handleRestart = async (id: number) => {
     try {
       await apiClient.post(`/api/interaction/discussions/${id}/restart`)
-      message.success('讨论已重新开始')
+      message.success(t('restartSuccess'))
       loadDiscussions()
     } catch (err: any) {
-      message.error('操作失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('operationFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     }
   }
 
@@ -182,10 +187,10 @@ const DiscussionPage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await apiClient.delete(`/api/interaction/discussions/${id}`)
-      message.success('讨论已删除')
+      message.success(t('deleteSuccess'))
       loadDiscussions()
     } catch (err: any) {
-      message.error('删除失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('deleteFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     }
   }
 
@@ -193,10 +198,10 @@ const DiscussionPage: React.FC = () => {
   const handleJoin = async (id: number) => {
     try {
       await apiClient.post(`/api/interaction/discussions/${id}/join`)
-      message.success('已加入讨论')
+      message.success(t('joinSuccess'))
       loadDiscussions()
     } catch (err: any) {
-      message.error('加入失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('joinFailWithReason', { reason: err?.response?.data?.detail || err?.message }))
     }
   }
 
@@ -206,7 +211,7 @@ const DiscussionPage: React.FC = () => {
       const { data } = await apiClient.get(`/api/interaction/discussions/${id}`)
       setDetailModal(data)
     } catch {
-      message.error('获取详情失败')
+      message.error(t('getDetailFail'))
     }
   }
 
@@ -223,23 +228,23 @@ const DiscussionPage: React.FC = () => {
   // ── 创建讨论表单 ──
   const renderCreateForm = () => (
     <Form form={createForm} layout="vertical" style={{ maxWidth: 600 }}>
-      <Form.Item name="title" label="讨论主题" rules={[{ required: true, message: '请输入讨论主题' }]}>
-        <Input placeholder="如：人工智能的伦理困境" />
+      <Form.Item name="title" label={t('discussionTopic')} rules={[{ required: true, message: t('discussionTopicRequired') }]}>
+        <Input placeholder={t('discussionTopicPlaceholder')} />
       </Form.Item>
-      <Form.Item name="description" label="讨论说明">
-        <TextArea rows={3} placeholder="描述讨论的目标和要点" />
+      <Form.Item name="description" label={t('discussionDescription')}>
+        <TextArea rows={3} placeholder={t('discussionDescPlaceholder')} />
       </Form.Item>
-      <Form.Item name="subject" label="学科">
-          <Select placeholder="选择学科（可选）" allowClear>
+      <Form.Item name="subject" label={t('subject')}>
+          <Select placeholder={t('selectSubject')} allowClear>
             {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
-            <Select.Option value="人工智能通识">人工智能通识</Select.Option>
+            <Select.Option value="人工智能通识">{t('aiGeneralKnowledge')}</Select.Option>
           </Select>
       </Form.Item>
-      <Form.Item name="group_mode" label="分组方式" initialValue="none">
+      <Form.Item name="group_mode" label={t('groupMode')} initialValue="none">
         <Select>
-          <Select.Option value="none">不分组（自由讨论区）</Select.Option>
-          <Select.Option value="auto">自动分组（按每组人数）</Select.Option>
-          <Select.Option value="random">随机分组（按组数）</Select.Option>
+          <Select.Option value="none">{t('noGroupMode')}</Select.Option>
+          <Select.Option value="auto">{t('autoGroup')}</Select.Option>
+          <Select.Option value="random">{t('randomGroup')}</Select.Option>
         </Select>
       </Form.Item>
       <Form.Item noStyle shouldUpdate={(prev, cur) => prev.group_mode !== cur.group_mode}>
@@ -247,37 +252,37 @@ const DiscussionPage: React.FC = () => {
           const mode = getFieldValue('group_mode')
           if (mode === 'none') return null
           return mode === 'auto' ? (
-            <Form.Item name="members_per_group" label="每组人数" initialValue={4}
-              rules={[{ required: true, message: '请输入每组人数' }]}>
+            <Form.Item name="members_per_group" label={t('membersPerGroup')} initialValue={4}
+              rules={[{ required: true, message: t('membersPerGroupRequired') }]}>
               <InputNumber min={2} max={10} style={{ width: '100%' }} />
             </Form.Item>
           ) : (
-            <Form.Item name="group_count" label="小组数量" initialValue={4}
-              rules={[{ required: true, message: '请输入小组数量' }]}>
+            <Form.Item name="group_count" label={t('groupCount')} initialValue={4}
+              rules={[{ required: true, message: t('groupCountRequired') }]}>
               <InputNumber min={1} max={20} style={{ width: '100%' }} />
             </Form.Item>
           )
         }}
       </Form.Item>
-      <Form.Item name="ai_role" label="AI 助教角色" initialValue="mixed">
+      <Form.Item name="ai_role" label={t('aiRole')} initialValue="mixed">
         <Select>
-          <Select.Option value="observer">👀 旁观者（不主动发言）</Select.Option>
-          <Select.Option value="guide">💡 引导者（适时引导讨论）</Select.Option>
-          <Select.Option value="proactive">🗣️ 主动参与（提供观点）</Select.Option>
-          <Select.Option value="judge">⚖️ 辩论裁判（分析论点）</Select.Option>
-          <Select.Option value="mixed">🎭 综合角色（智能切换四种角色）</Select.Option>
+          <Select.Option value="observer">{t('aiRoleObserverFull')}</Select.Option>
+          <Select.Option value="guide">{t('aiRoleGuideFull')}</Select.Option>
+          <Select.Option value="proactive">{t('aiRoleProactiveFull')}</Select.Option>
+          <Select.Option value="judge">{t('aiRoleJudgeFull')}</Select.Option>
+          <Select.Option value="mixed">{t('aiRoleMixedFull')}</Select.Option>
         </Select>
       </Form.Item>
-      <Form.Item name="duration_minutes" label="讨论时长 (分钟)" initialValue={30}>
+      <Form.Item name="duration_minutes" label={t('durationMinutes')} initialValue={30}>
         <InputNumber min={5} max={120} style={{ width: '100%' }} />
       </Form.Item>
-      <Form.Item label="目标范围">
+      <Form.Item label={t('targetScope')}>
         <ActivityScopeSelector value={discussionScope} onChange={setDiscussionScope} />
       </Form.Item>
-      <Form.Item name="require_summary" label="提交要求" valuePropName="checked" initialValue={false}>
+      <Form.Item name="require_summary" label={t('submitRequirement')} valuePropName="checked" initialValue={false}>
         <Select>
-          <Select.Option value={false}>无需提交总结</Select.Option>
-          <Select.Option value={true}>每组需提交总结</Select.Option>
+          <Select.Option value={false}>{t('noSubmit')}</Select.Option>
+          <Select.Option value={true}>{t('groupSubmit')}</Select.Option>
         </Select>
       </Form.Item>
     </Form>
@@ -285,7 +290,7 @@ const DiscussionPage: React.FC = () => {
 
   // ── 讨论卡片 ──
   const renderDiscussionCard = (disc: any) => {
-    const statusInfo = STATUS_MAP[disc.status] || { label: '未知', color: 'default' }
+    const statusInfo = STATUS_MAP[disc.status] || { label: t('unknown'), color: 'default' }
     return (
       <Card
         key={disc.id}
@@ -294,27 +299,27 @@ const DiscussionPage: React.FC = () => {
         actions={
           isTeacherOrAdmin
             ? [
-                <Tooltip title="查看详情"><TeamOutlined onClick={() => handleDetail(disc.id)} /></Tooltip>,
+                <Tooltip title={t('viewDetails')}><TeamOutlined onClick={() => handleDetail(disc.id)} /></Tooltip>,
                 ...(disc.status === 'pending' ? [
-                  <Tooltip title="开始讨论"><PlayCircleOutlined style={{ color: '#52c41a' }} onClick={() => handleStart(disc.id)} /></Tooltip>,
+                  <Tooltip title={t('startDiscussionTooltip')}><PlayCircleOutlined style={{ color: '#52c41a' }} onClick={() => handleStart(disc.id)} /></Tooltip>,
                 ] : []),
                 ...(disc.status === 'active' ? [
-                  <Popconfirm title="确定结束讨论？" onConfirm={() => handleEnd(disc.id)}>
-                    <Tooltip title="结束讨论"><StopOutlined style={{ color: '#ff4d4f' }} /></Tooltip>
+                  <Popconfirm title={t('confirmEnd')} onConfirm={() => handleEnd(disc.id)}>
+                    <Tooltip title={t('endDiscussionTooltip')}><StopOutlined style={{ color: '#ff4d4f' }} /></Tooltip>
                   </Popconfirm>,
                 ] : []),
                 ...(disc.status === 'ended' ? [
-                  <Tooltip title="重新开始"><ReloadOutlined style={{ color: '#52c41a' }} onClick={() => handleRestart(disc.id)} /></Tooltip>,
-                  <Popconfirm title="确定删除此讨论及其所有消息？" onConfirm={() => handleDelete(disc.id)}>
-                    <Tooltip title="删除讨论"><DeleteOutlined style={{ color: '#ff4d4f' }} /></Tooltip>
+                  <Tooltip title={t('restartDiscussionTooltip')}><ReloadOutlined style={{ color: '#52c41a' }} onClick={() => handleRestart(disc.id)} /></Tooltip>,
+                  <Popconfirm title={t('confirmDeleteAll')} onConfirm={() => handleDelete(disc.id)}>
+                    <Tooltip title={t('deleteDiscussionTooltip')}><DeleteOutlined style={{ color: '#ff4d4f' }} /></Tooltip>,
                   </Popconfirm>,
                 ] : []),
               ]
             : [
                 ...(disc.has_joined && disc.status === 'active'
-                  ? [<Tooltip title={disc.group_mode === 'none' ? '进入讨论区' : '进入小组'}><TeamOutlined onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)} /></Tooltip>]
+                  ? [<Tooltip title={disc.group_mode === 'none' ? t('enterDiscussion') : t('enterGroup')}><TeamOutlined onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)} /></Tooltip>]
                   : disc.status === 'active' && !disc.has_joined
-                  ? [<Tooltip title="加入讨论"><MessageOutlined onClick={() => handleJoin(disc.id)} /></Tooltip>]
+                  ? [<Tooltip title={t('joinDiscussion')}><MessageOutlined onClick={() => handleJoin(disc.id)} /></Tooltip>]
                   : []),
               ]
         }
@@ -336,16 +341,16 @@ const DiscussionPage: React.FC = () => {
           </div>
         </div>
         <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 13, color: '#888' }}>
-          <span><TeamOutlined /> {disc.total_members || 0} 人参与</span>
-          <span><MessageOutlined /> {disc.total_messages || 0} 条消息</span>
-          <span><RobotOutlined /> {AI_ROLE_MAP[disc.ai_role] || disc.ai_role}</span>
+          <span><TeamOutlined /> {disc.total_members || 0}{t('people')}{t('participants')}</span>
+          <span><MessageOutlined /> {disc.total_messages || 0}{t('messages_')}</span>
+          <span><RobotOutlined /> {getAiRoleLabel(disc.ai_role)}</span>
           {disc.duration_minutes > 0 && (
-            <span><FieldTimeOutlined /> {disc.duration_minutes} 分钟</span>
+            <span><FieldTimeOutlined /> {disc.duration_minutes}{t('minutes')}</span>
           )}
         </div>
         {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (
           <div style={{ marginTop: 4 }}>
-            <Tag color="blue">{disc.group_mode === 'none' ? '已加入聊天室' : `你的小组: ${disc.my_group.name || `第${disc.my_group.group_index}组`}`}</Tag>
+            <Tag color="blue">{disc.group_mode === 'none' ? t('joinedChat') : `${t('myGroup')}: ${disc.my_group.name || `第${disc.my_group.group_index}组`}`}</Tag>
           </div>
         )}
       </Card>
@@ -357,36 +362,36 @@ const DiscussionPage: React.FC = () => {
       <Card>
         <Space style={{ marginBottom: 16 }}>
           <TeamOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-          <Title level={4} style={{ margin: 0 }}>分组讨论</Title>
+          <Title level={4} style={{ margin: 0 }}>{t('title')}</Title>
         </Space>
 
         {isTeacherOrAdmin && (
           <Space style={{ marginBottom: 16 }}>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              创建讨论
+              {t('createDiscussion')}
             </Button>
             <Button icon={<BulbOutlined />} onClick={() => { setAiModal(true); aiForm.resetFields(); }}>
-              AI 生成方案
+              {t('aiGeneratePlan')}
             </Button>
           </Space>
         )}
 
         <Tabs activeKey={activeTab} onChange={setActiveTab} tabBarStyle={{ marginBottom: 16 }}>
-          <Tabs.TabPane tab="全部" key="all" />
-          <Tabs.TabPane tab="待开始" key="pending" />
-          <Tabs.TabPane tab="进行中" key="active" />
-          <Tabs.TabPane tab="已结束" key="ended" />
+          <Tabs.TabPane tab={t('allDiscussions')} key="all" />
+          <Tabs.TabPane tab={t('pendingDiscussions')} key="pending" />
+          <Tabs.TabPane tab={t('activeDiscussions')} key="active" />
+          <Tabs.TabPane tab={t('endedDiscussions')} key="ended" />
         </Tabs>
 
         <Spin spinning={loading}>
           {filtered.length === 0 ? (
-            <Empty description="暂无讨论" />
+            <Empty description={t('noDiscussions')} />
           ) : (
             <Table
               dataSource={filtered}
               rowKey="id"
               size="small"
-              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 个讨论`, pageSizeOptions: ['5', '10', '20', '50'] }}
+              pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalDiscussions', { total }), pageSizeOptions: ['5', '10', '20', '50'] }}
               expandable={{
                 expandedRowRender: (disc: any) => (
                   <div style={{ padding: '8px 0 4px 32px' }}>
@@ -396,37 +401,37 @@ const DiscussionPage: React.FC = () => {
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 24, fontSize: 13, color: '#888', flexWrap: 'wrap' }}>
-                      <span><TeamOutlined /> 参与人数：{disc.total_members || 0}</span>
-                      <span><MessageOutlined /> 消息数：{disc.total_messages || 0}</span>
-                      <span><RobotOutlined /> AI角色：{AI_ROLE_MAP[disc.ai_role] || disc.ai_role || '-'}</span>
+                      <span><TeamOutlined /> {t('participants')}：{disc.total_members || 0}</span>
+                      <span><MessageOutlined /> {t('messageCount')}：{disc.total_messages || 0}</span>
+                      <span><RobotOutlined /> {t('aiRole_')}：{getAiRoleLabel(disc.ai_role) || '-'}</span>
                       {disc.duration_minutes > 0 && (
-                        <span><FieldTimeOutlined /> 时长：{disc.duration_minutes} 分钟</span>
+                        <span><FieldTimeOutlined /> {t('duration')}：{disc.duration_minutes} {t('minutes')}</span>
                       )}
-                      <span><UserOutlined /> 创建者：{disc.creator_name || disc.creator_username || '-'}</span>
-                      {disc.grade && <span>适用年级：{disc.grade}</span>}
-                      {disc.classes && <span>适用班级：{disc.classes}</span>}
+                      <span><UserOutlined /> {t('creator')}：{disc.creator_name || disc.creator_username || '-'}</span>
+                      {disc.grade && <span>{t('applicableGrade')}：{disc.grade}</span>}
+                      {disc.classes && <span>{t('applicableClass')}：{disc.classes}</span>}
                       {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (
-                        <Tag color="blue" style={{ margin: 0 }}>{disc.group_mode === 'none' ? '已加入聊天室' : `你的小组: ${disc.my_group.name || `第${disc.my_group.group_index}组`}`}</Tag>
+                        <Tag color="blue" style={{ margin: 0 }}>{disc.group_mode === 'none' ? t('joinedChat') : `${t('myGroup')}: ${disc.my_group.name || t('groupN', { n: disc.my_group.group_index })}`}</Tag>
                       )}
                     </div>
                     {isTeacherOrAdmin && (
                       <div style={{ marginTop: 10, borderTop: '1px solid #f0f0f0', paddingTop: 10 }}>
                         <Space>
-                          <span style={{ fontSize: 13, color: '#888' }}>📋 AI 总结：</span>
-                          {disc.status === 'pending' && <Tag style={{ margin: 0 }}>未开始</Tag>}
-                          {disc.status === 'active' && <Tag color="processing" style={{ margin: 0 }}>进行中</Tag>}
+                          <span style={{ fontSize: 13, color: '#888' }}>📋 {t('aiSummary')}：</span>
+                          {disc.status === 'pending' && <Tag style={{ margin: 0 }}>{t('notStarted')}</Tag>}
+                          {disc.status === 'active' && <Tag color="processing" style={{ margin: 0 }}>{t('inProgress')}</Tag>}
                           {disc.status === 'ended' && disc.has_summary && (
                             <>
-                              <Tag color="success" style={{ margin: 0 }}>✅ 已总结</Tag>
+                              <Tag color="success" style={{ margin: 0 }}>✅ {t('summaryDone')}</Tag>
                               <Button type="link" size="small" icon={<EyeOutlined />}
                                 onClick={() => navigate(`/discussion-monitor/${disc.id}`)}
                                 style={{ padding: 0 }}>
-                                查看总结
+                                {t('viewSummary')}
                               </Button>
                             </>
                           )}
                           {disc.status === 'ended' && !disc.has_summary && (
-                            <Tag color="default" style={{ margin: 0 }}>⏳ 待总结</Tag>
+                            <Tag color="default" style={{ margin: 0 }}>⏳ {t('pendingSummary')}</Tag>
                           )}
                         </Space>
                       </div>
@@ -437,9 +442,9 @@ const DiscussionPage: React.FC = () => {
               }}
               columns={[
                 {
-                  title: '讨论主题', dataIndex: 'title', key: 'title',
+                  title: t('discussionTopic'), dataIndex: 'title', key: 'title',
                   render: (title: string, disc: any) => {
-                    const statusInfo = STATUS_MAP[disc.status] || { label: '未知', color: 'default' }
+                    const statusInfo = STATUS_MAP[disc.status] || { label: t('unknown'), color: 'default' }
                     return (
                       <Space>
                         <div className="markdown-content" style={{ fontWeight: 600, cursor: 'pointer' }} onClick={() => handleDetail(disc.id)}>
@@ -452,37 +457,37 @@ const DiscussionPage: React.FC = () => {
                   },
                 },
                 {
-                  title: '参与', key: 'members', width: 110,
+                  title: t('participation'), key: 'members', width: 110,
                   render: (_: any, disc: any) => (
                     <Text type="secondary">
-                      <TeamOutlined /> {disc.total_members || 0}人 | <MessageOutlined /> {disc.total_messages || 0}
+                      <TeamOutlined /> {disc.total_members || 0}{t('people')} | <MessageOutlined /> {disc.total_messages || 0}
                     </Text>
                   ),
                 },
                 {
-                  title: '操作', key: 'actions', width: 200,
+                  title: t('actions'), key: 'actions', width: 200,
                   render: (_: any, disc: any) => (
                     <Space size="small">
-                      <Tooltip title="查看详情">
+                      <Tooltip title={t('viewDetails')}>
                         <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handleDetail(disc.id)} />
                       </Tooltip>
                       {isTeacherOrAdmin ? (
                         <>
                           {disc.status === 'pending' && (
                             <Button type="link" size="small" icon={<PlayCircleOutlined />}
-                              onClick={() => handleStart(disc.id)} style={{ color: '#52c41a' }}>开始</Button>
+                              onClick={() => handleStart(disc.id)} style={{ color: '#52c41a' }}>{t('start')}</Button>
                           )}
                           {disc.status === 'active' && (
-                            <Popconfirm title="确定结束讨论？" onConfirm={() => handleEnd(disc.id)}>
-                              <Button type="link" size="small" icon={<StopOutlined />} danger>结束</Button>
+                            <Popconfirm title={t('confirmEnd')} onConfirm={() => handleEnd(disc.id)}>
+                              <Button type="link" size="small" icon={<StopOutlined />} danger>{t('end')}</Button>
                             </Popconfirm>
                           )}
                           {disc.status === 'ended' && (
                             <>
                               <Button type="link" size="small" icon={<ReloadOutlined />}
-                                onClick={() => handleRestart(disc.id)} style={{ color: '#52c41a' }}>重启</Button>
-                              <Popconfirm title="确定删除此讨论？" onConfirm={() => handleDelete(disc.id)}>
-                                <Button type="link" size="small" icon={<DeleteOutlined />} danger>删除</Button>
+                                onClick={() => handleRestart(disc.id)} style={{ color: '#52c41a' }}>{t('restart')}</Button>
+                              <Popconfirm title={t('confirmDeleteDiscussion')} onConfirm={() => handleDelete(disc.id)}>
+                                <Button type="link" size="small" icon={<DeleteOutlined />} danger>{t('delete')}</Button>
                               </Popconfirm>
                             </>
                           )}
@@ -492,12 +497,12 @@ const DiscussionPage: React.FC = () => {
                           {disc.has_joined && disc.status === 'active' && (
                             <Button type="link" size="small" icon={<TeamOutlined />}
                               onClick={() => navigate(`/discussion-room/${disc.my_group.id}?discussion_id=${disc.id}`)}>
-                              {disc.group_mode === 'none' ? '进入讨论区' : `进入小组${disc.my_group ? `(${disc.my_group.name || `第${disc.my_group.group_index}组`})` : ''}`}
+                              {disc.group_mode === 'none' ? t('enterDiscussion') : `${t('enterGroup')}${disc.my_group ? `(${disc.my_group.name || t('groupN', { n: disc.my_group.group_index })})` : ''}`}
                             </Button>
                           )}
                           {disc.status === 'active' && !disc.has_joined && (
                             <Button type="link" size="small" icon={<MessageOutlined />}
-                              onClick={() => handleJoin(disc.id)}>加入讨论</Button>
+                              onClick={() => handleJoin(disc.id)}>{t('joinDiscussion')}</Button>
                           )}
                         </>
                       )}
@@ -512,20 +517,20 @@ const DiscussionPage: React.FC = () => {
 
       {/* 创建讨论弹窗 */}
       <Modal
-        title="创建讨论"
+        title={t('createDiscussionTitle')}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={handleCreate}
         confirmLoading={createLoading}
         width={640}
-        okText="创建"
+        okText={t('createDisc')}
       >
         {renderCreateForm()}
       </Modal>
 
       {/* 讨论详情弹窗（教师） */}
       <Modal
-        title={<span className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{detailModal?.title || '讨论详情'}</ReactMarkdown></span>}
+        title={<span className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{detailModal?.title || t('discussionDetail')}</ReactMarkdown></span>}
         open={!!detailModal}
         onCancel={() => setDetailModal(null)}
         footer={null}
@@ -537,9 +542,9 @@ const DiscussionPage: React.FC = () => {
               <Tag color={STATUS_MAP[detailModal.status]?.color}>
                 {STATUS_MAP[detailModal.status]?.label}
               </Tag>
-              <Tag>{detailModal.subject || '未指定学科'}</Tag>
+              <Tag>{detailModal.subject || t('noSubject')}</Tag>
               <span style={{ marginLeft: 12, color: '#888' }}>
-                <RobotOutlined /> {AI_ROLE_MAP[detailModal.ai_role] || detailModal.ai_role}
+                <RobotOutlined /> {getAiRoleLabel(detailModal.ai_role)}
               </span>
             </div>
 
@@ -555,23 +560,23 @@ const DiscussionPage: React.FC = () => {
                 style={{ marginBottom: 16 }}
                 onClick={() => navigate(`/discussion-monitor/${detailModal.id}`)}
               >
-                监控面板
+                {t('monitorPanel')}
               </Button>
             )}
 
-            <Title level={5}>小组列表</Title>
+            <Title level={5}>{t('groupList')}</Title>
             {detailModal.groups?.map((g: any) => (
               <Card
                 key={g.id}
                 size="small"
-                title={`${g.name || `第${g.group_index}组`}`}
+                title={`${g.name || t('groupN', { n: g.group_index })}`}
                 style={{ marginBottom: 8 }}
                 extra={
                   <Space>
-                    <Text type="secondary">{g.members?.length || 0} 人</Text>
+                    <Text type="secondary">{g.members?.length || 0}{t('people')}</Text>
                     {detailModal.status === 'active' && (
                       <Button size="small" onClick={() => handleEnterGroup(g.id, detailModal.id)}>
-                        进入
+                        {t('enterRoom')}
                       </Button>
                     )}
                   </Space>
@@ -580,10 +585,10 @@ const DiscussionPage: React.FC = () => {
                 <Space wrap>
                   {g.members?.length > 0 ? g.members.map((m: any) => (
                     <Tag key={m.username} icon={<UserOutlined />}>{m.username}</Tag>
-                  )) : <Text type="secondary">暂无成员</Text>}
+                  )) : <Text type="secondary">{t('noMembers')}</Text>}
                 </Space>
                 <div style={{ marginTop: 8 }}>
-                  <Text type="secondary">消息数: {g.message_count || 0}</Text>
+                  <Text type="secondary">{t('messageCount')}: {g.message_count || 0}</Text>
                 </div>
               </Card>
             ))}
@@ -591,41 +596,41 @@ const DiscussionPage: React.FC = () => {
         )}
       </Modal>
 
-      {/* AI 生成讨论方案弹窗 */}
+      {/* AI generate plan modal */}
       <Modal
-        title="🤖 AI 生成讨论方案"
+        title={t('aiGenerateTopic')}
         open={aiModal}
         onCancel={() => setAiModal(false)}
         onOk={handleAiGenerate}
         confirmLoading={aiLoading}
-        okText="生成方案"
+        okText={t('generatePlan')}
       >
         <Form form={aiForm} layout="vertical">
-          <Form.Item name="topic" label="讨论主题" rules={[{ required: true, message: '请输入讨论主题' }]}>
-            <Input placeholder="如：人工智能的伦理困境" />
+          <Form.Item name="topic" label={t('discussionTopic')} rules={[{ required: true, message: t('discussionTopicRequired') }]}>
+            <Input placeholder={t('discussionTopicPlaceholder')} />
           </Form.Item>
-          <Form.Item name="subject" label="学科" initialValue={subjectOptions[0] || ''}>
+          <Form.Item name="subject" label={t('subject')} initialValue={subjectOptions[0] || ''}>
             <Select>
               {subjectOptions.map(s => <Select.Option key={s} value={s}>{s}</Select.Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="ai_role" label="AI 助教角色" initialValue="mixed">
+          <Form.Item name="ai_role" label={t('aiRole')} initialValue="mixed">
             <Select>
-              <Select.Option value="observer">👀 旁观者</Select.Option>
-              <Select.Option value="guide">💡 引导者</Select.Option>
-              <Select.Option value="proactive">🗣️ 主动参与</Select.Option>
-              <Select.Option value="judge">⚖️ 辩论裁判</Select.Option>
-              <Select.Option value="mixed">🎭 综合角色</Select.Option>
+              <Select.Option value="observer">{t('aiRoleObserver')}</Select.Option>
+              <Select.Option value="guide">{t('aiRoleGuide')}</Select.Option>
+              <Select.Option value="proactive">{t('aiRoleProactive')}</Select.Option>
+              <Select.Option value="judge">{t('aiRoleJudge')}</Select.Option>
+              <Select.Option value="mixed">{t('aiRoleMixed')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="duration_minutes" label="预计时长 (分钟)" initialValue={30}>
+          <Form.Item name="duration_minutes" label={t('estimatedDuration')} initialValue={30}>
             <InputNumber min={5} max={120} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="group_mode" label="分组方式" initialValue="none">
+          <Form.Item name="group_mode" label={t('groupMode')} initialValue="none">
             <Select>
-              <Select.Option value="none">不分组（自由讨论区）</Select.Option>
-              <Select.Option value="auto">自动分组（按每组人数）</Select.Option>
-              <Select.Option value="random">随机分组（按组数）</Select.Option>
+              <Select.Option value="none">{t('noGroupMode')}</Select.Option>
+              <Select.Option value="auto">{t('autoGroup')}</Select.Option>
+              <Select.Option value="random">{t('randomGroup')}</Select.Option>
             </Select>
           </Form.Item>
         </Form>

@@ -13,6 +13,7 @@ import {
   EyeOutlined, EditOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import * as whiteboardApi from '../api/whiteboard'
 import type { WhiteboardRoom, WhiteboardMode } from '../types'
@@ -20,6 +21,7 @@ import type { WhiteboardRoom, WhiteboardMode } from '../types'
 const { Title, Text } = Typography
 
 const WhiteboardPage: React.FC = () => {
+  const { t } = useTranslation('discussion')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isTeacher = user?.role === 'admin' || user?.role === 'teacher'
@@ -59,7 +61,7 @@ const WhiteboardPage: React.FC = () => {
   // ── 创建房间 ──
   const handleCreate = async () => {
     if (!title.trim()) {
-      message.warning('请输入白板标题')
+      message.warning(t('titleRequired'))
       return
     }
     setCreating(true)
@@ -69,7 +71,7 @@ const WhiteboardPage: React.FC = () => {
         mode,
         room_type: roomType,
       })
-      message.success(`房间创建成功！房间码：${res.room_code}`)
+      message.success(t('roomCreated', { code: res.room_code }))
       setCreateOpen(false)
       setTitle('')
       loadRooms()
@@ -77,7 +79,7 @@ const WhiteboardPage: React.FC = () => {
       // 教师自动进入房间
       navigate(`/whiteboard-room/${res.id}`)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '创建失败')
+      message.error(err?.response?.data?.detail || t('createFailed'))
     } finally {
       setCreating(false)
     }
@@ -99,7 +101,7 @@ const WhiteboardPage: React.FC = () => {
 
   const handleEdit = async () => {
     if (!editingRoom || !editTitle.trim()) {
-      message.warning('请输入标题')
+      message.warning(t('titleRequired'))
       return
     }
     setEditing(true)
@@ -108,11 +110,11 @@ const WhiteboardPage: React.FC = () => {
         title: editTitle.trim(),
         mode: editMode,
       })
-      message.success('白板已更新')
+      message.success(t('whiteboardUpdated'))
       setEditOpen(false)
       loadRooms()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '更新失败')
+      message.error(err?.response?.data?.detail || t('updateFailed'))
     } finally {
       setEditing(false)
     }
@@ -121,18 +123,18 @@ const WhiteboardPage: React.FC = () => {
   // ── 加入房间（学生）──
   const handleJoin = async () => {
     if (!joinCode.trim()) {
-      message.warning('请输入房间码')
+      message.warning(t('enterRoomCode'))
       return
     }
     setJoining(true)
     try {
       const res = await whiteboardApi.joinByCode(joinCode.trim().toUpperCase())
-      message.success(`已加入「${res.title}」`)
+      message.success(t('joinedRoom', { title: res.title }))
       setJoinOpen(false)
       setJoinCode('')
       navigate(`/whiteboard-room/${res.room_id}`)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加入失败')
+      message.error(err?.response?.data?.detail || t('joinFailed'))
     } finally {
       setJoining(false)
     }
@@ -142,10 +144,10 @@ const WhiteboardPage: React.FC = () => {
   const handleEnd = async (roomId: number) => {
     try {
       await whiteboardApi.endRoom(roomId)
-      message.success('房间已结束')
+      message.success(t('roomEnded'))
       loadRooms()
     } catch {
-      message.error('操作失败')
+      message.error(t('operationFailed'))
     }
   }
 
@@ -153,61 +155,61 @@ const WhiteboardPage: React.FC = () => {
   const handleDelete = async (roomId: number) => {
     try {
       await whiteboardApi.deleteRoom(roomId)
-      message.success('已删除')
+      message.success(t('deleted'))
       loadRooms()
     } catch {
-      message.error('删除失败')
+      message.error(t('deleteFailed'))
     }
   }
 
   const modeLabels: Record<string, { color: string; label: string }> = {
-    demo: { color: 'blue', label: '演示' },
-    interactive: { color: 'orange', label: '互动' },
-    self_study: { color: 'purple', label: '自习' },
+    demo: { color: 'blue', label: t('demo') },
+    interactive: { color: 'orange', label: t('interactive') },
+    self_study: { color: 'purple', label: t('selfStudy') },
   }
 
   const columns: ColumnsType<WhiteboardRoom> = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 60 },
-    { title: '房间码', dataIndex: 'room_code', key: 'room_code', width: 120,
+    { title: t('roomCode'), dataIndex: 'room_code', key: 'room_code', width: 120,
       render: (code: string) => (
         <Space>
           <Tag color="blue" style={{ fontFamily: 'monospace' }}>{code}</Tag>
-          <Tooltip title="复制房间码">
+          <Tooltip title={t('copyRoomCode')}>
             <Button
               type="text"
               size="small"
               icon={<CopyOutlined />}
               onClick={() => {
                 navigator.clipboard.writeText(code)
-                message.success('已复制房间码')
+                message.success(t('roomCodeCopied'))
               }}
             />
           </Tooltip>
         </Space>
       ),
     },
-    { title: '标题', dataIndex: 'title', key: 'title' },
-    { title: '创建人', dataIndex: 'creator_name', key: 'creator_name', width: 100,
+    { title: t('title'), dataIndex: 'title', key: 'title' },
+    { title: t('creator'), dataIndex: 'creator_name', key: 'creator_name', width: 100,
       render: (n: string) => n || '-',
     },
-    { title: '模式', dataIndex: 'mode', key: 'mode', width: 80,
+    { title: t('mode'), dataIndex: 'mode', key: 'mode', width: 80,
       render: (m: string) => (
         <Tag color={modeLabels[m]?.color}>{modeLabels[m]?.label || m}</Tag>
       ),
     },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 80,
+    { title: t('status'), dataIndex: 'status', key: 'status', width: 80,
       render: (s: string) => (
         <Tag color={s === 'active' ? 'green' : 'default'}>
-          {s === 'active' ? '进行中' : '已结束'}
+          {s === 'active' ? t('active') : t('ended')}
         </Tag>
       ),
     },
-    { title: '参与人数', dataIndex: 'student_count', key: 'student_count', width: 80 },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 160,
+    { title: t('participantCount'), dataIndex: 'student_count', key: 'student_count', width: 80 },
+    { title: t('createdAt'), dataIndex: 'created_at', key: 'created_at', width: 160,
       render: (t: string) => t?.replace('T', ' ').substring(0, 19) || '-',
     },
     {
-      title: '操作', key: 'actions', width: 120,
+      title: t('actions'), key: 'actions', width: 120,
       render: (_, record) => (
         <Space>
           <Tooltip title="进入房间">
@@ -245,7 +247,7 @@ const WhiteboardPage: React.FC = () => {
   return (
     <Card style={{ borderRadius: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Title level={3} style={{ margin: 0 }}>🎨 白板</Title>
+        <Title level={3} style={{ margin: 0 }}>🎨 {t('whiteboard')}</Title>
         <Space>
           {isStudent && (
             <Tooltip title="加入白板">
@@ -269,12 +271,12 @@ const WhiteboardPage: React.FC = () => {
         rowKey="id"
         loading={loading}
         pagination={{ pageSize: 20 }}
-        locale={{ emptyText: '暂无白板房间' }}
+        locale={{ emptyText: t('noWhiteboards') }}
       />
 
       {/* ── 创建房间弹窗 ── */}
       <Modal
-        title="创建白板房间"
+        title={t('createWhiteboard')}
         open={createOpen}
         onOk={handleCreate}
         onCancel={() => { setCreateOpen(false); setTitle('') }}
@@ -284,7 +286,7 @@ const WhiteboardPage: React.FC = () => {
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div>
-            <Text strong>白板标题</Text>
+            <Text strong>{t('whiteboardTitle')}</Text>
             <Input
               placeholder="例如：串联电路分析"
               value={title}
@@ -293,28 +295,28 @@ const WhiteboardPage: React.FC = () => {
             />
           </div>
           <div>
-            <Text strong>使用模式</Text>
+            <Text strong>{t('usageMode')}</Text>
             <Radio.Group value={mode} onChange={(e) => setMode(e.target.value as WhiteboardMode)} style={{ marginTop: 8 }}>
-              <Radio.Button value="demo">演示模式</Radio.Button>
-              <Radio.Button value="interactive">互动模式</Radio.Button>
-              <Radio.Button value="self_study">自习模式</Radio.Button>
+              <Radio.Button value="demo">{t('demoMode')}</Radio.Button>
+              <Radio.Button value="interactive">{t('interactiveMode')}</Radio.Button>
+              <Radio.Button value="self_study">{t('selfStudyMode')}</Radio.Button>
             </Radio.Group>
             <div style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
-              {mode === 'demo' && '教师独占操作，学生只读观看'}
-              {mode === 'interactive' && '教师授权后学生可上台操作'}
-              {mode === 'self_study' && '学生各自独立白板，教师巡览'}
+              {mode === 'demo' && t('demoModeDesc')}
+              {mode === 'interactive' && t('interactiveModeDesc')}
+              {mode === 'self_study' && t('selfStudyModeDesc')}
             </div>
           </div>
           <div>
-            <Text strong>房间类型</Text>
+            <Text strong>{t('roomType')}</Text>
             <Select
               value={roomType}
               onChange={(val) => setRoomType(val as 'classroom' | 'course' | 'temporary')}
               style={{ width: '100%', marginTop: 8 }}
               options={[
-                { value: 'classroom', label: '课堂白板' },
-                { value: 'temporary', label: '临时白板' },
-                { value: 'course', label: '课程白板' },
+                { value: 'classroom', label: t('classroomWhiteboard') },
+                { value: 'temporary', label: t('temporaryWhiteboard') },
+                { value: 'course', label: t('courseWhiteboard') },
               ]}
             />
           </div>
@@ -323,19 +325,19 @@ const WhiteboardPage: React.FC = () => {
 
       {/* ── 学生加入弹窗 ── */}
       <Modal
-        title="加入白板房间"
+        title={t('whiteboardRoom')}
         open={joinOpen}
         onOk={handleJoin}
         onCancel={() => { setJoinOpen(false); setJoinCode('') }}
         confirmLoading={joining}
-        okText="加入"
-        cancelText="取消"
+        okText={t('join')}
+        cancelText={t('cancel')}
       >
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Text>输入老师提供的6位房间码</Text>
+          <Text>{t('enterRoomCodeHint')}</Text>
           <Input
             size="large"
-            placeholder="例如：WB-3K8Q"
+            placeholder={t('roomCodeExample')}
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
             onPressEnter={handleJoin}
@@ -347,17 +349,17 @@ const WhiteboardPage: React.FC = () => {
 
       {/* ── 编辑房间弹窗 ── */}
       <Modal
-        title="编辑白板房间"
+        title={`编辑${t('whiteboardRoom')}`}
         open={editOpen}
         onOk={handleEdit}
         onCancel={() => setEditOpen(false)}
         confirmLoading={editing}
-        okText="保存"
-        cancelText="取消"
+        okText={t('save')}
+        cancelText={t('cancel')}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div>
-            <Text strong>白板标题</Text>
+            <Text strong>{t('whiteboardTitle')}</Text>
             <Input
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
@@ -365,16 +367,16 @@ const WhiteboardPage: React.FC = () => {
             />
           </div>
           <div>
-            <Text strong>使用模式</Text>
+            <Text strong>{t('usageMode')}</Text>
             <Radio.Group value={editMode} onChange={(e) => setEditMode(e.target.value as WhiteboardMode)} style={{ marginTop: 8 }}>
-              <Radio.Button value="demo">演示模式</Radio.Button>
-              <Radio.Button value="interactive">互动模式</Radio.Button>
-              <Radio.Button value="self_study">自习模式</Radio.Button>
+              <Radio.Button value="demo">{t('demoMode')}</Radio.Button>
+              <Radio.Button value="interactive">{t('interactiveMode')}</Radio.Button>
+              <Radio.Button value="self_study">{t('selfStudyMode')}</Radio.Button>
             </Radio.Group>
             <div style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
-              {editMode === 'demo' && '教师独占操作，学生只读观看'}
-              {editMode === 'interactive' && '教师授权后学生可上台操作'}
-              {editMode === 'self_study' && '学生各自独立白板，教师巡览'}
+              {editMode === 'demo' && t('demoModeDesc')}
+              {editMode === 'interactive' && t('interactiveModeDesc')}
+              {editMode === 'self_study' && t('selfStudyModeDesc')}
             </div>
           </div>
         </Space>

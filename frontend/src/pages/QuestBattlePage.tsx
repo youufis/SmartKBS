@@ -16,6 +16,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import apiClient from '../api/client'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -66,6 +67,7 @@ const LIFELINE_ICONS: Record<string, React.ReactNode> = {
 }
 
 const QuestBattlePage: React.FC = () => {
+  const { t } = useTranslation('questions')
   const { questId } = useParams<{ questId: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -150,7 +152,6 @@ const QuestBattlePage: React.FC = () => {
       setRemovedOption(null)
       startTimer()
     } catch {
-      message.error('获取题目失败')
       navigate('/quest')
     } finally {
       setLoading(false)
@@ -224,7 +225,6 @@ const QuestBattlePage: React.FC = () => {
         if (question) {
           setQuestion({ ...question, options: data.remaining_options })
         }
-        message.success('已去掉一个错误答案！')
       } else if (type === 'phone_friend') {
         setLifelineData({ type: 'phone_friend', advice: data.advice })
         setLifelineModal(true)

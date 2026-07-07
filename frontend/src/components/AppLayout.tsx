@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Layout, Menu, Dropdown, Avatar, Space, Typography, Card } from 'antd'
+import React, { useState, useEffect, useMemo } from 'react'
+import { Layout, Menu, Dropdown, Avatar, Space, Typography } from 'antd'
 import {
   HomeOutlined,
   MessageOutlined,
@@ -30,61 +30,16 @@ import {
   CrownOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import apiClient from '../api/client'
 import NotificationBell from './NotificationBell'
 import TitleCelebration from './TitleCelebration'
 import ThemeSwitcher from './ThemeSwitcher'
+import LanguageSwitcher from './LanguageSwitcher'
 import SecuritySetupModal from './SecuritySetupModal'
 
 const { Header, Sider, Content } = Layout
-
-// 学生菜单分组（注意：标签中不要使用 emoji，折叠后会显示为 ?）
-const studentMenuGroups: { icon: React.ReactNode; label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
-  { icon: <HomeOutlined />, label: '首页概览', key: 'overview', children: [
-    { key: '/dashboard', icon: <HomeOutlined />, label: '系统首页' },
-    { key: '/task-todo', icon: <CheckCircleOutlined />, label: '任务清单' },
-  ]},
-  { icon: <BookOutlined />, label: '学习中心', key: 'learn', children: [
-    { key: '/curriculum', icon: <BookOutlined />, label: '课程导学' },
-    { key: '/chat', icon: <MessageOutlined />, label: '知识问答' },
-    { key: '/wrong-book', icon: <BookOutlined />, label: '错题巩固' },
-    { key: '/shared-center', icon: <FileOutlined />, label: '共享中心' },
-  ]},
-  { icon: <StarOutlined />, label: '知识拓展', key: 'explore', children: [
-    { key: '/daily-discovery', icon: <StarOutlined />, label: '每日精选' },
-    { key: '/news-hub', icon: <GlobalOutlined />, label: '热点新闻' },
-  ]},
-  { icon: <FileAddOutlined />, label: '考核测评', key: 'exam-practice', children: [
-    { key: '/exam', icon: <FileAddOutlined />, label: '考试中心' },
-    { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务中心' },
-    { key: '/quest', icon: <ThunderboltOutlined />, label: '闯关挑战' },
-    { key: '/practice', icon: <ThunderboltOutlined />, label: '同步练习' },
-  ]},
-  { icon: <FileAddOutlined />, label: '编程实践', key: 'coding', children: [
-    { key: '/code-practice', icon: <FileAddOutlined />, label: '代码练习' },
-  ]},
-  { icon: <ThunderboltOutlined />, label: '互动课堂', key: 'interactive', children: [
-    { key: '/interaction', icon: <ThunderboltOutlined />, label: '随堂测验' },
-    { key: '/quick-poll', icon: <BarChartOutlined />, label: '课堂投票' },
-    { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '抢答竞赛' },
-    { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
-    { key: '/whiteboard', icon: <EditOutlined />, label: '教学白板' },
-    { key: '/student-questions', icon: <MessageOutlined />, label: '课堂提问' },
-  ]},
-  { icon: <TrophyOutlined />, label: '成长档案', key: 'growth', children: [
-    { key: '/showcase', icon: <CrownOutlined />, label: '荣耀殿堂' },
-    { key: '/score', icon: <StarOutlined />, label: '积分中心' },
-    { key: '/portfolio', icon: <UserOutlined />, label: '个人档案' },
-    { key: '/portrait', icon: <PictureOutlined />, label: '每周画像' },
-  ]},
-  { icon: <SettingOutlined />, label: '系统服务', key: 'sys', children: [
-    { key: '/user-mgmt', icon: <TeamOutlined />, label: '修改密码' },
-    { key: '/announcements', icon: <BellOutlined />, label: '系统公告' },
-    { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
-    { key: '/about', icon: <InfoCircleOutlined />, label: '关于系统' },
-  ]},
-]
 
 // 教师/管理员菜单项类型：分组（有子项）或平级条目
 type TeacherMenuItem = {
@@ -96,56 +51,113 @@ type TeacherMenuItem = {
   key: string; icon: React.ReactNode; label: string;
 }
 
-const teacherMenuItems: TeacherMenuItem[] = [
-    { type: 'group', icon: <HomeOutlined />, label: '首页概览', key: 'overview', children: [
-      { key: '/dashboard', icon: <HomeOutlined />, label: '系统首页' },
+/** 构建学生菜单（基于当前翻译） */
+function buildStudentMenu(t: (k: string) => string) {
+  const g = (key: string) => t(key)
+  const m: { icon: React.ReactNode; label: string; key: string; children: { key: string; icon: React.ReactNode; label: string }[] }[] = [
+    { icon: <HomeOutlined />, label: g('overview'), key: 'overview', children: [
+      { key: '/dashboard', icon: <HomeOutlined />, label: g('dashboard') },
+      { key: '/task-todo', icon: <CheckCircleOutlined />, label: g('taskTodo') },
     ]},
-    { type: 'group', icon: <BookOutlined />, label: '教学管理', key: 'teach', children: [
-      { key: '/curriculum', icon: <BookOutlined />, label: '课程管理' },
-      { key: '/chat', icon: <MessageOutlined />, label: '知识问答' },
-      { key: '/practice', icon: <ThunderboltOutlined />, label: '同步练习' },
-      { key: '/question-bank', icon: <DatabaseOutlined />, label: '试题管理' },
-      { key: '/exam', icon: <FileAddOutlined />, label: '考试发布' },
-      { key: '/wrong-book', icon: <BookOutlined />, label: '错题管理' },
-      { key: '/shared-center', icon: <FolderOutlined />, label: '资源中心', adminOrTeacherOnly: true },
+    { icon: <BookOutlined />, label: g('learnCenter'), key: 'learn', children: [
+      { key: '/curriculum', icon: <BookOutlined />, label: g('curriculum') },
+      { key: '/chat', icon: <MessageOutlined />, label: g('knowledgeQA') },
+      { key: '/wrong-book', icon: <BookOutlined />, label: g('wrongBook') },
+      { key: '/shared-center', icon: <FileOutlined />, label: g('sharedCenter') },
     ]},
-    { type: 'group', icon: <StarOutlined />, label: '知识拓展', key: 'explore', children: [
-      { key: '/daily-discovery', icon: <StarOutlined />, label: '每日精选' },
-      { key: '/news-hub', icon: <GlobalOutlined />, label: '热点新闻' },
+    { icon: <StarOutlined />, label: g('explore'), key: 'explore', children: [
+      { key: '/daily-discovery', icon: <StarOutlined />, label: g('dailyDiscovery') },
+      { key: '/news-hub', icon: <GlobalOutlined />, label: g('newsHub') },
     ]},
-    { type: 'group', icon: <FileAddOutlined />, label: '编程实践', key: 'coding', children: [
-      { key: '/code-practice', icon: <FileAddOutlined />, label: '代码练习' },
+    { icon: <FileAddOutlined />, label: g('examPractice'), key: 'exam-practice', children: [
+      { key: '/exam', icon: <FileAddOutlined />, label: g('examCenter') },
+      { key: '/tasks', icon: <CheckCircleOutlined />, label: g('taskCenter') },
+      { key: '/quest', icon: <ThunderboltOutlined />, label: g('questChallenge') },
+      { key: '/practice', icon: <ThunderboltOutlined />, label: g('syncPractice') },
     ]},
-    { type: 'group', icon: <ThunderboltOutlined />, label: '课堂活动', key: 'classroom', children: [
-      { key: '/interaction', icon: <ThunderboltOutlined />, label: '随堂测验' },
-      { key: '/quick-poll', icon: <BarChartOutlined />, label: '课堂投票' },
-      { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: '抢答竞赛' },
-      { key: '/discussion', icon: <TeamOutlined />, label: '分组讨论' },
-      { key: '/whiteboard', icon: <EditOutlined />, label: '教学白板' },
-      { key: '/rollcall', icon: <AuditOutlined />, label: '点名管理' },
-      { key: '/student-questions', icon: <MessageOutlined />, label: '提问管理' },
-      { key: '/tasks', icon: <CheckCircleOutlined />, label: '任务管理' },
-      { key: '/quest-records', icon: <TrophyOutlined />, label: '闯关管理', adminOrTeacherOnly: true },
+    { icon: <FileAddOutlined />, label: g('coding'), key: 'coding', children: [
+      { key: '/code-practice', icon: <FileAddOutlined />, label: g('codePractice') },
     ]},
-    { type: 'group', icon: <BarChartOutlined />, label: '学情分析', key: 'analytics', children: [
-      { key: '/showcase', icon: <CrownOutlined />, label: '荣耀殿堂' },
-      { key: '/analytics', icon: <BarChartOutlined />, label: '学情总览' },
-      { key: '/class-summary', icon: <RobotOutlined />, label: '课堂总结' },
-      { key: '/curriculum/progress', icon: <BarChartOutlined />, label: '进度详情' },
-      { key: '/activity-monitor', icon: <BarChartOutlined />, label: '活动监控' },
-      { key: '/score', icon: <TrophyOutlined />, label: '积分管理' },
+    { icon: <ThunderboltOutlined />, label: g('interactive'), key: 'interactive', children: [
+      { key: '/interaction', icon: <ThunderboltOutlined />, label: g('classQuiz') },
+      { key: '/quick-poll', icon: <BarChartOutlined />, label: g('classPoll') },
+      { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: g('quickQuiz') },
+      { key: '/discussion', icon: <TeamOutlined />, label: g('discussion') },
+      { key: '/whiteboard', icon: <EditOutlined />, label: g('whiteboard') },
+      { key: '/student-questions', icon: <MessageOutlined />, label: g('studentQuestions') },
     ]},
-    { type: 'group', icon: <SettingOutlined />, label: '系统管理', key: 'admin', children: [
-      { key: '/user-mgmt', icon: <TeamOutlined />, label: '用户管理' },
-      { key: '/announcements', icon: <BellOutlined />, label: '公告管理' },
-      { key: '/system-config', icon: <SettingOutlined />, label: '系统配置', adminOnly: true },
-      { key: '/notifications', icon: <BellOutlined />, label: '通知中心' },
-      { key: '/portrait', icon: <PictureOutlined />, label: '每周画像' },
-      { key: '/about', icon: <InfoCircleOutlined />, label: '关于系统' },
+    { icon: <TrophyOutlined />, label: g('growth'), key: 'growth', children: [
+      { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },
+      { key: '/score', icon: <StarOutlined />, label: g('score') },
+      { key: '/portfolio', icon: <UserOutlined />, label: g('portfolio') },
+      { key: '/portrait', icon: <PictureOutlined />, label: g('weeklyPortrait') },
+    ]},
+    { icon: <SettingOutlined />, label: g('system'), key: 'sys', children: [
+      { key: '/user-mgmt', icon: <TeamOutlined />, label: g('changePassword') },
+      { key: '/announcements', icon: <BellOutlined />, label: g('announcements') },
+      { key: '/notifications', icon: <BellOutlined />, label: g('notifications') },
+      { key: '/about', icon: <InfoCircleOutlined />, label: g('about') },
     ]},
   ]
+  return m
+}
+
+/** 构建教师/管理员菜单（基于当前翻译） */
+function buildTeacherMenu(t: (k: string) => string) {
+  const g = (key: string) => t(key)
+  const m: TeacherMenuItem[] = [
+    { type: 'group', icon: <HomeOutlined />, label: g('overview'), key: 'overview', children: [
+      { key: '/dashboard', icon: <HomeOutlined />, label: g('dashboard') },
+    ]},
+    { type: 'group', icon: <BookOutlined />, label: g('teacherMenu.teachingManagement'), key: 'teach', children: [
+      { key: '/curriculum', icon: <BookOutlined />, label: g('curriculumManage') },
+      { key: '/chat', icon: <MessageOutlined />, label: g('knowledgeQA') },
+      { key: '/practice', icon: <ThunderboltOutlined />, label: g('syncPractice') },
+      { key: '/question-bank', icon: <DatabaseOutlined />, label: g('questionBank') },
+      { key: '/exam', icon: <FileAddOutlined />, label: g('examPublish') },
+      { key: '/wrong-book', icon: <BookOutlined />, label: g('wrongBookManage') },
+      { key: '/shared-center', icon: <FolderOutlined />, label: g('resourceCenter'), adminOrTeacherOnly: true },
+    ]},
+    { type: 'group', icon: <StarOutlined />, label: g('explore'), key: 'explore', children: [
+      { key: '/daily-discovery', icon: <StarOutlined />, label: g('dailyDiscovery') },
+      { key: '/news-hub', icon: <GlobalOutlined />, label: g('newsHub') },
+    ]},
+    { type: 'group', icon: <FileAddOutlined />, label: g('coding'), key: 'coding', children: [
+      { key: '/code-practice', icon: <FileAddOutlined />, label: g('codePractice') },
+    ]},
+    { type: 'group', icon: <ThunderboltOutlined />, label: g('classroomActivities'), key: 'classroom', children: [
+      { key: '/interaction', icon: <ThunderboltOutlined />, label: g('classQuiz') },
+      { key: '/quick-poll', icon: <BarChartOutlined />, label: g('classPoll') },
+      { key: '/quick-quiz', icon: <ThunderboltOutlined />, label: g('quickQuiz') },
+      { key: '/discussion', icon: <TeamOutlined />, label: g('discussion') },
+      { key: '/whiteboard', icon: <EditOutlined />, label: g('whiteboard') },
+      { key: '/rollcall', icon: <AuditOutlined />, label: g('rollcallManage') },
+      { key: '/student-questions', icon: <MessageOutlined />, label: g('questionManage') },
+      { key: '/tasks', icon: <CheckCircleOutlined />, label: g('taskManage') },
+      { key: '/quest-records', icon: <TrophyOutlined />, label: g('questManage'), adminOrTeacherOnly: true },
+    ]},
+    { type: 'group', icon: <BarChartOutlined />, label: g('learningAnalytics'), key: 'analytics', children: [
+      { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },
+      { key: '/analytics', icon: <BarChartOutlined />, label: g('analytics') },
+      { key: '/class-summary', icon: <RobotOutlined />, label: g('classSummary') },
+      { key: '/curriculum/progress', icon: <BarChartOutlined />, label: g('curriculumProgress') },
+      { key: '/activity-monitor', icon: <BarChartOutlined />, label: g('activityMonitor') },
+      { key: '/score', icon: <TrophyOutlined />, label: g('scoreManage') },
+    ]},
+    { type: 'group', icon: <SettingOutlined />, label: g('systemManagement'), key: 'admin', children: [
+      { key: '/user-mgmt', icon: <TeamOutlined />, label: g('userManagement') },
+      { key: '/announcements', icon: <BellOutlined />, label: g('announcementsManage') },
+      { key: '/system-config', icon: <SettingOutlined />, label: g('systemConfig'), adminOnly: true },
+      { key: '/notifications', icon: <BellOutlined />, label: g('notifications') },
+      { key: '/portrait', icon: <PictureOutlined />, label: g('weeklyPortrait') },
+      { key: '/about', icon: <InfoCircleOutlined />, label: g('about') },
+    ]},
+  ]
+  return m
+}
 
 const AppLayout: React.FC = () => {
+  const { t } = useTranslation('menu')
   const navigate = useNavigate()
   const location = useLocation()
   const { user, onlineCount, logout, fetchOnlineCount, isLoggedIn } = useAuthStore()
@@ -157,6 +169,10 @@ const AppLayout: React.FC = () => {
     } catch { return [] }
   })
   const [orgName, setOrgName] = useState('')
+
+  // 基于翻译构建菜单
+  const studentMenuGroups = useMemo(() => buildStudentMenu(t), [t])
+  const teacherMenuItems = useMemo(() => buildTeacherMenu(t), [t])
 
   // 根据角色构建菜单项（分组分类）
   const isStudent = user?.role === 'student'
@@ -214,26 +230,11 @@ const AppLayout: React.FC = () => {
         }
       }
     }
-  }, [location.pathname, isStudent])
+  }, [location.pathname, isStudent, studentMenuGroups, teacherMenuItems])
 
   // ── 代码练习页随机名言（仅在挂载时计算一次） ──
-  const codeQuotes = [
-    'Talk is cheap. Show me the code.',
-    '代码如诗，简洁为美',
-    '写好每一行代码，解决每一个问题',
-    '编程是思考的艺术',
-    'Debug 是一种修行',
-    '用代码改变世界',
-    '每一次提交，都是进步',
-    'Clear code, clear mind',
-    'Code. Eat. Sleep. Repeat.',
-    '键盘敲烂，月入过万 💪',
-    '编译器不会骗你，但 debug 会 🐛',
-    '先跑起来，再优化',
-    'Programming is the art of logic',
-    '简单的代码最优雅',
-  ]
-  const [codeQuote] = useState(() => codeQuotes[Math.floor(Math.random() * codeQuotes.length)])
+  // codeQuote 供 CodePracticePage 通过 context 或 props 获取
+  // 当前暂未使用，保留以备后续扩展
 
   // ── 加载当前用户称号等级（用于顶栏头像） ──
   const [userTitleLevel, setUserTitleLevel] = useState(1)
@@ -292,9 +293,9 @@ const AppLayout: React.FC = () => {
     items: [
       { key: 'info', label: `${user?.name || user?.username} (${user?.role})`, disabled: true },
       { type: 'divider' as const },
-      { key: 'security', icon: <SafetyCertificateOutlined />, label: '安全设置' },
+      { key: 'security', icon: <SafetyCertificateOutlined />, label: t('securitySettings') },
       { type: 'divider' as const },
-      { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
+      { key: 'logout', icon: <LogoutOutlined />, label: t('logout'), danger: true },
     ],
     onClick: ({ key }: { key: string }) => {
       if (key === 'logout') handleLogout()
@@ -330,11 +331,12 @@ const AppLayout: React.FC = () => {
             </Typography.Text>
           )}
           <Typography.Text style={{ fontSize: 13, color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)' }}>
-            🟢 在线人数: {onlineCount}
+            🟢 {t('onlineCount', { count: onlineCount })}
           </Typography.Text>
         </Space>
 
         <Space size={16}>
+          <LanguageSwitcher />
           <ThemeSwitcher />
           <NotificationBell />
           <Dropdown menu={userMenu} placement="bottomRight">

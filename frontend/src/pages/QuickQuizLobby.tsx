@@ -14,10 +14,12 @@ import {
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 const { Title, Text } = Typography
 
 const QuickQuizLobby: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -93,7 +95,7 @@ const QuickQuizLobby: React.FC = () => {
         }
       }
     } catch (err: any) {
-      message.error('加载房间信息失败')
+      message.error(t('loadRoomInfoFailed'))
       navigate('/quick-quiz')
     } finally {
       setLoading(false)
@@ -163,7 +165,7 @@ const QuickQuizLobby: React.FC = () => {
       await apiClient.post(`/api/quick-quiz/room/${roomId}/start`)
       navigate(`/quick-quiz/console/${roomId}`, { replace: true })
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '启动失败')
+      message.error(err.response?.data?.detail || t('startFailed'))
     } finally {
       setStarting(false)
     }
@@ -172,14 +174,14 @@ const QuickQuizLobby: React.FC = () => {
   const handleCopyCode = () => {
     if (room?.room_code) {
       navigator.clipboard.writeText(room.room_code)
-      message.success('房间码已复制')
+      message.success(t('roomCodeCopied'))
     }
   }
 
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-        <Spin size="large" description="加载中..." />
+        <Spin size="large" description={t('loading')} />
       </div>
     )
   }
@@ -187,8 +189,8 @@ const QuickQuizLobby: React.FC = () => {
   if (!room) {
     return (
       <div style={{ textAlign: 'center', paddingTop: 120 }}>
-        <Title level={4}>房间不存在</Title>
-        <Button type="primary" onClick={() => navigate('/quick-quiz')}>返回</Button>
+        <Title level={4}>{t('roomNotFound')}</Title>
+        <Button type="primary" onClick={() => navigate('/quick-quiz')}>{t('back')}</Button>
       </div>
     )
   }
@@ -204,12 +206,12 @@ const QuickQuizLobby: React.FC = () => {
               <ThunderboltOutlined style={{ fontSize: 24, color: '#fff' }} />
               <Title level={3} style={{ color: '#fff', margin: 0 }}>{room.title}</Title>
               <Tag color={room.status === 'waiting' ? 'processing' : 'success'} style={{ borderRadius: 12 }}>
-                {room.status === 'waiting' ? '等待开始' : '进行中'}
+                {room.status === 'waiting' ? t('waitingStart') : t('inProgress')}
               </Tag>
             </Space>
             <div style={{ marginTop: 8 }}>
               <Text style={{ color: 'rgba(255,255,255,0.85)' }}>
-                房间码：
+                {t('roomCodeLabel')}
               </Text>
               <Text code style={{ color: '#fff', fontSize: 24, fontWeight: 'bold', letterSpacing: 4,
                 background: 'rgba(255,255,255,0.15)', padding: '2px 12px', borderRadius: 6 }}>
@@ -224,33 +226,33 @@ const QuickQuizLobby: React.FC = () => {
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 36, fontWeight: 'bold', color: '#fff' }}>{players.length}</div>
-            <div style={{ color: 'rgba(255,255,255,0.75)' }}>已加入 / {room.max_players || 50}</div>
+            <div style={{ color: 'rgba(255,255,255,0.75)' }}>{t('joined')} / {room.max_players || 50}</div>
           </div>
         </div>
       </Card>
 
       {/* 房间配置 */}
       <Card style={{ borderRadius: 12, marginBottom: 16 }} size="small"
-        title={<Space><SettingOutlined /> 活动配置</Space>}>
+        title={<Space><SettingOutlined /> {t('activityConfig')}</Space>}>
         <Space wrap size={16}>
-          <Text><ClockCircleOutlined /> 每题限时：<Text strong>{room.time_limit}s</Text></Text>
-          <Text>📝 共 <Text strong>{room.question_count}</Text> 题</Text>
-          <Text>🎯 计分模式：<Text strong>{room.scoring_mode === 'speed' ? '速度递减' : '分段奖励'}</Text></Text>
-          <Text>📚 题目来源：<Text strong>
-            {room.question_source === 'bank_academic' ? '学科试题库' :
-             room.question_source === 'bank_general' ? '百科知识题库' :
-             room.question_source === 'bank' ? '试题库' : room.question_source || '未设置'}
+          <Text><ClockCircleOutlined /> {t('timeLimit')}：<Text strong>{room.time_limit}s</Text></Text>
+          <Text>📝 {t('totalQuestions')}：<Text strong>{room.question_count}</Text></Text>
+          <Text>🎯 {t('scoring')}：<Text strong>{room.scoring_mode === 'speed' ? t('speedScoring') : t('tieredScoring')}</Text></Text>
+          <Text>📚 {t('questionSource')}：<Text strong>
+            {room.question_source === 'bank_academic' ? t('bankAcademicLabel') :
+             room.question_source === 'bank_general' ? t('bankGeneralLabel') :
+             room.question_source === 'bank' ? t('bankAcademicLabel') : room.question_source || t('notSet')}
           </Text></Text>
-          {room.subject && <Text>📖 学科：{room.subject}</Text>}
+          {room.subject && <Text>📖 {t('subject')}：{room.subject}</Text>}
         </Space>
       </Card>
 
       {/* 玩家列表 */}
-      <Card title={<Space><TeamOutlined /> 玩家列表 ({players.length})</Space>}
+      <Card title={<Space><TeamOutlined /> {t('playerListWithCount', { count: players.length })}</Space>}
         style={{ borderRadius: 12 }} styles={{ body: { padding: players.length === 0 ? '24px' : '12px 24px' } }}>
         {players.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 20 }}>
-            <Text type="secondary">暂无玩家加入，等待中...</Text>
+            <Text type="secondary">{t('noPlayersWaiting')}</Text>
           </div>
         ) : (
           <List
@@ -278,7 +280,7 @@ const QuickQuizLobby: React.FC = () => {
           <div style={{ fontSize: 120, color: '#fff', fontWeight: 'bold' }}>
             {countdown > 0 ? countdown : 'GO!'}
           </div>
-          <div style={{ color: '#fff', fontSize: 24, marginTop: 16 }}>即将开始...</div>
+          <div style={{ color: '#fff', fontSize: 24, marginTop: 16 }}>{t('aboutToStart')}</div>
         </div>
       )}
 
@@ -296,21 +298,21 @@ const QuickQuizLobby: React.FC = () => {
                 disabled={players.length < 1}
                 style={{ height: 48, borderRadius: 24, paddingLeft: 32, paddingRight: 32 }}
               >
-                🚀 开始抢答
+                {t('startQuizBattle')}
               </Button>
             </Space>
           </Space>
           <div style={{ marginTop: 8 }}>
-            <Button onClick={() => navigate('/quick-quiz')}>返回列表</Button>
+            <Button onClick={() => navigate('/quick-quiz')}>{t('backToList')}</Button>
           </div>
         </div>
       )}
 
       {!isTeacherOrAdmin && room.status === 'waiting' && (
         <div style={{ marginTop: 16, textAlign: 'center' }}>
-          <Text type="secondary">等待教师开始抢答...</Text>
+          <Text type="secondary">{t('waitingForTeacher')}</Text>
           <div style={{ marginTop: 8 }}>
-            <Button onClick={() => navigate('/quick-quiz')}>返回列表</Button>
+            <Button onClick={() => navigate('/quick-quiz')}>{t('backToList')}</Button>
           </div>
         </div>
       )}

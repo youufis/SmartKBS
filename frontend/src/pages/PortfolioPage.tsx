@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useReducer } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card, Row, Col, Statistic, Typography, Spin, Tag, Space,
@@ -142,6 +143,7 @@ const initialState: PortfolioState = {
 }
 
 const PortfolioPage: React.FC = () => {
+  const { t } = useTranslation('score')
   const { username: paramUsername } = useParams<{ username: string }>()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -194,7 +196,7 @@ const PortfolioPage: React.FC = () => {
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
         if (result) setReportData(result)
-        else message.error('AI 分析超时')
+        else message.error(t('aiAnalysisTimeout'))
       } else {
         setReportData(data)
       }
@@ -208,7 +210,7 @@ const PortfolioPage: React.FC = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
-        <Spin size="large" description="加载成长档案..." />
+        <Spin size="large" description={t('loading')} />
       </div>
     )
   }
@@ -218,7 +220,7 @@ const PortfolioPage: React.FC = () => {
   }
 
   if (!data) {
-    return <Empty description="暂无数据" />
+    return <Empty description={t('noData')} />
   }
 
   const { user: student, exams, scores, reward_points, reward_history, rollcall, tasks, chats, course_practice } = data
@@ -251,14 +253,14 @@ const PortfolioPage: React.FC = () => {
   const avatarColor = isSelfView ? baseColor : (isTeacherOrAdmin ? '#722ed1' : '#667eea')
 
   const totalDataPoints = [
-    { label: '考试', value: examStats?.total_exams ?? 0, icon: <FileAddOutlined />, color: '#1677ff' },
-    { label: '课堂积分', value: scores?.total_score ?? 0, icon: <TrophyOutlined />, color: '#faad14' },
-    { label: '奖励积分', value: reward_points ?? 0, icon: <TrophyOutlined />, color: '#eb2f96' },
-    { label: '点名次数', value: rollcall?.total_calls ?? 0, icon: <AuditOutlined />, color: '#722ed1' },
-    { label: '完成任务', value: tasks?.completed ?? 0, icon: <CheckCircleOutlined />, color: '#52c41a' },
-    { label: '对话天数', value: chats?.total_days ?? 0, icon: <MessageOutlined />, color: '#13c2c2' },
-    { label: '课程练习', value: course_practice?.total_count ?? 0, icon: <ExperimentOutlined />, color: '#52c41a' },
-    { label: '资源浏览', value: viewStats.total_views, icon: <EyeOutlined />, color: '#1677ff' },
+    { label: t('exam'), value: examStats?.total_exams ?? 0, icon: <FileAddOutlined />, color: '#1677ff' },
+    { label: t('classScore'), value: scores?.total_score ?? 0, icon: <TrophyOutlined />, color: '#faad14' },
+    { label: t('rewardPoints'), value: reward_points ?? 0, icon: <TrophyOutlined />, color: '#eb2f96' },
+    { label: t('rollcallCount'), value: rollcall?.total_calls ?? 0, icon: <AuditOutlined />, color: '#722ed1' },
+    { label: t('taskCompleted'), value: tasks?.completed ?? 0, icon: <CheckCircleOutlined />, color: '#52c41a' },
+    { label: t('chatDays'), value: chats?.total_days ?? 0, icon: <MessageOutlined />, color: '#13c2c2' },
+    { label: t('coursePractice'), value: course_practice?.total_count ?? 0, icon: <ExperimentOutlined />, color: '#52c41a' },
+    { label: t('resourceViews'), value: viewStats.total_views, icon: <EyeOutlined />, color: '#1677ff' },
   ]
 
   return (
@@ -276,7 +278,7 @@ const PortfolioPage: React.FC = () => {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <Title level={4} style={{ color: '#fff', margin: 0 }}>📋 我的档案</Title>
+              <Title level={4} style={{ color: '#fff', margin: 0 }}>📋 {t('portfolio')}</Title>
               <Title level={3} style={{ color: '#fff', margin: 0 }}>{student.name}</Title>
             </div>
             <Space style={{ marginTop: 4, flexWrap: 'wrap' }}>
@@ -293,7 +295,7 @@ const PortfolioPage: React.FC = () => {
           </div>
           {isTeacherOrAdmin && (
             <Button ghost icon={<RightOutlined />} onClick={() => navigate(-1)}>
-              返回
+              {t('cancel')}
             </Button>
           )}
         </div>
@@ -317,8 +319,8 @@ const PortfolioPage: React.FC = () => {
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Space>
               <RobotOutlined style={{ color: '#faad14', fontSize: 18 }} />
-              <Text strong>AI 学习报告</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>基于 AI 对学习数据深度分析，生成个性化学习报告</Text>
+              <Text strong>{t('aiReport')}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('aiReportDesc')}</Text>
             </Space>
             <Space>
               <Select value={reportDays} onChange={setReportDays} style={{ width: 100 }} size="small"
@@ -329,7 +331,7 @@ const PortfolioPage: React.FC = () => {
                 ]} />
               <Button type="primary" size="small" icon={<RobotOutlined />}
                 loading={reportLoading} onClick={handleGenerateReport}>
-                生成报告
+                {t('generateReport')}
               </Button>
             </Space>
           </Space>
@@ -356,13 +358,13 @@ const PortfolioPage: React.FC = () => {
         <Col xs={24} lg={14}>
           {/* 考试成绩表 */}
           {exams?.results && exams.results.length > 0 && (
-            <Card title={<Space><FileAddOutlined />考试成绩</Space>} style={{ marginBottom: 16 }} size="small">
+            <Card title={<Space><FileAddOutlined />{t('examResults')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={6}><Statistic title="平均分" value={examStats?.avg_percentage ?? 0} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
-                <Col span={6}><Statistic title="最高分" value={examStats?.max_score ?? 0} styles={{ content: { color: '#52c41a' } }} /></Col>
-                <Col span={6}><Statistic title="通过" value={examStats?.passed_count ?? 0} suffix={`/ ${examStats?.total_exams ?? 0}`} styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col span={6}><Statistic title={t('avgScore')} value={examStats?.avg_percentage ?? 0} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
+                <Col span={6}><Statistic title={t('maxScore')} value={examStats?.max_score ?? 0} styles={{ content: { color: '#52c41a' } }} /></Col>
+                <Col span={6}><Statistic title={t('passed')} value={examStats?.passed_count ?? 0} suffix={`/ ${examStats?.total_exams ?? 0}`} styles={{ content: { color: '#52c41a' } }} /></Col>
                 <Col span={6}>
-                  <Statistic title="正确率" value={rollcall?.accuracy ?? 0} suffix="%" prefix={<AuditOutlined />} />
+                  <Statistic title={t('accuracy')} value={rollcall?.accuracy ?? 0} suffix="%" prefix={<AuditOutlined />} />
                 </Col>
               </Row>
 
@@ -421,11 +423,11 @@ const PortfolioPage: React.FC = () => {
 
           {/* 课堂积分明细 */}
           {scores?.records && scores.records.length > 0 && (
-            <Card title={<Space><TrophyOutlined />课堂积分</Space>} style={{ marginBottom: 16 }} size="small">
+            <Card title={<Space><TrophyOutlined />{t('classScore')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col span={8}><Statistic title="累计积分" value={scores.total_score} styles={{ content: { color: '#faad14' } }} prefix={<TrophyOutlined />} /></Col>
-                <Col span={8}><Statistic title="授课教师" value={scores.teacher_count} suffix="人" /></Col>
-                <Col span={8}><Statistic title="班级数" value={scores.class_count} suffix="个" /></Col>
+                <Col span={8}><Statistic title={t('totalScore')} value={scores.total_score} styles={{ content: { color: '#faad14' } }} prefix={<TrophyOutlined />} /></Col>
+                <Col span={8}><Statistic title={t('teacherCount')} value={scores.teacher_count} suffix="人" /></Col>
+                <Col span={8}><Statistic title={t('classCount')} value={scores.class_count} suffix="个" /></Col>
               </Row>
 
               {/* 积分趋势 */}
@@ -467,7 +469,7 @@ const PortfolioPage: React.FC = () => {
 
           {/* 奖励积分（活动自动发放） */}
           {(reward_points > 0 || reward_history?.length > 0) && (
-            <Card title={<Space><TrophyOutlined style={{ color: '#eb2f96' }} />奖励积分</Space>} style={{ marginBottom: 16 }} size="small">
+            <Card title={<Space><TrophyOutlined style={{ color: '#eb2f96' }} />{t('rewardPoints')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={24}>
                   <Statistic title="累计奖励积分" value={reward_points} styles={{ content: { color: '#eb2f96' } }} prefix={<TrophyOutlined />} />
@@ -500,7 +502,7 @@ const PortfolioPage: React.FC = () => {
 
           {/* 任务完成 */}
           {tasks.tasks.length > 0 && (
-            <Card title={<Space><CheckCircleOutlined />任务完成</Space>} style={{ marginBottom: 16 }} size="small">
+            <Card title={<Space><CheckCircleOutlined />{t('taskCompleted')}</Space>} style={{ marginBottom: 16 }} size="small">
               <List
                 size="small"
                 dataSource={tasks.tasks}
@@ -522,7 +524,7 @@ const PortfolioPage: React.FC = () => {
 
           {/* 对话活跃 */}
           {chats?.total_days != null && (
-            <Card title={<Space><MessageOutlined />AI 对话活跃度</Space>} size="small">
+            <Card title={<Space><MessageOutlined />{t('aiChatActivity')}</Space>} size="small">
               <Row gutter={16}>
                 <Col span={8}><Statistic title="对话天数" value={chats.total_days} suffix="天" /></Col>
                 <Col span={8}><Statistic title="总对话数" value={chats.total_chats} suffix="次" /></Col>
@@ -533,7 +535,7 @@ const PortfolioPage: React.FC = () => {
 
           {/* 课程练习 */}
           {course_practice?.records && course_practice.records.length > 0 && (
-            <Card title={<Space><ExperimentOutlined style={{ color: '#52c41a' }} />课程练习</Space>} style={{ marginBottom: 16 }} size="small">
+            <Card title={<Space><ExperimentOutlined style={{ color: '#52c41a' }} />{t('coursePractice')}</Space>} style={{ marginBottom: 16 }} size="small">
               <Row gutter={16} style={{ marginBottom: 12 }}>
                 <Col span={8}><Statistic title="完成数" value={course_practice.total_count} suffix="个知识点" styles={{ content: { color: '#52c41a' } }} /></Col>
                 <Col span={8}><Statistic title="平均正确率" value={course_practice.avg_accuracy} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
@@ -581,11 +583,11 @@ const PortfolioPage: React.FC = () => {
         {/* ─── 右侧：成长时间轴 ─── */}
         <Col xs={24} lg={10}>
           <Card
-            title={<Space><CalendarOutlined />成长时间轴</Space>}
+            title={<Space><CalendarOutlined />{t('growthTimeline')}</Space>}
             style={{ height: '100%' }}
           >
             {timeline.length === 0 ? (
-              <Empty description="暂无成长记录" />
+              <Empty description={t('noGrowthRecords')} />
             ) : (
               <Timeline
                 items={timeline.slice(-30).reverse().map((ev: any) => ({

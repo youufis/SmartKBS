@@ -7,6 +7,7 @@ import {
   ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined,
   CloseCircleOutlined, ClockCircleOutlined, SendOutlined,
 } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -16,19 +17,20 @@ import type { ExamInfo, ExamQuestion } from '../types'
 const { TextArea } = Input
 const { Text, Title } = Typography
 
-const TYPE_LABELS: Record<string, string> = {
-  single: '单选题',
-  multiple: '多选题',
-  true_false: '判断题',
-  short: '简答题',
-  fill: '填空题',
-  essay: '作文',
-  subjective: '主观题',
-}
-
 const ExamTakePage: React.FC = () => {
+  const { t } = useTranslation('exam')
   const { examId } = useParams<{ examId: string }>()
   const navigate = useNavigate()
+
+  const TYPE_LABELS: Record<string, string> = {
+    single: t('singleChoice'),
+    multiple: t('multipleChoice'),
+    true_false: t('trueFalse'),
+    short: t('shortAnswer'),
+    fill: t('fillBlank'),
+    essay: t('essay'),
+    subjective: t('subjective'),
+  }
   // ── 考试数据 ──
   const [exam, setExam] = useState<ExamInfo | null>(null)
   const [questions, setQuestions] = useState<ExamQuestion[]>([])
@@ -89,7 +91,7 @@ const ExamTakePage: React.FC = () => {
         }
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载考试失败')
+      message.error(err?.response?.data?.detail || t('loadFailed'))
       navigate('/exam')
     } finally {
       setLoading(false)
@@ -109,7 +111,7 @@ const ExamTakePage: React.FC = () => {
           clearInterval(interval)
           setTimerActive(false)
           // 自动提交
-          message.warning('考试时间到，自动提交')
+          message.warning(t('timeUp'))
           handleSubmit()
           return 0
         }
@@ -157,9 +159,9 @@ const ExamTakePage: React.FC = () => {
         passed: res.passed,
         details: res.details || undefined,
       })
-      message.success('提交成功')
+      message.success(t('submitSuccess'))
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '提交失败')
+      message.error(err?.response?.data?.detail || t('submitFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -181,7 +183,7 @@ const ExamTakePage: React.FC = () => {
         title={
           <Space>
             <Tag color="blue">{TYPE_LABELS[q.type] || q.type}</Tag>
-            <span>第 {idx + 1} 题（{q.question_score} 分）</span>
+            <span>{t('questionNum', { num: idx + 1 })}（{q.question_score} {t('points')}）</span>
           </Space>
         }
         style={{ marginBottom: 16 }}
@@ -222,8 +224,8 @@ const ExamTakePage: React.FC = () => {
         {q.type === 'true_false' && (
           <Radio.Group value={answer} onChange={(e) => setAnswer(qId, e.target.value)}>
             <Space>
-              <Radio value="对" style={{ padding: '8px 20px', borderRadius: 6, border: answer === '对' ? '1px solid #1677ff' : '1px solid #eee' }}>对</Radio>
-              <Radio value="错" style={{ padding: '8px 20px', borderRadius: 6, border: answer === '错' ? '1px solid #1677ff' : '1px solid #eee' }}>错</Radio>
+              <Radio value="true" style={{ padding: '8px 20px', borderRadius: 6, border: answer === 'true' ? '1px solid #1677ff' : '1px solid #eee' }}>{t('true')}</Radio>
+              <Radio value="false" style={{ padding: '8px 20px', borderRadius: 6, border: answer === 'false' ? '1px solid #1677ff' : '1px solid #eee' }}>{t('false')}</Radio>
             </Space>
           </Radio.Group>
         )}
@@ -232,7 +234,7 @@ const ExamTakePage: React.FC = () => {
           <TextArea rows={q.type === 'essay' ? 10 : q.type === 'subjective' ? 8 : q.type === 'short' ? 4 : 3}
             value={answer}
             onChange={(e) => setAnswer(qId, e.target.value)}
-            placeholder={q.type === 'essay' ? '请在此撰写作文...' : q.type === 'subjective' ? '请输入你的答案...' : q.type === 'fill' ? '请填写答案...' : '请输入你的答案...'}
+            placeholder={q.type === 'essay' ? t('essayPlaceholder') : q.type === 'subjective' ? t('answerPlaceholder') : q.type === 'fill' ? t('fillPlaceholder') : t('answerPlaceholder')}
             showCount={q.type === 'essay'}
             maxLength={q.type === 'essay' ? 2000 : q.type === 'fill' ? 200 : undefined}
           />
@@ -251,32 +253,32 @@ const ExamTakePage: React.FC = () => {
         <Card style={{ maxWidth: 700, margin: '40px auto' }}>
           <Result
             status={result.passed ? 'success' : 'error'}
-            title={result.passed ? '考试通过！' : '未通过'}
+            title={result.passed ? t('passExam') : t('failExam')}
             subTitle={
               <Space orientation="vertical" size={8}>
                 <Typography.Title level={2}
                   style={{ color: result.passed ? '#52c41a' : '#ff4d4f', margin: 0 }}>
-                  {result.score} 分
+                  {result.score} {t('points')}
                 </Typography.Title>
                 <Typography.Text type="secondary">
-                  满分 {result.total_score} 分
+                  {t('fullScore')} {result.total_score} {t('points')}
                 </Typography.Text>
               </Space>
             }
             extra={[
               <Button type="primary" key="back" onClick={handleBack}>
-                返回考试列表
+                {t('backToList')}
               </Button>,
             ]}
           >
             {result.details && (
               <div style={{ marginTop: 16 }}>
                 <Divider />
-                <Typography.Title level={5}>答题详情</Typography.Title>
+                <Typography.Title level={5}>{t('answerDetail')}</Typography.Title>
                 <Progress
                   percent={Math.round((result.score / result.total_score) * 100)}
                   status={result.passed ? 'success' : 'exception'}
-                  format={() => `${correctCount}/${Object.keys(result.details || {}).length} 题正确`}
+                  format={() => `${correctCount}/${Object.keys(result.details || {}).length} ${t('questionsCorrect')}`}
                 />
                 {Object.entries(result.details).map(([qId, detail]: [string, any]) => {
                   const isEssay = detail.grading_type === 'essay' || detail.dimensions?.content

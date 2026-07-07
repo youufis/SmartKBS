@@ -8,6 +8,7 @@ import {
   CompressOutlined
 } from '@ant-design/icons'
 import apiClient from '../api/client'
+import { useTranslation } from 'react-i18next'
 
 interface Deployment {
   id: number
@@ -34,6 +35,7 @@ interface Stats {
 }
 
 const AuthorPanelPage: React.FC = () => {
+  const { t } = useTranslation('system')
   const [loading, setLoading] = useState(false)
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [total, setTotal] = useState(0)
@@ -68,10 +70,8 @@ const AuthorPanelPage: React.FC = () => {
     setDeleting(id)
     try {
       await apiClient.delete(`/api/config-sync/record/${id}`)
-      message.success('已删除')
       loadData(page, pageSize)
     } catch (err) {
-      message.error('删除失败')
     } finally {
       setDeleting(null)
     }
@@ -80,22 +80,19 @@ const AuthorPanelPage: React.FC = () => {
   const handleClearAll = async () => {
     try {
       await apiClient.delete('/api/config-sync/clear')
-      message.success('已清空全部记录')
       loadData(1, pageSize)
       setPage(1)
     } catch {
-      message.error('清空失败')
     }
   }
 
   const handleDeduplicate = async () => {
     try {
       const { data } = await apiClient.post('/api/config-sync/deduplicate')
-      message.success(`IP 去重完成，剩余 ${data.remaining} 条记录`)
+      message.success(t('deduplicateComplete', { remaining: data.remaining }))
       loadData(1, pageSize)
       setPage(1)
     } catch {
-      message.error('去重失败')
     }
   }
 
@@ -109,9 +106,7 @@ const AuthorPanelPage: React.FC = () => {
       a.download = `sync-logs-${new Date().toISOString().slice(0, 10)}.json`
       a.click()
       URL.revokeObjectURL(url)
-      message.success('导出成功')
     } catch {
-      message.error('导出失败')
     }
   }
 
@@ -121,28 +116,28 @@ const AuthorPanelPage: React.FC = () => {
   }
 
   const columns = [
-    { title: '节点ID', dataIndex: 'node_id', key: 'node_id', width: 100, ellipsis: true },
-    { title: '主机名', dataIndex: 'hostname', key: 'hostname', width: 100 },
-    { title: '出口IP', dataIndex: 'public_ip', key: 'public_ip', width: 120 },
-    { title: '请求IP', dataIndex: 'caller_ip', key: 'caller_ip', width: 120 },
+    { title: t('nodeId'), dataIndex: 'node_id', key: 'node_id', width: 100, ellipsis: true },
+    { title: t('hostname'), dataIndex: 'hostname', key: 'hostname', width: 100 },
+    { title: t('publicIp'), dataIndex: 'public_ip', key: 'public_ip', width: 120 },
+    { title: t('callerIp'), dataIndex: 'caller_ip', key: 'caller_ip', width: 120 },
     {
-      title: '地理位置', key: 'location', width: 180,
+      title: t('location'), key: 'location', width: 180,
       render: (_: any, r: Deployment) => (
         <span><EnvironmentOutlined style={{ marginRight: 4 }} />{r.country} {r.region} {r.city}</span>
       ),
     },
-    { title: '运营商', dataIndex: 'isp', key: 'isp', width: 80 },
-    { title: '版本', dataIndex: 'app_version', key: 'app_version', width: 70 },
-    { title: '平台', dataIndex: 'platform', key: 'platform', width: 100, ellipsis: true },
-    { title: '上报时间', dataIndex: 'first_sync', key: 'first_sync', width: 160 },
+    { title: t('isp'), dataIndex: 'isp', key: 'isp', width: 80 },
+    { title: t('version'), dataIndex: 'app_version', key: 'app_version', width: 70 },
+    { title: t('platform'), dataIndex: 'platform', key: 'platform', width: 100, ellipsis: true },
+    { title: t('syncTime'), dataIndex: 'first_sync', key: 'first_sync', width: 160 },
     {
-      title: '操作', key: 'action', width: 70, fixed: 'right' as const,
+      title: t('actions'), key: 'action', width: 70, fixed: 'right' as const,
       render: (_: any, r: Deployment) => (
         <Popconfirm
-          title="确定删除此记录？"
+          title={t('confirmDeleteRecord')}
           onConfirm={() => handleDelete(r.id)}
-          okText="确定"
-          cancelText="取消"
+          okText={t('confirmOk')}
+          cancelText={t('cancel')}
         >
           <Button
             type="link"
@@ -157,17 +152,17 @@ const AuthorPanelPage: React.FC = () => {
   ]
 
   const countryColumns = [
-    { title: '国家/地区', dataIndex: 'country', key: 'country' },
-    { title: '部署数', dataIndex: 'count', key: 'count' },
+    { title: t('country'), dataIndex: 'country', key: 'country' },
+    { title: t('deploymentCount'), dataIndex: 'count', key: 'count' },
   ]
 
   return (
     <Card style={{ borderRadius: 8 }}>
       <Typography.Title level={4} style={{ marginBottom: 8 }}>
-        <ApiOutlined /> 控制台
+        <ApiOutlined /> {t('console')}
       </Typography.Title>
       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
-        系统运行概览
+        {t('systemOverview')}
       </Typography.Text>
 
       {/* 统计卡片 */}
@@ -175,22 +170,22 @@ const AuthorPanelPage: React.FC = () => {
         <Row gutter={16} style={{ marginBottom: 24 }}>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable>
-              <Statistic title="总节点数" value={stats.total_nodes} prefix={<GlobalOutlined />} />
+              <Statistic title={t('totalNodes')} value={stats.total_nodes} prefix={<GlobalOutlined />} />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable>
-              <Statistic title="今日活跃" value={stats.today_active} prefix={<LoginOutlined />} />
+              <Statistic title={t('todayActive')} value={stats.today_active} prefix={<LoginOutlined />} />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable>
-              <Statistic title="本周活跃" value={stats.weekly_active} prefix={<TeamOutlined />} />
+              <Statistic title={t('weeklyActive')} value={stats.weekly_active} prefix={<TeamOutlined />} />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
             <Card size="small" hoverable onClick={() => setMapModalOpen(true)} style={{ cursor: 'pointer' }}>
-              <Statistic title="国家/地区" value={stats.country_distribution.length} prefix={<EnvironmentOutlined />} suffix="个" />
+              <Statistic title={t('countryRegion')} value={stats.country_distribution.length} prefix={<EnvironmentOutlined />} suffix={t('unitCount')} />
             </Card>
           </Col>
         </Row>
@@ -201,37 +196,37 @@ const AuthorPanelPage: React.FC = () => {
         title={
           <Space>
             <EyeOutlined />
-            <span>同步记录</span>
-            <Tag color="blue">共 {total} 条</Tag>
+            <span>{t('syncRecords')}</span>
+            <Tag color="blue">{t('totalRecords', { count: total })}</Tag>
           </Space>
         }
         extra={
           <Space>
             <Button size="small" icon={<DownloadOutlined />} onClick={handleExport}>
-              导出
+              {t('export')}
             </Button>
             <Popconfirm
-              title="确定清空全部记录？此操作不可恢复"
+              title={t('confirmClearAll')}
               onConfirm={handleClearAll}
-              okText="确定"
-              cancelText="取消"
+              okText={t('confirmOk')}
+              cancelText={t('cancel')}
             >
               <Button size="small" danger icon={<ClearOutlined />}>
-                清空
+                {t('clearAll')}
               </Button>
             </Popconfirm>
             <Popconfirm
-              title="IP 去重后将保留每个 IP 的最新一条记录，确定执行？"
+              title={t('confirmDeduplicate')}
               onConfirm={handleDeduplicate}
-              okText="确定"
-              cancelText="取消"
+              okText={t('confirmOk')}
+              cancelText={t('cancel')}
             >
               <Button size="small" icon={<CompressOutlined />}>
-                IP去重
+                {t('ipDeduplicate')}
               </Button>
             </Popconfirm>
             <Button size="small" icon={<ReloadOutlined />} onClick={() => loadData(page, pageSize)}>
-              刷新
+              {t('refresh')}
             </Button>
           </Space>
         }
@@ -247,7 +242,7 @@ const AuthorPanelPage: React.FC = () => {
             total: total,
             showSizeChanger: true,
             pageSizeOptions: ['10', '20', '50', '100'],
-            showTotal: (t: number) => `共 ${t} 条`,
+            showTotal: (total: number) => t('totalRecords', { count: total }),
           }}
           onChange={handleTableChange}
           scroll={{ x: 1450 }}
@@ -257,7 +252,7 @@ const AuthorPanelPage: React.FC = () => {
 
       {/* 国家分布弹窗 */}
       <Modal
-        title="🌍 国家/地区分布"
+        title={t('countryDistribution')}
         open={mapModalOpen}
         onCancel={() => setMapModalOpen(false)}
         footer={null}

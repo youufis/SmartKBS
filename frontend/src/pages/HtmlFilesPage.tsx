@@ -6,8 +6,10 @@ import * as sharingApi from '../api/sharing'
 import type { ResourceFile } from '../types'
 import { useAuthStore } from '../stores/authStore'
 import ShareDialog from '../components/ShareDialog'
+import { useTranslation } from 'react-i18next'
 
 const HtmlFilesPage: React.FC = () => {
+  const { t } = useTranslation('menu')
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const [files, setFiles] = useState<ResourceFile[]>([])
@@ -96,7 +98,6 @@ const HtmlFilesPage: React.FC = () => {
         setReceivedShares(shareRes.shares.filter(s => s.resource_type === 'html'))
       }
     } catch {
-      message.error('加载失败')
     } finally {
       setLoading(false)
     }
@@ -136,46 +137,43 @@ const HtmlFilesPage: React.FC = () => {
   // ── 分组管理 ──
   const openCreateGroup = () => {
     setEditingGroup(null)
-    setGroupModalTitle('新建分组')
+    setGroupModalTitle(t('newGroup'))
     setGroupInput('')
     setGroupModalOpen(true)
   }
 
   const openRenameGroup = (g: resourcesApi.ResourceGroup) => {
     setEditingGroup(g)
-    setGroupModalTitle('重命名分组')
+    setGroupModalTitle(t('renameGroup'))
     setGroupInput(g.group_name)
     setGroupModalOpen(true)
   }
 
   const handleGroupSubmit = async () => {
     const name = groupInput.trim()
-    if (!name) { message.warning('请输入分组名称'); return }
+    if (!name) { message.warning(t('nameRequired')); return }
     try {
       if (editingGroup) {
         await resourcesApi.renameGroup(editingGroup.id, name)
-        message.success('分组已重命名')
       } else {
         await resourcesApi.createGroup(name)
-        message.success('分组已创建')
       }
       setGroupModalOpen(false)
       await loadData()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || '操作失败')
+      message.error(err?.response?.data?.detail || err?.message || t('operationFailed'))
     }
   }
 
   const handleDeleteGroup = async (g: resourcesApi.ResourceGroup) => {
     try {
       await resourcesApi.deleteGroup(g.id)
-      message.success('分组已删除')
       if (activeGroup === g.id) setActiveGroup(null)
       await loadData()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || '删除失败')
+      message.error(err?.response?.data?.detail || err?.message || t('deleteFailed'))
     }
   }
 
@@ -206,15 +204,13 @@ const HtmlFilesPage: React.FC = () => {
       // 先检查是否已在分组中
       const g = groups.find(gr => gr.id === groupId)
       if (g?.files.includes(filePath)) {
-        message.info('该资源已在此分组中')
         return
       }
       await resourcesApi.addToGroup(groupId, filePath)
-      message.success('已添加到分组')
       await loadData()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || '添加失败')
+      message.error(err?.response?.data?.detail || err?.message || t('addFailed'))
     }
     setDraggedFile(null)
   }
@@ -223,11 +219,10 @@ const HtmlFilesPage: React.FC = () => {
     if (activeGroup === null) return
     try {
       await resourcesApi.removeFromGroup(activeGroup, filePath)
-      message.success('已从分组移除')
       await loadData()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || '移除失败')
+      message.error(err?.response?.data?.detail || err?.message || t('removeFailed'))
     }
   }
 
@@ -303,7 +298,7 @@ const HtmlFilesPage: React.FC = () => {
               {name}
             </span>
             {showShareBtn && (
-              <Tooltip title={isFileShared(urlPath) ? '已共享 - 点击取消共享' : '点击共享'}>
+              <Tooltip title={isFileShared(urlPath) ? t('sharedClickToCancel') : t('clickToShare')}>
                 <ShareAltOutlined
                   style={{ color: isFileShared(urlPath) ? '#ff4d4f' : '#999', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
                   onClick={(e) => { e.preventDefault(); openShare(urlPath, name); }}
@@ -311,7 +306,7 @@ const HtmlFilesPage: React.FC = () => {
               </Tooltip>
             )}
             {showGroupActions && activeGroup !== null && (
-              <Tooltip title="移出分组">
+              <Tooltip title={t('removeFromGroup')}>
                 <MinusCircleOutlined
                   style={{ color: '#999', cursor: 'pointer', fontSize: 13, flexShrink: 0, opacity: 0, transition: 'opacity 0.2s' }}
                   className="resource-card-remove-btn"
@@ -323,7 +318,7 @@ const HtmlFilesPage: React.FC = () => {
         }
         description={
           <Space size={4}>
-            {isShared && owner ? <Tag color="blue" style={{ fontSize: 11 }}>来自 {owner}</Tag> : null}
+            {isShared && owner ? <Tag color="blue" style={{ fontSize: 11 }}>{t('fromOwner', { owner })}</Tag> : null}
           </Space>
         }
       />
@@ -344,18 +339,18 @@ const HtmlFilesPage: React.FC = () => {
       <Space orientation="vertical" style={{ width: '100%' }} size={14}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-            {isAdminOrTeacher ? '📄 资源中心' : '📄 共享资源'}
+            {isAdminOrTeacher ? `📄 ${t('resourceCenter')}` : `📄 ${t('sharedResources')}`}
           </Typography.Title>
           <Space>
             <Input
-              placeholder="搜索资源名称..."
+              placeholder={t('searchResource')}
               prefix={<SearchOutlined />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               allowClear
               style={{ width: 220 }}
             />
-            <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>刷新</Button>
+            <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
           </Space>
         </div>
 
@@ -363,19 +358,19 @@ const HtmlFilesPage: React.FC = () => {
           <Tabs defaultActiveKey="mine" onChange={() => { setGroupPages({}); setSharedPage(1); setActiveGroup(null); }} items={[
             {
               key: 'mine',
-              label: <span><FileOutlined /> 我的资源</span>,
+              label: <span><FileOutlined /> {t('myResources')}</span>,
               children: (
                 <div style={{ display: 'flex', gap: 16 }}>
                   {/* 左侧分组列表 */}
                   <div style={{ width: groupCollapsed ? 40 : 200, flexShrink: 0, transition: 'width 0.3s' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      {!groupCollapsed && <Typography.Text strong style={{ fontSize: 13 }}>资源分组</Typography.Text>}
+                      {!groupCollapsed && <Typography.Text strong style={{ fontSize: 13 }}>{t('resourceGroups')}</Typography.Text>}
                       <Space size={2}>
                         {!groupCollapsed && <Button type="link" size="small" icon={<PlusOutlined />} onClick={openCreateGroup} />}
                         <Button type="text" size="small"
                           icon={groupCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
                           onClick={() => setGroupCollapsed(!groupCollapsed)}
-                          title={groupCollapsed ? '展开分组' : '折叠分组'}
+                          title={groupCollapsed ? t('expandGroups') : t('collapseGroups')}
                         />
                       </Space>
                     </div>
@@ -390,7 +385,7 @@ const HtmlFilesPage: React.FC = () => {
                           // 分组拖拽到未分组，忽略
                           if (dragGroupIndexRef.current !== null) { dragGroupIndexRef.current = null; return }
                           const fp = e.dataTransfer.getData('text/plain') || draggedFile;
-                          if (fp) { message.info('资源已在全部列表中'); setDraggedFile(null); }
+                          if (fp) { message.success(t('addedToUngrouped')); setDraggedFile(null); }
                         }}
                         style={{
                           padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
@@ -400,7 +395,7 @@ const HtmlFilesPage: React.FC = () => {
                           transition: 'all 0.2s',
                         }}
                       >
-                          <InboxOutlined style={{ marginRight: 6 }} />未分组 ({files.filter(f => !getAllGroupedPaths().has(f.url_path || f.name)).length})
+                          <InboxOutlined style={{ marginRight: 6 }} />{t('ungrouped')} ({files.filter(f => !getAllGroupedPaths().has(f.url_path || f.name)).length})
                       </div>
                       {groups.map((g, idx) => (
                         <div
@@ -448,11 +443,11 @@ const HtmlFilesPage: React.FC = () => {
                             <FolderOutlined style={{ marginRight: 6 }} />{g.group_name} ({g.files.length})
                           </span>
                           <span onClick={(e) => e.stopPropagation()} className="resource-group-actions" style={{ flexShrink: 0, display: 'flex', gap: 2, opacity: 0, transition: 'opacity 0.2s' }}>
-                            <Tooltip title="重命名">
+                            <Tooltip title={t('rename')}>
                               <EditOutlined style={{ fontSize: 11, cursor: 'pointer', color: '#999' }}
                                 onClick={() => openRenameGroup(g)} />
                             </Tooltip>
-                            <Popconfirm title="确认删除此分组？资源文件不会被删除" onConfirm={() => handleDeleteGroup(g)}>
+                            <Popconfirm title={t('confirmDeleteGroup')} onConfirm={() => handleDeleteGroup(g)}>
                               <DeleteOutlined style={{ fontSize: 11, cursor: 'pointer', color: '#999' }} />
                             </Popconfirm>
                           </span>
@@ -460,7 +455,7 @@ const HtmlFilesPage: React.FC = () => {
                       ))}
                       {groups.length === 0 && (
                         <Typography.Text type="secondary" style={{ fontSize: 12, padding: '8px 10px' }}>
-                          暂无分组，点击 + 创建
+                          {t('noGroups')}
                         </Typography.Text>
                       )}
                     </div>
@@ -478,7 +473,7 @@ const HtmlFilesPage: React.FC = () => {
                       })()}
                       {filteredFiles.length === 0 && (
                         <Typography.Text type="secondary">
-                          {activeGroup !== null ? '该分组暂无资源，拖动资源到左侧分组名称上即可归类' : '暂无资源文件'}
+                          {activeGroup !== null ? t('noResourcesInGroup') : t('noResourceFiles')}
                         </Typography.Text>
                       )}
                     </div>
@@ -504,7 +499,7 @@ const HtmlFilesPage: React.FC = () => {
             },
             {
               key: 'shared',
-              label: <span><ShareAltOutlined /> 共享给我的 ({sharedItems.length})</span>,
+              label: <span><ShareAltOutlined /> {t('sharedToMe')} ({sharedItems.length})</span>,
               children: (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
@@ -519,7 +514,7 @@ const HtmlFilesPage: React.FC = () => {
                         pageSize={PAGE_SIZE}
                         onChange={(p) => setSharedPage(p)}
                         showSizeChanger={false}
-                        showTotal={(t) => `共 ${t} 个资源`}
+                        showTotal={(n) => t('totalResources', { count: n })}
                       />
                     </div>
                   )}
@@ -531,7 +526,7 @@ const HtmlFilesPage: React.FC = () => {
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
               {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id))}
-              {sharedItems.length === 0 && <Typography.Text type="secondary">暂无共享资源</Typography.Text>}
+              {sharedItems.length === 0 && <Typography.Text type="secondary">{t('noSharedResources')}</Typography.Text>}
             </div>
             {sharedItems.length > PAGE_SIZE && (
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
@@ -566,14 +561,14 @@ const HtmlFilesPage: React.FC = () => {
           open={groupModalOpen}
           onOk={handleGroupSubmit}
           onCancel={() => setGroupModalOpen(false)}
-          okText="确认"
-          cancelText="取消"
+          okText={t('confirm')}
+          cancelText={t('cancel')}
         >
           <Input
             value={groupInput}
             onChange={(e) => setGroupInput(e.target.value)}
             onPressEnter={handleGroupSubmit}
-            placeholder="请输入分组名称"
+            placeholder={t('enterGroupName')}
             autoFocus
           />
         </Modal>

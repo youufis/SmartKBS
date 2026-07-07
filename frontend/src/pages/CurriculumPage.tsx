@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
-  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress, Radio,
+  Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
 } from 'antd'
 
 const { Sider, Content } = Layout
@@ -14,7 +15,7 @@ import {
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
   RightOutlined, DownOutlined, SettingOutlined,
-  EyeOutlined, BulbOutlined, LoadingOutlined,
+  EyeOutlined, BulbOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import * as curriculumApi from '../api/curriculum'
@@ -35,15 +36,15 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 }
 
 const DIFFICULTY_LABELS: Record<string, string> = {
-  easy: '简单',
-  medium: '中等',
-  hard: '困难',
+  easy: 'difficultyEasy',
+  medium: 'difficultyMedium',
+  hard: 'difficultyHard',
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  not_started: '未开始',
-  in_progress: '学习中',
-  completed: '已完成',
+  not_started: 'statusNotStarted',
+  in_progress: 'statusInProgress',
+  completed: 'statusCompleted',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -63,16 +64,17 @@ const RESOURCE_ICONS: Record<string, React.ReactNode> = {
 }
 
 const RESOURCE_LABELS: Record<string, string> = {
-  html: 'HTML 资源',
-  download: '下载文件',
-  question: '试题',
-  exam: '考试',
-  discussion: '讨论',
-  interaction_quiz: '随堂测验',
-  task: '任务',
+  html: 'resourceHtml',
+  download: 'resourceDownload',
+  question: 'resourceQuestion',
+  exam: 'resourceExam',
+  discussion: 'resourceDiscussion',
+  interaction_quiz: 'resourceInteractionQuiz',
+  task: 'resourceTask',
 }
 
 const CurriculumPage: React.FC = () => {
+  const { t } = useTranslation('curriculum')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
@@ -178,14 +180,14 @@ const CurriculumPage: React.FC = () => {
         if (result && result.lesson_plan) {
           setLessonPlanData(result)
         } else {
-          message.error(result?.error || 'AI 备课失败')
+          message.error(result?.error || t('aiLessonPlanFailed'))
           setLessonPlanModal(false)
         }
       } else {
         setLessonPlanData(data)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 备课失败')
+      message.error(err?.response?.data?.detail || t('aiLessonPlanFailed'))
       setLessonPlanModal(false)
     } finally {
       setLessonPlanLoading(false)
@@ -201,10 +203,10 @@ const CurriculumPage: React.FC = () => {
       const { data } = await apiClient.post(`/api/recommend/knowledge-point/${kpId}`)
       setRecResults(data.recommendations || [])
       if (!data.recommendations?.length) {
-        message.info(data.message || '暂无可推荐的资源')
+        message.info(data.message || t('noRecommendations'))
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 推荐失败')
+      message.error(err?.response?.data?.detail || t('aiRecommendFailed'))
       setRecModal(false)
     } finally {
       setRecLoading(false)
@@ -220,14 +222,14 @@ const CurriculumPage: React.FC = () => {
         resource_type: resourceType,
         resource_id: resourceId,
       })
-      message.success('资源已绑定')
+      message.success(t('resourceBound'))
       // 刷新资源列表
       try {
         const res = await curriculumApi.getKpResources(selectedKp.id)
         setKpResources(res.resources)
       } catch { /* ignore */ }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '绑定失败')
+      message.error(err?.response?.data?.detail || t('bindFailed'))
     } finally {
       setRecBindLoading(prev => ({ ...prev, [resourceId]: false }))
     }
@@ -247,11 +249,11 @@ const CurriculumPage: React.FC = () => {
         message.error(result.error)
         setCwModal(false)
       } else {
-        message.error('AI 课件生成失败（超时或未知错误）')
+        message.error(t('aiCoursewareFailedTimeout'))
         setCwModal(false)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 课件生成失败')
+      message.error(err?.response?.data?.detail || t('aiCoursewareFailed'))
       setCwModal(false)
     } finally {
       setCwLoading(false)
@@ -280,10 +282,12 @@ const CurriculumPage: React.FC = () => {
       if (Array.isArray(data) && data.length > 0) setPracticeGradeOptions(data)
     }).catch(() => {})
     if (activeCourse?.subject) setPracticeSubject(activeCourse.subject)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [practiceModal])
 
   // 点击 AI 练习按钮：打开配置弹窗
-  const handleAiPractice = async (kpId: number) => {
+  const handleAiPractice = async (_kpId: number) => {
+    void _kpId;
     setPracticeLoading(false)
     setPracticeHtmlUrl('')
     setPracticeDone(null)
@@ -300,20 +304,20 @@ const CurriculumPage: React.FC = () => {
       const { data } = await apiClient.post(`/api/curriculum/ai-practice/${selectedKp.id}`, {
         theme: practiceTheme || undefined,
       })
-      message.info('AI 正在生成练习题，请稍候...')
+      message.info(t('aiGeneratingPractice'))
       const result = await pollAiTask(data.task_id, 180000)
       if (result && result.file_url) {
         const fileUrl = result.file_url
         setPracticeHtmlUrl(fileUrl)
         setPracticeDone({ fileUrl, fileName: result.filename || '' })
-        message.success(`已生成 ${result.total || 10} 道练习题`)
+        message.success(t('practiceGenerated', { count: result.total || 10 }))
       } else if (result && result.error) {
         message.error(result.error)
       } else {
-        message.error('AI 练习生成失败（超时或未知错误）')
+        message.error(t('aiPracticeFailedTimeout'))
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 练习生成失败')
+      message.error(err?.response?.data?.detail || t('aiPracticeFailed'))
     } finally {
       setPracticeLoading(false)
     }
@@ -329,7 +333,7 @@ const CurriculumPage: React.FC = () => {
       })
       setBankQuestions(data.questions || [])
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '搜索题库失败')
+      message.error(err?.response?.data?.detail || t('searchBankFailed'))
     } finally {
       setBankLoading(false)
     }
@@ -354,7 +358,7 @@ const CurriculumPage: React.FC = () => {
         message.success(data.message)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '生成练习失败')
+      message.error(err?.response?.data?.detail || t('generatePracticeFailed'))
     } finally {
       setPracticeLoading(false)
     }
@@ -374,10 +378,10 @@ const CurriculumPage: React.FC = () => {
       })
       if (data.questions?.length > 0) {
         setMixedAiQuestions(data.questions)
-        message.success(`AI 已生成 ${data.questions.length} 道题`)
+        message.success(t('aiGeneratedCount', { count: data.questions.length }))
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 出题失败')
+      message.error(err?.response?.data?.detail || t('aiGenerateFailed'))
     } finally {
       setMixedGenLoading(false)
     }
@@ -403,7 +407,7 @@ const CurriculumPage: React.FC = () => {
     } else if (totalSelected < 10) {
       setMixedBankIds(prev => [...prev, qid])
     } else {
-      message.warning('最多选择10道题')
+      message.warning(t('maxSelect10'))
     }
   }
 
@@ -418,7 +422,7 @@ const CurriculumPage: React.FC = () => {
   const generateMixedPractice = async () => {
     if (!selectedKp) return
     const allIds = [...mixedAiQuestions.map(q => q.id), ...mixedBankIds]
-    if (allIds.length === 0) { message.warning('请至少选择一道题'); return }
+    if (allIds.length === 0) { message.warning(t('selectAtLeastOne')); return }
     setPracticeLoading(true)
     try {
       const { data } = await apiClient.post(`/api/curriculum/ai-practice/${selectedKp.id}/from-bank`, {
@@ -429,7 +433,7 @@ const CurriculumPage: React.FC = () => {
         message.success(data.message)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '生成练习失败')
+      message.error(err?.response?.data?.detail || t('generatePracticeFailed'))
     } finally {
       setPracticeLoading(false)
     }
@@ -454,7 +458,7 @@ const CurriculumPage: React.FC = () => {
         setPracticeHtmlUrl(data.file_url)
         setMixedAiQuestions([])
         setMixedBankIds([])
-        message.success(data.message || `智能练习已生成（${data.total} 题）`)
+        message.success(data.message || t('smartPracticeGenerated', { total: data.total }))
       }
     } catch (err: any) {
       // 如果后端返回了详细错误，直接显示
@@ -462,7 +466,7 @@ const CurriculumPage: React.FC = () => {
       if (detail) {
         message.error(detail)
       } else {
-        message.error('智能练习生成失败，请稍后重试')
+        message.error(t('smartPracticeFailed'))
       }
       setPracticeModal(false)
     } finally {
@@ -533,7 +537,7 @@ const CurriculumPage: React.FC = () => {
     if (!activeCourseId) return
     const course = courses.find((c) => c.id === activeCourseId)
     if (!course) return
-    const subj = course.subject || getCourseSubject(course) || '未分类'
+    const subj = course.subject || getCourseSubject(course) || t('uncategorized')
     if (!expandedSubjects.includes(subj)) {
       setTimeout(() => setExpandedSubjects((prev) => [...prev, subj]), 0)
     }
@@ -548,11 +552,11 @@ const CurriculumPage: React.FC = () => {
       setCourses(data)
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '加载课程数据失败')
+      message.error(detail || t('loadCourseDataFailed'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -610,10 +614,10 @@ const CurriculumPage: React.FC = () => {
       setSavingCourse(true)
       if (editingCourse) {
         await curriculumApi.updateCourse(editingCourse.id, values)
-        message.success('课程更新成功')
+        message.success(t('courseUpdated'))
       } else {
         await curriculumApi.createCourse(values)
-        message.success('课程创建成功')
+        message.success(t('courseCreated'))
       }
       setCourseModal(false)
       loadTree()
@@ -630,11 +634,11 @@ const CurriculumPage: React.FC = () => {
   const handleDeleteCourse = async (courseId: number) => {
     try {
       await curriculumApi.deleteCourse(courseId)
-      message.success('课程已删除')
+      message.success(t('courseDeleted'))
       loadTree()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '删除失败')
+      message.error(detail || t('deleteFailed'))
     }
   }
 
@@ -658,10 +662,10 @@ const CurriculumPage: React.FC = () => {
       setSavingChapter(true)
       if (editingChapter) {
         await curriculumApi.updateChapter(editingChapter.id, values)
-        message.success('章节更新成功')
+        message.success(t('chapterUpdated'))
       } else {
         await curriculumApi.createChapter(values)
-        message.success('章节创建成功')
+        message.success(t('chapterCreated'))
       }
       setChapterModal(false)
       loadTree()
@@ -678,11 +682,11 @@ const CurriculumPage: React.FC = () => {
   const handleDeleteChapter = async (chapterId: number) => {
     try {
       await curriculumApi.deleteChapter(chapterId)
-      message.success('章节已删除')
+      message.success(t('chapterDeleted'))
       loadTree()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '删除失败')
+      message.error(detail || t('deleteFailed'))
     }
   }
 
@@ -744,11 +748,11 @@ const CurriculumPage: React.FC = () => {
     const submitReorder = async (orderedList: curriculumApi.ReorderItem[]) => {
       try {
         await curriculumApi.reorderNodes(orderedList)
-        message.success('排序已更新')
+        message.success(t('sortUpdated'))
         loadTree()
       } catch (err: unknown) {
         const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        message.error(detail || '操作失败')
+        message.error(detail || t('operationFailed'))
         loadTree()
       }
     }
@@ -758,7 +762,7 @@ const CurriculumPage: React.FC = () => {
     // ─────────────────────────────────────────────
     if (dropToGap) {
       if (dragPrefix !== dropPrefix) {
-        message.warning('不能在不同类型节点间拖动排序')
+        message.warning(t('cannotDragDifferentType'))
         return
       }
 
@@ -795,7 +799,7 @@ const CurriculumPage: React.FC = () => {
     // ─────────────────────────────────────────────
     // 目标必须是章节节点
     if (dropPrefix !== 'ch') {
-      message.warning('只能拖入章节节点')
+      message.warning(t('canOnlyDragToChapter'))
       return
     }
 
@@ -814,7 +818,7 @@ const CurriculumPage: React.FC = () => {
         return parent.children.some((c: any) => c.id === searchId || wouldCycle(c.id, searchId))
       }
       if (wouldCycle(targetChapterId, dragId)) {
-        message.warning('不能将章节拖入自身或子章节')
+        message.warning(t('cannotDragToSelf'))
         return
       }
 
@@ -844,7 +848,7 @@ const CurriculumPage: React.FC = () => {
       // ── 知识点拖入章节 → 改变 chapter_id ──
       // 知识点不能拖入自身所在章节（无意义）
       if (dragContainer.parentChapterId === targetChapterId) {
-        message.info('知识点已在目标章节中')
+        message.info(t('kpAlreadyInChapter'))
         return
       }
 
@@ -890,10 +894,10 @@ const CurriculumPage: React.FC = () => {
       setSavingKp(true)
       if (editingKp) {
         await curriculumApi.updateKnowledgePoint(editingKp.id, values)
-        message.success('知识点更新成功')
+        message.success(t('kpUpdated'))
       } else {
         await curriculumApi.createKnowledgePoint(values)
-        message.success('知识点创建成功')
+        message.success(t('kpCreated'))
       }
       setKpModal(false)
       loadTree()
@@ -910,7 +914,7 @@ const CurriculumPage: React.FC = () => {
   const handleDeleteKp = async (kpId: number) => {
     try {
       await curriculumApi.deleteKnowledgePoint(kpId)
-      message.success('知识点已删除')
+      message.success(t('kpDeleted'))
       loadTree()
       if (selectedKp?.id === kpId) {
         setSelectedKp(null)
@@ -918,7 +922,7 @@ const CurriculumPage: React.FC = () => {
       }
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '删除失败')
+      message.error(detail || t('deleteFailed'))
     }
   }
 
@@ -926,7 +930,7 @@ const CurriculumPage: React.FC = () => {
   const handleUpdateProgress = async (kpId: number, status: string) => {
     try {
       await curriculumApi.updateProgress(kpId, status)
-      message.success(status === 'completed' ? '标记为已完成' : '状态已更新')
+      message.success(status === 'completed' ? t('markedCompleted') : t('statusUpdated'))
       loadTree()
       // 刷新当前知识点详情
       if (selectedKp?.id === kpId) {
@@ -935,7 +939,7 @@ const CurriculumPage: React.FC = () => {
       }
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '更新失败')
+      message.error(detail || t('updateFailed'))
     }
   }
 
@@ -981,7 +985,7 @@ const CurriculumPage: React.FC = () => {
       <Typography.Text strong>{ch.name}</Typography.Text>
       {isTeacherOrAdmin && showActions && (
         <Space size="small" style={{ marginLeft: 8 }}>
-          <Tooltip title="添加子章节">
+          <Tooltip title={t('addSubChapter')}>
             <Button
               type="text"
               size="small"
@@ -989,7 +993,7 @@ const CurriculumPage: React.FC = () => {
               onClick={(e) => { e.stopPropagation(); handleCreateChapter(ch.course_id, ch.id) }}
             />
           </Tooltip>
-          <Tooltip title="添加知识点">
+          <Tooltip title={t('addKnowledgePoint')}>
             <Button
               type="text"
               size="small"
@@ -997,7 +1001,7 @@ const CurriculumPage: React.FC = () => {
               onClick={(e) => { e.stopPropagation(); handleCreateKp(ch.id) }}
             />
           </Tooltip>
-          <Tooltip title="编辑">
+          <Tooltip title={t('editTitle')}>
             <Button
               type="text"
               size="small"
@@ -1005,7 +1009,7 @@ const CurriculumPage: React.FC = () => {
               onClick={(e) => { e.stopPropagation(); handleEditChapter(ch) }}
             />
           </Tooltip>
-          <Popconfirm title="确认删除此章节？" onConfirm={(e) => { e?.stopPropagation(); handleDeleteChapter(ch.id) }} okText="确认" cancelText="取消">
+          <Popconfirm title={t('confirmDeleteChapter')} onConfirm={(e) => { e?.stopPropagation(); handleDeleteChapter(ch.id) }} okText={t('confirm')} cancelText={t('cancel')}>
             <Button
               type="text"
               size="small"
@@ -1024,10 +1028,10 @@ const CurriculumPage: React.FC = () => {
       <span style={{ fontSize: 12 }}>•</span>
       <Typography.Text>{kp.name}</Typography.Text>
       <Tag color={DIFFICULTY_COLORS[kp.difficulty]} style={{ fontSize: 11, lineHeight: '18px' }}>
-        {DIFFICULTY_LABELS[kp.difficulty] || kp.difficulty}
+        {t(DIFFICULTY_LABELS[kp.difficulty]) || kp.difficulty}
       </Tag>
       {(kp.resource_count ?? 0) > 0 && (
-        <Tooltip title={`${kp.resource_count} 个绑定资源`}>
+        <Tooltip title={t('boundResources', { count: kp.resource_count })}>
           <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px', cursor: 'default' }}>
             {kp.resource_count}
           </Tag>
@@ -1035,12 +1039,12 @@ const CurriculumPage: React.FC = () => {
       )}
       {kp.estimated_minutes > 0 && (
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {kp.estimated_minutes}分钟
+          {t('minutes', { minutes: kp.estimated_minutes })}
         </Typography.Text>
       )}
       {isStudent && kp.progress_status && (
         <Tag color={STATUS_COLORS[kp.progress_status]} style={{ fontSize: 11, lineHeight: '18px' }}>
-          {STATUS_LABELS[kp.progress_status]}
+          {t(STATUS_LABELS[kp.progress_status])}
         </Tag>
       )}
       {isTeacherOrAdmin && showActions && (
@@ -1053,7 +1057,7 @@ const CurriculumPage: React.FC = () => {
               onClick={(e) => { e.stopPropagation(); handleEditKp(kp) }}
             />
           </Tooltip>
-          <Popconfirm title="确认删除此知识点？" onConfirm={() => handleDeleteKp(kp.id)} okText="确认" cancelText="取消">
+          <Popconfirm title={t('confirmDeleteKp')} onConfirm={() => handleDeleteKp(kp.id)} okText={t('confirm')} cancelText={t('cancel')}>
             <Button
               type="text"
               size="small"
@@ -1069,6 +1073,9 @@ const CurriculumPage: React.FC = () => {
 
   // ── 当前课程 ──
   const activeCourse = courses.find((c) => c.id === activeCourseId)
+
+  // Suppress unused warnings for bank/mixed practice mode (reserved for future use)
+  void [practiceHtmlUrl, practiceMode, bankKeyword, bankQuestions, bankLoading, selectedBankIds, mixedAiQuestions, mixedBankIds, mixedAiCount, mixedGenLoading, mixedBankSearch, mixedBankResults, mixedBankLoading, setBankKeyword, setBankQuestions, setBankLoading, setSelectedBankIds, setMixedAiQuestions, setMixedBankIds, setMixedAiCount, setMixedGenLoading, setMixedBankSearch, setMixedBankResults, setMixedBankLoading, searchBankQuestions, toggleBankQuestion, generateFromBank, generateMixedAi, searchMixedBank, toggleMixedBank, removeMixedQuestion, generateMixedPractice, handleSmartPractice];
 
   // ── 按大类分组 ──
   const groupedCourses: { subject: string; courses: Course[] }[] = subjectOptions
@@ -1086,7 +1093,7 @@ const CurriculumPage: React.FC = () => {
     return !cs || !subjectOptions.includes(cs)
   })
   if (unmatchedCourses.length > 0) {
-    groupedCourses.push({ subject: '未分类', courses: unmatchedCourses })
+    groupedCourses.push({ subject: t('uncategorized'), courses: unmatchedCourses })
   }
 
 
@@ -1095,7 +1102,7 @@ const CurriculumPage: React.FC = () => {
       {/* ── 加载中 ── */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
-          <Spin size="large" description="加载中..." />
+          <Spin size="large" description={t('loadingData')} />
         </div>
       )}
 
@@ -1104,8 +1111,8 @@ const CurriculumPage: React.FC = () => {
           <Empty
             description={
               subjectOptions.length === 0
-                ? '系统中未配置课程大类（SUBJECTS），请先在「系统配置」中添加'
-                : '暂无课程，请创建或 AI 导入课程'
+                ? t('noSubjectsConfigured')
+                : t('noCourses')
             }
           >
             {isTeacherOrAdmin && (
@@ -1115,15 +1122,15 @@ const CurriculumPage: React.FC = () => {
                     icon={<SettingOutlined />}
                     onClick={() => navigate('/system-config')}
                   >
-                    前往系统配置
+                    {t('goToSystemConfig')}
                   </Button>
                 )}
                 <Space>
                   <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
-                    创建课程
+                    {t('createCourse')}
                   </Button>
                   <Button icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
-                    AI 导入
+                    {t('aiImport')}
                   </Button>
                 </Space>
               </Space>
@@ -1173,17 +1180,17 @@ const CurriculumPage: React.FC = () => {
                 <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f0f0' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                     <Typography.Title level={5} style={{ margin: 0 }}>
-                      {isStudent ? '📖 课程导学' : '📚 课程管理'}
+                      {isStudent ? t('studentGuide') : t('courseTitle')}
                     </Typography.Title>
                     <Button size="small" icon={<ReloadOutlined />} onClick={loadTree} />
                   </div>
                   {isTeacherOrAdmin && (
                     <Space wrap style={{ marginBottom: 8 }}>
                       <Button size="small" type="primary" icon={<PlusOutlined />} onClick={handleCreateCourse}>
-                        新建课程
+                        {t('newCourse')}
                       </Button>
                       <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGeneratorOpen(true)}>
-                        AI 导入
+                        {t('aiImport')}
                       </Button>
                     </Space>
                   )}
@@ -1330,10 +1337,10 @@ const CurriculumPage: React.FC = () => {
               <div style={{ textAlign: 'center', padding: '120px 40px' }}>
                 <BookOutlined style={{ fontSize: 64, color: '#d9d9d9', marginBottom: 24 }} />
                 <Typography.Title level={4} type="secondary" style={{ margin: '0 0 8px' }}>
-                  请从左侧选择一门课程
+                  {t('selectCourseFromLeft')}
                 </Typography.Title>
                 <Typography.Text type="secondary">
-                  点击左侧导航中的课程名称，查看课程大纲与知识点
+                  {t('clickCourseToView')}
                 </Typography.Text>
               </div>
             ) : (
@@ -1357,24 +1364,24 @@ const CurriculumPage: React.FC = () => {
                         {isTeacherOrAdmin && (
                           <>
                             <Button size="small" icon={<EditOutlined />} onClick={() => handleEditCourse(activeCourse)}>
-                              编辑
+                              {t('edit')}
                             </Button>
-                            <Popconfirm title="确认删除此课程？" onConfirm={() => handleDeleteCourse(activeCourse.id)} okText="确认" cancelText="取消">
+                            <Popconfirm title={t('confirmDeleteCourse')} onConfirm={() => handleDeleteCourse(activeCourse.id)} okText={t('confirm')} cancelText={t('cancel')}>
                               <Button size="small" danger icon={<DeleteOutlined />}>
-                                删除
+                                {t('delete')}
                               </Button>
                             </Popconfirm>
                             <Button size="small" icon={<PlusOutlined />} onClick={() => handleCreateChapter(activeCourse.id)}>
-                              添加章/节
+                              {t('addChapterSection')}
                             </Button>
-                            <Tooltip title={showActions ? '隐藏节点操作按钮' : '显示节点操作按钮'}>
+                            <Tooltip title={showActions ? t('hideActionTooltip') : t('showActionTooltip')}>
                               <Button
                                 size="small"
                                 icon={<EditOutlined />}
                                 type={showActions ? 'primary' : 'default'}
                                 onClick={() => setShowActions(!showActions)}
                               >
-                                {showActions ? '隐藏操作' : '节点操作'}
+                                {showActions ? t('hideActions') : t('nodeActions')}
                               </Button>
                             </Tooltip>
                           </>
@@ -1425,35 +1432,35 @@ const CurriculumPage: React.FC = () => {
                       extra={
                         <Space>
                           {isTeacherOrAdmin && (
-                            <Tooltip title="AI 生成教案">
+                            <Tooltip title={t('aiGenerateLessonPlan')}>
                               <Button type="link" size="small" icon={<RobotOutlined />}
                                 loading={lessonPlanLoading}
                                 onClick={() => handleAiLessonPlan(selectedKp.id)}>
-                                AI 备课
+                                {t('aiLessonPlan')}
                               </Button>
                             </Tooltip>
                           )}
                           {isTeacherOrAdmin && (
-                            <Tooltip title="AI 推荐教学资源">
+                            <Tooltip title={t('aiRecommendResource')}>
                               <Button type="link" size="small" icon={<RobotOutlined />}
                                 onClick={() => handleAiRecommend(selectedKp.id)}>
-                                AI 推荐
+                                {t('aiRecommend')}
                               </Button>
                             </Tooltip>
                           )}
                           {isTeacherOrAdmin && (
-                            <Tooltip title="AI 生成 HTML 课件">
+                            <Tooltip title={t('aiGenerateCourseware')}>
                               <Button type="link" size="small" icon={<FileOutlined />}
                                 onClick={() => handleAiCourseware(selectedKp.id)}>
-                                AI 课件
+                                {t('aiCourseware')}
                               </Button>
                             </Tooltip>
                           )}
                           {isTeacherOrAdmin && (
-                            <Tooltip title="AI生成练习题">
+                            <Tooltip title={t('aiGeneratePractice')}>
                               <Button type="link" size="small" icon={<FormOutlined />}
                                 onClick={() => handleAiPractice(selectedKp.id)}>
-                                AI 练习
+                                {t('aiPractice')}
                               </Button>
                             </Tooltip>
                           )}
@@ -1489,30 +1496,30 @@ const CurriculumPage: React.FC = () => {
                       )}
                       {selectedKp.learning_objectives && (
                         <div style={{ marginBottom: 12 }}>
-                          <Typography.Text strong>学习目标：</Typography.Text>
+                          <Typography.Text strong>{t('learningObjectives')}：</Typography.Text>
                           <Typography.Paragraph>{selectedKp.learning_objectives}</Typography.Paragraph>
                         </div>
                       )}
                       <Space style={{ marginBottom: 12 }}>
                         <Tag color={DIFFICULTY_COLORS[selectedKp.difficulty]}>
-                          {DIFFICULTY_LABELS[selectedKp.difficulty] || selectedKp.difficulty}
+                          {t(DIFFICULTY_LABELS[selectedKp.difficulty]) || selectedKp.difficulty}
                         </Tag>
                         {selectedKp.estimated_minutes > 0 && (
-                          <Tag icon={<ClockCircleOutlined />}>{selectedKp.estimated_minutes} 分钟</Tag>
+                          <Tag icon={<ClockCircleOutlined />}>{t('kpMinutes', { minutes: selectedKp.estimated_minutes })}</Tag>
                         )}
                         {isStudent && selectedKp.progress_status && (
                           <Tag color={STATUS_COLORS[selectedKp.progress_status]}>
-                            {STATUS_LABELS[selectedKp.progress_status]}
+                            {t(STATUS_LABELS[selectedKp.progress_status])}
                           </Tag>
                         )}
                       </Space>
 
                       {/* 绑定的资源列表 */}
                       <Typography.Title level={5} style={{ marginTop: 16 }}>
-                        关联资源
+                        {t('relatedResources')}
                       </Typography.Title>
                       {kpResources.length === 0 ? (
-                        <Typography.Text type="secondary">暂无关联资源</Typography.Text>
+                        <Typography.Text type="secondary">{t('noRelatedResources')}</Typography.Text>
                       ) : (
                         <Space orientation="vertical" style={{ width: '100%' }}>
                           {kpResources.map((r) => {
@@ -1552,17 +1559,17 @@ const CurriculumPage: React.FC = () => {
                                   <Typography.Text style={{ color: r.resource_url ? '#1677ff' : undefined }}>
                                     {r.resource_name || `[${r.resource_type}:${r.resource_id}]`}
                                   </Typography.Text>
-                                  <Tag>{RESOURCE_LABELS[r.resource_type] || r.resource_type}</Tag>
+                                  <Tag>{t(RESOURCE_LABELS[r.resource_type]) || r.resource_type}</Tag>
                                   {/* 教师端显示浏览统计 */}
                                   {isTeacherOrAdmin && r.view_stats && (
                                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                      👁️ {r.view_stats.unique_viewers}人/{r.view_stats.total_views}次
+                                      {t('views')}{r.view_stats.unique_viewers}/{r.view_stats.total_views}
                                     </Typography.Text>
                                   )}
                                   {/* 学生端显示是否已查看 */}
                                   {isStudent && r.viewed !== undefined && (
                                     <Tag color={r.viewed ? 'success' : 'default'} style={{ fontSize: 11 }}>
-                                      {r.viewed ? '✅ 已查看' : '👁️ 未查看'}
+                                      {r.viewed ? t('viewed') : t('notViewed')}
                                     </Tag>
                                   )}
                                 </Space>
@@ -1585,7 +1592,7 @@ const CurriculumPage: React.FC = () => {
                             setBinderOpen(true)
                           }}
                         >
-                          管理绑定资源
+                          {t('manageBindResources')}
                         </Button>
                       )}
                     </Card>
@@ -1599,33 +1606,33 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── 课程编辑弹窗 ── */}
       <Modal
-        title={editingCourse ? '编辑课程' : '新建课程'}
+        title={editingCourse ? t('editCourse') : t('newCourse')}
         open={courseModal}
         onOk={handleSaveCourse}
         onCancel={() => setCourseModal(false)}
         confirmLoading={savingCourse}
       >
         <Form form={courseForm} layout="vertical">
-          <Form.Item name="subject" label="所属科目" rules={[{ required: true, message: '请选择科目' }]}>
-            <Select placeholder="从系统配置中选择科目">
+          <Form.Item name="subject" label={t('subject')} rules={[{ required: true, message: t('selectSubjectRequired') }]}>
+            <Select placeholder={t('selectSubjectPlaceholder')}>
               {subjectOptions.length > 0 ? subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>) : (
-                <Option value="" disabled>⚠️ 请先在系统配置中设置课程名称</Option>
+                <Option value="" disabled>{t('noSubjectConfig')}</Option>
               )}
             </Select>
           </Form.Item>
-          <Form.Item name="name" label="课程名称" rules={[{ required: true, message: '请输入课程名称' }]}>
-            <Input placeholder="例如：信息科技基础 / 人工智能入门" />
+          <Form.Item name="name" label={t('courseName')} rules={[{ required: true, message: t('courseNameRequired') }]}>
+            <Input placeholder={t('courseNamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="code" label="课程代码">
-            <Input placeholder="例如：IT / AI" />
+          <Form.Item name="code" label={t('courseCode')}>
+            <Input placeholder={t('codePlaceholder')} />
           </Form.Item>
-          <Form.Item name="description" label="课程简介">
-            <TextArea rows={3} placeholder="简要描述课程内容" />
+          <Form.Item name="description" label={t('courseDescription')}>
+            <TextArea rows={3} placeholder={t('descriptionPlaceholder')} />
           </Form.Item>
-          <Form.Item name="grade" label="适用年级">
+          <Form.Item name="grade" label={t('gradeApplicable')}>
             <Select
               mode="tags"
-              placeholder="选择或输入年级"
+              placeholder={t('gradePlaceholder')}
               tokenSeparators={[',', '|']}
               onChange={(vals: string[]) => {
                 courseForm.setFieldValue('grade', vals.join('|'))
@@ -1634,7 +1641,7 @@ const CurriculumPage: React.FC = () => {
               {gradeOptions.map(g => <Option key={g} value={g}>{g}</Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="sort_order" label="排序号">
+          <Form.Item name="sort_order" label={t('sortOrder')}>
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
@@ -1642,34 +1649,34 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── 章节编辑弹窗 ── */}
       <Modal
-        title={editingChapter ? '编辑章节' : '添加章节'}
+        title={editingChapter ? t('editChapter') : t('addChapter')}
         open={chapterModal}
         onOk={handleSaveChapter}
         onCancel={() => setChapterModal(false)}
         confirmLoading={savingChapter}
       >
         <Form form={chapterForm} layout="vertical">
-          <Form.Item name="course_id" label="所属课程" rules={[{ required: true }]}>
-            <Select placeholder="选择课程">
+          <Form.Item name="course_id" label={t('belongingCourse')} rules={[{ required: true }]}>
+            <Select placeholder={t('selectCourse')}>
               {courses.map((c) => (
                 <Option key={c.id} value={c.id}>{c.name}</Option>
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="parent_id" label="父章节（留空为顶层章）">
+          <Form.Item name="parent_id" label={t('parentChapter')}>
             <Select
               allowClear
-              placeholder="留空为顶层章"
+              placeholder={t('parentChapterPlaceholder')}
             >
               {activeCourse?.chapters?.map((ch) => (
                 <Option key={ch.id} value={ch.id}>{ch.name}</Option>
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入章节名称' }]}>
-            <Input placeholder="例如：第一章 走进技术世界" />
+          <Form.Item name="name" label={t('name')} rules={[{ required: true, message: t('nameRequired') }]}>
+            <Input placeholder={t('chapterNamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="description" label="描述">
+          <Form.Item name="description" label={t('description')}>
             <TextArea rows={2} />
           </Form.Item>
           <Form.Item name="sort_order" label="排序号">
@@ -1680,40 +1687,40 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── 知识点编辑弹窗 ── */}
       <Modal
-        title={editingKp ? '编辑知识点' : '添加知识点'}
+        title={editingKp ? t('editKnowledgePoint') : t('addKnowledgePoint')}
         open={kpModal}
         onOk={handleSaveKp}
         onCancel={() => setKpModal(false)}
         confirmLoading={savingKp}
       >
         <Form form={kpForm} layout="vertical">
-          <Form.Item name="chapter_id" label="所属章节" rules={[{ required: true }]}>
-            <Select placeholder="选择章节">
+          <Form.Item name="chapter_id" label={t('belongingChapter')} rules={[{ required: true }]}>
+            <Select placeholder={t('selectChapter')}>
               {activeCourse?.chapters?.map((ch) => (
                 <Option key={ch.id} value={ch.id}>{ch.name}</Option>
               ))}
             </Select>
           </Form.Item>
-          <Form.Item name="name" label="知识点名称" rules={[{ required: true, message: '请输入知识点名称' }]}>
-            <Input placeholder="例如：技术的性质" />
+          <Form.Item name="name" label={t('kpName')} rules={[{ required: true, message: t('kpNameRequired') }]}>
+            <Input placeholder={t('kpNamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="description" label="描述">
-            <TextArea rows={2} placeholder="简要描述该知识点" />
+          <Form.Item name="description" label={t('description')}>
+            <TextArea rows={2} placeholder={t('kpDescriptionPlaceholder')} />
           </Form.Item>
-          <Form.Item name="learning_objectives" label="学习目标">
-            <TextArea rows={2} placeholder="学习目标（可多行文本或 Markdown）" />
+          <Form.Item name="learning_objectives" label={t('learningObjectives')}>
+            <TextArea rows={2} placeholder={t('learningObjectivesPlaceholder')} />
           </Form.Item>
-          <Form.Item name="difficulty" label="难度">
+          <Form.Item name="difficulty" label={t('difficulty')}>
             <Select>
-              <Option value="easy">简单</Option>
-              <Option value="medium">中等</Option>
-              <Option value="hard">困难</Option>
+              <Option value="easy">{t('difficultyEasy')}</Option>
+              <Option value="medium">{t('difficultyMedium')}</Option>
+              <Option value="hard">{t('difficultyHard')}</Option>
             </Select>
           </Form.Item>
-          <Form.Item name="estimated_minutes" label="预计学习时长（分钟）">
+          <Form.Item name="estimated_minutes" label={t('estimatedMinutes')}>
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="sort_order" label="排序号">
+          <Form.Item name="sort_order" label={t('sortOrder')}>
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
@@ -1747,7 +1754,7 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── AI 备课结果弹窗 ── */}
       <Modal
-        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 备课 - {lessonPlanData?.knowledge_point || '生成中...'}</>}
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> {t('aiLessonPlanTitle')} - {lessonPlanData?.knowledge_point || t('generating')}</>}
         open={lessonPlanModal}
         onCancel={() => { if (lessonPlanLoading) return; setLessonPlanModal(false) }}
         width={800}
@@ -1755,13 +1762,13 @@ const CurriculumPage: React.FC = () => {
           lessonPlanLoading ? null : (
             <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
               <Button icon={<DownloadOutlined />} onClick={() => {
-                if (!lessonPlanData) { message.warning('请先生成教案'); return }
-                if (!selectedKp) { message.warning('未选中知识点'); return }
+                if (!lessonPlanData) { message.warning(t('generateLessonPlanFirst')); return }
+                if (!selectedKp) { message.warning(t('noKpSelected')); return }
                 const token = localStorage.getItem('smartkb_token')
                 const url = `/api/curriculum/ai-lesson-plan/${selectedKp.id}/export${token ? `?token=${token}` : ''}`
                 window.open(url, '_blank')
-              }}>导出 Word</Button>
-              <Button onClick={() => setLessonPlanModal(false)}>关闭</Button>
+              }}>{t('exportWord')}</Button>
+              <Button onClick={() => setLessonPlanModal(false)}>{t('close')}</Button>
             </Space>
           )
         }
@@ -1769,7 +1776,7 @@ const CurriculumPage: React.FC = () => {
         {lessonPlanLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>AI 正在生成教案，请稍候...</div>
+            <div style={{ marginTop: 16, color: '#666' }}>{t('aiGeneratingLessonPlan')}</div>
           </div>
         ) : lessonPlanData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 14, lineHeight: 1.8, padding: '0 4px' }}>
@@ -1782,30 +1789,30 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── AI 资源推荐弹窗 ── */}
       <Modal
-        title={<><RobotOutlined style={{ color: '#1677ff' }} /> AI 推荐教学资源</>}
+        title={<><RobotOutlined style={{ color: '#1677ff' }} /> {t('aiRecommendTitle')}</>}
         open={recModal}
         onCancel={() => { if (recLoading) return; setRecModal(false) }}
         width={700}
-        footer={recLoading ? null : <Button onClick={() => setRecModal(false)}>关闭</Button>}
+        footer={recLoading ? null : <Button onClick={() => setRecModal(false)}>{t('close')}</Button>}
       >
         {recLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>AI 正在分析知识点并推荐资源，请稍候...</div>
+            <div style={{ marginTop: 16, color: '#666' }}>{t('aiAnalyzing')}</div>
           </div>
         ) : recResults.length === 0 ? (
-          <Empty description="暂无可推荐的资源" />
+          <Empty description={t('noRecommendations')} />
         ) : (
           <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
             <Space style={{ marginBottom: 16 }} wrap>
-              <Tag icon={<RobotOutlined />} color="blue">共 {recResults.length} 个推荐</Tag>
+              <Tag icon={<RobotOutlined />} color="blue">{t('totalRecommendations', { count: recResults.length })}</Tag>
               {recResults.filter(r => r.relevance === 'high').length > 0 && (
-                <Tag color="green">高相关 {recResults.filter(r => r.relevance === 'high').length}</Tag>
+                <Tag color="green">{t('highRelevanceCount', { count: recResults.filter(r => r.relevance === 'high').length })}</Tag>
               )}
             </Space>
             {recResults.map((r, i) => {
               const relevanceColor = r.relevance === 'high' ? '#52c41a' : r.relevance === 'medium' ? '#faad14' : '#d9d9d9'
-              const relevanceLabel = r.relevance === 'high' ? '高度相关' : r.relevance === 'medium' ? '中度相关' : '低度相关'
+              const relevanceLabel = r.relevance === 'high' ? t('highRelevance') : r.relevance === 'medium' ? t('mediumRelevance') : t('lowRelevance')
               return (
                 <Card key={i} size="small" style={{ marginBottom: 8 }}>
                   <Space orientation="vertical" style={{ width: '100%' }}>
@@ -1836,7 +1843,7 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── AI 课件生成弹窗 ── */}
       <Modal
-        title={<><FileOutlined style={{ color: '#1677ff' }} /> AI 课件预览</>}
+        title={<><FileOutlined style={{ color: '#1677ff' }} /> {t('aiCoursewareTitle')}</>}
         open={cwModal}
         onCancel={() => { if (cwLoading) return; setCwModal(false) }}
         width={900}
@@ -1860,7 +1867,7 @@ const CurriculumPage: React.FC = () => {
         {cwLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>AI 正在生成 HTML 课件，请稍候...</div>
+            <div style={{ marginTop: 16, color: '#666' }}>{t('aiGeneratingCourseware')}</div>
           </div>
         ) : cwUrl ? (
           <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
@@ -1871,7 +1878,7 @@ const CurriculumPage: React.FC = () => {
 
       {/* ── AI 练习弹窗（参考资源中心 AI 生成样式） ── */}
       <Modal
-        title={<><FormOutlined style={{ color: '#1677ff' }} /> 🤖 AI 生成练习 - {selectedKp?.name || ''}</>}
+        title={<><FormOutlined style={{ color: '#1677ff' }} /> 🤖 {t('aiPracticeTitle')} - {selectedKp?.name || ''}</>}
         open={practiceModal}
         onCancel={() => { if (practiceLoading) return; setPracticeModal(false); setPracticeDone(null); setPracticeHtmlUrl(''); }}
         width={620}
@@ -1883,7 +1890,7 @@ const CurriculumPage: React.FC = () => {
             <Spin size="large" />
             <div style={{ marginTop: 16, color: '#666' }}>
               AI 正在生成练习题，请稍候...（约 30-180 秒）
-              <br /><span style={{ fontSize: 13 }}>自动生成 HTML 答题页面</span>
+              <br /><span style={{ fontSize: 13 }}>{t('autoGenerateHtml')}</span>
             </div>
           </div>
         ) : practiceDone ? (
@@ -1909,30 +1916,30 @@ const CurriculumPage: React.FC = () => {
           <Space orientation="vertical" style={{ width: '100%' }} size={16}>
             {/* 知识点 */}
             <div>
-              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>知识点 <span style={{ color: '#ff4d4f' }}>*</span></Typography.Text>
-              <Input value={practiceTopic} onChange={(e) => setPracticeTopic(e.target.value)} placeholder="请输入知识点名称" />
+              <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('kpLabel')} <span style={{ color: '#ff4d4f' }}>*</span></Typography.Text>
+              <Input value={practiceTopic} onChange={(e) => setPracticeTopic(e.target.value)} placeholder={t('enterKpName')} />
             </div>
 
             {/* 学科 & 年级 */}
             <Space>
               <div>
-                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>学科</Typography.Text>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('practiceSubject')}</Typography.Text>
                 <Select
                   value={practiceSubject || undefined}
                   onChange={(v) => setPracticeSubject(v || '')}
                   allowClear
-                  placeholder="选择学科（可选）"
+                  placeholder={t('selectSubjectOptional')}
                   style={{ width: 180 }}
                   options={practiceSubjectOptions.map(s => ({ value: s, label: s }))}
                 />
               </div>
               <div>
-                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>年级</Typography.Text>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('practiceGrade')}</Typography.Text>
                 <Select
                   value={practiceGrade || undefined}
                   onChange={(v) => setPracticeGrade(v || '')}
                   allowClear
-                  placeholder="选择年级（可选）"
+                  placeholder={t('selectGradeOptional')}
                   style={{ width: 140 }}
                   options={practiceGradeOptions.map(g => ({ value: g, label: g }))}
                 />
@@ -1942,12 +1949,12 @@ const CurriculumPage: React.FC = () => {
             {/* 视觉主题选择 */}
             {practiceThemes.length > 0 && (
               <div>
-                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>视觉主题</Typography.Text>
+                <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>{t('visualTheme')}</Typography.Text>
                 <Select
                   value={practiceTheme || undefined}
                   onChange={(v) => setPracticeTheme(v || '')}
                   style={{ width: '100%' }}
-                  placeholder="选择视觉主题"
+                  placeholder={t('selectTheme')}
                   options={practiceThemes.map(t => ({
                     value: t.id,
                     label: `${t.icon} ${t.name} — ${t.desc}`,

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 // 用户管理
 import {
   Layout, Card, Tabs, Form, Input, Button, message,
@@ -17,6 +18,7 @@ interface ApiError {
 }
 
 const UserMgmtPage: React.FC = () => {
+  const { t } = useTranslation('system')
   const user = useAuthStore((s: { user: { username: string; role: string } | null }) => s.user)
   const isAdmin = user?.role === 'admin'
   const isTeacher = user?.role === 'teacher'
@@ -41,7 +43,7 @@ const UserMgmtPage: React.FC = () => {
       message.success(msg)
       regForm.resetFields()
     } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || '注册失败')
+      message.error((err as ApiError)?.response?.data?.detail || t('registerFailed'))
     }
   }
 
@@ -76,7 +78,7 @@ const UserMgmtPage: React.FC = () => {
       )
       message.success(msg)
     } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || '更新失败')
+      message.error((err as ApiError)?.response?.data?.detail || t('updateFailed'))
     }
   }
 
@@ -91,12 +93,12 @@ const UserMgmtPage: React.FC = () => {
   const handleChangePwd = async (values: Record<string, unknown>) => {
     const v = values as Record<string, string>
     if (!v.username || !v.new_password) {
-      message.warning('用户名和新密码不能为空')
+      message.warning(t('usernamePasswordRequired'))
       return
     }
     // 普通用户只能改自己的
     if (!isAdmin && v.username !== user?.username) {
-      message.error('权限不足：只能修改自己的密码')
+      message.error(t('permissionDenied') + '：' + t('selfPasswordOnly'))
       return
     }
     try {
@@ -104,7 +106,7 @@ const UserMgmtPage: React.FC = () => {
       message.success(msg)
       pwdForm.resetFields()
     } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || '修改密码失败')
+      message.error((err as ApiError)?.response?.data?.detail || t('changePasswordFailed'))
     }
   }
 
@@ -117,7 +119,7 @@ const UserMgmtPage: React.FC = () => {
       message.success(msg)
       delForm.resetFields()
     } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || '删除失败')
+      message.error((err as ApiError)?.response?.data?.detail || t('deleteFailed'))
     }
   }
 
@@ -129,7 +131,7 @@ const UserMgmtPage: React.FC = () => {
     const v = values as Record<string, string>
     const keyword = v.keyword?.trim()
     if (!keyword) {
-      message.warning('请输入关键词')
+      message.warning(t('searchKeywordRequired'))
       return
     }
     setSearchLoading(true)
@@ -137,7 +139,7 @@ const UserMgmtPage: React.FC = () => {
       const { users } = await usersApi.getAllUsers(keyword)
       setSearchResult(users)
     } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || '查询失败')
+      message.error((err as ApiError)?.response?.data?.detail || t('searchFailed'))
       setSearchResult([])
     } finally {
       setSearchLoading(false)
@@ -153,7 +155,7 @@ const UserMgmtPage: React.FC = () => {
       const { users } = await usersApi.getAllUsers()
       setAllUsers(users)
     } catch {
-      message.error('获取用户列表失败')
+      message.error(t('loadUserListFailed'))
     } finally {
       setUsersLoading(false)
     }
@@ -184,7 +186,7 @@ const UserMgmtPage: React.FC = () => {
   })
 
   const handleBulkDelete = async () => {
-    if (!bulkPattern.trim()) { message.warning('请输入模式'); return }
+    if (!bulkPattern.trim()) { message.warning(t('enterPattern')); return }
     setBulkDeleteProgress({
       visible: true,
       percent: 0,
@@ -260,7 +262,7 @@ const UserMgmtPage: React.FC = () => {
       const preview = await usersApi.previewPromoteGrades()
       setPromotePreview(preview)
     } catch (err: unknown) {
-      message.error((err as ApiError)?.response?.data?.detail || '获取预览失败')
+      message.error((err as ApiError)?.response?.data?.detail || t('promotePreviewFailed'))
     } finally {
       setPromoteLoading(false)
     }
@@ -306,12 +308,12 @@ const UserMgmtPage: React.FC = () => {
           })
           setPromoteResult(result)
           if (result.success) {
-            message.success('批量升年级执行完成')
+            message.success(t('promoteExecSuccess'))
             // 刷新预览
             handlePreviewPromote()
           }
         } catch (err: unknown) {
-          message.error((err as ApiError)?.response?.data?.detail || '执行升年级失败')
+          message.error((err as ApiError)?.response?.data?.detail || t('promoteExecFailed'))
         } finally {
           setPromoteExecuting(false)
         }
@@ -353,14 +355,14 @@ const UserMgmtPage: React.FC = () => {
             confirm: true,
           })
           if (result.success) {
-            message.success('🎉 批量降级完成！')
+            message.success(t('demoteSuccess'))
             setPromotePreview(null)
             setPromoteResult(result)
             // 刷新预览
             handlePreviewPromote()
           }
         } catch (err: unknown) {
-          message.error((err as ApiError)?.response?.data?.detail || '降级失败')
+          message.error((err as ApiError)?.response?.data?.detail || t('demoteFailed'))
         } finally {
           setPromoteReversing(false)
         }
@@ -455,29 +457,29 @@ const UserMgmtPage: React.FC = () => {
   }
 
   const genderRadios = [
-    { label: '男', value: '男' },
-    { label: '女', value: '女' },
+    { label: t('male'), value: '男' },
+    { label: t('female'), value: '女' },
   ]
   const roleRadios = [
-    { label: '普通用户', value: '普通用户' },
-    { label: '教师', value: '教师' },
-    { label: '管理员', value: '管理员' },
+    { label: t('student'), value: '普通用户' },
+    { label: t('teacher'), value: '教师' },
+    { label: t('admin'), value: '管理员' },
   ]
 
   const userColumns = [
-    { title: '用户名', dataIndex: 'username', key: 'username', width: 120 },
-    { title: '姓名', dataIndex: 'name', key: 'name', width: 100 },
-    { title: '年级', dataIndex: 'grade', key: 'grade', width: 60 },
-    { title: '班级', dataIndex: 'class', key: 'class', width: 80 },
-    { title: '性别', dataIndex: 'gender', key: 'gender', width: 60 },
-    { title: '角色', dataIndex: 'role', key: 'role', width: 80 },
+    { title: t('username'), dataIndex: 'username', key: 'username', width: 120 },
+    { title: t('name'), dataIndex: 'name', key: 'name', width: 100 },
+    { title: t('grade'), dataIndex: 'grade', key: 'grade', width: 60 },
+    { title: t('class_'), dataIndex: 'class', key: 'class', width: 80 },
+    { title: t('gender'), dataIndex: 'gender', key: 'gender', width: 60 },
+    { title: t('role'), dataIndex: 'role', key: 'role', width: 80 },
     {
-      title: '任教科目',
+      title: t('teachingSubjects'),
       dataIndex: 'subjects',
       key: 'subjects',
       width: 180,
       render: (_: any, record: any) => {
-        if (record.role === '管理员') return '全部学科'
+        if (record.role === '管理员') return t('allSubjects')
         if (record.role !== '教师' || !record.subjects?.length) return '-'
         return record.subjects.join('、')
       },
@@ -499,51 +501,51 @@ const UserMgmtPage: React.FC = () => {
   const tabItems = [
     {
       key: 'register',
-      label: '注册用户',
+      label: t('addUser'),
       children: (
         <Form form={regForm} layout="vertical" onFinish={handleRegister} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
-            <Input placeholder="用户名/学号" />
+          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}>
+            <Input placeholder={t('usernamePlaceholder')} />
           </Form.Item>
-          <Form.Item name="password" label="密码" rules={[{ required: true }]}>
-            <Input.Password placeholder="密码" />
+          <Form.Item name="password" label={t('passwordLabel')} rules={[{ required: true }]}>
+            <Input.Password placeholder={t('passwordPlaceholder')} />
           </Form.Item>
-          <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
-            <Input placeholder="如：高一 或 高一|高二" />
+          <Form.Item name="grade" label={t('gradeLabel')} extra={<>{t('multiGradeHelp')}</>}>
+            <Input placeholder={t('gradePlaceholder')} />
           </Form.Item>
-          <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
-            <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
+          <Form.Item name="class_val" label={t('classLabel')} extra={<>{t('multiClassHelp')}</>}>
+            <Input placeholder={t('classPlaceholder')} />
           </Form.Item>
-          <Form.Item name="name" label="姓名"><Input placeholder="姓名" /></Form.Item>
-          <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
-          <Form.Item name="role" label="角色" initialValue="普通用户"><Radio.Group options={roleRadios} /></Form.Item>
+          <Form.Item name="name" label={t('nameLabel')}><Input placeholder={t('namePlaceholder')} /></Form.Item>
+          <Form.Item name="gender" label={t('genderLabel')} initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
+          <Form.Item name="role" label={t('roleLabel')} initialValue="普通用户"><Radio.Group options={roleRadios} /></Form.Item>
           <Form.Item shouldUpdate={(prev, cur) => prev.role !== cur.role} noStyle>
             {({ getFieldValue }) => {
               const role = getFieldValue('role')
               const isTeacherOrAdmin = role === '教师' || role === '管理员'
               return (
-                <Form.Item name="subjects" label="任教科目" hidden={!isTeacherOrAdmin}
+                <Form.Item name="subjects" label={t('teachingSubjectsLabel')} hidden={!isTeacherOrAdmin}
                   initialValue={role === '管理员' ? [...subjects] : undefined}
-                  extra={<>请在「系统配置」中先设置课程名称列表，此处才会显示可选学科。如列表为空，<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>前往配置</Button></>}>
-                  <Select mode="multiple" placeholder="选择任教学科（可多选）" allowClear
+                  extra={<>{t('configSubjectsFirst')}<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>{t('configSubjectsLink')}</Button></>}>
+                  <Select mode="multiple" placeholder={t('selectSubjectsPlaceholder')} allowClear
                     options={subjects.map(s => ({ label: s, value: s }))} />
                 </Form.Item>
               )
             }}
           </Form.Item>
-          <Button type="primary" htmlType="submit">注册</Button>
+          <Button type="primary" htmlType="submit">{t('register')}</Button>
         </Form>
       ),
     },
     {
       key: 'update',
-      label: '更新信息',
+      label: t('editUser'),
       children: (
         <Form form={updForm} layout="vertical" onFinish={handleUpdate} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
-            <Input placeholder="输入用户名后移出焦点自动加载" onBlur={handleUpdateUsernameBlur} />
+          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}>
+            <Input placeholder={t('usernameSearchPlaceholder')} onBlur={handleUpdateUsernameBlur} />
           </Form.Item>
-          <Form.Item name="role" label="角色">
+          <Form.Item name="role" label={t('roleLabel')}>
             <Radio.Group options={roleRadios} />
           </Form.Item>
           <Form.Item shouldUpdate={(prev, cur) => prev.role !== cur.role} noStyle>
@@ -551,100 +553,100 @@ const UserMgmtPage: React.FC = () => {
               const role = getFieldValue('role')
               const isTeacherOrAdmin = role === '教师' || role === '管理员'
               return (
-                <Form.Item name="subjects" label="任教科目" hidden={!isTeacherOrAdmin}
+                <Form.Item name="subjects" label={t('teachingSubjectsLabel')} hidden={!isTeacherOrAdmin}
                   initialValue={role === '管理员' ? [...subjects] : undefined}
-                  extra={<>请在「系统配置」中先设置课程名称列表，此处才会显示可选学科。<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>前往配置</Button></>}>
-                  <Select mode="multiple" placeholder="选择任教学科（可多选）" allowClear
+                  extra={<>{t('configSubjectsFirst')}<Button type="link" size="small" onClick={() => window.open('/system-config', '_blank')} style={{ padding: 0 }}>{t('configSubjectsLink')}</Button></>}>
+                  <Select mode="multiple" placeholder={t('selectSubjectsPlaceholder')} allowClear
                     options={subjects.map(s => ({ label: s, value: s }))} />
                 </Form.Item>
               )
             }}
           </Form.Item>
-          <Form.Item name="grade" label="年级" extra={<>多个年级用 <code>|</code> 分隔，如 <code>高一|高二</code></>}>
-            <Input placeholder="如：高一 或 高一|高二" />
+          <Form.Item name="grade" label={t('gradeLabel')} extra={<>{t('multiGradeHelp')}</>}>
+            <Input placeholder={t('gradePlaceholder')} />
           </Form.Item>
-          <Form.Item name="class_val" label="班级" extra={<>多个班级用 <code>,</code> 分隔，多个年级用 <code>|</code> 分隔，如 <code>1,2,3,4,5|6,5,4,38,9</code></>}>
-            <Input placeholder="如：1 或 1,2,3 或 1,2,3|4,5" />
+          <Form.Item name="class_val" label={t('classLabel')} extra={<>{t('multiClassHelp')}</>}>
+            <Input placeholder={t('classPlaceholder')} />
           </Form.Item>
-          <Form.Item name="name" label="姓名"><Input /></Form.Item>
-          <Form.Item name="gender" label="性别" initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
-          <Button type="primary" htmlType="submit">更新</Button>
+          <Form.Item name="name" label={t('nameLabel')}><Input /></Form.Item>
+          <Form.Item name="gender" label={t('genderLabel')} initialValue="男"><Radio.Group options={genderRadios} /></Form.Item>
+          <Button type="primary" htmlType="submit">{t('edit')}</Button>
         </Form>
       ),
     },
     {
       key: 'password',
-      label: '修改密码',
+      label: t('changePassword'),
       children: (
         <Form form={pwdForm} layout="vertical" onFinish={handleChangePwd} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}>
-            <Input placeholder="用户名" disabled={!isAdmin} />
+          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}>
+            <Input placeholder={t('usernameLabel')} disabled={!isAdmin} />
           </Form.Item>
-          <Form.Item name="new_password" label="新密码" rules={[{ required: true }]}>
-            <Input.Password placeholder="新密码" />
+          <Form.Item name="new_password" label={t('newPassword')} rules={[{ required: true }]}>
+            <Input.Password placeholder={t('newPassword')} />
           </Form.Item>
           <Form.Item
             name="confirm_password"
-            label="确认新密码"
+            label={t('confirmPassword')}
             dependencies={['new_password']}
             rules={[
-              { required: true, message: '请再次输入新密码' },
+              { required: true, message: t('passwordRequired') },
               ({ getFieldValue }) => ({
                 validator(_, value) {
                   if (!value || getFieldValue('new_password') === value) {
                     return Promise.resolve()
                   }
-                  return Promise.reject(new Error('两次输入的密码不一致'))
+                  return Promise.reject(new Error(t('passwordMismatch')))
                 },
               }),
             ]}
           >
-            <Input.Password placeholder="再次输入新密码" />
+            <Input.Password placeholder={t('confirmPassword')} />
           </Form.Item>
-          <Button type="primary" htmlType="submit">修改密码</Button>
+          <Button type="primary" htmlType="submit">{t('changePassword')}</Button>
         </Form>
       ),
     },
     {
       key: 'delete',
-      label: '删除用户',
+      label: t('deleteUser'),
       children: (
         <Form form={delForm} layout="vertical" onFinish={handleDelete} style={{ maxWidth: 400 }}>
-          <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input placeholder="要删除的用户名" /></Form.Item>
-          <Button type="primary" danger htmlType="submit">删除用户</Button>
+          <Form.Item name="username" label={t('usernameLabel')} rules={[{ required: true }]}><Input placeholder={t('usernameLabel')} /></Form.Item>
+          <Button type="primary" danger htmlType="submit">{t('deleteUser')}</Button>
         </Form>
       ),
     },
     {
       key: 'search',
-      label: '查询用户',
+      label: t('searchUser'),
       children: (
         <Space orientation="vertical" style={{ width: '100%' }}>
           <Form form={searchForm} layout="inline" onFinish={handleSearch}>
             <Form.Item name="keyword" rules={[{ required: true }]}>
-              <Input placeholder="用户名/姓名" style={{ width: 240 }} />
+              <Input placeholder={t('searchPlaceholder')} style={{ width: 240 }} />
             </Form.Item>
-            <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={searchLoading}>查询</Button>
+            <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={searchLoading}>{t('search')}</Button>
           </Form>
           {searchResult.length > 0 && (
             <>
-              <Typography.Text type="secondary">共找到 {searchResult.length} 个匹配用户</Typography.Text>
+              <Typography.Text type="secondary">{t('searchResults')} ({searchResult.length})</Typography.Text>
               <Table dataSource={searchResult} columns={userColumns} rowKey="username"
                 size="small" pagination={{ pageSize: 30 }} scroll={{ y: 400 }} />
             </>
           )}
           {searchResult.length === 0 && !searchLoading && (
-            <Typography.Text type="secondary">请输入关键词查询用户（支持用户名和姓名模糊匹配）</Typography.Text>
+            <Typography.Text type="secondary">{t('searchPlaceholder')}</Typography.Text>
           )}
         </Space>
       ),
     },
     {
       key: 'list',
-      label: '用户列表',
+      label: t('userManagement'),
       children: (
         <Space orientation="vertical" style={{ width: '100%' }}>
-          <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>刷新列表</Button>
+          <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>{t('refresh')}</Button>
           {allUsers.length > 0 && (
             <Table dataSource={allUsers} columns={userColumns} rowKey="username"
               size="small" pagination={{ pageSize: 30 }} scroll={{ y: 400 }} />
@@ -654,23 +656,23 @@ const UserMgmtPage: React.FC = () => {
     },
     {
       key: 'import',
-      label: '批量操作',
+      label: t('batchImport'),
       children: (
         <Space orientation="vertical" style={{ width: '100%' }}>
-          <Card size="small" title="导入用户">
+          <Card size="small" title={t('bulkImport')}>
             <Space>
               <Upload beforeUpload={handleImport} showUploadList={false} accept=".csv" disabled={importProgress.visible}>
                 <Button icon={<UploadOutlined />} disabled={importProgress.visible}>
-                  {importProgress.visible ? '导入中…' : '选择 CSV 文件'}
+                  {importProgress.visible ? t('importing') : t('selectCsv')}
                 </Button>
               </Upload>
-              <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>下载模板</Button>
+              <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>{t('downloadTemplate')}</Button>
               <Button icon={<DownloadOutlined />} onClick={async () => {
-                const hide = message.loading('正在导出用户…', 0)
+                const hide = message.loading(t('exporting'), 0)
                 try {
                   await usersApi.exportUsersCsv()
                   hide()
-                  message.success('用户导出成功')
+                  message.success(t('exportSuccess'))
                 } catch (err: unknown) {
                   hide()
                   const ae = err as ApiError
@@ -682,17 +684,17 @@ const UserMgmtPage: React.FC = () => {
                       detail = JSON.parse(text).detail
                     } catch { /* ignore */ }
                   }
-                  message.error(detail || '导出失败，请检查后端服务是否正常')
+                  message.error(detail || t('exportFailed'))
                 }
-              }}>导出用户</Button>
+              }}>{t('exportUsers')}</Button>
             </Space>
             {/* 导入进度弹窗 */}
             <Modal
-              title="导入用户进度"
+              title={t('bulkImport')}
               open={importProgress.visible}
               footer={
                 importProgress.done
-                  ? <Button type="primary" onClick={handleImportDone}>确定</Button>
+                  ? <Button type="primary" onClick={handleImportDone}>{t('confirm')}</Button>
                   : null
               }
               closable={importProgress.done}
@@ -704,14 +706,14 @@ const UserMgmtPage: React.FC = () => {
                 <Typography.Text>{importProgress.message}</Typography.Text>
                 {importProgress.total > 0 && (
                   <Typography.Text type="secondary">
-                    已处理 {importProgress.current} / {importProgress.total} 条
-                    ｜ 成功 {importProgress.imported} 条
-                    ｜ 失败 {importProgress.errorCount} 条
+                    {t('processed')} {importProgress.current} / {importProgress.total}
+                    ｜ {t('success')} {importProgress.imported}
+                    ｜ {t('failed')} {importProgress.errorCount}
                   </Typography.Text>
                 )}
                 {importProgress.errors.length > 0 && (
                   <div style={{ maxHeight: 200, overflow: 'auto', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4, padding: '8px 12px' }}>
-                    <Typography.Text type="danger" strong>错误详情：</Typography.Text>
+                    <Typography.Text type="danger" strong>{t('errorDetails')}:</Typography.Text>
                     {importProgress.errors.map((err, i) => (
                       <Typography.Text key={i} type="danger" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{err}</Typography.Text>
                     ))}
@@ -720,22 +722,22 @@ const UserMgmtPage: React.FC = () => {
               </Space>
             </Modal>
           </Card>
-          <Card size="small" title="批量删除">
+          <Card size="small" title={t('bulkDelete')}>
             <Space>
-                <Input placeholder="用户名关键词，如 s11" value={bulkPattern}
+                <Input placeholder={t('enterPattern')} value={bulkPattern}
                   onChange={(e) => setBulkPattern(e.target.value)} style={{ width: 240 }} />
-                <Popconfirm title="确认批量删除？" onConfirm={handleBulkDelete}>
-                  <Button danger disabled={bulkDeleteProgress.visible}>批量删除</Button>
+                <Popconfirm title={t('confirmDeleteTitle')} onConfirm={handleBulkDelete}>
+                  <Button danger disabled={bulkDeleteProgress.visible}>{t('bulkDelete')}</Button>
                 </Popconfirm>
               </Space>
             </Card>
             {/* 批量删除进度弹窗 */}
             <Modal
-              title="批量删除进度"
+              title={t('bulkDelete')}
               open={bulkDeleteProgress.visible}
               footer={
                 bulkDeleteProgress.done
-                  ? <Button type="primary" onClick={handleBulkDeleteDone}>确定</Button>
+                  ? <Button type="primary" onClick={handleBulkDeleteDone}>{t('confirm')}</Button>
                   : null
               }
               closable={bulkDeleteProgress.done}
@@ -747,14 +749,14 @@ const UserMgmtPage: React.FC = () => {
                 <Typography.Text>{bulkDeleteProgress.message}</Typography.Text>
                 {bulkDeleteProgress.total > 0 && (
                   <Typography.Text type="secondary">
-                    已处理 {bulkDeleteProgress.current} / {bulkDeleteProgress.total} 个
-                    ｜ 成功 {bulkDeleteProgress.deleted} 个
-                    ｜ 失败 {bulkDeleteProgress.errorCount} 个
+                    {t('processed')} {bulkDeleteProgress.current} / {bulkDeleteProgress.total}
+                    ｜ {t('success')} {bulkDeleteProgress.deleted}
+                    ｜ {t('failed')} {bulkDeleteProgress.errorCount}
                   </Typography.Text>
                 )}
                 {bulkDeleteProgress.errors.length > 0 && (
                   <div style={{ maxHeight: 200, overflow: 'auto', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 4, padding: '8px 12px' }}>
-                    <Typography.Text type="danger" strong>错误详情：</Typography.Text>
+                    <Typography.Text type="danger" strong>{t('errorDetails')}:</Typography.Text>
                     {bulkDeleteProgress.errors.map((err, i) => (
                       <Typography.Text key={i} type="danger" style={{ display: 'block', fontSize: 12, lineHeight: 1.8 }}>{err}</Typography.Text>
                     ))}
@@ -907,7 +909,7 @@ const UserMgmtPage: React.FC = () => {
 
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
-      <Typography.Title level={4} style={{ marginTop: 0 }}>👥 用户管理</Typography.Title>
+      <Typography.Title level={4} style={{ marginTop: 0 }}>👥 {t('title')}</Typography.Title>
       <Tabs items={visibleTabs} />
     </Layout>
   )

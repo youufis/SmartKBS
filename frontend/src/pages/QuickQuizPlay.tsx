@@ -14,6 +14,7 @@ import {
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 
@@ -40,6 +41,7 @@ interface RankingEntry {
 }
 
 const QuickQuizPlay: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -138,7 +140,7 @@ const QuickQuizPlay: React.FC = () => {
     } catch (err: any) {
       // 房间被删除时返回 404，跳回主页
       if (err?.response?.status === 404) {
-        message.warning('该抢答活动已被教师删除')
+        message.warning(t('quizDeletedByTeacher'))
         navigate('/quick-quiz', { replace: true })
       }
     }
@@ -168,10 +170,10 @@ const QuickQuizPlay: React.FC = () => {
       const detail = err?.response?.data?.detail || ''
       if (detail.includes('无权')) {
         setErrorMsg('您没有权限进入此房间')
-        message.error('您没有权限进入此房间')
+        message.error(t('noPermissionToEnter'))
       } else if (err?.response?.status === 404) {
         setErrorMsg('房间不存在')
-        message.error('房间不存在')
+        message.error(t('roomNotFound'))
       } else {
         setErrorMsg('加载房间信息失败，请刷新页面重试')
       }
@@ -314,7 +316,7 @@ const QuickQuizPlay: React.FC = () => {
         } catch { /* 可能已被其他客户端触发 */ }
       }
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '提交失败')
+      message.error(err.response?.data?.detail || t('submitFailed'))
       setAnswered(false)
     }
   }, [roomId, timer, question, phase, startTimer, navigate])

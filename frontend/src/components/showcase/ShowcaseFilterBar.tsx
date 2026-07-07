@@ -1,6 +1,7 @@
 import React from 'react'
 import { Input, Select, Space } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   grades: string[];
@@ -20,10 +21,11 @@ const ShowcaseFilterBar: React.FC<Props> = ({
   searchName, sortBy,
   onGradeChange, onClassChange, onSearchNameChange, onSortChange,
 }) => {
+  const { t } = useTranslation('score')
   return (
     <Space wrap style={{ marginBottom: 16, width: '100%' }}>
       <Input
-        placeholder="搜索学生姓名..."
+        placeholder={t('searchStudentName')}
         prefix={<SearchOutlined />}
         value={searchName}
         onChange={(e) => onSearchNameChange(e.target.value)}
@@ -31,7 +33,7 @@ const ShowcaseFilterBar: React.FC<Props> = ({
         allowClear
       />
       <Select
-        placeholder="全部年级"
+        placeholder={t('allGrades')}
         value={selectedGrade || undefined}
         onChange={onGradeChange}
         style={{ width: 130 }}
@@ -41,7 +43,7 @@ const ShowcaseFilterBar: React.FC<Props> = ({
         ]}
       />
       <Select
-        placeholder="全部班级"
+        placeholder={t('allClasses')}
         value={selectedClass || undefined}
         onChange={onClassChange}
         style={{ width: 120 }}
@@ -55,9 +57,9 @@ const ShowcaseFilterBar: React.FC<Props> = ({
         onChange={onSortChange}
         style={{ width: 140 }}
         options={[
-          { label: '🏆 积分最高', value: 'points' },
-          { label: '❤️ 点赞最多', value: 'likes' },
-          { label: '🆕 最新生成', value: 'newest' },
+          { label: t('sortByPoints'), value: 'points' },
+          { label: t('sortByLikes'), value: 'likes' },
+          { label: t('sortByNewest'), value: 'newest' },
         ]}
       />
     </Space>

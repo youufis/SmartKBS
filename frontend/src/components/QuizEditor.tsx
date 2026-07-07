@@ -6,6 +6,7 @@ import {
 import { PlusOutlined, DeleteOutlined, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons'
 import FormulaRenderer from './FormulaRenderer'
 import ActivityScopeSelector from './ActivityScopeSelector'
+import { useTranslation } from 'react-i18next'
 import type { ActivityScopeValue } from './ActivityScopeSelector'
 
 const { Text } = Typography
@@ -42,6 +43,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   open, onCancel, onSave,
   initialTitle = '', initialDescription = '', initialQuestions,
 }) => {
+  const { t } = useTranslation('interaction')
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState(initialDescription)
   const [questions, setQuestions] = useState<Question[]>(initialQuestions || [])
@@ -126,22 +128,22 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   }
 
   const handleSave = async () => {
-    if (!title.trim()) { message.warning('请输入测验标题'); return }
-    if (questions.length === 0) { message.warning('请至少添加一道题目'); return }
+    if (!title.trim()) { message.warning(t('enterQuizTitle')); return }
+    if (questions.length === 0) { message.warning(t('addAtLeastOneQuestion')); return }
 
     // 校验每道题
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i]
       if (!q.question.trim()) {
-        message.warning(`第 ${i + 1} 题题目内容不能为空`)
+        message.warning(t('questionContentRequired', { n: i + 1 }))
         return
       }
       if (q.type !== 'true_false' && q.options.length < 2) {
-        message.warning(`第 ${i + 1} 题至少需要2个选项`)
+        message.warning(t('questionNeedOptions', { n: i + 1 }))
         return
       }
       if (!q.answer) {
-        message.warning(`请设置第 ${i + 1} 题的正确答案`)
+        message.warning(t('setCorrectAnswer', { n: i + 1 }))
         return
       }
       // 验证 multiple 题型的答案格式：逗号分隔的选项字母
@@ -150,7 +152,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
         const validLetters = q.options.map(o => o.charAt(0).toUpperCase())
         for (const letter of answerLetters) {
           if (!validLetters.includes(letter)) {
-            message.warning(`第 ${i + 1} 题多选题答案 "${letter}" 不是有效选项`)
+            message.warning(t('multiChoiceInvalid', { n: i + 1, letter }))
             return
           }
         }
@@ -159,7 +161,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
         const letter = q.answer.toUpperCase()
         const validLetters = q.options.map(o => o.charAt(0).toUpperCase())
         if (!validLetters.includes(letter)) {
-          message.warning(`第 ${i + 1} 题单选题答案 "${letter}" 不是有效选项`)
+          message.warning(t('singleChoiceInvalid', { n: i + 1, letter }))
           return
         }
       }
@@ -175,9 +177,9 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
   const questionTypeLabel = (type: string) => {
     const map: Record<string, string> = {
-      single: '单选题',
-      multiple: '多选题',
-      true_false: '判断题',
+      single: t('singleChoice'),
+      multiple: t('multipleChoice'),
+      true_false: t('trueFalse'),
     }
     return map[type] || type
   }
@@ -193,13 +195,13 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
   return (
     <Modal
-      title={<Text strong style={{ fontSize: 18 }}>📝 创建随堂测验</Text>}
+      title={<Text strong style={{ fontSize: 18 }}>📝 {t('createQuiz')}</Text>}
       open={open}
       onCancel={onCancel}
       footer={[
-        <Button key="cancel" onClick={onCancel}>取消</Button>,
+        <Button key="cancel" onClick={onCancel}>{t('cancel')}</Button>,
         <Button key="save" type="primary" loading={saving} onClick={handleSave}>
-          创建测验 ({questions.length} 题)
+          {t('createQuizCount', { count: questions.length })}
         </Button>,
       ]}
       width={800}
@@ -208,14 +210,14 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
       {/* 基本信息 */}
       <div style={{ marginBottom: 16 }}>
         <Form layout="vertical">
-          <Form.Item label="测验标题" required>
+          <Form.Item label={t('quizTitle')} required>
             <Input
               value={title}
               onChange={e => setTitle(e.target.value)}
-              placeholder="例如：第3章 随堂小测"
+              placeholder={t('quizTitlePlaceholder')}
             />
           </Form.Item>
-          <Form.Item label="描述（可选）">
+          <Form.Item label={t('descriptionOptional')}>
             <Input
               value={description}
               onChange={e => setDescription(e.target.value)}
@@ -234,17 +236,17 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
       {/* 添加题目按钮 */}
       <div style={{ marginBottom: 16 }}>
-        <Text strong style={{ fontSize: 15 }}>题目列表</Text>
+        <Text strong style={{ fontSize: 15 }}>{t('questionList')}</Text>
         <div style={{ marginTop: 8 }}>
           <Space>
             <Button icon={<PlusOutlined />} type="primary" onClick={() => addQuestion('single')}>
-              添加单选题
+              {t('addSingleChoice')}
             </Button>
-            <Button icon={<PlusOutlined />} onClick={() => addQuestion('multiple')}>
-              添加多选题
+            <Button size="small" icon={<PlusOutlined />} onClick={() => addQuestion('multiple')}>
+              {t('addMultipleChoice')}
             </Button>
-            <Button icon={<PlusOutlined />} onClick={() => addQuestion('true_false')}>
-              添加判断题
+            <Button size="small" icon={<PlusOutlined />} onClick={() => addQuestion('true_false')}>
+              {t('addTrueFalse')}
             </Button>
           </Space>
         </div>
@@ -252,7 +254,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
       {/* 题目列表 */}
       {questions.length === 0 ? (
-        <Empty description="点击上方按钮添加题目" />
+        <Empty description={t('clickToAddQuestion')} />
       ) : (
         questions.map((q, index) => (
           <div
@@ -276,9 +278,9 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                   size="small"
                   style={{ width: 90 }}
                 >
-                  <Select.Option value="single">单选题</Select.Option>
-                  <Select.Option value="multiple">多选题</Select.Option>
-                  <Select.Option value="true_false">判断题</Select.Option>
+                  <Select.Option value="single">{t('singleChoice')}</Select.Option>
+                  <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
+                  <Select.Option value="true_false">{t('trueFalse')}</Select.Option>
                 </Select>
               </Space>
               <Space>
@@ -286,7 +288,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                   disabled={index === 0} onClick={() => moveQuestion(index, 'up')} />
                 <Button size="small" icon={<ArrowDownOutlined />}
                   disabled={index === questions.length - 1} onClick={() => moveQuestion(index, 'down')} />
-                <Popconfirm title="删除此题？" onConfirm={() => removeQuestion(q.id)}>
+                <Popconfirm title={t('deleteQuestionConfirm')} onConfirm={() => removeQuestion(q.id)}>
                   <Button size="small" danger icon={<DeleteOutlined />} />
                 </Popconfirm>
               </Space>
@@ -296,7 +298,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             <TextArea
               value={q.question}
               onChange={e => updateQuestion(q.id, 'question', e.target.value)}
-              placeholder="输入题目内容（支持 $...$ LaTeX 公式）..."
+              placeholder={t('questionContentPlaceholder')}
               rows={2}
               style={{ marginBottom: 4 }}
             />
@@ -336,7 +338,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                 ))}
                 <Button size="small" type="dashed" icon={<PlusOutlined />}
                   onClick={() => addOption(q.id)} style={{ marginTop: 6 }}>
-                  添加选项
+                  {t('addOption')}
                 </Button>
               </div>
             ) : (
@@ -351,7 +353,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
 
             {/* 正确答案 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>正确答案：</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('correctAnswerColon')}</Text>
               {q.type === 'single' && (
                 <Radio.Group
                   value={q.answer}
@@ -392,7 +394,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               <Input
                 value={q.explanation}
                 onChange={e => updateQuestion(q.id, 'explanation', e.target.value)}
-                placeholder="解析（可选，支持 $...$ LaTeX 公式）..."
+                placeholder={t('explanationPlaceholder')}
                 size="small"
               />
               {q.explanation.trim() && (

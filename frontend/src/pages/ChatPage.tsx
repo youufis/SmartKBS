@@ -20,6 +20,7 @@ import { useCompanionStore, loadCompanionHistory } from '../stores/companionStor
 import * as historyApi from '../api/history'
 import * as tasksApi from '../api/tasks'
 import * as chatApi from '../api/chat'
+import { useTranslation } from 'react-i18next'
 import CameraCapture from '../components/CameraCapture'
 import VoiceInput from '../components/VoiceInput'
 
@@ -49,6 +50,7 @@ const MessageBubble: React.FC<{
   companionName?: string
   companionPersonality?: string
 }> = ({ msg, isStreaming, onPreviewHtml, companionMode, companionName, companionPersonality }) => {
+  const { t } = useTranslation('chat')
   const isUser = msg.role === 'user'
   const companionAvatar = COMPANION_AVATARS[companionPersonality || 'encouraging'] || '🧠'
 
@@ -71,7 +73,7 @@ const MessageBubble: React.FC<{
             onClick={() => onPreviewHtml(codeContent)}
             style={{ position: 'absolute', top: 4, right: 4, fontSize: 12, lineHeight: '20px', height: 26 }}
           >
-            预览
+            {t('preview')}
           </Button>
         )}
       </div>
@@ -108,7 +110,7 @@ const MessageBubble: React.FC<{
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, color: '#667eea', fontWeight: 600, marginBottom: 4, paddingLeft: 4 }}>
-            {companionName || '助手'}
+            {companionName || t('assistant')}
           </div>
           <div style={{
             maxWidth: '85%', padding: '12px 16px', borderRadius: '16px 16px 16px 4px',
@@ -166,6 +168,7 @@ const MessageBubble: React.FC<{
 }
 
 const ChatPage: React.FC = () => {
+  const { t } = useTranslation('chat')
   // 智能教育助手 - SmartKB
   const {
     messages, isStreaming, currentText, filePaths,
@@ -279,11 +282,11 @@ const ChatPage: React.FC = () => {
     const node = info.node as TreeNode;
     const key = node.key || (selectedKeys.length > 0 ? String(selectedKeys[0]) : '');
     if (node.isLeaf && key) {
-      message.loading({ content: '加载中...', key: 'history' });
+      message.loading({ content: t('loadingHistory'), key: 'history' });
       try {
         const result = await historyApi.readHistoryFile(key);
         if (!result) {
-          message.error({ content: '加载失败：文件为空', key: 'history' });
+          message.error({ content: t('loadingHistoryFailed'), key: 'history' });
           return;
         }
         const msgs = parseHistoryContent(result.content);
@@ -314,28 +317,27 @@ const ChatPage: React.FC = () => {
           }
         }
 
-        message.success({ content: '已加载', key: 'history' });
+        message.success({ content: t('copied'), key: 'history' });
       } catch (e: unknown) {
-        console.error('历史文件加载失败:', e);
+        console.error(t('errorLoad'), e);
         const err = e as { response?: { data?: { detail?: string } }; message?: string };
-        message.error({ content: err?.response?.data?.detail || err?.message || '加载失败', key: 'history' });
+        message.error({ content: err?.response?.data?.detail || err?.message || t('errorLoad'), key: 'history' });
       }
     }
-  }, [parseHistoryContent, companionMode, curRole]);
+  }, [parseHistoryContent, companionMode, t]);
 
   // 删除历史文件或目录
   const handleHistoryDelete = useCallback(async (path: string) => {
     try {
       const msg = await historyApi.deleteHistoryFile(path);
-      message.success(msg || '已删除');
-      // 重新加载树
+      message.success(msg || t('deleted'));
       await loadHistoryTree();
     } catch (e: unknown) {
-      console.error('删除失败:', e);
+      console.error(t('deleteFailed'), e);
       const err = e as { response?: { data?: { detail?: string } }; message?: string };
-      message.error(err?.response?.data?.detail || err?.message || '删除失败');
+      message.error(err?.response?.data?.detail || err?.message || t('deleteFailed'));
     }
-  }, [loadHistoryTree]);
+  }, [loadHistoryTree, t]);
 
   const handleOpenHistory = useCallback(() => {
     setHistoryOpen(true);
@@ -350,23 +352,22 @@ const ChatPage: React.FC = () => {
   const submitToTask = useCallback(async (task: TaskInfo) => {
     const msgs = useChatStore.getState().messages;
     const content = msgs.map(m =>
-      `**${m.role === 'user' ? '用户' : '助手'}**: ${m.content}`
+      `**${m.role === 'user' ? t('you') : t('assistant')}**: ${m.content}`
     ).join('\n\n---\n\n');
     if (!content.trim()) {
-      message.warning('对话内容为空，请先进行对话');
+      message.warning(t('taskContentEmpty'));
       return;
     }
     try {
       const res = await tasksApi.submitTask(task.id, content);
       message.success(res.message);
-      // 设置下次自动保存使用任务相关文件名
       setTaskFilename(task.name);
-      useChatStore.getState().addSystemMessage(`✅ 已提交到任务「${task.name}」`);
+      useChatStore.getState().addSystemMessage(t('submittingToTask', { name: task.name }));
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string };
-      message.error(e?.response?.data?.detail || e?.message || '提交失败');
+      message.error(e?.response?.data?.detail || e?.message || t('submitFailed'));
     }
-  }, []);
+  }, [t]);
 
   // 检测并处理任务关键词
   const handleTaskCommand = useCallback(async (text: string): Promise<boolean> => {
@@ -377,18 +378,18 @@ const ChatPage: React.FC = () => {
       const taskDesc = (createMatch[2] || '').trim();
       if (!taskName) return false;
       if (curUser?.role !== 'admin' && curUser?.role !== 'teacher') {
-        message.warning('仅管理员和教师可创建任务');
+        message.warning(t('onlyTeacherCreate'));
         return true;
       }
       try {
         const res = await tasksApi.createTask(taskName, taskDesc || undefined);
         message.success(res.message);
         const descText = taskDesc ? `（${taskDesc}）` : '';
-        useChatStore.getState().addSystemMessage(`✅ 任务「${taskName}」${descText}已创建成功`);
+        useChatStore.getState().addSystemMessage(t('taskCreated', { name: taskName, desc: descText }));
         return true;
       } catch (err: unknown) {
         const e = err as { response?: { data?: { detail?: string } }; message?: string };
-        message.error(e?.response?.data?.detail || e?.message || '创建任务失败');
+        message.error(e?.response?.data?.detail || e?.message || t('createFailed'));
         return true;
       }
     }
@@ -402,14 +403,14 @@ const ChatPage: React.FC = () => {
         const { tasks } = await tasksApi.getActiveTasks();
         const target = tasks.find(t => t.status === 'active' && t.name === taskName);
         if (!target) {
-          message.warning(`未找到活动任务「${taskName}」`);
+          message.warning(t('taskNotFound', { name: taskName }));
           return true;
         }
         await submitToTask(target);
         return true;
       } catch (err: unknown) {
         const e = err as { response?: { data?: { detail?: string } }; message?: string };
-        message.error(e?.response?.data?.detail || e?.message || '提交失败');
+        message.error(e?.response?.data?.detail || e?.message || t('submitFailed'));
         return true;
       }
     }
@@ -420,7 +421,7 @@ const ChatPage: React.FC = () => {
         const { tasks } = await tasksApi.getActiveTasks();
         const activeTasks = tasks.filter(t => t.status === 'active');
         if (activeTasks.length === 0) {
-          message.info('当前没有活动任务可提交');
+          message.info(t('noActiveTask'));
           return false;
         }
         if (activeTasks.length === 1) {
@@ -434,12 +435,12 @@ const ChatPage: React.FC = () => {
         return true;
       } catch (err: unknown) {
         const e = err as { response?: { data?: { detail?: string } }; message?: string };
-        message.error(e?.response?.data?.detail || e?.message || '提交任务失败');
+        message.error(e?.response?.data?.detail || e?.message || t('submitFailed'));
         return true;
       }
     }
     return false;
-  }, [curUser, submitToTask]);
+  }, [curUser, submitToTask, t]);
 
   const handleSend = async () => {
     if (!input.trim() && filePaths.length === 0) return
@@ -525,14 +526,14 @@ const ChatPage: React.FC = () => {
       setPreviewHtml(fullContent);
       setShowPreview(true);
     } else {
-      message.info('未找到 HTML 代码块');
+      message.info(t('noHtmlFound'));
     }
-  }, [messages]);
+  }, [messages, t]);
 
   // 复制对话内容
   const handleCopy = useCallback(() => {
     const copyMsgs = companionMode ? companionMessages : messages
-    if (!copyMsgs.length) { message.warning('没有可复制的内容'); return }
+    if (!copyMsgs.length) { message.warning(t('noContentToCopy')); return }
 
     // 优先使用 DOM 选取方式复制渲染后的内容（保留完整样式，Word 友好）
     const container = messagesRef.current
@@ -545,14 +546,14 @@ const ChatPage: React.FC = () => {
         sel?.addRange(range)
         const ok = document.execCommand('copy')
         sel?.removeAllRanges()
-        if (ok) { message.success('已复制'); return }
+        if (ok) { message.success(t('copied')); return }
       } catch { /* 降级到 HTML clipboard */ }
     }
 
     // 降级方案：ClipboardItem API（text + html 双格式）
     const text = copyMsgs.map(m => `${m.role === 'user' ? '👤' : '🤖'} ${m.content}`).join('\n\n---\n\n')
     const html = copyMsgs.map(m => {
-      const role = m.role === 'user' ? '👤 用户' : '🤖 助手'
+      const role = m.role === 'user' ? `👤 ${t('you')}` : `🤖 ${t('assistant')}`
       const bg = m.role === 'user' ? '#f0f5ff' : '#f6ffed'
       return `<div style="margin:8px 0;padding:10px 14px;background:${bg};border-radius:6px;border-left:3px solid ${m.role === 'user' ? '#1677ff' : '#52c41a'}">\n        <div style="font-weight:600;font-size:14px;margin-bottom:4px;color:#333">${role}</div>\n        <div style="font-size:14px;line-height:1.7;color:#1a1a1a;white-space:pre-wrap">${m.content.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>\n      </div>`
     }).join('\n')
@@ -562,7 +563,7 @@ const ChatPage: React.FC = () => {
           'text/plain': new Blob([text], { type: 'text/plain' }),
           'text/html': new Blob([`<div style="font-family:'Microsoft YaHei',sans-serif">${html}</div>`], { type: 'text/html' }),
         }),
-      ]).then(() => message.success('已复制'), () => message.error('复制失败'))
+      ]).then(() => message.success(t('copied')), () => message.error(t('copyFailed')))
     } else {
       const ta = document.createElement('textarea')
       ta.value = text
@@ -570,10 +571,10 @@ const ChatPage: React.FC = () => {
       ta.style.opacity = '0'
       document.body.appendChild(ta)
       ta.select()
-      try { document.execCommand('copy'); message.success('已复制') } catch { message.error('复制失败') }
+      try { document.execCommand('copy'); message.success(t('copied')) } catch { message.error(t('copyFailed')) }
       document.body.removeChild(ta)
     }
-  }, [messages]);
+  }, [messages, companionMode, companionMessages, t]);
 
   // 判断是否处于流式状态（普通模式或学伴模式）
   const isAnyStreaming = companionMode ? companionIsStreaming : isStreaming
@@ -602,7 +603,7 @@ const ChatPage: React.FC = () => {
                     if (companionConfig === null) {
                       companionLoadConfig()
                     } else if (!companionConfig.enabled) {
-                      message.warning('学伴已关闭，请先在⚙️设置中启用')
+                      message.warning(t('companionDisabled'))
                       return
                     }
                   }
@@ -615,7 +616,7 @@ const ChatPage: React.FC = () => {
               }}
               style={companionMode ? { background: 'linear-gradient(135deg, #667eea, #764ba2)', borderColor: 'transparent' } : {}}
             >
-              {companionMode ? (curRole === 'teacher' || curRole === 'admin' ? '助手模式' : '学伴模式') : '智答模式'}
+              {companionMode ? (curRole === 'teacher' || curRole === 'admin' ? t('assistantMode') : t('companionMode')) : t('smartMode')}
             </Button>
             {companionMode && (
               <>
@@ -632,16 +633,16 @@ const ChatPage: React.FC = () => {
                 </div>
                 <div>
                   <Typography.Text strong style={{ fontSize: 14, color: curRole === 'teacher' || curRole === 'admin' ? '#13c2c2' : '#5b4fa0' }}>
-                    {curRole === 'teacher' || curRole === 'admin' ? '助手' : (companionConfig?.companion_name || '小智')}
+                    {curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
                   </Typography.Text>
                   <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6, color: '#8c7fbf' }}>
-                    {curRole === 'teacher' || curRole === 'admin' ? '🎓 教师助手' : (companionConfig?.personality_label || '鼓励型')}
+                    {curRole === 'teacher' || curRole === 'admin' ? `🎓 ${t('assistant')}` : (companionConfig?.personality_label || t('companionName'))}
                   </Typography.Text>
                 </div>
                 <div style={{ flex: 1 }} />
                 <Button size="small" type="text" onClick={() => setCompanionSidebar(!companionSidebar)}
                   style={{ color: curRole === 'teacher' || curRole === 'admin' ? '#13c2c2' : '#667eea' }}>
-                  📊 数据
+                  📊 {t('teachingData')}
                 </Button>
                 {curRole === 'student' && (
                   <Button size="small" type="text" icon={<span>⚙️</span>}
@@ -654,7 +655,7 @@ const ChatPage: React.FC = () => {
           </>
         )}
         {(!curRole || (curRole !== 'student' && curRole !== 'teacher' && curRole !== 'admin')) && (
-          <Typography.Text strong style={{ fontSize: 14 }}>💬 智答模式</Typography.Text>
+          <Typography.Text strong style={{ fontSize: 14 }}>{t('modeLabelSmart')}</Typography.Text>
         )}
       </div>
 
@@ -685,31 +686,31 @@ const ChatPage: React.FC = () => {
                     🎓
                   </div>
                   <Typography.Title level={4} style={{ color: '#13c2c2', margin: 0 }}>
-                    你好，我是你的教学助手
+                    {t('greetingTeacher')}
                   </Typography.Title>
                   <Typography.Text style={{ color: '#999', marginTop: 8, maxWidth: 520, fontSize: 14 }}>
-                    我可以帮你备课、出题、批改作业、分析成绩、设计课堂活动
+                    {t('greetingTeacherDesc')}
                   </Typography.Text>
                   <div style={{ marginTop: 20, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                     <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
                       onClick={() => companionSendMsg('请替我生成一份完整的教案，课题是「网络协议」，附带课堂活动和作业设计')}
                     >
-                      📝 生成教案
+                      {t('genLessonPlan')}
                     </Button>
                     <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
                       onClick={() => companionSendMsg('请出10道关于进制转换的题目，包含单选、多选和判断，附答案和解析')}
                     >
-                      📄 自动出卷
+                      {t('genExam')}
                     </Button>
                     <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
                       onClick={() => companionSendMsg('帮我分析高一1班最近一次考试的成绩，指出整体薄弱点')}
                     >
-                      📊 班级分析
+                      {t('classAnalysis')}
                     </Button>
                     <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
                       onClick={() => companionSendMsg('请帮我设计一个45分钟的课堂活动方案，主题是「算法与程序设计」')}
                     >
-                      🎯 活动策划
+                      {t('activityPlan')}
                     </Button>
                   </div>
                 </div>
@@ -729,28 +730,28 @@ const ChatPage: React.FC = () => {
                     {COMPANION_AVATARS[companionConfig?.personality || 'encouraging'] || '🧠'}
                   </div>
                   <Typography.Title level={4} style={{ color: '#667eea', margin: 0 }}>
-                    你好，我是{companionConfig?.companion_name || '小智'}！
+                    {t('greetingStudent', { name: companionConfig?.companion_name || t('companionName') })}
                   </Typography.Title>
                   <Typography.Text style={{ color: '#999', marginTop: 8, maxWidth: 400, fontSize: 14 }}>
-                    {'<'}{companionConfig?.personality_label || '鼓励型'}{'>'} 你的专属学习伙伴
+                    {'<'}{companionConfig?.personality_label || t('companionName')}{'>'} {t('companionTagline', { label: '' })}
                   </Typography.Text>
                   <div style={{ marginTop: 20, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                     {companionProfile?.weakness?.length ? (
                       <Button size="small" type="primary" ghost
                         onClick={() => companionSendMsg('帮我复习一下薄弱知识点')}
                       >
-                        📖 复习薄弱点
+                        {t('reviewWeakness')}
                       </Button>
                     ) : null}
                     <Button size="small" type="primary" ghost
                       onClick={() => companionSendMsg('给我做个学习计划')}
                     >
-                      📋 制定计划
+                      {t('makePlan')}
                     </Button>
                     <Button size="small" type="primary" ghost
                       onClick={() => companionSendMsg('今天有什么建议？')}
                     >
-                      💡 今日建议
+                      {t('todayAdvice')}
                     </Button>
                   </div>
                   {companionProfile && (
@@ -762,7 +763,7 @@ const ChatPage: React.FC = () => {
                         <span>⭐ {companionProfile.total_points} 积分</span>
                       )}
                       {companionProfile.streak_days > 0 && (
-                        <span>🔥 {companionProfile.streak_days} 天连续</span>
+                        <span>🔥 {t('daysStreak', { count: companionProfile.streak_days })}</span>
                       )}
                     </div>
                   )}
@@ -770,8 +771,8 @@ const ChatPage: React.FC = () => {
               )
             ) : (
               <div style={{ textAlign: 'center', paddingTop: 40, color: '#999' }}>
-                <Typography.Title level={4} type="secondary">开始智答</Typography.Title>
-                <Typography.Text type="secondary">在下方输入问题，或上传文件进行分析</Typography.Text>
+                <Typography.Title level={4} type="secondary">{t('emptyChatTitle')}</Typography.Title>
+                <Typography.Text type="secondary">{t('emptyChatDesc')}</Typography.Text>
               </div>
             )
           ) : (
@@ -785,7 +786,7 @@ const ChatPage: React.FC = () => {
                 setShowPreview(true);
               }}
               companionMode={companionMode}
-              companionName={curRole === 'teacher' || curRole === 'admin' ? '教学助手' : (companionConfig?.companion_name || '小智')}
+              companionName={curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
               companionPersonality={companionConfig?.personality}
             />
           ))
@@ -800,7 +801,7 @@ const ChatPage: React.FC = () => {
           overflow: 'auto', background: 'linear-gradient(180deg, #faf8ff 0%, #ffffff 100%)',
         }}>
           <Typography.Text strong style={{ fontSize: 14, display: 'block', marginBottom: 12, color: curRole === 'teacher' || curRole === 'admin' ? '#13c2c2' : '#5b4fa0' }}>
-            {curRole === 'teacher' || curRole === 'admin' ? '🎓 教学数据' : '🧠 我的学习画像'}
+            {curRole === 'teacher' || curRole === 'admin' ? t('teachingData') : t('learningProfile')}
           </Typography.Text>
 
           {(curRole === 'teacher' || curRole === 'admin') ? (
@@ -816,8 +817,8 @@ const ChatPage: React.FC = () => {
                   boxShadow: '0 2px 8px rgba(82,196,26,0.25)',
                 }}>🎓</div>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: '#13c2c2' }}>助手模式</div>
-                  <div style={{ fontSize: 11, color: '#999' }}>AI 助你备课与教学</div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#13c2c2' }}>{t('assistantMode')}</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>{t('greetingTeacherDesc')}</div>
                 </div>
               </div>
 
@@ -834,25 +835,25 @@ const ChatPage: React.FC = () => {
                       {companionTeacherData.total_students !== undefined && (
                         <div>
                           <div style={{ fontSize: 22, fontWeight: 700, color: '#52c41a' }}>{companionTeacherData.total_students}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>学生</div>
+                          <div style={{ fontSize: 11, color: '#888' }}>{t('students')}</div>
                         </div>
                       )}
                       {companionTeacherData.exam_stats && (
                         <div>
                           <div style={{ fontSize: 22, fontWeight: 700, color: '#1677ff' }}>{companionTeacherData.exam_stats.total}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>考试</div>
+                          <div style={{ fontSize: 11, color: '#888' }}>{t('exams')}</div>
                         </div>
                       )}
                       {companionTeacherData.total_submissions !== undefined && (
                         <div>
                           <div style={{ fontSize: 22, fontWeight: 700, color: '#fa8c16' }}>{companionTeacherData.total_submissions}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>已提交</div>
+                          <div style={{ fontSize: 11, color: '#888' }}>{t('submitted')}</div>
                         </div>
                       )}
                       {companionTeacherData.rollcall_this_week !== undefined && (
                         <div>
                           <div style={{ fontSize: 22, fontWeight: 700, color: '#722ed1' }}>{companionTeacherData.rollcall_this_week}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>点名</div>
+                          <div style={{ fontSize: 11, color: '#888' }}>{t('rollcall')}</div>
                         </div>
                       )}
                     </div>
@@ -861,12 +862,12 @@ const ChatPage: React.FC = () => {
                   {/* 今日概况 */}
                   <div style={{ fontSize: 12, color: '#666', marginBottom: 12, lineHeight: 1.8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>💬 今日对话</span>
-                      <span style={{ fontWeight: 600 }}>{companionTeacherData.today_chat_count ?? 0} 次</span>
+                      <span>{t('todayChats')}</span>
+                      <span style={{ fontWeight: 600 }}>{companionTeacherData.today_chat_count ?? 0} {t('times')}</span>
                     </div>
                     {companionTeacherData.teacher_grade && (
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span>📚 任教年级</span>
+                        <span>{t('grade')}</span>
                         <span style={{ fontWeight: 600 }}>{companionTeacherData.teacher_grade} {companionTeacherData.teacher_classes || ''}</span>
                       </div>
                     )}
@@ -879,21 +880,21 @@ const ChatPage: React.FC = () => {
                   }}>
                     {companionTeacherData.exam_stats && (
                       <div style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>📋 考试</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>📋 {t('exams')}</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <Tag color="default" style={{ fontSize: 11 }}>草稿 {companionTeacherData.exam_stats.draft}</Tag>
-                          <Tag color="blue" style={{ fontSize: 11 }}>已发布 {companionTeacherData.exam_stats.published}</Tag>
-                          <Tag color="green" style={{ fontSize: 11 }}>已结束 {companionTeacherData.exam_stats.ended}</Tag>
+                          <Tag color="default" style={{ fontSize: 11 }}>{t('common:status.draft')} {companionTeacherData.exam_stats.draft}</Tag>
+                          <Tag color="blue" style={{ fontSize: 11 }}>{t('common:status.published')} {companionTeacherData.exam_stats.published}</Tag>
+                          <Tag color="green" style={{ fontSize: 11 }}>{t('common:status.ended')} {companionTeacherData.exam_stats.ended}</Tag>
                         </div>
                       </div>
                     )}
                     {(companionTeacherData.teacher_quiz_count !== undefined || companionTeacherData.teacher_poll_count !== undefined) && (
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>🎯 课堂活动</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>🎯 {t('common:activity')}</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {companionTeacherData.teacher_quiz_count !== undefined && <Tag color="purple" style={{ fontSize: 11 }}>测验 {companionTeacherData.teacher_quiz_count}</Tag>}
-                          {companionTeacherData.teacher_poll_count !== undefined && <Tag color="orange" style={{ fontSize: 11 }}>投票 {companionTeacherData.teacher_poll_count}</Tag>}
-                          {companionTeacherData.teacher_question_count !== undefined && <Tag color="cyan" style={{ fontSize: 11 }}>提问 {companionTeacherData.teacher_question_count}</Tag>}
+                          {companionTeacherData.teacher_quiz_count !== undefined && <Tag color="purple" style={{ fontSize: 11 }}>{t('common:quiz')} {companionTeacherData.teacher_quiz_count}</Tag>}
+                          {companionTeacherData.teacher_poll_count !== undefined && <Tag color="orange" style={{ fontSize: 11 }}>{t('common:poll')} {companionTeacherData.teacher_poll_count}</Tag>}
+                          {companionTeacherData.teacher_question_count !== undefined && <Tag color="cyan" style={{ fontSize: 11 }}>{t('common:question')} {companionTeacherData.teacher_question_count}</Tag>}
                         </div>
                       </div>
                     )}
@@ -901,7 +902,7 @@ const ChatPage: React.FC = () => {
                 </>
               ) : (
                 <div style={{ textAlign: 'center', padding: '12px 0', color: '#ccc', fontSize: 12 }}>
-                  加载教学数据中...
+                  {t('loadingTeachingData')}
                 </div>
               )}
             </>
@@ -911,14 +912,14 @@ const ChatPage: React.FC = () => {
             <>
               <div style={{ textAlign: 'center', marginBottom: 16 }}>
                 <span style={{ fontSize: 32 }}>{companionProfile.titles?.main === '初窥门径' ? '🥚' : '🏆'}</span>
-                <div style={{ fontWeight: 600 }}>{companionProfile.titles?.main || '初窥门径'}</div>
-                <div style={{ fontSize: 12, color: '#999' }}>{companionProfile.total_points || 0} 积分</div>
+                <div style={{ fontWeight: 600 }}>{companionProfile.titles?.main || t('companionName')}</div>
+                <div style={{ fontSize: 12, color: '#999' }}>{companionProfile.total_points || 0} {t('points')}</div>
               </div>
 
               {/* 薄弱点 */}
               {companionProfile.weakness && companionProfile.weakness.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <Typography.Text type="danger" style={{ fontSize: 12, fontWeight: 600 }}>⚠️ 薄弱知识点</Typography.Text>
+                  <Typography.Text type="danger" style={{ fontSize: 12, fontWeight: 600 }}>{t('weaknessKnowledge')}</Typography.Text>
                   {companionProfile.weakness.slice(0, 3).map((w, i) => (
                     <div key={i} style={{
                       fontSize: 12, padding: '4px 8px', marginTop: 4,
@@ -936,12 +937,12 @@ const ChatPage: React.FC = () => {
               {/* 考试趋势 */}
               {companionProfile.recent_exams && companionProfile.recent_exams.count > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <Typography.Text style={{ fontSize: 12, fontWeight: 600 }}>📈 考试趋势</Typography.Text>
+                  <Typography.Text style={{ fontSize: 12, fontWeight: 600 }}>{t('examTrend')}</Typography.Text>
                   <div style={{ fontSize: 12, marginTop: 4 }}>
-                    平均分：{companionProfile.recent_exams.avg} 分
+                    {t('averageScore')}：{companionProfile.recent_exams.avg}
                     <span style={{ marginLeft: 8, color: companionProfile.recent_exams.trend === '上升' ? '#52c41a' : companionProfile.recent_exams.trend === '下降' ? '#ff4d4f' : '#999' }}>
                       {companionProfile.recent_exams.trend === '上升' ? '📈' : companionProfile.recent_exams.trend === '下降' ? '📉' : '➡️'}
-                      {companionProfile.recent_exams.trend}
+                      {companionProfile.recent_exams.trend === '上升' ? t('trendUp') : companionProfile.recent_exams.trend === '下降' ? t('trendDown') : ''}
                     </span>
                   </div>
                 </div>
@@ -950,9 +951,9 @@ const ChatPage: React.FC = () => {
               {/* 连续学习 */}
               {companionProfile.streak_days > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <Typography.Text style={{ fontSize: 12, fontWeight: 600 }}>🔥 连续学习</Typography.Text>
+                  <Typography.Text style={{ fontSize: 12, fontWeight: 600 }}>{t('streakDays')}</Typography.Text>
                   <div style={{ fontSize: 20, fontWeight: 700, color: '#fa8c16' }}>
-                    {companionProfile.streak_days} 天
+                    {companionProfile.streak_days} {t('days')}
                   </div>
                 </div>
               )}
@@ -963,7 +964,7 @@ const ChatPage: React.FC = () => {
                   padding: 8, background: '#f6ffed', borderRadius: 4,
                   fontSize: 12, marginBottom: 16,
                 }}>
-                  <Typography.Text style={{ color: '#52c41a', fontWeight: 600 }}>💡 小智建议</Typography.Text>
+                  <Typography.Text style={{ color: '#52c41a', fontWeight: 600 }}>{t('companionAdvice')}</Typography.Text>
                   <div style={{ marginTop: 4, color: '#666' }}>{companionProfile.recommendation}</div>
                 </div>
               )}
@@ -981,11 +982,11 @@ const ChatPage: React.FC = () => {
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#fff7e6'; }}
                 >
                   <Typography.Text style={{ color: '#fa8c16', fontWeight: 600 }}>
-                    💌 未读消息
-                    <span style={{ float: 'right', fontSize: 11, fontWeight: 400, color: '#d48806' }}>查看全部 ›</span>
+                    {t('unreadMessages')}
+                    <span style={{ float: 'right', fontSize: 11, fontWeight: 400, color: '#d48806' }}>{t('viewAll')}</span>
                   </Typography.Text>
                   <div style={{ marginTop: 4, color: '#666' }}>
-                    你有 {companionUnreadCount} 条学伴消息
+                    {t('unreadCountMessage', { count: companionUnreadCount })}
                   </div>
                 </div>
               )}
@@ -1009,7 +1010,7 @@ const ChatPage: React.FC = () => {
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
           }}>
-            <Typography.Text strong style={{ fontSize: 14 }}>💌 学伴消息</Typography.Text>
+            <Typography.Text strong style={{ fontSize: 14 }}>{t('pushModalTitle')}</Typography.Text>
             <Space size={4}>
               {companionPushes.length > 0 && (
                 <Button type="text" size="small" icon={<CheckOutlined />}
@@ -1018,7 +1019,7 @@ const ChatPage: React.FC = () => {
                     setPushModalOpen(false);
                   }}
                 >
-                  全部已读
+                  {t('markAllRead')}
                 </Button>
               )}
             </Space>
@@ -1026,17 +1027,17 @@ const ChatPage: React.FC = () => {
           {/* 列表 */}
           <div style={{ flex: 1, overflow: 'auto', minHeight: 100 }}>
             {companionPushes.length === 0 ? (
-              <Empty description="暂无未读消息" style={{ padding: 24 }} />
+              <Empty description={t('noUnread')} style={{ padding: 24 }} />
             ) : (
               <List
                 dataSource={companionPushes}
                 renderItem={(item) => {
                   const PUSH_TYPES: Record<string, { color: string; icon: string; label: string }> = {
-                    morning: { color: '#fa8c16', icon: '☀️', label: '早安提醒' },
-                    achievement: { color: '#52c41a', icon: '🏆', label: '成就通知' },
-                    encourage: { color: '#1677ff', icon: '💪', label: '鼓励消息' },
-                    reminder: { color: '#ff4d4f', icon: '📌', label: '学习提醒' },
-                    milestone: { color: '#722ed1', icon: '⭐', label: '里程碑' },
+                    morning: { color: '#fa8c16', icon: '☀️', label: t('pushMorning') },
+                    achievement: { color: '#52c41a', icon: '🏆', label: t('pushAchievement') },
+                    encourage: { color: '#1677ff', icon: '💪', label: t('pushEncourage') },
+                    reminder: { color: '#ff4d4f', icon: '📌', label: t('pushReminder') },
+                    milestone: { color: '#722ed1', icon: '⭐', label: t('pushMilestone') },
                   }
                   const cfg = PUSH_TYPES[item.push_type] || { color: '#999', icon: '💌', label: item.push_type_label }
                   const isUnread = !item.is_read
@@ -1060,7 +1061,7 @@ const ChatPage: React.FC = () => {
                             }}
                           />
                         ) : null,
-                        <Popconfirm key="delete" title="确定删除此消息？" placement="left"
+                        <Popconfirm key="delete" title={t('deleteConfirm')} placement="left"
                           onConfirm={async () => {
                             const { deletePush } = await import('../api/companion');
                             await deletePush(item.id);
@@ -1077,7 +1078,7 @@ const ChatPage: React.FC = () => {
                           <Space size={4}>
                             <Typography.Text strong={isUnread} style={{ fontSize: 13 }}>{item.title}</Typography.Text>
                             <Tag color={cfg.color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', border: 'none' }}>{cfg.label}</Tag>
-                            {isUnread && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>新</Tag>}
+                            {isUnread && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('pushNew')}</Tag>}
                           </Space>
                         }
                         description={
@@ -1102,7 +1103,7 @@ const ChatPage: React.FC = () => {
               <Button type="link" size="small"
                 onClick={() => { setPushModalOpen(false); navigate('/notifications') }}
               >
-                查看全部消息 <RightOutlined />
+                {t('viewAllMessages')} <RightOutlined />
               </Button>
             </div>
           )}
@@ -1142,14 +1143,14 @@ const ChatPage: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={companionMode ? (curRole === 'teacher' || curRole === 'admin' ? "输入教学需求，如：生成教案、出题、分析成绩..." : "跟小智聊聊你今天学了什么...") : "输入问题 (Ctrl+Enter 发送)"}
+              placeholder={companionMode ? (curRole === 'teacher' || curRole === 'admin' ? t('placeholderTeacher') : t('placeholderStudent', { name: companionConfig?.companion_name || t('companionName') })) : t('placeholderNormal')}
               autoSize={{ minRows: 1, maxRows: 4 }}
               disabled={isAnyStreaming}
               style={{ flex: 1 }}
             />
             {isAnyStreaming ? (
               <Button icon={<StopOutlined />} onClick={companionMode ? companionStop : stopStreaming} danger>
-                停止
+                {t('stop')}
               </Button>
             ) : (
               <Button
@@ -1157,23 +1158,23 @@ const ChatPage: React.FC = () => {
                 icon={<SendOutlined />}
                 onClick={handleSend}
               >
-                发送
+                {t('send')}
               </Button>
             )}
-            <Button icon={<CopyOutlined />} onClick={handleCopy} title="复制对话" />
+            <Button icon={<CopyOutlined />} onClick={handleCopy} title={t('copy')} />
           </Space.Compact>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <Tooltip title="上传文件">
+            <Tooltip title={t('upload')}>
               <Button icon={<UploadOutlined />} size="small" onClick={() => fileInputRef.current?.click()} />
             </Tooltip>
-            <Tooltip title="拍照输入">
+            <Tooltip title={t('cameraInput')}>
               <Button icon={<CameraOutlined />} size="small" onClick={() => setCameraOpen(true)} />
             </Tooltip>
             {filePaths.length > 0 && (
               <>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {filePaths.length} 个文件
+                  {t('filesCount', { count: filePaths.length })}
                 </Typography.Text>
                 <Button type="link" size="small" danger icon={<DeleteOutlined />}
                   onClick={() => {
@@ -1185,27 +1186,27 @@ const ChatPage: React.FC = () => {
             )}
             <Tooltip title={
               <span style={{ fontSize: 12, lineHeight: 1.6 }}>
-                开启后 AI 会先摘要文件再回答，关闭则直接交由 AI 处理
+                {t('contextEnhanceTip')}
               </span>
             }>
               <Checkbox checked={contextEnhance}
                 onChange={(e) => setContextEnhance(e.target.checked)}>
-                摘要
+                {t('summary')}
               </Checkbox>
             </Tooltip>
             <Tooltip title={
               <span style={{ fontSize: 12, lineHeight: 1.6 }}>
-                开启后 AI 会从试题库和课程大纲中检索相关知识辅助回答
+                {t('ragTip')}
               </span>
             }>
               <Checkbox checked={ragEnabled}
                 onChange={(e) => setRagEnabled(e.target.checked)}>
-                知识
+                {t('knowledge')}
               </Checkbox>
             </Tooltip>
             {hasHtmlInResponse && (
               <Button size="small" icon={<EyeOutlined />} onClick={extractHtmlPreview}>
-                预览 HTML
+                {t('previewHtml')}
               </Button>
             )}
             <div style={{ width: 1, height: 20, background: '#e8e8e8', margin: '0 2px' }} />
@@ -1220,13 +1221,13 @@ const ChatPage: React.FC = () => {
                 newTopic()
               }
             }}>
-              新话题
+              {t('newTopic')}
             </Button>
             <Button size="small" icon={<HistoryOutlined />} onClick={handleOpenHistory}>
-              历史对话
+              {t('chatHistory')}
             </Button>
             {usage && (
-              <Tooltip title={usage.multimodal_enabled ? '支持多模态：图片+文本' : '纯文本模型'}>
+              <Tooltip title={usage.multimodal_enabled ? t('multimodalTip') : t('textModelTip')}>
                 <span style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   fontSize: 12, padding: '2px 8px', borderRadius: 4,
@@ -1235,7 +1236,7 @@ const ChatPage: React.FC = () => {
                   border: '1px solid', borderColor: usage.multimodal_enabled ? '#91caff' : '#e8e8e8',
                   cursor: 'default', whiteSpace: 'nowrap',
                 }}>
-                  {usage.multimodal_enabled ? '🖼️ 多模态' : '💬 文本'}
+                  {usage.multimodal_enabled ? t('multimodal') : t('textOnly')}
                 </span>
               </Tooltip>
             )}
@@ -1243,17 +1244,17 @@ const ChatPage: React.FC = () => {
             {usage && (
               <div style={{ fontSize: 12, color: '#999', whiteSpace: 'nowrap' }}>
                 {usage.remaining === -1 ? (
-                  <span style={{ color: '#bbb' }}>● 管理员不受限</span>
+                  <span style={{ color: '#bbb' }}>{t('adminUnlimited')}</span>
                 ) : usage.enabled ? (
                   <span>
                     <span style={{ color: usage.remaining > 5 ? '#52c41a' : usage.remaining > 0 ? '#faad14' : '#ff4d4f', marginRight: 4 }}>●</span>
-                    今日 {usage.used}/{usage.max} 次
+                    {t('todayUsed', { used: usage.used, max: usage.max })}
                     {usage.remaining > 0
-                      ? <span style={{ marginLeft: 4, color: '#aaa' }}>剩 {usage.remaining}</span>
-                      : <span style={{ marginLeft: 4, color: '#ff4d4f', fontWeight: 600 }}>已用完</span>}
+                      ? <span style={{ marginLeft: 4, color: '#aaa' }}>{t('remaining')} {usage.remaining}</span>
+                      : <span style={{ marginLeft: 4, color: '#ff4d4f', fontWeight: 600 }}>{t('usedUp')}</span>}
                   </span>
                 ) : (
-                  <span style={{ color: '#bbb' }}>● 限流未启用</span>
+                  <span style={{ color: '#bbb' }}>{t('rateLimitDisabled')}</span>
                 )}
               </div>
             )}
@@ -1263,7 +1264,7 @@ const ChatPage: React.FC = () => {
 
       {/* 历史记录侧栏（点击文件加载到对话面板） */}
       <Drawer
-        title="📋 历史记录"
+        title={`📋 ${t('chatHistory')}`}
         placement="left"
         size={360}
         open={historyOpen}
@@ -1283,7 +1284,7 @@ const ChatPage: React.FC = () => {
                 return (
                   <Space size={4} style={{ width: '100%' }} className="history-tree-node">
                     {node.isLeaf ? (isCompanion ? <span>🧠</span> : <FileOutlined />) : <FolderOutlined />}
-                    {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>学伴</Tag>}
+                    {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('companionLabel')}</Tag>}
                     <span style={{
                       fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap', maxWidth: 190,
@@ -1291,7 +1292,7 @@ const ChatPage: React.FC = () => {
                     }} title={node.title as string}>{displayTitle}</span>
                     <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
                       style={{ flexShrink: 0, opacity: 0, transition: 'opacity 0.2s' }}>
-                      <Popconfirm title={`确认删除${node.isLeaf ? '文件' : '整个目录'}？`}
+                      <Popconfirm title={t('confirmDeleteFile', { type: node.isLeaf ? t('file') : t('directory') })}
                         onConfirm={() => handleHistoryDelete(node.key)}>
                         <Button type="link" size="small" danger icon={<DeleteOutlined />} />
                       </Popconfirm>
@@ -1300,7 +1301,7 @@ const ChatPage: React.FC = () => {
                 )}}
             />
           ) : (
-            <Typography.Text type="secondary">暂无历史记录</Typography.Text>
+            <Typography.Text type="secondary">{t('noHistory')}</Typography.Text>
           )}
         </Spin>
       </Drawer>
@@ -1314,7 +1315,7 @@ const ChatPage: React.FC = () => {
 
       {/* HTML 预览 Modal */}
       <Modal
-        title="HTML 预览"
+        title={t('htmlPreview')}
         open={showPreview}
         onCancel={() => setShowPreview(false)}
         width="90%"
@@ -1324,21 +1325,21 @@ const ChatPage: React.FC = () => {
         <iframe
           srcDoc={previewHtml}
           style={{ width: '100%', height: '70vh', border: 'none' }}
-          title="HTML Preview"
+          title={t('htmlPreview')}
           sandbox="allow-scripts allow-same-origin"
         />
       </Modal>
 
       {/* 多任务选择 Modal */}
       <Modal
-        title="📋 选择要提交的任务"
+        title={t('selectTaskTitle')}
         open={taskSelectOpen}
         onCancel={() => setTaskSelectOpen(false)}
         footer={null}
         destroyOnHidden
       >
         <Typography.Text type="secondary" style={{ marginBottom: 16, display: 'block' }}>
-          检测到多个活动任务，请选择要提交到的任务：
+          {t('selectTaskDesc')}
         </Typography.Text>
         <Space orientation="vertical" style={{ width: '100%' }}>
           {pendingTasks.map(task => (
@@ -1365,7 +1366,7 @@ const ChatPage: React.FC = () => {
                     </Typography.Paragraph>
                   )}
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    创建者: {task.creator} ｜ 已提交: {task.submissions?.length || 0} 人
+                    {t('creator')}: {task.creator} ｜ {t('submitted')}: {task.submissions?.length || 0} {t('people')}
                   </Typography.Text>
                 </div>
               </Space>

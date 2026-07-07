@@ -16,8 +16,10 @@ import ComposeWizard from '../components/ComposeWizard'
 import * as examsApi from '../api/exams'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 const ExamComposePage: React.FC = () => {
+  const { t } = useTranslation('exam')
   const { examId } = useParams<{ examId: string }>()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -46,7 +48,7 @@ const ExamComposePage: React.FC = () => {
       const data = await examsApi.getExam(id)
       setExam(data)
     } catch {
-      message.error('加载考试信息失败')
+      message.error(t('loadExamFailed'))
       navigate('/exam')
     } finally {
       setLoading(false)

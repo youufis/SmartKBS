@@ -160,7 +160,7 @@ async def serve_static_file(path: str, request: Request):
     basename = os.path.basename(requested_path)
     
     # 公开文件：未登录也可访问
-    public_files = {"USER_MANUAL.md", "README.md"}
+    public_files = {"USER_MANUAL.md", "README.md", "README.en.md"}
     if basename in public_files:
         return FileResponse(requested_path)
 

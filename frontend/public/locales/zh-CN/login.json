@@ -1,0 +1,35 @@
+{
+  "pageTitle": "欢迎登录 SmartKBS",
+  "username": "用户名",
+  "usernameOrName": "用户名或姓名",
+  "password": "密码",
+  "login": "登录",
+  "loggingIn": "登录中...",
+  "loginBtn": "登 录",
+  "forgotPassword": "忘记密码？",
+  "logout": "退出登录",
+  "logoutConfirm": "确认退出登录？",
+  "onlineCount": "当前在线 {{count}} 人",
+  "onlineCountText": "当前在线: {{count}} 人",
+  "usernameRequired": "请输入用户名",
+  "passwordRequired": "请输入密码",
+  "defaultAgentName": "智慧教学平台",
+  "quotePrefix": "—— ",
+  "theme": {
+    "switch": "切换主题",
+    "default": "默认蓝白",
+    "forest": "森林绿意",
+    "sunset": "日落暖橙",
+    "midnight": "暗夜星空",
+    "lavender": "薰衣草紫"
+  },
+  "language": {
+    "switch": "切换语言",
+    "zh-CN": "中文",
+    "en": "English"
+  },
+  "welcome": "欢迎回来",
+  "loginSuccess": "登录成功",
+  "loginFailed": "登录失败",
+  "sessionExpired": "会话已过期，请重新登录"
+}

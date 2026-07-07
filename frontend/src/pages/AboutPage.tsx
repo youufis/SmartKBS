@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Typography, Alert, Button, message } from 'antd'
 import { LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
-
 const AboutPage: React.FC = () => {
+  const { t, i18n } = useTranslation('system')
   const navigate = useNavigate()
   const [content, setContent] = useState('')
   const [clickCount, setClickCount] = useState(0)
@@ -18,19 +19,29 @@ const AboutPage: React.FC = () => {
     if (newCount >= 10) {
       setClickCount(0)
       setShowEntry(true)
-      message.success('🔓 已解锁')
+      message.success(t('unlocked'))
       return
     }
     clearTimeout((window as any).__aboutTimer)
     ;(window as any).__aboutTimer = setTimeout(() => setClickCount(0), 3000)
   }
 
+  // 根据当前语言加载对应版本的 README
+  const loadReadme = useCallback(async () => {
+    const isEn = i18n.language?.startsWith('en')
+    const file = isEn ? '/api/files/README.en.md' : '/api/files/README.md'
+    try {
+      const res = await fetch(file)
+      const text = await res.text()
+      setContent(text)
+    } catch {
+      setContent('# About & Help\n\nFailed to load help documentation.')
+    }
+  }, [i18n.language])
+
   useEffect(() => {
-    fetch('/api/files/README.md')
-      .then((r) => r.text())
-      .then(setContent)
-      .catch(() => setContent('# 关于与帮助\n\n系统帮助文档加载失败。'))
-  }, [])
+    loadReadme()
+  }, [loadReadme])
 
   // 导航锚点点击处理：提取中文名称，滚动到对应标题
   const navClickRef = useCallback((e: MouseEvent) => {
@@ -66,7 +77,7 @@ const AboutPage: React.FC = () => {
       background: '#fff', borderRadius: 8, minHeight: 'calc(100vh - 160px)',
     }}>
       <Typography.Title level={3} style={{ userSelect: 'none' }}>
-        ℹ️ 关于与帮助
+        ℹ️ {t('about')}
       </Typography.Title>
 
       {showEntry && (
@@ -77,14 +88,14 @@ const AboutPage: React.FC = () => {
           style={{ marginBottom: 16 }}
           message={
             <span>
-              已解锁！
+              {t('updateAvailable')}
               <Button
                 type="link"
                 size="small"
                 onClick={() => navigate('/console')}
                 style={{ marginLeft: 8 }}
               >
-                进入 →
+                {t('enter')} →
               </Button>
             </span>
           }

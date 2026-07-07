@@ -14,6 +14,7 @@ import {
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -36,6 +37,7 @@ interface Stats {
 }
 
 const ScorePage: React.FC = () => {
+  const { t } = useTranslation('score')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
@@ -71,6 +73,21 @@ const ScorePage: React.FC = () => {
       .catch(() => {})
   }, [currentTeacher])
 
+  const [grade, setGrade] = useState<string>('')
+  const [classes, setClasses] = useState<string[]>([])
+  const [cls, setCls] = useState<string>('')
+  const [students, setStudents] = useState<Student[]>([])
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<'scores' | 'ranking' | 'manage'>('scores')
+
+  // 学生管理
+  const [editModal, setEditModal] = useState(false)
+  const [editStudent, setEditStudent] = useState<Student | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editClass, setEditClass] = useState('')
+  const [editGender, setEditGender] = useState('')
+
   // 加载当前教师的任教信息
   const [teacherInfo, setTeacherInfo] = useState<string>('')
   useEffect(() => {
@@ -84,20 +101,6 @@ const ScorePage: React.FC = () => {
     ...extra, teacher: currentTeacher,
   }), [currentTeacher])
 
-  const [grade, setGrade] = useState<string>('')
-  const [classes, setClasses] = useState<string[]>([])
-  const [cls, setCls] = useState<string>('')
-  const [students, setStudents] = useState<Student[]>([])
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'scores' | 'ranking' | 'manage'>('scores')
-
-  // ── 学生管理 ──
-  const [editModal, setEditModal] = useState(false)
-  const [editStudent, setEditStudent] = useState<Student | null>(null)
-  const [editName, setEditName] = useState('')
-  const [editClass, setEditClass] = useState('')
-  const [editGender, setEditGender] = useState('')
 
   // ── 加载班级列表（当年级或教师变化时自动加载） ──
   useEffect(() => {
@@ -124,7 +127,7 @@ const ScorePage: React.FC = () => {
       })
       setStudents(Array.isArray(data) ? data : [])
     } catch {
-      message.error('加载学生列表失败')
+      message.error(t('loadFailed'))
       setStudents([])
     } finally {
       setLoading(false)
@@ -220,11 +223,11 @@ const ScorePage: React.FC = () => {
       const { data } = await apiClient.post('/api/scores/score', {
         grade, class: cls, name: student.name, points, teacher: currentTeacher,
       })
-      message.success(`${student.name} ${points > 0 ? '+' : ''}${points} 分 (当前 ${data.total} 分)`)
+      message.success(t('pointsChanged', { name: student.name, points: points > 0 ? '+' + points : points, total: data.total }))
       loadStudents()
       loadStats()
     } catch {
-      message.error('操作失败')
+      message.error(t('saveFail'))
     }
   }
 
@@ -235,15 +238,15 @@ const ScorePage: React.FC = () => {
         await apiClient.post('/api/scores/reset', {
           grade, class: cls, name: student.name, teacher: currentTeacher,
         })
-        message.success(`已重置 ${student.name} 的积分`)
+        message.success(t('resetSuccess', { name: student.name }))
       } else {
         await apiClient.post('/api/scores/reset', { grade, class: cls, teacher: currentTeacher })
-        message.success(`已重置 ${cls} 全部积分`)
+        message.success(t('resetAllSuccess', { cls }))
       }
       loadStudents()
       loadStats()
     } catch {
-      message.error('重置失败')
+      message.error(t('resetFail'))
     }
   }
 
@@ -266,7 +269,7 @@ const ScorePage: React.FC = () => {
 
   const handleSaveStudent = async () => {
     if (!editName.trim() || !editClass.trim()) {
-      message.warning('姓名和班级为必填项')
+      message.warning(t('requiredFields'))
       return
     }
     try {
@@ -279,11 +282,11 @@ const ScorePage: React.FC = () => {
         body.originalClass = editStudent.class
       }
       await apiClient.post('/api/scores/student', { ...body, teacher: currentTeacher })
-      message.success(editStudent ? '学生信息已更新' : '学生已添加')
+      message.success(editStudent ? t('saveSuccess') : t('addSuccess'))
       setEditModal(false)
       loadStudents()
     } catch {
-      message.error('保存失败')
+      message.error(t('saveFail'))
     }
   }
 
@@ -293,11 +296,11 @@ const ScorePage: React.FC = () => {
       await apiClient.delete('/api/scores/student', {
         data: { grade, name: s.name, class: s.class, teacher: currentTeacher },
       })
-      message.success(`已删除 ${s.name}`)
+      message.success(t('deleteSuccess', { name: s.name }))
       loadStudents()
       loadRanking()
     } catch {
-      message.error('删除失败')
+      message.error(t('saveFail'))
     }
   }
 
@@ -329,17 +332,17 @@ const ScorePage: React.FC = () => {
         >-1</Button>
       </Tooltip>
       <Popconfirm
-        title="确认重置该学生积分？"
+        title={t('resetStudentConfirm')}
         onConfirm={() => handleReset(student)}
-        okText="确认"
-        cancelText="取消"
+        okText={t('confirm')}
+        cancelText={t('cancel')}
       >
-        <Tooltip title="重置为 0">
+        <Tooltip title={t('resetToZero')}>
           <Button size="small" danger type="dashed" icon={<ReloadOutlined />} />
         </Tooltip>
       </Popconfirm>
       {isAdminOrTeacher && (
-        <Tooltip title="编辑">
+        <Tooltip title={t('edit')}>
           <Button size="small" type="text"
             icon={<EditOutlined />}
             onClick={() => openEditStudent(student)}
@@ -348,12 +351,12 @@ const ScorePage: React.FC = () => {
       )}
       {isAdminOrTeacher && (
         <Popconfirm
-          title={`确认删除 ${student.name}？`}
+          title={t('deleteStudentConfirm', { name: student.name })}
           onConfirm={() => handleDeleteStudent(student)}
-          okText="确认"
-          cancelText="取消"
+          okText={t('confirm')}
+          cancelText={t('cancel')}
         >
-          <Tooltip title="删除">
+          <Tooltip title={t('delete')}>
             <Button size="small" type="text" danger
               icon={<DeleteOutlined />}
             />
@@ -361,7 +364,7 @@ const ScorePage: React.FC = () => {
         </Popconfirm>
       )}
       {isAdminOrTeacher && (
-        <Tooltip title="查看成长档案">
+        <Tooltip title={t('viewPortfolio')}>
           <Button size="small" type="link"
             icon={<UserOutlined />}
             onClick={async () => {
@@ -369,11 +372,11 @@ const ScorePage: React.FC = () => {
                 const { data } = await apiClient.get('/api/users', { params: { keyword: student.name } })
                 const found = data.users?.find((u: any) => u.name === student.name && u.role === '普通用户')
                 if (found) navigate(`/portfolio/${found.username}`)
-                else message.warning('未找到对应用户')
-              } catch { message.warning('查询失败') }
+                else message.warning(t('userNotFound'))
+              } catch { message.warning(t('queryFailed')) }
             }}
           >
-            档案
+            {t('portfolio')}
           </Button>
         </Tooltip>
       )}
@@ -382,9 +385,9 @@ const ScorePage: React.FC = () => {
 
   // ── 表格列（统一显示手动积分 + 奖励积分 + 综合积分）──
   const scoreColumns = [
-    { title: '姓名', dataIndex: 'name', key: 'name', width: 80 },
+    { title: t('name'), dataIndex: 'name', key: 'name', width: 80 },
     {
-      title: '手动积分', dataIndex: 'score', key: 'score', width: 80,
+      title: t('manualScore'), dataIndex: 'score', key: 'score', width: 80,
       sorter: (a: any, b: any) => (b.score || 0) - (a.score || 0),
       render: (score: number) => (
         <Text strong style={{ color: score > 0 ? '#52c41a' : score < 0 ? '#ff4d4f' : undefined }}>
@@ -393,14 +396,14 @@ const ScorePage: React.FC = () => {
       ),
     },
     {
-      title: '奖励积分', dataIndex: 'reward_points', key: 'reward_points', width: 80,
+      title: t('rewardScore'), dataIndex: 'reward_points', key: 'reward_points', width: 80,
       sorter: (a: any, b: any) => (b.reward_points || 0) - (a.reward_points || 0),
       render: (points: number) => (
         <Text strong style={{ color: '#fa8c16' }}>{points ?? 0}</Text>
       ),
     },
     {
-      title: '综合积分', dataIndex: 'total_points', key: 'total_points', width: 80,
+      title: t('totalScore_'), dataIndex: 'total_points', key: 'total_points', width: 80,
       sorter: (a: any, b: any) => (b.total_points || 0) - (a.total_points || 0),
       defaultSortOrder: 'descend' as const,
       render: (points: number) => (
@@ -408,7 +411,7 @@ const ScorePage: React.FC = () => {
       ),
     },
     {
-      title: '操作', key: 'action', width: 340,
+      title: t('actions'), key: 'action', width: 340,
       render: (_: any, record: Student) =>
         isAdminOrTeacher ? <ScoreActions student={record} /> : null,
     },
@@ -416,24 +419,24 @@ const ScorePage: React.FC = () => {
 
   // 排行榜（按综合积分排序）
   const rankingColumns = [
-    { title: '排名', key: 'rank', width: 60,
+    { title: t('rank'), key: 'rank', width: 60,
       render: (_: any, __: any, idx: number) => {
         const medals = ['🥇', '🥈', '🥉']
         return <span style={{ fontSize: 16 }}>{medals[idx] || `#${idx + 1}`}</span>
       },
     },
-    { title: '姓名', dataIndex: 'name', key: 'name', width: 100 },
-    ...(!cls ? [{ title: '班级', dataIndex: 'class', key: 'class', width: 100 }] : []),
+    { title: t('name'), dataIndex: 'name', key: 'name', width: 100 },
+    ...(!cls ? [{ title: t('className'), dataIndex: 'class', key: 'class', width: 100 }] : []),
     {
-      title: '手动', dataIndex: 'score', key: 'score', width: 60,
+      title: t('score_'), dataIndex: 'score', key: 'score', width: 60,
       render: (score: number) => <Text type="secondary">{score ?? 0}</Text>,
     },
     {
-      title: '奖励', dataIndex: 'reward_points', key: 'reward_points', width: 60,
+      title: t('reward_'), dataIndex: 'reward_points', key: 'reward_points', width: 60,
       render: (points: number) => <Text type="secondary" style={{ color: '#fa8c16' }}>{points ?? 0}</Text>,
     },
     {
-      title: '综合积分', dataIndex: 'total_points', key: 'total_points', width: 80,
+      title: t('total_'), dataIndex: 'total_points', key: 'total_points', width: 80,
       render: (points: number) => (
         <Text strong style={{ color: '#faad14', fontSize: 16 }}>
           {points ?? 0}
@@ -441,14 +444,14 @@ const ScorePage: React.FC = () => {
       ),
     },
     {
-      title: '等级', key: 'level', width: 70,
+      title: t('levelLabel'), key: 'level', width: 70,
       render: (_: any, record: any) => {
         const p = record.total_points || record.score || 0
-        if (p >= 200) return <Tag color="red">⭐ 学神</Tag>
-        if (p >= 100) return <Tag color="orange">🌟 学霸</Tag>
-        if (p >= 50) return <Tag color="blue">📈 进阶</Tag>
-        if (p >= 20) return <Tag color="green">🌱 新秀</Tag>
-        return <Tag>⚡ 起步</Tag>
+        if (p >= 200) return <Tag color="red">{t('levelGod')}</Tag>
+        if (p >= 100) return <Tag color="orange">{t('levelScholar')}</Tag>
+        if (p >= 50) return <Tag color="blue">{t('levelAdvanced')}</Tag>
+        if (p >= 20) return <Tag color="green">{t('levelRookie')}</Tag>
+        return <Tag>{t('levelBeginner')}</Tag>
       },
     },
   ]
@@ -464,7 +467,7 @@ const ScorePage: React.FC = () => {
               {isAdmin && teacherList.length > 0 && (
                 <Select value={currentTeacher} onChange={(v) => setCurrentTeacher(v)}
                   style={{ width: 120 }} options={teacherList.map((t) => ({ label: t, value: t }))}
-                  placeholder="选择教师"
+                  placeholder={t('selectTeacher')}
                 />
               )}
               {teacherInfo && (
@@ -476,14 +479,14 @@ const ScorePage: React.FC = () => {
                 style={{ width: 100 }} options={allowedGrades.map((g) => ({ label: g, value: g }))}
               />
               <Select value={cls} onChange={setCls} style={{ width: 160 }}
-                placeholder="选择班级"
+                placeholder={t('selectClass')}
                 options={classes.map((c) => ({ label: c, value: c }))}
-                notFoundContent={<Empty description="暂无班级" />}
+                notFoundContent={<Empty description={t('noClass')} />}
               />
-              <Tooltip title="刷新">
+              <Tooltip title={t('refresh')}>
                 <Button icon={<ReloadOutlined />} onClick={() => { loadStudents(); loadStats() }} />
               </Tooltip>
-              <Tooltip title="导出 Excel">
+              <Tooltip title={t('exportExcel')}>
                 <Button icon={<DownloadOutlined />} onClick={() => {
                   const token = localStorage.getItem('smartkb_token')
                   const url = `/api/export/scores?teacher=${currentTeacher}&grade=${grade}&cls=${cls}`
@@ -497,18 +500,18 @@ const ScorePage: React.FC = () => {
             <>
               <Divider type="vertical" style={{ height: 40 }} />
               <Col>
-                <Statistic title="总积分" value={stats.total} prefix={<TrophyOutlined />}
+                <Statistic title={t('totalScoreStat')} value={stats.total} prefix={<TrophyOutlined />}
                   styles={{ content: { color: '#faad14' } }} />
               </Col>
               <Col>
-                <Statistic title="平均分" value={stats.avg} suffix="/ 人" />
+                <Statistic title={t('avgScore')} value={stats.avg} suffix="/" />
               </Col>
               <Col>
-                <Statistic title="最高分" value={stats.max_score}
+                <Statistic title={t('maxScore')} value={stats.max_score}
                   suffix={<Text type="secondary">({stats.max_name})</Text>} />
               </Col>
               <Col>
-                <Statistic title="人数" value={stats.count} prefix={<TeamOutlined />} />
+                <Statistic title={t('studentCount')} value={stats.count} prefix={<TeamOutlined />} />
               </Col>
             </>
           )}
@@ -523,18 +526,18 @@ const ScorePage: React.FC = () => {
             <Col span={8}>
               <Card style={{ background: 'linear-gradient(135deg,#667eea,#764ba2)', color: '#fff', border: 'none' }}>
                 {myScoreLoading ? (
-                  <div style={{ textAlign: 'center', padding: 10, color: 'rgba(255,255,255,0.8)' }}>加载中...</div>
+                  <div style={{ textAlign: 'center', padding: 10, color: 'rgba(255,255,255,0.8)' }}>{t('loading')}</div>
                 ) : myScore ? (
                   <div style={{ textAlign: 'center' }}>
                     <TrophyOutlined style={{ fontSize: 32, color: '#ffd700' }} />
-                    <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>手动积分</div>
+                    <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>{t('myManualScore')}</div>
                     <div style={{ fontSize: 26, fontWeight: 700, color: '#ffd700' }}>{myScore.score ?? 0}</div>
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
                       {user?.name} · {myScore.class}
                     </div>
                   </div>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: 10, color: 'rgba(255,255,255,0.8)' }}>暂无数据</div>
+                  <div style={{ textAlign: 'center', padding: 10, color: 'rgba(255,255,255,0.8)' }}>{t('noScoreData')}</div>
                 )}
               </Card>
             </Col>
@@ -543,16 +546,16 @@ const ScorePage: React.FC = () => {
                 <Spin spinning={rewardLoading}>
                   <div style={{ textAlign: 'center' }}>
                     <StarOutlined style={{ fontSize: 32, color: '#fff' }} />
-                    <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>奖励积分</div>
+                    <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>{t('myRewardPoints')}</div>
                     <div style={{ fontSize: 26, fontWeight: 700, color: '#fff' }}>{rewardPoints}</div>
                     <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
                       {(() => {
                         const p = rewardPoints
-                        if (p >= 200) return '⭐ 学神'
-                        if (p >= 100) return '🌟 学霸'
-                        if (p >= 50) return '📈 进阶'
-                        if (p >= 20) return '🌱 新秀'
-                        return '⚡ 起步'
+                        if (p >= 200) return t('levelGod')
+                        if (p >= 100) return t('levelScholar')
+                        if (p >= 50) return t('levelAdvanced')
+                        if (p >= 20) return t('levelRookie')
+                        return t('levelBeginner')
                       })()}
                     </div>
                   </div>
@@ -563,12 +566,12 @@ const ScorePage: React.FC = () => {
               <Card style={{ background: 'linear-gradient(135deg,#722ed1,#9c27b0)', color: '#fff', border: 'none' }}>
                 <div style={{ textAlign: 'center' }}>
                   <TrophyOutlined style={{ fontSize: 32, color: '#ffd700' }} />
-                  <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>综合积分</div>
+                  <div style={{ fontSize: 12, opacity: 0.8, color: '#fff', marginTop: 4 }}>{t('myTotalScore')}</div>
                   <div style={{ fontSize: 32, fontWeight: 700, color: '#ffd700' }}>
                     {myScoreLoading || rewardLoading ? '...' : (myScore?.score || 0) + rewardPoints}
                   </div>
                   <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
-                    手动 + 奖励
+                    {t('manualPlusReward')}
                   </div>
                 </div>
               </Card>
@@ -578,33 +581,33 @@ const ScorePage: React.FC = () => {
           {/* 积分奖励明细 */}
           <Card
             size="small"
-            title={<Space><StarOutlined style={{ color: '#faad14' }} /> 活动奖励明细</Space>}
+            title={<Space><StarOutlined style={{ color: '#faad14' }} /> {t('activityRewards')}</Space>}
             style={{ marginBottom: 16 }}
           >
             <Spin spinning={rewardLoading}>
               {rewardHistory.length === 0 ? (
-                <Empty description="暂无活动奖励记录，参与课堂互动自动获得积分" />
+                <Empty description={t('noActivityRewards')} />
               ) : (
                 <Table
                   dataSource={rewardHistory}
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 条`, pageSizeOptions: ['5', '10', '20', '50'] }}
+                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20', '50'] }}
                   columns={[
-                    { title: '时间', dataIndex: 'created_at', key: 'created_at', width: 130,
-                      render: (t: string) => t?.slice(0, 16) || '' },
-                    { title: '活动', dataIndex: 'activity_type_name', key: 'activity_type', width: 70 },
-                    { title: '活动名称', dataIndex: 'activity_title', key: 'activity_title', ellipsis: true },
-                    { title: '奖励类型', dataIndex: 'reward_type_name', key: 'reward_type', width: 90,
+                    { title: t('time'), dataIndex: 'created_at', key: 'created_at', width: 130,
+                      render: (v: string) => v?.slice(0, 16) || '' },
+                    { title: t('activity'), dataIndex: 'activity_type_name', key: 'activity_type', width: 70 },
+                    { title: t('activityName'), dataIndex: 'activity_title', key: 'activity_title', ellipsis: true },
+                    { title: t('rewardType'), dataIndex: 'reward_type_name', key: 'reward_type', width: 90,
                       render: (name: string, rec: any) => {
                         const colors: Record<string, string> = { participation: 'default', excellent: 'success', good: 'processing', pass: 'warning' }
                         return <Tag color={colors[rec.reward_type] || 'default'}>{name}</Tag>
                       },
                     },
-                    { title: '积分', dataIndex: 'points', key: 'points', width: 60,
+                    { title: t('points'), dataIndex: 'points', key: 'points', width: 60,
                       render: (p: number) => <Text strong style={{ color: '#52c41a', fontSize: 15 }}>+{p}</Text>,
                     },
-                    { title: '说明', dataIndex: 'reason', key: 'reason', ellipsis: true },
+                    { title: t('description'), dataIndex: 'reason', key: 'reason', ellipsis: true },
                   ]}
                 />
               )}
@@ -623,19 +626,19 @@ const ScorePage: React.FC = () => {
                 type={activeTab === 'scores' ? 'primary' : 'default'}
                 icon={<TrophyOutlined />}
                 onClick={() => setActiveTab('scores')}
-              >积分管理</Button>
+              >{t('scoreManage')}</Button>
               <Button
                 type={activeTab === 'ranking' ? 'primary' : 'default'}
                 icon={<BarChartOutlined />}
                 onClick={() => setActiveTab('ranking')}
-              >排行榜</Button>
+              >{t('ranking')}</Button>
 
               {isAdminOrTeacher && (
                 <Button
                   type={activeTab === 'manage' ? 'primary' : 'default'}
                   icon={<TeamOutlined />}
                   onClick={() => setActiveTab('manage')}
-                >学生管理</Button>
+                >{t('studentManage')}</Button>
               )}
             </Space>
           </Col>
@@ -643,20 +646,20 @@ const ScorePage: React.FC = () => {
             {activeTab === 'scores' && cls && (
               <Space>
                 {isAdminOrTeacher && (
-                  <Button icon={<UserAddOutlined />} onClick={openAddStudent}>添加学生</Button>
+                  <Button icon={<UserAddOutlined />} onClick={openAddStudent}>{t('addStudent')}</Button>
                 )}
                 <Popconfirm
-                  title={`确认重置 ${cls} 全部积分？此操作不可撤销！`}
+                  title={t('resetAllConfirm', { cls })}
                   onConfirm={() => handleReset()}
-                  okText="确认重置"
-                  cancelText="取消"
+                  okText={t('confirmReset')}
+                  cancelText={t('cancel')}
                 >
-                  <Button danger icon={<ReloadOutlined />}>重置全部</Button>
+                  <Button danger icon={<ReloadOutlined />}>{t('resetAll')}</Button>
                 </Popconfirm>
               </Space>
             )}
             {activeTab === 'manage' && cls && isAdminOrTeacher && (
-              <Button icon={<UserAddOutlined />} onClick={openAddStudent}>添加学生</Button>
+              <Button icon={<UserAddOutlined />} onClick={openAddStudent}>{t('addStudent')}</Button>
             )}
           </Col>
         </Row>
@@ -664,23 +667,23 @@ const ScorePage: React.FC = () => {
         {/* ── 积分规则提示 ── */}
         {activeTab === 'scores' && (
           <Card size="small" style={{ marginBottom: 12, background: '#fffbe6', fontSize: 13 }}>
-            📋 手动积分由教师评定 · 奖励积分在参与活动（测验/投票/练习/考试/讨论等）时自动获得：<Tag color="blue">参与+2</Tag> <Tag color="success">优秀+15</Tag> <Tag color="processing">良好+10</Tag> <Tag color="warning">及格+5</Tag>
+            📋 {t('scoreRulesDesc')}：<Tag color="blue">{t('tagParticipation')}</Tag> <Tag color="success">{t('tagExcellent')}</Tag> <Tag color="processing">{t('tagGood')}</Tag> <Tag color="warning">{t('tagPass')}</Tag>
           </Card>
         )}
 
         {/* ── 积分管理 Tab ── */}
         {activeTab === 'scores' && (
           !cls ? (
-            <Empty description="请先选择年级和班级" />
+            <Empty description={t('selectGradeClass')} />
           ) : (
             <Spin spinning={loading}>
               <Table
                 dataSource={students}
                 columns={scoreColumns}
                 rowKey={(r) => r.name}
-                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生`, pageSizeOptions: ['10', '20', '50'] }}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudents', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
                 size="small"
-                locale={{ emptyText: <Empty description="暂无学生数据" /> }}
+                locale={{ emptyText: <Empty description={t('noStudentData')} /> }}
               />
             </Spin>
           )
@@ -690,7 +693,7 @@ const ScorePage: React.FC = () => {
         {activeTab === 'ranking' && (
           <Spin spinning={rankingLoading}>
             {ranking.length === 0 ? (
-              <Empty description={cls ? "暂无排行数据" : "请选择年级查看排行（可选班级筛选）"} />
+              <Empty description={cls ? t('noRankingData') : t('selectGradeForRanking')} />
             ) : (
               <Table
                 dataSource={ranking}
@@ -713,37 +716,37 @@ const ScorePage: React.FC = () => {
         {/* ── 学生管理 Tab ── */}
         {activeTab === 'manage' && (
           !cls ? (
-            <Empty description="请先选择年级和班级" />
+            <Empty description={t('selectGradeClass')} />
           ) : (
             <Table
               dataSource={students}
               columns={[
-                { title: '姓名', dataIndex: 'name', key: 'name', width: 100 },
-                { title: '性别', dataIndex: 'gender', key: 'gender', width: 60 },
-                { title: '班级', dataIndex: 'class', key: 'class', width: 120 },
-                { title: '语言', dataIndex: 'language', key: 'language', width: 80 },
-                { title: '科目', dataIndex: 'subjects', key: 'subjects', width: 120 },
-                { title: '专业', dataIndex: 'major', key: 'major', width: 100 },
+                { title: t('name'), dataIndex: 'name', key: 'name', width: 100 },
+                { title: t('gender'), dataIndex: 'gender', key: 'gender', width: 60 },
+                { title: t('className'), dataIndex: 'class', key: 'class', width: 120 },
+                { title: t('language'), dataIndex: 'language', key: 'language', width: 80 },
+                { title: t('subjects'), dataIndex: 'subjects', key: 'subjects', width: 120 },
+                { title: t('major'), dataIndex: 'major', key: 'major', width: 100 },
                 {
-                  title: '操作', key: 'action', width: 140,
+                  title: t('actions'), key: 'action', width: 140,
                   render: (_: any, record: Student) => (
                     <Space>
                       <Button size="small" icon={<EditOutlined />}
-                        onClick={() => openEditStudent(record)}>编辑</Button>
+                        onClick={() => openEditStudent(record)}>{t('edit')}</Button>
                       <Popconfirm
-                        title={`确认删除 ${record.name}？`}
+                        title={t('deleteStudentConfirm', { name: record.name })}
                         onConfirm={() => handleDeleteStudent(record)}
-                        okText="确认"
-                        cancelText="取消"
+                        okText={t('confirm')}
+                        cancelText={t('cancel')}
                       >
-                        <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+                        <Button size="small" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
                       </Popconfirm>
                     </Space>
                   ),
                 },
               ]}
               rowKey={(r) => r.name}
-              pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 名学生`, pageSizeOptions: ['10', '20', '50'] }}
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudents', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
               size="small"
             />
           )
@@ -753,27 +756,27 @@ const ScorePage: React.FC = () => {
 
       {/* ── 添加/编辑学生弹窗 ── */}
       <Modal
-        title={editStudent ? '编辑学生' : '添加学生'}
+        title={editStudent ? t('editStudent') : t('addStudent')}
         open={editModal}
         onOk={handleSaveStudent}
         onCancel={() => setEditModal(false)}
-        okText="保存"
-        cancelText="取消"
+        okText={t('save')}
+        cancelText={t('cancel')}
       >
         <Space orientation="vertical" style={{ width: '100%' }}>
           <div>
-            <Text>姓名</Text>
-            <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="学生姓名" />
+            <Text>{t('name')}</Text>
+            <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t('studentName')} />
           </div>
           <div>
-            <Text>班级</Text>
-            <Input value={editClass} onChange={(e) => setEditClass(e.target.value)} placeholder="班级" />
+            <Text>{t('className')}</Text>
+            <Input value={editClass} onChange={(e) => setEditClass(e.target.value)} placeholder={t('className')} />
           </div>
           <div>
-            <Text>性别</Text>
+            <Text>{t('gender')}</Text>
             <Radio.Group value={editGender} onChange={(e) => setEditGender(e.target.value)}>
-              <Radio value="男">男</Radio>
-              <Radio value="女">女</Radio>
+              <Radio value="男">{t('male')}</Radio>
+              <Radio value="女">{t('female')}</Radio>
             </Radio.Group>
           </div>
         </Space>

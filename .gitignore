@@ -45,6 +45,9 @@ pytest.ini
 *.pytest_cache
 **/__pycache__/
 
+# ── 开发工具脚本（不部署） ──
+scripts/
+
 # ── 覆盖率报告 ──
 htmlcov/
 .coverage

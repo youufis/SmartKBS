@@ -10,7 +10,7 @@ import {
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
   DownloadOutlined, BulbOutlined, FileOutlined, RobotOutlined,
-  FileTextOutlined, SettingOutlined, AuditOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -19,10 +19,11 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { ExamInfo, ExamAttempt } from '../types'
 
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
-import { TYPE_LABELS, TYPE_OPTIONS } from '../constants/questionTypes'
+import { TYPE_OPTIONS } from '../constants/questionTypes'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
@@ -35,12 +36,6 @@ const STATUS_COLORS: Record<string, string> = {
   ended: 'red',
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  draft: '草稿',
-  published: '已发布',
-  ended: '已结束',
-}
-
 // 课程列表将从后端动态加载
 let subjectOptions: string[] = []
 
@@ -49,6 +44,37 @@ const ExamPage: React.FC = () => {
   const navigate = useNavigate()
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
+  const { t } = useTranslation('exam')
+
+  // 题型标签映射
+  const typeLabel = (type: string): string => {
+    const map: Record<string, string> = {
+      single: t('singleChoice'),
+      multiple: t('multipleChoice'),
+      true_false: t('trueFalse'),
+      short: t('shortAnswer'),
+      fill: t('fillBlank'),
+      essay: t('essay'),
+      subjective: t('subjective'),
+    }
+    return map[type] || type
+  }
+
+  // 难度标签映射
+  const difficultyLabel = (d: string): string => {
+    const map: Record<string, string> = {
+      easy: t('easy'),
+      medium: t('medium'),
+      hard: t('hard'),
+    }
+    return map[d] || d
+  }
+
+  const STATUS_LABELS: Record<string, string> = {
+    draft: t('draft'),
+    published: t('published'),
+    ended: t('ended'),
+  }
 
   // 从后端加载课程列表
   const [subjects, setSubjects] = useState<string[]>([])
@@ -120,12 +146,12 @@ const ExamPage: React.FC = () => {
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
         if (result) setExplainData(result)
-        else message.error('AI 讲解超时')
+        else message.error(t('aiExplainTimeout'))
       } else {
         setExplainData(data)
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '获取讲解失败')
+      message.error(err?.response?.data?.detail || t('aiExplainFailed'))
       setExplainModal(false)
     } finally {
       setExplainLoading(false)
@@ -144,7 +170,7 @@ const ExamPage: React.FC = () => {
       const { data } = await apiClient.get(`/api/exams/attempt/${attempt.id}/exam/${attempt.exam_id}`)
       setDetailData(data)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载详情失败')
+      message.error(err?.response?.data?.detail || t('loadDetailFailed'))
       setDetailModal(false)
     } finally {
       setDetailLoading(false)
@@ -167,11 +193,11 @@ const ExamPage: React.FC = () => {
       setExams(res.exams)
       setTotal(res.total)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载考试列表失败')
+      message.error(err?.response?.data?.detail || t('loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, page, pageSize, isStudent])
+  }, [statusFilter, page, pageSize, isStudent, t])
 
   useEffect(() => { const fn = async () => { loadExams() }; fn() }, [loadExams])
 
@@ -265,7 +291,7 @@ const ExamPage: React.FC = () => {
         show_result_immediately: values.show_result_immediately || false,
         max_attempts: values.max_attempts || 1,
       })
-      message.success('修改成功')
+      message.success(t('editSuccess'))
       setEditModal(false)
       loadExams()
     } catch (err: any) {
@@ -281,10 +307,10 @@ const ExamPage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await examsApi.deleteExam(id)
-      message.success('已删除')
+      message.success(t('deleteSuccess'))
       loadExams()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '删除失败')
+      message.error(err?.response?.data?.detail || t('deleteFailed'))
     }
   }
 
@@ -295,7 +321,7 @@ const ExamPage: React.FC = () => {
       message.success(res.message)
       loadExams()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '发布失败')
+      message.error(err?.response?.data?.detail || t('publishFailed'))
     }
   }
 
@@ -305,7 +331,7 @@ const ExamPage: React.FC = () => {
       message.success(res.message)
       loadExams()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '操作失败')
+      message.error(err?.response?.data?.detail || t('operationFailed'))
     }
   }
 
@@ -385,7 +411,7 @@ const ExamPage: React.FC = () => {
       message.success(res.message)
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '自动均衡失败')
+      message.error(err?.response?.data?.detail || t('autoBalanceFailed'))
     }
   }
 
@@ -398,11 +424,11 @@ const ExamPage: React.FC = () => {
       if (res.balanced) {
         message.success(res.message)
       } else {
-        message.warning(`总分 ${res.current_total} ≠ 目标 ${res.expected_total}，已保存但请检查`)
+        message.warning(t('scoreMismatch', { current: res.current_total, expected: res.expected_total }))
       }
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '保存分值失败')
+      message.error(err?.response?.data?.detail || t('saveScoreFailed'))
     } finally {
       setSavingScores(false)
     }
@@ -417,26 +443,26 @@ const ExamPage: React.FC = () => {
 
   const handleAddQuestions = async () => {
     if (!questionExam || selectedQIds.length === 0) {
-      message.warning('请选择要添加的试题')
+      message.warning(t('selectQuestionsFirst'))
       return
     }
     // 自动过滤掉已存在的题目
     const toAdd = newSelectedIds
     if (toAdd.length === 0) {
-      message.warning('选中的题目都已存在于本考试中，无需重复添加')
+      message.warning(t('allQuestionsExist'))
       return
     }
     try {
       const res = await examsApi.addQuestionsToExam(questionExam.id, toAdd)
       if (res.skipped_existing) {
-        message.warning(`成功添加 ${res.added} 道，${res.skipped_existing} 道重复已自动跳过`)
+        message.warning(t('questionsAdded', { added: res.added, skipped: res.skipped_existing }))
       } else {
         message.success(res.message)
       }
       setSelectedQIds([])
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '添加失败')
+      message.error(err?.response?.data?.detail || t('addFailed'))
     }
   }
 
@@ -444,10 +470,10 @@ const ExamPage: React.FC = () => {
     if (!questionExam) return
     try {
       await examsApi.removeQuestionsFromExam(questionExam.id, [qId])
-      message.success('已移除')
+      message.success(t('removed'))
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '移除失败')
+      message.error(err?.response?.data?.detail || t('removeFailed'))
     }
   }
 
@@ -485,7 +511,7 @@ const ExamPage: React.FC = () => {
         target_count: aiComposeCount,
         knowledge_focus: aiComposeFocus,
       })
-      message.success(data.message || 'AI 组卷完成')
+      message.success(data.message || t('composeSuccess'))
       if (data.reason) {
         Modal.info({
           title: 'AI 组卷思路',
@@ -494,7 +520,7 @@ const ExamPage: React.FC = () => {
       }
       await loadExamQuestions(questionExam.id)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'AI 组卷失败')
+      message.error(err?.response?.data?.detail || t('composeFailed'))
     } finally {
       setAiComposing(false)
     }
@@ -509,7 +535,7 @@ const ExamPage: React.FC = () => {
       const res = await examsApi.getExamResults(exam.id)
       setResultData(res)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '加载成绩失败')
+      message.error(err?.response?.data?.detail || t('loadScoreFailed'))
     } finally {
       setResultLoading(false)
     }
@@ -531,22 +557,10 @@ const ExamPage: React.FC = () => {
     window.open(url, '_blank')
   }
 
-  // ── 导出 Word 答案卷 ──
-  const handleExportAnswerKey = (examId: number) => {
-    const url = examsApi.getExportAnswerKeyUrl(examId)
-    window.open(url, '_blank')
-  }
-
-  // ── 导出 Word 答题卡 ──
-  const handleExportAnswerSheet = (examId: number) => {
-    const url = examsApi.getExportAnswerSheetUrl(examId)
-    window.open(url, '_blank')
-  }
-
   // ── 表格列（教师/管理员视图） ──
   const teacherColumns = [
     {
-      title: '标题',
+      title: t('examTitle'),
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -558,46 +572,46 @@ const ExamPage: React.FC = () => {
       ),
     },
     {
-      title: '科目',
+      title: t('subject'),
       dataIndex: 'subject',
       key: 'subject',
       width: 100,
     },
     {
-      title: '时长',
+      title: t('duration'),
       dataIndex: 'duration',
       key: 'duration',
       width: 70,
-      render: (v: number) => `${v}分钟`,
+      render: (v: number) => `${v}${t('minutes')}`,
     },
     {
-      title: '总分',
+      title: t('totalScore'),
       dataIndex: 'total_score',
       key: 'total_score',
       width: 60,
     },
     {
-      title: '题目数',
+      title: t('questionCount'),
       dataIndex: 'question_count',
       key: 'question_count',
       width: 70,
     },
     {
-      title: '创建者',
+      title: t('creator'),
       dataIndex: 'creator_name',
       key: 'creator_name',
       width: 100,
       render: (name: string, record: ExamInfo) => name || record.creator_username,
     },
     {
-      title: '创建时间',
+      title: t('createdAt'),
       dataIndex: 'created_at',
       key: 'created_at',
       width: 140,
       render: (t: string) => t ? t.slice(0, 16) : '-',
     },
     {
-      title: '操作',
+      title: t('actions'),
       key: 'action',
       width: 320,
       render: (_: any, record: ExamInfo) => {
@@ -606,29 +620,29 @@ const ExamPage: React.FC = () => {
           <Space size="small" wrap>
             {record.status === 'draft' && canEdit && (
               <>
-                <Tooltip title="编辑考试">
+                <Tooltip title={t('editExam')}>
                   <Button type="link" size="small" icon={<EditOutlined />}
                     onClick={() => handleEdit(record)} />
                 </Tooltip>
-                <Tooltip title="管理题目">
+                <Tooltip title={t('manageQuestions')}>
                   <Button type="link" size="small" icon={<OrderedListOutlined />}
                     onClick={() => handleManageQuestions(record)} />
                 </Tooltip>
-                <Tooltip title="智能组卷">
+                <Tooltip title={t('composeExam')}>
                   <Button type="link" size="small" icon={<RobotOutlined />}
                     style={{ color: '#722ed1' }}
                     onClick={() => handleComposeExam(record.id)} />
                 </Tooltip>
-                <Popconfirm title="确认发布？" description="发布后学生即可参加考试"
-                  onConfirm={() => handlePublish(record.id)} okText="发布" cancelText="取消">
-                  <Tooltip title="发布考试">
+                <Popconfirm title={t('confirmPublish')} description={t('publishDesc')}
+                  onConfirm={() => handlePublish(record.id)} okText={t('publish')} cancelText={t('cancel')}>
+                  <Tooltip title={t('publish')}>
                     <Button type="link" size="small" icon={<PlayCircleOutlined />}
                       style={{ color: '#52c41a' }} />
                   </Tooltip>
                 </Popconfirm>
-                <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}
-                  okText="确认" cancelText="取消">
-                  <Tooltip title="删除">
+                <Popconfirm title={t('confirmDelete')} onConfirm={() => handleDelete(record.id)}
+                  okText={t('confirm')} cancelText={t('cancel')}>
+                  <Tooltip title={t('deleteExam')}>
                     <Button type="link" size="small" danger icon={<DeleteOutlined />} />
                   </Tooltip>
                 </Popconfirm>
@@ -636,22 +650,22 @@ const ExamPage: React.FC = () => {
             )}
             {record.status === 'published' && canEdit && (
               <>
-                <Tooltip title="管理题目">
+                <Tooltip title={t('manageQuestions')}>
                   <Button type="link" size="small" icon={<OrderedListOutlined />}
                     onClick={() => handleManageQuestions(record)} />
                 </Tooltip>
-                <Tooltip title="导出试卷">
+                <Tooltip title={t('exportPaper')}>
                   <Button type="link" size="small" icon={<FileTextOutlined />}
                     style={{ color: '#1677ff' }}
                     onClick={() => handleExportPaper(record.id)} />
                 </Tooltip>
-                <Tooltip title="查看成绩">
+                <Tooltip title={t('reviewExam')}>
                   <Button type="link" size="small" icon={<BarChartOutlined />}
                     onClick={() => handleViewResults(record)} />
                 </Tooltip>
-                <Popconfirm title="确认结束考试？" description="结束后学生将无法继续作答"
-                  onConfirm={() => handleEnd(record.id)} okText="结束" cancelText="取消">
-                  <Tooltip title="结束考试">
+                <Popconfirm title={t('confirmEnd')} description={t('endDesc')}
+                  onConfirm={() => handleEnd(record.id)} okText={t('end')} cancelText={t('cancel')}>
+                  <Tooltip title={t('endExam')}>
                     <Button type="link" size="small" icon={<PauseCircleOutlined />}
                       style={{ color: '#ff4d4f' }} />
                   </Tooltip>
@@ -660,18 +674,18 @@ const ExamPage: React.FC = () => {
             )}
             {record.status === 'ended' && canEdit && (
               <>
-                <Tooltip title="导出试卷">
+                <Tooltip title={t('exportPaper')}>
                   <Button type="link" size="small" icon={<FileTextOutlined />}
                     style={{ color: '#1677ff' }}
                     onClick={() => handleExportPaper(record.id)} />
                 </Tooltip>
-                <Tooltip title="查看成绩">
+                <Tooltip title={t('reviewExam')}>
                   <Button type="link" size="small" icon={<BarChartOutlined />}
                     onClick={() => handleViewResults(record)} />
                 </Tooltip>
-                <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}
-                  okText="确认" cancelText="取消">
-                  <Tooltip title="删除">
+                <Popconfirm title={t('confirmDelete')} onConfirm={() => handleDelete(record.id)}
+                  okText={t('confirm')} cancelText={t('cancel')}>
+                  <Tooltip title={t('deleteExam')}>
                     <Button type="link" size="small" danger icon={<DeleteOutlined />} />
                   </Tooltip>
                 </Popconfirm>
@@ -686,62 +700,62 @@ const ExamPage: React.FC = () => {
   // ── 表格列（学生视图） ──
   const studentColumns = [
     {
-      title: '考试名称',
+      title: t('examTitle'),
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
       render: (text: string, record: ExamInfo) => (
         <Space>
           <span>{text}</span>
-          {record.status === 'ended' && <Tag color="red">已结束</Tag>}
+          {record.status === 'ended' && <Tag color="red">{t('ended')}</Tag>}
         </Space>
       ),
     },
     {
-      title: '科目',
+      title: t('subject'),
       dataIndex: 'subject',
       key: 'subject',
       width: 100,
     },
     {
-      title: '发布者',
+      title: t('publisher'),
       dataIndex: 'creator_name',
       key: 'creator_name',
       width: 90,
       render: (name: string, record: ExamInfo) => <Tag color="blue">{name || record.creator_username || '-'}</Tag>,
     },
     {
-      title: '时长',
+      title: t('duration'),
       dataIndex: 'duration',
       key: 'duration',
       width: 70,
-      render: (v: number) => `${v}分钟`,
+      render: (v: number) => `${v}${t('minutes')}`,
     },
     {
-      title: '总分',
+      title: t('totalScore'),
       dataIndex: 'total_score',
       key: 'total_score',
       width: 60,
     },
     {
-      title: '题目数',
+      title: t('questionCount'),
       dataIndex: 'question_count',
       key: 'question_count',
       width: 70,
     },
     {
-      title: '我的状态',
+      title: t('myStatus'),
       key: 'my_status',
       width: 120,
       render: (_: any, record: ExamInfo) => {
         const attempt = record.my_attempt
-        if (!attempt) return <Tag>未参加</Tag>
-        if (attempt.status === 'in_progress') return <Tag color="processing">进行中</Tag>
+        if (!attempt) return <Tag>{t('status')}</Tag>
+        if (attempt.status === 'in_progress') return <Tag color="processing">{t('inProgress')}</Tag>
         if (attempt.status === 'submitted') {
           const passed = attempt.score >= (record.pass_score || 60)
           return (
             <Space size={4}>
-              <Tag color={passed ? 'green' : 'red'}>{attempt.score}分</Tag>
+              <Tag color={passed ? 'green' : 'red'}>{attempt.score}{t('scoreUnit')}</Tag>
               {passed ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> : null}
             </Space>
           )
@@ -750,7 +764,7 @@ const ExamPage: React.FC = () => {
       },
     },
     {
-      title: '操作',
+      title: t('actions'),
       key: 'action',
       width: 200,
       render: (_: any, record: ExamInfo) => {
@@ -761,9 +775,9 @@ const ExamPage: React.FC = () => {
             <Space>
               {attempt ? (
                 <Button size="small" icon={<BarChartOutlined />}
-                  onClick={() => handleViewMyDetail(attempt)}>查看成绩</Button>
+                  onClick={() => handleViewMyDetail(attempt)}>{t('reviewExam')}</Button>
               ) : (
-                <Tag>已结束</Tag>
+                <Tag>{t('ended')}</Tag>
               )}
             </Space>
           )
@@ -775,12 +789,12 @@ const ExamPage: React.FC = () => {
               <Button type="primary" size="small"
                 icon={<PlayCircleOutlined />}
                 onClick={() => handleTakeExam(record.id)}>
-                {attempt ? '重考' : '参加考试'}
+                {attempt ? t('retake') : t('startExam')}
               </Button>
             ) : attempt.status === 'in_progress' ? (
               <Button type="primary" size="small"
                 onClick={() => handleTakeExam(record.id)}>
-                继续作答
+                {t('continueExam')}
               </Button>
             ) : null}
           </Space>
@@ -814,10 +828,10 @@ const ExamPage: React.FC = () => {
         <Row justify="space-between" align="middle">
           <Col>
             <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-              📋 考试发布
+              📋 {t('title')}
             </Typography.Title>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {isStudent ? '查看和参加已发布的考试' : '创建和管理考试'}
+              {isStudent ? t('studentDesc') : t('teacherDesc')}
             </Typography.Text>
           </Col>
           <Col>
@@ -825,11 +839,11 @@ const ExamPage: React.FC = () => {
               {isTeacherOrAdmin && (
                 <Button type="primary" icon={<PlusOutlined />}
                   onClick={() => { setCreateModal(true); createForm.resetFields() }}>
-                  创建考试
+                  {t('createExam')}
                 </Button>
               )}
               <Button icon={<ReloadOutlined />} onClick={loadExams} loading={loading}>
-                刷新
+                {t('refresh')}
               </Button>
             </Space>
           </Col>
@@ -838,19 +852,19 @@ const ExamPage: React.FC = () => {
         {/* ── 状态筛选 ── */}
         <Row gutter={12} align="middle">
           <Col>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>状态：</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('status')}：</Typography.Text>
           </Col>
           <Col span={3}>
-            <Select allowClear placeholder="全部" style={{ width: '100%' }}
+            <Select allowClear placeholder={t('all')} style={{ width: '100%' }}
               value={statusFilter}
               onChange={(val) => { setStatusFilter(val); setPage(1) }}>
-              <Option value="draft">草稿</Option>
-              <Option value="published">已发布</Option>
-              <Option value="ended">已结束</Option>
+              <Option value="draft">{t('draft')}</Option>
+              <Option value="published">{t('published')}</Option>
+              <Option value="ended">{t('ended')}</Option>
             </Select>
           </Col>
           <Col>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>共 {total} 场考试</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('totalExams', { count: total })}</Typography.Text>
           </Col>
         </Row>
 
@@ -861,32 +875,32 @@ const ExamPage: React.FC = () => {
           }} items={[
             {
               key: 'exams',
-              label: <Space><FileAddOutlined />考试列表</Space>,
+              label: <Space><FileAddOutlined />{t('examList')}</Space>,
               children: (
                 <Table dataSource={exams} columns={studentColumns} rowKey="id"
                   loading={loading} size="small"
                   pagination={{
                     current: page, pageSize, total,
                     showSizeChanger: true,
-                    showTotal: (t) => `共 ${t} 场考试`,
+                    showTotal: (total) => t('totalExams', { count: total }),
                     onChange: (p, ps) => { setPage(p); setPageSize(ps) },
                   }}
-                  locale={{ emptyText: <Empty description="暂无发布的考试" /> }}
+                  locale={{ emptyText: <Empty description={t('noExams')} /> }}
                 />
               ),
             },
             {
               key: 'results',
-              label: <Space><BarChartOutlined />我的成绩</Space>,
+              label: <Space><BarChartOutlined />{t('result')}</Space>,
               children: (
                 <Table dataSource={myResults} rowKey="id" loading={myResultsLoading} size="small"
                   columns={[
-                    { title: '考试名称', dataIndex: 'exam_title', key: 'exam_title', ellipsis: true },
-                    { title: '科目', dataIndex: 'exam_subject', key: 'exam_subject', width: 80 },
-                    { title: '发布者', dataIndex: 'creator_name', key: 'creator_name', width: 90,
+                    { title: t('examTitle'), dataIndex: 'exam_title', key: 'exam_title', ellipsis: true },
+                    { title: t('subject'), dataIndex: 'exam_subject', key: 'exam_subject', width: 80 },
+                    { title: t('publisher'), dataIndex: 'creator_name', key: 'creator_name', width: 90,
                       render: (name: string) => <Tag color="blue">{name || '-'}</Tag> },
                     {
-                      title: '得分', key: 'score', width: 100,
+                      title: t('score'), key: 'score', width: 100,
                       render: (_: any, r: ExamAttempt) => {
                         const passed = r.score >= (r.pass_score || 60)
                         return (
@@ -894,32 +908,32 @@ const ExamPage: React.FC = () => {
                             <Typography.Text strong style={{ color: passed ? '#52c41a' : '#ff4d4f' }}>
                               {r.score} / {r.total_score}
                             </Typography.Text>
-                            {passed ? <Tag color="green">及格</Tag> : <Tag color="red">未及格</Tag>}
+                            {passed ? <Tag color="green">{t('pass')}</Tag> : <Tag color="red">{t('fail')}</Tag>}
                           </Space>
                         )
                       },
                     },
                     {
-                      title: '提交时间', dataIndex: 'submitted_at', key: 'submitted_at', width: 160,
+                      title: t('startTime'), dataIndex: 'submitted_at', key: 'submitted_at', width: 160,
                       render: (t: string) => t ? t.slice(0, 16) : '-',
                     },
                     {
-                      title: '操作', key: 'actions', width: 200,
+                      title: t('actions'), key: 'actions', width: 200,
                       render: (_: any, r: ExamAttempt) => (
                         <Space>
                           <Button type="link" size="small" icon={<FileOutlined />}
                             onClick={() => handleViewMyDetail(r)}>
-                            查看详情
+                            {t('viewDetail')}
                           </Button>
                           <Button type="link" size="small" icon={<BulbOutlined />}
                             onClick={() => handleExplainWrong(r.exam_id)}>
-                            AI 讲解
+                            {t('aiExplain')}
                           </Button>
                         </Space>
                       ),
                     },
                   ]}
-                  locale={{ emptyText: <Empty description="暂无考试记录" /> }}
+                  locale={{ emptyText: <Empty description={t('noResults')} /> }}
                 />
               ),
             },
@@ -933,18 +947,18 @@ const ExamPage: React.FC = () => {
             pagination={{
               current: page, pageSize, total,
               showSizeChanger: true,
-              showTotal: (t) => `共 ${t} 场考试`,
+              showTotal: (total) => t('totalExams', { count: total }),
               onChange: (p, ps) => { setPage(p); setPageSize(ps) },
             }}
-            locale={{ emptyText: <Empty description="暂无考试，点击「创建考试」开始" /> }}
+            locale={{ emptyText: <Empty description={t('noExams')} /> }}
             expandable={{
               expandedRowRender: (record) => (
                 <div style={{ padding: '8px 0', maxWidth: 800 }}>
-                  <Typography.Text style={{ fontSize: 14 }}>{record.description || '无说明'}</Typography.Text>
+                  <Typography.Text style={{ fontSize: 14 }}>{record.description || t('noDescription')}</Typography.Text>
                   <div style={{ marginTop: 8, fontSize: 13, color: '#888' }}>
-                    创建者：{record.creator_name || record.creator_username} |
-                    时长：{record.duration}分钟 |
-                    及格线：{record.pass_score}分
+                    {t('creatorColon')}{record.creator_name || record.creator_username} |
+                    {t('durationColon')}{record.duration}{t('minutes')} |
+                    {t('passingScoreColon')}{record.pass_score}{t('scoreUnit')}
                   </div>
                 </div>
               ),
@@ -954,53 +968,53 @@ const ExamPage: React.FC = () => {
       </Space>
 
       {/* ── 创建考试弹窗 ── */}
-      <Modal title="创建考试" open={createModal}
+      <Modal title={t('createExam')} open={createModal}
         onCancel={() => setCreateModal(false)}
         onOk={handleCreate} confirmLoading={saving}
-        okText="创建" width={640}>
+        okText={t('createExam')} width={640}>
         <Form form={createForm} layout="vertical"
           initialValues={createInitialValues}>
-          <Form.Item label="考试标题" name="title"
-            rules={[{ required: true, message: '请输入考试标题' }]}>
-            <Input placeholder="如：第一章单元测试" />
+          <Form.Item label={t('examTitle')} name="title"
+            rules={[{ required: true, message: t('examTitleRequired') }]}>
+            <Input placeholder={t('examTitlePlaceholder')} />
           </Form.Item>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item label="科目" name="subject">
+              <Form.Item label={t('subject')} name="subject">
                 <Select>
                   {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="考试时长（分钟）" name="duration">
+              <Form.Item label={t('duration')} name="duration">
                 <InputNumber min={1} max={180} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="最大答题次数" name="max_attempts">
+              <Form.Item label={t('maxAttempts')} name="max_attempts">
                 <InputNumber min={1} max={10} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label="总分" name="total_score">
+              <Form.Item label={t('totalScore')} name="total_score">
                 <InputNumber min={1} max={1000} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="及格分" name="pass_score">
+              <Form.Item label={t('passScore')} name="pass_score">
                 <InputNumber min={0} max={1000} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label="考试说明" name="description">
-            <TextArea rows={3} placeholder="可选：填写考试说明或注意事项" />
+          <Form.Item label={t('description')} name="description">
+            <TextArea rows={3} placeholder={t('descriptionPlaceholder')} />
           </Form.Item>
 
           {/* ── 活动目标范围 ── */}
-          <Form.Item label="活动目标范围" name="activityScope" style={{ marginBottom: 16 }}>
+          <Form.Item label={t('activityScope')} name="activityScope" style={{ marginBottom: 16 }}>
             <ActivityScopeSelector
               showAllOption={isTeacherOrAdmin && user?.role === 'admin'}
             />
@@ -1008,26 +1022,26 @@ const ExamPage: React.FC = () => {
 
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item label="随机题目顺序" name="shuffle_questions" valuePropName="checked">
+              <Form.Item label={t('shuffleQuestions')} name="shuffle_questions" valuePropName="checked">
                 <Select>
-                  <Option value={true}>是</Option>
-                  <Option value={false}>否</Option>
+                  <Option value={true}>{t('yes')}</Option>
+                  <Option value={false}>{t('no')}</Option>
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="随机选项顺序" name="shuffle_options" valuePropName="checked">
+              <Form.Item label={t('shuffleOptions')} name="shuffle_options" valuePropName="checked">
                 <Select>
-                  <Option value={true}>是</Option>
-                  <Option value={false}>否</Option>
+                  <Option value={true}>{t('yes')}</Option>
+                  <Option value={false}>{t('no')}</Option>
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="立即显示结果" name="show_result_immediately">
+              <Form.Item label={t('showResults')} name="show_result_immediately">
                 <Select>
-                  <Option value={true}>是</Option>
-                  <Option value={false}>否</Option>
+                  <Option value={true}>{t('yes')}</Option>
+                  <Option value={false}>{t('no')}</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -1036,71 +1050,71 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑考试弹窗 ── */}
-      <Modal title="编辑考试" open={editModal}
+      <Modal title={t('editExam')} open={editModal}
         onCancel={() => setEditModal(false)}
         onOk={handleSaveEdit} confirmLoading={saving}
-        okText="保存" width={640}>
+        okText={t('save')} width={640}>
         <Form form={editForm} layout="vertical">
-          <Form.Item label="考试标题" name="title"
-            rules={[{ required: true, message: '请输入考试标题' }]}>
+          <Form.Item label={t('examTitle')} name="title"
+            rules={[{ required: true, message: t('examTitleRequired') }]}>
             <Input />
           </Form.Item>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item label="科目" name="subject">
+              <Form.Item label={t('subject')} name="subject">
                 <Select>
                   {subjectOptions.map(s => <Option key={s} value={s}>{s}</Option>)}
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="考试时长（分钟）" name="duration">
+              <Form.Item label={t('duration')} name="duration">
                 <InputNumber min={1} max={180} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="最大答题次数" name="max_attempts">
+              <Form.Item label={t('maxAttempts')} name="max_attempts">
                 <InputNumber min={1} max={10} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item label="总分" name="total_score">
+              <Form.Item label={t('totalScore')} name="total_score">
                 <InputNumber min={1} max={1000} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="及格分" name="pass_score">
+              <Form.Item label={t('passScore')} name="pass_score">
                 <InputNumber min={0} max={1000} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item label="考试说明" name="description">
+          <Form.Item label={t('description')} name="description">
             <TextArea rows={3} />
           </Form.Item>
           <Row gutter={16}>
             <Col span={8}>
-              <Form.Item label="随机题目顺序" name="shuffle_questions">
+              <Form.Item label={t('shuffleQuestions')} name="shuffle_questions">
                 <Select>
-                  <Option value={true}>是</Option>
-                  <Option value={false}>否</Option>
+                  <Option value={true}>{t('yes')}</Option>
+                  <Option value={false}>{t('no')}</Option>
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="随机选项顺序" name="shuffle_options">
+              <Form.Item label={t('shuffleOptions')} name="shuffle_options">
                 <Select>
-                  <Option value={true}>是</Option>
-                  <Option value={false}>否</Option>
+                  <Option value={true}>{t('yes')}</Option>
+                  <Option value={false}>{t('no')}</Option>
                 </Select>
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="立即显示结果" name="show_result_immediately">
+              <Form.Item label={t('showResults')} name="show_result_immediately">
                 <Select>
-                  <Option value={true}>是</Option>
-                  <Option value={false}>否</Option>
+                  <Option value={true}>{t('yes')}</Option>
+                  <Option value={false}>{t('no')}</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -1109,12 +1123,12 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 题目管理弹窗 ── */}
-      <Modal title={`管理题目 - ${questionExam?.title || ''}`}
+      <Modal title={`${t('manageQuestions')} - ${questionExam?.title || ''}`}
         open={questionModal}
         onCancel={() => setQuestionModal(false)}
         width={960}
         footer={[
-          <Button key="close" onClick={() => setQuestionModal(false)}>关闭</Button>,
+          <Button key="close" onClick={() => setQuestionModal(false)}>{t('close')}</Button>,
         ]}>
         <Spin spinning={qLoading}>
           {/* ── 总分指示器 ── */}
@@ -1122,28 +1136,28 @@ const ExamPage: React.FC = () => {
             <Card size="small" style={{ marginBottom: 12, background: totalBalanced ? '#f6ffed' : '#fff7e6', borderColor: totalBalanced ? '#b7eb8f' : '#ffd591' }}>
               <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                 <Space>
-                  <Typography.Text strong>当前总分：</Typography.Text>
+                  <Typography.Text strong>{t('currentScore')}：</Typography.Text>
                   <Typography.Text strong style={{
                     fontSize: 18, color: totalBalanced ? '#52c41a' : '#fa8c16'
                   }}>
                     {currentTotal.toFixed(1)}
                   </Typography.Text>
-                  <Typography.Text> / {expectedTotal}（目标总分）</Typography.Text>
+                  <Typography.Text> / {expectedTotal}（{t('targetScore')}）</Typography.Text>
                   {totalBalanced
-                    ? <Tag color="green" style={{ marginLeft: 8 }}>✅ 总分一致</Tag>
+                    ? <Tag color="green" style={{ marginLeft: 8 }}>✅ {t('scoreBalanced')}</Tag>
                     : <Tag color="orange" style={{ marginLeft: 8 }}>
-                        ⚠️ 相差 {(expectedTotal - currentTotal).toFixed(1)} 分
+                        ⚠️ {t('scoreDiff')} {(expectedTotal - currentTotal).toFixed(1)} {t('points')}
                       </Tag>
                   }
                 </Space>
                 <Space>
                   <Button size="small" icon={<ReloadOutlined />} onClick={handleAutoBalance}>
-                    自动均衡
+                    {t('autoBalance')}
                   </Button>
                   <Button type="primary" size="small" icon={<SaveOutlined />}
                     loading={savingScores} onClick={handleSaveScores}
                     disabled={!totalBalanced && !window.confirm?.toString()}>
-                    保存分值
+                    {t('saveScore')}
                   </Button>
                 </Space>
               </Space>
@@ -1151,24 +1165,24 @@ const ExamPage: React.FC = () => {
           )}
 
           <Typography.Title level={5} style={{ fontSize: 14, marginTop: 0 }}>
-            已选题目（{examQuestions.length} 道）
+            {t('selectedQuestions', { count: examQuestions.length })}
             {examQuestions.length > 0 && (
               <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 8, fontWeight: 'normal' }}>
-                可编辑每道题的分值
+                {t('editableScoreHint')}
               </Typography.Text>
             )}
           </Typography.Title>
           {examQuestions.length === 0 ? (
-            <Empty description="尚未添加题目，请从下方题库选择添加" />
+            <Empty description={t('noQuestionsHint')} />
           ) : (
             <Table dataSource={examQuestions} rowKey="id" size="small" pagination={false}
               columns={[
                 { title: '#', key: 'index', width: 40,
                   render: (_: any, __: any, idx: number) => idx + 1 },
-                { title: '题型', dataIndex: 'type', width: 70,
+                { title: t('questionType'), dataIndex: 'type', width: 70,
                   render: (t: string) => <Tag>{t === 'single' ? '单选' : t === 'multiple' ? '多选' : t === 'true_false' ? '判断' : '简答'}</Tag> },
-                { title: '题目', dataIndex: 'question_text', ellipsis: true },
-                { title: '分值', dataIndex: 'question_score', width: 100,
+                { title: t('questionText'), dataIndex: 'question_text', ellipsis: true },
+                { title: t('scorePerQuestion'), dataIndex: 'question_score', width: 100,
                   render: (_: any, rec: any) => (
                     <InputNumber
                       size="small"
@@ -1182,9 +1196,9 @@ const ExamPage: React.FC = () => {
                     />
                   ),
                 },
-                { title: '操作', width: 70,
+                { title: t('actions'), width: 70,
                   render: (_: any, rec: any) => (
-                    <Popconfirm title="移除该题？移除后需重新分配分值" onConfirm={() => handleRemoveQuestion(rec.id)}>
+                    <Popconfirm title={t('removeQuestionConfirm')} onConfirm={() => handleRemoveQuestion(rec.id)}>
                       <Button type="link" size="small" danger icon={<DeleteOutlined />} />
                     </Popconfirm>
                   ),
@@ -1198,96 +1212,96 @@ const ExamPage: React.FC = () => {
           {/* ── 智能选题卡片 ── */}
           <Card
             size="small"
-            title={<Space><FileAddOutlined />智能选题</Space>}
+            title={<Space><FileAddOutlined />{t('smartSelect')}</Space>}
             style={{ marginBottom: 16, background: '#fafaff', border: '1px solid #1677ff22' }}
             extra={
               <Button type="primary" size="small" icon={<FileAddOutlined />}
                 loading={autoSelecting} onClick={handleAutoSelect}>
-                自动选题
+                {t('autoSelect')}
               </Button>
             }
           >
             <Form form={autoSelectForm} layout="inline" initialValues={{ count: 10 }}
               style={{ flexWrap: 'wrap', gap: 8 }}>
               <Form.Item name="subject" style={{ minWidth: 120 }}>
-                <Select allowClear placeholder="科目">
+                <Select allowClear placeholder={t('subject')}>
                   {subjects.map(s => <Option key={s} value={s}>{s}</Option>)}
                 </Select>
               </Form.Item>
               <Form.Item name="question_types" style={{ minWidth: 160 }}>
-                <Select allowClear mode="multiple" placeholder="题型（不限）" maxTagCount={2}>
+                <Select allowClear mode="multiple" placeholder={t('questionTypeAny')} maxTagCount={2}>
                   {TYPE_OPTIONS.map(opt => (
                     <Option key={opt.value} value={opt.value}>{opt.label}</Option>
                   ))}
                 </Select>
               </Form.Item>
               <Form.Item name="difficulty" style={{ minWidth: 100 }}>
-                <Select allowClear placeholder="难度">
-                  <Option value="easy">简单</Option>
-                  <Option value="medium">中等</Option>
-                  <Option value="hard">困难</Option>
+                <Select allowClear placeholder={t('difficulty')}>
+                  <Option value="easy">{t('easy')}</Option>
+                  <Option value="medium">{t('medium')}</Option>
+                  <Option value="hard">{t('hard')}</Option>
                 </Select>
               </Form.Item>
               <Form.Item name="knowledge_keyword" style={{ minWidth: 160 }}>
-                <Input placeholder="知识点关键词" />
+                <Input placeholder={t('keywordPlaceholder')} />
               </Form.Item>
-              <Form.Item name="count" label="选题数" style={{ width: 100 }}>
+              <Form.Item name="count" label={t('selectCount')} style={{ width: 100 }}>
                 <InputNumber min={1} max={100} />
               </Form.Item>
             </Form>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-              💡 将根据筛选条件智能随机选题，自动排除已添加的题目。添加后可用「自动均衡」统一分配分值
+              {t('smartSelectHint')}
             </Typography.Text>
           </Card>
 
           {/* ── AI 智能组卷卡片 ── */}
           <Card
             size="small"
-            title={<Space><RobotOutlined />AI 智能组卷</Space>}
+            title={<Space><RobotOutlined />{t('aiCompose')}</Space>}
             style={{ marginBottom: 16, background: '#f0fff0', border: '1px solid #52c41a44' }}
             extra={
               <Button type="primary" size="small" icon={<RobotOutlined />}
                 loading={aiComposing} onClick={handleAiCompose}
                 disabled={!questionExam?.id}>
-                AI 组卷
+                {t('aiComposeButton')}
               </Button>
             }
           >
             <Space wrap style={{ gap: 8 }}>
-              <Typography.Text style={{ fontSize: 13 }}>目标题数：</Typography.Text>
+              <Typography.Text style={{ fontSize: 13 }}>{t('targetCount')}</Typography.Text>
               <InputNumber size="small" min={1} max={100} value={aiComposeCount}
                 onChange={(v) => setAiComposeCount(v || 10)} style={{ width: 80 }} />
-              <Typography.Text style={{ fontSize: 13 }}>知识点要求：</Typography.Text>
+              <Typography.Text style={{ fontSize: 13 }}>{t('knowledgeFocus')}</Typography.Text>
               <Input size="small" value={aiComposeFocus}
                 onChange={(e) => setAiComposeFocus(e.target.value)}
-                placeholder="如：算法、数据结构" style={{ width: 200 }} />
+                placeholder={t('aiComposePlaceholder')} style={{ width: 200 }} />
             </Space>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-              🤖 AI 会根据知识点覆盖、难度分布、题型搭配自动选择最优试题组合
+              {t('aiComposeHint')}
             </Typography.Text>
           </Card>
 
           <Typography.Title level={5} style={{ fontSize: 14 }}>
-            题库列表（手动选择）
+            {t('questionBank')}
           </Typography.Title>
           <Space wrap style={{ marginBottom: 8 }}>
-            <Select allowClear placeholder="科目" style={{ width: 120 }}
+            <Select allowClear placeholder={t('subject')} style={{ width: 120 }}
               value={qSubject} onChange={(v) => { setQSubject(v); setQPage(1) }}>
               {subjects.map(s => <Option key={s} value={s}>{s}</Option>)}
             </Select>
-            <Select allowClear placeholder="题型" style={{ width: 110 }}
+            <Select allowClear placeholder={t('questionType')} style={{ width: 110 }}
               value={qType} onChange={(v) => { setQType(v); setQPage(1) }}>
               {TYPE_OPTIONS.map(opt => (
                 <Option key={opt.value} value={opt.value}>{opt.label}</Option>
               ))}
             </Select>
-            <Select allowClear placeholder="难度" style={{ width: 100 }}
+            <Select allowClear placeholder={t('difficulty')} style={{ width: 100 }}
               value={qDifficulty} onChange={(v) => { setQDifficulty(v); setQPage(1) }}>
-              <Option value="easy">简单</Option>
-              <Option value="medium">中等</Option>
-              <Option value="hard">困难</Option>
+              <Option value="easy">{t('easy')}</Option>
+              <Option value="medium">{t('medium')}</Option>
+              <Option value="hard">{t('hard')}</Option>
             </Select>
-            <Input.Search placeholder="搜索题目/知识点..." allowClear
+            <Input.Search placeholder={t('searchQuestions')} allowClear
               value={qKeyword}
               onChange={(e) => setQKeyword(e.target.value)}
               onSearch={(val) => { setQKeyword(val); loadAllQuestions(1) }}
@@ -1295,12 +1309,12 @@ const ExamPage: React.FC = () => {
             <Button type="primary" icon={<PlusOutlined />}
               disabled={selectedQIds.length === 0}
               onClick={handleAddQuestions}>
-              添加选中题目（{selectedQIds.length}）
-              {hasDuplicatesInSelection && <Typography.Text style={{ marginLeft: 4, fontSize: 11, opacity: 0.8 }}>(新{newSelectedIds.length})</Typography.Text>}
+              {t('addSelected', { count: selectedQIds.length })}
+              {hasDuplicatesInSelection && <Typography.Text style={{ marginLeft: 4, fontSize: 11, opacity: 0.8 }}>({t('newCount', { count: newSelectedIds.length })})</Typography.Text>}
             </Button>
           </Space>
           <Table dataSource={allQuestions} rowKey="id" size="small"
-            pagination={{ current: qPage, pageSize: 10, total: qTotal, showSizeChanger: false, showTotal: (t) => `共 ${t} 题`,
+            pagination={{ current: qPage, pageSize: 10, total: qTotal, showSizeChanger: false, showTotal: (total) => t('totalQuestions', { count: total }),
               onChange: (page) => loadAllQuestions(page)
             }}
             rowSelection={{
@@ -1311,19 +1325,19 @@ const ExamPage: React.FC = () => {
               }),
             }}
             columns={[
-              { title: '题型', dataIndex: 'type', width: 70,
-                render: (t: string) => <Tag>{t === 'single' ? '单选' : t === 'multiple' ? '多选' : t === 'true_false' ? '判断' : '简答'}</Tag> },
-              { title: '题目', dataIndex: 'question_text', ellipsis: true,
+              { title: t('questionType'), dataIndex: 'type', width: 70,
+                render: (t: string) => <Tag>{typeLabel(t)}</Tag> },
+              { title: t('questionText'), dataIndex: 'question_text', ellipsis: true,
                 render: (text: string, record: any) => (
                   <span style={{ color: existingQuestionIds.has(record.id) ? '#bbb' : undefined }}>
-                    {existingQuestionIds.has(record.id) && <Tag color="default" style={{ marginRight: 4, fontSize: 11 }}>已添加</Tag>}
+                    {existingQuestionIds.has(record.id) && <Tag color="default" style={{ marginRight: 4, fontSize: 11 }}>{t('added')}</Tag>}
                     {text}
                   </span>
                 ),
               },
-              { title: '知识点', dataIndex: 'knowledge_points', width: 150, ellipsis: true },
-              { title: '难度', dataIndex: 'difficulty', width: 70,
-                render: (d: string) => <Tag>{d === 'easy' ? '简单' : d === 'hard' ? '困难' : '中等'}</Tag> },
+              { title: t('knowledgePoints'), dataIndex: 'knowledge_points', width: 150, ellipsis: true },
+              { title: t('difficulty'), dataIndex: 'difficulty', width: 70,
+                render: (d: string) => <Tag>{difficultyLabel(d)}</Tag> },
             ]}
             onRow={(record: any) => ({
               style: { opacity: existingQuestionIds.has(record.id) ? 0.5 : 1, cursor: existingQuestionIds.has(record.id) ? 'not-allowed' : 'pointer' },
@@ -1333,7 +1347,7 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 成绩查看弹窗 ── */}
-      <Modal title={`考试成绩 - ${resultExam?.title || ''}`}
+      <Modal title={`${t('result')} - ${resultExam?.title || ''}`}
         open={resultModal}
         onCancel={() => setResultModal(false)}
         width={900}
@@ -1343,8 +1357,8 @@ const ExamPage: React.FC = () => {
             onClick={() => {
               const token = localStorage.getItem('smartkb_token')
               window.open(`/api/export/exam/${resultExam?.id}?token=${token}`, '_blank')
-            }}>导出报告</Button>,
-          <Button key="close" onClick={() => setResultModal(false)}>关闭</Button>,
+            }}>{t('exportReport')}</Button>,
+          <Button key="close" onClick={() => setResultModal(false)}>{t('close')}</Button>,
         ]}>
         <Spin spinning={resultLoading}>
           {resultData && (
@@ -1352,37 +1366,37 @@ const ExamPage: React.FC = () => {
               <Row gutter={16} style={{ marginBottom: 16 }}>
                 <Col span={6}>
                   <Card size="small">
-                    <Statistic title="参考人数" value={resultData.statistics.total_students} />
+                    <Statistic title={t('totalStudents')} value={resultData.statistics.total_students} />
                   </Card>
                 </Col>
                 <Col span={6}>
                   <Card size="small">
-                    <Statistic title="平均分" value={resultData.statistics.avg_score} precision={1} />
+                    <Statistic title={t('average')} value={resultData.statistics.avg_score} precision={1} />
                   </Card>
                 </Col>
                 <Col span={6}>
                   <Card size="small">
-                    <Statistic title="及格人数" value={resultData.statistics.pass_count}
+                    <Statistic title={t('passCount')} value={resultData.statistics.pass_count}
                       suffix={`/ ${resultData.statistics.total_students}`} />
                   </Card>
                 </Col>
                 <Col span={6}>
                   <Card size="small">
-                    <Statistic title="及格率" value={resultData.statistics.pass_rate}
+                    <Statistic title={t('passRate')} value={resultData.statistics.pass_rate}
                       suffix="%" precision={1} />
                   </Card>
                 </Col>
               </Row>
               <Table dataSource={resultData.attempts} rowKey="id" size="small"
                 columns={[
-                  { title: '学生', dataIndex: 'student_name', key: 'student_name', width: 100 },
-                  { title: '得分', key: 'score', width: 100,
+                  { title: t('student'), dataIndex: 'student_name', key: 'student_name', width: 100 },
+                  { title: t('score'), key: 'score', width: 100,
                     render: (_: any, r: ExamAttempt) => {
                       const passed = r.score >= (resultExam?.pass_score || 60)
                       return <span style={{ color: passed ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>{r.score} / {r.total_score}</span>
                     },
                   },
-                  { title: '提交时间', dataIndex: 'submitted_at', key: 'submitted_at', width: 160,
+                  { title: t('submittedAt'), dataIndex: 'submitted_at', key: 'submitted_at', width: 160,
                     render: (t: string) => t ? t.slice(0, 16) : '-' },
                 ]}
                 pagination={false}
@@ -1402,31 +1416,31 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── AI 错题讲解弹窗 ── */}
-      <Modal title={<><BulbOutlined style={{ color: '#faad14' }} /> AI 错题讲解 - {explainData?.exam_title || '加载中...'}</>}
+      <Modal title={<><BulbOutlined style={{ color: '#faad14' }} /> {t('aiExplainTitle')} - {explainData?.exam_title || t('loading')}</>}
         open={explainModal}
         onCancel={() => { if (explainLoading) return; setExplainModal(false) }}
         width={800}
-        footer={explainLoading ? null : <Button onClick={() => setExplainModal(false)}>关闭</Button>}
+        footer={explainLoading ? null : <Button onClick={() => setExplainModal(false)}>{t('close')}</Button>}
       >
         {explainLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>AI 正在分析错题，请稍候...</div>
+            <div style={{ marginTop: 16, color: '#666' }}>{t('aiAnalyzing')}</div>
           </div>
         ) : explainData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
             {explainData.total_wrong === 0 ? (
               <Typography.Text type="success" style={{ fontSize: 16 }}>
-                <CheckCircleOutlined /> 太棒了！你没有错题，全部答对了！
+                <CheckCircleOutlined /> {t('noWrongAnswers')}
               </Typography.Text>
             ) : (
               <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-                共 {explainData.total_wrong} 道错题
+                {t('totalWrong')} {explainData.total_wrong} {t('questions')}
               </Typography.Text>
             )}
             {explainData.explanations.map((exp: any, idx: number) => (
               <Card key={idx} size="small" style={{ marginBottom: 12 }}
-                title={<Space><Tag color="error">错题 {idx + 1}</Tag><FormulaRenderer content={exp.question_text} /></Space>}>
+                title={<Space><Tag color="error">{t('wrongQuestion')} {idx + 1}</Tag><FormulaRenderer content={exp.question_text} /></Space>}>
                 {exp.error ? (
                   <Typography.Text type="danger">{exp.error}</Typography.Text>
                 ) : (
@@ -1441,10 +1455,10 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 答题详情弹窗（学生查看） ── */}
-      <Modal title="答题详情" open={detailModal}
+      <Modal title={t('detailTitle')} open={detailModal}
         onCancel={() => setDetailModal(false)}
         width={800}
-        footer={<Button onClick={() => setDetailModal(false)}>关闭</Button>}
+        footer={<Button onClick={() => setDetailModal(false)}>{t('close')}</Button>}
       >
         <Spin spinning={detailLoading}>
           {detailData ? (
@@ -1453,12 +1467,12 @@ const ExamPage: React.FC = () => {
                 <>
               <Card size="small" style={{ marginBottom: 16 }}>
                 <Space>
-                  <Statistic title="得分" value={detailData.attempt.score} suffix={`/ ${detailData.attempt.total_score}`}
+                  <Statistic title={t('score')} value={detailData.attempt.score} suffix={`/ ${detailData.attempt.total_score}`}
                     styles={{ content: { color: detailData.attempt.score >= (detailData.attempt.total_score || 100) * 0.6 ? '#52c41a' : '#ff4d4f' } }} />
                 </Space>
               </Card>
               {(!detailData.questions || detailData.questions.length === 0) ? (
-                <Typography.Text type="secondary">暂无题目数据</Typography.Text>
+                <Typography.Text type="secondary">{t('noQuestionData')}</Typography.Text>
               ) : detailData.questions.map((q: any, idx: number) => {
                 const answers = detailData.attempt.answers || {}
                 const ans = answers[String(q.id)] || {}
@@ -1576,6 +1590,7 @@ const StudentExamDetail: React.FC<{
   examId: number; attemptId: number; studentName: string;
   showReview?: boolean;
 }> = ({ examId, attemptId, studentName, showReview = false }) => {
+  const { t } = useTranslation('exam')
   const [loading, setLoading] = useState(true)
   const [detail, setDetail] = useState<any>(null)
   const user = useAuthStore((s) => s.user)
@@ -1595,11 +1610,11 @@ const StudentExamDetail: React.FC<{
       if (data.attempt?.teacher_score > 0) setReviewScore(data.attempt.teacher_score)
       if (data.attempt?.teacher_comment) setReviewComment(data.attempt.teacher_comment)
     } catch {
-      message.error('加载学生答题详情失败')
+      message.error(t('loadDetailFailed'))
     } finally {
       setLoading(false)
     }
-  }, [examId, attemptId])
+  }, [examId, attemptId, t])
 
   useEffect(() => { loadDetail() }, [loadDetail])
 
@@ -1612,11 +1627,11 @@ const StudentExamDetail: React.FC<{
         teacher_score: reviewScore,
         teacher_comment: reviewComment || null,
       })
-      message.success('复核完成')
+      message.success(t('reviewComplete'))
       setReviewModal(false)
       loadDetail()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '复核提交失败')
+      message.error(err?.response?.data?.detail || t('reviewFailed'))
     } finally {
       setReviewing(false)
     }
@@ -1759,7 +1774,7 @@ const StudentExamDetail: React.FC<{
       {/* ── 教师复核弹窗 ── */}
       <Modal title="复核 AI 批改" open={reviewModal} onCancel={() => setReviewModal(false)}
         onOk={handleReviewSubmit} confirmLoading={reviewing}
-        okText="确认复核" cancelText="取消">
+        okText="确认复核" cancelText={t('cancel')}>
         <Space orientation="vertical" style={{ width: '100%' }}>
           <div>
             <Typography.Text>当前 AI 评分：</Typography.Text>

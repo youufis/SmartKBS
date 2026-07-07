@@ -13,6 +13,7 @@ import {
   BarChartOutlined, PlusOutlined, CheckCircleOutlined,
   RobotOutlined, EditOutlined, DeleteOutlined, DownloadOutlined,
 } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
@@ -22,6 +23,7 @@ const { Title, Text } = Typography
 const { TextArea } = Input
 
 const QuickPollPage: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -81,11 +83,11 @@ const QuickPollPage: React.FC = () => {
       const { data } = await apiClient.post('/api/interaction/polls/ai-generate', values)
       setAiPollResult(data)
       if (data.poll) {
-        message.success('AI 生成了投票')
+        message.success(t('aiPollGenerated'))
       } else if (data.error) {
         message.warning(data.error)
       }
-    } catch { message.error('AI 生成失败') }
+    } catch { message.error(t('aiGenerateFailed')) }
     setAiPollLoading(false)
   }
 
@@ -96,7 +98,7 @@ const QuickPollPage: React.FC = () => {
         options: aiPollResult.poll.options.join('\n'),
         poll_type: aiPollForm.getFieldValue('poll_type') || 'single',
       })
-      message.success('已填入表单，可手动修改')
+      message.success(t('pollFilled'))
       setAiPollModal(false)
     }
   }
@@ -104,7 +106,7 @@ const QuickPollPage: React.FC = () => {
   // ── 创建投票 ──
   const handleCreatePoll = async (values: any) => {
     const options = values.options.split('\n').filter((l: string) => l.trim())
-    if (options.length < 2) { message.warning('至少需要2个选项'); return }
+    if (options.length < 2) { message.warning(t('minOptions')); return }
     try {
       await apiClient.post('/api/interaction/polls', {
         question: values.question,
@@ -115,13 +117,13 @@ const QuickPollPage: React.FC = () => {
         target_class: pollScope.target_class,
         target_users: pollScope.target_users,
       })
-      message.success('投票创建成功')
+      message.success(t('pollCreated'))
       setPollModal(false)
       pollForm.resetFields()
       setPollScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' })
       await loadPolls()
     } catch (err: any) {
-      message.error(err.response?.data?.detail || '创建失败')
+      message.error(err.response?.data?.detail || t('createFailed'))
     }
   }
 
@@ -133,32 +135,32 @@ const QuickPollPage: React.FC = () => {
 
     if (isMultiple) {
       const selOpts = selectedOptions[pollId] || []
-      if (selOpts.length === 0) { message.warning('请至少选择一个选项'); return }
+      if (selOpts.length === 0) { message.warning(t('selectOptionFirst')); return }
       const indicesStr = selOpts.sort().join(',')
       try {
         await apiClient.post(`/api/interaction/polls/${pollId}/vote`, null, {
           params: { option_indices: indicesStr },
         })
-        message.success('投票成功')
+        message.success(t('voteSuccess'))
         setVotedPolls({ ...votedPolls, [pollId]: true })
         await loadPolls()
         setTakingPoll(null)
       } catch (err: any) {
-        message.error(err.response?.data?.detail || '投票失败')
+        message.error(err.response?.data?.detail || t('voteFailed'))
       }
     } else {
       const selOpt = selectedOption[pollId]
-      if (selOpt === undefined || selOpt === null) { message.warning('请选择一个选项'); return }
+      if (selOpt === undefined || selOpt === null) { message.warning(t('selectOptionFirst')); return }
       try {
         await apiClient.post(`/api/interaction/polls/${pollId}/vote`, null, {
           params: { option_index: selOpt },
         })
-        message.success('投票成功')
+        message.success(t('voteSuccess'))
         setVotedPolls({ ...votedPolls, [pollId]: true })
         await loadPolls()
         setTakingPoll(null)
       } catch (err: any) {
-        message.error(err.response?.data?.detail || '投票失败')
+        message.error(err.response?.data?.detail || t('voteFailed'))
       }
     }
   }
@@ -167,7 +169,7 @@ const QuickPollPage: React.FC = () => {
     try {
       const { data } = await apiClient.get(`/api/interaction/polls/${pollId}/results`)
       setPollResult(data)
-    } catch { message.error('加载结果失败') }
+    } catch { message.error(t('loadResultsFailed')) }
   }
 
   const handleStartPoll = (poll: any) => {
@@ -179,8 +181,8 @@ const QuickPollPage: React.FC = () => {
 
   // ── 编辑/删除 ──
   const handleDeletePoll = async (id: number) => {
-    try { await apiClient.delete(`/api/interaction/polls/${id}`); message.success('已删除'); await loadPolls() }
-    catch { message.error('删除失败') }
+    try { await apiClient.delete(`/api/interaction/polls/${id}`); message.success(t('deleteSuccess')); await loadPolls() }
+    catch { message.error(t('deleteFailed')) }
   }
 
   const handleEditPoll = async () => {
@@ -191,8 +193,8 @@ const QuickPollPage: React.FC = () => {
         options: values.options.split('\n').filter((l: string) => l.trim()),
         poll_type: values.poll_type || 'single',
       })
-      message.success('已更新'); setEditPollModal(null); await loadPolls()
-    } catch { message.error('更新失败') }
+      message.success(t('updateSuccess')); setEditPollModal(null); await loadPolls()
+    } catch { message.error(t('updateFailed')) }
   }
 
   return (
@@ -201,9 +203,9 @@ const QuickPollPage: React.FC = () => {
         <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
             <BarChartOutlined style={{ fontSize: 28 }} />
-            <Title level={3} style={{ color: '#fff', margin: 0 }}>快速投票</Title>
+            <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('poll')}</Title>
             <Text style={{ color: 'rgba(255,255,255,0.85)', marginLeft: 12 }}>
-              即时反馈 · 课堂表决
+              {t('poll')}
             </Text>
           </Space>
         </div>
@@ -213,15 +215,15 @@ const QuickPollPage: React.FC = () => {
         {isTeacherOrAdmin && (
           <Space style={{ marginBottom: 16 }}>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setPollModal(true)}>
-              创建投票
+              {t('createPoll')}
             </Button>
             <Button icon={<RobotOutlined />} onClick={() => setAiPollModal(true)}>
-              AI 生成
+              {t('aiCreatePoll')}
             </Button>
           </Space>
         )}
         <Spin spinning={pollLoading}>
-          {polls.length === 0 ? <Empty description="暂无活跃投票" /> : (
+          {polls.length === 0 ? <Empty description={t('noPolls')} /> : (
             <>
             <List
               dataSource={polls.slice((pollPage - 1) * pollPageSize, pollPage * pollPageSize)}
@@ -235,30 +237,30 @@ const QuickPollPage: React.FC = () => {
                         <Text strong><FormulaRenderer content={poll.question} /></Text>
                         <div style={{ marginTop: 4 }}>
                           <Tag color={isMultiple ? 'purple' : 'blue'}>
-                            {isMultiple ? '多选' : '单选'}
+                            {isMultiple ? t('multiple') : t('single')}
                           </Tag>
                           <Tag color="blue">{poll.creator_name || poll.creator_username}</Tag>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{poll.unique_voters || poll.total_votes} 人参与</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{t('peopleCount', { count: poll.unique_voters || poll.total_votes })}</Text>
                         </div>
                       </div>
                       <Space>
                         {isStudent && !hasVoted && (
                           <Button size="small" type="primary" icon={<CheckCircleOutlined />}
-                            onClick={() => handleStartPoll(poll)}>开始投票</Button>
+                            onClick={() => handleStartPoll(poll)}>{t('vote')}</Button>
                         )}
                         {isStudent && hasVoted && (
                           <Button size="small" icon={<BarChartOutlined />}
-                            onClick={() => handleViewPollResults(poll.id)}>已投票</Button>
+                            onClick={() => handleViewPollResults(poll.id)}>{t('vote')}</Button>
                         )}
                         {isTeacherOrAdmin && (
                           <>
                             <Button size="small" icon={<BarChartOutlined />}
-                              onClick={() => handleViewPollResults(poll.id)}>查看结果</Button>
+                              onClick={() => handleViewPollResults(poll.id)}>{t('results')}</Button>
                             <Button size="small" icon={<DownloadOutlined />}
                               onClick={() => {
                                 const token = localStorage.getItem('smartkb_token')
                                 window.open(`/api/export/poll/${poll.id}?token=${token}`, '_blank')
-                              }}>导出</Button>
+                              }}>{t('export')}</Button>
                             <Button size="small" type="text" icon={<EditOutlined />}
                               onClick={() => {
                                 editPollForm.setFieldsValue({
@@ -268,7 +270,7 @@ const QuickPollPage: React.FC = () => {
                                 })
                                 setEditPollModal(poll)
                               }} />
-                            <Popconfirm title="删除此投票？" onConfirm={() => handleDeletePoll(poll.id)}>
+                            <Popconfirm title={t('confirmDeletePoll')} onConfirm={() => handleDeletePoll(poll.id)}>
                               <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                             </Popconfirm>
                           </>
@@ -282,7 +284,7 @@ const QuickPollPage: React.FC = () => {
             <div style={{ marginTop: 12, textAlign: 'center' }}>
               <Pagination
                 current={pollPage} pageSize={pollPageSize} total={polls.length}
-                showSizeChanger showTotal={(t) => `共 ${t} 个投票`}
+                showSizeChanger showTotal={(total) => t('totalPolls', { count: total })}
                 pageSizeOptions={['5', '10', '20', '50']}
                 onChange={(p, ps) => { setPollPage(p); setPollPageSize(ps) }}
                 size="small"
@@ -297,7 +299,7 @@ const QuickPollPage: React.FC = () => {
       <Modal title={takingPoll?.question} open={!!takingPoll && !pollResult}
         onCancel={() => { setTakingPoll(null); setPollResult(null) }}
         footer={[
-          <Button key="submit" type="primary" onClick={() => handleVote(takingPoll?.id)}>提交投票</Button>,
+          <Button key="submit" type="primary" onClick={() => handleVote(takingPoll?.id)}>{t('vote')}</Button>,
         ]}
         width={500}>
         {takingPoll?.options?.map((opt: any, i: number) => (
@@ -328,31 +330,31 @@ const QuickPollPage: React.FC = () => {
       </Modal>
 
       {/* ── 投票结果弹窗（投票后或教师查看） ── */}
-      <Modal title={pollResult?.question || '投票结果'} open={!!pollResult}
+      <Modal title={pollResult?.question || t('pollResults')} open={!!pollResult}
         onCancel={() => setPollResult(null)}
-        footer={<Button onClick={() => setPollResult(null)}>关闭</Button>}
+        footer={<Button onClick={() => setPollResult(null)}>{t('close')}</Button>}
         width={500}>
         {pollResult && (
           <>
             <Space style={{ marginBottom: 12 }}>
               <Tag color={pollResult.poll_type === 'multiple' ? 'purple' : 'blue'}>
-                {pollResult.poll_type === 'multiple' ? '多选' : '单选'}
+                {pollResult.poll_type === 'multiple' ? t('multiple') : t('single')}
               </Tag>
             </Space>
             {pollResult.options?.map((opt: any, i: number) => (
               <div key={i} style={{ marginBottom: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                   <Text>{opt.text}</Text>
-                  <Text type="secondary">{opt.votes} 票 ({opt.percentage || 0}%)</Text>
+                  <Text type="secondary">{t('votesCount', { count: opt.votes })} ({opt.percentage || 0}%)</Text>
                 </div>
                 <Progress percent={opt.percentage || 0} size="small" />
               </div>
             ))}
             <Divider />
-            <Text type="secondary">共 {pollResult.unique_voters || pollResult.total_votes} 人参与</Text>
+            <Text type="secondary">{t('peopleCount', { count: pollResult.unique_voters || pollResult.total_votes })}</Text>
             {pollResult.poll_type === 'multiple' && pollResult.unique_voters ? (
               <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                （共 {pollResult.total_votes} 票）
+                {t('totalVotes', { count: pollResult.total_votes })}
               </Text>
             ) : null}
           </>
@@ -360,34 +362,34 @@ const QuickPollPage: React.FC = () => {
       </Modal>
 
       {/* ── AI 生成投票弹窗 ── */}
-      <Modal title={<Space><RobotOutlined />AI 生成投票</Space>} open={aiPollModal}
+      <Modal title={<Space><RobotOutlined />{t('aiGeneratePoll')}</Space>} open={aiPollModal}
         onCancel={() => { setAiPollModal(false); setAiPollResult(null) }}
         footer={aiPollResult?.poll ? [
-          <Button key="cancel" onClick={() => { setAiPollModal(false); setAiPollResult(null) }}>取消</Button>,
-          <Button key="apply" type="primary" onClick={handleApplyAiPoll}>填入表单</Button>,
+          <Button key="cancel" onClick={() => { setAiPollModal(false); setAiPollResult(null) }}>{t('cancel')}</Button>,
+          <Button key="apply" type="primary" onClick={handleApplyAiPoll}>{t('fillForm')}</Button>,
         ] : null}>
         <Form form={aiPollForm} layout="vertical" onFinish={handleAiGeneratePoll}>
-          <Form.Item name="topic" label="投票主题" rules={[{ required: true }]}>
-            <Input placeholder="例如：你更喜欢哪种学习方式？" />
+          <Form.Item name="topic" label={t('pollTopic')} rules={[{ required: true }]}>
+            <Input placeholder={t('pollTopicPlaceholder')} />
           </Form.Item>
-          <Form.Item name="poll_type" label="投票类型" initialValue="single">
+          <Form.Item name="poll_type" label={t('pollType')} initialValue="single">
             <Select>
-              <Select.Option value="single">单选投票</Select.Option>
-              <Select.Option value="multiple">多选投票</Select.Option>
+              <Select.Option value="single">{t('singleChoice')}</Select.Option>
+              <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="option_count" label="选项数量" initialValue={4}>
+          <Form.Item name="option_count" label={t('optionCount')} initialValue={4}>
             <Select>
-              {[2, 3, 4, 5, 6].map(n => <Select.Option key={n} value={n}>{n} 个</Select.Option>)}
+              {[2, 3, 4, 5, 6].map(n => <Select.Option key={n} value={n}>{t('optionsCountValue', { n })}</Select.Option>)}
             </Select>
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={aiPollLoading} icon={<RobotOutlined />} block>
-            AI 生成
+            {t('aiGenerate')}
           </Button>
         </Form>
         {aiPollResult?.poll && (
           <div style={{ marginTop: 12 }}>
-            <Text strong>投票问题：</Text>
+            <Text strong>{t('previewLabel')}</Text>
             <Text>{aiPollResult.poll.question}</Text>
             <div style={{ marginTop: 8 }}>
               {aiPollResult.poll.options.map((opt: string, i: number) => (
@@ -399,44 +401,44 @@ const QuickPollPage: React.FC = () => {
       </Modal>
 
       {/* ── 创建投票弹窗 ── */}
-      <Modal title="创建快速投票" open={pollModal}
+      <Modal title={t('createPoll')} open={pollModal}
         onCancel={() => { setPollModal(false); setPollScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         footer={null}
         width={640}>
         <Form form={pollForm} layout="vertical" onFinish={handleCreatePoll}>
-          <Form.Item name="question" label="投票问题" rules={[{ required: true }]}>
-            <Input placeholder="例如：你更喜欢哪种编程语言？" />
+          <Form.Item name="question" label={t('pollQuestion')} rules={[{ required: true }]}>
+            <Input placeholder={t('pollQuestionPlaceholder')} />
           </Form.Item>
-          <Form.Item name="poll_type" label="投票类型" initialValue="single">
+          <Form.Item name="poll_type" label={t('pollType')} initialValue="single">
             <Select>
-              <Select.Option value="single">单选投票</Select.Option>
-              <Select.Option value="multiple">多选投票</Select.Option>
+              <Select.Option value="single">{t('singleChoice')}</Select.Option>
+              <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="options" label="选项（每行一个）" rules={[{ required: true }]}>
-            <TextArea rows={4} placeholder="每行一个选项&#10;例如：&#10;Python&#10;JavaScript&#10;C++" />
+          <Form.Item name="options" label={t('optionsPerLine')} rules={[{ required: true }]}>
+            <TextArea rows={4} placeholder={t('optionsPlaceholder')} />
           </Form.Item>
-          <Form.Item label="目标范围">
+          <Form.Item label={t('targetScope')}>
             <ActivityScopeSelector value={pollScope} onChange={setPollScope} />
           </Form.Item>
-          <Button type="primary" htmlType="submit" block>创建投票</Button>
+          <Button type="primary" htmlType="submit" block>{t('createPoll')}</Button>
         </Form>
       </Modal>
 
       {/* ── 编辑投票弹窗 ── */}
-      <Modal title="编辑投票" open={!!editPollModal} onCancel={() => setEditPollModal(null)}
-        onOk={handleEditPoll} okText="保存">
+      <Modal title={t('editPoll')} open={!!editPollModal} onCancel={() => setEditPollModal(null)}
+        onOk={handleEditPoll} okText={t('save')}>
         <Form form={editPollForm} layout="vertical">
-          <Form.Item name="question" label="问题" rules={[{ required: true }]}>
+          <Form.Item name="question" label={t('question')} rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="poll_type" label="投票类型">
+          <Form.Item name="poll_type" label={t('pollType')}>
             <Select>
-              <Select.Option value="single">单选投票</Select.Option>
-              <Select.Option value="multiple">多选投票</Select.Option>
+              <Select.Option value="single">{t('singleChoice')}</Select.Option>
+              <Select.Option value="multiple">{t('multipleChoice')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="options" label="选项（每行一个）" rules={[{ required: true }]}>
+          <Form.Item name="options" label={t('optionsPerLine')} rules={[{ required: true }]}>
             <TextArea rows={4} />
           </Form.Item>
         </Form>

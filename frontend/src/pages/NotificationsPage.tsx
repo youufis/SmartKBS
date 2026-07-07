@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, List, Tag, Typography, Button, Space, Empty, Spin,
   message, Popconfirm, Segmented, Tabs,
@@ -19,24 +20,25 @@ import type { PushMessage } from '../api/companion'
 
 const { Text } = Typography
 
-const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
-  exam: { color: '#1677ff', icon: <FileAddOutlined />, label: '考试' },
-  score: { color: '#52c41a', icon: <TrophyOutlined />, label: '积分' },
-  task: { color: '#faad14', icon: <CheckCircleOutlined />, label: '任务' },
-  rollcall: { color: '#722ed1', icon: <AuditOutlined />, label: '点名' },
-  share: { color: '#13c2c2', icon: <InfoCircleOutlined />, label: '分享' },
-  info: { color: '#999', icon: <InfoCircleOutlined />, label: '系统' },
-}
-
-const PUSH_TYPE_CONFIG: Record<string, { color: string; icon: string; label: string }> = {
-  morning: { color: '#fa8c16', icon: '☀️', label: '早安提醒' },
-  achievement: { color: '#52c41a', icon: '🏆', label: '成就通知' },
-  encourage: { color: '#1677ff', icon: '💪', label: '鼓励消息' },
-  reminder: { color: '#ff4d4f', icon: '📌', label: '学习提醒' },
-  milestone: { color: '#722ed1', icon: '⭐', label: '里程碑' },
-}
-
 const NotificationsPage: React.FC = () => {
+  const { t } = useTranslation('system')
+
+  const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+    exam: { color: '#1677ff', icon: <FileAddOutlined />, label: t('notifExam') },
+    score: { color: '#52c41a', icon: <TrophyOutlined />, label: t('notifScore') },
+    task: { color: '#faad14', icon: <CheckCircleOutlined />, label: t('notifTask') },
+    rollcall: { color: '#722ed1', icon: <AuditOutlined />, label: t('notifRollcall') },
+    share: { color: '#13c2c2', icon: <InfoCircleOutlined />, label: t('notifShare') },
+    info: { color: '#999', icon: <InfoCircleOutlined />, label: t('notifInfo') },
+  }
+
+  const PUSH_TYPE_CONFIG: Record<string, { color: string; icon: string; label: string }> = {
+    morning: { color: '#fa8c16', icon: '☀️', label: t('pushMorning') },
+    achievement: { color: '#52c41a', icon: '🏆', label: t('pushAchievement') },
+    encourage: { color: '#1677ff', icon: '💪', label: t('pushEncourage') },
+    reminder: { color: '#ff4d4f', icon: '📌', label: t('pushReminder') },
+    milestone: { color: '#722ed1', icon: '⭐', label: t('pushMilestone') },
+  }
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isStudent = user?.role === 'student'
@@ -64,7 +66,7 @@ const NotificationsPage: React.FC = () => {
       setNotifications(data.notifications)
       setTotal(data.total)
     } catch {
-      message.error('加载通知失败')
+      message.error(t('loadFailed'))
     }
     setLoading(false)
   }
@@ -83,29 +85,29 @@ const NotificationsPage: React.FC = () => {
       fetchNotifications()
       refreshUnreadCount()
     } catch {
-      message.error('标记已读失败，请重试')
+      message.error(t('markReadFailed'))
     }
   }
 
   const handleMarkAllRead = async () => {
     try {
       await notificationsApi.markAllAsRead()
-      message.success('已全部标记为已读')
+      message.success(t('markAllReadSuccess'))
       fetchNotifications()
       refreshUnreadCount()
     } catch {
-      message.error('操作失败，请重试')
+      message.error(t('markReadFailed'))
     }
   }
 
   const handleDelete = async (id: number) => {
     try {
       await notificationsApi.deleteNotification(id)
-      message.success('通知已删除')
+      message.success(t('notificationDeleted'))
       fetchNotifications()
       refreshUnreadCount()
     } catch {
-      message.error('删除失败，请重试')
+      message.error(t('deleteFailed'))
     }
   }
 
@@ -130,20 +132,20 @@ const NotificationsPage: React.FC = () => {
   const handlePushMarkAllRead = async () => {
     try {
       await useCompanionStore.getState().markAllPushesRead()
-      message.success('已全部标记为已读')
+      message.success(t('markAllReadSuccess'))
       fetchPushes()
     } catch {
-      message.error('操作失败')
+      message.error(t('markReadFailed'))
     }
   }
 
   const handlePushDelete = async (id: number) => {
     try {
       await companionApi.deletePush(id)
-      message.success('消息已删除')
+      message.success(t('messageDeleted'))
       fetchPushes()
     } catch {
-      message.error('删除失败')
+      message.error(t('deleteFailedRetry'))
     }
   }
 
@@ -152,19 +154,19 @@ const NotificationsPage: React.FC = () => {
       title={
         <Space>
           <InfoCircleOutlined />
-          消息通知
+          {t('notifications')}
         </Space>
       }
       extra={
         activeTab === 'system' ? (
           <Space>
-            <Button icon={<CheckOutlined />} onClick={handleMarkAllRead}>全部已读</Button>
-            <Button icon={<ReloadOutlined />} onClick={fetchNotifications}>刷新</Button>
+            <Button icon={<CheckOutlined />} onClick={handleMarkAllRead}>{t('markAllAsRead')}</Button>
+            <Button icon={<ReloadOutlined />} onClick={fetchNotifications}>{t('refresh')}</Button>
           </Space>
         ) : (
           <Space>
-            <Button icon={<CheckOutlined />} onClick={handlePushMarkAllRead}>全部已读</Button>
-            <Button icon={<ReloadOutlined />} onClick={fetchPushes}>刷新</Button>
+            <Button icon={<CheckOutlined />} onClick={handlePushMarkAllRead}>{t('markAllAsRead')}</Button>
+            <Button icon={<ReloadOutlined />} onClick={fetchPushes}>{t('refresh')}</Button>
           </Space>
         )
       }
@@ -175,14 +177,14 @@ const NotificationsPage: React.FC = () => {
         items={[
           {
             key: 'system',
-            label: <span><InfoCircleOutlined /> 系统通知</span>,
+            label: <span><InfoCircleOutlined /> {t('notifications')}</span>,
             children: (
               <>
                 <div style={{ marginBottom: 16 }}>
                   <Segmented
                     options={[
-                      { label: `全部 (${total})`, value: 'all' },
-                      { label: '未读', value: 'unread' },
+                      { label: t('allCount', { count: total }), value: 'all' },
+                      { label: t('unread'), value: 'unread' },
                     ]}
                     value={filter}
                     onChange={(val) => { setFilter(val as string); setPage(1) }}
@@ -190,7 +192,7 @@ const NotificationsPage: React.FC = () => {
                 </div>
                 <Spin spinning={loading}>
                   {notifications.length === 0 ? (
-                    <Empty description="暂无通知" />
+                    <Empty description={t('noNotifications')} />
                   ) : (
                     <List
                       dataSource={notifications}
@@ -206,10 +208,10 @@ const NotificationsPage: React.FC = () => {
                             }}
                             actions={[
                               !item.is_read && (
-                                <Button key="read" type="text" icon={<CheckOutlined />} onClick={() => handleMarkRead(item.id)}>标记已读</Button>
+                                <Button key="read" type="text" icon={<CheckOutlined />} onClick={() => handleMarkRead(item.id)}>{t('markAsRead')}</Button>
                               ),
-                              <Popconfirm key="delete" title="确定删除此通知？" onConfirm={() => handleDelete(item.id)}>
-                                <Button type="text" danger icon={<DeleteOutlined />}>删除</Button>
+                              <Popconfirm key="delete" title={t('confirmDelete')} onConfirm={() => handleDelete(item.id)}>
+                                <Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
                               </Popconfirm>,
                             ].filter(Boolean)}
                           >
@@ -219,7 +221,7 @@ const NotificationsPage: React.FC = () => {
                                 <Space>
                                   <Text strong={!item.is_read}>{item.title}</Text>
                                   <Tag color={cfg.color}>{cfg.label}</Tag>
-                                  {!item.is_read && <Tag color="blue">未读</Tag>}
+                                  {!item.is_read && <Tag color="blue">{t('unread')}</Tag>}
                                 </Space>
                               }
                               description={
@@ -230,7 +232,7 @@ const NotificationsPage: React.FC = () => {
                                     {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
                                   </Text>
                                   {item.related_link && (
-                                    <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>查看详情</Button>
+                                    <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>{t('viewDetails')}</Button>
                                   )}
                                 </div>
                               }
@@ -243,7 +245,7 @@ const NotificationsPage: React.FC = () => {
                         pageSize: 20,
                         total,
                         showSizeChanger: true,
-                        showTotal: (t) => `共 ${t} 条通知`,
+                        showTotal: (total) => t('totalNotifications', { count: total }),
                         pageSizeOptions: ['10', '20', '50'],
                         onChange: (p) => setPage(p),
                       }}
@@ -255,14 +257,14 @@ const NotificationsPage: React.FC = () => {
           },
           ...(isStudent ? [{
             key: 'companion',
-            label: <span><CustomerServiceOutlined /> 学伴消息</span>,
+            label: <span><CustomerServiceOutlined /> {t('companion')}</span>,
             children: (
               <>
                 <div style={{ marginBottom: 16 }}>
                   <Segmented
                     options={[
-                      { label: `全部 (${pushTotal})`, value: 'all' },
-                      { label: '未读', value: 'unread' },
+                      { label: t('allCount', { count: pushTotal }), value: 'all' },
+                      { label: t('unread'), value: 'unread' },
                     ]}
                     value={pushFilter}
                     onChange={(val) => { setPushFilter(val as string); setPushPage(1) }}
@@ -270,7 +272,7 @@ const NotificationsPage: React.FC = () => {
                 </div>
                 <Spin spinning={pushLoading}>
                   {pushes.length === 0 ? (
-                    <Empty description="暂无学伴消息" />
+                    <Empty description={t('noNotifications')} />
                   ) : (
                     <List
                       dataSource={pushes}
@@ -291,10 +293,10 @@ const NotificationsPage: React.FC = () => {
                                     await useCompanionStore.getState().markPushRead(item.id)
                                     fetchPushes()
                                   }}
-                                >标记已读</Button>
+                                >{t('markAsRead')}</Button>
                               ),
-                              <Popconfirm key="delete" title="确定删除此消息？" onConfirm={() => handlePushDelete(item.id)}>
-                                <Button type="text" danger icon={<DeleteOutlined />}>删除</Button>
+                              <Popconfirm key="delete" title={t('confirmDelete')} onConfirm={() => handlePushDelete(item.id)}>
+                                <Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
                               </Popconfirm>,
                             ].filter(Boolean)}
                           >
@@ -304,7 +306,7 @@ const NotificationsPage: React.FC = () => {
                                 <Space>
                                   <Text strong={!item.is_read}>{item.title}</Text>
                                   <Tag color={cfg.color}>{cfg.label}</Tag>
-                                  {!item.is_read && <Tag color="blue">未读</Tag>}
+                                  {!item.is_read && <Tag color="blue">{t('unread')}</Tag>}
                                 </Space>
                               }
                               description={
@@ -325,7 +327,7 @@ const NotificationsPage: React.FC = () => {
                         pageSize: 20,
                         total: pushTotal,
                         showSizeChanger: true,
-                        showTotal: (t) => `共 ${t} 条消息`,
+                        showTotal: (total) => t('totalMessages', { count: total }),
                         pageSizeOptions: ['10', '20', '50'],
                         onChange: (p) => setPushPage(p),
                       }}

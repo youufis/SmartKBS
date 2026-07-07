@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
+import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -39,6 +40,7 @@ interface MonitorData {
 }
 
 const DiscussionMonitorPage: React.FC = () => {
+  const { t } = useTranslation('discussion')
   const { discId } = useParams<{ discId: string }>()
   const navigate = useNavigate()
   const [data, setData] = useState<MonitorData | null>(null)
@@ -58,7 +60,6 @@ const DiscussionMonitorPage: React.FC = () => {
       const { data: res } = await apiClient.get(`/api/interaction/discussions/${discId}/monitor`)
       setData(res)
     } catch {
-      message.error('加载监控数据失败')
     } finally {
       setLoading(false)
     }
@@ -73,14 +74,13 @@ const DiscussionMonitorPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`)
       if (data.status === 'ok') {
-        message.success('AI 总结生成成功')
         setSummaryData(data)
       } else {
-        message.error(data.content || 'AI 总结生成失败')
+        message.error(data.content || t('summaryGenerateFailed'))
         setSummaryData(null)
       }
     } catch (err: any) {
-      message.error('AI 总结失败: ' + (err?.response?.data?.detail || err?.message))
+      message.error(t('operationFailed') + ': ' + (err?.response?.data?.detail || err?.message))
       setSummaryData(null)
     } finally {
       setGeneratingSummary(false)
@@ -120,19 +120,19 @@ const DiscussionMonitorPage: React.FC = () => {
 
   if (loading) return <Spin size="large" style={{ display: 'block', marginTop: 100 }} />
 
-  if (!data) return <div style={{ textAlign: 'center', padding: 60 }}>讨论不存在</div>
+  if (!data) return <div style={{ textAlign: 'center', padding: 60 }}>{t('discussionNotFound')}</div>
 
   return (
     <div>
       <Card>
         <Space style={{ marginBottom: 16 }}>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/discussion')} />
-          <Title level={4} style={{ margin: 0 }}>📊 讨论监控</Title>
+          <Title level={4} style={{ margin: 0 }}>{t('discussionMonitor')}</Title>
           <span className="markdown-content" style={{ display: 'inline-block' }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{`— ${data.title}`}</ReactMarkdown>
           </span>
           <Tag color={data.status === 'active' ? 'green' : 'red'}>
-            {data.status === 'active' ? '进行中' : '已结束'}
+            {data.status === 'active' ? t('activeDiscussions') : t('endedDiscussions')}
           </Tag>
         </Space>
 
@@ -140,23 +140,23 @@ const DiscussionMonitorPage: React.FC = () => {
         <Row gutter={16} style={{ marginBottom: 24 }}>
           <Col span={4}>
             <Card size="small">
-              <Statistic title="小组数" value={data.total_groups} prefix={<TeamOutlined />} />
+              <Statistic title={t('totalGroups')} value={data.total_groups} prefix={<TeamOutlined />} />
             </Card>
           </Col>
           <Col span={5}>
             <Card size="small">
-              <Statistic title="参与人数" value={data.total_members} prefix={<TeamOutlined />} />
+              <Statistic title={t('totalMembers')} value={data.total_members} prefix={<TeamOutlined />} />
             </Card>
           </Col>
           <Col span={5}>
             <Card size="small">
-              <Statistic title="消息总数" value={data.total_messages} prefix={<MessageOutlined />} />
+              <Statistic title={t('totalMessages')} value={data.total_messages} prefix={<MessageOutlined />} />
             </Card>
           </Col>
           <Col span={5}>
             <Card size="small">
               <Statistic
-                title="在线人数"
+                title={t('onlineCount')}
                 value={data.online_count}
                 prefix={<FieldTimeOutlined />}
                 styles={{ content: { color: data.online_count > 0 ? '#52c41a' : '#999' } }}
@@ -166,7 +166,7 @@ const DiscussionMonitorPage: React.FC = () => {
           <Col span={5}>
             <Card size="small">
               <Statistic
-                title="冷场小组"
+                title={t('coldGroups')}
                 value={data.cold_groups}
                 prefix={<WarningOutlined />}
                 styles={{ content: { color: data.cold_groups > 0 ? '#ff4d4f' : '#52c41a' } }}
@@ -177,7 +177,7 @@ const DiscussionMonitorPage: React.FC = () => {
         </Row>
 
         {/* 小组状态卡片 */}
-        <Title level={5}>各小组状态</Title>
+        <Title level={5}>{t('groupStatus')}</Title>
         <Row gutter={[12, 12]}>
           {data.groups.map(g => (
             <Col span={8} key={g.id}>
@@ -187,9 +187,9 @@ const DiscussionMonitorPage: React.FC = () => {
                   <Space>
                     {g.name}
                     {g.is_cold ? (
-                      <Tag color="red" style={{ fontSize: 11 }}>❄️ 冷场</Tag>
+                      <Tag color="red" style={{ fontSize: 11 }}>{t('coldStatus')}</Tag>
                     ) : (
-                      <Tag color="green" style={{ fontSize: 11 }}>💬 活跃</Tag>
+                      <Tag color="green" style={{ fontSize: 11 }}>{t('activeStatus')}</Tag>
                     )}
                   </Space>
                 }
@@ -200,7 +200,7 @@ const DiscussionMonitorPage: React.FC = () => {
                         size="small"
                         onClick={() => navigate(`/discussion-room/${g.id}?discussion_id=${discId}`)}
                       >
-                        进入
+                        {t('enterRoom')}
                       </Button>
                     )}
                     <Button
@@ -208,24 +208,24 @@ const DiscussionMonitorPage: React.FC = () => {
                       icon={<BulbOutlined />}
                       onClick={() => handleViewSummary(g.id)}
                     >
-                      AI 总结
+                      {t('aiSummary')}
                     </Button>
                   </Space>
                 }
               >
                 <div style={{ fontSize: 13 }}>
                   <div style={{ marginBottom: 4 }}>
-                    <TeamOutlined /> {g.member_count} 人 &nbsp;
-                    <MessageOutlined /> {g.message_count} 条
+                    <TeamOutlined /> {g.member_count}{t('people')} &nbsp;
+                    <MessageOutlined /> {g.message_count}{t('messages_')}
                   </div>
                   {g.last_preview && (
                     <div style={{ color: '#888', marginBottom: 4, fontSize: 12 }}>
-                      最后消息: {g.last_preview}
+                      {t('lastMessage')} {g.last_preview}
                     </div>
                   )}
                   {g.last_active && (
                     <div style={{ color: '#aaa', fontSize: 11 }}>
-                      最后活跃: {g.last_active}
+                      {t('lastActive')} {g.last_active}
                     </div>
                   )}
                 </div>
@@ -248,26 +248,26 @@ const DiscussionMonitorPage: React.FC = () => {
         title={
           <Space>
             <BulbOutlined style={{ color: '#faad14' }} />
-            <span>AI 讨论归纳总结 - {data?.groups.find(g => g.id === activeGroupId)?.name || ''}</span>
+            <span>{t('aiSummaryTitleWithGroup', { name: data?.groups.find(g => g.id === activeGroupId)?.name || '' })}</span>
           </Space>
         }
         open={summaryModal}
         onCancel={() => setSummaryModal(false)}
         footer={[
-          <Button key="close" onClick={() => setSummaryModal(false)}>关闭</Button>,
+          <Button key="close" onClick={() => setSummaryModal(false)}>{t('close')}</Button>,
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!summaryData?.content}
             onClick={() => {
               const token = localStorage.getItem('smartkb_token')
               window.open(`/api/interaction/groups/${activeGroupId}/summary/export?token=${token}`, '_blank')
             }}>
-            导出 Word
+            {t('exportWord')}
           </Button>,
           activeGroupId && (
             <Button key="regenerate" type="primary" icon={<ThunderboltOutlined />}
               loading={generatingSummary}
               onClick={() => handleGenerateSummary(activeGroupId)}>
-              重新生成
+              {t('regenerate')}
             </Button>
           ),
         ]}
@@ -277,19 +277,19 @@ const DiscussionMonitorPage: React.FC = () => {
           {summaryData?.content?.parsed ? (
             <div style={{ padding: '8px 0' }}>
               <div style={{ marginBottom: 20 }}>
-                <Text strong style={{ fontSize: 16, color: '#1677ff' }}>📝 总体归纳</Text>
+                <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallSummary')}</Text>
                 <div style={{
                   marginTop: 8, padding: 12, background: '#f6ffed',
                   borderRadius: 8, border: '1px solid #b7eb8f', lineHeight: 1.8,
                   fontSize: 14, color: '#333',
                 }}>
-                  {summaryData.content.parsed.summary || '（暂无内容）'}
+                  {summaryData.content.parsed.summary || t('noContent')}
                 </div>
               </div>
 
               {summaryData.content.parsed.key_points?.length > 0 && (
                 <div style={{ marginBottom: 20 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>💡 关键观点</Text>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('keyPoints')}</Text>
                   <div style={{ marginTop: 8 }}>
                     {summaryData.content.parsed.key_points.map((point: string, i: number) => (
                       <div key={i} style={{
@@ -297,7 +297,7 @@ const DiscussionMonitorPage: React.FC = () => {
                         background: '#fff7e6', borderRadius: 6,
                         border: '1px solid #ffd591', fontSize: 14,
                       }}>
-                        <Text strong style={{ color: '#fa8c16' }}>观点{i + 1}：</Text>
+                        <Text strong style={{ color: '#fa8c16' }}>{t('pointN', { n: i + 1 })}</Text>
                         {point}
                       </div>
                     ))}
@@ -307,7 +307,7 @@ const DiscussionMonitorPage: React.FC = () => {
 
               {summaryData.content.parsed.ai_comment && (
                 <div style={{ marginBottom: 20 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>🤖 AI 评价与建议</Text>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('aiComment')}</Text>
                   <div style={{
                     marginTop: 8, padding: 12, background: '#e6f7ff',
                     borderRadius: 8, border: '1px solid #91d5ff',
@@ -320,7 +320,7 @@ const DiscussionMonitorPage: React.FC = () => {
 
               {summaryData.content.parsed.score && (
                 <div style={{ marginBottom: 12 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>⭐ 综合评分</Text>
+                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallScore')}</Text>
                   <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
                     <Rate
                       disabled
@@ -337,7 +337,7 @@ const DiscussionMonitorPage: React.FC = () => {
 
               <details style={{ marginTop: 16 }}>
                 <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>
-                  查看原始 AI 回复
+                  {t('viewRawAIResponse')}
                 </summary>
                 <pre style={{
                   marginTop: 8, padding: 12, background: '#f5f5f5',
@@ -362,7 +362,7 @@ const DiscussionMonitorPage: React.FC = () => {
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
-              <Text type="secondary">正在生成总结...</Text>
+              <Text type="secondary">{t('generatingSummary')}</Text>
             </div>
           )}
         </Spin>

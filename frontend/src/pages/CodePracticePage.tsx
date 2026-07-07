@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, List, Typography, Button, Space, Tag, Modal, Spin,
   message, Tabs, Empty, Select, Statistic, Row, Col,
@@ -19,21 +20,20 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import CodeEditor from '../components/CodeEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
-import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
 
 // ── 状态标签映射 ──
-const STATUS_MAP: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  pending:        { label: '等待中',   color: 'default',   icon: <ClockCircleOutlined /> },
-  running:        { label: '运行中',   color: 'processing', icon: <Spin size="small" /> },
-  accepted:       { label: '通过 ✅',   color: 'success',   icon: <CheckCircleOutlined /> },
-  wrong_answer:   { label: '答案错误 ❌', color: 'error',     icon: <CloseCircleOutlined /> },
-  runtime_error:  { label: '运行时错误 💥', color: 'error',   icon: <CloseCircleOutlined /> },
-  time_limit:     { label: '超时 ⏱',   color: 'warning',   icon: <ClockCircleOutlined /> },
-  compile_error:  { label: '编译错误 🔧', color: 'error',    icon: <CloseCircleOutlined /> },
-  failed:         { label: '评分失败', color: 'default',    icon: <CloseCircleOutlined /> },
+const STATUS_MAP: Record<string, { labelKey: string; color: string; icon: React.ReactNode }> = {
+  pending:        { labelKey: 'statusPending',   color: 'default',   icon: <ClockCircleOutlined /> },
+  running:        { labelKey: 'statusRunning',   color: 'processing', icon: <Spin size="small" /> },
+  accepted:       { labelKey: 'statusAccepted',   color: 'success',   icon: <CheckCircleOutlined /> },
+  wrong_answer:   { labelKey: 'statusWrongAnswer', color: 'error',     icon: <CloseCircleOutlined /> },
+  runtime_error:  { labelKey: 'statusRuntimeError', color: 'error',   icon: <CloseCircleOutlined /> },
+  time_limit:     { labelKey: 'statusTimeLimit',   color: 'warning',   icon: <ClockCircleOutlined /> },
+  compile_error:  { labelKey: 'statusCompileError', color: 'error',    icon: <CloseCircleOutlined /> },
+  failed:         { labelKey: 'statusFailed', color: 'default',    icon: <CloseCircleOutlined /> },
 }
 
 // ── 紧凑型代码练习视图（用于表格展开行） ──
@@ -43,7 +43,8 @@ const CompactCodeView: React.FC<{
   language?: string
   supportedLanguages?: { value: string; label: string; available: boolean }[]
 }> = ({ problemId, starterCode, language: initLang = 'python', supportedLanguages }) => {
-  const [code, setCode] = useState(starterCode || '# 在此编写你的代码\n\ndef solution():\n    pass\n')
+  const { t } = useTranslation('practice')
+  const [code, setCode] = useState(starterCode || t('defaultCode'))
   const [lang, setLang] = useState(initLang)
   const [customInput, setCustomInput] = useState('')
   const [runResult, setRunResult] = useState<any>(null)
@@ -66,7 +67,7 @@ const CompactCodeView: React.FC<{
   }, [problemId])
 
   const handleRun = async () => {
-    if (!code.trim()) { message.warning('请编写代码'); return }
+    if (!code.trim()) { message.warning(t('writeCode')); return }
     setRunLoading(true)
     setRunResult(null)
     try {
@@ -74,22 +75,22 @@ const CompactCodeView: React.FC<{
         problem_id: problemId, language: lang, source_code: code, input_data: customInput,
       })
       setRunResult(data)
-    } catch (e: any) { message.error(e.response?.data?.detail || '运行失败') }
+    } catch (e: any) { message.error(e.response?.data?.detail || t('runFailed')) }
     finally { setRunLoading(false) }
   }
 
   const handleSubmit = async () => {
-    if (!code.trim()) { message.warning('请编写代码'); return }
+    if (!code.trim()) { message.warning(t('writeCode')); return }
     setSubmitLoading(true)
     setSubmissionResult(null)
     try {
       const { data } = await apiClient.post('/api/code/submit', {
         problem_id: problemId, language: lang, source_code: code,
       })
-      message.success('提交成功，正在评分...')
+      message.success(t('submitSuccessGrading'))
       setPollingSubmission(true)
       pollResult(data.submission_id)
-    } catch (e: any) { message.error(e.response?.data?.detail || '提交失败') }
+    } catch (e: any) { message.error(e.response?.data?.detail || t('submitFailed')) }
     finally { setSubmitLoading(false) }
   }
 
@@ -107,7 +108,7 @@ const CompactCodeView: React.FC<{
       await new Promise(r => setTimeout(r, 1000))
     }
     setPollingSubmission(false)
-    message.warning('评分超时')
+    message.warning(t('gradingTimeout'))
   }
 
   return (
@@ -127,7 +128,7 @@ const CompactCodeView: React.FC<{
         }} onClick={() => { if (descCollapsed) setDescCollapsed(false) }}>
           {descCollapsed ? (
             <div style={{ writingMode: 'vertical-rl', fontSize: 13, color: '#888', userSelect: 'none' }}>
-              <span onClick={(e) => { e.stopPropagation(); setDescCollapsed(false) }} style={{ cursor: 'pointer', color: '#1677ff' }}>📄 题目</span>
+              <span onClick={(e) => { e.stopPropagation(); setDescCollapsed(false) }} style={{ cursor: 'pointer', color: '#1677ff' }}>📄 {t('problemTitle')}</span>
             </div>
           ) : (
             <>
@@ -140,12 +141,12 @@ const CompactCodeView: React.FC<{
               </div>
               {problemData.sample_cases?.length > 0 && (
                 <div style={{ marginTop: 8 }}>
-                  <Text strong style={{ fontSize: 12 }}>示例：</Text>
+                  <Text strong style={{ fontSize: 12 }}>{t('example')}：</Text>
                   {problemData.sample_cases.map((sc: any, i: number) => (
                     <div key={sc.id || i} style={{ background: '#fff', padding: 6, borderRadius: 4, marginTop: 4, fontSize: 12, border: '1px solid #e8e8e8' }}>
-                      <Text type="secondary">示例 {i + 1}</Text>
+                      <Text type="secondary">{t('explanation')} {i + 1}</Text>
                       {sc.description && <Text type="secondary"> — {sc.description}</Text>}
-                      <pre style={{ margin: 2, fontSize: 11 }}>输入：{sc.input || '(无)'}{'\n'}输出：{sc.expected_output}</pre>
+                      <pre style={{ margin: 2, fontSize: 11 }}>{t('input')}：{sc.input || '(无)'}{'\n'}{t('output')}：{sc.expected_output}</pre>
                     </div>
                   ))}
                 </div>
@@ -164,21 +165,21 @@ const CompactCodeView: React.FC<{
           height="280px"
         />
         <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={runLoading}>运行</Button>
+          <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleRun} loading={runLoading}>{t('runCode')}</Button>
           <Button size="small" type="primary" ghost icon={<SendOutlined />} onClick={handleSubmit} loading={submitLoading || pollingSubmission}>
-            {pollingSubmission ? '评分中...' : '提交'}
+            {pollingSubmission ? t('grading') : t('submitCode')}
           </Button>
           <Select size="small" value={lang} onChange={setLang} style={{ width: 100 }}
             options={supportedLanguages && supportedLanguages.length > 0
               ? supportedLanguages
               : [{ value: 'python', label: 'Python', available: true }, { value: 'javascript', label: 'JavaScript', available: true }]} />
-          <Input size="small" placeholder="自定义输入" value={customInput}
+          <Input size="small" placeholder={t('input')} value={customInput}
             onChange={e => setCustomInput(e.target.value)} style={{ width: 160, fontSize: 12 }} />
           {/* 结果与按钮同行显示 */}
           {submissionResult && (
             <span style={{ fontSize: 12, color: submissionResult.status === 'accepted' ? '#52c41a' : '#f48771' }}>
-              {STATUS_MAP[submissionResult.status]?.label || submissionResult.status}
-              {' | '}{submissionResult.score}分 | 通过 {submissionResult.passed_cases ?? 0}/{submissionResult.total_cases ?? 0} 用例
+              {t(STATUS_MAP[submissionResult.status]?.labelKey ?? '') || submissionResult.status}
+              {' | '}{submissionResult.score}{t('scoreUnit')} | {t('passed')} {submissionResult.passed_cases ?? 0}/{submissionResult.total_cases ?? 0} {t('testCaseUnit')}
             </span>
           )}
           {runResult && !submissionResult && (
@@ -194,7 +195,7 @@ const CompactCodeView: React.FC<{
               <span style={{ color: '#f48771' }}>⚠ {runResult.error}</span>
             ) : (
               <>
-                {runResult.stdout ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre> : <span style={{ color: '#888' }}>（无输出）</span>}
+                {runResult.stdout ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre> : <span style={{ color: '#888' }}>{t('noOutput')}</span>}
                 {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 4 }}>{runResult.stderr}</pre>}
               </>
             )}
@@ -205,11 +206,8 @@ const CompactCodeView: React.FC<{
   )
 }
 
-interface CodePracticePageProps {
-  inTab?: boolean
-}
-
-const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) => {
+const CodePracticePage: React.FC = () => {
+  const { t } = useTranslation('practice')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
@@ -274,7 +272,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       const { data } = await apiClient.get(`/api/code/problems/${problemId}/submissions/detail`)
       setStatsDetail(data.submissions || [])
     } catch {
-      message.error('加载提交详情失败')
+      message.error(t('loadDetailFailed'))
     } finally {
       setStatsLoading(false)
     }
@@ -305,23 +303,18 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   })
   const [editTestCases, setEditTestCases] = useState<any[]>([])
 
-  // ── 教师端：统计 ──
-  const [teacherStats, setTeacherStats] = useState<any[]>([])
-
   // ═══════════════════════════════════════════════════════════
   // 所有 const 函数必须先声明，再在 useEffect 中调用
   // ═══════════════════════════════════════════════════════════
 
-  // 教师统计已内联到 useEffect 中
-
   // ── 创建题目 ──
   const handleCreateProblem = async () => {
     if (!createForm.title.trim()) {
-      message.warning('请输入题目标题')
+      message.warning(t('inputTitle'))
       return
     }
     if (createForm.test_cases.length === 0) {
-      message.warning('请至少添加一个测试用例')
+      message.warning(t('addAtLeastOneTestCase'))
       return
     }
     setCreateLoading(true)
@@ -340,7 +333,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         target_class: createForm.target_class || '',
         target_users: createForm.target_users || '',
       })
-      message.success('题目创建成功')
+      message.success(t('createSuccess'))
       setCreateModalOpen(false)
       setCreateForm({
         title: '', description: '', subject: '', knowledge_points: '',
@@ -350,11 +343,9 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '',
       })
       loadProblems()
-      apiClient.get('/api/code/teachers/statistics').then(({ data }) => {
-        setTeacherStats(data.problems || [])
-      }).catch(() => {})
+      apiClient.get('/api/code/teachers/statistics').then(() => {}).catch(() => {})
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '创建失败')
+      message.error(e.response?.data?.detail || t('createFailed'))
     } finally {
       setCreateLoading(false)
     }
@@ -392,7 +383,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       }
       setEditModalOpen(true)
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '加载题目失败')
+      message.error(e.response?.data?.detail || t('loadFailed'))
     } finally {
       setEditLoading(false)
     }
@@ -400,7 +391,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
 
   // ── 保存编辑 ──
   const handleSaveEdit = async () => {
-    if (!editForm.title.trim()) { message.warning('请输入题目标题'); return }
+    if (!editForm.title.trim()) { message.warning(t('inputTitle')); return }
     if (!editTarget) return
     setEditLoading(true)
     try {
@@ -415,11 +406,11 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         starter_code: editForm.starter_code,
         time_limit: editForm.time_limit,
       })
-      message.success('题目已更新')
+      message.success(t('updateSuccess'))
       setEditModalOpen(false)
       loadProblems()
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '更新失败')
+      message.error(e.response?.data?.detail || t('updateFailed'))
     } finally {
       setEditLoading(false)
     }
@@ -428,21 +419,19 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   // ── 删除题目 ──
   const handleDeleteProblem = (problemId: number) => {
     Modal.confirm({
-      title: '确认删除',
-      content: '删除后学生将无法看到该题目，确定要删除吗？',
-      okText: '确认删除',
+      title: t('confirmDelete'),
+      content: t('confirmDeleteContent'),
+      okText: t('confirmDeleteOk'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         try {
           await apiClient.delete(`/api/code/problems/${problemId}`)
-          message.success('题目已删除')
+          message.success(t('deletedSuccess'))
           loadProblems()
-          apiClient.get('/api/code/teachers/statistics').then(({ data }) => {
-            setTeacherStats(data.problems || [])
-          }).catch(() => {})
+          apiClient.get('/api/code/teachers/statistics').then(() => {}).catch(() => {})
         } catch (e: any) {
-          message.error(e.response?.data?.detail || '删除失败')
+          message.error(e.response?.data?.detail || t('deleteFailed'))
         }
       },
     })
@@ -457,7 +446,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   const [, setAiGenTaskId] = useState<string | null>(null)
 
   const handleAiGenerate = async () => {
-    if (!aiGenTopic.trim()) { message.warning('请输入主题'); return }
+    if (!aiGenTopic.trim()) { message.warning(t('inputTopic')); return }
     setAiGenLoading(true)
     setAiGenResult(null)
     try {
@@ -466,7 +455,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       })
       if (data.task_id) {
         setAiGenTaskId(data.task_id)
-        message.info('AI 生成中，请稍候...')
+        message.info(t('aiGeneratingWait'))
         const result = await pollAiTask(data.task_id, 180000)
         if (result?.status === 'ok' && result.data) {
           setAiGenResult(result.data)
@@ -487,13 +476,13 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               is_sample: !!tc.is_sample,
             })),
           }))
-          message.success('AI 生成完成，请确认后保存')
+          message.success(t('aiGenerateDone'))
         } else {
-          message.error('AI 生成失败：返回格式异常')
+          message.error(t('aiGenerateFailed'))
         }
       }
     } catch (e: any) {
-      message.error(e.response?.data?.detail || 'AI 生成请求失败')
+      message.error(e.response?.data?.detail || t('aiGenerateRequestFailed'))
     } finally {
       setAiGenLoading(false)
     }
@@ -509,7 +498,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       setProblemList(data.items || [])
       setTotal(data.total || 0)
     } catch {
-      message.error('加载题目列表失败')
+      message.error(t('loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -553,14 +542,14 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       // 同时加载提交历史
       loadSubmissions(problemId)
     } catch {
-      message.error('加载题目详情失败')
+      message.error(t('loadFailed'))
     }
   }
 
   // ── 运行代码 ──
   const handleRun = async () => {
     if (!sourceCode.trim()) {
-      message.warning('请先编写代码')
+      message.warning(t('writeCode'))
       return
     }
     setRunLoading(true)
@@ -574,7 +563,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       })
       setRunResult(data)
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '运行失败')
+      message.error(e.response?.data?.detail || t('runFailed'))
     } finally {
       setRunLoading(false)
     }
@@ -583,11 +572,11 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
   // ── 提交评分 ──
   const handleSubmit = async () => {
     if (!sourceCode.trim()) {
-      message.warning('请先编写代码')
+      message.warning(t('writeCode'))
       return
     }
     if (!currentProblem?.problem_id) {
-      message.error('请先选择题目')
+      message.error(t('selectProblemFirst'))
       return
     }
     setSubmitLoading(true)
@@ -598,11 +587,11 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         language,
         source_code: sourceCode,
       })
-      message.success('提交成功，正在评分...')
+      message.success(t('submitSuccessGrading'))
       setPollingSubmission(true)
       pollSubmissionResult(data.submission_id)
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '提交失败')
+      message.error(e.response?.data?.detail || t('submitFailed'))
     } finally {
       setSubmitLoading(false)
     }
@@ -631,13 +620,13 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       await new Promise(r => setTimeout(r, 1000))
     }
     setPollingSubmission(false)
-    message.warning('评分超时，请稍后刷新查看结果')
+    message.warning(t('gradingTimeoutRefresh'))
   }
 
   // ── AI 代码审查 ──
   const handleAiReview = async () => {
     if (!submissionResult?.id) {
-      message.warning('请先提交代码并等待评分完成')
+      message.warning(t('submitAndWaitForGrading'))
       return
     }
     setAiReviewLoading(true)
@@ -645,7 +634,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
     try {
       const { data } = await apiClient.post(`/api/code/submissions/${submissionResult.id}/review`)
       if (data.task_id) {
-          message.info('AI 审查已提交，正在分析...')
+          message.info(t('aiReviewSubmitted'))
         const result = await pollAiTask(data.task_id, 120000)
         if (result && !result.error) {
           setAiReview(result)
@@ -655,7 +644,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         }
       }
     } catch (e: any) {
-      message.error(e.response?.data?.detail || 'AI 审查请求失败')
+      message.error(e.response?.data?.detail || t('aiReviewRequestFailed'))
     } finally {
       setAiReviewLoading(false)
     }
@@ -672,7 +661,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           return
         }
         if (data.status === 'failed') {
-          message.error('AI 审查失败')
+          message.error(t('aiReviewFailed'))
           return
         }
       } catch {
@@ -680,7 +669,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       }
       await new Promise(r => setTimeout(r, 2000))
     }
-    message.warning('AI 审查超时')
+    message.warning(t('aiReviewTimeout'))
   }
 
   // ── 返回列表 ──
@@ -703,9 +692,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
     }).catch(() => {})
     if (isTeacherOrAdmin) {
-      apiClient.get('/api/code/teachers/statistics').then(({ data }) => {
-        setTeacherStats(data.problems || [])
-      }).catch(() => {})
+      apiClient.get('/api/code/teachers/statistics').then(() => {}).catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page])
@@ -718,8 +705,8 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         <Space>
           {isTeacherOrAdmin && (
             <>
-              <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGenModal(true)}>AI 生成</Button>
-              <Button size="small" type="primary" icon={<FileTextOutlined />} onClick={() => setCreateModalOpen(true)}>创建题目</Button>
+              <Button size="small" icon={<RobotOutlined />} onClick={() => setAiGenModal(true)}>{t('aiGenerate')}</Button>
+              <Button size="small" type="primary" icon={<FileTextOutlined />} onClick={() => setCreateModalOpen(true)}>{t('createProblem')}</Button>
             </>
           )}
         </Space>
@@ -768,7 +755,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                     {text}
                   </Text>
                   <Tag color={record.difficulty === 'easy' ? 'green' : record.difficulty === 'hard' ? 'red' : 'orange'}>
-                    {record.difficulty === 'easy' ? '简单' : record.difficulty === 'hard' ? '困难' : '中等'}
+                    {record.difficulty === 'easy' ? t('easy') : record.difficulty === 'hard' ? t('hard') : t('medium')}
                   </Tag>
                 </Space>
               ),
@@ -786,12 +773,12 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                         e.stopPropagation()
                         loadStatsDetail(record.problem_id, record.title)
                       }}
-                      title="查看提交详情"
+                      title={t('viewSubmissionDetails')}
                     />
                   )}
                   {record.my_status && (
                     <Tag color={record.my_status === 'accepted' ? 'success' : 'error'}>
-                      {record.my_status === 'accepted' ? `${record.my_score}分` : STATUS_MAP[record.my_status]?.label || record.my_status}
+                      {record.my_status === 'accepted' ? `${record.my_score}${t('scoreUnit')}` : t(STATUS_MAP[record.my_status]?.labelKey ?? '') || record.my_status}
                     </Tag>
                   )}
                   {isTeacherOrAdmin && (
@@ -808,7 +795,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               ),
             },
           ]}
-          locale={{ emptyText: <Empty description={isTeacherOrAdmin ? '暂无代码题目，点击「创建题目」开始' : '暂无代码题目'} /> }}
+          locale={{ emptyText: <Empty description={isTeacherOrAdmin ? t('noProblemsHint') : t('noProblems')} /> }}
         />
       </Spin>
 
@@ -822,14 +809,14 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           onShowSizeChange={(_p, size) => { setPageSize(size); setPage(1); setTimeout(loadProblems, 0) }}
           showSizeChanger
           pageSizeOptions={['5', '10', '20', '50']}
-          showTotal={(t) => `共 ${t} 道题目`}
+          showTotal={(total) => t('totalProblems', { count: total })}
           hideOnSinglePage={false}
         />
       </div>
 
       {/* ── 提交统计弹窗 ── */}
       <Modal
-        title={`提交详情 - ${statsProblemTitle}`}
+        title={t('submissionDetailTitle', { title: statsProblemTitle })}
         open={statsModalOpen}
         onCancel={() => setStatsModalOpen(false)}
         footer={null}
@@ -837,7 +824,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
       >
         <Spin spinning={statsLoading}>
           {statsDetail.length === 0 ? (
-            <Empty description="暂无学生提交" />
+            <Empty description={t('noStudentSubmissions')} />
           ) : (
             <Table
               dataSource={statsDetail}
@@ -847,61 +834,61 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               expandable={{
                 expandedRowRender: (record: any) => (
                   <div style={{ padding: '8px 0' }}>
-                    <Text strong style={{ fontSize: 13 }}>提交代码：</Text>
+                    <Text strong style={{ fontSize: 13 }}>{t('submittedCode')}</Text>
                     <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontSize: 12, overflow: 'auto', maxHeight: 300, marginTop: 4 }}>
-                      <code>{record.source_code || '（代码不可见）'}</code>
+                      <code>{record.source_code || t('codeNotVisible')}</code>
                     </pre>
                   </div>
                 ),
                 rowExpandable: () => true,
               }}
               columns={[
-                { title: '姓名', dataIndex: 'student_name', width: 100 },
-                { title: '班级', dataIndex: 'student_class', width: 80 },
+                { title: t('studentName'), dataIndex: 'student_name', width: 100 },
+                { title: t('studentClass'), dataIndex: 'student_class', width: 80 },
                 {
-                  title: '状态', dataIndex: 'status', width: 100,
+                  title: t('status'), dataIndex: 'status', width: 100,
                   render: (v: string) => {
                     const st = STATUS_MAP[v]
-                    return <Tag color={st?.color}>{st?.icon} {st?.label || v}</Tag>
+                    return <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || v}</Tag>
                   },
                 },
-                { title: '得分', dataIndex: 'score', width: 60 },
-                { title: '通过用例', render: (_: any, r: any) => `${r.passed_cases || 0}/${r.total_cases || 0}`, width: 90 },
-                { title: '用时', dataIndex: 'execution_time', render: (v: number) => v ? `${v}s` : '-', width: 70 },
-                { title: '提交时间', dataIndex: 'created_at', render: (v: string) => v?.slice(5, 16) || '', width: 120 },
+                { title: t('score'), dataIndex: 'score', width: 60 },
+                { title: t('passedCases'), render: (_: any, r: any) => `${r.passed_cases || 0}/${r.total_cases || 0}`, width: 90 },
+                { title: t('runTime'), dataIndex: 'execution_time', render: (v: number) => v ? `${v}s` : '-', width: 70 },
+                { title: t('submitTime'), dataIndex: 'created_at', render: (v: string) => v?.slice(5, 16) || '', width: 120 },
               ]}
             />
           )}
           <div style={{ marginTop: 12, textAlign: 'center' }}>
-            <Text type="secondary">共 {statsDetail.length} 名学生提交</Text>
+            <Text type="secondary">{t('totalStudentsSubmitted', { count: statsDetail.length })}</Text>
           </div>
         </Spin>
       </Modal>
 
       {/* ── 创建题目弹窗 ── */}
       <Modal
-        title="创建代码题"
+        title={t('createCodeProblem')}
         open={createModalOpen}
         onCancel={() => setCreateModalOpen(false)}
         onOk={handleCreateProblem}
         confirmLoading={createLoading}
         width={800}
-        okText="保存题目"
+        okText={t('saveProblem')}
       >
         <Tabs items={[
           {
             key: 'basic',
-            label: '基本信息',
+            label: t('basicInfo'),
             children: (
               <Space orientation="vertical" style={{ width: '100%' }}>
                 <Input
-                  placeholder="题目标题"
+                  placeholder={t('problemTitlePlaceholder')}
                   value={createForm.title}
                   onChange={e => setCreateForm({ ...createForm, title: e.target.value })}
                 />
                 <Input.TextArea
                   rows={4}
-                  placeholder="题目描述（支持 Markdown 格式，描述输入输出和样例）"
+                  placeholder={t('problemDescriptionPlaceholder')}
                   value={createForm.description}
                   onChange={e => setCreateForm({ ...createForm, description: e.target.value })}
                 />
@@ -917,9 +904,9 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                     onChange={v => setCreateForm({ ...createForm, difficulty: v })}
                     style={{ width: 100 }}
                     options={[
-                      { value: 'easy', label: '简单' },
-                      { value: 'medium', label: '中等' },
-                      { value: 'hard', label: '困难' },
+                      { value: 'easy', label: t('easy') },
+                      { value: 'medium', label: t('medium') },
+                      { value: 'hard', label: t('hard') },
                     ]}
                   />
                   <Select
@@ -929,7 +916,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                     options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]}
                   />
                   <Input
-                    placeholder="知识点标签（逗号分隔）"
+                    placeholder={t('kpPlaceholder')}
                     value={createForm.knowledge_points}
                     onChange={e => setCreateForm({ ...createForm, knowledge_points: e.target.value })}
                     style={{ width: 200 }}
@@ -940,10 +927,10 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           },
           {
             key: 'code',
-            label: '代码模板',
+            label: t('codeTemplate'),
             children: (
               <>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>学生编写代码时的初始模板（含 TODO 注释引导）</Text>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('codeTemplateDescription')}</Text>
                 <Input.TextArea
                   rows={12}
                   value={createForm.template_code}
@@ -957,7 +944,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
             key: 'cases',
             label: (
               <span>
-                测试用例
+                {t('testCases')}
                 <Tag style={{ marginLeft: 4 }}>{createForm.test_cases.length}</Tag>
               </span>
             ),
@@ -966,28 +953,28 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                 {/* 新增测试用例 */}
                 <Card size="small" style={{ marginBottom: 12 }}>
                   <Space orientation="vertical" style={{ width: '100%' }}>
-                    <Text strong>添加测试用例</Text>
+                    <Text strong>{t('addTestCase')}</Text>
                     <Space>
                       <Input
-                        placeholder="标准输入"
+                        placeholder={t('standardInput')}
                         value={newTestCase.input}
                         onChange={e => setNewTestCase({ ...newTestCase, input: e.target.value })}
                         style={{ width: 180 }}
                       />
                       <Input
-                        placeholder="期望输出"
+                        placeholder={t('expectedOutput')}
                         value={newTestCase.expected}
                         onChange={e => setNewTestCase({ ...newTestCase, expected: e.target.value })}
                         style={{ width: 180 }}
                       />
                       <Input
-                        placeholder="用例说明"
+                        placeholder={t('testCaseDescription')}
                         value={newTestCase.description}
                         onChange={e => setNewTestCase({ ...newTestCase, description: e.target.value })}
                         style={{ width: 160 }}
                       />
                       <InputNumber
-                        placeholder="分值"
+                        placeholder={t('scorePlaceholder')}
                         value={newTestCase.score}
                         onChange={v => setNewTestCase({ ...newTestCase, score: v || 1 })}
                         min={0.5} max={10} step={0.5}
@@ -996,7 +983,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                       <Button
                         type="primary" size="small"
                         onClick={() => {
-                          if (!newTestCase.expected.trim()) { message.warning('请输入期望输出'); return }
+                          if (!newTestCase.expected.trim()) { message.warning(t('inputExpectedOutput')); return }
                           setCreateForm({
                             ...createForm,
                             test_cases: [...createForm.test_cases, { ...newTestCase, is_sample: createForm.test_cases.length < 2 }],
@@ -1004,7 +991,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                           setNewTestCase({ input: '', expected: '', description: '', score: 1, is_sample: false })
                         }}
                       >
-                        添加
+                        {t('add')}
                       </Button>
                     </Space>
                   </Space>
@@ -1012,7 +999,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
 
                 {/* 测试用例列表 */}
                 {createForm.test_cases.length === 0 ? (
-                  <Text type="secondary">暂无测试用例，请至少添加一个</Text>
+                  <Text type="secondary">{t('noTestCasesYet')}</Text>
                 ) : (
                   <Table
                     size="small"
@@ -1021,18 +1008,18 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                     pagination={false}
                     columns={[
                       { title: '#', render: (_: any, __: any, i: number) => i + 1, width: 40 },
-                      { title: '输入', dataIndex: 'input', render: (v: string) => <code>{v || '(空)'}</code> },
-                      { title: '期望输出', dataIndex: 'expected', render: (v: string) => <code>{v}</code> },
-                      { title: '说明', dataIndex: 'description' },
-                      { title: '分值', dataIndex: 'score', width: 60 },
-                      { title: '示例', dataIndex: 'is_sample', render: (v: boolean) => v ? <Tag color="blue">示例</Tag> : null, width: 60 },
-                      { title: '操作', width: 60, render: (_: any, __: any, i: number) => (
+                      { title: t('input'), dataIndex: 'input', render: (v: string) => <code>{v || t('empty')}</code> },
+                      { title: t('expectedOutput'), dataIndex: 'expected', render: (v: string) => <code>{v}</code> },
+                      { title: t('description'), dataIndex: 'description' },
+                      { title: t('score'), dataIndex: 'score', width: 60 },
+                      { title: t('example'), dataIndex: 'is_sample', render: (v: boolean) => v ? <Tag color="blue">{t('example')}</Tag> : null, width: 60 },
+                      { title: t('actions'), width: 60, render: (_: any, __: any, i: number) => (
                         <Button type="link" danger size="small" onClick={() => {
                           setCreateForm({
                             ...createForm,
                             test_cases: createForm.test_cases.filter((_, idx) => idx !== i),
                           })
-                        }}>删除</Button>
+                        }}>{t('delete')}</Button>
                       )},
                     ]}
                   />
@@ -1042,7 +1029,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           },
           {
             key: 'scope',
-            label: '目标范围',
+            label: t('targetScope'),
             children: (
               <div style={{ padding: '8px 0' }}>
                 <ActivityScopeSelector
@@ -1069,17 +1056,17 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
 
       {/* ── AI 生成弹窗 ── */}
       <Modal
-        title="AI 生成代码题"
+        title={t('aiGenerateCodeProblem')}
         open={aiGenModal}
         onCancel={() => { setAiGenModal(false); setAiGenResult(null) }}
         footer={null}
         width={500}
       >
         <Space orientation="vertical" style={{ width: '100%' }}>
-          <Text>输入一个主题，AI 会自动生成完整的代码题目（含描述、模板、测试用例）。</Text>
+          <Text>{t('aiGenerateDesc')}</Text>
           <Space>
             <Input
-              placeholder="例如：冒泡排序、判断回文数、两数之和"
+              placeholder={t('aiGenTopicPlaceholder')}
               value={aiGenTopic}
               onChange={e => setAiGenTopic(e.target.value)}
               style={{ width: 300 }}
@@ -1092,7 +1079,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               options={subjectOptions.map(s => ({ value: s, label: s }))}
             />
             <Button type="primary" onClick={handleAiGenerate} loading={aiGenLoading}>
-              生成
+              {t('generate')}
             </Button>
           </Space>
 
@@ -1100,19 +1087,19 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
             <Alert
               type="success"
               showIcon
-              message="AI 生成完成"
+              message={t('aiGenerateComplete')}
               description={
                 <div>
-                  <Text strong>标题：</Text>{aiGenResult.title}<br />
-                  <Text strong>知识点：</Text>{aiGenResult.knowledge_points}<br />
-                  <Text strong>测试用例：</Text>{aiGenResult.test_cases?.length || 0} 个
+                  <Text strong>{t('title')}：</Text>{aiGenResult.title}<br />
+                  <Text strong>{t('knowledgePoints')}：</Text>{aiGenResult.knowledge_points}<br />
+                  <Text strong>{t('testCases')}：</Text>{t('countCases', { count: aiGenResult.test_cases?.length || 0 })}
                 </div>
               }
               action={
                 <Button size="small" type="primary" onClick={() => {
                   setAiGenModal(false)
                   setAiGenResult(null)
-                  message.success('内容已填入创建表单，请确认后保存')
+                  message.success(t('contentFilled'))
                 }}>
                   确认并编辑
                 </Button>
@@ -1149,7 +1136,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                     options={subjectOptions.map(s => ({ value: s, label: s }))} />
                   <Select value={editForm.difficulty} onChange={v => setEditForm({ ...editForm, difficulty: v })}
                     style={{ width: 100 }}
-                    options={[{ value: 'easy', label: '简单' }, { value: 'medium', label: '中等' }, { value: 'hard', label: '困难' }]} />
+                    options={[{ value: 'easy', label: t('easy') }, { value: 'medium', label: t('medium') }, { value: 'hard', label: t('hard') }]} />
                   <Select value={editForm.language} onChange={v => setEditForm({ ...editForm, language: v })}
                     style={{ width: 120 }}
                     options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]} />
@@ -1164,7 +1151,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
             label: '代码模板',
             children: (
               <>
-                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>学生编写代码时的初始模板</Text>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('starterCodeHint')}</Text>
                 <Input.TextArea rows={12} value={editForm.template_code}
                   onChange={e => setEditForm({ ...editForm, template_code: e.target.value })}
                   style={{ fontFamily: 'monospace', fontSize: 13 }} />
@@ -1173,11 +1160,11 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           },
           {
             key: 'cases',
-            label: <span>测试用例 <Tag style={{ marginLeft: 4 }}>{editTestCases.length}</Tag></span>,
+            label: <span>{t('testCases')} <Tag style={{ marginLeft: 4 }}>{editTestCases.length}</Tag></span>,
             children: (
               <>
                 {editTestCases.length === 0 ? (
-                  <Text type="secondary">暂无测试用例数据</Text>
+                  <Text type="secondary">{t('noTestCases')}</Text>
                 ) : (
                   <Table size="small" dataSource={editTestCases} rowKey={(_, i) => String(i)} pagination={false}
                     columns={[
@@ -1212,10 +1199,10 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
         {/* 左面板：题目描述 */}
         <div style={{ width: '40%', overflow: 'auto', background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #f0f0f0' }}>
           <Space style={{ marginBottom: 12 }}>
-            <Button icon={<ArrowLeftOutlined />} onClick={handleBack} size="small">返回</Button>
+            <Button icon={<ArrowLeftOutlined />} onClick={handleBack} size="small">{t('start')}</Button>
             <Title level={5} style={{ margin: 0 }}>{currentProblem.title}</Title>
             <Tag color={currentProblem.difficulty === 'easy' ? 'green' : currentProblem.difficulty === 'hard' ? 'red' : 'orange'}>
-              {currentProblem.difficulty === 'easy' ? '简单' : currentProblem.difficulty === 'hard' ? '困难' : '中等'}
+              {currentProblem.difficulty === 'easy' ? t('easy') : currentProblem.difficulty === 'hard' ? t('hard') : t('medium')}
             </Tag>
           </Space>
 
@@ -1226,14 +1213,14 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           {/* 示例测试用例 */}
           {currentProblem.sample_cases?.length > 0 && (
             <>
-              <Divider>示例测试用例</Divider>
+              <Divider>{t('explanation')}</Divider>
               {currentProblem.sample_cases.map((sc: any, i: number) => (
                 <Card key={sc.id} size="small" style={{ marginBottom: 8 }}>
-                  <Text strong>示例 {i + 1}</Text>
+                  <Text strong>{t('explanation')} {i + 1}</Text>
                   {sc.description && <Text type="secondary"> — {sc.description}</Text>}
                   <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, marginTop: 4, fontSize: 12 }}>
-                    <Text strong>输入：</Text>{sc.input || '(无)'}{'\n'}
-                    <Text strong>输出：</Text>{sc.expected_output}
+                    <Text strong>{t('input')}：</Text>{sc.input || '(无)'}{'\n'}
+                    <Text strong>{t('output')}：</Text>{sc.expected_output}
                   </pre>
                 </Card>
               ))}
@@ -1244,12 +1231,12 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
           <Divider>
             <Space>
               <HistoryOutlined />
-              <span>提交历史</span>
+              <span>{t('submitCode')}</span>
             </Space>
           </Divider>
           <Spin spinning={submissionsLoading}>
             {submissions.length === 0 ? (
-              <Text type="secondary">暂无提交记录</Text>
+              <Text type="secondary">{t('noHistory')}</Text>
             ) : (
               <List
                 size="small"
@@ -1267,8 +1254,8 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                       }}
                     >
                       <Space>
-                        <Tag color={st?.color}>{st?.icon} {st?.label || s.status}</Tag>
-                        <Text type="secondary" style={{ fontSize: 12 }}>{s.score}分</Text>
+                        <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || s.status}</Tag>
+                        <Text type="secondary" style={{ fontSize: 12 }}>{t('scorePoints', { score: s.score })}</Text>
                         <Text type="secondary" style={{ fontSize: 12 }}>{s.created_at?.slice(5, 16)}</Text>
                       </Space>
                     </List.Item>
@@ -1300,7 +1287,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               onClick={handleRun}
               loading={runLoading}
             >
-              运行一下
+              {t('runCode')}
             </Button>
             <Button
               type="primary"
@@ -1309,7 +1296,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               onClick={handleSubmit}
               loading={submitLoading || pollingSubmission}
             >
-              {pollingSubmission ? '评分中...' : '提交评分'}
+              {pollingSubmission ? t('testResult') : t('submitCode')}
             </Button>
             {isTeacherOrAdmin && (
               <Button
@@ -1318,7 +1305,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                 loading={aiReviewLoading}
                 disabled={!submissionResult}
               >
-                AI 审查
+                {t('runCode')}
               </Button>
             )}
             <div style={{ flex: 1 }} />
@@ -1333,7 +1320,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
 
           {/* 自定义输入 */}
           <div>
-            <Text type="secondary" style={{ fontSize: 12 }}>自定义输入（可选）：</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('input')}：</Text>
             <TextArea
               rows={2}
               value={customInput}
@@ -1351,12 +1338,12 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
               items={[
                 ...(runResult ? [{
                   key: 'output',
-                  label: <span><PlayCircleOutlined /> 运行输出</span>,
+                  label: <span><PlayCircleOutlined />{t('runOutput')}</span>,
                   children: (
                     <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 13, maxHeight: 300, overflow: 'auto' }}>
                       {runResult.error ? (
                         <div style={{ color: '#f48771' }}>
-                          <div>⚠ 错误：{runResult.error}</div>
+                          <div>{t('errorPrefix')}{runResult.error}</div>
                           {runResult.stderr && <pre style={{ margin: 0, color: '#f48771' }}>{runResult.stderr}</pre>}
                         </div>
                       ) : (
@@ -1365,7 +1352,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                           {runResult.stdout ? (
                             <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre>
                           ) : (
-                            <div style={{ color: '#888' }}>（无输出）</div>
+                            <div style={{ color: '#888' }}>{t('noOutput')}</div>
                           )}
                           {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 8 }}>{runResult.stderr}</pre>}
                         </>
@@ -1375,14 +1362,14 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                 }] : []),
                 ...(submissionResult ? [{
                   key: 'result',
-                  label: <span><BarChartOutlined /> 评分结果</span>,
+                  label: <span><BarChartOutlined />{t('scoreResult')}</span>,
                   children: (
                     <div>
                       <Row gutter={16} style={{ marginBottom: 12 }}>
                         <Col span={6}>
                           <Statistic
-                            title="状态"
-                            value={statusInfo?.label || submissionResult.status}
+                            title={t('status')}
+                            value={statusInfo ? t(statusInfo.labelKey) || submissionResult.status : submissionResult.status}
                             styles={{ content: { fontSize: 16, color: statusInfo?.color === 'success' ? '#52c41a' : '#ff4d4f' } }}
                           />
                         </Col>
@@ -1400,7 +1387,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                       {/* 测试用例详情 */}
                       {submissionResult.details?.length > 0 && (
                         <>
-                          <Divider>测试用例详情</Divider>
+                          <Divider>{t('testCaseDetail')}</Divider>
                           <Table
                             size="small"
                             dataSource={submissionResult.details}
@@ -1415,8 +1402,8 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                                   <code style={{ fontSize: 12 }}>{v ? v.slice(0, 80) : '(空)'}</code>
                                 </span>
                               )},
-                              { title: '结果', dataIndex: 'is_pass', render: (v: boolean) => v ? <Tag color="success">通过</Tag> : <Tag color="error">失败</Tag> },
-                              { title: '得分', dataIndex: 'score', render: (v: number) => v || 0 },
+                              { title: t('testResult'), dataIndex: 'is_pass', render: (v: boolean) => v ? <Tag color="success">{t('passed')}</Tag> : <Tag color="error">{t('failed')}</Tag> },
+                              { title: t('score'), dataIndex: 'score', render: (v: number) => v || 0 },
                             ]}
                           />
                         </>
@@ -1426,7 +1413,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                 }] : []),
                 ...(aiReview ? [{
                   key: 'review',
-                  label: <span><RobotOutlined /> AI 审查</span>,
+                  label: <span><RobotOutlined />{t('aiReview')}</span>,
                   children: (
                     <div>
                       <Row gutter={16} style={{ marginBottom: 12 }}>
@@ -1464,7 +1451,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                       {/* 优点 */}
                       {aiReview.strengths?.length > 0 && (
                         <>
-                          <Text strong style={{ color: '#52c41a' }}>✅ 优点</Text>
+                          <Text strong style={{ color: '#52c41a' }}>{t('strengths')}</Text>
                           <ul style={{ margin: '4px 0 12px' }}>
                             {aiReview.strengths.map((s: string, i: number) => <li key={i}><Text>{s}</Text></li>)}
                           </ul>
@@ -1474,7 +1461,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                       {/* 不足 */}
                       {aiReview.weaknesses?.length > 0 && (
                         <>
-                          <Text strong style={{ color: '#ff4d4f' }}>❌ 待改进</Text>
+                          <Text strong style={{ color: '#ff4d4f' }}>{t('improvements')}</Text>
                           <ul style={{ margin: '4px 0 12px' }}>
                             {aiReview.weaknesses.map((w: string, i: number) => <li key={i}><Text>{w}</Text></li>)}
                           </ul>
@@ -1484,7 +1471,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                       {/* 改进建议 */}
                       {aiReview.suggestions?.length > 0 && (
                         <>
-                          <Text strong style={{ color: '#1677ff' }}>💡 改进建议</Text>
+                          <Text strong style={{ color: '#1677ff' }}>{t('suggestions')}</Text>
                           <ul style={{ margin: '4px 0 12px' }}>
                             {aiReview.suggestions.map((s: string, i: number) => <li key={i}><Text>{s}</Text></li>)}
                           </ul>
@@ -1494,7 +1481,7 @@ const CodePracticePage: React.FC<CodePracticePageProps> = ({ inTab = false }) =>
                       {/* 改进代码 */}
                       {aiReview.improved_code && (
                         <>
-                          <Divider>改进参考</Divider>
+                          <Divider>{t('reference')}</Divider>
                           <pre style={{ background: '#f6ffed', padding: 12, borderRadius: 6, fontSize: 13, overflow: 'auto' }}>
                             <code>{aiReview.improved_code}</code>
                           </pre>

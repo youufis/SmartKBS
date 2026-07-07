@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { Card, Typography, Button, Spin, Empty, Pagination } from 'antd'
 import { CrownOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 import { getShowcaseList } from '../api/showcase'
 import type { ShowcaseCard as ShowcaseCardType } from '../api/showcase'
 import ShowcaseCard from '../components/showcase/ShowcaseCard'
@@ -17,6 +18,7 @@ const PAGE_SIZE = 20
 const ShowcasePage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
+  const { t } = useTranslation('score')
 
   // 列表数据
   const [cards, setCards] = useState<ShowcaseCardType[]>([])
@@ -165,17 +167,17 @@ const ShowcasePage: React.FC = () => {
         <div>
           <Title level={4} style={{ margin: 0 }}>
             <CrownOutlined style={{ color: '#faad14', marginRight: 8 }} />
-            荣耀殿堂
+            {t('hallOfGlory')}
           </Title>
-          <Text type="secondary">全校学生荣誉展示，互相学习，共同进步</Text>
+          <Text type="secondary">{t('showcaseSubtitle')}</Text>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Button icon={<ReloadOutlined />} onClick={doRefresh} loading={loading}>
-            刷新
+            {t('refresh')}
           </Button>
           {isTeacherOrAdmin && (
             <Button type="primary" icon={<CrownOutlined />} onClick={() => setGenOpen(true)}>
-              生成展示卡
+              {t('generateCard')}
             </Button>
           )}
         </div>
@@ -198,14 +200,14 @@ const ShowcasePage: React.FC = () => {
       {/* 卡片网格 */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: 60 }}>
-          <Spin size="large" tip="加载中..." />
+          <Spin size="large" tip={t('loading')} />
         </div>
       ) : cards.length === 0 ? (
         <Empty
           description={
             isTeacherOrAdmin
-              ? '暂无展示卡，点击右上方「生成展示卡」按钮创建'
-              : '暂无展示卡，请等待教师生成'
+              ? t('noCardTeacher')
+              : t('noCardStudent')
           }
           style={{ padding: 60 }}
         />
@@ -231,7 +233,7 @@ const ShowcasePage: React.FC = () => {
               pageSize={PAGE_SIZE}
               onChange={handlePageChange}
               showSizeChanger={false}
-              showTotal={(t) => `共 ${t} 位学子`}
+              showTotal={(total) => t('totalShowcaseStudents', { count: total })}
               hideOnSinglePage={false}
             />
           </div>

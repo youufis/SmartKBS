@@ -5,8 +5,8 @@ import {
   message, Spin, Tag, Alert, Radio, Row, Col, Divider,
 } from 'antd'
 import { ArrowLeftOutlined, ReloadOutlined, CheckOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { useCompanionStore } from '../stores/companionStore'
-
 const { Title, Text, Paragraph } = Typography
 
 const AVATAR_MAP: Record<string, string> = {
@@ -22,6 +22,7 @@ const PREVIEW_TEXT: Record<string, string> = {
 }
 
 const CompanionSettings: React.FC = () => {
+  const { t } = useTranslation('system')
   const navigate = useNavigate()
   const { config, loadConfig, loadProfile, updateConfig, refreshProfile, profile } = useCompanionStore()
 
@@ -48,13 +49,11 @@ const CompanionSettings: React.FC = () => {
 
   const handleSave = async () => {
     if (!companionName.trim() || companionName.trim().length > 10) {
-      message.warning('学伴名称限 1-10 个字符')
       return
     }
     setSaving(true)
     try {
       await updateConfig({ enabled, personality, companion_name: companionName.trim() })
-      message.success('学伴配置已保存 🎉')
     } catch (e: any) {
       message.error(e?.response?.data?.detail || e?.message || '保存失败')
     } finally {
@@ -65,16 +64,13 @@ const CompanionSettings: React.FC = () => {
   const handleRefresh = async () => {
     try {
       await refreshProfile()
-      message.success('学习画像已刷新')
-    } catch {
-      message.error('刷新失败')
-    }
+    } catch { /* ignore */ }
   }
 
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin size="large" description="加载中..." />
+        <Spin size="large" description={t('loading')} />
       </div>
     )
   }
@@ -84,11 +80,11 @@ const CompanionSettings: React.FC = () => {
       {/* ── 顶部导航 ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/chat?companion=1')}>
-          返回
+          {t('back')}
         </Button>
         <Divider type="vertical" />
         <span style={{ fontSize: 20 }}>🧠</span>
-        <Title level={4} style={{ margin: 0 }}>AI 学伴设置</Title>
+        <Title level={4} style={{ margin: 0 }}>{t('aiCompanionSettings')}</Title>
       </div>
 
       <Row gutter={[16, 16]}>
@@ -98,40 +94,40 @@ const CompanionSettings: React.FC = () => {
           <Card size="small" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <Text strong>启用 AI 学伴</Text>
+                <Text strong>{t('enableAiCompanion')}</Text>
                 <br />
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  开启后，智答页面将切换到学伴模式
+                  {t('enableAiCompanionDesc')}
                 </Text>
               </div>
-              <Switch checked={enabled} onChange={setEnabled} checkedChildren="开启" unCheckedChildren="关闭" />
+              <Switch checked={enabled} onChange={setEnabled} checkedChildren={t('enabled')} unCheckedChildren={t('disabled')} />
             </div>
           </Card>
 
           {/* ── 学伴名称 ── */}
           <Card size="small" style={{ marginBottom: 16 }}>
-            <Text strong>学伴名称</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>1-10 个字符</Text>
+            <Text strong>{t('companionName')}</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>{t('charLimit1to10')}</Text>
             <Input
               value={companionName}
               onChange={(e) => setCompanionName(e.target.value)}
               maxLength={10} showCount
               style={{ marginTop: 8 }}
-              prefix="🧠" placeholder="小智"
+              prefix="🧠" placeholder={t('companionNamePlaceholder')}
             />
           </Card>
 
           {/* ── 学伴人格 ── */}
           <Card size="small" style={{ marginBottom: 16 }}>
-            <Text strong>学伴人格</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>不同人格有不同的对话风格</Text>
+            <Text strong>{t('companionPersonality')}</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>{t('personalityDesc')}</Text>
             <div style={{ marginTop: 10 }}>
               <Radio.Group value={personality} onChange={(e) => setPersonality(e.target.value)} style={{ width: '100%' }}>
                 <Space orientation="vertical" style={{ width: '100%' }} size={8}>
                   {[
-                    { value: 'encouraging', emoji: '🎉', label: '鼓励型', desc: '「加油，你是最棒的！」温暖热情，充满正能量' },
-                    { value: 'rigorous', emoji: '📐', label: '严谨型', desc: '「这道题我们来一步步分析」严谨细致，逻辑清晰' },
-                    { value: 'humorous', emoji: '😄', label: '幽默型', desc: '「今天又翻车了？来，必拿下！」风趣幽默' },
+                    { value: 'encouraging', emoji: '🎉', label: t('encouraging'), desc: t('encouragingDesc') },
+                    { value: 'rigorous', emoji: '📐', label: t('rigorous'), desc: t('rigorousDesc') },
+                    { value: 'humorous', emoji: '😄', label: t('humorous'), desc: t('humorousDesc') },
                   ].map((p) => (
                     <Radio
                       key={p.value} value={p.value}
@@ -167,8 +163,8 @@ const CompanionSettings: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <Text strong style={{ color: '#5b4fa0' }}>👁️ 人格预览</Text>
-              {hasChanges && <Text type="warning" style={{ fontSize: 11 }}>⚡ 有未保存的更改</Text>}
+              <Text strong style={{ color: '#5b4fa0' }}>👁️ {t('personalityPreview')}</Text>
+              {hasChanges && <Text type="warning" style={{ fontSize: 11 }}>⚡ {t('unsavedChanges')}</Text>}
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
               <div style={{
@@ -198,10 +194,10 @@ const CompanionSettings: React.FC = () => {
               icon={<CheckOutlined />} size="large"
               style={hasChanges ? { background: 'linear-gradient(135deg, #667eea, #764ba2)', borderColor: 'transparent' } : {}}
             >
-              保存设置
+              {t('saveSettings')}
             </Button>
             <Button icon={<ReloadOutlined />} onClick={handleRefresh} size="large">
-              刷新画像
+              {t('refreshProfile')}
             </Button>
           </div>
         </Col>
@@ -209,7 +205,7 @@ const CompanionSettings: React.FC = () => {
         {/* ═══ 右栏：画像预览 ═══ */}
         <Col xs={24} md={10}>
           <Card
-            title={<span style={{ fontSize: 14 }}>📊 当前学习画像</span>}
+            title={<span style={{ fontSize: 14 }}>📊 {t('currentLearningProfile')}</span>}
             size="small"
             style={{
               background: 'linear-gradient(180deg, #faf8ff, #fff)',
@@ -224,7 +220,7 @@ const CompanionSettings: React.FC = () => {
                   <span style={{ fontSize: 40 }}>{profile.titles?.main === '初窥门径' ? '🥚' : '🏆'}</span>
                   <div style={{ fontWeight: 600, fontSize: 16, marginTop: 4 }}>{profile.titles?.main || '初窥门径'}</div>
                   <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 4 }}>
-                    <Tag color="orange">⭐ {profile.total_points || 0} 积分</Tag>
+                    <Tag color="orange">⭐ {profile.total_points || 0} {t('points')}</Tag>
                     {profile.streak_days > 0 && <Tag color="red">🔥 {profile.streak_days} 天</Tag>}
                   </div>
                 </div>
@@ -234,14 +230,14 @@ const CompanionSettings: React.FC = () => {
                 {/* 薄弱知识点 */}
                 {profile.weakness && profile.weakness.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
-                    <Text type="danger" style={{ fontSize: 12, fontWeight: 600 }}>⚠️ 薄弱知识点</Text>
+                    <Text type="danger" style={{ fontSize: 12, fontWeight: 600 }}>⚠️ {t('weakness')}</Text>
                     <div style={{ marginTop: 4 }}>
                       {profile.weakness.slice(0, 3).map((w, i) => (
                         <div key={i} style={{
                           fontSize: 12, padding: '4px 8px', marginTop: 4,
                           background: '#fff2f0', borderRadius: 6,
                         }}>
-                          {w.kp} <Tag color="error" style={{ fontSize: 10 }}>错{w.wrong_count}次</Tag>
+                          {w.kp} <Tag color="error" style={{ fontSize: 10 }}>{t('wrongCount', { count: w.wrong_count })}</Tag>
                         </div>
                       ))}
                     </div>
@@ -251,9 +247,9 @@ const CompanionSettings: React.FC = () => {
                 {/* 考试趋势 */}
                 {profile.recent_exams && profile.recent_exams.count > 0 && (
                   <div style={{ marginBottom: 12 }}>
-                    <Text style={{ fontSize: 12, fontWeight: 600 }}>📈 考试趋势</Text>
+                    <Text style={{ fontSize: 12, fontWeight: 600 }}>📈 {t('examTrend')}</Text>
                     <div style={{ marginTop: 4, fontSize: 13 }}>
-                      平均分 <Text strong>{profile.recent_exams.avg}</Text>
+                      {t('avgScore')} <Text strong>{profile.recent_exams.avg}</Text>
                       <span style={{ marginLeft: 8 }}>
                         {profile.recent_exams.trend === '上升' ? '📈' : profile.recent_exams.trend === '下降' ? '📉' : '➡️'}
                         <Text style={{ color: profile.recent_exams.trend === '上升' ? '#52c41a' : profile.recent_exams.trend === '下降' ? '#ff4d4f' : '#999' }}>
@@ -267,7 +263,7 @@ const CompanionSettings: React.FC = () => {
                 {/* 里程碑 */}
                 {profile.milestones && profile.milestones.length > 0 && (
                   <div style={{ marginBottom: 12 }}>
-                    <Text style={{ fontSize: 12, fontWeight: 600 }}>🏅 近期成就</Text>
+                    <Text style={{ fontSize: 12, fontWeight: 600 }}>🏅 {t('recentAchievements')}</Text>
                     {profile.milestones.slice(0, 2).map((m, i) => (
                       <div key={i} style={{ fontSize: 12, marginTop: 4, color: '#666' }}>• {m}</div>
                     ))}
@@ -279,7 +275,7 @@ const CompanionSettings: React.FC = () => {
                   <Alert
                     type="info"
                     showIcon
-                    message="💡 小智建议"
+                    message={`💡 ${t('companionSuggestion')}`}
                     description={profile.recommendation}
                     style={{ fontSize: 12 }}
                   />
@@ -288,7 +284,7 @@ const CompanionSettings: React.FC = () => {
             ) : (
               <div style={{ textAlign: 'center', padding: '24px 0', color: '#999' }}>
                 <Spin size="small" />
-                <div style={{ marginTop: 8 }}>暂无画像数据</div>
+                <div style={{ marginTop: 8 }}>{t('noProfileData')}</div>
               </div>
             )}
           </Card>
