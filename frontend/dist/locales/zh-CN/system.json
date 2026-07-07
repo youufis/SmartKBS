@@ -322,7 +322,7 @@
   "upgradeStep3": "更新数据库结构（如有需要）",
   "upgradeStep4": "安装新增的依赖包",
   "upgradeAutoRecover": "💡 如果升级失败，系统会自动还原到升级前的状态，无需手动处理",
-  "confirmUpgradeOk": "确认升级",
+  "confirmUpgradeOk": "确认",
   "rollbackStepsTitle": "回滚操作将执行以下步骤：",
   "rollbackStep1": "将代码回退到最近一次升级前的版本（git reset --hard HEAD@{1}）",
   "rollbackStep2": "升级历史中将新增一条回滚记录",
