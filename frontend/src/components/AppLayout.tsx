@@ -87,8 +87,8 @@ function buildStudentMenu(t: (k: string) => string) {
       { key: '/student-questions', icon: <MessageOutlined />, label: g('studentQuestions') },
     ]},
     { icon: <TrophyOutlined />, label: g('growth'), key: 'growth', children: [
-      { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },
       { key: '/score', icon: <StarOutlined />, label: g('score') },
+      { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },
       { key: '/portfolio', icon: <UserOutlined />, label: g('portfolio') },
       { key: '/portrait', icon: <PictureOutlined />, label: g('weeklyPortrait') },
     ]},
@@ -137,19 +137,19 @@ function buildTeacherMenu(t: (k: string) => string) {
       { key: '/quest-records', icon: <TrophyOutlined />, label: g('questManage'), adminOrTeacherOnly: true },
     ]},
     { type: 'group', icon: <BarChartOutlined />, label: g('learningAnalytics'), key: 'analytics', children: [
-      { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },
       { key: '/analytics', icon: <BarChartOutlined />, label: g('analytics') },
       { key: '/class-summary', icon: <RobotOutlined />, label: g('classSummary') },
       { key: '/curriculum/progress', icon: <BarChartOutlined />, label: g('curriculumProgress') },
       { key: '/activity-monitor', icon: <BarChartOutlined />, label: g('activityMonitor') },
       { key: '/score', icon: <TrophyOutlined />, label: g('scoreManage') },
+      { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },
+      { key: '/portrait', icon: <PictureOutlined />, label: g('weeklyPortrait') },
     ]},
     { type: 'group', icon: <SettingOutlined />, label: g('systemManagement'), key: 'admin', children: [
       { key: '/user-mgmt', icon: <TeamOutlined />, label: g('userManagement') },
       { key: '/announcements', icon: <BellOutlined />, label: g('announcementsManage') },
       { key: '/system-config', icon: <SettingOutlined />, label: g('systemConfig'), adminOnly: true },
       { key: '/notifications', icon: <BellOutlined />, label: g('notifications') },
-      { key: '/portrait', icon: <PictureOutlined />, label: g('weeklyPortrait') },
       { key: '/about', icon: <InfoCircleOutlined />, label: g('about') },
     ]},
   ]
