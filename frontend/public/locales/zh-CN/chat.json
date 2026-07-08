@@ -148,5 +148,14 @@
   "useAgent": "智能体",
   "useAgentTip": "连接智能体应用", 
   "useAgentDisabledTip": "未配置APPID，仅支持直连大模型",
-  "directModel": "直连大模型"
+  "directModel": "直连大模型",
+  "status": {
+    "draft": "草稿",
+    "published": "已发布",
+    "ended": "已结束"
+  },
+  "activity": "课堂活动",
+  "quiz": "测验",
+  "poll": "投票",
+  "question": "提问"
 }

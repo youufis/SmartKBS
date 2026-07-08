@@ -211,10 +211,13 @@ if _frontend_dist.exists() and _frontend_dist.is_dir():
     async def serve_frontend(full_path: str):
         file_path = _frontend_dist / full_path
         if file_path.is_file():
-            # 带 hash 的静态资源（assets/*.xxx.js/css 等）设置一年强缓存
             headers = {}
             if _HASHED_FILE_RE.match(full_path):
+                # 带 hash 的静态资源（assets/*.xxx.js/css 等）设置一年强缓存
                 headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            elif full_path.endswith('.json'):
+                # locale JSON 文件不缓存，确保翻译更新即时生效
+                headers["Cache-Control"] = "no-cache, must-revalidate"
             return FileResponse(str(file_path), headers=headers)
         # SPA fallback: 所有非 API、非文件路径返回 index.html
         return FileResponse(str(_frontend_dist / "index.html"))

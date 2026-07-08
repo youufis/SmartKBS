@@ -882,19 +882,19 @@ const ChatPage: React.FC = () => {
                       <div style={{ marginBottom: 8 }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>📋 {t('exams')}</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <Tag color="default" style={{ fontSize: 11 }}>{t('common:status.draft')} {companionTeacherData.exam_stats.draft}</Tag>
-                          <Tag color="blue" style={{ fontSize: 11 }}>{t('common:status.published')} {companionTeacherData.exam_stats.published}</Tag>
-                          <Tag color="green" style={{ fontSize: 11 }}>{t('common:status.ended')} {companionTeacherData.exam_stats.ended}</Tag>
+                          <Tag color="default" style={{ fontSize: 11 }}>{t('status.draft')} {companionTeacherData.exam_stats.draft}</Tag>
+                          <Tag color="blue" style={{ fontSize: 11 }}>{t('status.published')} {companionTeacherData.exam_stats.published}</Tag>
+                          <Tag color="green" style={{ fontSize: 11 }}>{t('status.ended')} {companionTeacherData.exam_stats.ended}</Tag>
                         </div>
                       </div>
                     )}
                     {(companionTeacherData.teacher_quiz_count !== undefined || companionTeacherData.teacher_poll_count !== undefined) && (
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>🎯 {t('common:activity')}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>🎯 {t('activity')}</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {companionTeacherData.teacher_quiz_count !== undefined && <Tag color="purple" style={{ fontSize: 11 }}>{t('common:quiz')} {companionTeacherData.teacher_quiz_count}</Tag>}
-                          {companionTeacherData.teacher_poll_count !== undefined && <Tag color="orange" style={{ fontSize: 11 }}>{t('common:poll')} {companionTeacherData.teacher_poll_count}</Tag>}
-                          {companionTeacherData.teacher_question_count !== undefined && <Tag color="cyan" style={{ fontSize: 11 }}>{t('common:question')} {companionTeacherData.teacher_question_count}</Tag>}
+                          {companionTeacherData.teacher_quiz_count !== undefined && <Tag color="purple" style={{ fontSize: 11 }}>{t('quiz')} {companionTeacherData.teacher_quiz_count}</Tag>}
+                          {companionTeacherData.teacher_poll_count !== undefined && <Tag color="orange" style={{ fontSize: 11 }}>{t('poll')} {companionTeacherData.teacher_poll_count}</Tag>}
+                          {companionTeacherData.teacher_question_count !== undefined && <Tag color="cyan" style={{ fontSize: 11 }}>{t('question')} {companionTeacherData.teacher_question_count}</Tag>}
                         </div>
                       </div>
                     )}
