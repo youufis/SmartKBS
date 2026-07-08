@@ -9,6 +9,10 @@ import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import Backend from 'i18next-http-backend'
 
+// 从 package.json 读取版本号作为翻译缓存破坏参数
+import pkg from '../package.json'
+const _cacheBust = `v=${pkg.version}`
+
 i18n
   .use(Backend)
   .use(LanguageDetector)
@@ -26,9 +30,9 @@ i18n
       caches: ['localStorage'],
     },
 
-    // 加载翻译文件的路径模式
+    // 加载翻译文件的路径模式（带版本号做缓存破坏）
     backend: {
-      loadPath: '/locales/{{lng}}/{{ns}}.json?v=7.6.1',
+      loadPath: `/locales/{{lng}}/{{ns}}.json?${_cacheBust}`,
     },
 
     // 默认命名空间

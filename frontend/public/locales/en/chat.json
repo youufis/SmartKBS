@@ -146,5 +146,14 @@
   "useAgent": "Agent",
   "useAgentTip": "Connect via AI Agent",
   "useAgentDisabledTip": "APPID not configured, direct model connection only",
-  "directModel": "Direct Model"
+  "directModel": "Direct Model",
+  "status": {
+    "draft": "Draft",
+    "published": "Published",
+    "ended": "Ended"
+  },
+  "activity": "Class Activity",
+  "quiz": "Quiz",
+  "poll": "Poll",
+  "question": "Question"
 }
