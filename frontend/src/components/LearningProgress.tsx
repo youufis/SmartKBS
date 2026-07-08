@@ -3,6 +3,7 @@
  * 教师/管理员查看班级或单个学生的学习进度统计
  */
 import React, { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, Row, Col, Select, Table, Statistic, Typography, Spin, Empty, message, Tag, Space,
 } from 'antd'
@@ -18,6 +19,7 @@ import { fetchGrades, fetchClasses } from '../api/gradeClass'
 const { Text } = Typography
 
 const LearningProgress: React.FC = () => {
+  const { t } = useTranslation('curriculum')
   const user = useAuthStore((s) => s.user)
   const isAdmin = user?.role === 'admin'
 
@@ -77,7 +79,7 @@ const LearningProgress: React.FC = () => {
       })))
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || '加载失败')
+      message.error(err?.response?.data?.detail || err?.message || t('loadDataFailed'))
     } finally {
       setLoading(false)
     }
@@ -92,7 +94,7 @@ const LearningProgress: React.FC = () => {
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || '加载失败')
+      message.error(err?.response?.data?.detail || err?.message || t('loadDataFailed'))
     } finally {
       setLoading(false)
     }
@@ -108,37 +110,37 @@ const LearningProgress: React.FC = () => {
   }
 
   const columns = [
-    { title: '姓名', dataIndex: 'student_name', key: 'name', width: 100 },
+    { title: t('studentName'), dataIndex: 'student_name', key: 'name', width: 100 },
     {
-      title: '课程进度', dataIndex: 'course_progress', key: 'course_progress', width: 120,
+      title: t('courseProgress'), dataIndex: 'course_progress', key: 'course_progress', width: 120,
       sorter: (a: StudentProgress, b: StudentProgress) => a.course_progress - b.course_progress,
       render: (v: number) => <span>{v}% <Text type="secondary" style={{ fontSize: 11 }}>({v > 0 ? `${Math.round(v / 10)}/10` : '-'})</Text></span>,
     },
     {
-      title: '完成率', dataIndex: 'completion_rate', key: 'completion_rate', width: 100,
+      title: t('completionRate'), dataIndex: 'completion_rate', key: 'completion_rate', width: 100,
       sorter: (a: StudentProgress, b: StudentProgress) => a.completion_rate - b.completion_rate,
       render: (v: number) => <span>{v}%</span>,
     },
     {
-      title: '正确率', dataIndex: 'accuracy_rate', key: 'accuracy_rate', width: 100,
+      title: t('accuracyRate'), dataIndex: 'accuracy_rate', key: 'accuracy_rate', width: 100,
       sorter: (a: StudentProgress, b: StudentProgress) => a.accuracy_rate - b.accuracy_rate,
       render: (v: number) => <span>{v}%</span>,
     },
     {
-      title: '连续学习', dataIndex: 'streak_days', key: 'streak_days', width: 100,
+      title: t('streakDays'), dataIndex: 'streak_days', key: 'streak_days', width: 100,
       sorter: (a: StudentProgress, b: StudentProgress) => a.streak_days - b.streak_days,
-      render: (v: number) => v > 0 ? <Tag color="orange"><FireOutlined /> {v}天</Tag> : '-',
+      render: (v: number) => v > 0 ? <Tag color="orange"><FireOutlined /> {v}{t('days')}</Tag> : '-',
     },
     {
-      title: '考试/练习/课程/代码',
+      title: t('detailHeader'),
       key: 'detail',
       width: 200,
       render: (_: any, r: StudentProgress) => (
         <Space size={4} split={<Text type="secondary">|</Text>}>
-          <span title="已完成考试">📝{r.exam_done || 0}</span>
-          <span title="已完成练习">📋{r.practice_done || 0}</span>
-          <span title="已完成课程练习">📖{r.course_done || 0}</span>
-          <span title="已完成代码练习">💻{r.code_done || 0}</span>
+          <span title={t('tooltipExamDone')}>📝{r.exam_done || 0}</span>
+          <span title={t('tooltipPracticeDone')}>📋{r.practice_done || 0}</span>
+          <span title={t('tooltipCourseDone')}>📖{r.course_done || 0}</span>
+          <span title={t('tooltipCodeDone')}>💻{r.code_done || 0}</span>
         </Space>
       ),
     },
@@ -150,10 +152,10 @@ const LearningProgress: React.FC = () => {
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row gutter={[16, 12]} align="middle">
           <Col>
-            <Text strong>年级：</Text>
+            <Text strong>{t('gradeLabel')}：</Text>
             <Select
               allowClear
-              placeholder="选择年级"
+              placeholder={t('selectGrade')}
               value={selectedGrade}
               onChange={(v) => setSelectedGrade(v)}
               style={{ width: 120 }}
@@ -161,10 +163,10 @@ const LearningProgress: React.FC = () => {
             />
           </Col>
           <Col>
-            <Text strong>班级：</Text>
+            <Text strong>{t('classLabel')}：</Text>
             <Select
               allowClear
-              placeholder="选择班级"
+              placeholder={t('selectClass')}
               value={selectedClass}
               onChange={(v) => setSelectedClass(v)}
               style={{ width: 120 }}
@@ -173,10 +175,10 @@ const LearningProgress: React.FC = () => {
             />
           </Col>
           <Col>
-            <Text strong>学生：</Text>
+            <Text strong>{t('studentLabel')}：</Text>
             <Select
               allowClear
-              placeholder="全部学生"
+              placeholder={t('allStudents')}
               value={selectedStudent}
               onChange={handleStudentChange}
               style={{ width: 150 }}
@@ -204,33 +206,33 @@ const LearningProgress: React.FC = () => {
         <Row gutter={16} style={{ marginBottom: 16 }}>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="学生人数" value={summary.total_students} prefix={<TeamOutlined />} suffix="人" />
+              <Statistic title={t('totalStudentsLabel')} value={summary.total_students} prefix={<TeamOutlined />} suffix={t('personUnit')} />
             </Card>
           </Col>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="平均课程进度" value={summary.avg_course_progress} prefix={<BookOutlined />} suffix="%" />
+              <Statistic title={t('avgCourseProgress')} value={summary.avg_course_progress} prefix={<BookOutlined />} suffix="%" />
             </Card>
           </Col>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="平均完成率" value={summary.avg_completion_rate} prefix={<CheckCircleOutlined />} suffix="%" />
+              <Statistic title={t('avgCompletionRate')} value={summary.avg_completion_rate} prefix={<CheckCircleOutlined />} suffix="%" />
             </Card>
           </Col>
           <Col span={6}>
             <Card size="small">
-              <Statistic title="平均正确率" value={summary.avg_accuracy_rate} prefix={<TrophyOutlined />} suffix="%" />
+              <Statistic title={t('avgAccuracyRate')} value={summary.avg_accuracy_rate} prefix={<TrophyOutlined />} suffix="%" />
             </Card>
           </Col>
         </Row>
       )}
 
       {/* 学生详情表格 */}
-      <Card size="small" title={selectedStudent ? '个人学习进度' : '班级学习进度'}>
+      <Card size="small" title={selectedStudent ? t('individualProgress') : t('classProgress')}>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /><div style={{ marginTop: 8, color: '#999' }}>加载中...</div></div>
+          <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /><div style={{ marginTop: 8, color: '#999' }}>{t('loadingData')}</div></div>
         ) : progressData.length === 0 ? (
-          <Empty description="请选择年级和班级查看学习进度" />
+          <Empty description={t('selectGradeClassPrompt')} />
         ) : (
           <Table
             dataSource={progressData}

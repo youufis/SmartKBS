@@ -340,7 +340,7 @@ const CurriculumProgressPage: React.FC = () => {
             },
             {
               key: 'overall',
-              label: <span><BarChartOutlined /> {t('progress')}</span>,
+              label: <span><BarChartOutlined /> {t('progressDetail')}</span>,
               children: <LearningProgress />,
             },
           ]}

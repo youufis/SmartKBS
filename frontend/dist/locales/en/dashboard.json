@@ -144,6 +144,42 @@
     "pagination": {
       "totalActivities": "Total {{count}} activities",
       "totalStudents": "Total {{count}} students"
+    },
+    "resourceViews": {
+      "title": "Resource Views",
+      "loadFailed": "Failed to load data",
+      "activeStudents": "Active Students (30d)",
+      "totalViews": "Total Views",
+      "viewedResources": "Resources Viewed",
+      "viewSuffix": "",
+      "resourceSuffix": "",
+      "byKnowledgePoint": "📖 View by Knowledge Point",
+      "selectCourse": "① Select Course",
+      "selectKp": "Select Knowledge Point",
+      "selectCourseFirst": "Please select a course, then select a knowledge point to view stats",
+      "selectKpHint": "Please select a knowledge point to view statistics",
+      "noKpResources": "No HTML/file resources bound to this KP",
+      "noKpForCourse": "No knowledge points",
+      "selectCourseFirstHint": "Please select a course first",
+      "sharedResources": "📄 Shared Resource Views",
+      "empty": "No shared resources or no view data",
+      "viewStudents": "View Students",
+      "pagination": "Total {{count}} resources",
+      "detailTitle": "👁️ Students who viewed \"{{name}}\"",
+      "noRecords": "No view records",
+      "fileType": "File",
+      "columns": {
+        "resourceName": "Resource Name",
+        "type": "Type",
+        "owner": "Owner",
+        "views": "Views",
+        "viewers": "Viewers",
+        "lastView": "Last Viewed",
+        "action": "Action",
+        "student": "Student",
+        "username": "Username",
+        "viewCount": "View Count"
+      }
     }
   },
   "analytics": {

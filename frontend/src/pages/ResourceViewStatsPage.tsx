@@ -3,6 +3,7 @@
  * 展示 HTML 资源和下载文件被学生查看的统计数据
  */
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Card, Table, Select, Space, Typography, message, Row, Col,
   Statistic, Tag, Spin, Empty, Button,
@@ -29,6 +30,7 @@ interface ResourceViewItem {
 }
 
 const ResourceViewStatsPage: React.FC = () => {
+  const { t } = useTranslation('dashboard')
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
 
@@ -55,7 +57,7 @@ const ResourceViewStatsPage: React.FC = () => {
   if (!isTeacherOrAdmin) {
     return (
       <Card>
-        <Empty description="仅教师和管理员可访问" />
+        <Empty description={t('activityMonitor.restricted')} />
       </Card>
     )
   }
@@ -113,7 +115,7 @@ const ResourceViewStatsPage: React.FC = () => {
       setResources(items.sort((a, b) => b.total_views - a.total_views))
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      message.error(err?.response?.data?.detail || err?.message || '加载失败')
+      message.error(err?.response?.data?.detail || err?.message || t('activityMonitor.resourceViews.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -121,6 +123,7 @@ const ResourceViewStatsPage: React.FC = () => {
 
   useEffect(() => {
     loadResourceStats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 查看某个资源的学生明细
@@ -153,20 +156,20 @@ const ResourceViewStatsPage: React.FC = () => {
 
   const columns = [
     {
-      title: '资源名称',
+      title: t('activityMonitor.resourceViews.columns.resourceName'),
       dataIndex: 'resource_name',
       key: 'resource_name',
       ellipsis: true,
     },
     {
-      title: '类型',
+      title: t('activityMonitor.resourceViews.columns.type'),
       dataIndex: 'resource_type',
       key: 'resource_type',
       width: 80,
-      render: (t: string) => t === 'html' ? <Tag icon={<FileOutlined />} color="blue">HTML</Tag> : <Tag icon={<DownloadOutlined />} color="green">文件</Tag>,
+      render: (type: string) => type === 'html' ? <Tag icon={<FileOutlined />} color="blue">HTML</Tag> : <Tag icon={<DownloadOutlined />} color="green">{t('activityMonitor.resourceViews.fileType')}</Tag>,
     },
     {
-      title: '共享者',
+      title: t('activityMonitor.resourceViews.columns.owner'),
       dataIndex: 'owner',
       key: 'owner',
       width: 100,
@@ -174,21 +177,21 @@ const ResourceViewStatsPage: React.FC = () => {
       render: (v: string) => v ? <Tag color="default">{v}</Tag> : '-',
     },
     {
-      title: '浏览次数',
+      title: t('activityMonitor.resourceViews.columns.views'),
       dataIndex: 'total_views',
       key: 'total_views',
       width: 100,
       sorter: (a: ResourceViewItem, b: ResourceViewItem) => a.total_views - b.total_views,
     },
     {
-      title: '查看人数',
+      title: t('activityMonitor.resourceViews.columns.viewers'),
       dataIndex: 'unique_viewers',
       key: 'unique_viewers',
       width: 100,
       sorter: (a: ResourceViewItem, b: ResourceViewItem) => a.unique_viewers - b.unique_viewers,
     },
     {
-      title: '最近查看',
+      title: t('activityMonitor.resourceViews.columns.lastView'),
       dataIndex: 'last_view_time',
       key: 'last_view_time',
       width: 180,
@@ -200,11 +203,11 @@ const ResourceViewStatsPage: React.FC = () => {
       ) : '-',
     },
     {
-      title: '操作',
+      title: t('activityMonitor.resourceViews.columns.action'),
       key: 'action',
       width: 100,
       render: (_: any, r: ResourceViewItem) => (
-        <a onClick={() => handleViewDetail(r.resource_type, r.id, r.resource_name)}>查看学生</a>
+        <a onClick={() => handleViewDetail(r.resource_type, r.id, r.resource_name)}>{t('activityMonitor.resourceViews.viewStudents')}</a>
       ),
     },
   ]
@@ -212,37 +215,37 @@ const ResourceViewStatsPage: React.FC = () => {
   return (
     <div>
       <Title level={4} style={{ marginBottom: 16 }}>
-        <EyeOutlined /> 浏览统计
+        <EyeOutlined /> {t('activityMonitor.resourceViews.title')}
       </Title>
 
       {/* 概览卡片 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
           <Card size="small">
-            <Statistic title="活跃学生（30天）" value={overview.active_students} prefix={<TeamOutlined />} suffix="人" />
+            <Statistic title={t('activityMonitor.resourceViews.activeStudents')} value={overview.active_students} prefix={<TeamOutlined />} suffix={t('activityMonitor.stats.personSuffix')} />
           </Card>
         </Col>
         <Col span={8}>
           <Card size="small">
-            <Statistic title="总浏览次" value={overview.total_views} prefix={<EyeOutlined />} suffix="次" />
+            <Statistic title={t('activityMonitor.resourceViews.totalViews')} value={overview.total_views} prefix={<EyeOutlined />} suffix={t('activityMonitor.resourceViews.viewSuffix')} />
           </Card>
         </Col>
         <Col span={8}>
           <Card size="small">
-            <Statistic title="被浏览资源数" value={overview.viewed_resources} prefix={<FileOutlined />} suffix="个" />
+            <Statistic title={t('activityMonitor.resourceViews.viewedResources')} value={overview.viewed_resources} prefix={<FileOutlined />} suffix={t('activityMonitor.resourceViews.resourceSuffix')} />
           </Card>
         </Col>
       </Row>
 
       {/* 按知识点查看 */}
-      <Card size="small" title="📖 按知识点查看浏览统计" style={{ marginBottom: 16 }}>
+      <Card size="small" title={t('activityMonitor.resourceViews.byKnowledgePoint')} style={{ marginBottom: 16 }}>
         <Space orientation="vertical" style={{ width: '100%' }} size={12}>
           <Space>
             <Select
               value={selectedCourseId}
               onChange={v => { setSelectedCourseId(v); setSelectedKpId(undefined); setKpViewData([]) }}
               style={{ width: 250 }}
-              placeholder="① 选择课程"
+              placeholder={t('activityMonitor.resourceViews.selectCourse')}
               allowClear
               showSearch
               optionFilterProp="label"
@@ -258,19 +261,19 @@ const ResourceViewStatsPage: React.FC = () => {
             />
             {selectedKpId && (
               <Button icon={<ReloadOutlined />} size="small" onClick={() => handleKpSelect(selectedKpId, selectedKpName)}>
-                刷新
+                {t('activityMonitor.refresh')}
               </Button>
             )}
           </Space>
           {!selectedCourseId ? (
-            <Text type="secondary">请先选择课程，然后选择知识点查看该知识点下绑定资源的浏览统计</Text>
+            <Text type="secondary">{t('activityMonitor.resourceViews.selectCourseFirst')}</Text>
           ) : !selectedKpId ? (
-            <Text type="secondary">请选择一个知识点查看浏览统计</Text>
+            <Text type="secondary">{t('activityMonitor.resourceViews.selectKpHint')}</Text>
           ) : (
             <div>
               <Text strong>{selectedKpName}</Text>
               {kpViewData.length === 0 ? (
-                <Text type="secondary" style={{ marginLeft: 12 }}>该知识点暂无 HTML/文件资源绑定</Text>
+                <Text type="secondary" style={{ marginLeft: 12 }}>{t('activityMonitor.resourceViews.noKpResources')}</Text>
               ) : (
                 <Table
                   dataSource={kpViewData}
@@ -278,15 +281,15 @@ const ResourceViewStatsPage: React.FC = () => {
                   size="small"
                   pagination={false}
                   columns={[
-                    { title: '资源名称', dataIndex: 'resource_name', ellipsis: true },
+                    { title: t('activityMonitor.resourceViews.columns.resourceName'), dataIndex: 'resource_name', ellipsis: true },
                     {
-                      title: '类型', dataIndex: 'resource_type', width: 80,
-                      render: (t: string) => t === 'html' ? <Tag color="blue">HTML</Tag> : <Tag color="green">文件</Tag>,
+                      title: t('activityMonitor.resourceViews.columns.type'), dataIndex: 'resource_type', width: 80,
+                      render: (type: string) => type === 'html' ? <Tag color="blue">HTML</Tag> : <Tag color="green">{t('activityMonitor.resourceViews.fileType')}</Tag>,
                     },
-                    { title: '浏览次数', dataIndex: 'total_views', width: 90 },
-                    { title: '查看人数', dataIndex: 'unique_viewers', width: 90 },
+                    { title: t('activityMonitor.resourceViews.columns.views'), dataIndex: 'total_views', width: 90 },
+                    { title: t('activityMonitor.resourceViews.columns.viewers'), dataIndex: 'unique_viewers', width: 90 },
                     {
-                      title: '最近查看', dataIndex: 'last_view', width: 160,
+                      title: t('activityMonitor.resourceViews.columns.lastView'), dataIndex: 'last_view', width: 160,
                       render: (v: any) => v ? `${v.viewed_at} ${v.student_username}` : '-',
                     },
                   ]}
@@ -300,32 +303,32 @@ const ResourceViewStatsPage: React.FC = () => {
       {/* 资源浏览明细 */}
       <Card
         size="small"
-        title="📄 共享资源浏览统计"
-        extra={<Button size="small" icon={<ReloadOutlined />} onClick={loadResourceStats} loading={loading}>刷新</Button>}
+        title={t('activityMonitor.resourceViews.sharedResources')}
+        extra={<Button size="small" icon={<ReloadOutlined />} onClick={loadResourceStats} loading={loading}>{t('activityMonitor.refresh')}</Button>}
       >
         {loading ? (
           <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
         ) : resources.length === 0 ? (
-          <Empty description="暂无共享资源或暂无浏览数据" />
+          <Empty description={t('activityMonitor.resourceViews.empty')} />
         ) : (
           <Table
             dataSource={resources}
             rowKey="id"
             size="small"
             columns={columns}
-            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 个资源` }}
+            pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('activityMonitor.resourceViews.pagination', { count: total }) }}
           />
         )}
       </Card>
 
       {/* 学生明细弹窗 */}
       <Card
-        title={`👁️ 查看「${detailTitle}」的学生`}
+        title={t('activityMonitor.resourceViews.detailTitle', { name: detailTitle })}
         style={{ marginTop: 16, display: detailModalOpen ? 'block' : 'none' }}
-        extra={<a onClick={() => setDetailModalOpen(false)}>关闭</a>}
+        extra={<a onClick={() => setDetailModalOpen(false)}>{t('activityMonitor.close')}</a>}
       >
         {viewDetail.length === 0 ? (
-          <Text type="secondary">暂无学生查看记录</Text>
+          <Text type="secondary">{t('activityMonitor.resourceViews.noRecords')}</Text>
         ) : (
           <Table
             dataSource={viewDetail}
@@ -333,10 +336,10 @@ const ResourceViewStatsPage: React.FC = () => {
             size="small"
             pagination={{ pageSize: 10 }}
             columns={[
-              { title: '学生', dataIndex: 'student_name', width: 120 },
-              { title: '用户名', dataIndex: 'student_username', width: 120 },
-              { title: '查看次数', dataIndex: 'view_count', width: 90 },
-              { title: '最近查看', dataIndex: 'last_viewed', width: 180 },
+              { title: t('activityMonitor.resourceViews.columns.student'), dataIndex: 'student_name', width: 120 },
+              { title: t('activityMonitor.resourceViews.columns.username'), dataIndex: 'student_username', width: 120 },
+              { title: t('activityMonitor.resourceViews.columns.viewCount'), dataIndex: 'view_count', width: 90 },
+              { title: t('activityMonitor.resourceViews.columns.lastView'), dataIndex: 'last_viewed', width: 180 },
             ]}
           />
         )}
@@ -351,6 +354,7 @@ const KpSelect: React.FC<{
   value?: number
   onChange: (kpId: number, kpName: string) => void
 }> = ({ courseId, value, onChange }) => {
+  const { t } = useTranslation('dashboard')
   const [kpList, setKpList] = useState<{ id: number; name: string; chapter_path: string }[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -386,12 +390,12 @@ const KpSelect: React.FC<{
         onChange(v, kp ? `${kp.chapter_path} > ${kp.name}` : '')
       }}
       style={{ width: 300 }}
-      placeholder="选择知识点"
+      placeholder={t('activityMonitor.resourceViews.selectKp')}
       allowClear
       showSearch
       optionFilterProp="label"
       loading={loading}
-      notFoundContent={loading ? <Spin size="small" /> : courseId ? '暂无知识点' : '请先选择课程'}
+      notFoundContent={loading ? <Spin size="small" /> : courseId ? t('activityMonitor.resourceViews.noKpForCourse') : t('activityMonitor.resourceViews.selectCourseFirstHint')}
     >
       {kpList.map(kp => (
         <Select.Option key={kp.id} value={kp.id} label={`${kp.chapter_path} > ${kp.name}`}>
