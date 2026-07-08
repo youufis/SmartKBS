@@ -242,5 +242,6 @@
   "roomCode": "房间码",
   "mode": "模式",
   "status": "状态",
-  "createdAt": "创建时间"
+  "createdAt": "创建时间",
+  "cancel": "取消"
 }

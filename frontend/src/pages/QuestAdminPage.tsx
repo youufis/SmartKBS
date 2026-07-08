@@ -786,9 +786,8 @@ const QuestBankTab: React.FC = () => {
       width: 180,
       render: (_: any, r: QuestBankQuestion) => (
         <Space size="small">
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
-            {t('edit')}
-          </Button>
+          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
+
           <Tooltip title={t('mediaManage')}>
             <Button type="link" size="small" icon={<span>🎨</span>} onClick={() => handleManageMedia(r)} />
           </Tooltip>

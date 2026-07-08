@@ -242,5 +242,6 @@
   "roomCode": "Room Code",
   "mode": "Mode",
   "status": "Status",
-  "createdAt": "Created At"
+  "createdAt": "Created At",
+  "cancel": "Cancel"
 }
