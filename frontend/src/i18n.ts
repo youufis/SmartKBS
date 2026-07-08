@@ -28,7 +28,7 @@ i18n
 
     // 加载翻译文件的路径模式
     backend: {
-      loadPath: '/locales/{{lng}}/{{ns}}.json?v=7.6.0',
+      loadPath: '/locales/{{lng}}/{{ns}}.json?v=7.6.1',
     },
 
     // 默认命名空间

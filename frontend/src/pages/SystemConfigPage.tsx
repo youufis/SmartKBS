@@ -8,13 +8,13 @@ import {
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
-  CheckCircleOutlined, CloseCircleOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, EditOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import {
-  fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills,
+  fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
   type SkillInfo, type SkillDetail,
 } from '../api/skills'
 import {
@@ -112,6 +112,9 @@ const SkillManagePanel: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [editing, setEditing] = useState(false)
+  const [editContent, setEditContent] = useState('')
+  const [savingContent, setSavingContent] = useState(false)
 
   const loadSkills = useCallback(async () => {
     setLoading(true)
@@ -173,7 +176,6 @@ const SkillManagePanel: React.FC = () => {
 
   // 全选/取消全选
   const allEnabled = skills.length > 0 && skills.every(s => s.enabled)
-  const someEnabled = skills.some(s => s.enabled)
   const handleToggleAll = async () => {
     setSaving(true)
     try {
@@ -326,7 +328,7 @@ const SkillManagePanel: React.FC = () => {
                     size="small"
                   />
                   <Button type="link" size="small" onClick={() => showDetail(record.name)}>
-                    <EyeOutlined /> {t('skillView')}
+                    <EditOutlined /> {t('skillViewEdit')}
                   </Button>
                 </Space>
               ),
@@ -373,28 +375,76 @@ const SkillManagePanel: React.FC = () => {
               </Descriptions.Item>
             </Descriptions>
 
-            {/* 原始文档内容预览 */}
+            {/* 编辑/查看模式切换 */}
+            <Space style={{ marginBottom: 12 }}>
+              {editing ? (
+                <>
+                  <Button type="primary" icon={<SaveOutlined />} loading={savingContent}
+                    onClick={async () => {
+                      if (!selectedSkill) return
+                      setSavingContent(true)
+                      try {
+                        const result = await updateSkillContent(selectedSkill.name, editContent)
+                        if (result.parse_error) {
+                          message.warning(t('skillSavedWithError') + ': ' + result.parse_error)
+                        } else {
+                          message.success(result.message)
+                        }
+                        setEditing(false)
+                        showDetail(selectedSkill.name)
+                      } catch (e: any) {
+                        message.error(t('saveFailed') + ': ' + (e?.response?.data?.detail || e.message))
+                      }
+                      setSavingContent(false)
+                    }}
+                  >
+                    {t('save')}
+                  </Button>
+                  <Button onClick={() => { setEditing(false); setEditContent('') }}>
+                    {t('cancel')}
+                  </Button>
+                </>
+              ) : (
+                <Button icon={<EditOutlined />} onClick={() => {
+                  setEditContent(selectedSkill?.raw_content || '')
+                  setEditing(true)
+                }}>
+                  {t('edit')}
+                </Button>
+              )}
+            </Space>
+
+            {/* 原始文档内容 */}
             {selectedSkill.parse_error && (
               <Alert type="warning" showIcon message={t('skillParseError')} description={selectedSkill.parse_error} style={{ marginBottom: 16 }} />
             )}
             {selectedSkill.raw_content && (
-              <>
-                <Text strong>{t('skillRawContent')}</Text>
-                <pre style={{
-                  marginTop: 8,
-                  padding: 12,
-                  background: '#f5f5f5',
-                  borderRadius: 6,
-                  fontSize: 13,
-                  maxHeight: 400,
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                  border: '1px solid #e8e8e8',
-                }}>
-                  {selectedSkill.raw_content}
-                </pre>
-              </>
+              editing ? (
+                <Input.TextArea
+                  value={editContent}
+                  onChange={e => setEditContent(e.target.value)}
+                  rows={20}
+                  style={{ fontFamily: 'monospace', fontSize: 13 }}
+                />
+              ) : (
+                <>
+                  <Text strong>{t('skillRawContent')}</Text>
+                  <pre style={{
+                    marginTop: 8,
+                    padding: 12,
+                    background: '#f5f5f5',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    maxHeight: 400,
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    border: '1px solid #e8e8e8',
+                  }}>
+                    {selectedSkill.raw_content}
+                  </pre>
+                </>
+              )
             )}
           </div>
         )}

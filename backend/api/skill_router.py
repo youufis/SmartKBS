@@ -12,6 +12,7 @@
 技能启用状态存储在 system_config.json 的 enabled_skills 字段中。
 """
 from typing import Any
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -25,6 +26,11 @@ router = APIRouter()
 class EnabledSkillsUpdate(BaseModel):
     """更新已启用技能列表的请求体"""
     enabled_skills: list[str]
+
+
+class SkillUpdate(BaseModel):
+    """更新技能文档的请求体"""
+    raw_content: str
 
 
 # ── 辅助函数 ──
@@ -181,3 +187,42 @@ async def validate_skills(req: EnabledSkillsUpdate, request: Request):
     engine.load_all()
     result = engine.validate(req.enabled_skills)
     return result
+
+
+@router.put("/{name}", summary="更新技能文档内容")
+async def update_skill_content(name: str, req: SkillUpdate, request: Request):
+    """更新单个技能文档的原始内容（管理员）
+
+    修改后自动重新加载技能引擎。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+
+    engine = _get_engine()
+    engine.load_all()
+    skill = engine.get(name)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"技能不存在: {name}")
+
+    # 写入文件
+    fpath = Path(skill.file_path)
+    try:
+        fpath.write_text(req.raw_content, encoding="utf-8")
+    except Exception as e:
+        logger.error(f"写入技能文件失败: {fpath} - {e}")
+        raise HTTPException(status_code=500, detail=f"写入文件失败: {str(e)}")
+
+    # 重新加载
+    engine.clear_cache()
+    engine.load_all()
+
+    # 验证新内容可解析
+    updated = engine.get(name)
+    if updated and updated.parse_error:
+        logger.warning(f"技能 {name} 更新后存在解析错误: {updated.parse_error}")
+
+    logger.info(f"技能 {name} 已更新")
+    return {
+        "message": f"技能「{updated.display_name if updated else name}」已更新",
+        "parse_error": updated.parse_error if updated else None,
+    }

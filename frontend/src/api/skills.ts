@@ -90,3 +90,11 @@ export async function validateSkills(skillNames: string[]): Promise<ValidateResu
   const res = await apiClient.post('/api/skills/validate', { enabled_skills: skillNames })
   return res.data
 }
+
+/**
+ * 更新技能文档内容
+ */
+export async function updateSkillContent(name: string, rawContent: string): Promise<{ message: string; parse_error: string | null }> {
+  const res = await apiClient.put(`/api/skills/${encodeURIComponent(name)}`, { raw_content: rawContent })
+  return res.data
+}
