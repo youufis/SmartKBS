@@ -18,6 +18,7 @@
   "startExam": "开始考试",
   "continueExam": "继续考试",
   "reviewExam": "查看成绩",
+  "exportPaper": "导出试卷",
   "publish": "发布",
   "unpublish": "取消发布",
   "confirmDelete": "确认删除此考试？",
