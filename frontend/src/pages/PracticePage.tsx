@@ -369,7 +369,7 @@ const TeacherView: React.FC = () => {
 
   return (
     <div>
-      <Title level={4}><RobotOutlined /> {t('title')}</Title>
+      <Title level={4}>{t('syncPractice')}</Title>
       <Space style={{ marginBottom: 16 }}>
         <Button type={tab === 'generate' ? 'primary' : 'default'} onClick={() => setTab('generate')}>{t('aiGenerate')}</Button>
         <Button type={tab === 'sessions' ? 'primary' : 'default'} onClick={() => setTab('sessions')}>{t('publishedPractices')}</Button>

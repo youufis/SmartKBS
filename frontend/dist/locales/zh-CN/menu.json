@@ -119,5 +119,7 @@
   "addFailed": "添加失败",
   "deleteFailed": "删除失败",
   "operationFailed": "操作失败",
-  "addedToUngrouped": "已添加到未分组"
+  "addedToUngrouped": "已添加到未分组",
+  "ungrouped": "未分组",
+  "refresh": "刷新"
 }

@@ -1,5 +1,6 @@
 {
   "title": "Title",
+  "syncPractice": "Practice",
   "startPractice": "Start Practice",
   "continuePractice": "Continue",
   "submit": "Submit",
@@ -84,6 +85,7 @@
   "deletedSuccess": "Deleted",
   "deleteFailed": "Delete failed",
   "people": "people",
+  "all": "All",
   "classUnit": "",
   "status": "Status",
   "submitted": "Submitted",

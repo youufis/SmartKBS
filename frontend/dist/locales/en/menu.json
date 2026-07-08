@@ -116,5 +116,7 @@
   "addFailed": "Add failed",
   "deleteFailed": "Delete failed",
   "operationFailed": "Operation failed",
-  "addedToUngrouped": "Added to ungrouped"
+  "addedToUngrouped": "Added to ungrouped",
+  "ungrouped": "Ungrouped",
+  "refresh": "Refresh"
 }

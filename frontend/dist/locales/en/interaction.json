@@ -361,6 +361,8 @@
   "clearAllRecords": "Clear All Records",
   "attendanceHelperText": "(Default: show all online students. Select grade/class to view details.)",
   "classTotalCount": "Total Students",
+  "totalCount": "{{count}} total",
+  "skip": "Skip",
   "loggedInCount": "Logged In",
   "notLoggedInCount": "Not Logged In",
   "loginRate": "Login Rate",

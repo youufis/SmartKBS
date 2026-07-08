@@ -365,6 +365,8 @@
   "clearAllRecords": "清除全部记录",
   "attendanceHelperText": "（默认显示全部在线学生，选择年级/班级可查看班级详情）",
   "classTotalCount": "班级总人数",
+  "totalCount": "共 {{count}} 条",
+  "skip": "跳过",
   "loggedInCount": "已登录",
   "notLoggedInCount": "未登录",
   "loginRate": "登录率",
