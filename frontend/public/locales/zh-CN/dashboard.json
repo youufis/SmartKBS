@@ -144,6 +144,42 @@
     "pagination": {
       "totalActivities": "共 {{count}} 个活动",
       "totalStudents": "共 {{count}} 名学生"
+    },
+    "resourceViews": {
+      "title": "浏览统计",
+      "loadFailed": "加载失败",
+      "activeStudents": "活跃学生（30天）",
+      "totalViews": "总浏览次",
+      "viewedResources": "被浏览资源数",
+      "viewSuffix": "次",
+      "resourceSuffix": "个",
+      "byKnowledgePoint": "📖 按知识点查看浏览统计",
+      "selectCourse": "① 选择课程",
+      "selectKp": "选择知识点",
+      "selectCourseFirst": "请先选择课程，然后选择知识点查看该知识点下绑定资源的浏览统计",
+      "selectKpHint": "请选择一个知识点查看浏览统计",
+      "noKpResources": "该知识点暂无 HTML/文件资源绑定",
+      "noKpForCourse": "暂无知识点",
+      "selectCourseFirstHint": "请先选择课程",
+      "sharedResources": "📄 共享资源浏览统计",
+      "empty": "暂无共享资源或暂无浏览数据",
+      "viewStudents": "查看学生",
+      "pagination": "共 {{count}} 个资源",
+      "detailTitle": "👁️ 查看「{{name}}」的学生",
+      "noRecords": "暂无学生查看记录",
+      "fileType": "文件",
+      "columns": {
+        "resourceName": "资源名称",
+        "type": "类型",
+        "owner": "共享者",
+        "views": "浏览次数",
+        "viewers": "查看人数",
+        "lastView": "最近查看",
+        "action": "操作",
+        "student": "学生",
+        "username": "用户名",
+        "viewCount": "查看次数"
+      }
     }
   },
   "analytics": {
