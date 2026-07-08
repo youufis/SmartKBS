@@ -17,7 +17,7 @@ from backend.database import execute_query, execute_insert_update, execute_query
 from backend.permission_service import filter_activities_by_scope, check_activity_visibility
 from backend.logger import logger
 from backend.ws_manager import manager as ws_manager
-from backend.prompts import build_ai_role
+from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
 
@@ -244,6 +244,7 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
         ai_role_desc=ai_role_desc,
         duration_minutes=req.duration_minutes,
     )
+    prompt = apply_skills(prompt, "discussion")
 
     import json, re
     from backend.api.chat_router import get_api_keys
@@ -676,6 +677,7 @@ async def _auto_generate_report(disc_id: int):
                     description=disc.get("description") or "",
                     messages_text=messages_text,
                 )
+                prompt = apply_skills(prompt, "discussion")
 
                 try:
                     from backend.api.ai_service import call_ai_async
@@ -1068,6 +1070,7 @@ async def ai_suggest(group_id: int, request: Request):
 {messages_text or "（讨论尚未开始）"}
 
 请根据讨论情况给出简短的引导或总结（50-100字）："""
+    prompt = apply_skills(prompt, "discussion")
 
     # 调用 AI
     from backend.api.chat_router import get_api_keys
@@ -1175,6 +1178,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
         description=description,
         messages_text=messages_text,
     )
+    prompt = apply_skills(prompt, "discussion")
 
     from backend.api.ai_service import call_ai_async
 
@@ -1473,6 +1477,7 @@ async def generate_report(disc_id: int, request: Request):
 {messages_text}
 
 简要分析："""
+            prompt = apply_skills(prompt, "discussion")
 
             ai_summary = ""
             try:
@@ -1697,6 +1702,7 @@ async def auto_trigger_ai(disc_id: int, request: Request):
 {messages_text}
 
 简短引导："""
+        prompt = apply_skills(prompt, "discussion")
 
         try:
             content = await call_ai_async(prompt, api_key)

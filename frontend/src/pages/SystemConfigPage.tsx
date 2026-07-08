@@ -3,7 +3,7 @@ import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
-  Spin, Typography, Divider, Space, Alert, Tag, Checkbox,
+  Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select,
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
@@ -13,6 +13,10 @@ import {
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import {
+  fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills,
+  type SkillInfo, type SkillDetail,
+} from '../api/skills'
 import {
   checkVersion, startUpgrade, getUpgradeStatus,
   rollback as apiRollback, getHistory, deleteHistory,
@@ -75,6 +79,328 @@ const GROUP_LABELS: Record<string, string> = {
   filetype: 'group_filetype',
   imagegen: 'group_imagegen',
   quest: 'group_quest',
+}
+
+// ═══════════════════════════════════════════════
+//  技能管理 Tab 组件（必须定义在组件外部，避免渲染时重复创建）
+// ═══════════════════════════════════════════════
+
+const TYPE_COLORS: Record<string, string> = {
+  core: 'blue',
+  domain: 'green',
+  adapter: 'purple',
+}
+
+const SkillManagePanel: React.FC = () => {
+  const { t } = useTranslation('system')
+
+  // 通过 i18n 翻译技能标签，键名格式: tag_xxx
+  // 未找到时返回原始 tag（不会显示 "tag_xxx"）
+  const tTag = (tag: string): string => {
+    const key = `tag_${tag}`
+    const translated = t(key)
+    return translated !== key ? translated : tag
+  }
+
+  const [skills, setSkills] = useState<SkillInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [selectedSkill, setSelectedSkill] = useState<SkillDetail | null>(null)
+  const [detailVisible, setDetailVisible] = useState(false)
+  const [searchText, setSearchText] = useState('')
+  const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+
+  const loadSkills = useCallback(async () => {
+    setLoading(true)
+    setErrorMsg(null)
+    try {
+      const data = await fetchSkills()
+      setSkills(data.skills)
+      if (data.errors && data.errors.length > 0) {
+        setErrorMsg(data.errors.join('; '))
+      }
+    } catch (e: any) {
+      message.error(t('loadFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    }
+    setLoading(false)
+  }, [t])
+
+  useEffect(() => {
+    loadSkills()
+  }, [loadSkills])
+
+  // 切换单个技能启用状态
+  const toggleSkill = async (name: string, currentEnabled: boolean) => {
+    setSaving(true)
+    try {
+      const newList = currentEnabled
+        ? skills.filter(s => s.name !== name).map(s => s.name)
+        : [...skills.filter(s => s.enabled).map(s => s.name), name]
+      await updateEnabledSkills(newList)
+      message.success(t('skillToggled'))
+      loadSkills()
+    } catch (e: any) {
+      message.error(t('saveFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    }
+    setSaving(false)
+  }
+
+  // 查看技能详情
+  const showDetail = async (name: string) => {
+    try {
+      const detail = await fetchSkillDetail(name)
+      setSelectedSkill(detail)
+      setDetailVisible(true)
+    } catch (e: any) {
+      message.error(t('loadFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    }
+  }
+
+  // 重新加载
+  const handleReload = async () => {
+    setLoading(true)
+    try {
+      const result = await reloadSkills()
+      message.success(result.message)
+      loadSkills()
+    } catch (e: any) {
+      message.error(t('reloadFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    }
+  }
+
+  // 全选/取消全选
+  const allEnabled = skills.length > 0 && skills.every(s => s.enabled)
+  const someEnabled = skills.some(s => s.enabled)
+  const handleToggleAll = async () => {
+    setSaving(true)
+    try {
+      const newList = allEnabled ? [] : filtered.map(s => s.name)
+      await updateEnabledSkills(newList)
+      message.success(allEnabled ? t('skillAllDisabled') : t('skillAllEnabled'))
+      loadSkills()
+    } catch (e: any) {
+      message.error(t('saveFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    }
+    setSaving(false)
+  }
+
+  // 分页重置（搜索/筛选时回到第一页）
+  const handleSearchChange = (val: string) => {
+    setSearchText(val)
+    setPage(1)
+  }
+  const handleTypeChange = (val: string) => {
+    setTypeFilter(val)
+    setPage(1)
+  }
+
+  // 筛选
+  const filtered = skills.filter(s => {
+    if (typeFilter !== 'all' && s.type !== typeFilter) return false
+    if (searchText) {
+      const q = searchText.toLowerCase()
+      return s.name.toLowerCase().includes(q) ||
+        s.display_name.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.tags.some(t => t.toLowerCase().includes(q))
+    }
+    return true
+  })
+
+  const typeCount = skills.reduce((acc, s) => {
+    acc[s.type] = (acc[s.type] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
+  return (
+    <div>
+      {/* 工具栏 */}
+      <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <Input.Search
+          placeholder={t('skillSearch')}
+          value={searchText}
+          onChange={e => handleSearchChange(e.target.value)}
+          style={{ width: 260 }}
+          allowClear
+        />
+        <Select
+          value={typeFilter}
+          onChange={handleTypeChange}
+          style={{ width: 150 }}
+          options={[
+            { value: 'all', label: t('skillAllTypes') + ` (${skills.length})` },
+            { value: 'core', label: `${t('skillCoreType')} (${typeCount.core || 0})` },
+            { value: 'domain', label: `${t('skillDomainType')} (${typeCount.domain || 0})` },
+            { value: 'adapter', label: `${t('skillAdapterType')} (${typeCount.adapter || 0})` },
+          ]}
+        />
+        <Button icon={<ReloadOutlined />} onClick={handleReload} loading={loading}>
+          {t('reload')}
+        </Button>
+        <Divider type="vertical" />
+        <Space>
+          <Text type="secondary">{t('skillToggleAll')}</Text>
+          <Switch
+            checked={allEnabled}
+            onChange={handleToggleAll}
+            loading={saving}
+          />
+        </Space>
+        {errorMsg && (
+          <Alert type="warning" showIcon message={errorMsg} style={{ margin: 0, flex: 1 }} />
+        )}
+      </div>
+
+      {/* 技能列表 */}
+      <Spin spinning={loading}>
+        <Table
+          dataSource={filtered.slice((page - 1) * pageSize, page * pageSize)}
+          rowKey="name"
+          pagination={{
+            current: page,
+            pageSize: pageSize,
+            total: filtered.length,
+            onChange: (p, ps) => { setPage(p); setPageSize(ps) },
+            showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50'],
+            showTotal: (total) => t('skillTotal', { count: total }),
+          }}
+          size="small"
+          columns={[
+            {
+              title: t('skillName'),
+              dataIndex: 'display_name',
+              key: 'name',
+              width: 180,
+              render: (_: string, record: SkillInfo) => (
+                <Space>
+                  <Tag color={TYPE_COLORS[record.type] || 'default'} style={{ fontSize: 11 }}>
+                    {record.type}
+                  </Tag>
+                  <Text strong>{record.display_name}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>v{record.version}</Text>
+                </Space>
+              ),
+            },
+            {
+              title: t('skillDescription'),
+              dataIndex: 'description',
+              key: 'desc',
+              ellipsis: true,
+            },
+            {
+              title: t('skillTags'),
+              dataIndex: 'tags',
+              key: 'tags',
+              width: 180,
+              render: (tags: string[]) => (
+                <Space size={4} wrap>
+                  {tags.slice(0, 3).map(t => <Tag key={t} style={{ fontSize: 11 }}>{tTag(t)}</Tag>)}
+                </Space>
+              ),
+            },
+            {
+              title: t('skillStatus'),
+              dataIndex: 'enabled',
+              key: 'enabled',
+              width: 100,
+              render: (enabled: boolean) => (
+                enabled
+                  ? <Tag color="success" icon={<CheckCircleOutlined />}>{t('skillEnabled')}</Tag>
+                  : <Tag color="default" icon={<CloseCircleOutlined />}>{t('skillDisabled')}</Tag>
+              ),
+            },
+            {
+              title: t('skillAction'),
+              key: 'action',
+              width: 160,
+              render: (_: any, record: SkillInfo) => (
+                <Space>
+                  <Switch
+                    checked={record.enabled}
+                    onChange={() => toggleSkill(record.name, record.enabled)}
+                    loading={saving}
+                    size="small"
+                  />
+                  <Button type="link" size="small" onClick={() => showDetail(record.name)}>
+                    <EyeOutlined /> {t('skillView')}
+                  </Button>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Spin>
+
+      {/* 技能详情弹窗 */}
+      <Modal
+        title={selectedSkill ? `${selectedSkill.display_name} v${selectedSkill.version}` : ''}
+        open={detailVisible}
+        onCancel={() => setDetailVisible(false)}
+        footer={null}
+        width={800}
+      >
+        {selectedSkill && (
+          <div>
+            <Descriptions column={2} size="small" bordered style={{ marginBottom: 16 }}>
+              <Descriptions.Item label={t('skillName')} span={2}>
+                <Tag color={TYPE_COLORS[selectedSkill.type]}>{selectedSkill.type}</Tag>
+                {selectedSkill.display_name}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('version')}>{selectedSkill.version}</Descriptions.Item>
+              <Descriptions.Item label={t('skillStatus')}>
+                {selectedSkill.enabled
+                  ? <Tag color="success">{t('skillEnabled')}</Tag>
+                  : <Tag color="default">{t('skillDisabled')}</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('skillDescription')} span={2}>
+                {selectedSkill.description}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('skillTags')} span={2}>
+                {selectedSkill.tags.map(t => <Tag key={t}>{tTag(t)}</Tag>)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('compatibleWith')} span={2}>
+                {selectedSkill.compatible_with.length > 0
+                  ? selectedSkill.compatible_with.join(', ')
+                  : t('all')}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('priority')}>{selectedSkill.priority}</Descriptions.Item>
+              <Descriptions.Item label={t('requires')}>
+                {selectedSkill.requires.length > 0 ? selectedSkill.requires.join(', ') : '-'}
+              </Descriptions.Item>
+            </Descriptions>
+
+            {/* 原始文档内容预览 */}
+            {selectedSkill.parse_error && (
+              <Alert type="warning" showIcon message={t('skillParseError')} description={selectedSkill.parse_error} style={{ marginBottom: 16 }} />
+            )}
+            {selectedSkill.raw_content && (
+              <>
+                <Text strong>{t('skillRawContent')}</Text>
+                <pre style={{
+                  marginTop: 8,
+                  padding: 12,
+                  background: '#f5f5f5',
+                  borderRadius: 6,
+                  fontSize: 13,
+                  maxHeight: 400,
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  border: '1px solid #e8e8e8',
+                }}>
+                  {selectedSkill.raw_content}
+                </pre>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+    </div>
+  )
 }
 
 // ═══════════════════════════════════════════════
@@ -829,7 +1155,51 @@ const SystemConfigPage: React.FC = () => {
         )}
 
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          {/* ── 全局配置 Tab ── */}
+          {/* ── 系统配置 Tab ── */}
+          <Tabs.TabPane
+            tab={<span><SettingOutlined /> {t('systemConfig')}</span>}
+            key="global"
+          >
+            <Spin spinning={loading}>
+              <Form
+                form={form}
+                layout="vertical"
+                initialValues={config}
+                style={{ maxWidth: 900 }}
+              >
+                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen', 'quest'].map(renderGroup)}
+
+                <Divider />
+                <Space>
+                  <Button
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    loading={saving}
+                    onClick={handleSave}
+                  >
+                    {t('saveConfig')}
+                  </Button>
+                  <Button icon={<ReloadOutlined />} onClick={loadConfig}>
+                    {t('reload')}
+                  </Button>
+                </Space>
+                <div style={{ marginTop: 8 }}>
+                  <Text type="secondary">
+                    {t('restartNote')}
+                  </Text>
+                </div>
+              </Form>
+            </Spin>
+          </Tabs.TabPane>
+
+          {/* ── 技能管理 Tab ── */}
+          <Tabs.TabPane
+            tab={<span><SettingOutlined /> {t('skillManagement')}</span>}
+            key="skills"
+          >
+            <SkillManagePanel />
+          </Tabs.TabPane>
+
           {/* ── 缓存管理 Tab ── */}
           <Tabs.TabPane
             tab={<span><ReloadOutlined /> {t('cacheManagement')}</span>}
@@ -873,42 +1243,6 @@ const SystemConfigPage: React.FC = () => {
                 </Button>
               </Space>
             </Card>
-          </Tabs.TabPane>
-
-          <Tabs.TabPane
-            tab={<span><SettingOutlined /> {t('systemConfig')}</span>}
-            key="global"
-          >
-            <Spin spinning={loading}>
-              <Form
-                form={form}
-                layout="vertical"
-                initialValues={config}
-                style={{ maxWidth: 900 }}
-              >
-                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen', 'quest'].map(renderGroup)}
-
-                <Divider />
-                <Space>
-                  <Button
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    loading={saving}
-                    onClick={handleSave}
-                  >
-                    {t('saveConfig')}
-                  </Button>
-                  <Button icon={<ReloadOutlined />} onClick={loadConfig}>
-                    {t('reload')}
-                  </Button>
-                </Space>
-                <div style={{ marginTop: 8 }}>
-                  <Text type="secondary">
-                    {t('restartNote')}
-                  </Text>
-                </div>
-              </Form>
-            </Spin>
           </Tabs.TabPane>
 
           {/* ── 版本管理 Tab ── */}

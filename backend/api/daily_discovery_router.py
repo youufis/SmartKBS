@@ -27,6 +27,7 @@ from backend.prompts.daily_discovery import (
     DAILY_DISCOVERY_REFRESH_PROMPT,
 )
 from backend.logger import logger
+from backend.prompts import apply_skills
 
 router = APIRouter()
 
@@ -390,6 +391,7 @@ class DiscoveryService:
                 count=8,
                 extra_instructions="请生成8条有趣的知识卡片，涵盖不同领域。"
             )
+            prompt = apply_skills(prompt, "daily-discovery")
             text = call_ai_sync_direct(prompt, api_key)
             cards = _parse_ai_response(text)
             for card in cards:
@@ -434,6 +436,7 @@ class DiscoveryService:
                 count=8,
                 extra_instructions=f"{extra}请确保与知识池中已有内容不重复。"
             )
+            prompt = apply_skills(prompt, "daily-discovery")
             try:
                 text = call_ai_sync_direct(prompt, api_key)
                 cards = _parse_ai_response(text)
@@ -483,6 +486,7 @@ class DiscoveryService:
             count=DAILY_CARD_COUNT,
             used_categories=json.dumps(used_cats, ensure_ascii=False)
         )
+        prompt = apply_skills(prompt, "daily-discovery")
         api_key = _get_dashscope_api_key()
         if not api_key:
             raise HTTPException(503, "AI 服务不可用，请配置 API Key")

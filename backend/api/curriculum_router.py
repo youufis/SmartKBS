@@ -18,7 +18,7 @@ from backend.api.dependencies import get_current_user
 from backend.auth import is_admin, is_teacher
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
-from backend.prompts import build_ai_role
+from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
 
@@ -1881,6 +1881,7 @@ async def ai_lesson_plan(
         knowledge_point=_safe(kp["name"]),
         grade=_safe(kp.get("grade", "")),
     )
+    prompt = apply_skills(prompt, "curriculum")
 
     from backend.ai_task_manager import task_manager
 

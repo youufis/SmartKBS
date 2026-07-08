@@ -35,6 +35,7 @@ from backend.utils import (
 )
 from backend.logger import logger
 from backend.database import execute_query
+from backend.prompts import apply_skills
 
 router = APIRouter()
 
@@ -377,6 +378,9 @@ def _chat_event_generator(
             if summaries:
                 enhanced_prompt = ("\n\n".join(summaries) + "\n\n" + enhanced_prompt).strip()
                 _summaries_generated = True
+
+        # ── 技能注入 ──
+        enhanced_prompt = apply_skills(enhanced_prompt, "chat")
 
         if multimodal_enabled and image_files:
             model = get_config_value("MODEL_NAME", "deepseek-v4-flash")

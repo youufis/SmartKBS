@@ -26,6 +26,7 @@ from backend.config import (
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
+from backend.prompts import apply_skills
 router = APIRouter()
 
 
@@ -624,6 +625,7 @@ async def ai_grade_task(task_id: str, request: Request):
         task_name=task_name,
         task_description=task_desc,
     )
+    prompt = apply_skills(prompt, "practice-grading")
 
     # 6. 调用 qwen-long
     try:

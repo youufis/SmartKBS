@@ -28,6 +28,7 @@ from backend.prompts.chat import SVG_GENERATE_PROMPT, IMAGE_GEN_PROMPT_TEMPLATE
 from backend.logger import logger
 from backend.reward_engine import award_participation, award_grade, update_student_total
 from backend.title_system import check_and_unlock_badges
+from backend.prompts import apply_skills
 
 router = APIRouter()
 
@@ -83,6 +84,7 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         used_categories=used_cats_str,
         question_index=question_index,
     )
+    prompt = apply_skills(prompt, "quest")
     try:
         import concurrent.futures
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync
@@ -300,6 +302,7 @@ def _call_ai_phone_friend(api_key: str, question: str, options: dict[str, Any]) 
         option_c=opts.get("C", ""),
         option_d=opts.get("D", ""),
     )
+    prompt = apply_skills(prompt, "quest")
     try:
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync
         future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
@@ -319,6 +322,7 @@ def _call_ai_audience_vote(api_key: str, question: str, options: dict[str, Any])
         option_c=options.get("C", ""),
         option_d=options.get("D", ""),
     )
+    prompt = apply_skills(prompt, "quest")
     try:
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync
         future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
@@ -1620,6 +1624,7 @@ async def quest_bank_generate_svg(question_id: int, request: Request):
         description=row["question_text"],
         subject=row.get("category", "百科")
     )
+    prompt = apply_skills(prompt, "quest")
     try:
         text = call_ai_sync_direct(prompt, api_key)
     except Exception as e:

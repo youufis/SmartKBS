@@ -56,6 +56,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         '.xls', '.xlsx', '.ppt', '.pptx', '.csv',
         '.json', '.html', '.htm',
     ],
+    # 技能系统：已启用的技能名称列表（空列表=关闭所有技能）
+    "enabled_skills": [],
     # 课程名称列表
     "SUBJECTS": ["人工智能"],
     # 启用的试题题型（可在此增删，前端自动同步）

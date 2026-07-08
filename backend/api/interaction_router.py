@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_insert_update, execute_batch, execute_query_dict
 from backend.logger import logger
-from backend.prompts import build_ai_role
+from backend.prompts import apply_skills, build_ai_role
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.question_db import (
@@ -268,6 +268,7 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
             type_desc=type_desc,
             count=remaining,
         )
+        prompt = apply_skills(prompt, "quiz")
 
         try:
             result_text = await call_ai_async(prompt, api_key)
@@ -412,6 +413,7 @@ async def ai_generate_poll(req: AiGeneratePoll, request: Request):
         '  "options": ["选项1", "选项2", ...]\n'
         '}'
     )
+    prompt = apply_skills(prompt, "quiz")
 
     try:
         result_text = await call_ai_async(prompt, api_key)
@@ -979,6 +981,7 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
                             half_minus=str(q_score_val * 0.4),
                             student_answer=user_ans.replace('{', '{{').replace('}', '}}'),
                         )
+                        prompt = apply_skills(prompt, "quiz")
                         ai_resp = await call_ai_async(prompt, api_key)
                         jm = re.search(r'\{[^}]+\}', ai_resp)
                         if jm:
@@ -2273,6 +2276,7 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
             participant_count=_safe(participant_count),
             question_stats=_safe(stats_text),
         )
+        prompt = apply_skills(prompt, "quiz")
 
         analysis = await call_ai_async(prompt, api_key)
         return {
@@ -2439,6 +2443,7 @@ async def ai_class_summary(
             question_data=_safe(question_data),
             discussion_data=_safe(discussion_data),
         )
+        prompt = apply_skills(prompt, "quiz")
 
         summary = await call_ai_async(prompt, api_key)
         return {
@@ -2593,6 +2598,7 @@ async def export_class_summary_docx(
         question_data=_safe(question_data),
         discussion_data=_safe(discussion_data),
     )
+    prompt = apply_skills(prompt, "quiz")
 
     try:
         summary = await call_ai_async(prompt, api_key)

@@ -15,7 +15,7 @@ from backend.database import execute_query as user_query
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
-from backend.prompts import build_ai_role
+from backend.prompts import apply_skills, build_ai_role
 from backend.database import execute_query as db_exec, execute_insert_update as db_insert
 from backend.permission_service import (
     parse_legacy_teacher_grade_class,
@@ -636,6 +636,7 @@ async def get_review_plan(request: Request):
         weak_types=weak_types,
         wrong_questions=wrong_text,
     )
+    prompt = apply_skills(prompt, "wrong-book")
 
     keys = get_api_keys(username)
     api_key = keys[0] if keys and keys[0] else ""

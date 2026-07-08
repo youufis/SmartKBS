@@ -28,6 +28,7 @@ from backend.logger import logger
 
 # 复用聊天模块的 API Key 获取函数
 from backend.api.chat_router import get_api_keys
+from backend.prompts import apply_skills
 
 router = APIRouter()
 
@@ -211,6 +212,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
     # 构造 Prompt
     type_desc = QUESTION_TYPE_MAP.get(req.question_type, "单选题")
     prompt = _build_generate_prompt(req.subject, req.knowledge_points, type_desc, req.count, req.difficulty, username)
+    prompt = apply_skills(prompt, "quiz")
     logger.info(f"开始调用AI生成试题: subject={req.subject}, type={req.question_type}, count={req.count}")
 
     # 调用 AI
@@ -797,6 +799,7 @@ async def extract_questions_from_text(
 
         # 构造提取 Prompt
         prompt = _build_extract_prompt(subject, difficulty, content)
+        prompt = apply_skills(prompt, "quiz")
         logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
 
         # 调用 AI
@@ -1253,6 +1256,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
         count=req.count,
         difficulty_desc=difficulty_desc,
     )
+    prompt = apply_skills(prompt, "quiz")
 
     logger.info(f"开始调用AI生成多媒体试题: subject={req.subject}, type={req.question_type}")
 
@@ -1421,6 +1425,7 @@ async def generate_svg_for_question(question_id: int, request: Request):
         description=row["question_text"],
         subject=row["subject"]
     )
+    prompt = apply_skills(prompt, "quiz")
 
     try:
         result = await _call_dashscope_agent(prompt, api_key)

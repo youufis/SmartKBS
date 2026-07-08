@@ -23,7 +23,7 @@ from backend.database import execute_query as db_query, execute_query_dict as db
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
-from backend.prompts import build_ai_role
+from backend.prompts import apply_skills, build_ai_role
 from backend.code_runner import run_python, run_javascript, get_supported_languages
 from backend.code_grader import grade_submission
 from backend.permission_service import check_activity_visibility
@@ -183,6 +183,7 @@ async def ai_code_review(submission_id: int, request: Request):
     from backend.prompts import build_ai_role
     ai_role = build_ai_role()
     prompt = f"{ai_role}" + CODE_REVIEW_PROMPT.format(problem_title=sub["problem_title"], language=sub["language"], source_code=sub["source_code"])
+    prompt = apply_skills(prompt, "code-review")
 
     async def _do() -> dict[str, Any]:
         try:
@@ -492,6 +493,7 @@ async def ai_generate_code_problem(req: AiGenerateCodeProblem, request: Request)
               "\"reference_solution\":\"...\",\"knowledge_points\":\"...\","
               "\"test_cases\":[{\"input\":\"...\",\"expected_output\":\"...\",\"description\":\"...\",\"is_sample\":true,\"score\":1}]}"
               "\n至少5个测试用例，前2个is_sample=true，总分10")
+    prompt = apply_skills(prompt, "code-review")
 
     async def _do() -> dict[str, Any]:
         try:

@@ -20,6 +20,7 @@ from backend.logger import logger
 from backend.reward_engine import award_participation, award_grade, REWARD_CONFIG
 from backend.title_system import check_and_unlock_badges
 from backend.question_db import execute_query as qb_execute_query, execute_query_one as qb_execute_query_one
+from backend.prompts import apply_skills
 
 router = APIRouter()
 

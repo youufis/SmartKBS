@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.logger import logger
+from backend.prompts import apply_skills
 from backend.question_db import (
     execute_query,
     execute_query_one,
@@ -317,6 +318,7 @@ async def _select_questions_by_ai(
         knowledge_focus=_safe(knowledge_focus),
         candidate_questions=_safe(candidate_text),
     )
+    prompt = apply_skills(prompt, "paper")
 
     try:
         ai_response = await call_ai_async(prompt, api_key)

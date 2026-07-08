@@ -845,6 +845,10 @@ async def ai_preview_html(request: Request):
         real_questions=real_questions,  # 传入真实题目
     )
 
+    # ── 技能增强 ──
+    from backend.prompts import apply_skills
+    prompt = apply_skills(prompt, "html-generation")
+
     # 调用 AI
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout

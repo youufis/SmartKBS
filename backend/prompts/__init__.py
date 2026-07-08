@@ -69,3 +69,75 @@ def build_ai_role(
     parts.append("教师")
 
     return "".join(parts)
+
+
+# ═══════════════════════════════════════════════
+# 技能系统集成
+# ═══════════════════════════════════════════════
+
+def build_prompt_with_skills(
+    base_prompt: str,
+    skill_names: Optional[list[str]] = None,
+    context: Optional[dict] = None,
+    enabled_names: Optional[list[str]] = None,
+) -> str:
+    """将技能增强段注入基础 Prompt
+
+    这是技能系统的统一入口。所有异常都被吞掉，确保不影响主流程。
+
+    Args:
+        base_prompt: 原始的 Prompt 文本
+        skill_names: 要应用的技能名称列表（None 或空列表 = 无增强）
+        context: 上下文信息（如场景、学科等），传给技能引擎
+        enabled_names: 全局已启用技能列表（None=不检查启用状态）
+
+    Returns:
+        注入技能后的 Prompt（出错时返回原始 base_prompt）
+    """
+    if not skill_names:
+        return base_prompt
+
+    try:
+        from backend.skill_engine import build_skill_prompt_segment
+
+        segment = build_skill_prompt_segment(
+            skill_names=skill_names,
+            context=context,
+            enabled_names=enabled_names,
+        )
+        if not segment:
+            return base_prompt
+
+        # 技能增强段注入到基础 Prompt 之前
+        return f"{segment}\n\n---\n\n{base_prompt}"
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(
+            f"技能注入失败，已降级为原始 Prompt: {e}", exc_info=True
+        )
+        return base_prompt
+
+
+def apply_skills(base_prompt: str, scene_type: str) -> str:
+    """一键注入：读取已启用的技能并按场景过滤后注入到 Prompt
+
+    这是各个 Router 中使用的便捷接口。自动处理所有异常。
+
+    Args:
+        base_prompt: 原始的 Prompt 文本
+        scene_type: 场景类型（如 "exam"、"quiz"、"code-review" 等）
+
+    Returns:
+        注入技能后的 Prompt（出错时返回原始 base_prompt）
+    """
+    try:
+        from backend.api.config_router import get_config_value
+        enabled = get_config_value("enabled_skills", [])
+        return build_prompt_with_skills(
+            base_prompt=base_prompt,
+            skill_names=enabled,
+            context={"type": scene_type},
+            enabled_names=enabled,
+        )
+    except Exception:
+        return base_prompt

@@ -22,6 +22,7 @@ from backend.auth import is_admin
 from backend.database import execute_query as user_query, execute_insert_update as db_update
 from backend.logger import logger
 from backend.api.ai_service import call_ai_async
+from backend.prompts import apply_skills
 from backend.permission_service import check_activity_visibility
 
 router = APIRouter()
@@ -1070,6 +1071,7 @@ async def _grade_short_with_ai(q: dict[str, Any], student_answer: str, api_key: 
                 half_minus=str(q_score * 0.4),
                 student_answer=str(student_answer or "").replace('{', '{{').replace('}', '}}'),
             )
+            prompt = apply_skills(prompt, "exam-grading")
             ai_resp = await call_ai_async(prompt, api_key)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
@@ -1121,6 +1123,7 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
                 max_score=str(q_score),
                 student_answer=str(student_answer or "").replace('{', '{{').replace('}', '}}'),
             )
+            prompt = apply_skills(prompt, "exam-grading")
             ai_resp = await call_ai_async(prompt, api_key)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
@@ -1985,6 +1988,7 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
                 student_answer=_safe(ans.get("student_answer", "")),
                 knowledge_points=_safe(q.get("knowledge_points", "")),
             )
+            prompt = apply_skills(prompt, "exam")
             ai_response = await call_ai_async(prompt, api_key)
             return {
                 "question_id": q["id"],
@@ -2108,6 +2112,7 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
         knowledge_focus=_safe(req.knowledge_focus or "无特定要求"),
         candidate_questions=_safe(candidate_text),
     )
+    prompt = apply_skills(prompt, "exam")
 
     try:
         ai_response = await call_ai_async(prompt, api_key)

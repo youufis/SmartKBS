@@ -19,7 +19,7 @@ from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.api.config_router import get_config_value
 from backend.logger import logger
-from backend.prompts import build_ai_role
+from backend.prompts import apply_skills, build_ai_role
 from backend.permission_service import get_teacher_classes, get_grade_by_name
 
 router = APIRouter()
@@ -94,6 +94,7 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
+    prompt = apply_skills(prompt, "practice")
 
     try:
         result_text = await call_ai_async(prompt, api_key)
@@ -203,6 +204,7 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
+    prompt = apply_skills(prompt, "practice")
 
     async def _generate_and_save() -> dict[str, Any]:
         result_text = await call_ai_async(prompt, api_key)
@@ -700,6 +702,7 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
                             half_minus=str(q_score * 0.4),
                             student_answer=student_ans.replace('{', '{{').replace('}', '}}'),
                         )
+                        prompt = apply_skills(prompt, "practice")
                         ai_resp = await call_ai_async(prompt, api_key)
                         import re
                         jm = re.search(r'\{[^}]+\}', ai_resp)

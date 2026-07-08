@@ -12,7 +12,7 @@ from backend.api.dependencies import get_current_user
 from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
-from backend.prompts import build_ai_role
+from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
 
@@ -576,6 +576,7 @@ async def get_learning_report(username: str, request: Request):
         chat_days=_safe(chat_days),
         chat_total=_safe(chat_total),
     )
+    prompt = apply_skills(prompt, "portfolio")
 
     from backend.ai_task_manager import task_manager
     _student_username = username
@@ -725,6 +726,7 @@ async def export_learning_report_docx(username: str, request: Request, token: st
         chat_days=_safe(chat_days),
         chat_total=_safe(chat_total),
     )
+    prompt = apply_skills(prompt, "portfolio")
 
     report_text = await call_ai_async(prompt, api_key)
 

@@ -13,6 +13,7 @@ from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.logger import logger
 from backend.permission_service import can_access_grade, can_access_class, get_grade_by_name
+from backend.prompts import apply_skills
 from backend.prompts.analytics import CLASS_ANALYSIS_PROMPT, STUDENT_ANALYSIS_PROMPT, TEACHING_ADVICE_PROMPT
 from backend.prompts.exam import EXAM_ANALYSIS_PROMPT
 from backend.prompts import build_ai_role
@@ -54,6 +55,8 @@ def _call_ai(prompt: str) -> str:  # type: ignore[misc]
     api_key = _get_dashscope_api_key()
     if not api_key:
         return "⚠️ AI 分析功能不可用：请管理员在「系统配置」中填写 DashScope API Key"
+
+    prompt = apply_skills(prompt, "analytics")
 
     from backend.api.ai_service import call_ai_sync
     try:

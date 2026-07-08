@@ -16,6 +16,7 @@ from backend.api.config_router import get_config_value
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.whiteboard_ws import whiteboard_manager
 from backend.logger import logger
+from backend.prompts import apply_skills
 
 router = APIRouter()
 
@@ -1433,6 +1434,7 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
 
         from backend.prompts.whiteboard_ai import DIAGRAM_GENERATION_PROMPT
         prompt = DIAGRAM_GENERATION_PROMPT.format(description=description, subject=subject)
+        prompt = apply_skills(prompt, "whiteboard")
         timeout = _get_ai_timeout()
 
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1537,6 +1539,7 @@ async def ai_generate_board(request: Request):
 
     from backend.prompts.whiteboard_ai import BOARD_GENERATION_PROMPT
     prompt = BOARD_GENERATION_PROMPT.format(kp_name=kp_name, subject=subject, grade=grade)
+    prompt = apply_skills(prompt, "whiteboard")
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1581,6 +1584,7 @@ async def ai_beautify_board(request: Request):
         snapshot_text=snapshot_text,
         subject=subject,
     )
+    prompt = apply_skills(prompt, "whiteboard")
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1618,6 +1622,7 @@ async def ai_smart_annotation(request: Request):
 
     from backend.prompts.whiteboard_ai import SMART_LABEL_PROMPT
     prompt = SMART_LABEL_PROMPT.format(selection_desc=selection_desc, mode=mode)
+    prompt = apply_skills(prompt, "whiteboard")
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1659,6 +1664,7 @@ async def ai_generate_mindmap(request: Request):
 
     from backend.prompts.whiteboard_ai import MIND_MAP_PROMPT
     prompt = MIND_MAP_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
+    prompt = apply_skills(prompt, "whiteboard")
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1697,6 +1703,7 @@ async def ai_suggest(request: Request):
 知识点：{kp_name}
 
 直接回复文字，不要JSON格式。"""
+    prompt = apply_skills(prompt, "whiteboard")
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
@@ -1735,6 +1742,7 @@ async def export_board_summary(room_id: int, request: Request):
     # AI 生成总结
     from backend.prompts.whiteboard_ai import BOARD_SUMMARY_PROMPT
     prompt = BOARD_SUMMARY_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
+    prompt = apply_skills(prompt, "whiteboard")
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
@@ -1848,6 +1856,7 @@ async def ai_generate_quiz(request: Request):
         kp_name=kp_name or "未指定",
         subject=subject,
     )
+    prompt = apply_skills(prompt, "whiteboard")
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1889,6 +1898,7 @@ async def ai_generate_bilingual(request: Request):
 
     from backend.prompts.whiteboard_ai import BILINGUAL_BOARD_PROMPT
     prompt = BILINGUAL_BOARD_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
+    prompt = apply_skills(prompt, "whiteboard")
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout

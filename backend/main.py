@@ -141,6 +141,7 @@ from backend.api.quest_router import router as quest_router
 from backend.api.quick_quiz_router import router as quick_quiz_router
 from backend.api.activity_monitor_router import router as activity_monitor_router
 from backend.api.companion_router import router as companion_router
+from backend.api.skill_router import router as skill_router
 from backend.api.whiteboard_router import router as whiteboard_router
 from backend.api.portrait_router import router as portrait_router
 from backend.api.tracking_router import router as tracking_router
@@ -179,6 +180,7 @@ app.include_router(recommend_router, prefix="/api/recommend", tags=["AI 资源�
 app.include_router(reward_router, prefix="/api", tags=["积分奖励"])
 app.include_router(code_router, prefix="/api", tags=["代码练习"])
 app.include_router(companion_router, prefix="/api", tags=["AI 学伴"])
+app.include_router(skill_router, prefix="/api/skills", tags=["技能管理"])
 app.include_router(whiteboard_router, prefix="/api/whiteboard", tags=["协作白板"])
 app.include_router(portrait_router, prefix="/api/portrait", tags=["自我画像"])
 app.include_router(tracking_router, prefix="/api", tags=["资源追踪"])

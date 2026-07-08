@@ -13,6 +13,7 @@ from backend.api.dependencies import get_current_user
 from backend.database import execute_query_dict as execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.api.chat_router import get_api_keys
+from backend.prompts import apply_skills
 from backend.api.ai_service import call_ai_async
 from backend.logger import logger
 
@@ -121,6 +122,7 @@ async def recommend_resources(kp_id: int, request: Request):
         resources_json=resources_json,
     )
 
+    prompt = apply_skills(prompt, "recommend")
     try:
         result_text = await call_ai_async(prompt, api_key)
     except Exception as e:

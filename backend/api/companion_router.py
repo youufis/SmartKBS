@@ -38,6 +38,7 @@ from backend.companion_push import (
     push_morning_greeting,
 )
 from backend.logger import logger
+from backend.prompts import apply_skills
 from backend.database import execute_query
 
 router = APIRouter()
@@ -123,6 +124,8 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
 
     # 构建学伴增强提示词（含画像/人格/教学助手提示词）
     enhanced_prompt = _build_companion_prompt_with_profile(req.prompt, username, role)
+    # ── 技能注入 ──
+    enhanced_prompt = apply_skills(enhanced_prompt, "companion")
 
     # 调用流式对话生成器（与智答模式共用 _chat_event_generator）
     # 注意：user_payload=None 避免 enhance_prompt_with_user_context 二次包装，

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from backend.api.dependencies import get_current_user
 from backend.api.config_router import get_config_value
 from backend.auth import is_admin
+from backend.prompts import apply_skills
 from backend.api.ai_service import call_ai_sync_with_timeout
 from backend.api.image_gen_service import generate_and_save_image
 from backend.companion_memory import get_student_profile
@@ -490,6 +491,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     # 3. LLM 生成创意寄语
     logger.info(f"开始生成寄语: username={username}")
     try:
+        prompt = apply_skills(prompt, "portrait")
         comment = await call_ai_sync_with_timeout(
             build_portrait_comment_prompt(profile, style),
             api_key,

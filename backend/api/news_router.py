@@ -25,6 +25,7 @@ from backend.api.ai_service import call_ai_sync_direct
 from backend.database import execute_query, execute_insert_update, execute_query_one
 from backend.prompts.news import NEWS_SUMMARIZE_PROMPT, NEWS_DAILY_BRIEFING_PROMPT
 from backend.logger import logger
+from backend.prompts import apply_skills
 
 router = APIRouter()
 
@@ -353,6 +354,7 @@ class NewsService:
             prompt = NEWS_SUMMARIZE_PROMPT.format(
                 title=title, content=summary
             )
+            prompt = apply_skills(prompt, "news")
             text = call_ai_sync_direct(prompt, api_key)
 
             # 安全解析 AI 返回的 JSON
@@ -486,6 +488,7 @@ class NewsService:
         prompt = NEWS_DAILY_BRIEFING_PROMPT.format(
             date=today_str, news_list=news_text
         )
+        prompt = apply_skills(prompt, "news")
         try:
             content = call_ai_sync_direct(prompt, api_key)
 

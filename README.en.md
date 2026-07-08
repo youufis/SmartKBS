@@ -14,7 +14,7 @@
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-7.5.0-blue)
+![Version](https://img.shields.io/badge/Version-7.6.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,10 +30,12 @@
 
 ---
 
-> 📌 **V7.5.0 Highlights**:
-> 🌐 **i18n Multi-Language Support**: One-click switch between Chinese and English across all pages
-> 🔤 **react-i18next Integration**: 13 namespaces, ~2000+ translation keys
-> 🔄 **Language Switching Optimized**: Default Chinese, localStorage persistence, fixed sync issues
+> 📌 **V7.6.0 Highlights**:
+> 🎯 **Skill Document System**: 20 modular AI skills, auto-injected by scene into 25 API routes
+> ⚡ **Three-Stage Quality Enhancement**: Deep Analysis → Structured Output → Self-Review, verified by A/B testing
+> 🧩 **8 Core Skills + 12 Domain Skills**: Covering chat, exams, quizzes, whiteboard, code review and all scenarios
+> 📋 **Skill Management Page**: Visual list, toggle all on/off, detail preview, paginated search
+> 🔌 **Unified Injection**: one-liner across all routers
 
 ---
 
@@ -864,6 +866,21 @@ Centralized management of all system configuration parameters:
 
 ---
 
+### 🎯 Skill Management
+
+Modular AI Skill Document System — each skill is defined via YAML + Markdown, automatically injected into AI calls by scene:
+
+- **🧩 20 Pre-installed Skills**: 8 core + 12 domain-specific
+- **🎯 Scene-Aware Injection**: controls which scenes each skill applies to
+- **⚡ Three-Stage Quality Enhancement**: Deep Analysis → Structured Output → Self-Review
+- **📋 Visual Management**: Search, filter by type, pagination, toggle all on/off
+- **🔍 Detail Preview**: View raw skill document, version, tags, priority
+- **🛡️ Safe Degradation**: Skills silently skip on error, zero impact on existing features
+
+> **Admin only**
+
+---
+
 ### 🔔 Notification Center
 
 Real-time message notification system:
@@ -940,6 +957,16 @@ Git-based online incremental upgrade system:
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
 ## 📦 Changelog
+
+### v7.6.0 (2026-07-08)
+
+- 🎯 **Skill Document System**: 20 modular AI skills, auto-injected by scene into 25 API routes
+- ⚡ **Three-Stage Quality Enhancement**: Deep Analysis → Structured Output → Self-Review, verified by A/B testing
+- 🧩 **8 Core Skills + 12 Domain Skills**: Covering chat, exams, quizzes, whiteboard, code review and all scenarios
+- 📋 **Skill Management Page**: Visual list, toggle all on/off, detail preview, paginated search
+- 🔌 **Unified Injection**: `apply_skills(prompt, scene)` one-liner across all routers
+
+---
 
 ### v7.5.0 (2026-07-07)
 
