@@ -60,11 +60,7 @@ class AiGenerateAnnouncement(BaseModel):
 def _get_enabled_notification_types() -> set[str]:
     """获取系统当前启用的通知类型，默认启用考试和系统通知"""
     types = get_config_value("enabled_notification_types", ["exam", "system"])
-    result = set(types)
-    # 系统通知（版本更新等）始终启用，不受配置文件限制
-    # 因为 system_config.json 被 .gitignore，老部署可能缺少 "system"
-    result.add("system")
-    return result
+    return set(types)
 
 
 def _is_notification_type_enabled(type_: str) -> bool:
