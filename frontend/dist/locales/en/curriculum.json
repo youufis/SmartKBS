@@ -283,6 +283,12 @@
     "reasonNetwork": "Network error — check server connection",
     "retry": "Regenerate",
     "title": "AI Import Course",
+    "noSubjectConfig": "Please configure subjects in System Config first",
+    "courseNamePlaceholder": "e.g., Information Technology Basics",
+    "gradePlaceholder": "Select or enter grade",
+    "minutes": "{{minutes}}min",
+    "completed": "Completed",
+    "done": "Done",
     "gradeLabel": "Grade"
   }
 }
