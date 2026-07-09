@@ -151,22 +151,6 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
-            # ── 字段迁移：code_problems 新增目标范围字段 ──
-            for col_def in [
-                ("target_scope", "TEXT DEFAULT 'teacher_classes'"),
-                ("target_grade", "TEXT DEFAULT ''"),
-                ("target_class", "TEXT DEFAULT ''"),
-                ("target_users", "TEXT DEFAULT ''"),
-            ]:
-                try:
-                    c.execute(f"ALTER TABLE code_problems ADD COLUMN {col_def[0]} {col_def[1]}")
-                except sqlite3.OperationalError:
-                    pass  # 字段已存在
-            try:
-                c.execute("CREATE INDEX IF NOT EXISTS idx_cp_target ON code_problems(target_scope, target_grade, target_class)")
-            except sqlite3.OperationalError:
-                pass
-
             # ── 智能练习：练习任务表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS practice_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -288,6 +272,10 @@ def init_question_db():
                 starter_code TEXT DEFAULT '',
                 time_limit INTEGER DEFAULT 5,
                 status TEXT DEFAULT 'active',
+                target_scope TEXT DEFAULT 'teacher_classes',
+                target_grade TEXT DEFAULT '',
+                target_class TEXT DEFAULT '',
+                target_users TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )""")
@@ -348,6 +336,22 @@ def init_question_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cs_student ON code_submissions(student_username, problem_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cs_best ON code_submissions(problem_id, is_best)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_cr_student ON code_runs(student_username)")
+            except sqlite3.OperationalError:
+                pass
+
+            # ── 字段迁移：code_problems 新增目标范围字段（兼容旧表）──
+            for col_def in [
+                ("target_scope", "TEXT DEFAULT 'teacher_classes'"),
+                ("target_grade", "TEXT DEFAULT ''"),
+                ("target_class", "TEXT DEFAULT ''"),
+                ("target_users", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE code_problems ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_cp_target ON code_problems(target_scope, target_grade, target_class)")
             except sqlite3.OperationalError:
                 pass
 

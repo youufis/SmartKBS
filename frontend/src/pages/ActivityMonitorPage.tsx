@@ -138,7 +138,9 @@ const ActivityMonitorPage: React.FC = () => {
         }
       } catch (err: any) {
         if (!cancelled) {
-          message.error(err?.response?.data?.detail || t('activityMonitor.loadFailed'));
+          // 加载失败时静默返回空列表
+          setActivities([]);
+          setTotal(0);
         }
       } finally {
         if (!cancelled) setLoading(false);

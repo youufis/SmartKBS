@@ -46,6 +46,7 @@
   "expectedOutput": "期望输出",
   "actualOutput": "实际输出",
   "noProblems": "还没有题目，点击\"生成\"创建",
+  "noProblemsHint": "还没有题目，可以点击上方按钮或使用\"AI 生成\"创建新题目",
   "problemList": "题目列表",
   "difficultyLabel": "难度：{{level}}",
   "timeLabel": "用时：{{time}}",
