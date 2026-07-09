@@ -370,14 +370,14 @@ const DashboardPage: React.FC = () => {
           <Row gutter={[12, 12]} style={{ marginBottom: 24 }}>
             {/* 能力雷达图 */}
             <Col xs={12} md={6}>
-              <Card size="small" title={<Space><RadarChart style={{ color: '#722ed1', width: 14, height: 14 }} /><Text style={{ fontSize: 13 }}>能力维度</Text></Space>} styles={{ body: { padding: '2px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
+              <Card size="small" title={<Space><RadarChart style={{ color: '#722ed1', width: 14, height: 14 }} /><Text style={{ fontSize: 13 }}>{t('chart.radarDimension')}</Text></Space>} styles={{ body: { padding: '2px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
                 <ResponsiveContainer width="100%" height={140}>
                   <RadarChart data={[
-                    { d: '考试', v: Math.min(100, ((summary.completed_exam_count ?? 0) * 20 + (summary.exam_results?.length ?? 0) * 10)) },
-                    { d: '互动', v: Math.min(100, ((summary.active_quiz_count ?? 0) * 15 + (summary.my_quiz_answers ?? 0) * 10 + (summary.student_poll_vote_count ?? 0) * 5)) },
-                    { d: '闯关', v: Math.min(100, (summary.quest_completed_count ?? 0) * 25 + (summary.quick_quiz_correct ?? 0) * 5) },
-                    { d: '练习', v: Math.min(100, ((summary.pending_practice_count ?? 0) * 10 + (summary.course_practice_avg_accuracy ?? 0))) },
-                    { d: '讨论', v: Math.min(100, ((summary.my_discussion_count ?? 0) * 20 + (summary.active_discussion_count ?? 0) * 15)) },
+                    { d: t('chart.exam'), v: Math.min(100, ((summary.completed_exam_count ?? 0) * 20 + (summary.exam_results?.length ?? 0) * 10)) },
+                    { d: t('chart.interaction'), v: Math.min(100, ((summary.active_quiz_count ?? 0) * 15 + (summary.my_quiz_answers ?? 0) * 10 + (summary.student_poll_vote_count ?? 0) * 5)) },
+                    { d: t('chart.quest'), v: Math.min(100, (summary.quest_completed_count ?? 0) * 25 + (summary.quick_quiz_correct ?? 0) * 5) },
+                    { d: t('chart.practice'), v: Math.min(100, ((summary.pending_practice_count ?? 0) * 10 + (summary.course_practice_avg_accuracy ?? 0))) },
+                    { d: t('chart.discussion'), v: Math.min(100, ((summary.my_discussion_count ?? 0) * 20 + (summary.active_discussion_count ?? 0) * 15)) },
                   ]}>
                     <PolarGrid stroke="#f0f0f0" />
                     <PolarAngleAxis dataKey="d" tick={{ fontSize: 9 }} />
@@ -408,21 +408,21 @@ const DashboardPage: React.FC = () => {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#999', fontSize: 12 }}>暂无成绩</div>
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#999', fontSize: 12 }}>{t('chart.noExamData')}</div>
                 )}
               </Card>
             </Col>
             {/* 学习活动面积图 */}
             <Col xs={12} md={6}>
-              <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>学习活动</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
+              <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>{t('chart.learningActivity')}</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
                 {(summary.active_quiz_count ?? 0) + (summary.student_poll_vote_count ?? 0) + (summary.my_questions_count ?? 0) + (summary.pending_practice_count ?? 0) + (summary.my_discussion_count ?? 0) > 0 ? (
                   <ResponsiveContainer width="100%" height={120}>
                     <AreaChart data={[
-                      { name: '测验', value: summary.active_quiz_count ?? 0 },
-                      { name: '投票', value: summary.student_poll_vote_count ?? 0 },
-                      { name: '提问', value: summary.my_questions_count ?? 0 },
-                      { name: '练习', value: summary.pending_practice_count ?? 0 },
-                      { name: '讨论', value: summary.my_discussion_count ?? 0 },
+                      { name: t('chart.quiz'), value: summary.active_quiz_count ?? 0 },
+                      { name: t('chart.poll'), value: summary.student_poll_vote_count ?? 0 },
+                      { name: t('chart.question'), value: summary.my_questions_count ?? 0 },
+                      { name: t('chart.practice'), value: summary.pending_practice_count ?? 0 },
+                      { name: t('chart.discussion'), value: summary.my_discussion_count ?? 0 },
                     ]} margin={{ top: 8, right: 2, left: 0, bottom: 0 }}>
                       <XAxis dataKey="name" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 9 }} axisLine={false} tickLine={false} width={18} />
@@ -431,21 +431,21 @@ const DashboardPage: React.FC = () => {
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>暂无活动数据</div>
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>{t('chart.noActivityData')}</div>
                 )}
               </Card>
             </Col>
             {/* 闯关挑战横向柱状图 */}
             <Col xs={12} md={6}>
-              <Card size="small" title={<Space><FireOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>闯关挑战</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
+              <Card size="small" title={<Space><FireOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>{t('chart.questChallenge')}</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
                 {(summary.quest_completed_count ?? 0) + (summary.quick_quiz_participated ?? 0) + (summary.quick_quiz_correct ?? 0) + (summary.course_practice_count ?? 0) > 0 ? (
                   <ResponsiveContainer width="100%" height={120}>
                     <BarChart data={[
-                      { name: '闯关', value: summary.quest_completed_count ?? 0 },
-                      { name: '抢答', value: summary.quick_quiz_participated ?? 0 },
-                      { name: '正确', value: summary.quick_quiz_correct ?? 0 },
-                      { name: '课程', value: summary.course_practice_count ?? 0 },
-                      { name: '正确率', value: Math.round(summary.course_practice_avg_accuracy ?? 0) },
+                      { name: t('chart.quest'), value: summary.quest_completed_count ?? 0 },
+                      { name: t('chart.quickQuiz'), value: summary.quick_quiz_participated ?? 0 },
+                      { name: t('chart.correct'), value: summary.quick_quiz_correct ?? 0 },
+                      { name: t('chart.course'), value: summary.course_practice_count ?? 0 },
+                      { name: t('chart.accuracy'), value: Math.round(summary.course_practice_avg_accuracy ?? 0) },
                     ]} layout="vertical" margin={{ top: 4, right: 4, left: 2, bottom: 0 }} barSize={10}>
                       <XAxis type="number" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} width={32} />
@@ -456,7 +456,7 @@ const DashboardPage: React.FC = () => {
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>暂无挑战数据</div>
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>{t('chart.noChallengeData')}</div>
                 )}
               </Card>
             </Col>
@@ -523,7 +523,7 @@ const DashboardPage: React.FC = () => {
             {/* 考试状态环形图 */}
             {summary.exam_stats && summary.exam_stats.total > 0 && (
               <Col xs={12} md={6}>
-                <Card size="small" title={<Space><PieChart style={{ color: '#1677ff', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>考试状态</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
+                <Card size="small" title={<Space><PieChart style={{ color: '#1677ff', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>{t('chart.examStatus')}</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
                   <ResponsiveContainer width="100%" height={95}>
                     <PieChart>
                       <Pie
@@ -545,50 +545,50 @@ const DashboardPage: React.FC = () => {
                     </PieChart>
                   </ResponsiveContainer>
                   <div style={{ display: 'flex', justifyContent: 'center', gap: 6, fontSize: 11 }}>
-                    <span><Tag color="default" style={{ fontSize: 9, lineHeight: '14px', minWidth: 18, textAlign: 'center', padding: '0 3px' }}>{summary.exam_stats.draft}</Tag> 草稿</span>
-                    <span><Tag color="green" style={{ fontSize: 9, lineHeight: '14px', minWidth: 18, textAlign: 'center', padding: '0 3px' }}>{summary.exam_stats.published}</Tag> 发布</span>
-                    <span><Tag color="red" style={{ fontSize: 9, lineHeight: '14px', minWidth: 18, textAlign: 'center', padding: '0 3px' }}>{summary.exam_stats.ended}</Tag> 结束</span>
+                    <span><Tag color="default" style={{ fontSize: 9, lineHeight: '14px', minWidth: 18, textAlign: 'center', padding: '0 3px' }}>{summary.exam_stats.draft}</Tag> {t('draft')}</span>
+                    <span><Tag color="green" style={{ fontSize: 9, lineHeight: '14px', minWidth: 18, textAlign: 'center', padding: '0 3px' }}>{summary.exam_stats.published}</Tag> {t('published')}</span>
+                    <span><Tag color="red" style={{ fontSize: 9, lineHeight: '14px', minWidth: 18, textAlign: 'center', padding: '0 3px' }}>{summary.exam_stats.ended}</Tag> {t('ended')}</span>
                   </div>
                 </Card>
               </Col>
             )}
             {/* 教学概况柱状图 */}
             <Col xs={12} md={6}>
-              <Card size="small" title={<Space><TeamOutlined style={{ color: '#722ed1', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>教学概况</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
+              <Card size="small" title={<Space><TeamOutlined style={{ color: '#722ed1', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>{t('chart.teachingOverview')}</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
                 {(summary.total_students ?? 0) + (summary.total_submissions ?? 0) + (summary.rollcall_this_week ?? 0) + (summary.today_chat_count ?? 0) > 0 ? (
                   <ResponsiveContainer width="100%" height={120}>
                     <BarChart data={[
-                      { name: '学生', value: summary.total_students ?? 0 },
-                      { name: '提交', value: summary.total_submissions ?? 0 },
-                      { name: '点名', value: summary.rollcall_this_week ?? 0 },
-                      { name: '对话', value: summary.today_chat_count ?? 0 },
-                      { name: '教师', value: summary.total_teachers ?? 0 },
+                      { name: t('chart.student'), value: summary.total_students ?? 0 },
+                      { name: t('chart.submit'), value: summary.total_submissions ?? 0 },
+                      { name: t('chart.rollcall'), value: summary.rollcall_this_week ?? 0 },
+                      { name: t('chart.chat'), value: summary.today_chat_count ?? 0 },
+                      { name: t('chart.teacher'), value: summary.total_teachers ?? 0 },
                     ]} margin={{ top: 8, right: 4, left: -10, bottom: 0 }}>
                       <XAxis dataKey="name" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
                       <Tooltip />
-                      <Bar dataKey="value" name="数量" radius={[4, 4, 0, 0]} maxBarSize={20}>
+                      <Bar dataKey="value" name={t('chart.count')} radius={[4, 4, 0, 0]} maxBarSize={20}>
                         {['#722ed1', '#1677ff', '#fa8c16', '#13c2c2', '#52c41a'].map((color, idx) => (<Cell key={idx} fill={color} />))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>暂无教学数据</div>
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>{t('chart.noTeachingData')}</div>
                 )}
               </Card>
             </Col>
             {/* 课堂活动面积图 */}
             <Col xs={12} md={6}>
-              <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>课堂活动</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
+              <Card size="small" title={<Space><ThunderboltOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>{t('chart.classActivity')}</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
                 {(summary.teacher_quiz_count ?? 0) + (summary.teacher_poll_count ?? 0) + (summary.teacher_question_count ?? 0) + (summary.teacher_student_answer_count ?? 0) + (summary.practice_published ?? 0) + (summary.discussion_total ?? 0) > 0 ? (
                   <ResponsiveContainer width="100%" height={120}>
                     <AreaChart data={[
-                      { name: '测验', value: (summary.teacher_quiz_count ?? 0) + (summary.teacher_active_quiz_count ?? 0) },
-                      { name: '投票', value: summary.teacher_poll_count ?? 0 },
-                      { name: '提问', value: summary.teacher_question_count ?? 0 },
-                      { name: '回答', value: summary.teacher_student_answer_count ?? 0 },
-                      { name: '练习', value: summary.practice_published ?? 0 },
-                      { name: '讨论', value: summary.discussion_total ?? 0 },
+                      { name: t('chart.quiz'), value: (summary.teacher_quiz_count ?? 0) + (summary.teacher_active_quiz_count ?? 0) },
+                      { name: t('chart.poll'), value: summary.teacher_poll_count ?? 0 },
+                      { name: t('chart.question'), value: summary.teacher_question_count ?? 0 },
+                      { name: t('chart.answer'), value: summary.teacher_student_answer_count ?? 0 },
+                      { name: t('chart.practice'), value: summary.practice_published ?? 0 },
+                      { name: t('chart.discussion'), value: summary.discussion_total ?? 0 },
                     ]} margin={{ top: 8, right: 2, left: 0, bottom: 0 }}>
                       <XAxis dataKey="name" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 9 }} axisLine={false} tickLine={false} width={18} />
@@ -597,33 +597,33 @@ const DashboardPage: React.FC = () => {
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>暂无活动数据</div>
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>{t('chart.noActivityData')}</div>
                 )}
               </Card>
             </Col>
             {/* 趣味挑战横向柱状图 */}
             <Col xs={12} md={6}>
-              <Card size="small" title={<Space><FireOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>趣味挑战</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
+              <Card size="small" title={<Space><FireOutlined style={{ color: '#ff4d4f', fontSize: 14 }} /><Text style={{ fontSize: 13 }}>{t('chart.funChallenge')}</Text></Space>} styles={{ body: { padding: '4px 2px', minHeight: 158 }, header: { padding: '6px 12px', minHeight: 0 } }}>
                 {(summary.quest_total_count ?? 0) + (summary.quest_completed_count_t ?? 0) + (summary.quick_quiz_total ?? 0) + (summary.discussion_active ?? 0) > 0 ? (
                   <ResponsiveContainer width="100%" height={120}>
                     <BarChart data={[
-                      { name: '闯关', value: summary.quest_total_count ?? 0 },
-                      { name: '完成', value: summary.quest_completed_count_t ?? 0 },
-                      { name: '抢答', value: summary.quick_quiz_total ?? 0 },
-                      { name: '结束', value: summary.quick_quiz_ended ?? 0 },
-                      { name: '讨论', value: summary.discussion_active ?? 0 },
-                      { name: '成员', value: summary.discussion_member_count ?? 0 },
+                      { name: t('chart.quest'), value: summary.quest_total_count ?? 0 },
+                      { name: t('chart.completed'), value: summary.quest_completed_count_t ?? 0 },
+                      { name: t('chart.quickQuiz'), value: summary.quick_quiz_total ?? 0 },
+                      { name: t('chart.ended'), value: summary.quick_quiz_ended ?? 0 },
+                      { name: t('chart.discussion'), value: summary.discussion_active ?? 0 },
+                      { name: t('chart.member'), value: summary.discussion_member_count ?? 0 },
                     ]} layout="vertical" margin={{ top: 4, right: 4, left: 2, bottom: 0 }} barSize={10}>
                       <XAxis type="number" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} width={28} />
                       <Tooltip />
-                      <Bar dataKey="value" name="数量" radius={[0, 3, 3, 0]}>
+                      <Bar dataKey="value" name={t('chart.count')} radius={[0, 3, 3, 0]}>
                         {['#ff4d4f', '#52c41a', '#722ed1', '#fa8c16', '#1677ff', '#13c2c2'].map((color, idx) => (<Cell key={idx} fill={color} />))}
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>暂无挑战数据</div>
+                  <div style={{ textAlign: 'center', padding: '40px 0', color: '#ccc', fontSize: 12 }}>{t('chart.noChallengeData')}</div>
                 )}
               </Card>
             </Col>
