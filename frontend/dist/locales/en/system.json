@@ -388,7 +388,7 @@
   "envVarTag": "✅ Environment Variable",
   "configTag": "📋 System Config",
   "notConfiguredTag": "❌ Not Configured",
-  "notifSystem": "🔄 Version Update",
+  "notifSystem": "Update",
   "multimodalCheckbox": "Enable multimodal chat (supports image + text input)",
   "placeholder_notCover": "Leave empty to keep existing value",
   "placeholder_enterApiKey": "Please enter API Key",

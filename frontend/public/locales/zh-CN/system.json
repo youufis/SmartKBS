@@ -396,7 +396,7 @@
   "envVarTag": "✅ 环境变量",
   "configTag": "📋 系统配置",
   "notConfiguredTag": "❌ 未配置",
-  "notifSystem": "🔄 版本更新通知",
+  "notifSystem": "更新",
   "multimodalCheckbox": "启用多模态对话（支持图片+文本同时输入）",
   "placeholder_notCover": "留空则不覆盖已有值",
   "placeholder_enterApiKey": "请输入 API Key",
