@@ -46,6 +46,7 @@
   "expectedOutput": "Expected",
   "actualOutput": "Actual",
   "noProblems": "No problems yet. Click \"Generate\" to create.",
+  "noProblemsHint": "No problems yet. Click the button above or use \"AI Generate\" to create new problems.",
   "problemList": "Problems",
   "difficultyLabel": "Difficulty: {{level}}",
   "timeLabel": "Time: {{time}}",
