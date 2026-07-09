@@ -626,6 +626,10 @@ async def get_review_plan(request: Request):
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
+    # 从考试记录中提取学科
+    subjects = set(a['exam_subject'] for a in attempts if a.get('exam_subject'))
+    subject = '、'.join(sorted(subjects)) if subjects else '通用'
+
     ai_role = build_ai_role(grade=student_grade)
     prompt = f"{ai_role}\n" + WRONG_BOOK_REVIEW_PROMPT.format(
         student_name=student_name,
@@ -635,6 +639,7 @@ async def get_review_plan(request: Request):
         knowledge_points="、".join(sorted(kp_set)[:10]),
         weak_types=weak_types,
         wrong_questions=wrong_text,
+        subject=subject,
     )
     prompt = apply_skills(prompt, "wrong-book")
 
@@ -764,6 +769,10 @@ async def export_review_plan_docx(
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
+    # 从考试记录中提取学科
+    subjects = set(a['exam_subject'] for a in attempts if a.get('exam_subject'))
+    subject = '、'.join(sorted(subjects)) if subjects else '通用'
+
     ai_role = build_ai_role(grade=student_grade)
     prompt = f"{ai_role}\n" + WRONG_BOOK_REVIEW_PROMPT.format(
         student_name=student_name,
@@ -773,6 +782,7 @@ async def export_review_plan_docx(
         knowledge_points="、".join(sorted(kp_set)[:10]),
         weak_types=weak_types,
         wrong_questions=wrong_text,
+        subject=subject,
     )
 
     keys = get_api_keys(username if role == 2 else username)
