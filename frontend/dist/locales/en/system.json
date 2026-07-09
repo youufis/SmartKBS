@@ -684,5 +684,13 @@
   "skillToggleAll": "Toggle All",
   "skillAllEnabled": "All skills enabled",
   "skillAllDisabled": "All skills disabled",
-  "skillTotal": "{{count}} skills total"
+  "skillTotal": "{{count}} skills total",
+  "AI": "AI analysis timeout",
+  "Failed": "Failed to load",
+  "IPSuccessdataremaining": "IP dedup completed, {{remaining}} records remaining",
+  "Success": "Exported successfully",
+  "SuccessSuccesssuccess": "Upload complete: {{success}} succeeded",
+  "dataerrorFailed": "Delete failed",
+  "operationFailed": "Failed to generate class summary",
+  "pleaseHint": "Please select a grade and class first"
 }

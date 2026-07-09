@@ -304,6 +304,7 @@
     "badgeUnit": "",
     "totalCorrect": "Total Correct",
     "questions": "",
+    "question": "Question",
     "bestRecord": "Best Record",
     "bestSuffix": "/ {{max}}",
     "bankQuestions": "Bank Questions",
@@ -365,5 +366,13 @@
     "wrong": "Wrong",
     "notAnswered": "Not Answered",
     "timeout": "⏱ Timeout"
-  }
+  },
+  "Failed": "Removed a wrong answer!",
+  "LIFELINENAMEStype": "\"{{name}}\" has been used",
+  "SVG": "SVG image deleted",
+  "Success": "Updated successfully",
+  "eresponsedatadetailAIFailed": "AI generation failed",
+  "eresponsedatadetailFailed": "Failed to use lifeline",
+  "eresponsedatadetailSVGFailed": "SVG generation failed",
+  "operationSuccess": "AI successfully generated {{saved}}/{{total}} questions"
 }

@@ -155,5 +155,7 @@
   "activity": "Class Activity",
   "quiz": "Quiz",
   "poll": "Poll",
-  "question": "Question"
+  "question": "Question",
+  "Failed": "Failed to refresh",
+  "operationFailed": "Save failed"
 }

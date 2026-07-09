@@ -290,5 +290,14 @@
     "completed": "Completed",
     "done": "Done",
     "gradeLabel": "Grade"
-  }
+  },
+  "aiPracticeFailed": "AI practice generation failed",
+  "aiPracticeFailedTimeout": "AI practice generation timed out, please retry later",
+  "aiGeneratedCount": "{{count}} questions generated",
+  "generatePracticeFailed": "Failed to generate practice",
+  "maxSelect10": "Maximum 10 knowledge points can be selected",
+  "searchBankFailed": "Failed to search question bank",
+  "selectAtLeastOne": "Please select at least one knowledge point",
+  "smartPracticeFailed": "Smart practice failed",
+  "smartPracticeGenerated": "Smart practice generated ({{total}} questions)"
 }

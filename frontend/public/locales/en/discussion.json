@@ -243,5 +243,9 @@
   "mode": "Mode",
   "status": "Status",
   "createdAt": "Created At",
-  "cancel": "Cancel"
+  "cancel": "Cancel",
+  "enterRoomCode": "Please enter room code",
+  "joinFailed": "Join failed",
+  "joinedRoom": "Joined room \"{{title}}\"",
+  "whiteboardUpdated": "Whiteboard updated"
 }

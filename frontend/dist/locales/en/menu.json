@@ -118,5 +118,7 @@
   "operationFailed": "Operation failed",
   "addedToUngrouped": "Added to ungrouped",
   "ungrouped": "Ungrouped",
-  "refresh": "Refresh"
+  "refresh": "Refresh",
+  "Failed": "Failed to load",
+  "pleaseHint": "Please enter a group name"
 }

@@ -243,5 +243,9 @@
   "mode": "模式",
   "status": "状态",
   "createdAt": "创建时间",
-  "cancel": "取消"
+  "cancel": "取消",
+  "enterRoomCode": "请输入房间码",
+  "joinFailed": "加入失败",
+  "joinedRoom": "已加入房间「{{title}}」",
+  "whiteboardUpdated": "白板已更新"
 }

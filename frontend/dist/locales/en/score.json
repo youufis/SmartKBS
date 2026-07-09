@@ -283,5 +283,6 @@
   "portfolio.classesSuffix": " classes",
   "portfolio.daysSuffix": " days",
   "portfolio.timesSuffix": " times",
-  "portfolio.knowledgePointsSuffix": " knowledge points"
+  "portfolio.knowledgePointsSuffix": " knowledge points",
+  "pointsNotEnough": "Not enough points"
 }
