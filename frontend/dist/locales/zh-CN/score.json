@@ -283,5 +283,6 @@
   "portfolio.classesSuffix": "个",
   "portfolio.daysSuffix": "天",
   "portfolio.timesSuffix": "次",
-  "portfolio.knowledgePointsSuffix": "个知识点"
+  "portfolio.knowledgePointsSuffix": "个知识点",
+  "pointsNotEnough": "积分不足"
 }

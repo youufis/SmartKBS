@@ -424,5 +424,8 @@
   "difficultyEasy": "简单",
   "difficultyMedium": "中等",
   "difficultyHard": "困难",
-  "kpExample": "例如：算法与程序设计、数据结构"
+  "kpExample": "例如：算法与程序设计、数据结构",
+  "joinFailed": "加入失败",
+  "playing": "进行中",
+  "tieredScoringDesc": "按排名分段奖励，排名越高得分越多"
 }

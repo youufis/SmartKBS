@@ -312,6 +312,7 @@
     "badgeUnit": "枚",
     "totalCorrect": "累计答对",
     "questions": "题",
+    "question": "题目",
     "bestRecord": "最佳战绩",
     "bestSuffix": "/ {{max}} 题",
     "bankQuestions": "题库储备",

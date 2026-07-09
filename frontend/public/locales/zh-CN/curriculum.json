@@ -290,5 +290,14 @@
     "completed": "已完成",
     "done": "完成",
     "gradeLabel": "年级"
-  }
+  },
+  "aiPracticeFailed": "AI 练习生成失败",
+  "aiPracticeFailedTimeout": "AI 练习生成超时，请稍后重试",
+  "aiGeneratedCount": "已生成 {{count}} 道题",
+  "generatePracticeFailed": "生成练习失败",
+  "maxSelect10": "最多选择 10 个知识点",
+  "searchBankFailed": "搜索题库失败",
+  "selectAtLeastOne": "请至少选择一个知识点",
+  "smartPracticeFailed": "智能练习失败",
+  "smartPracticeGenerated": "智能练习已生成（共 {{total}} 题）"
 }

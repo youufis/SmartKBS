@@ -420,5 +420,12 @@
   "difficultyEasy": "Easy",
   "difficultyMedium": "Medium",
   "difficultyHard": "Hard",
-  "kpExample": "e.g. Algorithms, Data Structures"
+  "kpExample": "e.g. Algorithms, Data Structures",
+  "Failed": "Failed to load quick quiz list",
+  "errresponsedatadetailFailed": "Failed to start",
+  "operationSuccess": "Room \"{{title}}\" created successfully! Room code: {{code}}",
+  "pleaseHint": "Please enter room code",
+  "joinFailed": "Join failed",
+  "playing": "In Progress",
+  "tieredScoringDesc": "Tiered rewards by rank, higher rank earns more points"
 }

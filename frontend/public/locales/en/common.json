@@ -130,6 +130,9 @@
   "sessionExpired": "Session expired, please login again",
   "requestFailed": "Request failed",
   "aiContentEmpty": "AI generated content is empty",
+  "Failed": "Failed to generate briefing",
+  "eresponsedatadetailFailed": "Refresh failed",
+  "subj": "About to jump to learning resources related to {{subj}}",
   "resource": {
     "accessDenied": "Only admins and teachers can access resource management",
     "fileManagement": "File Management",
