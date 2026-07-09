@@ -587,11 +587,16 @@ async def teaching_suggestions(
 
     # ── 构建 Prompt ──
     from backend.prompts.analytics import TEACHING_SUGGESTIONS_PROMPT
+    from backend.permission_service import get_teacher_subjects
+
+    subjects = get_teacher_subjects(query_teacher)
+    subject = subjects[0] if subjects else "通用"
 
     ai_role = build_ai_role(grade=grade)
     prompt = f"{ai_role}" + TEACHING_SUGGESTIONS_PROMPT.format(
         grade=grade,
         cls=cls_display,
+        subject=subject,
         total_students=total_students,
         score_count=_safe_int(sc[0]),
         score_total=_safe_int(sc[1]),

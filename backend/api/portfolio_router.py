@@ -560,12 +560,17 @@ async def get_learning_report(username: str, request: Request):
     def _safe(s):
         return str(s).replace('{', '{{').replace('}', '}}')
 
+    # 从考试结果中提取学科
+    subjects = set(r['subject'] for r in exam_results if r.get('subject'))
+    subject = '、'.join(sorted(subjects)) if subjects else '通用'
+
     ai_role = build_ai_role(grade=student_grade)
     prompt = f"{ai_role}" + LEARNING_REPORT_PROMPT.format(
         student_name=_safe(student_name),
         grade=_safe(student_grade),
         cls=_safe(student_class),
         period=_safe(period),
+        subject=_safe(subject),
         exam_text=_safe(exam_text),
         total_score=_safe(total_score),
         score_trend=_safe(score_trend),
@@ -710,12 +715,17 @@ async def export_learning_report_docx(username: str, request: Request, token: st
 
     score_trend = "暂无数据"
 
+    # 从考试结果中提取学科
+    subjects = set(r['subject'] for r in exam_results if r.get('subject'))
+    subject = '、'.join(sorted(subjects)) if subjects else '通用'
+
     ai_role = build_ai_role(grade=student_grade)
     prompt = f"{ai_role}" + LEARNING_REPORT_PROMPT.format(
         student_name=_safe(student_name),
         grade=_safe(student_grade),
         cls=_safe(student_class),
         period=_safe(period),
+        subject=_safe(subject),
         exam_text=_safe(exam_text),
         total_score=_safe(total_score),
         score_trend=_safe(score_trend),

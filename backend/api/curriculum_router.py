@@ -1880,6 +1880,7 @@ async def ai_lesson_plan(
         chapter_name=_safe(kp["chapter_name"]),
         knowledge_point=_safe(kp["name"]),
         grade=_safe(kp.get("grade", "")),
+        subject=_safe(kp.get("course_name", "")),
     )
     prompt = apply_skills(prompt, "curriculum")
 
@@ -1972,6 +1973,7 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
         chapter_name=_safe(kp["chapter_name"]),
         knowledge_point=_safe(kp["name"]),
         grade=_safe(kp.get("grade", "")),
+        subject=_safe(kp.get("course_name", "")),
     )
 
     try:
