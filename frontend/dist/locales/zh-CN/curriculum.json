@@ -283,6 +283,12 @@
     "reasonNetwork": "网络连接异常 — 请检查服务器网络",
     "retry": "重新生成",
     "title": "AI 导入课程",
+    "noSubjectConfig": "请先在系统配置中设置课程名称",
+    "courseNamePlaceholder": "例如：信息科技基础 / 人工智能入门",
+    "gradePlaceholder": "选择或输入年级",
+    "minutes": "{{minutes}}分钟",
+    "completed": "已完成",
+    "done": "完成",
     "gradeLabel": "年级"
   }
 }
