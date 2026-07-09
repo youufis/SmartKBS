@@ -180,7 +180,7 @@ const PortraitPage: React.FC = () => {
         onOk: async () => {
           const result = await generate(selectedStyle, true)
           if (result) {
-            message.success(t('generateSuccess', { points: 50 }))
+            message.success(t('generateSuccess', { points: 100 }))
           }
         },
       })

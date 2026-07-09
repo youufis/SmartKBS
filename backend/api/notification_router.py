@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
 from backend.database import execute_query, execute_insert_update, execute_batch, execute_query_dict
+from backend.utils import extract_json_from_text
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
@@ -297,14 +298,9 @@ async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request
             prompt = apply_skills(prompt, "notification")
             result = await call_ai_async(prompt, api_key)
             if result:
-                import re
-                json_match = re.search(r'\{[\s\S]*\}', result)
-                if json_match:
-                    try:
-                        data = json.loads(json_match.group())
-                        return {"status": "ok", "data": data, "raw": result}
-                    except json.JSONDecodeError:
-                        pass
+                data = extract_json_from_text(result)
+                if data:
+                    return {"status": "ok", "data": data, "raw": result}
                 return {"status": "error", "content": result}
             return {"status": "error", "content": "AI 未返回有效结果"}
         except Exception as e:

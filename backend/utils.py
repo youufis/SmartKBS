@@ -265,3 +265,75 @@ def check_user_daily_requests(username: str, role: int) -> tuple[bool, int | flo
             conn.commit()
 
     return allowed, remaining
+
+
+# ── AI 返回 JSON 解析（多策略鲁棒解析）──
+
+def extract_json_from_text(text: str) -> dict | list | None:
+    """从 AI 返回文本中鲁棒地提取 JSON 对象或数组
+
+    支持：
+    - 直接解析（标准 JSON）
+    - ```json ``` / ``` ``` 代码块内提取
+    - 最外层 {…} 或 […] 截取
+    - 自动修复尾部逗号
+
+    Args:
+        text: AI 返回的原始文本
+
+    Returns:
+        解析成功的 Python 对象（dict 或 list），失败返回 None
+    """
+    if not text or not text.strip():
+        return None
+
+    text = text.strip()
+
+    # ── 策略1: 直接解析 ──
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # ── 策略2: 从 ```json ``` / ``` ``` 代码块提取 ──
+    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # ── 策略3: 从最外层 JSON 对象或数组截取 ──
+    # 先尝试找 {…} 对象
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        json_str = text[start:end + 1]
+        # 清理残留的 markdown 标记
+        json_str = json_str.replace("```json", "").replace("```", "").strip()
+        # 尝试修复常见问题：尾部逗号
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            try:
+                fixed = re.sub(r",\s*([}\]])", r"\1", json_str)
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                pass
+
+    # 再尝试找 […] 数组
+    start = text.find('[')
+    end = text.rfind(']')
+    if start != -1 and end != -1 and end > start:
+        json_str = text[start:end + 1]
+        json_str = json_str.replace("```json", "").replace("```", "").strip()
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            try:
+                fixed = re.sub(r",\s*([}\]])", r"\1", json_str)
+                return json.loads(fixed)
+            except json.JSONDecodeError:
+                pass
+
+    return None

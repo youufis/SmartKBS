@@ -159,7 +159,7 @@
   "regenerateDesc": "This week portrait has been generated. Spend 100 points to generate again.",
   "okRegenerate": "Spend 100 points",
   "cancelRegenerate": "Never mind",
-  "generateSuccess": "🎉 Portrait generated! 50 points deducted",
+  "generateSuccess": "🎉 Portrait generated! 100 points deducted",
   "alreadyLiked": "❤️ Liked",
   "unliked": "Unliked",
   "resetToZero": "Reset to 0",

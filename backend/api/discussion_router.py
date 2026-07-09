@@ -18,6 +18,7 @@ from backend.permission_service import filter_activities_by_scope, check_activit
 from backend.logger import logger
 from backend.ws_manager import manager as ws_manager
 from backend.prompts import apply_skills, build_ai_role
+from backend.utils import extract_json_from_text
 
 router = APIRouter()
 
@@ -259,13 +260,9 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
         try:
             result = await call_ai_async(prompt, api_key)
             if result:
-                json_match = re.search(r'\{[\s\S]*\}', result)
-                if json_match:
-                    try:
-                        data = json.loads(json_match.group())
-                        return {"status": "ok", "data": data, "raw": result}
-                    except json.JSONDecodeError:
-                        pass
+                data = extract_json_from_text(result)
+                if data:
+                    return {"status": "ok", "data": data, "raw": result}
                 return {"status": "error", "content": result, "raw": result}
             return {"status": "error", "content": "AI 未返回有效结果"}
         except Exception as e:
@@ -685,13 +682,7 @@ async def _auto_generate_report(disc_id: int):
                     if summary:
                         # 尝试解析 JSON
                         import json as _json, re as _re
-                        json_match = _re.search(r'\{[\s\S]*\}', summary)
-                        parsed = None
-                        if json_match:
-                            try:
-                                parsed = _json.loads(json_match.group())
-                            except _json.JSONDecodeError:
-                                pass
+                        parsed = extract_json_from_text(summary)
 
                         if parsed:
                             s = parsed.get("summary", "")
@@ -1188,15 +1179,8 @@ async def generate_group_ai_summary(group_id: int, request: Request):
             return {"status": "error", "content": "AI 未返回有效结果"}
 
         # 尝试解析 JSON
-        import re as _re
         import json as _json
-        json_match = _re.search(r'\{[\s\S]*\}', content)
-        parsed = None
-        if json_match:
-            try:
-                parsed = _json.loads(json_match.group())
-            except _json.JSONDecodeError:
-                pass
+        parsed = extract_json_from_text(content)
 
         # 构建结构化报告内容
         now_str = _now()

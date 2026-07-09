@@ -34,7 +34,7 @@ router = APIRouter()
 
 class GenerateRequest(BaseModel):
     style: str = "random"
-    use_points: bool = False  # 是否消耗 50 积分兑换额外生成机会
+    use_points: bool = False  # 是否消耗 100 积分兑换额外生成机会
 
 
 class ThemeRequest(BaseModel):
