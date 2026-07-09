@@ -159,7 +159,7 @@
   "regenerateDesc": "本周画像已生成，消耗 100 积分可再生成一次。",
   "okRegenerate": "消耗 100 积分生成",
   "cancelRegenerate": "算了",
-  "generateSuccess": "🎉 画像生成成功！已扣除 50 积分",
+  "generateSuccess": "🎉 画像生成成功！已扣除 100 积分",
   "alreadyLiked": "❤️ 已点赞",
   "unliked": "已取消点赞",
   "resetToZero": "重置为 0",

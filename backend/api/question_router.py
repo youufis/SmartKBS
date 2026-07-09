@@ -212,7 +212,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
     # 构造 Prompt
     type_desc = QUESTION_TYPE_MAP.get(req.question_type, "单选题")
     prompt = _build_generate_prompt(req.subject, req.knowledge_points, type_desc, req.count, req.difficulty, username)
-    prompt = apply_skills(prompt, "quiz")
+    # 注意：不注入技能 — 技能的结构化输出指令与纯 JSON 输出要求冲突
     logger.info(f"开始调用AI生成试题: subject={req.subject}, type={req.question_type}, count={req.count}")
 
     # 调用 AI
@@ -314,29 +314,49 @@ async def _call_dashscope_agent(prompt: str, api_key: str) -> str:
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
-    """解析 AI 返回的 JSON 试题列表"""
-    # 尝试直接解析
+    """解析 AI 返回的 JSON 试题列表（多策略鲁棒解析）"""
     text = text.strip()
-    
-    # 尝试提取 JSON 数组（处理 AI 可能额外输出的内容）
-    json_match = re.search(r'\[[\s\S]*\]', text)
-    if json_match:
-        json_str = json_match.group()
-    else:
-        json_str = text
-
-    # 清理可能的 Markdown 代码块标记
-    json_str = json_str.replace("```json", "").replace("```", "").strip()
-
-    try:
-        questions = json.loads(json_str)
-        if isinstance(questions, list):
-            return questions
-        elif isinstance(questions, dict) and "questions" in questions:
-            return questions["questions"]
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON 解析失败: {e}, 原文: {text[:200]}")
+    if not text:
         return []
+
+    # 策略1：直接解析
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return data
+        elif isinstance(data, dict) and "questions" in data:
+            return data["questions"]
+    except json.JSONDecodeError:
+        pass
+
+    # 策略2：从 ```json ``` 代码块提取
+    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict) and "questions" in data:
+                return data["questions"]
+        except json.JSONDecodeError:
+            pass
+
+    # 策略3：从最外层 [ 到 ] 提取 JSON 数组
+    start = text.find('[')
+    end = text.rfind(']')
+    if start != -1 and end != -1 and end > start:
+        json_str = text[start:end + 1]
+        # 清理代码块标记
+        json_str = json_str.replace("```json", "").replace("```", "").strip()
+        try:
+            data = json.loads(json_str)
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict) and "questions" in data:
+                return data["questions"]
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON 解析失败: {e}, 原文前200字: {text[:200]}")
+            return []
 
     return []
 
@@ -982,11 +1002,7 @@ async def extract_questions_from_image(
     logger.info(f"图片提取 AI 返回: {result_text[:200]}")
 
     # 解析 JSON
-    json_match = re.search(r'\[[\s\S]*\]', result_text)
-    if not json_match:
-        raise HTTPException(status_code=502, detail="AI 返回格式异常，未能提取出试题")
-
-    questions = json.loads(json_match.group())
+    questions = _parse_ai_response(result_text)
     if not questions:
         raise HTTPException(status_code=502, detail="未提取到任何试题")
 

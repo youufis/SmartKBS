@@ -17,6 +17,7 @@ from backend.question_db import execute_insert, execute_query, execute_query_one
 from backend.database import execute_query as db_execute_query
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
+from backend.utils import extract_json_from_text
 from backend.api.config_router import get_config_value
 from backend.logger import logger
 from backend.prompts import apply_skills, build_ai_role
@@ -704,10 +705,8 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
                         )
                         prompt = apply_skills(prompt, "practice")
                         ai_resp = await call_ai_async(prompt, api_key)
-                        import re
-                        jm = re.search(r'\{[^}]+\}', ai_resp)
-                        if jm:
-                            result = json.loads(jm.group())
+                        result = extract_json_from_text(ai_resp)
+                        if result:
                             ai_score = float(result.get("score", 0))
                             ai_score = max(0, min(ai_score, q_score))
                             return qid, {
@@ -841,19 +840,9 @@ async def _get_practice_result(session_id: int, username: str) -> dict[str, Any]
 
 def _parse_ai_result(text: str) -> list[dict[str, Any]]:
     """解析 AI 返回的 JSON 题目列表"""
-    text = text.strip()
-    json_match = re.search(r'\[[\s\S]*\]', text)
-    if json_match:
-        json_str = json_match.group()
-    else:
-        json_str = text
-    json_str = json_str.replace("```json", "").replace("```", "").strip()
-    try:
-        questions = json.loads(json_str)
-        if isinstance(questions, list):
-            return questions
-        elif isinstance(questions, dict) and "questions" in questions:
-            return questions["questions"]
-    except json.JSONDecodeError:
-        pass
+    data = extract_json_from_text(text)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and "questions" in data:
+        return data["questions"]
     return []

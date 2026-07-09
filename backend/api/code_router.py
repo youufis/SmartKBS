@@ -24,6 +24,7 @@ from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.prompts import apply_skills, build_ai_role
+from backend.utils import extract_json_from_text
 from backend.code_runner import run_python, run_javascript, get_supported_languages
 from backend.code_grader import grade_submission
 from backend.permission_service import check_activity_visibility
@@ -188,9 +189,8 @@ async def ai_code_review(submission_id: int, request: Request):
     async def _do() -> dict[str, Any]:
         try:
             rt = await call_ai_async(prompt, api_key)
-            m = re.search(r'\{[\s\S]*\}', rt)
-            if m:
-                d = json.loads(m.group())
+            d = extract_json_from_text(rt)
+            if d:
                 q_update("UPDATE code_submissions SET ai_review=?, ai_review_status='completed' WHERE id=?", (json.dumps(d, ensure_ascii=False), submission_id))
                 return d
             q_update("UPDATE code_submissions SET ai_review_status='failed' WHERE id=?", (submission_id,))
@@ -498,9 +498,9 @@ async def ai_generate_code_problem(req: AiGenerateCodeProblem, request: Request)
     async def _do() -> dict[str, Any]:
         try:
             rt = await call_ai_async(prompt, api_key)
-            m = re.search(r'\{[\s\S]*\}', rt)
-            if m:
-                return {"status": "ok", "data": json.loads(m.group()), "raw": rt}
+            d = extract_json_from_text(rt)
+            if d:
+                return {"status": "ok", "data": d, "raw": rt}
             return {"status": "error", "content": rt}
         except Exception as e:
             return {"status": "error", "content": str(e)}

@@ -15,6 +15,7 @@ from backend.question_db import execute_query as q_execute_query
 from backend.api.chat_router import get_api_keys
 from backend.prompts import apply_skills
 from backend.api.ai_service import call_ai_async
+from backend.utils import extract_json_from_text
 from backend.logger import logger
 
 router = APIRouter()
@@ -165,17 +166,9 @@ async def recommend_resources(kp_id: int, request: Request):
 
 def _parse_recommend_result(text: str) -> list[dict[str, Any]]:
     """解析 AI 返回的 JSON 推荐结果"""
-    text = text.strip()
-    json_match = re.search(r'\{[\s\S]*\}', text)
-    if not json_match:
-        return []
-    json_str = json_match.group()
-    json_str = json_str.replace("```json", "").replace("```", "").strip()
-    try:
-        data = json.loads(json_str)
+    data = extract_json_from_text(text)
+    if isinstance(data, dict):
         recs = data.get("recommendations", [])
         if isinstance(recs, list):
             return recs
-    except json.JSONDecodeError:
-        pass
     return []

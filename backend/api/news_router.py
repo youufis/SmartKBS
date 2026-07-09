@@ -26,6 +26,7 @@ from backend.database import execute_query, execute_insert_update, execute_query
 from backend.prompts.news import NEWS_SUMMARIZE_PROMPT, NEWS_DAILY_BRIEFING_PROMPT
 from backend.logger import logger
 from backend.prompts import apply_skills
+from backend.utils import extract_json_from_text
 
 router = APIRouter()
 
@@ -358,10 +359,7 @@ class NewsService:
             text = call_ai_sync_direct(prompt, api_key)
 
             # 安全解析 AI 返回的 JSON
-            try:
-                result = json.loads(text) if isinstance(text, str) else {}
-            except json.JSONDecodeError:
-                result = {}
+            result = extract_json_from_text(text) if isinstance(text, str) else {}
 
             execute_insert_update(
                 """UPDATE news_articles SET

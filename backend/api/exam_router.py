@@ -23,6 +23,7 @@ from backend.database import execute_query as user_query, execute_insert_update 
 from backend.logger import logger
 from backend.api.ai_service import call_ai_async
 from backend.prompts import apply_skills
+from backend.utils import extract_json_from_text
 from backend.permission_service import check_activity_visibility
 
 router = APIRouter()
@@ -2121,13 +2122,11 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
         raise HTTPException(status_code=500, detail=f"AI 组卷失败: {str(e)}")
 
     # 解析 AI 返回的 JSON
-    import re
-    json_match = re.search(r'\{[^}]+\}', ai_response)
-    if not json_match:
+    result = extract_json_from_text(ai_response)
+    if not result or not isinstance(result, dict):
         raise HTTPException(status_code=500, detail="AI 返回格式异常，请重试")
 
     try:
-        result = json.loads(json_match.group())
         selected_ids = result.get("selected_ids", [])
         reason = result.get("reason", "")
     except (json.JSONDecodeError, TypeError):
