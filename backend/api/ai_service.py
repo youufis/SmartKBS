@@ -79,18 +79,20 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 12
 
 
 def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
-    """调用百炼智能体应用（同步）
-    
-    注意：使用流式模式（stream=True）再汇总，因为非流式模式在某些 SDK 版本中返回 output=None
-    """
+    """调用百炼智能体应用（同步）- 使用流式模式汇总，兼容 dashscope SDK 1.25+"""
+    # 安全处理 None 参数
+    prompt = prompt or ""
+    api_key = api_key or ""
+    app_id = app_id or ""
     from dashscope import Application as DashScopeApp
-    messages = [{"role": "user", "content": prompt}]
+    import os as _os
+    _os.environ["DASHSCOPE_API_KEY"] = api_key
     call_params = {
+        "api_key": api_key,
         "app_id": app_id,
-        "messages": messages,
+        "prompt": prompt,
         "stream": True,
         "incremental_output": True,
-        "headers": {"X-DashScope-OssResourceResolve": "enable"},
     }
     try:
         response = DashScopeApp.call(**call_params)
@@ -105,7 +107,7 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
             return accumulated
         logger.warning(f"智能体流式返回为空 (app_id={app_id})，降级到直接调模型")
     except Exception as e:
-        logger.warning(f"智能体流式调用失败 (app_id={app_id}): {e}，降级到直接调模型")
+        logger.warning(f"智能体调用失败 (app_id={app_id}): {e}，降级到直接调模型")
 
     # 降级：直接调大模型
     from backend.api.config_router import get_config_value
@@ -302,7 +304,6 @@ async def call_ai_async(prompt: str, api_key: str) -> str:
 
     cfg = get_ai_config()
     os.environ["DASHSCOPE_API_KEY"] = api_key
-
     if cfg["mode"] == "agent":
         return await _call_agent_async(prompt, api_key, cfg["app_id"])
     else:
