@@ -822,6 +822,7 @@ async def extract_questions_from_text(
         # 构造提取 Prompt（不注入技能，避免结构化输出指令与纯 JSON 要求冲突）
         prompt = _build_extract_prompt(subject, difficulty, content)
         logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
+        logger.info(f"提取 Prompt 前200字: {prompt[:200]}")
 
         # 调用 AI
         try:

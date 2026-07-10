@@ -141,7 +141,9 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> st
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                content_out = data["choices"][0]["message"]["content"]
+                logger.info(f"_call_model_sync response: model={model}, len={len(content_out)}, head={content_out[:200]}")
+                return content_out
             # 400 错误可能是格式问题，尝试下一种格式
             if resp.status_code == 400:
                 last_error = resp.text[:300]
@@ -164,6 +166,7 @@ def call_ai_sync_direct(prompt: str, api_key: str) -> str:
     model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
     api_base = get_config_value("QWEN_OPENAI_API_BASE",
                                  "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    logger.info(f"call_ai_sync_direct: model={model}, prompt_len={len(prompt)}, prompt_head={prompt[:200]}")
     return _call_model_sync(prompt, api_key, model, api_base)
 
 
