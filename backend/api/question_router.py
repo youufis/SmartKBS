@@ -308,9 +308,11 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 
 
 async def _call_dashscope_agent(prompt: str, api_key: str) -> str:
-    """调用 AI（异步）- 支持智能体/直接调大模型双模式"""
-    from backend.api.ai_service import call_ai_async
-    return await call_ai_async(prompt, api_key)
+    """调用 AI（异步）- 试题场景跳过智能体，直接调大模型"""
+    from backend.api.ai_service import call_ai_sync_direct
+    import asyncio
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, call_ai_sync_direct, prompt, api_key)
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
