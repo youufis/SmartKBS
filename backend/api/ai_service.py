@@ -116,9 +116,25 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
                         text = out.get("text", "")
             except (KeyError, TypeError):
                 pass
+        # 方式4: output.final_result（新版 dashscope SDK）
+        if not text and output is not None:
+            try:
+                if hasattr(output, "get"):
+                    fr = output.get("final_result", None) or getattr(output, "final_result", None)
+                    if isinstance(fr, dict):
+                        text = fr.get("text", "") or str(fr)
+                    elif isinstance(fr, str):
+                        text = fr
+            except Exception:
+                pass
         if text:
             return str(text)
-        # 智能体返回空时，降级到直接调模型
+        # 全部方式均提取失败，记录响应结构用于调试
+        logger.warning(
+            f"智能体返回文本为空 (app_id={app_id}), "
+            f"响应类型={type(response).__name__}, "
+            f"output={str(output)[:200] if output is not None else 'None'}"
+        )
         logger.warning(f"智能体返回为空，降级到直接调模型 (app_id={app_id})")
         from backend.api.config_router import get_config_value
         model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
