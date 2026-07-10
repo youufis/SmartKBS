@@ -218,7 +218,6 @@ async def generate_questions(req: GenerateRequest, request: Request):
     # 调用 AI
     try:
         result_text = await _call_dashscope_agent(prompt, api_key)
-        logger.info(f"AI 返回原始内容: {result_text[:300]}")
     except Exception as e:
         logger.error(f"AI 生成试题失败: {e}")
         raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
@@ -308,11 +307,9 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 
 
 async def _call_dashscope_agent(prompt: str, api_key: str) -> str:
-    """调用 AI（异步）- 试题场景跳过智能体，直接调大模型"""
-    from backend.api.ai_service import call_ai_sync_direct
-    import asyncio
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, call_ai_sync_direct, prompt, api_key)
+    """调用 AI（异步）- 支持智能体/直接调大模型双模式"""
+    from backend.api.ai_service import call_ai_async
+    return await call_ai_async(prompt, api_key)
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
@@ -822,12 +819,10 @@ async def extract_questions_from_text(
         # 构造提取 Prompt（不注入技能，避免结构化输出指令与纯 JSON 要求冲突）
         prompt = _build_extract_prompt(subject, difficulty, content)
         logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
-        logger.info(f"提取 Prompt 前200字: {prompt[:200]}")
 
         # 调用 AI
         try:
             result_text = await _call_dashscope_agent(prompt, api_key)
-            logger.info(f"AI 返回原始内容: {result_text[:300]}")
         except Exception as e:
             logger.error(f"AI 提取试题失败: {e}")
             raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")

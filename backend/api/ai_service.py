@@ -79,33 +79,42 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 12
 
 
 def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
-    """调用百炼智能体应用（同步）- 使用流式模式汇总，兼容 dashscope SDK 1.25+"""
-    # 安全处理 None 参数
-    prompt = prompt or ""
-    api_key = api_key or ""
-    app_id = app_id or ""
+    """调用百炼智能体应用（同步）"""
     from dashscope import Application as DashScopeApp
-    import os as _os
-    _os.environ["DASHSCOPE_API_KEY"] = api_key
-    call_params = {
-        "api_key": api_key,
-        "app_id": app_id,
-        "prompt": prompt,
-        "stream": True,
-        "incremental_output": True,
-    }
     try:
-        response = DashScopeApp.call(**call_params)
-        accumulated = ""
-        for chunk in response:
-            output = getattr(chunk, "output", None)
-            if output:
+        messages = [{"role": "user", "content": prompt}]
+        response = DashScopeApp.call(
+            app_id=app_id,
+            messages=messages,
+            stream=False,
+            headers={"X-DashScope-OssResourceResolve": "enable"},
+        )
+        # 尝试多种方式提取响应文本
+        text = None
+        output = getattr(response, "output", None)
+        if output is not None:
+            if isinstance(output, str):
+                text = output
+            elif hasattr(output, "get"):
+                text = output.get("text", None) or getattr(output, "text", None)
+            else:
                 text = getattr(output, "text", None)
-                if text:
-                    accumulated += text
-        if accumulated.strip():
-            return accumulated
-        logger.warning(f"智能体流式返回为空 (app_id={app_id})，降级到直接调模型")
+        if not text:
+            try:
+                text = getattr(response, "text", None)
+            except (KeyError, AttributeError, TypeError):
+                pass
+        if not text:
+            try:
+                if isinstance(response, dict):
+                    out = response.get("output", {})
+                    if isinstance(out, dict):
+                        text = out.get("text", "")
+            except (KeyError, TypeError):
+                pass
+        if text:
+            return str(text)
+        logger.warning(f"智能体返回为空，降级到直接调模型 (app_id={app_id})")
     except Exception as e:
         logger.warning(f"智能体调用失败 (app_id={app_id}): {e}，降级到直接调模型")
 
