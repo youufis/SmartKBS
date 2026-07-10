@@ -5,6 +5,7 @@
   "deleteQuestion": "Delete",
   "questionList": "Questions",
   "noQuestions": "No questions",
+  "noDuplicates": "No duplicates found",
   "questionType": "Type",
   "singleChoice": "Single Choice",
   "multipleChoice": "Multiple Choice",

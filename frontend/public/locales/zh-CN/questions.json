@@ -5,6 +5,7 @@
   "deleteQuestion": "删除",
   "questionList": "试题列表",
   "noQuestions": "暂无提问",
+  "noDuplicates": "没有发现重复题目",
   "questionType": "题型",
   "singleChoice": "单选题",
   "multipleChoice": "多选题",
