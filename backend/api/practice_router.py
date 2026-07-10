@@ -95,7 +95,7 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
-    prompt = apply_skills(prompt, "practice")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         result_text = await call_ai_async(prompt, api_key)
@@ -205,7 +205,7 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
-    prompt = apply_skills(prompt, "practice")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     async def _generate_and_save() -> dict[str, Any]:
         result_text = await call_ai_async(prompt, api_key)

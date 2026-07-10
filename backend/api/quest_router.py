@@ -84,7 +84,7 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         used_categories=used_cats_str,
         question_index=question_index,
     )
-    prompt = apply_skills(prompt, "quest")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
         import concurrent.futures
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync
@@ -322,7 +322,7 @@ def _call_ai_audience_vote(api_key: str, question: str, options: dict[str, Any])
         option_c=options.get("C", ""),
         option_d=options.get("D", ""),
     )
-    prompt = apply_skills(prompt, "quest")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync
         future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)

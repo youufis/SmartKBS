@@ -318,7 +318,7 @@ async def _select_questions_by_ai(
         knowledge_focus=_safe(knowledge_focus),
         candidate_questions=_safe(candidate_text),
     )
-    prompt = apply_skills(prompt, "paper")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         ai_response = await call_ai_async(prompt, api_key)

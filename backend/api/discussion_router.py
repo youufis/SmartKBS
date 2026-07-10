@@ -245,7 +245,7 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
         ai_role_desc=ai_role_desc,
         duration_minutes=req.duration_minutes,
     )
-    prompt = apply_skills(prompt, "discussion")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     import json, re
     from backend.api.chat_router import get_api_keys
@@ -674,14 +674,14 @@ async def _auto_generate_report(disc_id: int):
                     description=disc.get("description") or "",
                     messages_text=messages_text,
                 )
-                prompt = apply_skills(prompt, "discussion")
+                # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
                 try:
                     from backend.api.ai_service import call_ai_async
                     summary = await call_ai_async(prompt, api_key)
                     if summary:
                         # 尝试解析 JSON
-                        import json as _json, re as _re
+                        import json as _json
                         parsed = extract_json_from_text(summary)
 
                         if parsed:
@@ -1169,7 +1169,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
         description=description,
         messages_text=messages_text,
     )
-    prompt = apply_skills(prompt, "discussion")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     from backend.api.ai_service import call_ai_async
 

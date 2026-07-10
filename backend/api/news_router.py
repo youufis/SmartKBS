@@ -355,7 +355,7 @@ class NewsService:
             prompt = NEWS_SUMMARIZE_PROMPT.format(
                 title=title, content=summary
             )
-            prompt = apply_skills(prompt, "news")
+            # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
             text = call_ai_sync_direct(prompt, api_key)
 
             # 安全解析 AI 返回的 JSON

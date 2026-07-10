@@ -184,7 +184,7 @@ async def ai_code_review(submission_id: int, request: Request):
     from backend.prompts import build_ai_role
     ai_role = build_ai_role()
     prompt = f"{ai_role}" + CODE_REVIEW_PROMPT.format(problem_title=sub["problem_title"], language=sub["language"], source_code=sub["source_code"])
-    prompt = apply_skills(prompt, "code-review")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     async def _do() -> dict[str, Any]:
         try:
@@ -493,7 +493,7 @@ async def ai_generate_code_problem(req: AiGenerateCodeProblem, request: Request)
               "\"reference_solution\":\"...\",\"knowledge_points\":\"...\","
               "\"test_cases\":[{\"input\":\"...\",\"expected_output\":\"...\",\"description\":\"...\",\"is_sample\":true,\"score\":1}]}"
               "\n至少5个测试用例，前2个is_sample=true，总分10")
-    prompt = apply_skills(prompt, "code-review")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     async def _do() -> dict[str, Any]:
         try:

@@ -625,7 +625,7 @@ async def ai_grade_task(task_id: str, request: Request):
         task_name=task_name,
         task_description=task_desc,
     )
-    prompt = apply_skills(prompt, "practice-grading")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     # 6. 调用 qwen-long
     try:

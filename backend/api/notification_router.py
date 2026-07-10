@@ -295,7 +295,7 @@ async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request
 
     async def _do_generate() -> dict[str, Any]:
         try:
-            prompt = apply_skills(prompt, "notification")
+            # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
             result = await call_ai_async(prompt, api_key)
             if result:
                 data = extract_json_from_text(result)
