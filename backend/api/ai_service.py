@@ -79,75 +79,40 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 12
 
 
 def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
-    """调用百炼智能体应用（同步）"""
+    """调用百炼智能体应用（同步）
+    
+    注意：使用流式模式（stream=True）再汇总，因为非流式模式在某些 SDK 版本中返回 output=None
+    """
     from dashscope import Application as DashScopeApp
+    messages = [{"role": "user", "content": prompt}]
+    call_params = {
+        "app_id": app_id,
+        "messages": messages,
+        "stream": True,
+        "incremental_output": True,
+        "headers": {"X-DashScope-OssResourceResolve": "enable"},
+    }
     try:
-        # 新版 dashscope SDK 使用 messages 替代 prompt
-        messages = [{"role": "user", "content": prompt}]
-        response = DashScopeApp.call(
-            app_id=app_id,
-            messages=messages,  # type: ignore
-            stream=False,
-            headers={"X-DashScope-OssResourceResolve": "enable"},
-        )
-        # 尝试多种方式提取响应文本
-        text = None
-        # 方式1: response.output.text
-        output = getattr(response, "output", None)
-        if output is not None:
-            if isinstance(output, str):
-                text = output
-            elif hasattr(output, "get"):
-                text = output.get("text", None) or getattr(output, "text", None)
-            else:
+        response = DashScopeApp.call(**call_params)
+        accumulated = ""
+        for chunk in response:
+            output = getattr(chunk, "output", None)
+            if output:
                 text = getattr(output, "text", None)
-        # 方式2: response.text（兼容旧版 SDK）
-        if not text:
-            try:
-                text = getattr(response, "text", None)
-            except (KeyError, AttributeError, TypeError):
-                pass
-        # 方式3: response 本身是 dict
-        if not text:
-            try:
-                if isinstance(response, dict):
-                    out = response.get("output", {})
-                    if isinstance(out, dict):
-                        text = out.get("text", "")
-            except (KeyError, TypeError):
-                pass
-        # 方式4: output.final_result（新版 dashscope SDK）
-        if not text and output is not None:
-            try:
-                if hasattr(output, "get"):
-                    fr = output.get("final_result", None) or getattr(output, "final_result", None)
-                    if isinstance(fr, dict):
-                        text = fr.get("text", "") or str(fr)
-                    elif isinstance(fr, str):
-                        text = fr
-            except Exception:
-                pass
-        if text:
-            return str(text)
-        # 全部方式均提取失败，记录响应结构用于调试
-        logger.warning(
-            f"智能体返回文本为空 (app_id={app_id}), "
-            f"响应类型={type(response).__name__}, "
-            f"output={str(output)[:200] if output is not None else 'None'}"
-        )
-        logger.warning(f"智能体返回为空，降级到直接调模型 (app_id={app_id})")
-        from backend.api.config_router import get_config_value
-        model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-        api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                     "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        return _call_model_sync(prompt, api_key, model, api_base)
+                if text:
+                    accumulated += text
+        if accumulated.strip():
+            return accumulated
+        logger.warning(f"智能体流式返回为空 (app_id={app_id})，降级到直接调模型")
     except Exception as e:
-        logger.error(f"智能体调用失败 (app_id={app_id}): {e}，降级到直接调模型")
-        from backend.api.config_router import get_config_value
-        model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-        api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                     "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        return _call_model_sync(prompt, api_key, model, api_base)
+        logger.warning(f"智能体流式调用失败 (app_id={app_id}): {e}，降级到直接调模型")
+
+    # 降级：直接调大模型
+    from backend.api.config_router import get_config_value
+    model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
+    api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                 "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    return _call_model_sync(prompt, api_key, model, api_base)
 
 
 def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> str:
