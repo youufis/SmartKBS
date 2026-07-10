@@ -6,6 +6,7 @@ import asyncio
 import json
 import random
 import string
+import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -35,17 +36,6 @@ SCORE_TIERS = [
     (7, 11, 40),     # 7-11秒: 40分
     (11, 999, 20),   # 11秒+: 20分
 ]
-STREAK_MULTIPLIERS = {
-    0: 1.0,
-    1: 1.0,
-    2: 1.2,
-    3: 1.5,
-    4: 1.8,
-    5: 2.0,
-}
-CONSECUTIVE_WRONG_PENALTY = -10  # 连续答错3题扣分
-CONSECUTIVE_WRONG_THRESHOLD = 3
-PERFECT_MULTIPLIER = 1.2
 
 # ── 辅助函数 ──
 
@@ -71,8 +61,8 @@ def _generate_room_code() -> str:
 # ── 计分辅助函数 ──
 
 
-def _calc_speed_score(time_spent: float, time_limit: int) -> float:  # type: ignore[valid-type]
-    """速度递减计分：用时越少得分越高"""
+def _calc_speed_score(time_spent: float, time_limit: int) -> int:
+    """速度递减计分：用时越少得分越高（整数分）"""
     min_score = 10
     max_score = 100
     if time_spent <= 0:
@@ -80,23 +70,15 @@ def _calc_speed_score(time_spent: float, time_limit: int) -> float:  # type: ign
     if time_spent >= time_limit:
         return min_score
     decay = (max_score - min_score) / time_limit
-    return round(max_score - decay * time_spent, 1)
+    return round(max_score - decay * time_spent)
 
 
-def _calc_tiered_score(time_spent: float) -> float:  # type: ignore[valid-type]
+def _calc_tiered_score(time_spent: float) -> int:
     """分段计分"""
     for lo, hi, score in SCORE_TIERS:
         if lo <= time_spent < hi:
             return score
     return 10
-
-
-def _calc_streak_multiplier(streak: int) -> float:  # type: ignore[valid-type]
-    """计算连击倍率"""
-    for s, m in sorted(STREAK_MULTIPLIERS.items(), reverse=True):
-        if streak >= s:
-            return m
-    return 1.0
 
 
 def _get_username_display(username: str) -> str:
@@ -1572,7 +1554,7 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
     )
 
 
-async def _do_reveal(room_id: int) -> dict[str, Any] | None:
+async def _do_reveal(room_id: int, push_next: bool = True) -> dict[str, Any] | None:
     """公布当前题目答案"""
     state = game_manager.get_room(room_id)
     if not state or state["phase"] != "question":
@@ -1644,11 +1626,11 @@ async def _do_reveal(room_id: int) -> dict[str, Any] | None:
         "data": reveal_data,
     })
 
-    # 立即推送下一题（或结束），不依赖任何定时器
+    # 如果不是强制结束（push_next=True），推送下一题或结束
     if is_last:
         await _do_end_game(room_id)
         reveal_data["ended"] = True
-    else:
+    elif push_next:
         await _push_question(room_id, current_q + 1)
         # 在 reveal_data 中附带下一题信息，前端可直接使用
         nq = execute_query_one(
@@ -1664,6 +1646,7 @@ async def _do_reveal(room_id: int) -> dict[str, Any] | None:
                 "time_limit": state["time_limit"],
                 "total_questions": total,
             }
+    # else: push_next=False 即教师提前结束，仅公布答案不推送下一题
 
     return reveal_data
 
@@ -1681,9 +1664,9 @@ async def _do_end_game(room_id: int):
         state = game_manager.get_room(room_id)
         now = _now()
 
-        # 如果还有未公布答案的题目，先公布
+        # 如果还有未公布答案的题目，先公布（但不再推送下一题）
         if state and state["phase"] == "question":
-            await _do_reveal(room_id)
+            await _do_reveal(room_id, push_next=False)
 
         # 更新房间状态
         execute_insert_update(

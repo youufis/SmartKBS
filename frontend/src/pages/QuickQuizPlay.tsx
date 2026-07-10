@@ -69,7 +69,8 @@ const QuickQuizPlay: React.FC = () => {
   const connectWebSocket = () => {
     if (!roomId) return
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/quick-quiz/${roomId}`
+    const token = localStorage.getItem('smartkb_token') || ''
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/quick-quiz/${roomId}?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
@@ -99,6 +100,7 @@ const QuickQuizPlay: React.FC = () => {
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const stoppedRef = useRef(false)
+  const lastQuestionRef = useRef(0) // 追踪已显示的最新题号，用于轮询检测新题
 
   const startTimer = useCallback((limit: number) => {
     if (timerRef.current) clearInterval(timerRef.current)
@@ -122,8 +124,9 @@ const QuickQuizPlay: React.FC = () => {
         navigate(`/quick-quiz/result/${roomId}`, { replace: true })
         return
       }
-      // 检测是否有新题目
-      if (data.question && !stoppedRef.current) {
+      // 检测是否有新题目（比较题号，不受 stoppedRef 影响）
+      if (data.question && data.current_question !== lastQuestionRef.current) {
+        lastQuestionRef.current = data.current_question
         setQuestion(data.question)
         setTimer(data.question.time_limit || 15)
         setPhase('question')
@@ -131,11 +134,6 @@ const QuickQuizPlay: React.FC = () => {
         setSelectedAnswer(null)
         setResult(null)
         startTimer(data.question.time_limit || 15)
-        stoppedRef.current = true
-        if (pollTimerRef.current) {
-          clearInterval(pollTimerRef.current)
-          pollTimerRef.current = null
-        }
       }
     } catch (err: any) {
       // 房间被删除时返回 404，跳回主页
@@ -203,6 +201,7 @@ const QuickQuizPlay: React.FC = () => {
         break
 
       case 'new_question':
+        lastQuestionRef.current = msg.data.sort_order
         setQuestion(msg.data)
         setTimer(msg.data.time_limit || 15)
         setPhase('question')
@@ -211,12 +210,6 @@ const QuickQuizPlay: React.FC = () => {
         setResult(null)
         setAnsweredCount(0)
         startTimer(msg.data.time_limit || 15)
-        // 通过 WebSocket 拿到题目了，停止轮询
-        stoppedRef.current = true
-        if (pollTimerRef.current) {
-          clearInterval(pollTimerRef.current)
-          pollTimerRef.current = null
-        }
         break
 
       case 'your_answer_result':
@@ -248,8 +241,6 @@ const QuickQuizPlay: React.FC = () => {
             correct_answer: msg.data.correct_answer,
           })
         }
-        // 重置轮询，下一题到达时自动显示
-        stoppedRef.current = false
         break
 
       case 'game_end':
@@ -303,6 +294,7 @@ const QuickQuizPlay: React.FC = () => {
           }
           const nq = res.data?.next_question
           if (nq) {
+            lastQuestionRef.current = nq.sort_order
             // 直接从响应拿到下一题，立即显示，不等 WebSocket
             setQuestion(nq)
             setTimer(nq.time_limit || 15)
