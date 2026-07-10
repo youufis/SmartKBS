@@ -3,6 +3,7 @@
 HTML 文件列表/上传/删除/导航
 """
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -984,6 +985,11 @@ def _extract_questions_from_html(html_content: str,
                             break
                         i += 1
             raw = html_content[start:end]
+            # 处理单引号 JS 格式，转为标准 JSON
+            # 1. 属性名: 'xxx' → "xxx"
+            raw = re.sub(r"'([^']+)'\s*:", r'"\1":', raw)
+            # 2. 字符串值: : 'xxx' → : "xxx"（但在引号内不转义）
+            raw = re.sub(r":\s*'([^']*?)'(\s*[,}\]])", r': "\1"\2', raw)
             parsed = _json.loads(raw)
             for item in parsed:
                 qtext = item.get("question", item.get("text", ""))[:50]
