@@ -133,14 +133,19 @@ async def grade_submission(submission_id: int) -> dict[str, Any]:
     # 5. 计算结果
     final_score = round(total_score, 1)
 
+    any_actual_error = any(d.get("error") for d in details)
+
     if max_exec_time >= MAX_EXECUTION_TIME:
         final_status = "time_limit"
     elif passed == total_cases:
         final_status = "accepted"
     elif passed > 0:
         final_status = "wrong_answer"
-    else:
+    elif any_actual_error:
         final_status = "runtime_error"
+    else:
+        # 全部用例输出不匹配，但无实际运行错误 → 应判为答案错误而非运行时错误
+        final_status = "wrong_answer"
 
     # 6. 更新提交记录
     q_update(
