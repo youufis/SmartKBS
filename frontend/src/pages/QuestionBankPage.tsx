@@ -1282,7 +1282,7 @@ const QuestionBankPage: React.FC = () => {
             <Typography.Title level={4} style={{ color: dedupResult.total_deleted > 0 ? '#52c41a' : '#999' }}>
               {dedupResult.total_deleted > 0
                 ? `${t('deleteSuccess')} ${dedupResult.total_deleted} ${t('dedupTitle')}`
-                : t('noQuestions')}
+                : t('noDuplicates')}
             </Typography.Title>
             {(dedupResult.total_skipped_owner ?? 0) > 0 || (dedupResult.total_skipped_ref ?? 0) > 0 ? (
               <div style={{ marginBottom: 12 }}>
