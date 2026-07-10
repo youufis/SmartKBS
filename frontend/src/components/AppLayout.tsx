@@ -139,7 +139,6 @@ function buildTeacherMenu(t: (k: string) => string) {
     { type: 'group', icon: <BarChartOutlined />, label: g('learningAnalytics'), key: 'analytics', children: [
       { key: '/analytics', icon: <BarChartOutlined />, label: g('analytics') },
       { key: '/class-summary', icon: <RobotOutlined />, label: g('classSummary') },
-      { key: '/curriculum/progress', icon: <BarChartOutlined />, label: g('curriculumProgress') },
       { key: '/activity-monitor', icon: <BarChartOutlined />, label: g('activityMonitor') },
       { key: '/score', icon: <TrophyOutlined />, label: g('scoreManage') },
       { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },

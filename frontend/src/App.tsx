@@ -31,7 +31,6 @@ import DiscussionRoomPage from './pages/DiscussionRoomPage'
 import DiscussionMonitorPage from './pages/DiscussionMonitorPage'
 import CurriculumPage from './pages/CurriculumPage'
 import WrongBookPage from './pages/WrongBookPage'
-import CurriculumProgressPage from './pages/CurriculumProgressPage'
 import SharedCenterPage from './pages/SharedCenterPage'
 import StudentExamTaskPage from './pages/StudentExamTaskPage'
 import RewardPage from './pages/RewardPage'
@@ -135,7 +134,6 @@ function App() {
             <Route path="discussion-monitor/:discId" element={<DiscussionMonitorPage />} />
             <Route path="student-exam-task" element={<StudentExamTaskPage />} />
             <Route path="curriculum" element={<CurriculumPage />} />
-            <Route path="curriculum/progress" element={user?.role === 'admin' || user?.role === 'teacher' ? <CurriculumProgressPage /> : <Navigate to="/curriculum" />} />
             <Route path="wrong-book" element={<WrongBookPage />} />
             <Route path="quest" element={user?.role === 'student' ? <QuestPage /> : <QuestAdminPage />} />
             <Route path="quest-records" element={user?.role === 'admin' || user?.role === 'teacher' ? <QuestAdminPage /> : <Navigate to="/chat" />} />

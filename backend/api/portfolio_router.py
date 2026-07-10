@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
+from backend.reward_engine import ACTIVITY_TYPE_NAMES, REWARD_TYPE_NAMES
 from backend.logger import logger
 from backend.prompts import apply_skills, build_ai_role
 
@@ -133,8 +134,10 @@ async def get_portfolio(username: str, request: Request):
         reward_history = [
             {
                 "activity_type": r[0],
+                "activity_type_name": ACTIVITY_TYPE_NAMES.get(r[0], r[0]),
                 "activity_title": r[1] or "",
                 "reward_type": r[2],
+                "reward_type_name": REWARD_TYPE_NAMES.get(r[2], r[2]),
                 "points": r[3],
                 "reason": r[4] or "",
                 "created_at": r[5] or "",

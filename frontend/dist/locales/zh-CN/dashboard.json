@@ -224,7 +224,8 @@
     "tabs": {
       "class": "班级学情",
       "exam": "考试分析",
-      "progress": "学情进度"
+      "progress": "学情进度",
+      "progressDetail": "进度详情"
     },
     "aiAnalyze": "AI 分析",
     "aiSuggestions": "AI 教学建议",

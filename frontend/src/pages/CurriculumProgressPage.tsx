@@ -6,7 +6,7 @@ import {
 } from 'antd'
 import {
   ReloadOutlined, TeamOutlined, BookOutlined, CheckCircleOutlined,
-  ClockCircleOutlined, StopOutlined, BarChartOutlined,
+  ClockCircleOutlined, StopOutlined, BarChartOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import * as curriculumApi from '../api/curriculum'
 import { useAuthStore } from '../stores/authStore'
@@ -119,6 +119,19 @@ const CurriculumProgressPage: React.FC = () => {
       setLoading(false)
     }
   }, [courseId, grade, className])
+
+  // ── 导出 Excel ──
+  const exportProgressExcel = () => {
+    const token = localStorage.getItem('smartkb_token')
+    let url = `/api/export/progress?token=${token}`
+    if (courseId) url += `&course_id=${courseId}`
+    if (grade) url += `&grade=${grade}`
+    if (className) {
+      const match = String(className).match(/(\d+)/)
+      url += `&class_name=${match ? match[1] : className}`
+    }
+    window.open(url, '_blank')
+  }
 
   // ── 筛选条件变化时重新加载（仅当用户主动选择过课程） ──
   useEffect(() => {
@@ -293,7 +306,13 @@ const CurriculumProgressPage: React.FC = () => {
             </Row>
 
             <Card
-              extra={<Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>}
+              extra={
+                <Space>
+                  <Button icon={<DownloadOutlined />} onClick={exportProgressExcel}
+                    disabled={students.length === 0}>{t('exportProgress')}</Button>
+                  <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
+                </Space>
+              }
               style={{ marginBottom: 16 }}
             >
               <Space style={{ marginBottom: 12 }}>

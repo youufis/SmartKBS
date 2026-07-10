@@ -14,6 +14,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { pollAiTask } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
+import LearningProgress from '../components/LearningProgress'
 
 const { Title, Text } = Typography
 
@@ -621,6 +622,11 @@ const AnalyticsPage: React.FC = () => {
                   )}
                 </div>
               ),
+            },
+            {
+              key: 'overall',
+              label: <span><BarChartOutlined /> {t('analytics.tabs.progressDetail')}</span>,
+              children: <LearningProgress />,
             },
           ]}
         />

@@ -156,6 +156,7 @@ def _get_teacher_activities(teacher_username: str) -> List[Dict[str, Any]]:
                   'code' as activity_type
            FROM code_problems cp
            WHERE cp.creator_username = ?
+             AND cp.status = 'active'
            ORDER BY cp.created_at DESC""",
         (teacher_username,),
     )
