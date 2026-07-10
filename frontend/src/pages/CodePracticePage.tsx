@@ -48,6 +48,7 @@ const CompactCodeView: React.FC<{
   const [lang, setLang] = useState(initLang)
   const [customInput, setCustomInput] = useState('')
   const [runResult, setRunResult] = useState<any>(null)
+  const [runHistory, setRunHistory] = useState<any[]>([])
   const [runLoading, setRunLoading] = useState(false)
   const [submitLoading, setSubmitLoading] = useState(false)
   const [submissionResult, setSubmissionResult] = useState<any>(null)
@@ -75,6 +76,11 @@ const CompactCodeView: React.FC<{
         problem_id: problemId, language: lang, source_code: code, input_data: customInput,
       })
       setRunResult(data)
+      // 累积运行历史（保留最近 10 条）
+      setRunHistory(prev => {
+        const entry = { id: Date.now(), ...data, input_data: customInput, createdAt: new Date().toLocaleTimeString() }
+        return [entry, ...prev].slice(0, 10)
+      })
     } catch (e: any) { message.error(e.response?.data?.detail || t('runFailed')) }
     finally { setRunLoading(false) }
   }
@@ -201,6 +207,36 @@ const CompactCodeView: React.FC<{
             )}
           </div>
         )}
+        {/* 运行历史记录 */}
+        {runHistory.length > 1 && !submissionResult && (
+          <div style={{ marginTop: 6 }}>
+            <details style={{ fontSize: 12 }}>
+              <summary style={{ cursor: 'pointer', color: '#888', userSelect: 'none' }}>
+                {t('runHistory')}（{runHistory.length} {t('countRuns')}）
+              </summary>
+              <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 4 }}>
+                {runHistory.map((entry, idx) => (
+                  <div key={entry.id} style={{
+                    background: '#1e1e1e', color: '#d4d4d4', padding: '4px 8px',
+                    borderRadius: 4, marginBottom: 4, fontFamily: 'monospace', fontSize: 11,
+                    borderLeft: `3px solid ${entry.exit_code === 0 ? '#52c41a' : '#f48771'}`,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <span style={{ color: '#888' }}>#{runHistory.length - idx} {entry.createdAt}</span>
+                      <span style={{ color: entry.exit_code === 0 ? '#52c41a' : '#f48771' }}>
+                        Exit {entry.exit_code} | {entry.execution_time}s
+                      </span>
+                    </div>
+                    {entry.input_data && <div style={{ color: '#69b1ff' }}>↳ {t('input')}: {entry.input_data}</div>}
+                    <pre style={{ margin: '2px 0 0', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
+                      {entry.stdout || (entry.error ? entry.error.slice(0, 60) : `(${t('noOutput')})`)}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -225,6 +261,7 @@ const CodePracticePage: React.FC = () => {
 
   // 运行结果
   const [runResult, setRunResult] = useState<any>(null)
+  const [runHistory, setRunHistory] = useState<any[]>([])
   const [runLoading, setRunLoading] = useState(false)
 
   // 提交评分
@@ -520,6 +557,7 @@ const CodePracticePage: React.FC = () => {
   // ── 加载题目详情 ──
   const loadProblem = async (problemId: number) => {
     setRunResult(null)
+    setRunHistory([])
     setSubmissionResult(null)
     setAiReview(null)
     setSubmissions([])
@@ -562,6 +600,11 @@ const CodePracticePage: React.FC = () => {
         input_data: customInput,
       })
       setRunResult(data)
+      // 累积运行记录
+      setRunHistory(prev => {
+        const entry = { id: Date.now(), ...data, input_data: customInput, createdAt: new Date().toLocaleTimeString() }
+        return [entry, ...prev].slice(0, 10)
+      })
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('runFailed'))
     } finally {
@@ -1340,22 +1383,53 @@ const CodePracticePage: React.FC = () => {
                   key: 'output',
                   label: <span><PlayCircleOutlined />{t('runOutput')}</span>,
                   children: (
-                    <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 13, maxHeight: 300, overflow: 'auto' }}>
-                      {runResult.error ? (
-                        <div style={{ color: '#f48771' }}>
-                          <div>{t('errorPrefix')}{runResult.error}</div>
-                          {runResult.stderr && <pre style={{ margin: 0, color: '#f48771' }}>{runResult.stderr}</pre>}
-                        </div>
-                      ) : (
-                        <>
-                          <div style={{ color: '#888', marginBottom: 4 }}>Exit Code: {runResult.exit_code} | Time: {runResult.execution_time}s</div>
-                          {runResult.stdout ? (
-                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre>
-                          ) : (
-                            <div style={{ color: '#888' }}>{t('noOutput')}</div>
-                          )}
-                          {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 8 }}>{runResult.stderr}</pre>}
-                        </>
+                    <div>
+                      {/* 当前运行结果 */}
+                      <div style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 12, borderRadius: 6, fontFamily: 'monospace', fontSize: 13, maxHeight: 200, overflow: 'auto' }}>
+                        {runResult.error ? (
+                          <div style={{ color: '#f48771' }}>
+                            <div>{t('errorPrefix')}{runResult.error}</div>
+                            {runResult.stderr && <pre style={{ margin: 0, color: '#f48771' }}>{runResult.stderr}</pre>}
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ color: '#888', marginBottom: 4 }}>Exit Code: {runResult.exit_code} | Time: {runResult.execution_time}s | 输入: {customInput || '(空)'}</div>
+                            {runResult.stdout ? (
+                              <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre>
+                            ) : (
+                              <div style={{ color: '#888' }}>{t('noOutput')}</div>
+                            )}
+                            {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 8 }}>{runResult.stderr}</pre>}
+                          </>
+                        )}
+                      </div>
+                      {/* 运行历史 */}
+                      {runHistory.length > 1 && (
+                        <details style={{ marginTop: 8, fontSize: 13 }}>
+                          <summary style={{ cursor: 'pointer', color: '#888', userSelect: 'none' }}>
+                            {t('runHistory')}（{runHistory.length} {t('countRuns')}）
+                          </summary>
+                          <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 4 }}>
+                            {runHistory.map((entry, idx) => (
+                              <div key={entry.id} style={{
+                                background: '#1e1e1e', color: '#d4d4d4', padding: '6px 10px',
+                                borderRadius: 4, marginBottom: 4, fontFamily: 'monospace', fontSize: 12,
+                                borderLeft: `3px solid ${entry.exit_code === 0 ? '#52c41a' : '#f48771'}`,
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                                  <span style={{ color: '#888' }}>#{runHistory.length - idx} {entry.createdAt}</span>
+                                  <span style={{ color: entry.exit_code === 0 ? '#52c41a' : '#f48771' }}>
+                                    Exit {entry.exit_code} | {entry.execution_time}s
+                                  </span>
+                                </div>
+                                {entry.input_data && <div style={{ color: '#69b1ff' }}>↳ {t('input')}: {entry.input_data}</div>}
+                                <pre style={{ margin: '2px 0 0', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>
+                                  {entry.stdout || (entry.error ? entry.error.slice(0, 80) : `(${t('noOutput')})`)}
+                                </pre>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
                       )}
                     </div>
                   ),

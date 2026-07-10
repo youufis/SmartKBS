@@ -24,6 +24,191 @@ import { useTranslation } from 'react-i18next'
 const { Title, Text } = Typography
 const { TextArea } = Input
 
+// ── 独立的 QuestionItem 组件，避免在 renderItem 中调用 Hooks ──
+interface QuestionItemProps {
+  q: any
+  isTeacherOrAdmin: boolean
+  isStudent: boolean
+  t: (key: string, options?: any) => string
+  onDelete: (id: number) => void
+  onEdit: (q: any) => void
+  onAnswerClick: (q: any) => void
+  loadQuestions: () => Promise<void>
+}
+
+const QuestionItem: React.FC<QuestionItemProps> = ({ q, isTeacherOrAdmin, isStudent, t, onDelete, onEdit, onAnswerClick, loadQuestions }) => {
+  const qContent = q.content?.length > 50 ? q.content.slice(0, 50) + '...' : q.content
+  const [expanded, setExpanded] = React.useState(false)
+  const [studentAnswers, setStudentAnswers] = React.useState<any[]>([])
+  const [answersLoading, setAnswersLoading] = React.useState(false)
+  const [expandedAnswers, setExpandedAnswers] = React.useState<Record<number, boolean>>({})
+
+  const loadStudentAnswers = async (forceRefresh = false) => {
+    if (!forceRefresh && expanded) { setExpanded(false); return }
+    setAnswersLoading(true)
+    try {
+      const { data } = await apiClient.get(`/api/interaction/questions/${q.id}/answers`)
+      setStudentAnswers(data.answers || [])
+      setExpanded(true)
+    } catch { message.error(t('loadFailed')) }
+    setAnswersLoading(false)
+  }
+
+  return (
+    <Card size="small" style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
+          <Text strong>{qContent}</Text>
+          <div style={{ marginTop: 4 }}>
+            {q.is_anonymous ? <Tag>{t('anonymous')}</Tag> : !isStudent && <Tag>{q.student_username}</Tag>}
+            {q.status === 'answered' && <Tag color="green">{t('answeredQuestions')}</Tag>}
+            {q.status === 'pending' && <Tag color="orange">{t('pendingQuestions')}</Tag>}
+            <Text type="secondary" style={{ fontSize: 12 }}>{q.created_at?.slice(0, 16)}</Text>
+            {q.answered_by && q.status === 'answered' && (
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                {t('answeredBy', { name: q.answered_by })}
+              </Text>
+            )}
+            {q.student_answer_count > 0 && (
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                {t('studentAnswerCount', { count: q.student_answer_count })}
+                {q.approved_answer_count > 0 && t('approvedCount', { approved: q.approved_answer_count })}
+              </Text>
+            )}
+            {isStudent && q.my_answer_status === 'pending_approval' && (
+              <Tag color="purple" style={{ marginLeft: 4 }}>{t('myAnswerPending')}</Tag>
+            )}
+            {isStudent && q.my_answer_status === 'approved' && (
+              <Tag color="green" style={{ marginLeft: 4 }}>{t('myAnswerApproved')}</Tag>
+            )}
+            {isStudent && q.my_answer_status === 'rejected' && (
+              <Tag color="red" style={{ marginLeft: 4 }}>{t('myAnswerRejected')}</Tag>
+            )}
+          </div>
+        </div>
+        <Space>
+          {isStudent && (
+            <>
+              <Button size="small" type="primary" icon={<QuestionCircleOutlined />}
+                onClick={() => onAnswerClick(q)}>{t('viewDetails')}</Button>
+              {!q.is_own && q.status === 'pending' && !q.my_answer_status && (
+                <Button size="small" icon={<SendOutlined />}
+                  onClick={() => onAnswerClick(q)}>{t('answer')}</Button>
+              )}
+              {!q.is_own && q.my_answer_status === 'rejected' && (
+                <Button size="small" icon={<SendOutlined />}
+                  onClick={() => onAnswerClick(q)}>{t('reAnswer')}</Button>
+              )}
+              {q.is_own && (
+                <Button size="small" icon={<EditOutlined />}
+                  onClick={() => onEdit(q)}>{t('edit')}</Button>
+              )}
+              {q.is_own && (
+                <Popconfirm title={t('deleteConfirm')} onConfirm={() => onDelete(q.id)}>
+                  <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                </Popconfirm>
+              )}
+            </>
+          )}
+          {isTeacherOrAdmin && (
+            <>
+              <Button size="small"
+                type={q.answer ? 'default' : 'primary'}
+                icon={<SendOutlined />}
+                onClick={() => onAnswerClick(q)}>
+                {q.answer ? t('edit') : t('answer')}
+              </Button>
+              {q.student_answer_count > 0 && (
+                <Button size="small" icon={expanded ? <EditOutlined /> : <PlusOutlined />}
+                  loading={answersLoading}
+                  onClick={() => {
+                    if (expanded) { setExpanded(false); return }
+                    loadStudentAnswers(true)
+                  }}>
+                  {expanded ? t('collapse') : t('answerCount', { count: q.student_answer_count })}
+                </Button>
+              )}
+              <Popconfirm title={t('deleteConfirm')} onConfirm={() => onDelete(q.id)}>
+                <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </>
+          )}
+        </Space>
+      </div>
+      {/* 展开的学生回答列表（教师端） */}
+      {expanded && isTeacherOrAdmin && (
+        <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid #d9d9d9' }}>
+          {studentAnswers.length === 0 ? (
+            <Text type="secondary">{t('noStudentAnswers')}</Text>
+          ) : (
+            studentAnswers.map((sa: any) => (
+              <div key={sa.id} style={{
+                marginBottom: 8, padding: 8, borderRadius: 4,
+                background: sa.status === 'approved' ? '#f6ffed' :
+                           sa.status === 'rejected' ? '#fff2f0' : '#fffbe6',
+                border: '1px solid',
+                borderColor: sa.status === 'approved' ? '#b7eb8f' :
+                            sa.status === 'rejected' ? '#ffccc7' : '#ffe58f',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text strong style={{ fontSize: 13 }}>{sa.student_username}</Text>
+                  <Space size="small">
+                    {sa.status === 'pending_approval' && (
+                      <>
+                        <Button size="small" type="primary"
+                          icon={<CheckCircleOutlined />}
+                          onClick={async () => {
+                            try {
+                              await apiClient.put(`/api/interaction/questions/${q.id}/answers/${sa.id}/approve`)
+                              message.success(t('approved'))
+                              loadStudentAnswers(true)
+                            } catch { message.error(t('operationFail')) }
+                          }}>{t('approve')}</Button>
+                        <Popconfirm title={t('rejectConfirm')} onConfirm={async () => {
+                          try {
+                            await apiClient.put(`/api/interaction/questions/${q.id}/answers/${sa.id}/reject`)
+                            message.success(t('rejected'))
+                            loadStudentAnswers(true)
+                          } catch { message.error(t('operationFail')) }
+                        }}>
+                          <Button size="small" danger icon={<DeleteOutlined />}>{t('reject')}</Button>
+                        </Popconfirm>
+                      </>
+                    )}
+                    {sa.status === 'approved' && <Tag color="green">{t('approved')}</Tag>}
+                    {sa.status === 'rejected' && <Tag color="red">{t('rejected')}</Tag>}
+                  </Space>
+                </div>
+                <div style={{
+                  marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  maxHeight: expandedAnswers[sa.id] ? 'none' : '72px',
+                  overflow: 'hidden',
+                  transition: 'max-height 0.2s',
+                  lineHeight: '22px',
+                  display: 'block',
+                }}>
+                  {sa.answer}
+                </div>
+                {sa.answer?.length > 80 && (
+                  <Button type="link" size="small" style={{ padding: 0, height: 20, fontSize: 12 }}
+                    onClick={() => setExpandedAnswers(prev => ({ ...prev, [sa.id]: !prev[sa.id] }))}>
+                    {expandedAnswers[sa.id] ? t('collapse') : t('expandFull')}
+                  </Button>
+                )}
+                <div style={{ marginTop: 2 }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    {sa.created_at?.slice(0, 16)}
+                  </Text>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 const StudentQuestionsPage: React.FC = () => {
   const { t } = useTranslation('questions')
   const user = useAuthStore((s) => s.user)
@@ -205,179 +390,24 @@ const StudentQuestionsPage: React.FC = () => {
           {questions.length === 0 ? <Empty description={t('noQuestions')} /> : (
             <List
               dataSource={questions}
-              renderItem={(q: any) => {
-                const qContent = q.content?.length > 50 ? q.content.slice(0, 50) + '...' : q.content
-                const [expanded, setExpanded] = React.useState(false)
-                const [studentAnswers, setStudentAnswers] = React.useState<any[]>([])
-                const [answersLoading, setAnswersLoading] = React.useState(false)
-                const [expandedAnswers, setExpandedAnswers] = React.useState<Record<number, boolean>>({})
-                const loadStudentAnswers = async (forceRefresh = false) => {
-                  if (!forceRefresh && expanded) { setExpanded(false); return }
-                  setAnswersLoading(true)
-                  try {
-                    const { data } = await apiClient.get(`/api/interaction/questions/${q.id}/answers`)
-                    setStudentAnswers(data.answers || [])
-                    setExpanded(true)
-                  } catch { message.error(t('loadFailed')) }
-                  setAnswersLoading(false)
-                }
-                return (
-                  <Card size="small" style={{ marginBottom: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ flex: 1 }}>
-                        <Text strong>{qContent}</Text>
-                        <div style={{ marginTop: 4 }}>
-                          {q.is_anonymous ? <Tag>{t('anonymous')}</Tag> : !isStudent && <Tag>{q.student_username}</Tag>}
-                          {q.status === 'answered' && <Tag color="green">{t('answeredQuestions')}</Tag>}
-                          {q.status === 'pending' && <Tag color="orange">{t('pendingQuestions')}</Tag>}
-                          <Text type="secondary" style={{ fontSize: 12 }}>{q.created_at?.slice(0, 16)}</Text>
-                          {q.answered_by && q.status === 'answered' && (
-                            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                              {t('answeredBy', { name: q.answered_by })}
-                            </Text>
-                          )}
-                          {q.student_answer_count > 0 && (
-                            <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
-                              {t('studentAnswerCount', { count: q.student_answer_count })}
-                              {q.approved_answer_count > 0 && t('approvedCount', { approved: q.approved_answer_count })}
-                            </Text>
-                          )}
-                          {isStudent && q.my_answer_status === 'pending_approval' && (
-                            <Tag color="purple" style={{ marginLeft: 4 }}>{t('myAnswerPending')}</Tag>
-                          )}
-                          {isStudent && q.my_answer_status === 'approved' && (
-                            <Tag color="green" style={{ marginLeft: 4 }}>{t('myAnswerApproved')}</Tag>
-                          )}
-                          {isStudent && q.my_answer_status === 'rejected' && (
-                            <Tag color="red" style={{ marginLeft: 4 }}>{t('myAnswerRejected')}</Tag>
-                          )}
-                        </div>
-                      </div>
-                      <Space>
-                        {isStudent && (
-                          <>
-                            <Button size="small" type="primary" icon={<QuestionCircleOutlined />}
-                              onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>{t('viewDetails')}</Button>
-                            {!q.is_own && q.status === 'pending' && !q.my_answer_status && (
-                              <Button size="small" icon={<SendOutlined />}
-                                onClick={() => { setAnswerText(''); setAnswerModal(q) }}>{t('answer')}</Button>
-                            )}
-                            {!q.is_own && q.my_answer_status === 'rejected' && (
-                              <Button size="small" icon={<SendOutlined />}
-                                onClick={() => { setAnswerText(''); setAnswerModal(q) }}>{t('reAnswer')}</Button>
-                            )}
-                            {q.is_own && (
-                              <Button size="small" icon={<EditOutlined />}
-                                onClick={() => {
-                                  editQuestionForm.setFieldsValue({ content: q.content })
-                                  setEditQuestionModal(q)
-                                }}>{t('edit')}</Button>
-                            )}
-                            {q.is_own && (
-                              <Popconfirm title={t('deleteConfirm')} onConfirm={() => handleDeleteQuestion(q.id)}>
-                                <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                              </Popconfirm>
-                            )}
-                          </>
-                        )}
-                        {isTeacherOrAdmin && (
-                          <>
-                            <Button size="small"
-                              type={q.answer ? 'default' : 'primary'}
-                              icon={<SendOutlined />}
-                              onClick={() => { setAnswerText(q.answer || ''); setAnswerModal(q) }}>
-                              {q.answer ? t('edit') : t('answer')}
-                            </Button>
-                            {q.student_answer_count > 0 && (
-                              <Button size="small" icon={expanded ? <EditOutlined /> : <PlusOutlined />}
-                                loading={answersLoading}
-                                onClick={() => {
-                                  if (expanded) { setExpanded(false); return }
-                                  loadStudentAnswers(true)
-                                }}>
-                                {expanded ? t('collapse') : t('answerCount', { count: q.student_answer_count })}
-                              </Button>
-                            )}
-                            <Popconfirm title={t('deleteConfirm')} onConfirm={() => handleDeleteQuestion(q.id)}>
-                              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-                            </Popconfirm>
-                          </>
-                        )}
-                      </Space>
-                    </div>
-                    {/* 展开的学生回答列表（教师端） */}
-                    {expanded && isTeacherOrAdmin && (
-                      <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid #d9d9d9' }}>
-                        {studentAnswers.length === 0 ? (
-                          <Text type="secondary">{t('noStudentAnswers')}</Text>
-                        ) : (
-                          studentAnswers.map((sa: any) => (
-                            <div key={sa.id} style={{
-                              marginBottom: 8, padding: 8, borderRadius: 4,
-                              background: sa.status === 'approved' ? '#f6ffed' :
-                                         sa.status === 'rejected' ? '#fff2f0' : '#fffbe6',
-                              border: '1px solid',
-                              borderColor: sa.status === 'approved' ? '#b7eb8f' :
-                                          sa.status === 'rejected' ? '#ffccc7' : '#ffe58f',
-                            }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <Text strong style={{ fontSize: 13 }}>{sa.student_username}</Text>
-                                <Space size="small">
-                                  {sa.status === 'pending_approval' && (
-                                    <>
-                                      <Button size="small" type="primary"
-                                        icon={<CheckCircleOutlined />}
-                                        onClick={async () => {
-                                          try {
-                                            await apiClient.put(`/api/interaction/questions/${q.id}/answers/${sa.id}/approve`)
-                                            message.success(t('approved'))
-                                            loadStudentAnswers(true)
-                                          } catch { message.error(t('operationFail')) }
-                                        }}>{t('approve')}</Button>
-                                      <Popconfirm title={t('rejectConfirm')} onConfirm={async () => {
-                                        try {
-                                          await apiClient.put(`/api/interaction/questions/${q.id}/answers/${sa.id}/reject`)
-                                          message.success(t('rejected'))
-                                          loadStudentAnswers(true)
-                                        } catch { message.error(t('operationFail')) }
-                                      }}>
-                                        <Button size="small" danger icon={<DeleteOutlined />}>{t('reject')}</Button>
-                                      </Popconfirm>
-                                    </>
-                                  )}
-                                  {sa.status === 'approved' && <Tag color="green">{t('approved')}</Tag>}
-                                  {sa.status === 'rejected' && <Tag color="red">{t('rejected')}</Tag>}
-                                </Space>
-                              </div>
-                              <div style={{
-                                marginTop: 4, fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                                maxHeight: expandedAnswers[sa.id] ? 'none' : '72px',
-                                overflow: 'hidden',
-                                transition: 'max-height 0.2s',
-                                lineHeight: '22px',
-                                display: 'block',
-                              }}>
-                                {sa.answer}
-                              </div>
-                              {sa.answer?.length > 80 && (
-                                <Button type="link" size="small" style={{ padding: 0, height: 20, fontSize: 12 }}
-                                  onClick={() => setExpandedAnswers(prev => ({ ...prev, [sa.id]: !prev[sa.id] }))}>
-                                  {expandedAnswers[sa.id] ? t('collapse') : t('expandFull')}
-                                </Button>
-                              )}
-                              <div style={{ marginTop: 2 }}>
-                                <Text type="secondary" style={{ fontSize: 11 }}>
-                                  {sa.created_at?.slice(0, 16)}
-                                </Text>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </Card>
-                )
-              }}
+              renderItem={(q: any) => (
+                <QuestionItem
+                  q={q}
+                  isTeacherOrAdmin={isTeacherOrAdmin}
+                  isStudent={isStudent}
+                  t={t}
+                  onDelete={handleDeleteQuestion}
+                  onEdit={(question) => {
+                    editQuestionForm.setFieldsValue({ content: question.content })
+                    setEditQuestionModal(question)
+                  }}
+                  onAnswerClick={(question) => {
+                    setAnswerText(question.answer || '')
+                    setAnswerModal(question)
+                  }}
+                  loadQuestions={() => loadQuestions()}
+                />
+              )}
             />
           )}
           <div style={{ marginTop: 12, textAlign: 'center' }}>
