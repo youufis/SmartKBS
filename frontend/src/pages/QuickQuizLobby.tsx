@@ -105,7 +105,8 @@ const QuickQuizLobby: React.FC = () => {
   const connectWebSocket = () => {
     if (!roomId) return
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/quick-quiz/${roomId}`
+    const token = localStorage.getItem('smartkb_token') || ''
+    const wsUrl = `${protocol}//${window.location.host}/api/ws/quick-quiz/${roomId}?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 

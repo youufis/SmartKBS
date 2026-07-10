@@ -39,6 +39,8 @@
   "testResult": "Test Results",
   "passed": "Passed",
   "failed": "Failed",
+  "submitted": "Submitted",
+  "notStarted": "Not Started",
   "language": "Language",
   "selectLanguage": "Select Language",
   "input": "Input",

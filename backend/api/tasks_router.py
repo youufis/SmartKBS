@@ -447,41 +447,58 @@ async def get_task_submissions(task_id: str, request: Request):
 
 
 def _read_student_submission(creator: str, task_name: str, student: str) -> str:
-    """从学生的 ChatHistory 中读取提交到该任务的对话文件"""
-    from backend.config import BASE_DIR
-    student_dir = get_account_chat_history_dir(student)
-    full_path = os.path.join(str(BASE_DIR), student_dir)
+    """从汇总文件中读取指定学生的提交内容"""
+    admin_chat_dir = get_admin_chat_history_dir()
 
-    if not os.path.isdir(full_path):
+    # 汇总文件路径（与 _save_to_summary 一致）
+    summary_path = os.path.join(
+        admin_chat_dir,
+        SUMMARY_DIR_NAME, TEACHERS_SUMMARY_DIR, creator,
+        f"summary_{task_name}.md",
+    )
+    if not os.path.isfile(summary_path):
         return ""
 
-    # 在所有日期目录中查找 task_{task_name}_*.md，取最新的
-    import glob
-    pattern = f"task_{task_name}_*.md"
-    matches = []
-    for root, dirs, files in os.walk(full_path):
-        for f in files:
-            if f.startswith(f"task_{task_name}_") and f.endswith(".md"):
-                matches.append(os.path.join(root, f))
-
-    if not matches:
-        return ""
-
-    # 按修改时间取最新的文件
-    matches.sort(key=os.path.getmtime, reverse=True)
     try:
-        with open(matches[0], "r", encoding="utf-8") as f:
+        with open(summary_path, "r", encoding="utf-8") as f:
             content = f.read()
-        # 去掉文件头部的创建时间信息，只保留对话内容
-        if "---" in content:
-            parts = content.split("---", 1)
-            if len(parts) > 1:
-                return parts[1].strip()
-        return content.strip()
     except Exception:
         return ""
 
+    # 提取该学生的所有提交内容（可能有多次提交记录）
+    marker = f"## 学生 {student}"
+    if marker not in content:
+        return ""
 
+    next_marker = "\n## 学生 "
+    all_chunks = []
+    for part in content.split(marker):
+        if not part.strip():
+            continue
+        # 取到下一个学生标记或文件末尾
+        if next_marker in part:
+            student_chunk = part.split(next_marker, 1)[0]
+        else:
+            student_chunk = part
+
+        # 解析提交内容 — 取 "内容:" 之后到结束的全部内容
+        lines = student_chunk.strip().split("\n")
+        content_started = False
+        result_lines = []
+        for line in lines:
+            if line.startswith("内容:"):
+                content_started = True
+                rest = line[len("内容:"):].strip()
+                if rest:
+                    result_lines.append(rest)
+                continue
+            if content_started:
+                result_lines.append(line)
+        chunk_text = "\n".join(result_lines).strip()
+        if chunk_text:
+            all_chunks.append(chunk_text)
+
+    return "\n\n---\n\n".join(all_chunks) if all_chunks else ""
 @router.post("/revert-submission")
 async def revert_submission(request: Request):
     """回退学生的提交（管理员/教师）"""

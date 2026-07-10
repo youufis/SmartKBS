@@ -184,7 +184,7 @@ const StudentView: React.FC = () => {
             {sessions.slice((stuPage - 1) * stuPageSize, stuPage * stuPageSize).map(s => (
               <Card key={s.id} size="small" style={{ marginBottom: 8 }}
                 hoverable onClick={() => startPractice(s.id)}
-                extra={s.attempted ? <Tag color="success">{t('passed')}</Tag> : <Tag color="processing">{t('practiceComplete')}</Tag>}>
+                extra={s.attempted ? <Tag color="processing">{t('submitted')}</Tag> : <Tag color="default">{t('notStarted')}</Tag>}>
                 <Text strong>{s.title}</Text>
                 <div><Text type="secondary">{s.knowledge_points}</Text></div>
                 <div><Text type="secondary">{t('difficulty')}：{s.creator_name} · {s.question_count} {t('questionCount')}</Text></div>
@@ -269,7 +269,9 @@ const TeacherView: React.FC = () => {
       })
       message.info(t('aiGeneratingWait'))
       const result = await pollAiTask(data.task_id, 120000)
-      if (result) {
+      if (result?.error) {
+        message.error(result.error)
+      } else if (result) {
         setQuestions(result.questions || [])
         setTitle(`${kpInput.trim()}${t('practiceSuffix')}`)
         message.success(t('generatedCount', { count: result.total || result.questions?.length || 0 }))

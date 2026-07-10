@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Card, Button, Space, Typography, Input, Tag, message,
-  Spin, Empty, Tooltip, Modal, Divider, Rate, Collapse,
+  Spin, Empty, Tooltip, Modal, Rate, Collapse,
 } from 'antd'
 import {
   SendOutlined, RobotOutlined, ArrowLeftOutlined,
   UserOutlined, BellOutlined, BulbOutlined,
-  ThunderboltOutlined, StarOutlined, DownloadOutlined,
+  ThunderboltOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -78,6 +78,9 @@ const DiscussionRoomPage: React.FC = () => {
     loadInfo()
   }, [discussionId, groupId])
 
+  // 轮询用的最新消息 ID
+  const [lastPollId, setLastPollId] = useState(0)
+
   // 加载历史消息（初始）
   const loadInitialMessages = useCallback(async () => {
     if (!groupId) return
@@ -90,19 +93,14 @@ const DiscussionRoomPage: React.FC = () => {
         setMessages(data)
         // 更新轮询 ID 为最新消息 ID
         const maxId = Math.max(...data.map(m => m.id))
-        if (maxId > lastPollIdRef.current) {
-          lastPollIdRef.current = maxId
-        }
+        if (maxId > lastPollId) setLastPollId(maxId)
       }
     } catch {
       // 忽略
     } finally {
       setLoading(false)
     }
-  }, [groupId])
-
-  // 轮询用的最新消息 ID ref
-  const lastPollIdRef = useRef(0)
+  }, [groupId, lastPollId])
 
   // 初始加载消息
   useEffect(() => {
@@ -122,7 +120,16 @@ const DiscussionRoomPage: React.FC = () => {
     const token = localStorage.getItem('smartkb_token') || ''
     const host = window.location.host
     const wsUrl = `${protocol}//${host}/api/interaction/ws/${groupId}?token=${encodeURIComponent(token)}`
+    const aiAssistantName = t('aiAssistant')
     let reconnectTimer: ReturnType<typeof setTimeout>
+    let currentPollId = lastPollId
+
+    const updatePollId = (newId: number) => {
+      if (newId > currentPollId) {
+        currentPollId = newId
+        setLastPollId(newId)
+      }
+    }
 
     const connectWs = () => {
       try {
@@ -141,15 +148,13 @@ const DiscussionRoomPage: React.FC = () => {
               const msgId = data.id || Date.now()
               const newMsg: Message = {
                 id: msgId,
-                username: data.username || t('aiAssistant'),
+                username: data.username || aiAssistantName,
                 content: data.content,
                 msg_type: data.msg_type || 'text',
                 created_at: data.created_at || new Date().toISOString(),
               }
               // 同步更新轮询 ID，防止轮询再次拉取同一条消息
-              if (typeof msgId === 'number' && msgId > lastPollIdRef.current) {
-                lastPollIdRef.current = msgId
-              }
+              if (typeof msgId === 'number') updatePollId(msgId)
               setMessages(prev => {
                 // 去重：避免与轮询带回的消息重复
                 if (prev.some(m => m.id === newMsg.id)) return prev
@@ -180,11 +185,10 @@ const DiscussionRoomPage: React.FC = () => {
 
     // 轮询 fallback：每 3 秒拉取新消息（WebSocket 的补充，确保 IIS 下也能实时同步）
     const pollInterval = setInterval(async () => {
-      const afterId = lastPollIdRef.current
       try {
         const { data } = await apiClient.get(
           `/api/interaction/groups/${groupId}/messages`,
-          { params: { after_id: afterId } }
+          { params: { after_id: currentPollId } }
         )
         if (Array.isArray(data) && data.length > 0) {
           setMessages(prev => {
@@ -198,9 +202,7 @@ const DiscussionRoomPage: React.FC = () => {
             return prev
           })
           const maxId = Math.max(...data.map(m => m.id))
-          if (maxId > lastPollIdRef.current) {
-            lastPollIdRef.current = maxId
-          }
+          updatePollId(maxId)
         }
       } catch {
         // 忽略轮询错误
@@ -215,7 +217,8 @@ const DiscussionRoomPage: React.FC = () => {
       }
       clearInterval(pollInterval)
     }
-  }, [groupId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId, lastPollId])
 
   // 发送消息
   const handleSend = async () => {
@@ -227,8 +230,8 @@ const DiscussionRoomPage: React.FC = () => {
       const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/messages`, { content })
       setInput('')
       // 用后端返回的真实 ID 更新轮询 ID，防止轮询再次拉取同一条消息
-      if (data?.id && typeof data.id === 'number' && data.id > lastPollIdRef.current) {
-        lastPollIdRef.current = data.id
+      if (data?.id && typeof data.id === 'number' && data.id > lastPollId) {
+        setLastPollId(data.id)
       }
       // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
     } catch (err: any) {
@@ -326,10 +329,10 @@ const DiscussionRoomPage: React.FC = () => {
   }, [groupId])
 
   return (
-    <Card style={{ borderRadius: 8, height: 'calc(100vh - 120px)' }}>
+    <div style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
       {/* 顶部栏 */}
       <Card
-        style={{ marginBottom: 0, borderRadius: '8px 8px 0 0' }}
+        style={{ marginBottom: 0, borderRadius: 0 }}
         styles={{ body: { padding: '12px 16px' } }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -440,6 +443,7 @@ const DiscussionRoomPage: React.FC = () => {
           overflow: 'auto',
           background: '#f5f5f5',
           padding: '12px 16px',
+          minHeight: 0,
         }}
       >
         <Spin spinning={loading}>
@@ -562,7 +566,7 @@ const DiscussionRoomPage: React.FC = () => {
         footer={[
           <Button key="close" onClick={() => setSummaryModal(false)}>{t('close')}</Button>,
           <Button key="export" icon={<DownloadOutlined />}
-            disabled={!summaryData?.content}
+            disabled={!summaryData?.content && !summaryData?.parsed}
             onClick={() => {
               const token = localStorage.getItem('smartkb_token')
               window.open(`/api/interaction/groups/${groupId}/summary/export?token=${token}`, '_blank')
@@ -578,119 +582,122 @@ const DiscussionRoomPage: React.FC = () => {
         width={700}
       >
         <Spin spinning={summaryLoading || generatingSummary}>
-          {summaryData?.content?.parsed ? (
-            <div style={{ padding: '8px 0' }}>
-              {/* 总体总结 */}
-              <div style={{ marginBottom: 20 }}>
-                <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallSummary')}</Text>
-                <div style={{
-                  marginTop: 8, padding: 12, background: '#f6ffed',
-                  borderRadius: 8, border: '1px solid #b7eb8f', lineHeight: 1.8,
-                  fontSize: 14, color: '#333',
-                }}>
-                  {summaryData.content.parsed.summary || t('noContent')}
-                </div>
-              </div>
+          {(() => {
+            // 统一两种数据格式：生成后(data.parsed) vs 查看已有(data.content.parsed)
+            const parsed = summaryData?.content?.parsed || summaryData?.parsed || null
+            const raw = summaryData?.content?.raw_content ||
+                        (typeof summaryData?.content === 'string' ? summaryData.content : null) ||
+                        null
+            if (parsed) {
+              return (
+                <div style={{ padding: '8px 0' }}>
+                  {/* 总体总结 */}
+                  <div style={{ marginBottom: 20 }}>
+                    <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallSummary')}</Text>
+                    <div style={{
+                      marginTop: 8, padding: 12, background: '#f6ffed',
+                      borderRadius: 8, border: '1px solid #b7eb8f', lineHeight: 1.8,
+                      fontSize: 14, color: '#333',
+                    }}>
+                      {parsed.summary || t('noContent')}
+                    </div>
+                  </div>
 
-              {/* 关键观点 */}
-              {summaryData.content.parsed.key_points?.length > 0 && (
-                <div style={{ marginBottom: 20 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('keyPoints')}</Text>
-                  <div style={{ marginTop: 8 }}>
-                    {summaryData.content.parsed.key_points.map((point: string, i: number) => (
-                      <div key={i} style={{
-                        padding: '8px 12px', marginBottom: 6,
-                        background: '#fff7e6', borderRadius: 6,
-                        border: '1px solid #ffd591',
-                        fontSize: 14,
-                      }}>
-                        <Text strong style={{ color: '#fa8c16' }}>{t('pointN', { n: i + 1 })}</Text>
-                        {point}
+                  {/* 关键观点 */}
+                  {parsed.key_points?.length > 0 && (
+                    <div style={{ marginBottom: 20 }}>
+                      <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('keyPoints')}</Text>
+                      <div style={{ marginTop: 8 }}>
+                        {parsed.key_points.map((point: string, i: number) => (
+                          <div key={i} style={{
+                            padding: '8px 12px', marginBottom: 6,
+                            background: '#fff7e6', borderRadius: 6,
+                            border: '1px solid #ffd591',
+                            fontSize: 14,
+                          }}>
+                            <Text strong style={{ color: '#fa8c16' }}>{t('pointN', { n: i + 1 })}</Text>
+                            {point}
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                    </div>
+                  )}
 
-              {/* AI 评价 */}
-              {summaryData.content.parsed.ai_comment && (
-                <div style={{ marginBottom: 20 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('aiComment')}</Text>
+                  {/* AI 评价 */}
+                  {parsed.ai_comment && (
+                    <div style={{ marginBottom: 20 }}>
+                      <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('aiComment')}</Text>
+                      <div style={{
+                        marginTop: 8, padding: 12, background: '#e6f7ff',
+                        borderRadius: 8, border: '1px solid #91d5ff',
+                        fontSize: 14, lineHeight: 1.8,
+                      }}>
+                        {parsed.ai_comment}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 评分 */}
+                  {parsed.score && (
+                    <div style={{ marginBottom: 12 }}>
+                      <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallScore')}</Text>
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <Rate
+                          disabled
+                          value={Math.round(parseInt(parsed.score) / 2)}
+                          count={5}
+                          style={{ fontSize: 20 }}
+                        />
+                        <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#fa8c16' }}>
+                          {parsed.score}/10
+                        </Text>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 原始 AI 回复 */}
+                  {raw && (
+                    <details style={{ marginTop: 16 }}>
+                      <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>
+                        {t('viewRawAIResponse')}
+                      </summary>
+                      <pre style={{
+                        marginTop: 8, padding: 12, background: '#f5f5f5',
+                        borderRadius: 6, fontSize: 12, color: '#666',
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        maxHeight: 300, overflow: 'auto',
+                      }}>
+                        {raw}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              )
+            }
+            // 有原始文本但没有解析结构
+            if (raw) {
+              return (
+                <div style={{ padding: '8px 0' }}>
                   <div style={{
-                    marginTop: 8, padding: 12, background: '#e6f7ff',
-                    borderRadius: 8, border: '1px solid #91d5ff',
-                    fontSize: 14, lineHeight: 1.8,
+                    padding: 16, background: '#f6ffed',
+                    borderRadius: 8, border: '1px solid #b7eb8f',
+                    lineHeight: 1.8, fontSize: 14,
+                    whiteSpace: 'pre-wrap',
                   }}>
-                    {summaryData.content.parsed.ai_comment}
+                    {raw}
                   </div>
                 </div>
-              )}
-
-              {/* 评分 */}
-              {summaryData.content.parsed.score && (
-                <div style={{ marginBottom: 12 }}>
-                  <Text strong style={{ fontSize: 16, color: '#1677ff' }}>{t('overallScore')}</Text>
-                  <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Rate
-                      disabled
-                      value={Math.round(parseInt(summaryData.content.parsed.score) / 2)}
-                      count={5}
-                      style={{ fontSize: 20 }}
-                    />
-                    <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#fa8c16' }}>
-                      {summaryData.content.parsed.score}/10
-                    </Text>
-                  </div>
-                </div>
-              )}
-
-              {/* 原始 AI 回复 */}
-              <details style={{ marginTop: 16 }}>
-                <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>
-                  {t('viewRawAIResponse')}
-                </summary>
-                <pre style={{
-                  marginTop: 8, padding: 12, background: '#f5f5f5',
-                  borderRadius: 6, fontSize: 12, color: '#666',
-                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                  maxHeight: 300, overflow: 'auto',
-                }}>
-                  {summaryData.content.raw_content || summaryData.content}
-                </pre>
-              </details>
-            </div>
-          ) : summaryData?.content?.raw_content ? (
-            <div style={{ padding: '8px 0' }}>
-              <div style={{
-                padding: 16, background: '#f6ffed',
-                borderRadius: 8, border: '1px solid #b7eb8f',
-                lineHeight: 1.8, fontSize: 14,
-                whiteSpace: 'pre-wrap',
-              }}>
-                {summaryData.content.raw_content}
+              )
+            }
+            return (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                <Text type="secondary">{t('noSummaryHint')}</Text>
               </div>
-            </div>
-          ) : summaryData?.content ? (
-            <div style={{ padding: '8px 0' }}>
-              <div style={{
-                padding: 16, background: '#f6ffed',
-                borderRadius: 8, border: '1px solid #b7eb8f',
-                lineHeight: 1.8, fontSize: 14,
-                whiteSpace: 'pre-wrap',
-              }}>
-                {typeof summaryData.content === 'string'
-                  ? summaryData.content
-                  : JSON.stringify(summaryData.content, null, 2)}
-              </div>
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '40px 0' }}>
-              <Text type="secondary">{t('noSummaryHint')}</Text>
-            </div>
-          )}
+            )
+          })()}
         </Spin>
       </Modal>
-    </Card>
+    </div>
   )
 }
 
