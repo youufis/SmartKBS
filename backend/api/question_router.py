@@ -218,7 +218,6 @@ async def generate_questions(req: GenerateRequest, request: Request):
     # 调用 AI
     try:
         result_text = await _call_dashscope_agent(prompt, api_key)
-        logger.info(f"AI 返回原始内容: {result_text[:300]}")
     except Exception as e:
         logger.error(f"AI 生成试题失败: {e}")
         raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
@@ -308,11 +307,9 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
 
 
 async def _call_dashscope_agent(prompt: str, api_key: str) -> str:
-    """调用 AI（异步）- 试题场景跳过智能体，直接调大模型"""
-    from backend.api.ai_service import call_ai_sync_direct
-    import asyncio
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, call_ai_sync_direct, prompt, api_key)
+    """调用 AI（异步）- 支持智能体/直接调大模型双模式"""
+    from backend.api.ai_service import call_ai_async
+    return await call_ai_async(prompt, api_key)
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
@@ -826,7 +823,6 @@ async def extract_questions_from_text(
         # 调用 AI
         try:
             result_text = await _call_dashscope_agent(prompt, api_key)
-            logger.info(f"AI 返回原始内容: {result_text[:300]}")
         except Exception as e:
             logger.error(f"AI 提取试题失败: {e}")
             raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
@@ -1191,41 +1187,42 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
     from backend.prompts import build_ai_role
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     ai_role = build_ai_role(subject=subject)
-    prompt = f"""{ai_role}
-你是一个试题提取助手。下面是一些文本内容，可能包含试题和答案。
-请从文本中识别并提取出所有试题，按照 JSON 格式输出。
+    MAX_EXTRACT_LEN = 3000
+    trimmed = content[:MAX_EXTRACT_LEN]
+    if len(content) > MAX_EXTRACT_LEN:
+        trimmed += "\n\n[后续内容已截断]"
+    prompt = f"""下面是一段需要处理的文本数据，请根据数据后面的要求进行操作。
+
+=== 文本数据 ===
+{trimmed}
+=== 数据结束 ===
+
+{ai_role}
+你的唯一任务是从上面的文本数据中提取或生成试题。
+请严格按照 JSON 数组格式输出，只输出 JSON，不得有任何其他文字。
 
 科目：{subject}
 难度：{difficulty_desc}
 
 要求：
-1. 仔细阅读文本，找出其中的试题（包括题干、选项、答案）
-2. 如果文本中没有明确的试题，可以根据文本内容中的知识点，自动生成相关试题
-3. 每个试题必须包含：题目、正确答案、题型
-4. 选择题必须有选项（最少4个选项）
-5. 判断题的选项为 {{"对":"对","错":"错"}}
-6. 涉及数学、物理、化学公式时，用 $...$ LaTeX 语法标记
-7. 可根据题目内容生成 svg_code（技术图示）和 media_placeholders（实物图描述）
-8. **⚠️ 安全约束**：svg_code 和 media_placeholders 生成的配图中**严禁**出现题目答案、解析、解题过程或任何会泄露正确选项的文字内容
+1. 如果文本中有明确的试题（含题干、选项、答案），直接提取出来
+2. 如果文本是知识点讲解，则针对每个核心知识点生成一道试题
+3. 每个试题必须包含：题目、正确答案、题型（single/multiple/true_false/short/fill）
+4. 选择题必须有选项（A/B/C/D），判断题选项为 {{"对":"对","错":"错"}}
 
-请严格按照 JSON 格式输出，只返回一个 JSON 数组，不要包含其他内容：
-
+JSON 格式：
 [
   {{
-    "type": "题型标识(single/multiple/true_false/short/fill/essay/subjective/code)",
-    "question": "题目内容（含 $...$ LaTeX 公式）",
-    "options": {{"A":"选项（含公式）", "B":"...", "C":"...", "D":"..."}},
+    "type": "single/multiple/true_false/short/fill",
+    "question": "题目",
+    "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
     "answer": "正确答案",
-    "explanation": "解析内容（含公式）",
-    "knowledge_point": "所属知识点",
-    "difficulty": "easy/medium/hard",
-    "svg_code": "<svg>...</svg>",
-    "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图/实物图"}}]
+    "explanation": "解析",
+    "knowledge_point": "知识点",
+    "difficulty": "easy/medium/hard"
   }}
-]
-
-文本内容：
-{content}"""
+]"""
+    return prompt
 
 
 # ════════════════════════════════════════════
@@ -1367,26 +1364,6 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
                 results = await asyncio.gather(*[_gen_one(ph) for ph in placeholders])
                 media_files = [r for r in results if r is not None]
-
-            elif not svg_code.strip():
-                # 策略 B：既无 SVG 又无占位符 → 根据题目内容自动补一张插图
-                q_text = (q_data.get("question", "") or "")[:300]
-                if len(q_text) > 20:
-                    fallback_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-                        subject=req.subject,
-                        purpose="示意图",
-                        description=f"与「{q_text}」相关的教学插图，适合高中{req.subject}课堂展示",
-                    )
-                    local_path = await generate_and_save_image(fallback_prompt, media_dir)
-                    if local_path:
-                        from pathlib import Path as PPath
-                        media_files.append({
-                            "key": "auto",
-                            "type": "image",
-                            "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
-                            "alt": q_text[:100],
-                            "created_at": now,
-                        })
 
             # 更新 media_files 到数据库
             if media_files:

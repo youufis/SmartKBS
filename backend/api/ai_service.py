@@ -79,33 +79,44 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 12
 
 
 def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
-    """调用百炼智能体应用（同步）
-    
-    注意：使用流式模式（stream=True）再汇总，因为非流式模式在某些 SDK 版本中返回 output=None
-    """
+    """调用百炼智能体应用（同步）"""
     from dashscope import Application as DashScopeApp
-    messages = [{"role": "user", "content": prompt}]
-    call_params = {
-        "app_id": app_id,
-        "messages": messages,
-        "stream": True,
-        "incremental_output": True,
-        "headers": {"X-DashScope-OssResourceResolve": "enable"},
-    }
     try:
-        response = DashScopeApp.call(**call_params)
-        accumulated = ""
-        for chunk in response:
-            output = getattr(chunk, "output", None)
-            if output:
+        messages = [{"role": "user", "content": prompt}]
+        response = DashScopeApp.call(
+            app_id=app_id,
+            messages=messages,
+            stream=False,
+            headers={"X-DashScope-OssResourceResolve": "enable"},
+        )
+        # 尝试多种方式提取响应文本
+        text = None
+        output = getattr(response, "output", None)
+        if output is not None:
+            if isinstance(output, str):
+                text = output
+            elif hasattr(output, "get"):
+                text = output.get("text", None) or getattr(output, "text", None)
+            else:
                 text = getattr(output, "text", None)
-                if text:
-                    accumulated += text
-        if accumulated.strip():
-            return accumulated
-        logger.warning(f"智能体流式返回为空 (app_id={app_id})，降级到直接调模型")
+        if not text:
+            try:
+                text = getattr(response, "text", None)
+            except (KeyError, AttributeError, TypeError):
+                pass
+        if not text:
+            try:
+                if isinstance(response, dict):
+                    out = response.get("output", {})
+                    if isinstance(out, dict):
+                        text = out.get("text", "")
+            except (KeyError, TypeError):
+                pass
+        if text:
+            return str(text)
+        logger.warning(f"智能体返回为空，降级到直接调模型 (app_id={app_id})")
     except Exception as e:
-        logger.warning(f"智能体流式调用失败 (app_id={app_id}): {e}，降级到直接调模型")
+        logger.warning(f"智能体调用失败 (app_id={app_id}): {e}，降级到直接调模型")
 
     # 降级：直接调大模型
     from backend.api.config_router import get_config_value
@@ -141,7 +152,9 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> st
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                content_out = data["choices"][0]["message"]["content"]
+                logger.info(f"_call_model_sync response: model={model}, len={len(content_out)}, head={content_out[:200]}")
+                return content_out
             # 400 错误可能是格式问题，尝试下一种格式
             if resp.status_code == 400:
                 last_error = resp.text[:300]
@@ -164,6 +177,7 @@ def call_ai_sync_direct(prompt: str, api_key: str) -> str:
     model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
     api_base = get_config_value("QWEN_OPENAI_API_BASE",
                                  "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    logger.info(f"call_ai_sync_direct: model={model}, prompt_len={len(prompt)}, prompt_head={prompt[:200]}")
     return _call_model_sync(prompt, api_key, model, api_base)
 
 
@@ -299,7 +313,6 @@ async def call_ai_async(prompt: str, api_key: str) -> str:
 
     cfg = get_ai_config()
     os.environ["DASHSCOPE_API_KEY"] = api_key
-
     if cfg["mode"] == "agent":
         return await _call_agent_async(prompt, api_key, cfg["app_id"])
     else:

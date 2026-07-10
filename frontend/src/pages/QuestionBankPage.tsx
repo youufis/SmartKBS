@@ -805,6 +805,7 @@ const QuestionBankPage: React.FC = () => {
                                 })
                                 setExtractedQuestions(data.questions || [])
                                 message.success(data.message || t('extractedCount', { count: data.total || 0 }))
+                                loadQuestions()
                               } catch (err: any) {
                                 setExtractError(err.response?.data?.detail || err.message || t('extractFail'))
                               } finally {
