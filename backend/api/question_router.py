@@ -817,9 +817,8 @@ async def extract_questions_from_text(
         if not api_key:
             raise HTTPException(status_code=400, detail="未配置 API Key，请先在系统配置中设置")
 
-        # 构造提取 Prompt
+        # 构造提取 Prompt（不注入技能，避免结构化输出指令与纯 JSON 要求冲突）
         prompt = _build_extract_prompt(subject, difficulty, content)
-        prompt = apply_skills(prompt, "quiz")
         logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
 
         # 调用 AI
@@ -1272,8 +1271,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
         count=req.count,
         difficulty_desc=difficulty_desc,
     )
-    prompt = apply_skills(prompt, "quiz")
-
+    # 注意：不注入技能 — 技能的结构化输出指令与纯 JSON 输出要求冲突
     logger.info(f"开始调用AI生成多媒体试题: subject={req.subject}, type={req.question_type}")
 
     try:
