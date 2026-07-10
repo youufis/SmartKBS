@@ -224,7 +224,8 @@
     "tabs": {
       "class": "Class Analytics",
       "exam": "Exam Analytics",
-      "progress": "Progress"
+      "progress": "Progress",
+      "progressDetail": "Progress Details"
     },
     "aiAnalyze": "AI Analyze",
     "aiSuggestions": "AI Suggestions",

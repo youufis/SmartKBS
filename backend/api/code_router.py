@@ -404,8 +404,8 @@ async def delete_code_problem(problem_id: int, request: Request):
     from backend.database import execute_insert_update as db_update
     db_update("DELETE FROM activity_rewards WHERE activity_type='code' AND activity_id=?", (str(problem_id),))
     db_update("DELETE FROM notifications WHERE source_type='code' AND source_id=?", (str(problem_id),))
-    # 软删主记录
-    q_update("UPDATE code_problems SET status='deleted',updated_at=? WHERE id=?", (_now(), problem_id))
+    # 硬删主记录
+    q_update("DELETE FROM code_problems WHERE id=?", (problem_id,))
     return {"status": "ok"}
 
 

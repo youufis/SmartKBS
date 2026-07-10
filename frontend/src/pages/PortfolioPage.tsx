@@ -482,9 +482,9 @@ const PortfolioPage: React.FC = () => {
                   size="small"
                   pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
                   columns={[
-                    { title: t('portfolio.activityType'), dataIndex: 'activity_type', width: 80 },
+                    { title: t('portfolio.activityType'), dataIndex: 'activity_type_name', width: 80 },
                     { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
-                    { title: t('rewardType'), dataIndex: 'reward_type', width: 80 },
+                    { title: t('rewardType'), dataIndex: 'reward_type_name', width: 80 },
                     { title: t('points'), dataIndex: 'points', width: 60 },
                     {
                       title: t('description'), dataIndex: 'reason', ellipsis: true,
