@@ -1370,26 +1370,6 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
                 results = await asyncio.gather(*[_gen_one(ph) for ph in placeholders])
                 media_files = [r for r in results if r is not None]
 
-            elif not svg_code.strip():
-                # 策略 B：既无 SVG 又无占位符 → 根据题目内容自动补一张插图
-                q_text = (q_data.get("question", "") or "")[:300]
-                if len(q_text) > 20:
-                    fallback_prompt = IMAGE_GEN_PROMPT_TEMPLATE.format(
-                        subject=req.subject,
-                        purpose="示意图",
-                        description=f"与「{q_text}」相关的教学插图，适合高中{req.subject}课堂展示",
-                    )
-                    local_path = await generate_and_save_image(fallback_prompt, media_dir)
-                    if local_path:
-                        from pathlib import Path as PPath
-                        media_files.append({
-                            "key": "auto",
-                            "type": "image",
-                            "url": f"/api/files/question_media/{qid}/{PPath(local_path).name}",
-                            "alt": q_text[:100],
-                            "created_at": now,
-                        })
-
             # 更新 media_files 到数据库
             if media_files:
                 execute_update(
