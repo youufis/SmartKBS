@@ -2113,7 +2113,7 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
         knowledge_focus=_safe(req.knowledge_focus or "无特定要求"),
         candidate_questions=_safe(candidate_text),
     )
-    prompt = apply_skills(prompt, "exam")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         ai_response = await call_ai_async(prompt, api_key)

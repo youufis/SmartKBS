@@ -269,7 +269,7 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
             type_desc=type_desc,
             count=remaining,
         )
-        prompt = apply_skills(prompt, "quiz")
+        # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
         try:
             result_text = await call_ai_async(prompt, api_key)
@@ -414,7 +414,7 @@ async def ai_generate_poll(req: AiGeneratePoll, request: Request):
         '  "options": ["选项1", "选项2", ...]\n'
         '}'
     )
-    prompt = apply_skills(prompt, "quiz")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         result_text = await call_ai_async(prompt, api_key)

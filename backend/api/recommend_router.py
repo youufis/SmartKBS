@@ -123,7 +123,7 @@ async def recommend_resources(kp_id: int, request: Request):
         resources_json=resources_json,
     )
 
-    prompt = apply_skills(prompt, "recommend")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
         result_text = await call_ai_async(prompt, api_key)
     except Exception as e:
