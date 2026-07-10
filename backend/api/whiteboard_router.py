@@ -1434,7 +1434,7 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
 
         from backend.prompts.whiteboard_ai import DIAGRAM_GENERATION_PROMPT
         prompt = DIAGRAM_GENERATION_PROMPT.format(description=description, subject=subject)
-        prompt = apply_skills(prompt, "whiteboard")
+        # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
         timeout = _get_ai_timeout()
 
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1539,7 +1539,7 @@ async def ai_generate_board(request: Request):
 
     from backend.prompts.whiteboard_ai import BOARD_GENERATION_PROMPT
     prompt = BOARD_GENERATION_PROMPT.format(kp_name=kp_name, subject=subject, grade=grade)
-    prompt = apply_skills(prompt, "whiteboard")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1584,7 +1584,7 @@ async def ai_beautify_board(request: Request):
         snapshot_text=snapshot_text,
         subject=subject,
     )
-    prompt = apply_skills(prompt, "whiteboard")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1622,7 +1622,7 @@ async def ai_smart_annotation(request: Request):
 
     from backend.prompts.whiteboard_ai import SMART_LABEL_PROMPT
     prompt = SMART_LABEL_PROMPT.format(selection_desc=selection_desc, mode=mode)
-    prompt = apply_skills(prompt, "whiteboard")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1664,7 +1664,7 @@ async def ai_generate_mindmap(request: Request):
 
     from backend.prompts.whiteboard_ai import MIND_MAP_PROMPT
     prompt = MIND_MAP_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
-    prompt = apply_skills(prompt, "whiteboard")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1742,7 +1742,7 @@ async def export_board_summary(room_id: int, request: Request):
     # AI 生成总结
     from backend.prompts.whiteboard_ai import BOARD_SUMMARY_PROMPT
     prompt = BOARD_SUMMARY_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
-    prompt = apply_skills(prompt, "whiteboard")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
@@ -1856,7 +1856,7 @@ async def ai_generate_quiz(request: Request):
         kp_name=kp_name or "未指定",
         subject=subject,
     )
-    prompt = apply_skills(prompt, "whiteboard")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
@@ -1898,7 +1898,7 @@ async def ai_generate_bilingual(request: Request):
 
     from backend.prompts.whiteboard_ai import BILINGUAL_BOARD_PROMPT
     prompt = BILINGUAL_BOARD_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
-    prompt = apply_skills(prompt, "whiteboard")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
