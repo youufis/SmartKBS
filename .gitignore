@@ -70,13 +70,8 @@ web.config
 stu/
 root/
 
-# ── 桌面版构建产物（仅忽略生成的文件，保留源码） ──
-desktop/backend-dist/
-desktop/build/
-desktop/release/
-desktop/dist_installer/
-desktop/node_modules/
-desktop/*.spec
+# ── 桌面版（构建产物 + 源码，整目录排除） ──
+desktop/
 .venv/
 youufis/
 Temp/
