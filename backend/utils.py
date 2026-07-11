@@ -13,6 +13,7 @@ from typing import Optional, Any
 
 from backend.config import (
     BASE_DIR,
+    DATA_DIR,
     ROOT_DIR,
     STU_DIR,
     CHAT_HISTORY_DIR,
@@ -30,10 +31,10 @@ def get_user_role_num(username: str) -> Optional[int]:
 
 
 def _resolve_abs(path: str) -> str:
-    """将相对路径解析为基于 BASE_DIR 的绝对路径"""
+    """将相对路径解析为基于 DATA_DIR 的绝对路径"""
     if os.path.isabs(path):
         return path
-    return str(BASE_DIR / path)
+    return str(DATA_DIR / path)
 
 
 def get_user_base_dir(username: str) -> str:

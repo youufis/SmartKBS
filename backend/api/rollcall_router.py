@@ -7,7 +7,7 @@ from typing import Any
 import jwt as pyjwt
 from fastapi import APIRouter, Request, HTTPException
 
-from backend.config import BASE_DIR, ROOT_DIR, STU_DIR
+from backend.config import DATA_DIR, ROOT_DIR, STU_DIR
 from backend.api.dependencies import get_current_user
 from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT, is_admin, get_online_usernames
 from backend.database import get_connection, execute_query, execute_query_dict, execute_insert_update
@@ -213,11 +213,11 @@ def _save_to_student_chat(student_name, cls, content):
     try:
         role_rows = execute_query("SELECT role FROM users WHERE username=?", (username,))
         if role_rows and role_rows[0][0] == 2:
-            user_dir = os.path.join(BASE_DIR, STU_DIR, username)
+            user_dir = os.path.join(DATA_DIR, STU_DIR, username)
         else:
-            user_dir = os.path.join(BASE_DIR, username)
+            user_dir = os.path.join(DATA_DIR, username)
     except Exception:
-        user_dir = os.path.join(BASE_DIR, username)
+        user_dir = os.path.join(DATA_DIR, username)
     os.makedirs(user_dir, exist_ok=True)
     chat_dir = os.path.join(user_dir, "ChatHistory")
     date_str = time.strftime("%Y-%m-%d")

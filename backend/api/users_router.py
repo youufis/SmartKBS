@@ -25,7 +25,7 @@ from backend.auth import (
     can_import_users,
 )
 from backend.api.dependencies import get_current_user
-from backend.config import STU_DIR, ROOT_DIR, BASE_DIR
+from backend.config import STU_DIR, ROOT_DIR, DATA_DIR
 from backend.logger import logger
 from backend.permission_service import (
     upsert_grade,
@@ -112,8 +112,8 @@ def _delete_user_completely(username: str):
     2. 删除数据库中所有与该用户相关的记录
     """
     # 1. 删除用户文件目录
-    user_dir = os.path.join(BASE_DIR, STU_DIR, username)
-    alt_dir = os.path.join(BASE_DIR, username)
+    user_dir = os.path.join(DATA_DIR, STU_DIR, username)
+    alt_dir = os.path.join(DATA_DIR, username)
     for d in [user_dir, alt_dir]:
         if os.path.isdir(d):
             try:
