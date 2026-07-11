@@ -13,7 +13,7 @@ copyright: "Copyright © 2026 SmartKBS Team"
 
 directories:
   buildResources: resources
-  output: dist_installer
+  output: release
 
 # ── 进入 ASAR 的文件（Electron 应用代码） ──
 # 仅包含桌面应用本身的脚本，不含任何项目源文件
