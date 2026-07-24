@@ -392,7 +392,7 @@ def _get_activity_summary(username: str) -> str:
         from backend.database import execute_query
         rows = execute_query(
             """SELECT activity_type, COUNT(*) as cnt
-               FROM reward_history
+               FROM activity_rewards
                WHERE student_username=? AND created_at >= date('now', '-30 days')
                GROUP BY activity_type
                ORDER BY cnt DESC

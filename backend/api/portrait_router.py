@@ -134,14 +134,14 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
 
             # 本周新增积分
             pt_rows = execute_query(
-                "SELECT COALESCE(SUM(points),0) FROM reward_history WHERE student_username=? AND created_date BETWEEN ? AND ?",
+                "SELECT COALESCE(SUM(points),0) FROM activity_rewards WHERE student_username=? AND created_at BETWEEN ? AND ?",
                 (username, week_start, week_end),
             )
             week_points = pt_rows[0][0] if pt_rows else 0
 
             # 累计总积分
             total_pts = execute_query(
-                "SELECT COALESCE(SUM(points),0) FROM reward_history WHERE student_username=?",
+                "SELECT COALESCE(SUM(points),0) FROM activity_rewards WHERE student_username=?",
                 (username,),
             )
             total_points_all = total_pts[0][0] if total_pts else 0
@@ -149,7 +149,7 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
             # 全部活动类型的累计次数（15种）
             act_rows = execute_query(
                 """SELECT activity_type, COUNT(*) as cnt
-                   FROM reward_history
+                   FROM activity_rewards
                    WHERE student_username=?
                    GROUP BY activity_type
                    ORDER BY cnt DESC""",
@@ -491,9 +491,9 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     # 3. LLM 生成创意寄语
     logger.info(f"开始生成寄语: username={username}")
     try:
-        prompt = apply_skills(prompt, "portrait")
+        comment_prompt = apply_skills(build_portrait_comment_prompt(profile, style), "portrait")
         comment = await call_ai_sync_with_timeout(
-            build_portrait_comment_prompt(profile, style),
+            comment_prompt,
             api_key,
             timeout=150,
         )
