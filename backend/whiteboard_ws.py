@@ -42,30 +42,61 @@ class WhiteboardManager:
                 return code
 
     # ── 连接管理 ──
-    async def join_room(self, room_id: int, username: str,
-                        role: str, websocket: WebSocket):
-        await websocket.accept()
-        if room_id not in self.rooms:
-            self.rooms[room_id] = {
-                "connections": {},
-                "current_page": 1,
-                "mode": "demo",
-                "controller": username,
-                "granted_users": set(),
-            }
-        self.rooms[room_id]["connections"][username] = {
+    def _ensure_room(self, room_id: int, controller: str = "") -> dict:
+        """获取房间；不存在则创建，并尽量从数据库恢复最新快照"""
+        room = self.rooms.get(room_id)
+        if room is not None:
+            return room
+        room = {
+            "connections": {},
+            "current_page": 1,
+            "mode": "demo",
+            "controller": controller,
+            "granted_users": set(),
+            "last_snapshot": "",
+        }
+        # 房间可能已因全员离开/结束而被回收，尝试从数据库恢复最新快照，避免白板内容丢失
+        try:
+            rows = execute_query(
+                "SELECT snapshot_data FROM whiteboard_pages "
+                "WHERE room_id=? AND snapshot_data IS NOT NULL AND snapshot_data != '' "
+                "ORDER BY updated_at DESC LIMIT 1",
+                (room_id,),
+            )
+            if rows and rows[0][0]:
+                room["last_snapshot"] = rows[0][0]
+        except Exception as e:
+            logger.warning(f"[白板] 恢复房间 {room_id} 最新快照失败: {e}")
+        self.rooms[room_id] = room
+        return room
+
+    def _register_connection(self, room: dict, username: str, role: str,
+                             websocket: WebSocket):
+        room["connections"][username] = {
             "ws": websocket,
             "role": role,
             "cursor": {"x": 0, "y": 0},
-            "granted": False,
+            "granted": username in room.get("granted_users", set()),
         }
+
+    async def join_room(self, room_id: int, username: str,
+                        role: str, websocket: WebSocket):
+        await websocket.accept()
+        # 房间可能被并发移除（如最后一个连接恰好断开/房间被结束），
+        # 每次 await 后都重新获取，避免 KeyError 崩溃
+        room = self._ensure_room(room_id, controller=username)
+        self._register_connection(room, username, role, websocket)
+
         # 如果该用户之前被授权过，自动恢复
-        if username in self.rooms[room_id].get("granted_users", set()):
-            self.rooms[room_id]["connections"][username]["granted"] = True
+        if username in room.get("granted_users", set()):
+            room["connections"][username]["granted"] = True
             await self.send_to_user(room_id, username, {
                 "type": "control_granted",
                 "by": "system",
             })
+            # await 期间房间可能被移除，重新获取并恢复连接
+            room = self._ensure_room(room_id, controller=username)
+            self._register_connection(room, username, role, websocket)
 
         # 更新数据库：清除离开时间，标记为在线
         execute_insert_update(
@@ -75,7 +106,7 @@ class WhiteboardManager:
 
         # 更新数据库成员在线数（基于实时 WebSocket 连接中的学生数）
         student_online = sum(
-            1 for c in self.rooms[room_id]["connections"].values()
+            1 for c in room["connections"].values()
             if c.get("role") == "student"
         )
         execute_insert_update(
@@ -90,8 +121,12 @@ class WhiteboardManager:
             "role": role,
             "online_count": student_online,
         })
+        # 广播期间房间可能被并发移除，重新获取并恢复本连接
+        room = self._ensure_room(room_id, controller=username)
+        if username not in room["connections"]:
+            self._register_connection(room, username, role, websocket)
         # 新加入者：从内存获取最新快照
-        last_snap = self.rooms[room_id].get("last_snapshot", "")
+        last_snap = room.get("last_snapshot", "")
         if last_snap:
             await self.send_to_user(room_id, username, {
                 "type": "op_broadcast",
