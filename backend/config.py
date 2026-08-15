@@ -8,12 +8,23 @@ from pathlib import Path
 # ── 项目根目录 ──
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ── 应用版本（从前端 package.json 读取，避免硬编码） ──
+# ── 用户数据目录（桌面版可通过环境变量覆盖） ──
+# 桌面版 Electron 会将此设为 app.getPath('userData')，实现数据持久化
+DATA_DIR = Path(os.environ.get("SMARTKB_DATA_DIR", str(BASE_DIR)))
+
+# ── 应用版本 ──
+# 优先读取前端 package.json，桌面版回退到 version.json
 def _load_app_version() -> str:
-    pkg = BASE_DIR / "frontend" / "package.json"
     try:
+        pkg = BASE_DIR / "frontend" / "package.json"
         if pkg.exists():
             return json.loads(pkg.read_text(encoding="utf-8")).get("version", "0.0.0")
+    except Exception:
+        pass
+    try:
+        ver = BASE_DIR / "version.json"
+        if ver.exists():
+            return json.loads(ver.read_text(encoding="utf-8")).get("latest_version", "0.0.0")
     except Exception:
         pass
     return "0.0.0"
@@ -22,7 +33,7 @@ APP_VERSION: str = _load_app_version()
 
 # ── 目录/文件相关 ──
 CHAT_HISTORY_DIR = "ChatHistory"
-LOG_FILES_DIR = str(BASE_DIR / "LogFiles")
+LOG_FILES_DIR = str(DATA_DIR / "LogFiles")
 ROOT_DIR = "root"
 STU_DIR = "stu"
 SUMMARY_DIR_NAME = "Summary"
@@ -43,7 +54,11 @@ JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "smartkb-jwt-secret-key-change
 JWT_ALGORITHM = "HS256"
 
 # ── 静态文件路径 ──
-FRONTEND_DIST_DIR = BASE_DIR / "frontend" / "dist"
+# 桌面版可通过环境变量 SMARTKB_FRONTEND_PATH 覆盖
+FRONTEND_DIST_DIR = Path(os.environ.get(
+    "SMARTKB_FRONTEND_PATH",
+    str(BASE_DIR / "frontend" / "dist")
+))
 
 # 注意：运行时配置由 backend/api/config_router.py 统一管理
 # 修改 system_config.json 请通过 API（/api/config）或直接编辑 JSON 文件

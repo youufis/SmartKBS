@@ -15,7 +15,7 @@ from backend.auth import ROLE_ADMIN, ROLE_TEACHER, ROLE_STUDENT
 from backend.database import execute_query, execute_insert_update, execute_batch
 from backend.logger import logger
 from backend.api.config_router import get_config_value
-from backend.config import STU_DIR, ROOT_DIR, BASE_DIR
+from backend.config import STU_DIR, ROOT_DIR, DATA_DIR
 from backend.permission_service import check_share_visibility
 
 router = APIRouter()
@@ -75,7 +75,7 @@ def cleanup_empty_dir_shares(owner_username: str | None = None):
                 continue
             dir_name = dir_name_map.get(res_type, "downloads")
             clean_path = file_path.strip("/")
-            full_dir = os.path.join(str(BASE_DIR), owner, dir_name, clean_path)
+            full_dir = os.path.join(str(DATA_DIR), owner, dir_name, clean_path)
             if not os.path.isdir(full_dir) or not os.listdir(full_dir):
                 # 清理关联的课程绑定
                 try:

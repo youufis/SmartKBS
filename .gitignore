@@ -47,6 +47,7 @@ pytest.ini
 
 # ── 开发工具脚本（不部署） ──
 scripts/
+build-desktop.bat
 
 # ── 覆盖率报告 ──
 htmlcov/
@@ -68,6 +69,10 @@ web.config
 **/Summary/
 stu/
 root/
+
+# ── 桌面版（构建产物 + 源码，整目录排除） ──
+desktop/
+.venv/
 youufis/
 Temp/
 question_media/
