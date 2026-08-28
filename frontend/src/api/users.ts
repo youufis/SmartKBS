@@ -2,6 +2,17 @@
 import apiClient from './client';
 import type { UserItem } from '../types';
 
+/** 从后端错误响应中取出可读错误信息（detail 可能是字符串，也可能是结构化对象） */
+export function extractApiErrorDetail(errData: unknown): string {
+  const detail = (errData as { detail?: unknown } | undefined)?.detail;
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object') {
+    const d = detail as { message?: string; error?: string };
+    return d.message || d.error || '';
+  }
+  return '';
+}
+
 export interface RegisterParams {
   username: string;
   password: string;
@@ -44,14 +55,55 @@ export async function getAllUsers(keyword?: string): Promise<{ users: UserItem[]
   return data;
 }
 
-export async function bulkDeleteUsers(pattern: string): Promise<string> {
-  const { data } = await apiClient.post('/api/users/bulk-delete', { pattern });
+/** 批量删除的用户名匹配模式：前缀 / 包含 / 精确 */
+export type BulkMatchMode = 'prefix' | 'contains' | 'exact';
+
+/** 批量删除预览结果（后端 /bulk-delete/preview 返回，不会删除任何数据） */
+export interface BulkDeletePreview {
+  pattern: string;
+  match_mode: BulkMatchMode;
+  match_mode_label?: string;
+  matched_count: number;
+  preview: string[];
+  skipped_admin_count: number;
+  message: string;
+}
+
+/** 预览批量删除将命中的用户，用于删除前的二次确认 */
+export async function previewBulkDelete(
+  pattern: string,
+  matchMode: BulkMatchMode = 'prefix',
+): Promise<BulkDeletePreview> {
+  const { data } = await apiClient.post('/api/users/bulk-delete/preview', {
+    pattern,
+    match_mode: matchMode,
+  });
+  return data;
+}
+
+/**
+ * 批量删除（非流式）。
+ * 后端要求 confirm=true 才会真正删除；confirm=false 只返回匹配预览并报 400。
+ */
+export async function bulkDeleteUsers(
+  pattern: string,
+  matchMode: BulkMatchMode = 'prefix',
+  confirm = true,
+): Promise<string> {
+  const { data } = await apiClient.post('/api/users/bulk-delete', {
+    pattern,
+    match_mode: matchMode,
+    confirm,
+  });
   return data.message;
 }
 
 /** 流式批量删除用户（支持进度回调） */
 export interface BulkDeleteProgressEvent {
   type: 'start' | 'progress' | 'done';
+  pattern?: string;
+  match_mode?: BulkMatchMode;
+  skipped_admin_count?: number;
   total?: number;
   current?: number;
   deleted?: number;
@@ -64,6 +116,8 @@ export interface BulkDeleteProgressEvent {
 export async function bulkDeleteUsersStream(
   pattern: string,
   onProgress: (event: BulkDeleteProgressEvent) => void,
+  matchMode: BulkMatchMode = 'prefix',
+  confirm = true,
 ): Promise<BulkDeleteProgressEvent> {
   const token = localStorage.getItem('smartkb_token');
 
@@ -73,12 +127,13 @@ export async function bulkDeleteUsersStream(
       'Content-Type': 'application/json',
       ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ pattern }),
+    // confirm 必须为 true：否则后端只会回“请确认”的 400，不会真的删除任何用户
+    body: JSON.stringify({ pattern, match_mode: matchMode, confirm }),
   });
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.detail || `批量删除失败 (${response.status})`);
+    throw new Error(extractApiErrorDetail(errData) || `批量删除失败 (${response.status})`);
   }
 
   const reader = response.body!.getReader();

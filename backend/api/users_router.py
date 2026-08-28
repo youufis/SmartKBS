@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -68,7 +69,8 @@ class ChangePasswordRequest(BaseModel):
 
 class BulkDeleteRequest(BaseModel):
     pattern: str
-    confirm: bool = False  # 确认删除，防止误操作
+    confirm: bool = False  # 确认删除，防止误操作（false 时只返回匹配预览，绝不删除）
+    match_mode: str = "prefix"  # 匹配模式：prefix 前缀 / contains 包含 / exact 精确
 
 
 # ── 辅助函数 ──
@@ -101,6 +103,56 @@ def _standardize_role(role_value) -> int:
     if r in ("1", "teacher", "教师"):
         return 1
     return 2
+
+
+# ── 批量删除：用户名匹配辅助 ──
+
+_BULK_MATCH_MODES = {"prefix", "contains", "exact"}
+_MATCH_MODE_LABELS = {"prefix": "前缀匹配", "contains": "包含匹配", "exact": "精确匹配"}
+_DELETE_FROM_RE = re.compile(r"^\s*DELETE\s+FROM\s+([A-Za-z0-9_]+)", re.IGNORECASE)
+_main_tables_cache: Optional[frozenset] = None
+
+
+def _normalize_match_mode(mode: Optional[str]) -> str:
+    """规范化匹配模式，未知取值回退为最安全的前缀匹配"""
+    m = (mode or "prefix").strip().lower()
+    return m if m in _BULK_MATCH_MODES else "prefix"
+
+
+def _username_condition(pattern: str, match_mode: str) -> tuple[str, tuple]:
+    """按匹配模式构造用户名匹配条件与查询参数"""
+    if match_mode == "exact":
+        return "username = ?", (pattern,)
+    if match_mode == "contains":
+        return "username LIKE ?", (f"%{pattern}%",)
+    return "username LIKE ?", (f"{pattern}%",)
+
+
+def _find_bulk_delete_targets(pattern: str, match_mode: str) -> tuple[list[str], int]:
+    """返回 (可删除用户名列表, 被跳过的管理员账号数量)"""
+    cond, cond_params = _username_condition(pattern, match_mode)
+    rows = execute_query(f"SELECT username, role FROM users WHERE {cond}", cond_params)
+    users = [r[0] for r in rows if r[1] != 0]
+    return users, len(rows) - len(users)
+
+
+def _delete_target_table(sql: str) -> str:
+    """取出 DELETE 语句的目标表名（用于跳过不存在的表）"""
+    m = _DELETE_FROM_RE.match(sql)
+    return m.group(1).lower() if m else ""
+
+
+def _main_table_names() -> frozenset:
+    """主库现有表名集合（进程内缓存，建表仅发生在启动初始化阶段）"""
+    global _main_tables_cache
+    if _main_tables_cache is None:
+        try:
+            rows = execute_query("SELECT name FROM sqlite_master WHERE type='table'")
+            _main_tables_cache = frozenset(r[0].lower() for r in rows)
+        except Exception as e:
+            logger.warning(f"读取表名列表失败，跳过表存在性检查: {e}")
+            _main_tables_cache = frozenset()
+    return _main_tables_cache
 
 
 # ── 彻底删除用户（数据库 + 文件系统） ──
@@ -236,60 +288,67 @@ def _delete_user_completely(username: str):
     # 最后删除用户本身
     delete_ops.append(("DELETE FROM users WHERE username=?", (username,)))
 
-    # 逐条执行删除操作，单条失败仅记录日志不影响后续
+    # 先按表存在性过滤（老版本库可能缺表），再放进单个事务一次性提交。
+    # 原来每条语句单独开连接提交，删除上千个用户时会慢几十倍。
+    existing_tables = _main_table_names()
+    ops = []
     for sql, params in delete_ops:
-        try:
-            execute_batch([(sql, params)])
-        except Exception as e:
-            logger.warning(f"删除操作跳过（表或列不存在）: {sql[:80]}... - {e}")
+        table = _delete_target_table(sql)
+        if existing_tables and table and table not in existing_tables:
+            logger.debug(f"表不存在，跳过删除: {table}")
+            continue
+        ops.append((sql, params))
 
-    # 4. 删除 questions.db 中的考试、练习、题库等记录
     try:
-        from backend.question_db import execute_update as q_execute_update
-        q_execute_update(
-            "DELETE FROM exam_attempts WHERE student_username=?", (username,)
-        )
-        q_execute_update(
-            "DELETE FROM code_submissions WHERE student_username=?", (username,)
-        )
-        # 教师创建的代码题（先删关联的测试用例和运行记录）
-        q_execute_update(
-            "DELETE FROM code_test_cases WHERE problem_id IN (SELECT id FROM code_problems WHERE creator_username=?)", (username,)
-        )
-        q_execute_update(
-            "DELETE FROM code_runs WHERE problem_id IN (SELECT id FROM code_problems WHERE creator_username=?)", (username,)
-        )
-        q_execute_update(
-            "DELETE FROM code_problems WHERE creator_username=?", (username,)
-        )
-        q_execute_update(
-            "DELETE FROM ai_practice_results WHERE student_username=?", (username,)
-        )
-        # 教师创建的考试（先删关联的 exam_questions）
-        q_execute_update(
-            "DELETE FROM exam_questions WHERE exam_id IN (SELECT id FROM exams WHERE creator_username=?)", (username,)
-        )
-        q_execute_update(
-            "DELETE FROM exams WHERE creator_username=?", (username,)
-        )
-        # 教师创建的题库题目
-        q_execute_update(
-            "DELETE FROM question_bank WHERE creator_username=?", (username,)
-        )
-        # 教师创建的智能练习（先删关联题目，再删练习记录）
-        q_execute_update(
-            "DELETE FROM practice_session_questions WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)
-        )
-        q_execute_update(
-            "DELETE FROM practice_attempts WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)
-        )
-        q_execute_update(
-            "DELETE FROM practice_sessions WHERE creator_username=?", (username,)
-        )
-        # 学生答题记录（与教师创建的练习独立）
-        q_execute_update(
-            "DELETE FROM practice_attempts WHERE student_username=?", (username,)
-        )
+        execute_batch(ops)
+    except Exception as bulk_err:
+        # 整体事务失败（例如列不存在）时回退为逐条执行，尽量把数据删干净
+        logger.warning(f"批量删除事务失败，回退逐条执行: {bulk_err}")
+        for sql, params in ops:
+            try:
+                execute_batch([(sql, params)])
+            except Exception as e:
+                logger.warning(f"删除操作跳过（表或列不存在）: {sql[:80]}... - {e}")
+
+    # 4. 删除 questions.db 中的考试、练习、题库等记录（共用一个连接和一个事务）
+    try:
+        from backend.question_db import get_connection as q_get_connection
+
+        q_ops = [
+            ("DELETE FROM exam_attempts WHERE student_username=?", (username,)),
+            ("DELETE FROM code_submissions WHERE student_username=?", (username,)),
+            # 教师创建的代码题（先删关联的测试用例和运行记录）
+            ("DELETE FROM code_test_cases WHERE problem_id IN (SELECT id FROM code_problems WHERE creator_username=?)", (username,)),
+            ("DELETE FROM code_runs WHERE problem_id IN (SELECT id FROM code_problems WHERE creator_username=?)", (username,)),
+            ("DELETE FROM code_problems WHERE creator_username=?", (username,)),
+            ("DELETE FROM ai_practice_results WHERE student_username=?", (username,)),
+            # 教师创建的考试（先删关联的 exam_questions）
+            ("DELETE FROM exam_questions WHERE exam_id IN (SELECT id FROM exams WHERE creator_username=?)", (username,)),
+            ("DELETE FROM exams WHERE creator_username=?", (username,)),
+            # 教师创建的题库题目
+            ("DELETE FROM question_bank WHERE creator_username=?", (username,)),
+            # 教师创建的智能练习（先删关联题目，再删练习记录）
+            ("DELETE FROM practice_session_questions WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)),
+            ("DELETE FROM practice_attempts WHERE session_id IN (SELECT id FROM practice_sessions WHERE creator_username=?)", (username,)),
+            ("DELETE FROM practice_sessions WHERE creator_username=?", (username,)),
+            # 学生答题记录（与教师创建的练习独立）
+            ("DELETE FROM practice_attempts WHERE student_username=?", (username,)),
+        ]
+        with q_get_connection() as q_conn:
+            q_cur = q_conn.cursor()
+            q_tables = frozenset(
+                r[0].lower()
+                for r in q_cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            )
+            for sql, params in q_ops:
+                table = _delete_target_table(sql)
+                if q_tables and table and table not in q_tables:
+                    continue
+                try:
+                    q_cur.execute(sql, params)
+                except Exception as e:
+                    logger.warning(f"questions.db 删除跳过: {sql[:60]}... - {e}")
+            q_conn.commit()
     except Exception as e:
         logger.warning(f"删除 questions.db 记录失败: {e}")
 
@@ -601,9 +660,9 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
     return {"users": users, "total": len(users)}
 
 
-@router.post("/bulk-delete")
-async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
-    """批量彻底删除用户（按用户名模式匹配，跳过管理员账号，流式进度返回）"""
+@router.post("/bulk-delete/preview")
+async def preview_bulk_delete_users(req: BulkDeleteRequest, request: Request):
+    """批量删除预览：只统计匹配用户并返回样例，不做任何删除，供前端二次确认"""
     current_user = get_current_user(request)
     if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
         raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以批量删除")
@@ -612,69 +671,103 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
     if not pattern:
         raise HTTPException(status_code=400, detail="请提供要删除的用户名模式")
 
-    if not req.confirm:
-        rows_preview = execute_query(
-            "SELECT username FROM users WHERE username LIKE ? AND role != 0 LIMIT 10",
-            (f"%{pattern}%",),
-        )
-        preview = [r[0] for r in rows_preview]
-        count = execute_query(
-            "SELECT COUNT(*) FROM users WHERE username LIKE ? AND role != 0",
-            (f"%{pattern}%",),
-        )
-        total_match = count[0][0] if count else 0
-        raise HTTPException(
-            status_code=400,
-            detail=json.dumps({
-                "error": "请确认批量删除操作",
-                "message": f"模式 '{pattern}' 匹配 {total_match} 个用户，前 {min(len(preview), 10)} 个: {preview}。请设置 confirm=true 确认删除",
-                "matched_count": total_match,
-                "preview": preview,
-            }, ensure_ascii=False),
-        )
+    match_mode = _normalize_match_mode(req.match_mode)
+    users, skipped_admins = _find_bulk_delete_targets(pattern, match_mode)
+    return {
+        "pattern": pattern,
+        "match_mode": match_mode,
+        "match_mode_label": _MATCH_MODE_LABELS[match_mode],
+        "matched_count": len(users),
+        "preview": users[:10],
+        "skipped_admin_count": skipped_admins,
+        "message": f"模式 '{pattern}'（{_MATCH_MODE_LABELS[match_mode]}）匹配 {len(users)} 个用户"
+        + (f"，另有 {skipped_admins} 个管理员账号不会被删除" if skipped_admins else ""),
+    }
 
-    # 先查出匹配的非管理员用户
-    rows = execute_query(
-        "SELECT username FROM users WHERE username LIKE ? AND role != 0",
-        (f"%{pattern}%",),
-    )
-    all_users = [row[0] for row in rows]
+
+@router.post("/bulk-delete")
+async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
+    """批量彻底删除用户（按用户名模式匹配，跳过管理员账号，SSE 流式进度）
+
+    安全约定：必须显式传 confirm=true 才会真正删除。confirm=false 时返回 400 且
+    detail 为结构化对象（含 matched_count / preview），前端应先调用
+    /bulk-delete/preview 展示确认框，用户确认后再以 confirm=true 重发本接口。
+    """
+    current_user = get_current_user(request)
+    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以批量删除")
+
+    pattern = req.pattern.strip()
+    if not pattern:
+        raise HTTPException(status_code=400, detail="请提供要删除的用户名模式")
+
+    match_mode = _normalize_match_mode(req.match_mode)
+    all_users, skipped_admins = _find_bulk_delete_targets(pattern, match_mode)
     total = len(all_users)
 
+    if not req.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "need_confirm",
+                "code": "BULK_DELETE_NEED_CONFIRM",
+                "message": f"模式 '{pattern}'（{_MATCH_MODE_LABELS[match_mode]}）匹配 {total} 个用户，"
+                f"前 {min(total, 10)} 个: {all_users[:10]}。请确认后以 confirm=true 重新提交",
+                "matched_count": total,
+                "preview": all_users[:10],
+                "skipped_admin_count": skipped_admins,
+            },
+        )
+
     async def event_generator():
+        yield "data: {}\n\n".format(json.dumps(
+            {
+                'type': 'start',
+                'total': total,
+                'pattern': pattern,
+                'match_mode': match_mode,
+                'skipped_admin_count': skipped_admins,
+            },
+            ensure_ascii=False,
+        ))
+
         if total == 0:
             yield "data: {}\n\n".format(json.dumps(
-                {'type': 'done', 'deleted': 0, 'message': '没有匹配的用户'},
+                {'type': 'done', 'deleted': 0, 'error_count': 0, 'errors': [], 'message': '没有匹配的用户'},
                 ensure_ascii=False,
             ))
             return
 
-        yield "data: {}\n\n".format(json.dumps(
-            {'type': 'start', 'total': total},
-            ensure_ascii=False,
-        ))
-
+        # 用户很多时按批次回报进度，避免上千条 SSE 事件拖慢前端渲染
+        step = 1 if total <= 50 else max(1, total // 100)
         deleted_count = 0
-        error_list = []
+        error_list: list[str] = []
+
         for i, username in enumerate(all_users):
             try:
-                _delete_user_completely(username)
+                # 放入线程池执行，避免删除耗时阻塞事件循环导致进度长时间不动
+                await asyncio.to_thread(_delete_user_completely, username)
                 deleted_count += 1
             except Exception as e:
                 error_list.append(f"用户 '{username}': {str(e)}")
                 logger.error(f"批量删除用户 '{username}' 失败: {e}")
 
-            progress_data = {
-                'type': 'progress',
-                'current': i + 1,
-                'total': total,
-                'deleted': deleted_count,
-                'error_count': len(error_list),
-                'percent': round((i + 1) / total * 100, 1),
-            }
-            yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
+            done_so_far = i + 1
+            if done_so_far % step == 0 or done_so_far == total:
+                progress_data = {
+                    'type': 'progress',
+                    'current': done_so_far,
+                    'total': total,
+                    'deleted': deleted_count,
+                    'error_count': len(error_list),
+                    'percent': round(done_so_far / total * 100, 1),
+                }
+                yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
 
-        logger.info(f"批量删除用户: pattern={pattern}, deleted={deleted_count}, errors={len(error_list)}")
+        logger.info(
+            f"批量删除用户: pattern={pattern}, mode={match_mode}, "
+            f"deleted={deleted_count}, errors={len(error_list)}, skipped_admins={skipped_admins}"
+        )
         done_msg = (
             f"成功删除 {deleted_count} 个用户，{len(error_list)} 个错误"
             if error_list else f"成功删除 {deleted_count} 个用户"
@@ -688,7 +781,11 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
         }
         yield f"data: {json.dumps(done_data, ensure_ascii=False)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/import")

@@ -3,13 +3,16 @@ import { useTranslation } from 'react-i18next'
 // 用户管理
 import {
   Layout, Card, Tabs, Form, Input, Button, message,
-  Modal, Progress, Table, Upload, Space, Radio, Select, Typography, Popconfirm,
-  Tag, Checkbox,
+  Modal, Progress, Table, Upload, Space, Radio, Select, Typography,
+  Tag, Checkbox, Alert,
 } from 'antd'
 import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, RollbackOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
 import type { UserItem } from '../types'
-import type { ImportProgressEvent, BulkDeleteProgressEvent, GradePromotionPreview, GradePromotionResult } from '../api/users'
+import type {
+  ImportProgressEvent, BulkDeleteProgressEvent, BulkMatchMode,
+  GradePromotionPreview, GradePromotionResult,
+} from '../api/users'
 import { useAuthStore } from '../stores/authStore'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
 
@@ -161,8 +164,13 @@ const UserMgmtPage: React.FC = () => {
     }
   }
 
-  // ── 批量删除（含进度提示） ──
+  // ── 批量删除：先预览匹配结果 -> 二次确认 -> 流式删除（带进度） ──
   const [bulkPattern, setBulkPattern] = useState('')
+  const [bulkMatchMode, setBulkMatchMode] = useState<BulkMatchMode>('prefix')
+  const [bulkPreview, setBulkPreview] = useState<usersApi.BulkDeletePreview | null>(null)
+  const [bulkPreviewOpen, setBulkPreviewOpen] = useState(false)
+  const [bulkPreviewLoading, setBulkPreviewLoading] = useState(false)
+  const [bulkConfirmed, setBulkConfirmed] = useState(false)
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{
     visible: boolean
     percent: number
@@ -185,50 +193,89 @@ const UserMgmtPage: React.FC = () => {
     done: false,
   })
 
+  /** 第一步：查询匹配到的用户（只读，不会删除任何数据） */
+  const openBulkDeletePreview = async () => {
+    const pattern = bulkPattern.trim()
+    if (!pattern) { message.warning(t('enterPattern')); return }
+    setBulkPreviewLoading(true)
+    try {
+      const preview = await usersApi.previewBulkDelete(pattern, bulkMatchMode)
+      setBulkPreview(preview)
+      setBulkConfirmed(false)
+      if (preview.matched_count === 0) {
+        setBulkPreviewOpen(false)
+        message.warning('没有匹配到可删除的用户（管理员账号不参与批量删除）')
+        return
+      }
+      setBulkPreviewOpen(true)
+    } catch (err: unknown) {
+      message.error(usersApi.extractApiErrorDetail((err as ApiError)?.response?.data) || '查询匹配用户失败')
+    } finally {
+      setBulkPreviewLoading(false)
+    }
+  }
+
+  const closeBulkDeletePreview = () => {
+    setBulkPreviewOpen(false)
+    setBulkConfirmed(false)
+  }
+
+  /** 第二步：用户确认后才真正删除（必须带 confirm=true） */
   const handleBulkDelete = async () => {
-    if (!bulkPattern.trim()) { message.warning(t('enterPattern')); return }
+    if (!bulkPreview || bulkPreview.matched_count === 0) { closeBulkDeletePreview(); return }
+    if (!bulkConfirmed) { message.warning('请先勾选确认删除'); return }
+    setBulkPreviewOpen(false)
+    setBulkConfirmed(false)
     setBulkDeleteProgress({
       visible: true,
       percent: 0,
       current: 0,
-      total: 0,
+      total: bulkPreview.matched_count,
       deleted: 0,
       errorCount: 0,
       errors: [],
-      message: '正在查询匹配的用户…',
+      message: `开始删除 ${bulkPreview.matched_count} 个用户…`,
       done: false,
     })
     try {
-      await usersApi.bulkDeleteUsersStream(bulkPattern, (event: BulkDeleteProgressEvent) => {
-        if (event.type === 'start') {
-          setBulkDeleteProgress(prev => ({
-            ...prev,
-            total: event.total || 0,
-            message: `准备删除 ${event.total} 个用户…`,
-          }))
-        } else if (event.type === 'progress') {
-          setBulkDeleteProgress(prev => ({
-            ...prev,
-            percent: event.percent || 0,
-            current: event.current || 0,
-            total: event.total || 0,
-            deleted: event.deleted || 0,
-            errorCount: event.error_count || 0,
-            message: `正在删除 ${event.current}/${event.total}…`,
-          }))
-        } else if (event.type === 'done') {
-          const errList = event.errors || []
-          setBulkDeleteProgress(prev => ({
-            ...prev,
-            percent: 100,
-            deleted: event.deleted || 0,
-            errorCount: event.error_count || 0,
-            errors: errList,
-            message: event.message || '批量删除完成',
-            done: true,
-          }))
-        }
-      })
+      await usersApi.bulkDeleteUsersStream(
+        bulkPreview.pattern,
+        (event: BulkDeleteProgressEvent) => {
+          if (event.type === 'start') {
+            setBulkDeleteProgress(prev => ({
+              ...prev,
+              total: event.total || 0,
+              message: `准备删除 ${event.total} 个用户…`,
+            }))
+          } else if (event.type === 'progress') {
+            setBulkDeleteProgress(prev => ({
+              ...prev,
+              percent: event.percent || 0,
+              current: event.current || 0,
+              total: event.total || 0,
+              deleted: event.deleted || 0,
+              errorCount: event.error_count || 0,
+              message: `正在删除 ${event.current}/${event.total}…`,
+            }))
+          } else if (event.type === 'done') {
+            const errList = event.errors || []
+            setBulkDeleteProgress(prev => ({
+              ...prev,
+              percent: 100,
+              current: prev.total,
+              deleted: event.deleted || 0,
+              errorCount: event.error_count || 0,
+              errors: errList,
+              message: event.message || '批量删除完成',
+              done: true,
+            }))
+            // 删除完成后刷新用户列表，界面立即反映结果
+            if ((event.deleted || 0) > 0) void handleListUsers()
+          }
+        },
+        bulkPreview.match_mode,
+        true,
+      )
     } catch (err: unknown) {
       setBulkDeleteProgress(prev => ({
         ...prev,
@@ -240,6 +287,7 @@ const UserMgmtPage: React.FC = () => {
 
   const handleBulkDeleteDone = () => {
     setBulkDeleteProgress(prev => ({ ...prev, visible: false }))
+    setBulkPreview(null)
     setBulkPattern('')
   }
 
@@ -723,14 +771,83 @@ const UserMgmtPage: React.FC = () => {
             </Modal>
           </Card>
           <Card size="small" title={t('bulkDelete')}>
-            <Space>
-                <Input placeholder={t('enterPattern')} value={bulkPattern}
-                  onChange={(e) => setBulkPattern(e.target.value)} style={{ width: 240 }} />
-                <Popconfirm title={t('confirmDeleteTitle')} onConfirm={handleBulkDelete}>
-                  <Button danger disabled={bulkDeleteProgress.visible}>{t('bulkDelete')}</Button>
-                </Popconfirm>
+            <Space wrap>
+              <Select
+                value={bulkMatchMode}
+                onChange={(v: BulkMatchMode) => setBulkMatchMode(v)}
+                style={{ width: 120 }}
+                options={[
+                  { value: 'prefix', label: '前缀匹配' },
+                  { value: 'contains', label: '包含匹配' },
+                  { value: 'exact', label: '精确匹配' },
+                ]}
+              />
+              <Input placeholder={t('enterPattern')} value={bulkPattern}
+                onChange={(e) => setBulkPattern(e.target.value)}
+                onPressEnter={openBulkDeletePreview}
+                style={{ width: 240 }} allowClear />
+              <Button danger icon={<WarningOutlined />} loading={bulkPreviewLoading}
+                disabled={bulkDeleteProgress.visible} onClick={openBulkDeletePreview}>
+                {t('bulkDelete')}
+              </Button>
+            </Space>
+            <div style={{ marginTop: 8 }}>
+              <Typography.Text type="secondary">
+                按用户名模式匹配后先预览、再确认删除；管理员账号不会被删除。用户及其学习数据会被彻底删除且不可恢复。
+              </Typography.Text>
+            </div>
+          </Card>
+
+          {/* 批量删除：匹配结果二次确认弹窗 */}
+          <Modal
+            title="确认批量删除"
+            open={bulkPreviewOpen}
+            okText="确认删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true, disabled: !bulkConfirmed }}
+            onOk={handleBulkDelete}
+            onCancel={closeBulkDeletePreview}
+            maskClosable={false}
+            closable={!bulkDeleteProgress.visible}
+          >
+            {bulkPreview && (
+              <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+                <Alert
+                  type="error"
+                  showIcon
+                  message={`即将彻底删除 ${bulkPreview.matched_count} 个用户，操作不可恢复`}
+                  description={bulkPreview.message}
+                />
+                {bulkPreview.preview.length > 0 && (
+                  <div>
+                    <Typography.Text strong>
+                      匹配示例（前 {bulkPreview.preview.length} 个）：
+                    </Typography.Text>
+                    <div style={{ marginTop: 6 }}>
+                      {bulkPreview.preview.map((u) => <Tag key={u} color="red">{u}</Tag>)}
+                    </div>
+                    {bulkPreview.matched_count > bulkPreview.preview.length && (
+                      <Typography.Text type="secondary">
+                        另有 {bulkPreview.matched_count - bulkPreview.preview.length} 个匹配用户同样会被删除
+                      </Typography.Text>
+                    )}
+                  </div>
+                )}
+                {bulkPreview.skipped_admin_count > 0 && (
+                  <Typography.Text type="warning">
+                    已自动跳过 {bulkPreview.skipped_admin_count} 个管理员账号
+                  </Typography.Text>
+                )}
+                <Checkbox
+                  checked={bulkConfirmed}
+                  onChange={(e) => setBulkConfirmed(e.target.checked)}
+                >
+                  我确认删除以上 {bulkPreview.matched_count} 个用户及其全部数据
+                </Checkbox>
               </Space>
-            </Card>
+            )}
+          </Modal>
+
             {/* 批量删除进度弹窗 */}
             <Modal
               title={t('bulkDelete')}
