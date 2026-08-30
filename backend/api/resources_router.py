@@ -10,8 +10,9 @@ import shutil
 import urllib.parse
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, Request, File, Form, Query
 from fastapi.responses import HTMLResponse
+from starlette.datastructures import UploadFile
 
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files, is_admin, is_teacher
@@ -121,14 +122,17 @@ async def upload_resource(request: Request):
     errors = []
 
     file_items: dict[str, tuple[UploadFile, str]] = {}  # index -> (filename, subpath)
+    # 第一轮：收集文件（subpath 初始为空，不依赖字段顺序）
     for key in form.keys():
         if key.startswith("file"):
             idx = key[4:]  # "file0" -> "0"
             item = form[key]
             if not isinstance(item, UploadFile) or not item.filename:
                 continue
-            file_items[idx] = (item, item.filename)
-        elif key.startswith("path"):
+            file_items[idx] = (item, "")
+    # 第二轮：合并子目录路径
+    for key in form.keys():
+        if key.startswith("path"):
             idx = key[4:]  # "path0" -> "0"
             if idx in file_items:
                 _item, _fn = file_items[idx]
