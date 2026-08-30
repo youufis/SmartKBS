@@ -7,7 +7,8 @@ import shutil
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Request, UploadFile
+from fastapi import APIRouter, Request
+from starlette.datastructures import UploadFile
 
 from backend.config import BASE_DIR
 from backend.utils import get_user_base_dir
