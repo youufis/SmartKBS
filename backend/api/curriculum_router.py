@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from backend.database import execute_query_dict as execute_query, execute_insert_update, get_connection
 from backend.question_db import execute_query as q_execute_query
 from backend.api.dependencies import get_current_user
+from backend.permission_service import check_share_visibility
 from backend.auth import is_admin, is_teacher
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
@@ -1135,6 +1136,24 @@ async def get_knowledge_point(kp_id: int, request: Request):
     student_username = user.get("username") if user.get("role") == 2 else None
     resources = []
     for b in bindings:
+        # 学生访问 html/download 资源时，同样按共享范围过滤
+        if student_username and b["resource_type"] in ("html", "download"):
+            share_rows = execute_query(
+                """SELECT share_scope, target_users, target_grade, target_class
+                   FROM shared_resources WHERE id=? AND resource_type=?""",
+                (b["resource_id"], b["resource_type"]),
+            )
+            if not share_rows:
+                continue
+            sr = share_rows[0]
+            if not check_share_visibility(
+                student_username,
+                str(sr["share_scope"] or ""),
+                str(sr["target_users"] or ""),
+                str(sr["target_grade"] or ""),
+                str(sr["target_class"] or ""),
+            ):
+                continue
         info = _get_resource_info(b["resource_type"], b["resource_id"], include_stats=is_teacher_or_admin, student_username=student_username)
         resources.append({
             "binding_id": b["id"],
@@ -1259,8 +1278,6 @@ async def get_kp_resources(kp_id: int, request: Request):
 
     # 教师/管理员可见全部，学生需按共享范围过滤
     is_student = role == 2
-    viewer_grade = str(user.get("grade") or "") if is_student else ""
-    viewer_class = str(user.get("class") or "") if is_student else ""
 
     bindings = execute_query(
         """SELECT cb.* FROM curriculum_bindings cb
@@ -1271,7 +1288,7 @@ async def get_kp_resources(kp_id: int, request: Request):
     student_username = user.get("username") if is_student else None
     resources = []
     for b in bindings:
-        # 学生访问 html/download 资源时，检查共享范围
+        # 学生访问 html/download 资源时，检查共享范围（与共享列表使用同一套统一规则）
         if is_student and b["resource_type"] in ("html", "download"):
             share_rows = execute_query(
                 """SELECT share_scope, target_users, target_grade, target_class
@@ -1281,21 +1298,13 @@ async def get_kp_resources(kp_id: int, request: Request):
             can_access = False
             if share_rows:
                 sr = share_rows[0]
-                scope = sr["share_scope"]
-                if scope == "all":
-                    can_access = True
-                elif scope == "teacher":
-                    # 检查年级/班级匹配
-                    tg = str(sr["target_grade"] or "")
-                    tc = str(sr["target_class"] or "")
-                    if tg and tc:
-                        grade_ok = viewer_grade == tg or f",{tg},".find(f",{viewer_grade},") != -1
-                        class_ok = viewer_class == tc or f",{tc},".find(f",{viewer_class},") != -1
-                        can_access = grade_ok and class_ok
-                    elif tg:
-                        can_access = viewer_grade == tg or f",{tg},".find(f",{viewer_grade},") != -1
-                elif scope == "staff":
-                    can_access = False  # 学生不属于 staff
+                can_access = check_share_visibility(
+                    student_username,
+                    str(sr["share_scope"] or ""),
+                    str(sr["target_users"] or ""),
+                    str(sr["target_grade"] or ""),
+                    str(sr["target_class"] or ""),
+                )
             if not can_access:
                 continue
 
