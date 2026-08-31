@@ -219,31 +219,37 @@ def init_db():
                     UNIQUE(owner_username, file_path, resource_type)
                 )"""
             )
-            # 迁移旧表：移除 share_scope 的 CHECK 约束以支持新值，并添加 target_users 列
-            try:
-                c.execute("DROP TABLE IF EXISTS shared_resources_old")
-                c.execute("ALTER TABLE shared_resources RENAME TO shared_resources_old")
-                c.execute("""CREATE TABLE shared_resources (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    owner_username TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    file_name TEXT NOT NULL,
-                    resource_type TEXT NOT NULL CHECK(resource_type IN ('html', 'download')),
-                    share_scope TEXT NOT NULL DEFAULT 'all',
-                    target_users TEXT DEFAULT '',
-                    target_grade TEXT DEFAULT '',
-                    target_class TEXT DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    UNIQUE(owner_username, file_path, resource_type)
-                )""")
-                c.execute("""INSERT INTO shared_resources
-                    (id, owner_username, file_path, file_name, resource_type, share_scope, target_users, target_grade, target_class, created_at, updated_at)
-                    SELECT id, owner_username, file_path, file_name, resource_type, share_scope, '', target_grade, target_class, created_at, updated_at
-                    FROM shared_resources_old""")
-                c.execute("DROP TABLE shared_resources_old")
-            except sqlite3.OperationalError:
-                pass  # 首次创建或已迁移
+            # 迁移旧表：仅在缺列/带旧 CHECK 时重建，并保留 target_users 数据
+            # （旧实现每次启动都无条件重建并把整表 target_users 清空，导致共享目标教师丢失）
+            _sr_cols = [r[1] for r in c.execute("PRAGMA table_info(shared_resources)").fetchall()]
+            _sr_sql = str((c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='shared_resources'").fetchone() or [""])[0])
+            _sr_scope_check = "check(share_scope" in _sr_sql.replace(" ", "").replace("\n", "").replace("\r", "").lower()
+            if _sr_cols and ("target_users" not in _sr_cols or _sr_scope_check):
+                try:
+                    c.execute("DROP TABLE IF EXISTS shared_resources_old")
+                    c.execute("ALTER TABLE shared_resources RENAME TO shared_resources_old")
+                    c.execute("""CREATE TABLE shared_resources (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        owner_username TEXT NOT NULL,
+                        file_path TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        resource_type TEXT NOT NULL CHECK(resource_type IN ('html', 'download')),
+                        share_scope TEXT NOT NULL DEFAULT 'all',
+                        target_users TEXT DEFAULT '',
+                        target_grade TEXT DEFAULT '',
+                        target_class TEXT DEFAULT '',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(owner_username, file_path, resource_type)
+                    )""")
+                    _tu_expr = "target_users" if "target_users" in _sr_cols else "''"
+                    c.execute(f"""INSERT INTO shared_resources
+                        (id, owner_username, file_path, file_name, resource_type, share_scope, target_users, target_grade, target_class, created_at, updated_at)
+                        SELECT id, owner_username, file_path, file_name, resource_type, share_scope, {_tu_expr}, target_grade, target_class, created_at, updated_at
+                        FROM shared_resources_old""")
+                    c.execute("DROP TABLE shared_resources_old")
+                except sqlite3.OperationalError:
+                    pass  # 首次创建或已迁移
             # 兼容旧表：添加 target_users 列（如果不存在）
             try:
                 c.execute("ALTER TABLE shared_resources ADD COLUMN target_users TEXT DEFAULT ''")

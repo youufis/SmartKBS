@@ -1338,6 +1338,36 @@ async def create_binding(req: BindingCreate, request: Request):
         logger.warning(f"用户 {username} 尝试绑定非自己的资源 {req.resource_type}:{req.resource_id}")
         raise HTTPException(status_code=403, detail="只能绑定自己的资源")
 
+    # 绑定个人私有资源时：自动把共享范围放开到知识点所属课程的年级（回退为教师任教年级）
+    if req.resource_type in ("html", "download") and not is_admin(username):
+        try:
+            sr_row = execute_query(
+                "SELECT share_scope, target_users, target_grade, owner_username FROM shared_resources WHERE id=?",
+                (req.resource_id,),
+            )
+            if (sr_row and sr_row[0]["owner_username"] == username
+                    and sr_row[0]["share_scope"] == "teacher"
+                    and not (sr_row[0]["target_grade"] or "").strip()):
+                course_row = execute_query(
+                    """SELECT c.grade FROM knowledge_points kp
+                       JOIN chapters ch ON ch.id = kp.chapter_id
+                       JOIN courses c ON c.id = ch.course_id
+                       WHERE kp.id=?""",
+                    (req.knowledge_point_id,),
+                )
+                grade_csv = ((course_row[0]["grade"] if course_row else "") or "").strip()
+                if not grade_csv:
+                    from backend.permission_service import get_teacher_grades
+                    grade_csv = ",".join(g["name"] for g in get_teacher_grades(username) if g.get("name"))
+                if grade_csv:
+                    execute_insert_update(
+                        "UPDATE shared_resources SET share_scope='class', target_users='', target_grade=?, updated_at=? WHERE id=?",
+                        (grade_csv, _now(), req.resource_id),
+                    )
+                    logger.info(f"绑定 {req.resource_type}:{req.resource_id} 后自动放开共享范围: {grade_csv}")
+        except Exception as e:
+            logger.warning(f"绑定后更新共享范围失败: {e}")
+
     # 检查是否已绑定
     existing = execute_query_one(
         "SELECT id FROM curriculum_bindings WHERE knowledge_point_id=? AND resource_type=? AND resource_id=?",
@@ -1387,6 +1417,57 @@ async def delete_binding(binding_id: int, request: Request):
     return {"message": "资源已解绑"}
 
 
+def _register_personal_resources(username: str, resource_type: str) -> None:
+    """把教师个人目录（html / downloads）中尚未入库的文件，
+    自动登记为「仅本人可见」的私有共享记录（share_scope='teacher', target_users=本人），
+    使其能出现在「管理绑定资源」候选列表中。
+    绑定发生时（create_binding）会自动将共享范围放开到课程年级，此前对学生不可见。"""
+    from backend.utils import get_user_base_dir
+    subdir = "html" if resource_type == "html" else "downloads"
+    scan_dir = os.path.join(get_user_base_dir(username), subdir)
+    if not os.path.isdir(scan_dir):
+        return
+    exts = (".html", ".htm") if resource_type == "html" else None
+    try:
+        rows = execute_query(
+            "SELECT file_path FROM shared_resources WHERE owner_username=? AND resource_type=?",
+            (username, resource_type),
+        )
+        known = {(os.path.basename((r["file_path"] or "").replace("\\", "/")) or "").lower() for r in rows}
+    except Exception:
+        known = set()
+    now = _now()
+    created = 0
+    for fname in sorted(os.listdir(scan_dir), key=str.lower):
+        fpath = os.path.join(scan_dir, fname)
+        if not os.path.isfile(fpath):
+            continue
+        low = fname.lower()
+        if exts:
+            if not low.endswith(exts):
+                continue
+        elif "." not in fname:
+            # 无扩展名的下载文件会被空目录共享清理误判为目录，跳过
+            continue
+        if low in known:
+            continue
+        try:
+            execute_insert_update(
+                """INSERT INTO shared_resources
+                   (owner_username, file_path, file_name, resource_type, share_scope,
+                    target_users, target_grade, target_class, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 'teacher', ?, '', '', ?, ?)""",
+                (username, f"{username}/{subdir}/{fname}", os.path.splitext(fname)[0],
+                 resource_type, username, now, now),
+            )
+            known.add(low)
+            created += 1
+        except Exception as e:
+            logger.warning(f"自动登记个人资源失败 ({username}/{fname}): {e}")
+    if created:
+        logger.info(f"教师 {username} 自动登记个人资源 {created} 条 (type={resource_type})")
+
+
 @router.get("/bindings/available", summary="获取可绑定的候选资源")
 async def get_available_resources(
     request: Request,
@@ -1406,6 +1487,8 @@ async def get_available_resources(
 
     try:
         if resource_type == "html":
+            if not is_admin(username):
+                _register_personal_resources(username, "html")
             sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='html' AND owner_username=?"
             params = [username]
             if keyword:
@@ -1415,6 +1498,8 @@ async def get_available_resources(
             results = execute_query(sql, tuple(params))
 
         elif resource_type == "download":
+            if not is_admin(username):
+                _register_personal_resources(username, "download")
             sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='download' AND owner_username=?"
             params = [username]
             if keyword:

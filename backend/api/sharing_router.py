@@ -38,6 +38,28 @@ def _list_to_csv(items: list[str]) -> str:
     return ",".join(items)
 
 
+def _teacher_allowed_grades(username: str) -> list[str]:
+    """教师的任教年级名称列表。
+    优先取 teacher_assignments（任教关系，权威数据），
+    回退到 users.grade 字段（兼容 '高一|高二' / '高一,高二' 等多年级写法）。"""
+    grades: list[str] = []
+    try:
+        from backend.permission_service import get_teacher_grades
+        grades = [g["name"] for g in get_teacher_grades(username) if g.get("name")]
+    except Exception as e:
+        logger.warning(f"读取教师任教年级失败 ({username}): {e}")
+    if not grades:
+        rows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
+        if rows:
+            raw = (rows[0][0] or "").replace("|", ",")
+            grades = [g.strip() for g in raw.split(",") if g.strip()]
+    result: list[str] = []
+    for g in grades:
+        if g not in result:
+            result.append(g)
+    return result
+
+
 def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
     """构建完整的 /api/files/ 访问路径（相对于 BASE_DIR）"""
     dir_name = "html" if resource_type == "html" else "downloads"
@@ -128,31 +150,35 @@ async def share_resource(request: Request, body: ShareRequest):
     if role == ROLE_TEACHER:
         if body.share_scope == "all":
             raise HTTPException(status_code=403, detail="教师不能选择「所有人」范围")
-        if body.share_scope == "class":
-            rows = execute_query(
-                "SELECT grade, class FROM users WHERE username=?",
-                (username,),
-            )
-            if rows:
-                allowed_grade = rows[0][0] or ""
-                for g in body.target_grades:
-                    if g != allowed_grade:
-                        raise HTTPException(status_code=403, detail="教师只能共享给自己所在年级")
+        if body.share_scope == "class" and body.target_grades:
+            allowed_grades = _teacher_allowed_grades(username)
+            for g in body.target_grades:
+                if g not in allowed_grades:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="教师只能共享给自己任教的年级（可共享年级："
+                        + ("、".join(allowed_grades) or "无，请先在用户管理中配置任教年级") + "）",
+                    )
 
     # 将数组转为逗号分隔字符串存储
     target_users_csv = _list_to_csv(body.target_users)
     target_grades_csv = _list_to_csv(body.target_grades)
     target_classes_csv = _list_to_csv(body.target_classes)
 
-    # 如果是教师 scope='class' 但未指定，自动填充教师的年级/班级
+    # 如果是教师 scope='class' 但未指定，自动填充教师任教的年级/班级
     if role == ROLE_TEACHER and body.share_scope == 'class' and not target_grades_csv and not target_classes_csv:
-        rows = execute_query(
-            "SELECT grade, class FROM users WHERE username=?",
-            (username,),
-        )
-        if rows:
-            target_grades_csv = rows[0][0] or ""
-            target_classes_csv = rows[0][1] or ""
+        try:
+            from backend.permission_service import get_teacher_assignments
+            tas = get_teacher_assignments(username)
+        except Exception:
+            tas = []
+        if tas:
+            grades = list(dict.fromkeys(t["grade_name"] for t in tas if t.get("grade_name")))
+            target_grades_csv = _list_to_csv(grades)
+            classes = list(dict.fromkeys(t["class_display_name"] for t in tas if t.get("class_display_name")))
+            target_classes_csv = _list_to_csv(classes)
+        else:
+            target_grades_csv = _list_to_csv(_teacher_allowed_grades(username))
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
