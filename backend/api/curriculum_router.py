@@ -1347,33 +1347,41 @@ async def create_binding(req: BindingCreate, request: Request):
         logger.warning(f"用户 {username} 尝试绑定非自己的资源 {req.resource_type}:{req.resource_id}")
         raise HTTPException(status_code=403, detail="只能绑定自己的资源")
 
-    # 绑定个人私有资源时：自动把共享范围放开到知识点所属课程的年级（回退为教师任教年级）
+    # 绑定个人资源后自动放开共享范围：课程年级 ∪ 教师任教年级 ∪ 已有年级
+    # （多年级教师不会只放开课程所在年级；重复绑定到其它年级课程时自动并入新年级）
     if req.resource_type in ("html", "download") and not is_admin(username):
         try:
             sr_row = execute_query(
-                "SELECT share_scope, target_users, target_grade, owner_username FROM shared_resources WHERE id=?",
+                "SELECT share_scope, target_grade, target_class FROM shared_resources WHERE id=?",
                 (req.resource_id,),
             )
-            if (sr_row and sr_row[0]["owner_username"] == username
-                    and sr_row[0]["share_scope"] == "teacher"
-                    and not (sr_row[0]["target_grade"] or "").strip()):
-                course_row = execute_query(
-                    """SELECT c.grade FROM knowledge_points kp
-                       JOIN chapters ch ON ch.id = kp.chapter_id
-                       JOIN courses c ON c.id = ch.course_id
-                       WHERE kp.id=?""",
-                    (req.knowledge_point_id,),
-                )
-                grade_csv = ((course_row[0]["grade"] if course_row else "") or "").strip()
-                if not grade_csv:
-                    from backend.permission_service import get_teacher_grades
-                    grade_csv = ",".join(g["name"] for g in get_teacher_grades(username) if g.get("name"))
-                if grade_csv:
-                    execute_insert_update(
-                        "UPDATE shared_resources SET share_scope='class', target_users='', target_grade=?, updated_at=? WHERE id=?",
-                        (grade_csv, _now(), req.resource_id),
+            if sr_row:
+                sr0 = sr_row[0]
+                _tclass = str(sr0["target_class"] or "").strip()
+                _tgrade = str(sr0["target_grade"] or "").strip()
+                private_auto = sr0["share_scope"] == "teacher" and not _tgrade   # 自动登记的私有资源
+                grade_shared = sr0["share_scope"] == "class" and not _tclass     # 已按年级共享的资源
+                if private_auto or grade_shared:
+                    course_row = execute_query(
+                        """SELECT c.grade FROM knowledge_points kp
+                           JOIN chapters ch ON ch.id = kp.chapter_id
+                           JOIN courses c ON c.id = ch.course_id
+                           WHERE kp.id=?""",
+                        (req.knowledge_point_id,),
                     )
-                    logger.info(f"绑定 {req.resource_type}:{req.resource_id} 后自动放开共享范围: {grade_csv}")
+                    grades: list[str] = [g.strip() for g in _tgrade.split(",") if g.strip()]
+                    course_grade = str((course_row[0]["grade"] if course_row else "") or "").strip()
+                    if course_grade:
+                        grades += [g.strip() for g in course_grade.split(",") if g.strip()]
+                    from backend.permission_service import get_teacher_grades
+                    grades += [g["name"] for g in get_teacher_grades(username) if g.get("name")]
+                    merged = list(dict.fromkeys(grades))
+                    if merged:
+                        execute_insert_update(
+                            "UPDATE shared_resources SET share_scope='class', target_users='', target_grade=?, updated_at=? WHERE id=?",
+                            (",".join(merged), _now(), req.resource_id),
+                        )
+                        logger.info(f"绑定 {req.resource_type}:{req.resource_id} 后自动放开共享年级: {','.join(merged)}")
         except Exception as e:
             logger.warning(f"绑定后更新共享范围失败: {e}")
 
