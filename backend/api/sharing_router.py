@@ -780,8 +780,11 @@ async def my_shares(request: Request):
 # ── 收到的共享（给当前用户可见的共享） ──
 
 @router.get("/received")
-async def received_shares(request: Request):
-    """获取共享给当前用户的资源（按角色、年级、班级、指定用户过滤）"""
+async def received_shares(request: Request, include_self: bool = False):
+    """获取共享给当前用户的资源（按角色、年级、班级、指定用户过滤）
+
+    include_self=False（默认）：隐藏"仅共享给自己"的记录（含个人目录自动登记的私有资源），
+    自己拥有且只共享给自己的资源属于个人资源，无需出现在"共享给我的"列表。"""
     user = get_current_user(request)
     username = user["username"]
     role = user["role"]
@@ -896,8 +899,16 @@ async def received_shares(request: Request):
     filtered = []
     for r in rows:
         row_data = (r[5], r[6] or "", r[7] or "", r[8] or "")
-        if _check_share_scope(row_data, username):
-            filtered.append(r)
+        if not _check_share_scope(row_data, username):
+            continue
+        # 默认过滤"仅共享给自己"的记录：owner=本人 且 目标用户只有本人（或为空）且未指定年级/班级
+        if not include_self and (r[1] or "") == username:
+            _tu = {u.strip() for u in str(r[6] or "").split(",") if u.strip()}
+            _tg = str(r[7] or "").strip()
+            _tc = str(r[8] or "").strip()
+            if not _tg and not _tc and (_tu == {username} or not _tu):
+                continue
+        filtered.append(r)
     rows = filtered
 
     return {
