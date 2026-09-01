@@ -346,7 +346,90 @@ async def rename_resource(request: Request):
     try:
         os.rename(old_path, new_path)
         logger.info(f"资源已重命名: {old_path} -> {new_path}")
-        return {"message": f"已重命名为 {new_name}"}
+
+        # ── 同步更新数据库关联记录（共享记录 / 资源分组 / 资源元数据），
+        #    避免重命名后旧名称残留、共享与绑定指向不存在的文件 ──
+        synced_shares = synced_groups = 0
+        try:
+            from datetime import datetime as _dt
+            from backend.database import execute_query_dict, execute_insert_update
+            now = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+            old_rel = os.path.relpath(old_path, html_dir).replace("\\", "/")
+            new_rel = os.path.relpath(new_path, html_dir).replace("\\", "/")
+            old_bn = os.path.basename(old_path)
+            new_bn = os.path.basename(new_path)
+
+            def _swap(fp: str) -> str:
+                """把路径中指向旧名的尾段/目录段替换为新名，保持原存储格式"""
+                fp = (fp or "").replace("\\", "/")
+                for suffix in ("", "/"):
+                    core = fp[: -1] if suffix else fp
+                    if core.endswith(old_bn) and (core == old_bn or core[-len(old_bn) - 1] == "/"):
+                        return fp[: len(core) - len(old_bn)] + new_bn + suffix
+                if ("/" + old_bn + "/") in fp:
+                    return fp.replace("/" + old_bn + "/", "/" + new_bn + "/", 1)
+                if fp.startswith(old_bn + "/"):
+                    return new_bn + fp[len(old_bn):]
+                return fp
+
+            new_display = new_bn
+            for _ext in (".html", ".htm"):
+                if new_display.lower().endswith(_ext):
+                    new_display = new_display[: -len(_ext)]
+                    break
+
+            share_rows = execute_query_dict(
+                """SELECT id, file_path FROM shared_resources
+                   WHERE owner_username=?
+                   AND (file_path=? OR file_path=? OR file_path LIKE ? OR file_path LIKE ?
+                        OR file_path LIKE ? OR file_path LIKE ?)""",
+                (username, old_rel, old_bn,
+                 f"%/{old_rel}", f"%/{old_bn}",
+                 f"{old_rel}/%", f"%/{old_rel}/%"),
+            )
+            for row in share_rows:
+                fp = (row["file_path"] or "").replace("\\", "/")
+                swapped = _swap(fp)
+                if swapped == fp:
+                    continue
+                if os.path.basename(fp.rstrip("/")) == old_bn:
+                    execute_insert_update(
+                        "UPDATE shared_resources SET file_path=?, file_name=?, updated_at=? WHERE id=?",
+                        (swapped, new_display, now, row["id"]),
+                    )
+                else:  # 目录改名下的子资源：仅调整路径前缀，保留自身显示名
+                    execute_insert_update(
+                        "UPDATE shared_resources SET file_path=?, updated_at=? WHERE id=?",
+                        (swapped, now, row["id"]),
+                    )
+                synced_shares += 1
+
+            grp_rows = execute_query_dict(
+                """SELECT id, file_path FROM resource_group_items
+                   WHERE file_path=? OR file_path=? OR file_path LIKE ? OR file_path LIKE ?""",
+                (old_rel, old_bn, f"{old_rel}/%", f"%/{old_bn}%"),
+            )
+            for row in grp_rows:
+                fp = (row["file_path"] or "").replace("\\", "/")
+                swapped = _swap(fp)
+                if swapped != fp:
+                    execute_insert_update(
+                        "UPDATE resource_group_items SET file_path=? WHERE id=?",
+                        (swapped, row["id"]),
+                    )
+                    synced_groups += 1
+
+            execute_insert_update(
+                "UPDATE resource_meta SET file_path=?, file_name=?, updated_at=? WHERE file_path=? OR file_path=?",
+                (new_bn, new_bn, now, old_bn, old_rel),
+            )
+
+            if synced_shares or synced_groups:
+                logger.info(f"重命名同步: shares={synced_shares}, groups={synced_groups} ({old_bn} -> {new_bn})")
+        except Exception as sync_err:
+            logger.warning(f"重命名后同步数据库记录失败: {sync_err}")
+
+        return {"message": f"已重命名为 {new_name}", "synced_shares": synced_shares, "synced_groups": synced_groups}
     except Exception as e:
         logger.error(f"重命名失败: {e}")
         raise HTTPException(status_code=500, detail=f"重命名失败: {str(e)}")
