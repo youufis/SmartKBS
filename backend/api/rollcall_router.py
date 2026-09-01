@@ -62,6 +62,9 @@ def _score_key(teacher, grade, cls, name):
 
 def _is_teacher_allowed(username: str, grade: str, cls: str) -> bool:
     """检查教师是否有权限访问该年级/班级（严格走统一权限 permission_service）"""
+    # 兼容 int 型班级（users.class 存在 1 这类数字），避免 .replace 抛 AttributeError
+    grade = str(grade or "").strip()
+    cls = str(cls or "").strip()
     if not grade and not cls:
         return True
     if is_admin(username):
