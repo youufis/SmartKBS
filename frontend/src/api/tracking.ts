@@ -65,6 +65,24 @@ export async function getResourceViewStudents(
   return data;
 }
 
+/** 聚合获取全部共享资源的浏览统计（教师端，一次请求；已排除共享给自己的资源） */
+export async function getAllResourceViewStats(): Promise<{
+  resources: {
+    id: number;
+    resource_name: string;
+    resource_type: string;
+    owner: string;
+    total_views: number;
+    unique_viewers: number;
+    last_view_time: string;
+    last_view_student: string;
+  }[];
+  total: number;
+}> {
+  const { data } = await apiClient.get('/api/tracking/resource-view-stats/all');
+  return data;
+}
+
 /** 获取知识点下所有资源的浏览统计（教师端） */
 export async function getKpViewStats(
   kpId: number,

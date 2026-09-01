@@ -85,34 +85,12 @@ const ResourceViewStatsPage: React.FC = () => {
       .catch(() => {})
   }, [])
 
-  // 加载所有共享资源的浏览统计
+  // 加载所有共享资源的浏览统计（服务端一次聚合查询；共享给自己的资源不参与统计）
   const loadResourceStats = async () => {
     setLoading(true)
     try {
-      // 获取当前教师的所有共享资源
-      const { data: myShares } = await apiClient.get('/api/sharing/my-shares')
-      const shares = Array.isArray(myShares?.shares) ? myShares.shares : []
-
-      const items: ResourceViewItem[] = []
-      for (const share of shares) {
-        try {
-          const stats = await trackingApi.getResourceViewStats(share.resource_type, share.id)
-          const students = await trackingApi.getResourceViewStudents(share.resource_type, share.id)
-          const lastStudent = students.students?.[0]
-          items.push({
-            id: share.id,
-            resource_name: share.file_name,
-            resource_type: share.resource_type,
-            owner: share.owner_username,
-            total_views: stats.total_views,
-            unique_viewers: stats.unique_viewers,
-            last_view_time: lastStudent?.last_viewed || '',
-            last_view_student: lastStudent?.student_name || '',
-          })
-        } catch { /* ignore */ }
-      }
-
-      setResources(items.sort((a, b) => b.total_views - a.total_views))
+      const data = await trackingApi.getAllResourceViewStats()
+      setResources(Array.isArray(data?.resources) ? data.resources : [])
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }
       message.error(err?.response?.data?.detail || err?.message || t('activityMonitor.resourceViews.loadFailed'))

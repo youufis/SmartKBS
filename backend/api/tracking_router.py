@@ -119,6 +119,85 @@ async def get_resource_view_stats(
 
 
 # ═══════════════════════════════════════════════════════════
+# 全部共享资源浏览统计（一次聚合，替代前端逐资源循环请求）
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/tracking/resource-view-stats/all", summary="获取全部共享资源的浏览统计")
+async def get_all_resource_view_stats(request: Request):
+    """一次性返回共享资源的浏览统计（教师=自己的共享，管理员=全部共享）。
+
+    仅共享给自己（target_users 只有本人且未指定年级/班级）的资源不参与统计，
+    包括个人目录自动登记的私有记录——它们不是"共享出来的"资源。
+    """
+    user = get_current_user(request)
+    username = user.get("username", "")
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    # 排除共享给自己的记录（私有登记 / 仅共享给自己）
+    _not_self_only = (
+        "NOT (s.share_scope='teacher'"
+        " AND COALESCE(s.target_grade,'')=''"
+        " AND COALESCE(s.target_class,'')=''"
+        " AND s.target_users = s.owner_username)"
+    )
+    if role == 0:
+        where_sql, params = _not_self_only, []
+    else:
+        where_sql, params = f"s.owner_username=? AND {_not_self_only}", [username]
+
+    try:
+        agg_rows = execute_query_dict(
+            f"""SELECT s.id AS resource_id, s.resource_type, s.file_name, s.owner_username,
+                       COUNT(v.id) AS total_views,
+                       COUNT(DISTINCT v.student_username) AS unique_viewers
+                FROM shared_resources s
+                LEFT JOIN resource_view_logs v
+                       ON v.resource_type = s.resource_type AND v.resource_id = s.id
+                WHERE {where_sql}
+                GROUP BY s.id, s.resource_type, s.file_name, s.owner_username
+                ORDER BY total_views DESC, s.id DESC""",
+            tuple(params),
+        )
+
+        # 每个资源最近一次查看（单条窗口函数查询 + 关联学生姓名）
+        last_rows = execute_query_dict(
+            """SELECT t.resource_type, t.resource_id, t.student_username,
+                      COALESCE(u.name, '') AS student_name, t.viewed_at
+               FROM (
+                   SELECT resource_type, resource_id, student_username, viewed_at,
+                          ROW_NUMBER() OVER (
+                              PARTITION BY resource_type, resource_id
+                              ORDER BY viewed_at DESC, id DESC
+                          ) AS rn
+                   FROM resource_view_logs
+               ) t
+               LEFT JOIN users u ON u.username = t.student_username
+               WHERE t.rn = 1""",
+        )
+    except Exception as e:
+        logger.warning(f"聚合资源浏览统计失败: {e}")
+        raise HTTPException(status_code=500, detail="统计查询失败")
+
+    last_map = {(r["resource_type"], r["resource_id"]): r for r in last_rows}
+    resources = []
+    for r in agg_rows:
+        last = last_map.get((r["resource_type"], r["resource_id"]))
+        resources.append({
+            "id": r["resource_id"],
+            "resource_name": r["file_name"],
+            "resource_type": r["resource_type"],
+            "owner": r["owner_username"],
+            "total_views": r["total_views"],
+            "unique_viewers": r["unique_viewers"],
+            "last_view_time": (last["viewed_at"] if last else "") or "",
+            "last_view_student": (last["student_name"] or last["student_username"]) if last else "",
+        })
+    return {"resources": resources, "total": len(resources)}
+
+
+# ═══════════════════════════════════════════════════════════
 # 学生个人资源浏览统计（自己查看自己的）
 # ═══════════════════════════════════════════════════════════
 
