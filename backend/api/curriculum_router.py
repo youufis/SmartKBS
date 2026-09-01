@@ -249,6 +249,16 @@ def _inject_progress(kps: list[dict[str, Any]], username: str):
             kp["progress_score"] = 0
 
 
+def _canonical_share_url(owner: str, resource_type: str, file_path: str) -> str:
+    """把共享行 file_path 规范为可访问的 /api/files/ 路径。
+    兼容历史三种存储格式：裸文件名 / 相对资源目录 / 已带 owner 前缀的完整相对路径。"""
+    fp = str(file_path or "").replace("\\", "/").lstrip("/")
+    dir_name = "html" if resource_type == "html" else "downloads"
+    if not (owner and not fp.startswith(f"{owner}/{dir_name}/") and not fp.startswith(f"stu/{owner}/{dir_name}/")):
+        return "/api/files/" + fp
+    return f"/api/files/{owner}/{dir_name}/{fp}"
+
+
 def _get_resource_info(resource_type: str, resource_id: int, include_stats: bool = False, student_username: str | None = None) -> dict[str, Any]:
     """根据资源类型和 ID 获取资源名称和访问路径
     如果 include_stats=True，还会查询 HTML/下载资源的浏览统计
@@ -258,12 +268,12 @@ def _get_resource_info(resource_type: str, resource_id: int, include_stats: bool
     try:
         if resource_type in ("html", "download"):
             rows = execute_query(
-                "SELECT file_name, file_path FROM shared_resources WHERE id=? AND resource_type=?",
+                "SELECT file_name, file_path, owner_username FROM shared_resources WHERE id=? AND resource_type=?",
                 (resource_id, resource_type),
             )
             if rows:
                 result["name"] = rows[0]["file_name"]
-                result["url"] = "/api/files/" + rows[0]["file_path"].lstrip("/")
+                result["url"] = _canonical_share_url(rows[0]["owner_username"] or "", resource_type, rows[0]["file_path"])
                 # 查询该学生是否已查看
                 if student_username:
                     try:
@@ -1134,6 +1144,20 @@ async def get_knowledge_point(kp_id: int, request: Request):
     )
     is_teacher_or_admin = user.get("role") in (0, 1)
     student_username = user.get("username") if user.get("role") == 2 else None
+
+    # 自动清理文件已不存在的脏共享行及其绑定（与列表接口一致）
+    try:
+        _rids = [b["resource_id"] for b in bindings if b["resource_type"] in ("html", "download")]
+        if _rids:
+            from backend.api.sharing_router import purge_dead_share_rows
+            if purge_dead_share_rows(resource_ids=_rids):
+                bindings = execute_query(
+                    """SELECT cb.* FROM curriculum_bindings cb
+                       WHERE cb.knowledge_point_id=? ORDER BY cb.sort_order, cb.id""",
+                    (kp_id,),
+                )
+    except Exception:
+        pass
     resources = []
     for b in bindings:
         # 学生访问 html/download 资源时，同样按共享范围过滤
@@ -1286,6 +1310,20 @@ async def get_kp_resources(kp_id: int, request: Request):
     )
     is_teacher_or_admin = not is_student
     student_username = user.get("username") if is_student else None
+
+    # 自动清理文件已不存在的脏共享行及其绑定，绑定列表不留无法访问的残留
+    try:
+        _rids = [b["resource_id"] for b in bindings if b["resource_type"] in ("html", "download")]
+        if _rids:
+            from backend.api.sharing_router import purge_dead_share_rows
+            if purge_dead_share_rows(resource_ids=_rids):
+                bindings = execute_query(
+                    """SELECT cb.* FROM curriculum_bindings cb
+                       WHERE cb.knowledge_point_id=? ORDER BY cb.sort_order, cb.id""",
+                    (kp_id,),
+                )
+    except Exception:
+        pass
     resources = []
     for b in bindings:
         # 学生访问 html/download 资源时，检查共享范围（与共享列表使用同一套统一规则）
@@ -1444,6 +1482,12 @@ def _register_personal_resources(username: str, resource_type: str) -> None:
     scan_dir = os.path.join(get_user_base_dir(username), subdir)
     if not os.path.isdir(scan_dir):
         return
+    # 先清除本目录中文件已丢失的脏行（重命名/外部删除后的旧记录），再补登记新文件
+    try:
+        from backend.api.sharing_router import purge_dead_share_rows
+        purge_dead_share_rows(owner=username, resource_type=resource_type)
+    except Exception:
+        pass
     exts = (".html", ".htm") if resource_type == "html" else None
     try:
         rows = execute_query(

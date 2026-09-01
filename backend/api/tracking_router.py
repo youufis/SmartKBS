@@ -135,6 +135,13 @@ async def get_all_resource_view_stats(request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
+    # 自动清理文件已不存在的脏共享行（重命名/删除后的残留），统计列表不留无效条目
+    try:
+        from backend.api.sharing_router import purge_dead_share_rows
+        purge_dead_share_rows(owner=None if role == 0 else username)
+    except Exception:
+        pass
+
     # 排除共享给自己的记录（私有登记 / 仅共享给自己）
     _not_self_only = (
         "NOT (s.share_scope='teacher'"

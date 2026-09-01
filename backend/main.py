@@ -59,6 +59,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        # 启动时自动清理无效的残留资源绑定（悬挂绑定 + 文件已不存在的脏共享行）
+        from backend.api.sharing_router import run_bind_repair
+        run_bind_repair()
+    except Exception as e:
+        print(f"[main] 启动自动清理资源绑定残留失败: {e}", file=sys.stderr)
+    try:
         from backend.config_sync import try_sync_remote_config
         import asyncio
         asyncio.ensure_future(try_sync_remote_config())

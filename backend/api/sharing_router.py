@@ -97,6 +97,10 @@ def cleanup_empty_dir_shares(owner_username: str | None = None):
                 continue
             dir_name = dir_name_map.get(res_type, "downloads")
             clean_path = file_path.strip("/")
+            # 容忍已带 owner/目录 前缀的路径
+            _pfx = f"{owner}/{dir_name}/"
+            if clean_path.startswith(_pfx):
+                clean_path = clean_path[len(_pfx):]
             full_dir = os.path.join(str(DATA_DIR), owner, dir_name, clean_path)
             if not os.path.isdir(full_dir) or not os.listdir(full_dir):
                 # 清理关联的课程绑定
@@ -455,14 +459,55 @@ async def share_resource(request: Request, body: ShareRequest):
         raise HTTPException(status_code=500, detail=f"共享失败: {str(e)}")
 
 
-# ── 修复悬挂的资源绑定 ──
+# ── 修复悬挂/无效的残留资源绑定（启动自动执行，也可手动触发） ──
 
-@router.post("/repair-bindings", summary="清理悬挂的资源绑定（资源已不存在的残留）")
-async def repair_dangling_bindings(request: Request):
-    """删除指向已不存在共享资源行的课程绑定（旧版本"重新共享换id"产生的残留），教师/管理员可用"""
-    user = get_current_user(request)
-    if user["role"] not in (ROLE_ADMIN, ROLE_TEACHER):
-        raise HTTPException(status_code=403, detail="权限不足")
+def purge_dead_share_rows(owner: str | None = None, resource_ids: list | None = None,
+                          resource_type: str | None = None) -> list[dict]:
+    """检测并删除文件/目录已不存在的脏共享行（重命名、外部删除后的残留），
+    联动清理其课程绑定/查看日志/练习成绩。返回被清理明细，幂等可重复调用。
+    触发点：服务启动、打开绑定候选列表、知识点绑定列表（师生）、活动监控统计列表、repair 接口。"""
+    sql = "SELECT id, owner_username, resource_type, file_path FROM shared_resources WHERE 1=1"
+    params: list = []
+    if owner:
+        sql += " AND owner_username=?"
+        params.append(owner)
+    if resource_type:
+        sql += " AND resource_type=?"
+        params.append(resource_type)
+    if resource_ids:
+        _ids = [int(i) for i in resource_ids]
+        sql += f" AND id IN ({','.join(['?'] * len(_ids))})"
+        params.extend(_ids)
+    sql += " ORDER BY id"
+    stale: list[dict] = []
+    for (sid, sowner, stype, sfp) in execute_query(sql, tuple(params)):
+        fp = str(sfp or "").replace("\\", "/")
+        dir_name = "html" if stype == "html" else "downloads"
+        last = fp.rstrip("/").split("/")[-1]
+        is_dir = fp.endswith("/") or "." not in last
+        if is_dir:
+            rel = fp[len(f"{sowner}/{dir_name}/"):] if fp.startswith(f"{sowner}/{dir_name}/") else fp
+            full_dir = os.path.join(str(DATA_DIR), sowner, dir_name, rel.rstrip("/"))
+            ok = os.path.isdir(full_dir) and bool(os.listdir(full_dir))
+        else:
+            cands = {fp.lstrip("/"), f"{sowner}/{dir_name}/{fp.lstrip('/')}", f"stu/{sowner}/{dir_name}/{fp.lstrip('/')}"}
+            cands |= {f"{sowner}/{dir_name}/{last}", f"stu/{sowner}/{dir_name}/{last}"}
+            ok = any(os.path.exists(os.path.join(str(DATA_DIR), c)) for c in cands)
+        if not ok:
+            stale.append({"id": sid, "owner": sowner, "resource_type": stype, "file_path": fp})
+            _drop_share_row(sid, stype)
+    if stale:
+        logger.info(f"[资源记录自动清理] 文件已不存在的脏共享行 {len(stale)} 条 (owner={owner or 'ALL'}, type={resource_type or 'ALL'})")
+    return stale
+
+
+def run_bind_repair(by_user: str = "system") -> dict:
+    """清理两类资源绑定残留，幂等可重复调用：
+    1) 悬挂绑定：curriculum_bindings 指向的共享行 id 已不存在（旧版重新共享换 id 造成）；
+    2) 脏共享行：shared_resources 的 file_path 指向的文件/目录已不存在
+       （重命名/外部删除后的残留，列表显示旧名且点开 404），删除行并联动清理绑定/日志/成绩。
+    服务启动时自动执行一次；也可 POST /api/sharing/repair-bindings 手动触发。"""
+    # 1) 悬挂绑定
     rows = execute_query(
         """SELECT cb.id, cb.knowledge_point_id, cb.resource_type, cb.resource_id
            FROM curriculum_bindings cb
@@ -482,8 +527,24 @@ async def repair_dangling_bindings(request: Request):
                 pass
         details.append({"binding_id": bid, "knowledge_point_id": kpid,
                         "resource_type": rtype, "stale_resource_id": rid})
-    logger.info(f"修复悬挂绑定: 清理 {len(details)} 条, by {user['username']}")
-    return {"removed": len(details), "details": details}
+
+    # 2) 脏共享行（文件/目录已不存在）
+    stale_shares = purge_dead_share_rows()
+
+    if details or stale_shares:
+        logger.info(f"[资源绑定修复] 悬挂绑定 {len(details)} 条 + 脏共享行 {len(stale_shares)} 条 (by {by_user})")
+    return {"removed": len(details), "details": details,
+            "removed_shares": len(stale_shares), "stale_share_rows": stale_shares}
+
+
+@router.post("/repair-bindings", summary="清理悬挂/无效的资源绑定残留")
+async def repair_dangling_bindings(request: Request):
+    """手动触发资源绑定残留修复（教师/管理员）。服务启动时也会自动执行。"""
+    user = get_current_user(request)
+    if user["role"] not in (ROLE_ADMIN, ROLE_TEACHER):
+        raise HTTPException(status_code=403, detail="权限不足")
+    return run_bind_repair(by_user=user["username"])
+
 
 
 # ── 取消共享 ──
