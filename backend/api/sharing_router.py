@@ -119,6 +119,73 @@ def cleanup_empty_dir_shares(owner_username: str | None = None):
 _VALID_SCOPES = {"all", "teacher", "staff", "class"}
 
 
+def _find_share_rows_multi_format(username: str, resource_type: str, file_path: str):
+    """多格式匹配同一资源的现有共享行（全路径/裸文件名/owner前缀等存储格式混用），
+    按 id 升序返回 (id, target_users, target_grade, target_class, share_scope, file_path)。"""
+    _dir = "html" if resource_type == "html" else "downloads"
+    clean_fp = str(file_path).replace("\\", "/").rstrip("/")
+    bn = clean_fp.split("/")[-1]
+    prefixed = clean_fp if clean_fp.startswith(f"{username}/{_dir}/") else f"{username}/{_dir}/{clean_fp}"
+    return execute_query(
+        """SELECT id, target_users, target_grade, target_class, share_scope, file_path
+           FROM shared_resources
+           WHERE owner_username=? AND resource_type=?
+           AND (file_path=? OR file_path=? OR file_path=?
+                OR file_path LIKE ? OR file_path LIKE ?)
+           ORDER BY id""",
+        (username, resource_type, file_path, clean_fp, prefixed, f"%/{bn}", f"%/{clean_fp}"),
+    )
+
+
+def _drop_share_row(rid: int, resource_type: str):
+    """删除共享行并同步清理关联绑定/练习成绩/浏览日志（与取消共享行为一致）"""
+    try:
+        kp_rows = execute_query(
+            "SELECT knowledge_point_id FROM curriculum_bindings WHERE resource_type=? AND resource_id=?",
+            (resource_type, rid),
+        )
+        execute_insert_update(
+            "DELETE FROM curriculum_bindings WHERE resource_type=? AND resource_id=?",
+            (resource_type, rid),
+        )
+        if resource_type == "html" and kp_rows:
+            from backend.question_db import execute_insert as q_del
+            for (kpid,) in kp_rows:
+                q_del("DELETE FROM ai_practice_results WHERE kp_id=?", (kpid,))
+        execute_insert_update(
+            "DELETE FROM resource_view_logs WHERE resource_type=? AND resource_id=?",
+            (resource_type, rid),
+        )
+        execute_insert_update("DELETE FROM shared_resources WHERE id=?", (rid,))
+    except Exception as e:
+        logger.warning(f"删除共享行 {rid} 失败: {e}")
+
+
+def _merge_share_row(old_id: int, keep_id: int, resource_type: str):
+    """把重复残留共享行并入保留行：转移课程绑定（去重）、迁移浏览日志，然后删除旧行"""
+    try:
+        execute_insert_update(
+            """DELETE FROM curriculum_bindings
+               WHERE resource_type=? AND resource_id=?
+               AND knowledge_point_id IN (
+                   SELECT knowledge_point_id FROM curriculum_bindings
+                   WHERE resource_type=? AND resource_id=?)""",
+            (resource_type, old_id, resource_type, keep_id),
+        )
+        execute_insert_update(
+            "UPDATE curriculum_bindings SET resource_id=? WHERE resource_type=? AND resource_id=?",
+            (keep_id, resource_type, old_id),
+        )
+        execute_insert_update(
+            "UPDATE resource_view_logs SET resource_id=? WHERE resource_type=? AND resource_id=?",
+            (keep_id, resource_type, old_id),
+        )
+        execute_insert_update("DELETE FROM shared_resources WHERE id=?", (old_id,))
+        logger.info(f"合并重复共享行: {old_id} -> {keep_id} ({resource_type})")
+    except Exception as e:
+        logger.warning(f"合并重复共享行 {old_id}->{keep_id} 失败: {e}")
+
+
 # ── 创建共享 ──
 
 @router.post("/share")
@@ -182,20 +249,18 @@ async def share_resource(request: Request, body: ShareRequest):
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # 现有共享行（多格式匹配）：命中则原行 UPDATE 保持 id 稳定，避免重新共享"换 id"导致课程绑定悬挂
+    share_rows_all = _find_share_rows_multi_format(username, body.resource_type, body.file_path)
+
     try:
         if body.mode == "append":
             # 追加模式：合并现有目标
-            existing = execute_query(
-                """SELECT target_users, target_grade, target_class, share_scope
-                   FROM shared_resources
-                   WHERE owner_username=? AND file_path=? AND resource_type=?""",
-                (username, body.file_path, body.resource_type),
-            )
+            existing = share_rows_all
             if existing:
-                exist_users = existing[0][0] or ""
-                exist_grades = existing[0][1] or ""
-                exist_classes = existing[0][2] or ""
-                exist_scope = existing[0][3]
+                exist_users = existing[0][1] or ""
+                exist_grades = existing[0][2] or ""
+                exist_classes = existing[0][3] or ""
+                exist_scope = existing[0][4]
 
                 # 合并目标用户
                 merged_users = set(exist_users.split(",")) if exist_users else set()
@@ -221,19 +286,14 @@ async def share_resource(request: Request, body: ShareRequest):
                 actual_scope = body.share_scope
         elif body.mode == "remove":
             # 移除模式：从现有目标中移除指定项
-            existing = execute_query(
-                """SELECT target_users, target_grade, target_class, share_scope
-                   FROM shared_resources
-                   WHERE owner_username=? AND file_path=? AND resource_type=?""",
-                (username, body.file_path, body.resource_type),
-            )
+            existing = share_rows_all
             if not existing:
                 raise HTTPException(status_code=404, detail="未找到现有共享记录，无法移除")
 
-            exist_users = set(existing[0][0].split(",")) if existing[0][0] else set()
-            exist_grades = set(existing[0][1].split(",")) if existing[0][1] else set()
-            exist_classes = set(existing[0][2].split(",")) if existing[0][2] else set()
-            actual_scope = existing[0][3]
+            exist_users = set(existing[0][1].split(",")) if existing[0][1] else set()
+            exist_grades = set(existing[0][2].split(",")) if existing[0][2] else set()
+            exist_classes = set(existing[0][3].split(",")) if existing[0][3] else set()
+            actual_scope = existing[0][4]
 
             remove_users_set = set(body.target_users)
             remove_grades_set = set(body.target_grades)
@@ -253,25 +313,44 @@ async def share_resource(request: Request, body: ShareRequest):
 
             # 如果所有目标都被移除了，自动删除共享记录
             if not merged_users and not merged_grades and not merged_classes:
-                execute_insert_update(
-                    "DELETE FROM shared_resources WHERE owner_username=? AND file_path=? AND resource_type=?",
-                    (username, body.file_path, body.resource_type),
-                )
-                logger.info(f"共享所有目标已移除，自动删除共享: {username} -> {body.file_path}")
+                for _r in share_rows_all:
+                    _drop_share_row(_r[0], body.resource_type)
+                logger.info(f"共享所有目标已移除，自动删除共享: {username} -> {body.file_path} ({len(share_rows_all)}行)")
                 return {"message": "共享目标已全部移除，共享已取消", "file_path": body.file_path}
         else:
             # replace 模式（默认）：直接覆盖
             actual_scope = body.share_scope
 
-        execute_insert_update(
-            """INSERT OR REPLACE INTO shared_resources
-               (owner_username, file_path, file_name, resource_type, share_scope,
-                target_users, target_grade, target_class, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (username, body.file_path, body.file_name, body.resource_type,
-             actual_scope, target_users_csv, target_grades_csv, target_classes_csv, now, now),
-        )
-        logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={actual_scope})")
+        if share_rows_all:
+            # 优先保留已被绑定引用的 id，否则取最小 id 为主行；其余重复格式行并入主行
+            _ids = [r[0] for r in share_rows_all]
+            _ph = ",".join(["?"] * len(_ids))
+            _bound = execute_query(
+                f"SELECT resource_id FROM curriculum_bindings WHERE resource_type=? AND resource_id IN ({_ph}) ORDER BY id",
+                (body.resource_type, *_ids),
+            )
+            primary_id = _bound[0][0] if _bound else _ids[0]
+            execute_insert_update(
+                """UPDATE shared_resources SET file_path=?, file_name=?, share_scope=?,
+                          target_users=?, target_grade=?, target_class=?, updated_at=?
+                   WHERE id=?""",
+                (body.file_path, body.file_name, actual_scope,
+                 target_users_csv, target_grades_csv, target_classes_csv, now, primary_id),
+            )
+            for _r in share_rows_all:
+                if _r[0] != primary_id:
+                    _merge_share_row(_r[0], primary_id, body.resource_type)
+            logger.info(f"共享更新成功(保持id): {username} -> {body.file_path} (scope={actual_scope}, id={primary_id})")
+        else:
+            execute_insert_update(
+                """INSERT INTO shared_resources
+                   (owner_username, file_path, file_name, resource_type, share_scope,
+                    target_users, target_grade, target_class, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (username, body.file_path, body.file_name, body.resource_type,
+                 actual_scope, target_users_csv, target_grades_csv, target_classes_csv, now, now),
+            )
+            logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={actual_scope})")
 
         # 共享后清理空目录共享记录（如果共享的是空目录，会自动删除）
         cleanup_empty_dir_shares(username)
@@ -374,6 +453,37 @@ async def share_resource(request: Request, body: ShareRequest):
     except Exception as e:
         logger.error(f"共享创建失败: {e}")
         raise HTTPException(status_code=500, detail=f"共享失败: {str(e)}")
+
+
+# ── 修复悬挂的资源绑定 ──
+
+@router.post("/repair-bindings", summary="清理悬挂的资源绑定（资源已不存在的残留）")
+async def repair_dangling_bindings(request: Request):
+    """删除指向已不存在共享资源行的课程绑定（旧版本"重新共享换id"产生的残留），教师/管理员可用"""
+    user = get_current_user(request)
+    if user["role"] not in (ROLE_ADMIN, ROLE_TEACHER):
+        raise HTTPException(status_code=403, detail="权限不足")
+    rows = execute_query(
+        """SELECT cb.id, cb.knowledge_point_id, cb.resource_type, cb.resource_id
+           FROM curriculum_bindings cb
+           LEFT JOIN shared_resources sr
+                  ON cb.resource_type=sr.resource_type AND cb.resource_id=sr.id
+           WHERE cb.resource_type IN ('html','download') AND sr.id IS NULL
+           ORDER BY cb.id""",
+    )
+    details = []
+    for (bid, kpid, rtype, rid) in rows:
+        execute_insert_update("DELETE FROM curriculum_bindings WHERE id=?", (bid,))
+        if rtype == "html":
+            try:
+                from backend.question_db import execute_insert as q_del
+                q_del("DELETE FROM ai_practice_results WHERE kp_id=?", (kpid,))
+            except Exception:
+                pass
+        details.append({"binding_id": bid, "knowledge_point_id": kpid,
+                        "resource_type": rtype, "stale_resource_id": rid})
+    logger.info(f"修复悬挂绑定: 清理 {len(details)} 条, by {user['username']}")
+    return {"removed": len(details), "details": details}
 
 
 # ── 取消共享 ──
