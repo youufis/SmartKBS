@@ -480,6 +480,15 @@ async def get_nav_html(request: Request):
         if os.path.exists(index_path):
             with open(index_path, "r", encoding="utf-8") as f:
                 content = f.read()
+            # 系统自动生成的导航页（新版标记或旧版签名）→ 每次访问比对文件变化并刷新，
+            # 使上传/生成/重命名即时可见；用户自定义 index.html 不受影响
+            if (_NAV_AUTO_MARK in content) or ("SmartKB 资源中心" in content):
+                default_html = _generate_default_nav_html(html_dir)
+                if default_html != content:
+                    with open(index_path, "w", encoding="utf-8") as f:
+                        f.write(default_html)
+                    logger.info(f"资源中心导航页已自动刷新/升级: {index_path}")
+                return HTMLResponse(content=default_html)
             base_url_path = html_dir.replace("\\", "/") + "/"
             base_url = "/api/files/" + urllib.parse.quote(base_url_path)
             content = _rewrite_html_links(content, base_url)
@@ -495,48 +504,95 @@ async def get_nav_html(request: Request):
         raise HTTPException(status_code=500, detail=f"加载导航页失败: {str(e)}")
 
 
+_NAV_AUTO_MARK = "<!-- smartkb-nav:auto v2 -->"
+
+# 扩展名 -> 文件类型图标（资源中心导航页）
+_NAV_ICON_MAP = {
+    ".html": "\U0001F310", ".htm": "\U0001F310",
+    ".png": "\U0001F5BC\uFE0F", ".jpg": "\U0001F5BC\uFE0F", ".jpeg": "\U0001F5BC\uFE0F",
+    ".gif": "\U0001F5BC\uFE0F", ".bmp": "\U0001F5BC\uFE0F", ".webp": "\U0001F5BC\uFE0F",
+    ".svg": "\U0001F5BC\uFE0F", ".ico": "\U0001F5BC\uFE0F", ".tiff": "\U0001F5BC\uFE0F",
+    ".mp4": "\U0001F3AC", ".avi": "\U0001F3AC", ".mov": "\U0001F3AC", ".wmv": "\U0001F3AC",
+    ".flv": "\U0001F3AC", ".mkv": "\U0001F3AC", ".webm": "\U0001F3AC",
+    ".mp3": "\U0001F3B5", ".wav": "\U0001F3B5", ".flac": "\U0001F3B5", ".aac": "\U0001F3B5",
+    ".ogg": "\U0001F3B5", ".m4a": "\U0001F3B5",
+    ".pdf": "\U0001F4D5",
+    ".doc": "\U0001F4D8", ".docx": "\U0001F4D8",
+    ".xls": "\U0001F4D7", ".xlsx": "\U0001F4D7", ".csv": "\U0001F4D7",
+    ".ppt": "\U0001F4D9", ".pptx": "\U0001F4D9",
+    ".txt": "\U0001F4DD", ".md": "\U0001F4DD",
+    ".zip": "\U0001F4E6", ".rar": "\U0001F4E6", ".7z": "\U0001F4E6", ".tar": "\U0001F4E6", ".gz": "\U0001F4E6",
+    ".py": "\U0001F40D", ".java": "\u2615", ".go": "\U0001F537", ".rs": "\U0001F980",
+    ".c": "\U0001F9E9", ".cpp": "\U0001F9E9", ".h": "\U0001F9E9",
+}
+
+# 资源包辅助文件 / 配置文件，不作为独立资源展示
+_NAV_SKIP_EXT = {".js", ".css", ".map"}
+
+
+def _nav_icon_for(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    return _NAV_ICON_MAP.get(ext, "\U0001F4C4")
+
+
 def _generate_default_nav_html(html_dir: str = "") -> str:
-    """生成默认导航页，如果 html_dir 中有实际文件则列出它们"""
-    file_links = ""
+    """生成默认导航页：列出目录中生成/上传的资源文件，按扩展名显示类型图标"""
+    import html as _html
+    body_section = ""
     if html_dir and os.path.exists(html_dir):
         from backend.config import BASE_DIR
-        files = sorted([
+        files = [
             f for f in os.listdir(html_dir)
             if os.path.isfile(os.path.join(html_dir, f))
-            and f.endswith('.html') and f != 'index.html'
-        ])
+            and f != "index.html"
+            and not f.startswith(".")
+            and os.path.splitext(f)[1].lower() not in _NAV_SKIP_EXT
+        ]
+        # HTML 资源在前，其余文件在后，各自按名称排序
+        files.sort(key=lambda f: (0 if f.lower().endswith((".html", ".htm")) else 1, f.lower()))
         if files:
-            file_links = '<h2>📄 资源中心</h2><div class="grid">'
+            cards = []
             for f in files:
                 rel = os.path.relpath(os.path.join(html_dir, f), str(BASE_DIR)).replace("\\", "/")
-                display = os.path.splitext(f)[0]
-                file_links += f'<a href="/api/files/{rel}" target="_blank" class="card">{display}</a>'
-            file_links += '</div>'
+                display = _html.escape(os.path.splitext(f)[0])
+                icon = _nav_icon_for(f)
+                href = "/api/files/" + urllib.parse.quote(rel)
+                cards.append(
+                    f'<a href="{href}" target="_blank" class="card" title="{display}">'
+                    f'<span class="ic">{icon}</span><span class="nm">{display}</span></a>'
+                )
+            body_section = (
+                f'<h2>\U0001F4DA 我的资源（{len(files)}）</h2>'
+                f'<div class="grid">{"".join(cards)}</div>'
+            )
 
-    return f"""<!DOCTYPE html>
+    return f"""{_NAV_AUTO_MARK}
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>资源中心</title>
 <style>
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:900px;margin:0 auto;padding:30px 20px;color:#333}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:960px;margin:0 auto;padding:30px 20px;color:#333}}
 h1{{color:#1677ff;border-bottom:2px solid #1677ff;padding-bottom:10px}}
+h2{{font-size:1.05em;color:#555;margin:18px 0 10px}}
 .tip{{background:#e8f0fe;border-left:4px solid #1677ff;padding:14px 18px;margin:20px 0;border-radius:0 4px 4px 0}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin:16px 0}}
-.card{{display:block;padding:10px 14px;background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;text-decoration:none;color:#333;font-size:14px;transition:all .2s}}
+.card{{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#fafafa;border:1px solid #e8e8e8;border-radius:6px;text-decoration:none;color:#333;font-size:14px;transition:all .2s;min-width:0}}
 .card:hover{{background:#e6f4ff;border-color:#1677ff;transform:translateY(-1px);box-shadow:0 2px 6px rgba(22,119,255,0.1)}}
+.card .ic{{font-size:18px;flex:none;line-height:1}}
+.card .nm{{word-break:break-all;white-space:normal}}
 .footer{{margin-top:40px;font-size:.85em;color:#888;text-align:center}}
 </style>
 </head>
 <body>
-<h1>📚 资源中心</h1>
-<div class="tip"><strong>💡 提示：</strong>点击下方资源文件即可在新标签页中打开查看。</div>
-{file_links if file_links else '<p style="color:#999;text-align:center;padding:40px">暂无资源文件，请在「资源管理」中上传。</p>'}
-<div class="footer"><p>SmartKB 资源中心</p></div>
-</body></html>"""
-
-
+<h1>\U0001F4DA 资源中心</h1>
+<div class="tip"><strong>\U0001F4A1 提示：</strong>点击下方资源文件可在新标签页中打开查看；图标按文件类型自动匹配。</div>
+{body_section if body_section else '<p style="color:#999;text-align:center;padding:40px">暂无资源文件，请在「资源管理」中上传或使用 AI 生成。</p>'}
+<div class="footer"><p>此页面由系统自动生成并随文件变化更新 · SmartKB</p></div>
+</body>
+</html>"""
 # ═══════════════════════════════════════════════
 # 资源分组管理 API
 # ═══════════════════════════════════════════════
