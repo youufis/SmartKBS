@@ -167,13 +167,13 @@ const QuickQuizPlay: React.FC = () => {
     } catch (err: any) {
       const detail = err?.response?.data?.detail || ''
       if (detail.includes('无权')) {
-        setErrorMsg('您没有权限进入此房间')
+        setErrorMsg(t('qqNoPerm'))
         message.error(t('noPermissionToEnter'))
       } else if (err?.response?.status === 404) {
-        setErrorMsg('房间不存在')
+        setErrorMsg(t('qqRoomNotFound'))
         message.error(t('roomNotFound'))
       } else {
-        setErrorMsg('加载房间信息失败，请刷新页面重试')
+        setErrorMsg(t('qqLoadRoomFail'))
       }
     }
   }
@@ -325,7 +325,7 @@ const QuickQuizPlay: React.FC = () => {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh', flexDirection: 'column' }}>
         <Text type="danger" style={{ fontSize: 18 }}>{errorMsg}</Text>
-        <Button style={{ marginTop: 16 }} onClick={() => navigate('/quick-quiz')}>返回抢答主页</Button>
+        <Button style={{ marginTop: 16 }} onClick={() => navigate('/quick-quiz')}>{t('qqBackHome')}</Button>
       </div>
     )
   }
@@ -336,7 +336,7 @@ const QuickQuizPlay: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh', flexDirection: 'column' }}>
         <Spin size="large" />
         <div style={{ marginTop: 24 }}>
-          <Text type="secondary">等待下一题...</Text>
+          <Text type="secondary">{t('qqWaitNext')}</Text>
         </div>
       </div>
     )
@@ -347,7 +347,7 @@ const QuickQuizPlay: React.FC = () => {
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh', flexDirection: 'column' }}>
         <Spin size="large" />
         <div style={{ marginTop: 24 }}>
-          <Text type="secondary">等待教师出题...</Text>
+          <Text type="secondary">{t('qqWaitQuestion')}</Text>
         </div>
       </div>
     )
@@ -366,18 +366,18 @@ const QuickQuizPlay: React.FC = () => {
           <Space>
             <ThunderboltOutlined style={{ fontSize: 20, color: '#fa8c16' }} />
             <Text strong>
-              {question ? `第 ${question.sort_order} / ${question.total_questions} 题` : '抢答中'}
+              {question ? t('qqProgress', { no: question.sort_order, total: question.total_questions }) : t('qqBuzzing')}
             </Text>
           </Space>
           <Space size={16}>
             <span>
               <TrophyOutlined style={{ color: '#faad14', marginRight: 4 }} />
-              <Text strong style={{ color: '#faad14' }}>{myTotalScore}</Text> 分
+              <Text strong style={{ color: '#faad14' }}>{myTotalScore}</Text> {t('fenUnit2')}
             </span>
             {myRank && (
               <span>
                 <TeamOutlined style={{ color: '#1677ff', marginRight: 4 }} />
-                <Text strong style={{ color: '#1677ff' }}>第 {myRank} 名</Text>
+                <Text strong style={{ color: '#1677ff' }}>{t('qqRank', { no: myRank })}</Text>
               </span>
             )}
           </Space>
@@ -485,10 +485,10 @@ const QuickQuizPlay: React.FC = () => {
                   : <CloseCircleOutlined style={{ fontSize: 20, color: '#ff4d4f' }} />
                 }
                 <Text strong style={{ fontSize: 16, color: result.is_correct ? '#52c41a' : '#ff4d4f' }}>
-                  {result.is_correct ? `✓ 答对了！+${result.score}分` : '✗ 答错了...'}
+                  {result.is_correct ? `\u2713 ${t('qqRight')} +${result.score}${t('fenUnit2')}` : '\u2717 ' + t('qqWrong')}
                 </Text>
                 {result.time_spent !== undefined && (
-                  <Text type="secondary">用时 {result.time_spent}s</Text>
+                  <Text type="secondary">{t('qqTimeUsed')}{result.time_spent}s</Text>
                 )}
               </Space>
             </Card>
@@ -503,7 +503,7 @@ const QuickQuizPlay: React.FC = () => {
             }} styles={{ body: { padding: 12 } }}>
               <Space>
                 <CheckCircleOutlined style={{ fontSize: 20, color: '#52c41a' }} />
-                <Text strong>正确答案：{result.correct_answer}. </Text>
+                <Text strong>{t('qqCorrectAns')}{result.correct_answer}. </Text>
                 <FormulaRenderer content={options[result.correct_answer] as string} inline />
               </Space>
             </Card>
@@ -517,8 +517,8 @@ const QuickQuizPlay: React.FC = () => {
           <Space>
             <TeamOutlined />
             <Text>
-              已作答：<Text strong>{answeredCount}</Text> / {totalPlayers || '?'} 人
-              {result && result.is_correct && ' ✅ 你已答对'}
+              {t('qqAnsweredPrefix')}<Text strong>{answeredCount}</Text> / {totalPlayers || '?'} {t('qqPeopleUnit')}
+              {result && result.is_correct && ' \u2705 ' + t('qqYouGotIt')}
             </Text>
           </Space>
         </Card>
@@ -526,9 +526,9 @@ const QuickQuizPlay: React.FC = () => {
 
       {/* 排行榜（简略） */}
       {phase === 'reveal' && ranking.length > 0 && (
-        <Card title="🏆 当前排行榜" style={{ borderRadius: 12, marginTop: 16 }}
+        <Card title={t('qqRanking')} style={{ borderRadius: 12, marginTop: 16 }}
           extra={<Button size="small" type="link" onClick={() => setShowFullRanking(!showFullRanking)}>
-            {showFullRanking ? '收起' : '查看全部'}
+            {showFullRanking ? t('qqCollapse') : t('qqViewAll')}
           </Button>}
         >
           {(showFullRanking ? ranking : ranking.slice(0, 5)).map((r, i) => (
@@ -546,7 +546,7 @@ const QuickQuizPlay: React.FC = () => {
                 <Text strong>{r.student_name}</Text>
               </Space>
               <Space size={12}>
-                <Text style={{ color: '#52c41a' }}>{r.correct_count} 对</Text>
+                <Text style={{ color: '#52c41a' }}>{r.correct_count} {t('qqRightUnit')}</Text>
                 <Text strong style={{ color: '#faad14', fontSize: 16 }}>{r.total_score}</Text>
               </Space>
             </div>

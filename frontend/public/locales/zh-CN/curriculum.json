@@ -300,5 +300,20 @@
   "selectAtLeastOne": "请至少选择一个知识点",
   "smartPracticeFailed": "智能练习失败",
   "smartPracticeGenerated": "智能练习已生成（共 {{total}} 题）",
-  "aiGenerateFailed": "AI 生成失败"
+  "aiGenerateFailed": "AI 生成失败",
+  "cyEditKp": "编辑知识点",
+  "cyMarkDone": "标记已完成",
+  "cyStartLearn": "开始学习",
+  "cySortOrder": "排序号",
+  "cyBindToKp": "绑定到知识点",
+  "cyDownloadCourseware": "下载课件 (.html)",
+  "cyOpenNewTab": "新标签页打开",
+  "cyClose": "关闭",
+  "cyCoursewarePreview": "课件预览",
+  "cyGenPracticeWait": "AI 正在生成练习题，请稍候...（约 30-180 秒）",
+  "cyPracticeReady": "练习已生成",
+  "cyOpenPreview": "打开预览",
+  "cyPracticeHint": "提示：生成的文件保存在您的个人目录中，可前往「资源中心」共享并绑定到知识点",
+  "cyDone": "完成",
+  "cyGenPractice": "生成练习"
 }

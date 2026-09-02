@@ -152,7 +152,7 @@ const CompactCodeView: React.FC<{
                     <div key={sc.id || i} style={{ background: '#fff', padding: 6, borderRadius: 4, marginTop: 4, fontSize: 12, border: '1px solid #e8e8e8' }}>
                       <Text type="secondary">{t('explanation')} {i + 1}</Text>
                       {sc.description && <Text type="secondary"> — {sc.description}</Text>}
-                      <pre style={{ margin: 2, fontSize: 11 }}>{t('input')}：{sc.input || '(无)'}{'\n'}{t('output')}：{sc.expected_output}</pre>
+                      <pre style={{ margin: 2, fontSize: 11 }}>{t('input')}：{sc.input || t('cpNone')}{'\n'}{t('output')}：{sc.expected_output}</pre>
                     </div>
                   ))}
                 </div>
@@ -1144,7 +1144,7 @@ const CodePracticePage: React.FC = () => {
                   setAiGenResult(null)
                   message.success(t('contentFilled'))
                 }}>
-                  确认并编辑
+                  {t('cpConfirmEdit')}
                 </Button>
               }
               style={{ marginTop: 8 }}
@@ -1155,23 +1155,23 @@ const CodePracticePage: React.FC = () => {
 
       {/* ── 编辑题目弹窗 ── */}
       <Modal
-        title="编辑代码题"
+        title={t('cpEditTitle')}
         open={editModalOpen}
         onCancel={() => setEditModalOpen(false)}
         onOk={handleSaveEdit}
         confirmLoading={editLoading}
         width={800}
-        okText="保存修改"
+        okText={t('cpSaveChanges')}
       >
         <Tabs items={[
           {
             key: 'basic',
-            label: '基本信息',
+            label: t('cpBasics'),
             children: (
               <Space orientation="vertical" style={{ width: '100%' }}>
-                <Input placeholder="题目标题" value={editForm.title}
+                <Input placeholder={t('cpTitlePh')} value={editForm.title}
                   onChange={e => setEditForm({ ...editForm, title: e.target.value })} />
-                <Input.TextArea rows={4} placeholder="题目描述（支持 Markdown）" value={editForm.description}
+                <Input.TextArea rows={4} placeholder={t('cpDescPh')} value={editForm.description}
                   onChange={e => setEditForm({ ...editForm, description: e.target.value })} />
                 <Space>
                   <Select value={editForm.subject} onChange={v => setEditForm({ ...editForm, subject: v })}
@@ -1183,7 +1183,7 @@ const CodePracticePage: React.FC = () => {
                   <Select value={editForm.language} onChange={v => setEditForm({ ...editForm, language: v })}
                     style={{ width: 120 }}
                     options={supportedLangs.length > 0 ? supportedLangs : [{ value: 'python', label: 'Python', available: true }]} />
-                  <Input placeholder="知识点标签（逗号分隔）" value={editForm.knowledge_points}
+                  <Input placeholder={t('cpKpPh')} value={editForm.knowledge_points}
                     onChange={e => setEditForm({ ...editForm, knowledge_points: e.target.value })} style={{ width: 200 }} />
                 </Space>
               </Space>
@@ -1191,7 +1191,7 @@ const CodePracticePage: React.FC = () => {
           },
           {
             key: 'code',
-            label: '代码模板',
+            label: t('cpTemplate'),
             children: (
               <>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>{t('starterCodeHint')}</Text>
@@ -1212,16 +1212,16 @@ const CodePracticePage: React.FC = () => {
                   <Table size="small" dataSource={editTestCases} rowKey={(_, i) => String(i)} pagination={false}
                     columns={[
                       { title: '#', render: (_: any, __: any, i: number) => i + 1, width: 40 },
-                      { title: '输入', dataIndex: 'input', render: (v: string) => <code>{v || '(空)'}</code> },
-                      { title: '期望输出', dataIndex: 'expected', render: (v: string) => <code>{v}</code> },
-                      { title: '说明', dataIndex: 'description' },
-                      { title: '分值', dataIndex: 'score', width: 60 },
-                      { title: '示例', dataIndex: 'is_sample', render: (v: boolean) => v ? <Tag color="blue">示例</Tag> : null, width: 60 },
+                          { title: t('cpColInput'), dataIndex: 'input', render: (v: string) => <code>{v || t('cpEmpty')}</code> },
+                          { title: t('cpColExpected'), dataIndex: 'expected', render: (v: string) => <code>{v}</code> },
+                          { title: t('cpColDesc'), dataIndex: 'description' },
+                          { title: t('cpColScore'), dataIndex: 'score', width: 60 },
+                          { title: t('cpColSample'), dataIndex: 'is_sample', render: (v: boolean) => v ? <Tag color="blue">{t('cpSampleTag')}</Tag> : null, width: 60 },
                     ]}
                   />
                 )}
                 <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
-                  💡 测试用例管理将在后续版本中支持在线编辑
+                  {t('cpTestCaseHint')}
                 </Text>
               </>
             ),
@@ -1262,7 +1262,7 @@ const CodePracticePage: React.FC = () => {
                   <Text strong>{t('explanation')} {i + 1}</Text>
                   {sc.description && <Text type="secondary"> — {sc.description}</Text>}
                   <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, marginTop: 4, fontSize: 12 }}>
-                    <Text strong>{t('input')}：</Text>{sc.input || '(无)'}{'\n'}
+                    <Text strong>{t('input')}：</Text>{sc.input || t('cpNone')}{'\n'}
                     <Text strong>{t('output')}：</Text>{sc.expected_output}
                   </pre>
                 </Card>
@@ -1368,7 +1368,7 @@ const CodePracticePage: React.FC = () => {
               rows={2}
               value={customInput}
               onChange={e => setCustomInput(e.target.value)}
-              placeholder="输入程序的标准输入数据..."
+              placeholder={t('cpStdinPh')}
               style={{ fontSize: 12, marginTop: 4 }}
             />
           </div>
@@ -1393,7 +1393,7 @@ const CodePracticePage: React.FC = () => {
                           </div>
                         ) : (
                           <>
-                            <div style={{ color: '#888', marginBottom: 4 }}>Exit Code: {runResult.exit_code} | Time: {runResult.execution_time}s | 输入: {customInput || '(空)'}</div>
+                            <div style={{ color: '#888', marginBottom: 4 }}>Exit Code: {runResult.exit_code} | Time: {runResult.execution_time}s | {t('cpInputLabel')}: {customInput || t('cpEmpty')}</div>
                             {runResult.stdout ? (
                               <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre>
                             ) : (
@@ -1448,13 +1448,13 @@ const CodePracticePage: React.FC = () => {
                           />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="得分" value={submissionResult.score} suffix={`/ ${submissionResult.total_cases}`} styles={{ content: { fontSize: 16 } }} />
+                          <Statistic title={t('cpScore')} value={submissionResult.score} suffix={`/ ${submissionResult.total_cases}`} styles={{ content: { fontSize: 16 } }} />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="通过用例" value={`${submissionResult.passed_cases || 0} / ${submissionResult.total_cases || 0}`} styles={{ content: { fontSize: 16 } }} />
+                          <Statistic title={t('cpPassedCases')} value={`${submissionResult.passed_cases || 0} / ${submissionResult.total_cases || 0}`} styles={{ content: { fontSize: 16 } }} />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="运行时间" value={submissionResult.execution_time || 0} suffix="s" styles={{ content: { fontSize: 16 } }} />
+                          <Statistic title={t('cpRuntime')} value={submissionResult.execution_time || 0} suffix="s" styles={{ content: { fontSize: 16 } }} />
                         </Col>
                       </Row>
 
@@ -1468,12 +1468,12 @@ const CodePracticePage: React.FC = () => {
                             rowKey="case_id"
                             pagination={false}
                             columns={[
-                              { title: '用例', dataIndex: 'description', render: (v: string, r: any) => v || (r.is_sample ? '示例' : `测试 #${r.case_id}`) },
-                              { title: '输入', dataIndex: 'input', render: (v: string) => <code style={{ fontSize: 12 }}>{(v || '(空)').slice(0, 50)}</code> },
-                              { title: '期望输出', dataIndex: 'expected', render: (v: string) => <code style={{ fontSize: 12 }}>{v.slice(0, 80)}</code> },
-                              { title: '实际输出', dataIndex: 'actual', render: (v: string, r: any) => (
+                                  { title: t('cpColCase'), dataIndex: 'description', render: (v: string, r: any) => v || (r.is_sample ? t('cpSampleTag') : `${t('cpCasePrefix')} #${r.case_id}`) },
+                                  { title: t('cpColInput'), dataIndex: 'input', render: (v: string) => <code style={{ fontSize: 12 }}>{(v || t('cpEmpty')).slice(0, 50)}</code> },
+                                  { title: t('cpColExpected'), dataIndex: 'expected', render: (v: string) => <code style={{ fontSize: 12 }}>{v.slice(0, 80)}</code> },
+                                  { title: t('cpColActual'), dataIndex: 'actual', render: (v: string, r: any) => (
                                 <span style={{ color: r.is_pass ? '#52c41a' : '#ff4d4f' }}>
-                                  <code style={{ fontSize: 12 }}>{v ? v.slice(0, 80) : '(空)'}</code>
+                                  <code style={{ fontSize: 12 }}>{v ? v.slice(0, 80) : t('cpEmpty')}</code>
                                 </span>
                               )},
                               { title: t('testResult'), dataIndex: 'is_pass', render: (v: boolean) => v ? <Tag color="success">{t('passed')}</Tag> : <Tag color="error">{t('failed')}</Tag> },
@@ -1492,31 +1492,31 @@ const CodePracticePage: React.FC = () => {
                     <div>
                       <Row gutter={16} style={{ marginBottom: 12 }}>
                         <Col span={6}>
-                          <Statistic title="综合评分" value={aiReview.overall_score} suffix="/100" styles={{ content: { fontSize: 16 } }} />
+                          <Statistic title={t('cpOverallScore')} value={aiReview.overall_score} suffix="/100" styles={{ content: { fontSize: 16 } }} />
                         </Col>
                         <Col span={6}>
-                          <Statistic title="评价" value={aiReview.overall_rating} styles={{ content: { fontSize: 16 } }} />
+                          <Statistic title={t('cpRating')} value={aiReview.overall_rating} styles={{ content: { fontSize: 16 } }} />
                         </Col>
                       </Row>
 
                       <Descriptions column={2} size="small" bordered style={{ marginBottom: 12 }}>
                         {aiReview.dimensions?.correctness && (
-                          <Descriptions.Item label="正确性" span={1}>
+                          <Descriptions.Item label={t('cpDimCorrect')} span={1}>
                             <Progress percent={aiReview.dimensions.correctness.score} size="small" />
                           </Descriptions.Item>
                         )}
                         {aiReview.dimensions?.code_quality && (
-                          <Descriptions.Item label="代码质量" span={1}>
+                          <Descriptions.Item label={t('cpDimQuality')} span={1}>
                             <Progress percent={aiReview.dimensions.code_quality.score} size="small" />
                           </Descriptions.Item>
                         )}
                         {aiReview.dimensions?.efficiency && (
-                          <Descriptions.Item label="算法效率" span={1}>
+                          <Descriptions.Item label={t('cpDimEfficiency')} span={1}>
                             <Progress percent={aiReview.dimensions.efficiency.score} size="small" />
                           </Descriptions.Item>
                         )}
                         {aiReview.dimensions?.style && (
-                          <Descriptions.Item label="编码规范" span={1}>
+                          <Descriptions.Item label={t('cpDimStyle')} span={1}>
                             <Progress percent={aiReview.dimensions.style.score} size="small" />
                           </Descriptions.Item>
                         )}

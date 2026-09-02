@@ -300,5 +300,20 @@
   "selectAtLeastOne": "Please select at least one knowledge point",
   "smartPracticeFailed": "Smart practice failed",
   "smartPracticeGenerated": "Smart practice generated ({{total}} questions)",
-  "aiGenerateFailed": "AI generation failed"
+  "aiGenerateFailed": "AI generation failed",
+  "cyEditKp": "Edit knowledge point",
+  "cyMarkDone": "Mark done",
+  "cyStartLearn": "Start learning",
+  "cySortOrder": "Sort order",
+  "cyBindToKp": "Bind to knowledge point",
+  "cyDownloadCourseware": "Download (.html)",
+  "cyOpenNewTab": "Open in new tab",
+  "cyClose": "Close",
+  "cyCoursewarePreview": "Courseware preview",
+  "cyGenPracticeWait": "AI is generating exercises, please wait... (about 30-180s)",
+  "cyPracticeReady": "Exercises ready",
+  "cyOpenPreview": "Open preview",
+  "cyPracticeHint": "Tip: generated files are saved in your directory; share them in Resource Center and bind to a knowledge point",
+  "cyDone": "Done",
+  "cyGenPractice": "Generate exercises"
 }

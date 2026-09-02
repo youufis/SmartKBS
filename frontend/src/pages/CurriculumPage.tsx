@@ -1049,7 +1049,7 @@ const CurriculumPage: React.FC = () => {
       )}
       {isTeacherOrAdmin && showActions && (
         <Space size="small" style={{ marginLeft: 4 }}>
-          <Tooltip title="编辑知识点">
+          <Tooltip title={t('cyEditKp')}>
             <Button
               type="text"
               size="small"
@@ -1473,7 +1473,7 @@ const CurriculumPage: React.FC = () => {
                                   icon={<CheckCircleOutlined />}
                                   onClick={() => handleUpdateProgress(selectedKp.id, 'completed')}
                                 >
-                                  标记已完成
+                                  {t('cyMarkDone')}
                                 </Button>
                               )}
                               {selectedKp.progress_status === 'not_started' && (
@@ -1482,7 +1482,7 @@ const CurriculumPage: React.FC = () => {
                                   icon={<ClockCircleOutlined />}
                                   onClick={() => handleUpdateProgress(selectedKp.id, 'in_progress')}
                                 >
-                                  开始学习
+                                  {t('cyStartLearn')}
                                 </Button>
                               )}
                             </>
@@ -1679,7 +1679,7 @@ const CurriculumPage: React.FC = () => {
           <Form.Item name="description" label={t('description')}>
             <TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="sort_order" label="排序号">
+          <Form.Item name="sort_order" label={t('cySortOrder')}>
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
         </Form>
@@ -1831,7 +1831,7 @@ const CurriculumPage: React.FC = () => {
                       loading={recBindLoading[r.resource_id]}
                       onClick={() => handleBindRecommended(r.resource_type, r.resource_id)}
                     >
-                      绑定到知识点
+                      {t('cyBindToKp')}
                     </Button>
                   </Space>
                 </Card>
@@ -1852,14 +1852,14 @@ const CurriculumPage: React.FC = () => {
             <Space>
               <a href={cwUrl} download style={{ textDecoration: 'none' }}>
                 <Button type="primary" icon={<DownloadOutlined />} disabled={!cwUrl}>
-                  下载课件 (.html)
+                  {t('cyDownloadCourseware')}
                 </Button>
               </a>
               <Button icon={<FileTextOutlined />} disabled={!cwUrl}
                 onClick={() => { if (cwUrl) window.open(cwUrl, '_blank') }}>
-                新标签页打开
+                {t('cyOpenNewTab')}
               </Button>
-              <Button onClick={() => setCwModal(false)}>关闭</Button>
+              <Button onClick={() => setCwModal(false)}>{t('cyClose')}</Button>
             </Space>
           )
         }
@@ -1871,7 +1871,7 @@ const CurriculumPage: React.FC = () => {
           </div>
         ) : cwUrl ? (
           <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
-            <iframe src={cwUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="课件预览" />
+            <iframe src={cwUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
           </div>
         ) : null}
       </Modal>
@@ -1889,26 +1889,26 @@ const CurriculumPage: React.FC = () => {
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
             <div style={{ marginTop: 16, color: '#666' }}>
-              AI 正在生成练习题，请稍候...（约 30-180 秒）
+              {t('cyGenPracticeWait')}
               <br /><span style={{ fontSize: 13 }}>{t('autoGenerateHtml')}</span>
             </div>
           </div>
         ) : practiceDone ? (
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <Typography.Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 16 }}>
-              ✅ 练习已生成
+              ✅ {t('cyPracticeReady')}
             </Typography.Text>
             <Space orientation="vertical" size={12} style={{ width: '100%' }}>
               <Button type="primary" size="large" icon={<EyeOutlined />}
                 href={practiceDone.fileUrl} target="_blank" rel="noopener noreferrer"
                 block>
-                打开预览
+                {t('cyOpenPreview')}
               </Button>
               <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                提示：生成的文件保存在您的个人目录中，可前往「资源中心」共享并绑定到知识点
+                {t('cyPracticeHint')}
               </Typography.Text>
               <Button onClick={() => { setPracticeModal(false); setPracticeDone(null); setPracticeHtmlUrl(''); }} block>
-                完成
+                {t('cyDone')}
               </Button>
             </Space>
           </div>
@@ -1968,7 +1968,7 @@ const CurriculumPage: React.FC = () => {
               icon={<BulbOutlined />}
               onClick={handleAiPracticeGenerate}
             >
-              🚀 生成练习
+              🚀 {t('cyGenPractice')}
             </Button>
           </Space>
         )}

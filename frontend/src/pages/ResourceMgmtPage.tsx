@@ -252,7 +252,7 @@ const ResourceMgmtPage: React.FC = () => {
         let lastStage = ''
 
         message.loading({
-          content: '🚀 AI 生成中（第一阶段：AI 构思内容...）',
+          content: t('rmGeneratingPhase'),
           key: 'ai_async', duration: 0,
         })
 
