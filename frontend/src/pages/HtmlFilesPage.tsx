@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm } from 'antd'
 import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
+import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
 import * as sharingApi from '../api/sharing'
 import type { ResourceFile } from '../types'
@@ -291,7 +292,7 @@ const HtmlFilesPage: React.FC = () => {
       }}
     >
       <Card.Meta
-        avatar={<FileOutlined style={{ fontSize: 16, color: isShared ? '#ff4d4f' : undefined }} />}
+        avatar={getFileIcon(urlPath || name, { fontSize: 16, color: isShared ? '#ff4d4f' : undefined })}
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, fontSize: 14, color: isShared ? '#1677ff' : undefined }}>

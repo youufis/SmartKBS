@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List, Input, Pagination } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FileOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined, SearchOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined, SearchOutlined } from '@ant-design/icons'
+import { getFileIcon } from '../utils/fileIcon'
 import * as sharingApi from '../api/sharing'
 import ShareDialog from '../components/ShareDialog'
 import apiClient from '../api/client'
@@ -271,7 +272,7 @@ const DownloadsPage: React.FC = () => {
       key: 'path',
       render: (path: string, record: DownloadFile) => (
         <Space>
-          {record.is_dir ? <FolderOutlined style={{ color: '#faad14' }} /> : <FileOutlined />}
+          {record.is_dir ? <FolderOutlined style={{ color: '#faad14' }} /> : getFileIcon(record.name || path)}
           {record.is_dir ? (
             <Typography.Text strong>{record.name}/</Typography.Text>
           ) : (
@@ -449,7 +450,7 @@ const DownloadsPage: React.FC = () => {
                   return (
                     <Card key={s.id} size="small" hoverable>
                       <Card.Meta
-                        avatar={<FileOutlined style={{ color: '#1677ff' }} />}
+                        avatar={getFileIcon(fullPath)}
                         title={
                           <a href={fileUrl} target="_blank" rel="noreferrer"
                             style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
@@ -518,7 +519,7 @@ const DownloadsPage: React.FC = () => {
                     ]}
                   >
                     <List.Item.Meta
-                      avatar={<FileOutlined style={{ color: '#1677ff' }} />}
+                      avatar={getFileIcon(item.path || item.name)}
                       title={item.name}
                       description={
                         item.size < 1024 ? `${item.size} B` :

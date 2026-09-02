@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Layout, Card, Space, Button, Typography, message } from 'antd'
-import { ReloadOutlined, FileOutlined } from '@ant-design/icons'
+import { ReloadOutlined } from '@ant-design/icons'
+import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
 import type { ResourceFile } from '../types'
 import { useTranslation } from 'react-i18next'
@@ -52,7 +53,7 @@ const ResourceCategoryPage: React.FC<{ subdir: string; title?: string }> = ({ su
             return (
             <Card key={f.path} size="small" hoverable style={{ width: 280 }}>
               <Card.Meta
-                avatar={<FileOutlined />}
+                avatar={getFileIcon(f.url_path || f.name, { fontSize: 18})}
                 title={
                   <a href={fileUrl} target="_blank" rel="noreferrer"
                     style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>
