@@ -115,7 +115,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
     setQuestions(questions.map(q => {
       if (q.id !== qId) return q
       const prefix = String.fromCharCode(65 + q.options.length) // A, B, C, ...
-      return { ...q, options: [...q.options, `${prefix}. 新选项${q.options.length + 1}`] }
+      return { ...q, options: [...q.options, t('qeNewOption', { letter: prefix, n: q.options.length + 1 })] }
     }))
   }
 
@@ -221,7 +221,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             <Input
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder="测验说明..."
+              placeholder={t('qeDescPh')}
             />
           </Form.Item>
         </Form>
@@ -270,7 +270,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             {/* 题号 + 题型 + 操作 */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Space>
-                <Text strong style={{ fontSize: 15 }}>第 {index + 1} 题</Text>
+                <Text strong style={{ fontSize: 15 }}>{t('qeQuestionNo', { no: index + 1 })}</Text>
                 <Tag color={questionTypeColor(q.type)}>{questionTypeLabel(q.type)}</Tag>
                 <Select
                   value={q.type}
@@ -308,7 +308,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                 borderRadius: 4, background: '#fff',
                 border: '1px dashed #d9d9d9', fontSize: 13, color: '#888',
               }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>预览：</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('qePreview')}</Text>
                 <FormulaRenderer content={q.question} />
               </div>
             )}
@@ -316,7 +316,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             {/* 选项编辑 */}
             {q.type !== 'true_false' ? (
               <div style={{ marginBottom: 12 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>选项：</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('qeOptionsLbl')}</Text>
                 {q.options.map((opt, oi) => (
                   <div key={oi} style={{ display: 'flex', alignItems: 'center', marginTop: 6 }}>
                     <Space style={{ flex: 1 }}>
@@ -343,7 +343,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               </div>
             ) : (
               <div style={{ marginBottom: 12 }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>选项：</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('qeOptionsLbl')}</Text>
                 <div style={{ marginTop: 4 }}>
                   <Tag>对</Tag>
                   <Tag>错</Tag>
@@ -403,7 +403,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                   borderRadius: 4, background: '#fff',
                   border: '1px dashed #d9d9d9', fontSize: 13, color: '#888',
                 }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>预览：</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{t('qePreview')}</Text>
                   <FormulaRenderer content={q.explanation} />
                 </div>
               )}

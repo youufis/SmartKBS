@@ -127,7 +127,7 @@ const AnnouncementsPage: React.FC = () => {
         aiForm.resetFields()
         setCreateModal(true)
       } else {
-        message.error(data.content || 'AI 生成失败')
+        message.error(data.content || t('anGenFailed'))
       }
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'errorFields' in err) return
@@ -227,10 +227,10 @@ const AnnouncementsPage: React.FC = () => {
       render: (_: any, record: AnnouncementItem) => (
         <Space size={4}>
           {record.target_role !== 'all' && (
-            <Tag>{record.target_role === 'teacher' ? '教师' : record.target_role === 'student' ? '学生' : record.target_role}</Tag>
+            <Tag>{record.target_role === 'teacher' ? t('anRoleTeacher') : record.target_role === 'student' ? t('anRoleStudent') : record.target_role}</Tag>
           )}
           {record.target_grade && <Tag>{record.target_grade}</Tag>}
-          {record.target_class && <Tag>{record.target_class}班</Tag>}
+          {record.target_class && <Tag>{t('anClassSuffix', { cls: record.target_class })}</Tag>}
         </Space>
       ),
     },
@@ -317,13 +317,13 @@ const AnnouncementsPage: React.FC = () => {
                 {PRIORITY_LABELS[detailModal.priority] || detailModal.priority}
               </Tag>
               {detailModal.target_role !== 'all' && (
-                <Tag>{detailModal.target_role === 'teacher' ? '教师' : detailModal.target_role === 'student' ? '学生' : detailModal.target_role}</Tag>
+                <Tag>{detailModal.target_role === 'teacher' ? t('anRoleTeacher') : detailModal.target_role === 'student' ? t('anRoleStudent') : detailModal.target_role}</Tag>
               )}
               {detailModal.target_grade && <Tag>{detailModal.target_grade}</Tag>}
-              {detailModal.target_class && <Tag>{detailModal.target_class}班</Tag>}
+              {detailModal.target_class && <Tag>{t('anClassSuffix', { cls: detailModal.target_class })}</Tag>}
             </Space>
             <div style={{ color: '#999', fontSize: 12, marginBottom: 16 }}>
-              发布者：{detailModal.creator_name || detailModal.creator_username}
+              {t('anPublisher')}{detailModal.creator_name || detailModal.creator_username}
               &nbsp;|&nbsp;
               {detailModal.created_at ? new Date(detailModal.created_at).toLocaleString('zh-CN') : ''}
             </div>
@@ -336,7 +336,7 @@ const AnnouncementsPage: React.FC = () => {
 
       {/* ── AI 生成公告弹窗 ── */}
       <Modal
-        title="🤖 AI 起草公告"
+        title={t('anDraftTitle')}
         open={aiModal}
         onCancel={() => setAiModal(false)}
         onOk={handleAiGenerate}
@@ -344,28 +344,28 @@ const AnnouncementsPage: React.FC = () => {
         okText={t('generateAnnouncement')} cancelText={t('cancel')}
       >
         <Form form={aiForm} layout="vertical">
-          <Form.Item name="topic" label="公告主题" rules={[{ required: true, message: '请输入公告主题' }]}>
-            <Input placeholder="如：期末考试安排通知" />
+          <Form.Item name="topic" label={t('anTopic')} rules={[{ required: true, message: t('anTopicReq') }]}>
+            <Input placeholder={t('anTopicPh')} />
           </Form.Item>
-          <Form.Item name="target_role" label="发布范围" initialValue="all">
+          <Form.Item name="target_role" label={t('anScope')} initialValue="all">
             <Select>
-              <Select.Option value="all">全体用户</Select.Option>
-              <Select.Option value="teacher">仅教师</Select.Option>
-              <Select.Option value="student">仅学生</Select.Option>
+              <Select.Option value="all">{t('anAllUsers')}</Select.Option>
+              <Select.Option value="teacher">{t('anOnlyTeacher')}</Select.Option>
+              <Select.Option value="student">{t('anOnlyStudent')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="priority" label="优先级" initialValue="normal">
+          <Form.Item name="priority" label={t('anPriority')} initialValue="normal">
             <Select>
-              <Select.Option value="normal">普通</Select.Option>
-              <Select.Option value="important">重要</Select.Option>
-              <Select.Option value="urgent">紧急</Select.Option>
+              <Select.Option value="normal">{t('anPNormal')}</Select.Option>
+              <Select.Option value="important">{t('anPImportant')}</Select.Option>
+              <Select.Option value="urgent">{t('anPUrgent')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item name="target_grade" label="适用年级（留空不限）">
-            <Input placeholder="如：高一" />
+          <Form.Item name="target_grade" label={t('anGradeLbl')}>
+            <Input placeholder={t('anGradePh')} />
           </Form.Item>
-          <Form.Item name="target_class" label="适用班级（留空不限）">
-            <Input placeholder="如：1,2,3" />
+          <Form.Item name="target_class" label={t('anClassLbl')}>
+            <Input placeholder={t('anClassPh')} />
           </Form.Item>
         </Form>
       </Modal>
@@ -381,34 +381,34 @@ const AnnouncementsPage: React.FC = () => {
         width={640}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="title" label={t('announcementTitle')} rules={[{ required: true, message: '请输入标题' }]}>
+          <Form.Item name="title" label={t('announcementTitle')} rules={[{ required: true, message: t('anTitleReq') }]}>
             <Input placeholder={t('announcementTitle')} maxLength={100} />
           </Form.Item>
-          <Form.Item name="content" label={t('announcementContent')} rules={[{ required: true, message: '请输入内容' }]}>
+          <Form.Item name="content" label={t('announcementContent')} rules={[{ required: true, message: t('anContentReq') }]}>
             <TextArea rows={6} placeholder={t('announcementContent')} />
           </Form.Item>
           <Form.Item
             name="target_role"
-            label="可见角色"
+            label={t('anVisRole')}
             initialValue={isAdminOrTeacher && user?.role === 'teacher' ? 'student' : 'all'}
-            extra={user?.role === 'teacher' ? '教师公告默认发送给所教班级学生，管理员始终可见' : '管理员公告默认发送给所有人'}
+            extra={user?.role === 'teacher' ? t('anExtraTeacher') : t('anExtraAdmin')}
           >
             <Select>
-              <Select.Option value="all">所有人</Select.Option>
-              <Select.Option value="teacher">仅教师</Select.Option>
-              <Select.Option value="student">仅学生</Select.Option>
+              <Select.Option value="all">{t('anEveryone')}</Select.Option>
+              <Select.Option value="teacher">{t('anOnlyTeacher')}</Select.Option>
+              <Select.Option value="student">{t('anOnlyStudent')}</Select.Option>
             </Select>
           </Form.Item>
-          <Form.Item label="年级/班级范围">
+          <Form.Item label={t('anGradeRange')}>
             <ActivityScopeSelector value={announceScope} onChange={setAnnounceScope} />
           </Form.Item>
           <Space style={{ width: '100%' }} size={16}>
-            <Form.Item name="priority" label="优先级" initialValue="normal">
+            <Form.Item name="priority" label={t('anPriority')} initialValue="normal">
               <Select style={{ width: 140 }}>
-                <Select.Option value="normal">普通</Select.Option>
-                <Select.Option value="important">重要</Select.Option>
-                <Select.Option value="urgent">紧急</Select.Option>
-                <Select.Option value="low">低</Select.Option>
+                <Select.Option value="normal">{t('anPNormal')}</Select.Option>
+                <Select.Option value="important">{t('anPImportant')}</Select.Option>
+                <Select.Option value="urgent">{t('anPUrgent')}</Select.Option>
+                <Select.Option value="low">{t('anPLow')}</Select.Option>
               </Select>
             </Form.Item>
             <Form.Item name="is_pinned" label={t('pinned')} valuePropName="checked" initialValue={false}>
@@ -428,18 +428,18 @@ const AnnouncementsPage: React.FC = () => {
         width={640}
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item name="title" label={t('announcementTitle')} rules={[{ required: true, message: '请输入标题' }]}>
+          <Form.Item name="title" label={t('announcementTitle')} rules={[{ required: true, message: t('anTitleReq') }]}>
             <Input maxLength={100} />
           </Form.Item>
-          <Form.Item name="content" label={t('announcementContent')} rules={[{ required: true, message: '请输入内容' }]}>
+          <Form.Item name="content" label={t('announcementContent')} rules={[{ required: true, message: t('anContentReq') }]}>
             <TextArea rows={6} />
           </Form.Item>
-          <Form.Item name="priority" label="优先级">
+          <Form.Item name="priority" label={t('anPriority')}>
             <Select>
-              <Select.Option value="normal">普通</Select.Option>
-              <Select.Option value="important">重要</Select.Option>
-              <Select.Option value="urgent">紧急</Select.Option>
-              <Select.Option value="low">低</Select.Option>
+              <Select.Option value="normal">{t('anPNormal')}</Select.Option>
+              <Select.Option value="important">{t('anPImportant')}</Select.Option>
+              <Select.Option value="urgent">{t('anPUrgent')}</Select.Option>
+              <Select.Option value="low">{t('anPLow')}</Select.Option>
             </Select>
           </Form.Item>
         </Form>

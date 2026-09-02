@@ -9,6 +9,7 @@ import {
   QuestionCircleOutlined, SafetyCertificateOutlined, EditOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'
 import * as authApi from '../api/auth'
+import { useTranslation, Trans } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -19,6 +20,7 @@ interface Props {
 }
 
 const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
+  const { t } = useTranslation('login')
   const [loading, setLoading] = useState(false)
   const [questions, setQuestions] = useState<string[]>([])
   const [configured, setConfigured] = useState(false)
@@ -68,7 +70,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
       message.success(msg)
       onClose()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '设置失败')
+      message.error(err?.response?.data?.detail || t('ssSetupFailed'))
     } finally {
       setLoading(false)
     }
@@ -79,7 +81,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
       title={
         <span>
           <SafetyCertificateOutlined style={{ marginRight: 8, color: 'var(--primary-color)' }} />
-          {configured && !editing ? '密保问题' : '设置密保问题'}
+          {configured && !editing ? t('ssTitleView') : t('ssTitleSet')}
         </span>
       }
       open={open}
@@ -91,10 +93,10 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
         }
         if (onSkip) {
           Modal.confirm({
-            title: '确定跳过吗？',
-            content: '设置密保问题后，你可以在忘记密码时通过它找回账号。建议立即设置。',
-            okText: '暂不设置',
-            cancelText: '继续设置',
+            title: t('ssSkipTitle'),
+            content: t('ssSkipContent'),
+            okText: t('ssNotNow'),
+            cancelText: t('ssContinueSetup'),
             onOk: () => onSkip(),
           })
         } else {
@@ -116,7 +118,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
           }}>
             <CheckCircleOutlined style={{ color: 'var(--success-color)', marginRight: 8 }} />
             <Text style={{ color: 'var(--text-secondary)' }}>
-              你已设置密保问题。忘记密码时可通过回答这些问题重置密码。
+              {t('ssViewedHint')}
             </Text>
           </div>
 
@@ -125,7 +127,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
             border: '1px solid var(--border-color)', borderRadius: 10,
           }}>
             <Text style={{ fontSize: 12, color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>
-              密保问题 ①
+              {t('ssQ1')}
             </Text>
             <Text strong>
               <QuestionCircleOutlined style={{ marginRight: 8, color: 'var(--primary-color)' }} />
@@ -137,7 +139,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
             border: '1px solid var(--border-color)', borderRadius: 10,
           }}>
             <Text style={{ fontSize: 12, color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>
-              密保问题 ②
+              {t('ssQ2')}
             </Text>
             <Text strong>
               <QuestionCircleOutlined style={{ marginRight: 8, color: 'var(--primary-color)' }} />
@@ -146,13 +148,13 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
           </div>
 
           <div style={{ textAlign: 'right' }}>
-            <Button style={{ marginRight: 8 }} onClick={onClose}>关闭</Button>
+            <Button style={{ marginRight: 8 }} onClick={onClose}>{t('ssClose')}</Button>
             <Button
               type="primary"
               icon={<EditOutlined />}
               onClick={() => setEditing(true)}
             >
-              修改密保
+              {t('ssEditBtn')}
             </Button>
           </div>
         </>
@@ -164,82 +166,81 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
           <div style={{ marginBottom: 20 }}>
             <Text style={{ color: 'var(--text-secondary)' }}>
               {configured && editing
-                ? '修改密保问题后，旧的问题将失效。请设置两个不同的密保问题。'
+                ? t('ssEditHint')
                 : currentQ1 && !currentQ2
-                  ? <>你之前设置了1个密保问题，请再<Text strong>添加第二个</Text>密保问题以完善安全设置。</>
-                  : <>请设置<Text strong>两个不同的</Text>密保问题并牢记答案。
-                     忘记密码时，需要<Text strong>同时答对两个问题</Text>才能重置密码。</>
+                  ? <Trans i18nKey="ssLegacy1" components={{ 1: <Text strong /> }} />
+                  : <Trans i18nKey="ssIntro" components={{ 1: <Text strong /> }} />
               }
             </Text>
           </div>
 
           <Form form={form} onFinish={handleSubmit} layout="vertical">
-            <Text strong style={{ display: 'block', marginBottom: 8 }}>密保问题 ①</Text>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>{t('ssQ1')}</Text>
             <Form.Item
               name="question1"
-              rules={[{ required: true, message: '请选择第一个密保问题' }]}
+              rules={[{ required: true, message: t('ssPickQ1') }]}
             >
               <Select
-                placeholder="请选择第一个密保问题"
+                placeholder={t('ssPickQ1')}
                 options={questions.map((q) => ({ label: q, value: q }))}
               />
             </Form.Item>
             <Form.Item
               name="answer1"
               rules={[
-                { required: true, message: '请输入答案' },
-                { min: 2, message: '答案至少需要2个字符' },
+                { required: true, message: t('ssAnswerRequired') },
+                { min: 2, message: t('ssAnswerMin') },
               ]}
             >
               <Input.Password
                 prefix={<QuestionCircleOutlined />}
-                placeholder="请输入答案（请牢记！）"
+                placeholder={t('ssAnswerPlaceholder')}
               />
             </Form.Item>
 
             <Divider style={{ margin: '12px 0' }} />
 
-            <Text strong style={{ display: 'block', marginBottom: 8 }}>密保问题 ②</Text>
+            <Text strong style={{ display: 'block', marginBottom: 8 }}>{t('ssQ2')}</Text>
             <Form.Item
               name="question2"
-              rules={[{ required: true, message: '请选择第二个密保问题' }]}
+              rules={[{ required: true, message: t('ssPickQ2') }]}
             >
               <Select
-                placeholder="请选择第二个密保问题（不能与第一个相同）"
+                placeholder={t('ssPickQ2Ph')}
                 options={getQuestion2Options()}
               />
             </Form.Item>
             <Form.Item
               name="answer2"
               rules={[
-                { required: true, message: '请输入答案' },
-                { min: 2, message: '答案至少需要2个字符' },
+                { required: true, message: t('ssAnswerRequired') },
+                { min: 2, message: t('ssAnswerMin') },
               ]}
             >
               <Input.Password
                 prefix={<QuestionCircleOutlined />}
-                placeholder="请输入答案（请牢记！）"
+                placeholder={t('ssAnswerPlaceholder')}
               />
             </Form.Item>
 
             <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
               {onSkip && !configured && (
                 <Button style={{ marginRight: 8 }} onClick={onSkip}>
-                  暂不设置
+                  {t('ssNotNow')}
                 </Button>
               )}
               {editing && configured && (
                 <Button style={{ marginRight: 8 }} onClick={() => setEditing(false)}>
-                  取消
+                  {t('fpCancel')}
                 </Button>
               )}
               {editing && !configured && onSkip && (
                 <Button style={{ marginRight: 8 }} onClick={onSkip}>
-                  暂不设置
+                  {t('ssNotNow')}
                 </Button>
               )}
               <Button type="primary" htmlType="submit" loading={loading}>
-                确认{configured ? '修改' : '设置'}
+                {configured ? t('ssConfirmChange') : t('ssConfirmSet')}
               </Button>
             </Form.Item>
           </Form>

@@ -110,7 +110,7 @@ const InteractionPage: React.FC = () => {
       // 直接通过 API 创建测验，保留完整题目结构
       try {
         await apiClient.post('/api/interaction/quizzes', {
-          title: aiQuizForm.getFieldValue('topic') + ' - 随堂测验',
+          title: t('ipQuizSuffix', { topic: aiQuizForm.getFieldValue('topic') }),
           questions: JSON.stringify(aiQuizResult.questions),
           target_scope: aiQuizScope.target_scope,
           target_grade: aiQuizScope.target_grade,
@@ -245,7 +245,7 @@ const InteractionPage: React.FC = () => {
                       <div style={{ flex: 1 }}>
                         <Text strong>{quiz.title}</Text>
                         <div style={{ marginTop: 4 }}>
-                          <Tag>{quiz.questions?.length || 0} 题</Tag>
+                          <Tag>{t('ipNCount', { count: quiz.questions?.length || 0 })}</Tag>
                           <Tag color={quiz.status === 'active' ? 'green' : 'default'}>
                             {quiz.status === 'active' ? t('started') : t('ended')}
                           </Tag>
@@ -270,9 +270,9 @@ const InteractionPage: React.FC = () => {
                               onClick={() => {
                                 const token = localStorage.getItem('smartkb_token')
                                 window.open(`/api/export/quiz/${quiz.id}?token=${token}`, '_blank')
-                              }}>导出</Button>
+                              }}>{t('ipExport')}</Button>
                             <Button size="small" icon={<EditOutlined />}
-                              onClick={() => { editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }}>编辑</Button>
+                              onClick={() => { editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }}>{t('ipEdit')}</Button>
                             <Popconfirm title={t('confirmDeleteQuiz')} onConfirm={() => handleDeleteQuiz(quiz.id)}>
                               <Button size="small" danger icon={<DeleteOutlined />} />
                             </Popconfirm>
@@ -374,14 +374,14 @@ const InteractionPage: React.FC = () => {
         {quizResult && (
           <Result
             status={quizResult.percentage >= 60 ? 'success' : 'warning'}
-            title={`${quizResult.score} / ${quizResult.total_score} 分`}
+            title={t('ipScoreOf', { score: quizResult.score, total: quizResult.total_score })}
             subTitle={t('accuracyRate', { percent: quizResult.percentage })}
           />
         )}
       </Modal>
 
       {/* ── 测验结果统计弹窗 ── */}
-      <Modal title={quizResultsView?.quiz_title ? `我的成绩 - ${quizResultsView.quiz_title}` : "测验结果"}
+      <Modal title={quizResultsView?.quiz_title ? t('ipMyScore', { title: quizResultsView.quiz_title }) : t('ipQuizResult')}
         open={!!quizResultsView} onCancel={() => setQuizResultsView(null)}
         footer={null} width={720}>
         {quizResultsView && (
@@ -394,13 +394,13 @@ const InteractionPage: React.FC = () => {
                     format={p => `${p}%`}
                     strokeColor={quizResultsView.percentage >= 80 ? '#52c41a' : quizResultsView.percentage >= 60 ? '#faad14' : '#ff4d4f'} />
                   <div style={{ marginTop: 8 }}>
-                    <Text>得分：{quizResultsView.score}/{quizResultsView.total_score}</Text>
+                    <Text>{t('ipScore', { score: quizResultsView.score, total: quizResultsView.total_score })}</Text>
                   </div>
                 </Card>
                 {quizResultsView.details?.map((r: any, i: number) => (
                   <Card key={i} size="small" style={{ marginBottom: 8 }}
-                    title={`第 ${i+1} 题`}
-                    extra={r.is_correct ? <Tag color="success">正确</Tag> : <Tag color="error">错误</Tag>}>
+                    title={t('ipQNo', { no: i + 1 })}
+                    extra={r.is_correct ? <Tag color="success">{t('ipCorrect')}</Tag> : <Tag color="error">{t('ipWrong')}</Tag>}>
                     <FormulaRenderer content={r.question} />
                     <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={r.media_files} size="compact" />
                     {r.options && typeof r.options === 'object' && !Array.isArray(r.options) && (
@@ -422,8 +422,8 @@ const InteractionPage: React.FC = () => {
                       </div>
                     )}
                     <div style={{ marginTop: 8 }}>
-                      <Text>你的答案：<Text type={r.is_correct ? 'success' : 'danger'}>{r.user_answer || '（未作答）'}</Text></Text>
-                      {!r.is_correct && <div><Text type="secondary">正确答案：{r.correct_answer}</Text></div>}
+                      <Text>{t('ipYourAnswer')}<Text type={r.is_correct ? 'success' : 'danger'}>{r.user_answer || t('ipUnanswered')}</Text></Text>
+                      {!r.is_correct && <div><Text type="secondary">{t('ipCorrectAnswer')}{r.correct_answer}</Text></div>}
                     </div>
                     {r.explanation && (
                       <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
@@ -438,26 +438,26 @@ const InteractionPage: React.FC = () => {
             {!quizResultsView.quiz_title && (
               <>
                 <Row gutter={16} style={{ marginBottom: 16 }}>
-                  <Col span={8}><Statistic title="题目数" value={quizResultsView.quiz?.question_count} /></Col>
-                  <Col span={8}><Statistic title="参与人数" value={quizResultsView.total_answers} /></Col>
+                  <Col span={8}><Statistic title={t('ipQCount')} value={quizResultsView.quiz?.question_count} /></Col>
+                  <Col span={8}><Statistic title={t('ipParticipants')} value={quizResultsView.total_answers} /></Col>
                 </Row>
                 {/* 学生答题汇总 */}
                 {quizResultsView.student_answers?.length > 0 && (
-                  <Card title="学生答题情况" size="small" style={{ marginBottom: 16 }}>
+                  <Card title={t('ipStudentTable')} size="small" style={{ marginBottom: 16 }}>
                     <Table dataSource={quizResultsView.student_answers} rowKey="student" size="small"
                       pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }}
                       columns={[
-                        { title: '序号', key: 'idx', width: 50, render: (_: any, __: any, i: number) => i + 1 },
-                        { title: '学生', dataIndex: 'student', width: 120 },
-                        { title: '答对', dataIndex: 'correct_count', width: 80,
+                        { title: t('ipIdx'), key: 'idx', width: 50, render: (_: any, __: any, i: number) => i + 1 },
+                        { title: t('ipStudent'), dataIndex: 'student', width: 120 },
+                        { title: t('ipCorrectCol'), dataIndex: 'correct_count', width: 80,
                           render: (v: number, r: any) => (
                             <Text strong style={{ color: v === r.total_questions ? '#52c41a' : v > 0 ? '#faad14' : '#ff4d4f' }}>
                               {v}/{r.total_questions}
                             </Text>
                           ),
                         },
-                        { title: '得分', dataIndex: 'score', width: 80 },
-                        { title: '提交时间', dataIndex: 'submitted_at', width: 160 },
+                        { title: t('ipScoreCol'), dataIndex: 'score', width: 80 },
+                        { title: t('ipSubmitted'), dataIndex: 'submitted_at', width: 160 },
                       ]} />
                   </Card>
                 )}
@@ -465,14 +465,14 @@ const InteractionPage: React.FC = () => {
                   <Button icon={<RobotOutlined />} size="small"
                     loading={quizAiAnalysisLoading}
                     onClick={() => handleQuizAiAnalysis(quizResultsView.quiz?.id)}>
-                    AI 分析
+                    {t('ipAiAnalyze')}
                   </Button>
                 </div>
                 <Table dataSource={quizResultsView.question_stats} rowKey="index" size="small"
-                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `共 ${t} 题`, pageSizeOptions: ['5', '10', '20'] }}
+                  pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (num: number) => t('ipNTotal', { count: num }), pageSizeOptions: ['5', '10', '20'] }}
                   columns={[
-                    { title: '题号', dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
-                    { title: '题目', key: 'question', width: 400,
+                    { title: t('ipQNoCol'), dataIndex: 'index', render: (i: number) => i + 1, width: 60 },
+                    { title: t('ipQuestionCol'), key: 'question', width: 400,
                       render: (_: any, r: any) => (
                         <div>
                           <FormulaRenderer content={r.question} />
@@ -486,7 +486,7 @@ const InteractionPage: React.FC = () => {
                               ))}
                             </div>
                           )}
-                          <Tag color="blue" style={{ marginTop: 4 }}>答案：{r.correct_answer}</Tag>
+                          <Tag color="blue" style={{ marginTop: 4 }}>{t('ipAnswerLabel')}{r.correct_answer}</Tag>
                         </div>
                       ),
                     },
@@ -582,19 +582,19 @@ const InteractionPage: React.FC = () => {
 
 
       {/* ── 编辑测验弹窗 ── */}
-      <Modal title="编辑测验" open={!!editQuizModal} onCancel={() => setEditQuizModal(null)}
-        onOk={handleEditQuiz} okText="保存">
+      <Modal title={t('ipEditQuiz')} open={!!editQuizModal} onCancel={() => setEditQuizModal(null)}
+        onOk={handleEditQuiz} okText={t('ipSave')}>
         <Form form={editQuizForm} layout="vertical">
-          <Form.Item name="title" label="标题" rules={[{ required: true }]}>
+          <Form.Item name="title" label={t('quizTitle')} rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="description" label="描述">
+          <Form.Item name="description" label={t('ipDesc')}>
             <Input />
           </Form.Item>
-          <Form.Item name="status" label="状态">
+          <Form.Item name="status" label={t('ipStatus')}>
             <Select>
-              <Select.Option value="active">进行中</Select.Option>
-              <Select.Option value="closed">已结束</Select.Option>
+              <Select.Option value="active">{t('ipStatusActive')}</Select.Option>
+              <Select.Option value="closed">{t('ipStatusEnded')}</Select.Option>
             </Select>
           </Form.Item>
         </Form>

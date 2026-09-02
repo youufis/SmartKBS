@@ -2,6 +2,7 @@
  * 随堂测验 AI 生成题目管理组件
  * 与试题管理页面保持一致的 UI 风格
  */
+import { useTranslation } from 'react-i18next'
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Layout, Table, Tag, Space, Typography, Button, Empty, message,
@@ -48,6 +49,7 @@ interface FlatQuestion extends QuizQuestion {
 }
 
 const QuizManager: React.FC = () => {
+  const { t } = useTranslation('interaction')
   const [flatQuestions, setFlatQuestions] = useState<FlatQuestion[]>([])
   const [loading, setLoading] = useState(false)
   const [importing, setImporting] = useState<Set<string>>(new Set())
@@ -76,7 +78,7 @@ const QuizManager: React.FC = () => {
       }
       setFlatQuestions(flat)
     } catch {
-      message.error('加载测验题目失败')
+      message.error(t('qmLoadFailed'))
     }
     setLoading(false)
   }, [])
@@ -124,9 +126,9 @@ const QuizManager: React.FC = () => {
         }
       }
       await apiClient.post('/api/questions/import', payload)
-      message.success('已导入题库')
+      message.success(t('qmImported'))
     } catch {
-      message.error('导入失败，请重试')
+      message.error(t('qmImportFailed'))
     }
     setImporting((prev) => {
       const next = new Set(prev)
@@ -138,10 +140,10 @@ const QuizManager: React.FC = () => {
   const handleDeleteQuiz = async (quizId: number) => {
     try {
       await apiClient.delete(`/api/interaction/quizzes/${quizId}`)
-      message.success('测验已删除')
+      message.success(t('qmQuizDeleted'))
       loadQuestions()
     } catch {
-      message.error('删除失败')
+      message.error(t('qmDeleteFailed'))
     }
   }
 
@@ -150,10 +152,10 @@ const QuizManager: React.FC = () => {
     const questionIndex = parseInt(parts[parts.length - 1], 10)
     try {
       await apiClient.delete(`/api/interaction/quizzes/${record._quizId}/questions/${questionIndex}`)
-      message.success('题目已删除')
+      message.success(t('qmQuestionDeleted'))
       loadQuestions()
     } catch {
-      message.error('删除失败')
+      message.error(t('qmDeleteFailed'))
     }
   }
 
@@ -168,7 +170,7 @@ const QuizManager: React.FC = () => {
       ),
     },
     {
-      title: '题型',
+      title: t('qmColType'),
       dataIndex: 'type',
       key: 'type',
       width: 80,
@@ -177,7 +179,7 @@ const QuizManager: React.FC = () => {
       ),
     },
     {
-      title: '题目内容',
+      title: t('qmColContent'),
       dataIndex: 'question',
       key: 'question',
       ellipsis: true,
@@ -197,7 +199,7 @@ const QuizManager: React.FC = () => {
       ),
     },
     {
-      title: '创建者',
+      title: t('qmColCreator'),
       dataIndex: '_creatorName',
       key: '_creatorName',
       width: 90,
@@ -206,13 +208,13 @@ const QuizManager: React.FC = () => {
       ),
     },
     {
-      title: '配图',
+      title: t('qmColImage'),
       key: 'media',
       width: 80,
       render: (_: any, record: FlatQuestion) => {
         const svgContent = record.svg_content || record.svg_code
         if (svgContent) {
-          return <SVGViewer svgCode={svgContent} description="预览" thumbHeight={50} />
+          return <SVGViewer svgCode={svgContent} description={t('qmPreview')} thumbHeight={50} />
         }
         const hasMediaImages = Array.isArray(record.media_files) && record.media_files.length > 0
         if (hasMediaImages && record.media_files![0].url) {
@@ -229,7 +231,7 @@ const QuizManager: React.FC = () => {
       },
     },
     {
-      title: '来源测验',
+      title: t('qmColSource'),
       dataIndex: '_quizTitle',
       key: '_quizTitle',
       width: 140,
@@ -242,36 +244,36 @@ const QuizManager: React.FC = () => {
       ),
     },
     {
-      title: '操作',
+      title: t('qmColActions'),
       key: 'actions',
       width: 190,
       render: (_: any, record: FlatQuestion) => (
         <Space size="small">
-          <Tooltip title="导入题库">
+          <Tooltip title={t('qmImportTip')}>
             <Button type="link" size="small" icon={<ImportOutlined />}
               loading={importing.has(record._key)}
               onClick={(e) => { e.stopPropagation(); handleImportToBank(record) }} />
           </Tooltip>
           <Popconfirm
-            title="删除此题？"
-            description="将从所属测验中移除，并清理对应的答题记录"
+            title={t('qmDelQTitle')}
+            description={t('qmDelQDesc')}
             onConfirm={(e) => { e?.stopPropagation(); handleDeleteQuestion(record) }}
-            okText="确认"
-            cancelText="取消"
+            okText={t('qmOk')}
+            cancelText={t('qmCancel')}
           >
-            <Tooltip title="删除此题">
+            <Tooltip title={t('qmDelQTip')}>
               <Button type="link" size="small" danger icon={<DeleteOutlined />}
                 onClick={(e) => e.stopPropagation()} />
             </Tooltip>
           </Popconfirm>
           <Popconfirm
-            title={`删除整个测验「${record._quizTitle}」？`}
-            description="该测验下的所有题目将一并删除"
+            title={t('qmDelQuizTitle', { title: record._quizTitle })}
+            description={t('qmDelQuizDesc')}
             onConfirm={(e) => { e?.stopPropagation(); handleDeleteQuiz(record._quizId) }}
-            okText="确认"
-            cancelText="取消"
+            okText={t('qmOk')}
+            cancelText={t('qmCancel')}
           >
-            <Tooltip title="删除整卷">
+            <Tooltip title={t('qmDelQuizTip')}>
               <Button type="link" size="small" danger icon={<DeleteOutlined />}
                 style={{ opacity: 0.5 }}
                 onClick={(e) => e.stopPropagation()} />
@@ -308,11 +310,11 @@ const QuizManager: React.FC = () => {
       })()}
       {record.type === 'short' && (
         <div style={{ margin: '4px 0 0 20px', fontSize: 13, color: '#555' }}>
-          参考答案：<FormulaRenderer content={record.answer} inline />
+          {t('qmRefAnswer')}<FormulaRenderer content={record.answer} inline />
         </div>
       )}
       <div style={{ marginTop: 8 }}>
-        <Tag color="green">正确答案：{record.answer}</Tag>
+        <Tag color="green">{t('qmCorrectAnswer')}{record.answer}</Tag>
         {record.explanation && (
           <div style={{ marginTop: 4 }}>
             <FormulaRenderer content={record.explanation} />
@@ -320,7 +322,7 @@ const QuizManager: React.FC = () => {
         )}
       </div>
       <div style={{ marginTop: 4, fontSize: 12, color: '#aaa' }}>
-        来源测验：{record._quizTitle} | 分值：{record.score ?? '-'} 分
+        {t('qmSourceLine', { title: record._quizTitle, score: record.score ?? '-' })}
       </div>
     </div>
   )
@@ -332,15 +334,15 @@ const QuizManager: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
-              🤖 测验题目
+              {t('qmTitle')}
             </Typography.Title>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              查看和管理随堂测验中 AI 生成的题目，支持导入题库复用
+              {t('qmSubtitle')}
             </Typography.Text>
           </div>
           <div>
             <Button icon={<ReloadOutlined />} onClick={loadQuestions} loading={loading}>
-              刷新
+              {t('qmRefresh')}
             </Button>
           </div>
         </div>
@@ -351,26 +353,26 @@ const QuizManager: React.FC = () => {
         <Space wrap>
           <Select
             allowClear
-            placeholder="筛选题型"
+            placeholder={t('qmFilterType')}
             style={{ width: 110 }}
             value={typeFilter}
             onChange={(v: string | undefined) => setTypeFilter(v)}
           >
-            <Select.Option value="single">单选题</Select.Option>
-            <Select.Option value="true_false">判断题</Select.Option>
-            <Select.Option value="multiple">多选题</Select.Option>
-            <Select.Option value="short">简答题</Select.Option>
+            <Select.Option value="single">{t('qmTypeSingle')}</Select.Option>
+            <Select.Option value="true_false">{t('qmTypeTrueFalse')}</Select.Option>
+            <Select.Option value="multiple">{t('qmTypeMultiple')}</Select.Option>
+            <Select.Option value="short">{t('qmTypeShort')}</Select.Option>
           </Select>
           <Input.Search
             allowClear
-            placeholder="搜索题目内容..."
+            placeholder={t('qmSearchPh')}
             value={keyword}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKeyword(e.target.value)}
             onSearch={(val: string) => setKeyword(val)}
             style={{ width: 220 }}
           />
           <Text type="secondary" style={{ fontSize: 13 }}>
-            共 {filtered.length} 道题目
+            {t('qmTotalN', { count: filtered.length })}
           </Text>
         </Space>
 
@@ -381,8 +383,8 @@ const QuizManager: React.FC = () => {
           rowKey="_key"
           loading={loading}
           size="small"
-          pagination={{ pageSize: 20, showTotal: (t: number) => `共 ${t} 题` }}
-          locale={{ emptyText: <Empty description="暂无 AI 生成的测验题目" /> }}
+          pagination={{ pageSize: 20, showTotal: (num: number) => t('qmTotalPage', { count: num }) }}
+          locale={{ emptyText: <Empty description={t('qmEmpty')} /> }}
           expandable={{
             expandedRowRender,
             rowExpandable: () => true,
