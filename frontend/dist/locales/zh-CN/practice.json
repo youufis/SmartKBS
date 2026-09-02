@@ -217,5 +217,12 @@
   "testCaseUnit": "个用例",
   "totalStudentsSubmitted": "共 {{count}} 名学生已提交",
   "viewSubmissionDetails": "查看提交详情",
-  "writeCode": "请先编写代码"
+  "writeCode": "请先编写代码",
+  "codeNotVisible": "暂不可见",
+  "createFailed": "创建失败",
+  "createSuccess": "创建成功",
+  "updateFailed": "更新失败",
+  "updateSuccess": "更新成功",
+  "true": "正确",
+  "false": "错误"
 }

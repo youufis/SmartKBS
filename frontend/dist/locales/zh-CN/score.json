@@ -179,7 +179,6 @@
   "shareCancelled": "已取消分享",
   "selfShareOnly": "只能管理自己的画像分享",
   "aiAnalysisTimeout": "AI 分析超时",
-  "userNotFound": "未找到对应用户",
   "queryFailed": "查询失败",
   "updateFailed": "更新失败",
   "noNewBadges": "没有新徽章可解锁",
@@ -284,5 +283,9 @@
   "portfolio.daysSuffix": "天",
   "portfolio.timesSuffix": "次",
   "portfolio.knowledgePointsSuffix": "个知识点",
-  "pointsNotEnough": "积分不足"
+  "pointsNotEnough": "积分不足",
+  "confirmDelete": "确定删除吗？",
+  "deleteFailed": "删除失败",
+  "loadFailed": "加载失败",
+  "passed": "合格"
 }

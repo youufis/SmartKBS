@@ -488,7 +488,7 @@ const HtmlFilesPage: React.FC = () => {
                             pageSize={PAGE_SIZE}
                             onChange={(p) => setGroupPage(activeGroup, p)}
                             showSizeChanger
-                            showTotal={(t) => `共 ${t} 个资源`}
+                            showTotal={(num) => t('totalResources', { count: num })}
                             pageSizeOptions={['10', '20', '50']}
                           />
                         </div>
@@ -536,7 +536,7 @@ const HtmlFilesPage: React.FC = () => {
                   total={sharedItems.length}
                   pageSize={PAGE_SIZE}
                   showSizeChanger
-                  showTotal={(t) => `共 ${t} 个资源`}
+                  showTotal={(num) => t('totalResources', { count: num })}
                   pageSizeOptions={['10', '20', '50']}
                   onChange={(p) => setSharedPage(p)}
                 />

@@ -91,14 +91,13 @@
   ],
   "Failed": "加载失败",
   "pleaseHint": "请输入分组名称",
-  "operationFailed": "err?.response?.data?.detail || err?.message || 移除失败",
+  "operationFailed": "操作失败",
   "newGroup": "新建分组",
   "renameGroup": "重命名分组",
   "sharedClickToCancel": "已共享 - 点击取消共享",
   "clickToShare": "点击共享",
   "removeFromGroup": "移出分组",
   "fromOwner": "来自 {{owner}}",
-  "resourceCenter": "资源中心",
   "sharedResources": "共享资源",
   "myResources": "我的资源",
   "sharedToMe": "共享给我的",
@@ -117,8 +116,10 @@
   "removeFailed": "移除失败",
   "addFailed": "添加失败",
   "deleteFailed": "删除失败",
-  "operationFailed": "操作失败",
   "addedToUngrouped": "已添加到未分组",
   "ungrouped": "未分组",
-  "refresh": "刷新"
+  "refresh": "刷新",
+  "cancel": "取消",
+  "confirm": "确认",
+  "nameRequired": "名称不能为空"
 }

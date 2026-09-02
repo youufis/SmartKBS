@@ -94,7 +94,6 @@
   "all": "All",
   "classUnit": "",
   "status": "Status",
-  "submitted": "Submitted",
   "detail": "Details",
   "delete": "Delete",
   "questionN": "Q{{n}}",
@@ -218,5 +217,12 @@
   "testCaseUnit": "cases",
   "totalStudentsSubmitted": "{{count}} students submitted",
   "viewSubmissionDetails": "View Submission Details",
-  "writeCode": "Please write code first"
+  "writeCode": "Please write code first",
+  "codeNotVisible": "Not visible yet",
+  "createFailed": "Create failed",
+  "createSuccess": "Created successfully",
+  "updateFailed": "Update failed",
+  "updateSuccess": "Updated successfully",
+  "true": "True",
+  "false": "False"
 }

@@ -427,5 +427,10 @@
   "kpExample": "例如：算法与程序设计、数据结构",
   "joinFailed": "加入失败",
   "playing": "进行中",
-  "tieredScoringDesc": "按排名分段奖励，排名越高得分越多"
+  "tieredScoringDesc": "按排名分段奖励，排名越高得分越多",
+  "addOption": "添加选项",
+  "explanationPlaceholder": "答案解析（可选）",
+  "operationFailed": "操作失败",
+  "roomNotFound": "未找到房间",
+  "selectSubject": "请选择学科"
 }

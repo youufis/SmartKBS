@@ -299,5 +299,6 @@
   "searchBankFailed": "Failed to search question bank",
   "selectAtLeastOne": "Please select at least one knowledge point",
   "smartPracticeFailed": "Smart practice failed",
-  "smartPracticeGenerated": "Smart practice generated ({{total}} questions)"
+  "smartPracticeGenerated": "Smart practice generated ({{total}} questions)",
+  "aiGenerateFailed": "AI generation failed"
 }

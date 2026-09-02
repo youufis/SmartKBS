@@ -247,5 +247,12 @@
   "enterRoomCode": "Please enter room code",
   "joinFailed": "Join failed",
   "joinedRoom": "Joined room \"{{title}}\"",
-  "whiteboardUpdated": "Whiteboard updated"
+  "whiteboardUpdated": "Whiteboard updated",
+  "createFailed": "Create failed",
+  "deleteFailed": "Delete failed",
+  "deleted": "Deleted",
+  "ended": "Ended",
+  "roomCreated": "Room created",
+  "titleRequired": "Title is required",
+  "updateFailed": "Update failed"
 }

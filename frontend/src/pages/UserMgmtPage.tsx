@@ -204,12 +204,12 @@ const UserMgmtPage: React.FC = () => {
       setBulkConfirmed(false)
       if (preview.matched_count === 0) {
         setBulkPreviewOpen(false)
-        message.warning('没有匹配到可删除的用户（管理员账号不参与批量删除）')
+        message.warning(t('noDeletableMatched'))
         return
       }
       setBulkPreviewOpen(true)
     } catch (err: unknown) {
-      message.error(usersApi.extractApiErrorDetail((err as ApiError)?.response?.data) || '查询匹配用户失败')
+      message.error(usersApi.extractApiErrorDetail((err as ApiError)?.response?.data) || t('queryMatchFailed'))
     } finally {
       setBulkPreviewLoading(false)
     }
@@ -223,7 +223,7 @@ const UserMgmtPage: React.FC = () => {
   /** 第二步：用户确认后才真正删除（必须带 confirm=true） */
   const handleBulkDelete = async () => {
     if (!bulkPreview || bulkPreview.matched_count === 0) { closeBulkDeletePreview(); return }
-    if (!bulkConfirmed) { message.warning('请先勾选确认删除'); return }
+    if (!bulkConfirmed) { message.warning(t('tickConfirmFirst')); return }
     setBulkPreviewOpen(false)
     setBulkConfirmed(false)
     setBulkDeleteProgress({
@@ -234,7 +234,7 @@ const UserMgmtPage: React.FC = () => {
       deleted: 0,
       errorCount: 0,
       errors: [],
-      message: `开始删除 ${bulkPreview.matched_count} 个用户…`,
+      message: t('startDeleteCount', { count: bulkPreview.matched_count }),
       done: false,
     })
     try {
@@ -245,7 +245,7 @@ const UserMgmtPage: React.FC = () => {
             setBulkDeleteProgress(prev => ({
               ...prev,
               total: event.total || 0,
-              message: `准备删除 ${event.total} 个用户…`,
+              message: t('prepareDeleteCount', { count: event.total }),
             }))
           } else if (event.type === 'progress') {
             setBulkDeleteProgress(prev => ({
@@ -255,7 +255,7 @@ const UserMgmtPage: React.FC = () => {
               total: event.total || 0,
               deleted: event.deleted || 0,
               errorCount: event.error_count || 0,
-              message: `正在删除 ${event.current}/${event.total}…`,
+              message: t('deletingProgress', { current: event.current, total: event.total }),
             }))
           } else if (event.type === 'done') {
             const errList = event.errors || []
@@ -266,7 +266,7 @@ const UserMgmtPage: React.FC = () => {
               deleted: event.deleted || 0,
               errorCount: event.error_count || 0,
               errors: errList,
-              message: event.message || '批量删除完成',
+              message: event.message || t('batchDeleteDone'),
               done: true,
             }))
             // 删除完成后刷新用户列表，界面立即反映结果
@@ -279,7 +279,7 @@ const UserMgmtPage: React.FC = () => {
     } catch (err: unknown) {
       setBulkDeleteProgress(prev => ({
         ...prev,
-        message: err instanceof Error ? err.message : '批量删除失败',
+        message: err instanceof Error ? err.message : t('batchDeleteFailed'),
         done: true,
       }))
     }
@@ -321,14 +321,14 @@ const UserMgmtPage: React.FC = () => {
     const promoteDesc = promotePreview?.grade_details
       ?.filter(d => d.next_grade)
       .map(d => `${d.grade}→${d.next_grade}`)
-      ?.join('，') || '按学段自动升级'
+      ?.join('，') || t('autoUpgradeByStage')
     const graduateDesc = promotePreview?.grade_details
       ?.filter(d => !d.next_grade && d.count > 0)
-      .map(d => `${d.grade}（${d.count}人）`)
+      .map(d => t('gradeCountItem', { grade: d.grade, count: d.count }))
       ?.join('、')
 
     Modal.confirm({
-      title: '⚠️ 确认执行批量升年级？',
+      title: t('confirmBatchUpgradeTitle'),
       icon: <WarningOutlined />,
       width: 520,
       content: (
@@ -344,9 +344,9 @@ const UserMgmtPage: React.FC = () => {
           <p style={{ color: '#fa8c16', marginTop: 8 }}>此操作不可撤销，请确认已备份数据。</p>
         </div>
       ),
-      okText: '确认执行',
+      okText: t('confirmExecute'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         setPromoteExecuting(true)
         try {
@@ -377,14 +377,14 @@ const UserMgmtPage: React.FC = () => {
       ?.join('，') || ''
 
     Modal.confirm({
-      title: '⚠️ 确认执行批量降级？',
+      title: t('confirmBatchDemoteTitle'),
       icon: <WarningOutlined />,
       width: 520,
       content: (
         <div>
           <p style={{ marginBottom: 12 }}>降级是升年级的逆操作，将执行以下变更：</p>
           <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
-            <li>{reverseDesc || '按升年级映射反向降级'}</li>
+            <li>{reverseDesc || t('demoteByUpgradeMap')}</li>
             {promoteOptions.sync_scores && <li>同步降级课堂积分的年级归属</li>}
             {promoteOptions.sync_rollcall && <li>同步降级点名数据的年级归属</li>}
             {promoteOptions.match_class && <li>按同名班级自动匹配</li>}
@@ -392,9 +392,9 @@ const UserMgmtPage: React.FC = () => {
           <p style={{ color: '#fa8c16', marginTop: 8 }}>毕业年级学生不受影响。降级可多次执行，每次都是升年级的逆操作。</p>
         </div>
       ),
-      okText: '确认降级',
+      okText: t('confirmDemote'),
       okType: 'danger',
-      cancelText: '取消',
+      cancelText: t('cancel'),
       onOk: async () => {
         setPromoteReversing(true)
         try {
@@ -450,7 +450,7 @@ const UserMgmtPage: React.FC = () => {
       imported: 0,
       errorCount: 0,
       errors: [],
-      message: '正在解析文件…',
+      message: t('parsingFile'),
       done: false,
     })
 
@@ -460,7 +460,7 @@ const UserMgmtPage: React.FC = () => {
           setImportProgress(prev => ({
             ...prev,
             total: event.total || 0,
-            message: `准备导入 ${event.total} 个用户…`,
+            message: t('prepareImportCount', { count: event.total }),
           }))
         } else if (event.type === 'progress') {
           setImportProgress(prev => ({
@@ -470,7 +470,7 @@ const UserMgmtPage: React.FC = () => {
             total: event.total || 0,
             imported: event.imported || 0,
             errorCount: event.error_count || 0,
-            message: `正在导入 ${event.current}/${event.total}…`,
+            message: t('importingProgress', { current: event.current, total: event.total }),
           }))
         } else if (event.type === 'done') {
           const errList = event.errors || []
@@ -480,7 +480,7 @@ const UserMgmtPage: React.FC = () => {
             imported: event.imported || 0,
             errorCount: event.error_count || 0,
             errors: errList,
-            message: event.message || '导入完成',
+            message: event.message || t('importDone'),
             done: true,
           }))
         }
@@ -488,7 +488,7 @@ const UserMgmtPage: React.FC = () => {
     } catch (err: unknown) {
       setImportProgress(prev => ({
         ...prev,
-        message: err instanceof Error ? err.message : '导入失败',
+        message: err instanceof Error ? err.message : t('importFailed'),
         done: true,
       }))
     }
@@ -777,9 +777,9 @@ const UserMgmtPage: React.FC = () => {
                 onChange={(v: BulkMatchMode) => setBulkMatchMode(v)}
                 style={{ width: 120 }}
                 options={[
-                  { value: 'prefix', label: '前缀匹配' },
-                  { value: 'contains', label: '包含匹配' },
-                  { value: 'exact', label: '精确匹配' },
+                  { value: 'prefix', label: t('matchPrefix') },
+                  { value: 'contains', label: t('matchContains') },
+                  { value: 'exact', label: t('matchExact') },
                 ]}
               />
               <Input placeholder={t('enterPattern')} value={bulkPattern}
@@ -793,17 +793,17 @@ const UserMgmtPage: React.FC = () => {
             </Space>
             <div style={{ marginTop: 8 }}>
               <Typography.Text type="secondary">
-                按用户名模式匹配后先预览、再确认删除；管理员账号不会被删除。用户及其学习数据会被彻底删除且不可恢复。
+                {t('batchDeleteHint')}
               </Typography.Text>
             </div>
           </Card>
 
           {/* 批量删除：匹配结果二次确认弹窗 */}
           <Modal
-            title="确认批量删除"
+            title={t('confirmBatchDeleteTitle')}
             open={bulkPreviewOpen}
-            okText="确认删除"
-            cancelText="取消"
+            okText={t('confirmDeleteBtn')}
+            cancelText={t('cancel')}
             okButtonProps={{ danger: true, disabled: !bulkConfirmed }}
             onOk={handleBulkDelete}
             onCancel={closeBulkDeletePreview}
@@ -815,34 +815,34 @@ const UserMgmtPage: React.FC = () => {
                 <Alert
                   type="error"
                   showIcon
-                  message={`即将彻底删除 ${bulkPreview.matched_count} 个用户，操作不可恢复`}
+                  message={t('deleteWarnCount', { count: bulkPreview.matched_count })}
                   description={bulkPreview.message}
                 />
                 {bulkPreview.preview.length > 0 && (
                   <div>
                     <Typography.Text strong>
-                      匹配示例（前 {bulkPreview.preview.length} 个）：
+                      {t('matchPreviewHead', { count: bulkPreview.preview.length })}
                     </Typography.Text>
                     <div style={{ marginTop: 6 }}>
                       {bulkPreview.preview.map((u) => <Tag key={u} color="red">{u}</Tag>)}
                     </div>
                     {bulkPreview.matched_count > bulkPreview.preview.length && (
                       <Typography.Text type="secondary">
-                        另有 {bulkPreview.matched_count - bulkPreview.preview.length} 个匹配用户同样会被删除
+                        {t('moreMatched', { count: bulkPreview.matched_count - bulkPreview.preview.length })}
                       </Typography.Text>
                     )}
                   </div>
                 )}
                 {bulkPreview.skipped_admin_count > 0 && (
                   <Typography.Text type="warning">
-                    已自动跳过 {bulkPreview.skipped_admin_count} 个管理员账号
+                    {t('skippedAdmins', { count: bulkPreview.skipped_admin_count })}
                   </Typography.Text>
                 )}
                 <Checkbox
                   checked={bulkConfirmed}
                   onChange={(e) => setBulkConfirmed(e.target.checked)}
                 >
-                  我确认删除以上 {bulkPreview.matched_count} 个用户及其全部数据
+                  {t('iConfirmDelete', { count: bulkPreview.matched_count })}
                 </Checkbox>
               </Space>
             )}
@@ -883,23 +883,23 @@ const UserMgmtPage: React.FC = () => {
             </Modal>
 
           {/* ── 批量升年级 ── */}
-          <Card size="small" title={<span><RiseOutlined /> 批量升年级</span>}
+          <Card size="small" title={<span><RiseOutlined /> {t('batchUpgradeTitle')}</span>}
             extra={isAdmin ? null : <Typography.Text type="warning">仅管理员可用</Typography.Text>}>
             {isAdmin ? (
               <Space orientation="vertical" style={{ width: '100%' }}>
                 <Typography.Text type="secondary">
-                  按学段自动升级：一年级→二年级→…→六年级→（毕业），初一→初二→初三→（毕业），高一→高二→高三→（毕业）。
-                  毕业年级学生保留账号但不再升级。
+                  {t('upgradePathHint')}
+                  {t('gradRetainHint')}
                 </Typography.Text>
 
                 {/* 预览区域 */}
                 <Space>
                   <Button icon={<RiseOutlined />} onClick={handlePreviewPromote} loading={promoteLoading}>
-                    预览升年级
+                    {t('previewUpgrade')}
                   </Button>
                   {promotePreview && (
                     <span style={{ color: '#888', fontSize: 13 }}>
-                      共 {promotePreview.total_students} 名学生
+                      {t('totalStudentsN', { count: promotePreview.total_students })}
                     </span>
                   )}
                 </Space>
@@ -909,16 +909,16 @@ const UserMgmtPage: React.FC = () => {
                     <Table
                       dataSource={promotePreview.grade_details}
                       columns={[
-                        { title: '当前年级', dataIndex: 'grade', key: 'grade', width: 100 },
-                        { title: '人数', dataIndex: 'count', key: 'count', width: 60 },
+                        { title: t('curGrade'), dataIndex: 'grade', key: 'grade', width: 100 },
+                        { title: t('headcount'), dataIndex: 'count', key: 'count', width: 60 },
                         {
-                          title: '升入年级', dataIndex: 'next_grade', key: 'next_grade', width: 120,
+                          title: t('nextGrade'), dataIndex: 'next_grade', key: 'next_grade', width: 120,
                           render: (val: string | null) => val
                             ? <Tag color="blue">{val}</Tag>
-                            : <Tag color="orange">🎓 毕业</Tag>,
+                            : <Tag color="orange">{t("graduateTag")}</Tag>,
                         },
                         {
-                          title: '班级', dataIndex: 'classes', key: 'classes',
+                          title: t('classCol'), dataIndex: 'classes', key: 'classes',
                           render: (val: string[]) => val?.length ? val.join('、') : '-',
                         },
                       ]}
@@ -929,25 +929,25 @@ const UserMgmtPage: React.FC = () => {
                     />
 
                     {/* 选项 */}
-                    <Card size="small" type="inner" title="升级选项" style={{ marginBottom: 12 }}>
+                    <Card size="small" type="inner" title={t('upgradeOptions')} style={{ marginBottom: 12 }}>
                       <Space orientation="vertical">
                         <Checkbox
                           checked={promoteOptions.sync_scores}
                           onChange={(e) => setPromoteOptions(prev => ({ ...prev, sync_scores: e.target.checked }))}
                         >
-                          同步更新课堂积分（scores）的年级归属
+                          {t('syncScoresHint')}
                         </Checkbox>
                         <Checkbox
                           checked={promoteOptions.sync_rollcall}
                           onChange={(e) => setPromoteOptions(prev => ({ ...prev, sync_rollcall: e.target.checked }))}
                         >
-                          同步更新点名数据（rollcall）的年级归属
+                          {t('syncRollcallHint')}
                         </Checkbox>
                         <Checkbox
                           checked={promoteOptions.match_class}
                           onChange={(e) => setPromoteOptions(prev => ({ ...prev, match_class: e.target.checked }))}
                         >
-                          按同名班级自动匹配新年级班级（如 1班 → 1班）
+                          {t('matchClassHint')}
                         </Checkbox>
                       </Space>
                     </Card>
@@ -956,14 +956,14 @@ const UserMgmtPage: React.FC = () => {
                     <Space>
                       <Button type="primary" icon={<RiseOutlined />}
                         loading={promoteExecuting} onClick={handleExecutePromote}>
-                        执行升年级
+                        {t('executeUpgrade')}
                       </Button>
                       <Button icon={<RollbackOutlined />}
                         loading={promoteReversing} onClick={handleReversePromote}>
-                        反向降级
+                        {t('reverseDemote')}
                       </Button>
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        升/降级可反复执行，互逆操作
+                        {t('upgradeReversibleHint')}
                       </Typography.Text>
                     </Space>
                   </>
@@ -991,11 +991,11 @@ const UserMgmtPage: React.FC = () => {
                       ))}
                       {promoteResult.success && (
                         <>
-                          <Typography.Text>✅ {promoteResult.direction === 'up' ? '已升级' : '已降级'}学生：{Object.entries(promoteResult.promoted).map(([g, c]) => `${g}→${c}人`).join('、')}</Typography.Text>
+                          <Typography.Text>✅ {promoteResult.direction === 'up' ? t('upgradedLabel') : t('demotedLabel')}{t('studentsColon')}{Object.entries(promoteResult.promoted).map(([g, c]) => t('gradeMoveSummary', { from: g, to: c })).join('、')}</Typography.Text>
                           {Object.keys(promoteResult.not_moved).length > 0 && (
                             <Typography.Text>
-                              {promoteResult.direction === 'up' ? '🎓 毕业学生：' : '⏸ 已是最低年级：'}
-                              {Object.entries(promoteResult.not_moved).map(([g, c]) => `${g} ${c}人`).join('、')}
+                              {promoteResult.direction === 'up' ? t('graduatedLabel') : t('lowestGradeLabel')}
+                              {Object.entries(promoteResult.not_moved).map(([g, c]) => t('gradeCountPlain', { grade: g, count: c })).join('、')}
                             </Typography.Text>
                           )}
                           {promoteResult.skipped && promoteResult.skipped.length > 0 && (

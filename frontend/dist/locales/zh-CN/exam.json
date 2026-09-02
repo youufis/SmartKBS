@@ -242,5 +242,6 @@
   "editSuccess": "编辑成功",
   "inProgress": "进行中",
   "noDescription": "暂无描述",
-  "retake": "重新考试"
+  "retake": "重新考试",
+  "loading": "加载中…"
 }

@@ -299,5 +299,6 @@
   "searchBankFailed": "搜索题库失败",
   "selectAtLeastOne": "请至少选择一个知识点",
   "smartPracticeFailed": "智能练习失败",
-  "smartPracticeGenerated": "智能练习已生成（共 {{total}} 题）"
+  "smartPracticeGenerated": "智能练习已生成（共 {{total}} 题）",
+  "aiGenerateFailed": "AI 生成失败"
 }

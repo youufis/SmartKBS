@@ -179,7 +179,6 @@
   "shareCancelled": "Share cancelled",
   "selfShareOnly": "Can only manage your own portrait shares",
   "aiAnalysisTimeout": "AI analysis timeout",
-  "userNotFound": "User not found",
   "queryFailed": "Query failed",
   "updateFailed": "Update failed",
   "noNewBadges": "No new badges to unlock",
@@ -284,5 +283,9 @@
   "portfolio.daysSuffix": " days",
   "portfolio.timesSuffix": " times",
   "portfolio.knowledgePointsSuffix": " knowledge points",
-  "pointsNotEnough": "Not enough points"
+  "pointsNotEnough": "Not enough points",
+  "confirmDelete": "Are you sure you want to delete?",
+  "deleteFailed": "Delete failed",
+  "loadFailed": "Load failed",
+  "passed": "Passed"
 }

@@ -427,5 +427,10 @@
   "pleaseHint": "Please enter room code",
   "joinFailed": "Join failed",
   "playing": "In Progress",
-  "tieredScoringDesc": "Tiered rewards by rank, higher rank earns more points"
+  "tieredScoringDesc": "Tiered rewards by rank, higher rank earns more points",
+  "addOption": "Add option",
+  "explanationPlaceholder": "Explanation (optional)",
+  "operationFailed": "Operation failed",
+  "roomNotFound": "Room not found",
+  "selectSubject": "Select a subject"
 }

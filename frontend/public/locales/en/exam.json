@@ -242,5 +242,6 @@
   "editSuccess": "Updated successfully",
   "inProgress": "In Progress",
   "noDescription": "No description",
-  "retake": "Retake"
+  "retake": "Retake",
+  "loading": "Loading…"
 }

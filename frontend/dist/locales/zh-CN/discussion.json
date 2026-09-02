@@ -247,5 +247,12 @@
   "enterRoomCode": "请输入房间码",
   "joinFailed": "加入失败",
   "joinedRoom": "已加入房间「{{title}}」",
-  "whiteboardUpdated": "白板已更新"
+  "whiteboardUpdated": "白板已更新",
+  "createFailed": "创建失败",
+  "deleteFailed": "删除失败",
+  "deleted": "已删除",
+  "ended": "已结束",
+  "roomCreated": "讨论室已创建",
+  "titleRequired": "请输入标题",
+  "updateFailed": "更新失败"
 }

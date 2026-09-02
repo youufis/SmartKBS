@@ -95,7 +95,6 @@
   "clickToShare": "Click to share",
   "removeFromGroup": "Remove from group",
   "fromOwner": "From {{owner}}",
-  "resourceCenter": "Resource Center",
   "sharedResources": "Shared Resources",
   "myResources": "My Resources",
   "sharedToMe": "Shared with me",
@@ -119,5 +118,8 @@
   "ungrouped": "Ungrouped",
   "refresh": "Refresh",
   "Failed": "Failed to load",
-  "pleaseHint": "Please enter a group name"
+  "pleaseHint": "Please enter a group name",
+  "cancel": "Cancel",
+  "confirm": "OK",
+  "nameRequired": "Name is required"
 }
