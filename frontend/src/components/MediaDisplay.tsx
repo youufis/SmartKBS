@@ -4,6 +4,7 @@
  * 统一渲染 SVG 配图 + 万相生成的图片（media_files）
  * 用于在试卷、练习、错题本等页面中展示
  */
+import { useTranslation } from 'react-i18next'
 import React from 'react'
 import { Image } from 'antd'
 import SVGViewer from './SVGViewer'
@@ -21,6 +22,7 @@ interface MediaDisplayProps {
 }
 
 const MediaDisplay: React.FC<MediaDisplayProps> = ({ svgContent, hasSvg, mediaFiles, size = 'normal' }) => {
+  const { t } = useTranslation('common')
   // 解析 mediaFiles（可能是 JSON 字符串或数组）
   let files: MediaFile[] = []
   if (Array.isArray(mediaFiles)) {
@@ -50,7 +52,7 @@ const MediaDisplay: React.FC<MediaDisplayProps> = ({ svgContent, hasSvg, mediaFi
           padding: 8, background: '#f5f5f5', borderRadius: 8,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <SVGViewer svgCode={svgContent} description="题目配图" expandable={true} thumbHeight={s.svgThumbHeight} />
+          <SVGViewer svgCode={svgContent} description={t('mdQuestionFigure')} expandable={true} thumbHeight={s.svgThumbHeight} />
         </div>
       )}
 
@@ -65,7 +67,7 @@ const MediaDisplay: React.FC<MediaDisplayProps> = ({ svgContent, hasSvg, mediaFi
         }}>
           <Image
             src={f.url}
-            alt={f.alt || '题目配图'}
+            alt={f.alt || t('mdQuestionFigure')}
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
             preview={{ mask: null }}
           />

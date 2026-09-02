@@ -1,4 +1,5 @@
 /** 对话状态管理 (Zustand) */
+import i18n from '../i18n'
 import { create } from 'zustand';
 import type { Message, TreeNode } from '../types';
 import { chatStream, checkApiKeyStatus } from '../api/chat';
@@ -87,7 +88,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: prompt || '(文件)',
+      content: prompt || i18n.t('chat:fileTag'),
       timestamp: Date.now(),
     };
     const aiMsg: Message = {
@@ -198,8 +199,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       set({ historyContent: result.content, historyFilename: result.filename });
     } catch (e: any) {
       console.error('历史文件加载失败:', e);
-      const detail = e?.response?.data?.detail || e.message || '未知错误';
-      set({ historyContent: `❌ 加载失败: ${detail}`, historyFilename: null });
+      const detail = e?.response?.data?.detail || e.message || i18n.t('chat:unknownError');
+      set({ historyContent: `\u274c ${i18n.t('chat:loadFailed')}: ${detail}`, historyFilename: null });
     }
   },
 

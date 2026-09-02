@@ -157,5 +157,8 @@
   "poll": "Poll",
   "question": "Question",
   "Failed": "Failed to refresh",
-  "operationFailed": "Save failed"
+  "operationFailed": "Save failed",
+  "fileTag": "(file)",
+  "unknownError": "Unknown error",
+  "loadFailed": "Load failed"
 }

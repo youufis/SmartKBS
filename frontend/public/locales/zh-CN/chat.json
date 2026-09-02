@@ -146,7 +146,7 @@
   "operationFailed": "e?.response?.data?.detail || e?.message || 保存失败",
   "Failed": "刷新失败",
   "useAgent": "智能体",
-  "useAgentTip": "连接智能体应用", 
+  "useAgentTip": "连接智能体应用",
   "useAgentDisabledTip": "未配置APPID，仅支持直连大模型",
   "directModel": "直连大模型",
   "status": {
@@ -157,5 +157,8 @@
   "activity": "课堂活动",
   "quiz": "测验",
   "poll": "投票",
-  "question": "提问"
+  "question": "提问",
+  "fileTag": "(文件)",
+  "unknownError": "未知错误",
+  "loadFailed": "加载失败"
 }

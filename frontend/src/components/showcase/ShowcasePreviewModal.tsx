@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import React from 'react'
 import { Modal, Tag, Typography, Divider, Descriptions } from 'antd'
 import { EyeOutlined } from '@ant-design/icons'
@@ -21,6 +22,7 @@ interface Props {
 }
 
 const ShowcasePreviewModal: React.FC<Props> = ({ card, open, onClose, onLikeChange }) => {
+  const { t } = useTranslation('dashboard')
   if (!card) return null
   const { snapshot_data } = card
   if (!snapshot_data) return null
@@ -33,7 +35,7 @@ const ShowcasePreviewModal: React.FC<Props> = ({ card, open, onClose, onLikeChan
     <Modal
       title={
         <span style={{ fontSize: 18 }}>
-          {main_title.emoji} {card.student_name} · 荣誉档案
+          {main_title.emoji} {card.student_name} · {t('scHonorArchive')}
         </span>
       }
       open={open}
@@ -52,16 +54,16 @@ const ShowcasePreviewModal: React.FC<Props> = ({ card, open, onClose, onLikeChan
       </div>
 
       <Descriptions column={2} size="small" bordered>
-        <Descriptions.Item label="总积分" span={2}>
+        <Descriptions.Item label={t('scTotalPoints')} span={2}>
           <span style={{ fontSize: 24, fontWeight: 700, color }}>{total_points.toLocaleString()}</span>
-          <span style={{ marginLeft: 8, color: '#999' }}>分</span>
+          <span style={{ marginLeft: 8, color: '#999' }}>{t('scPointsUnit')}</span>
         </Descriptions.Item>
         {progress?.next && (
-          <Descriptions.Item label="下一级" span={2}>
-            {progress.next.emoji} {progress.next.name}（还需 {progress.points_needed} 分）
+          <Descriptions.Item label={t('scNextLevel')} span={2}>
+            {progress.next.emoji} {progress.next.name}{t('scNeedPoints', { count: progress.points_needed })}
           </Descriptions.Item>
         )}
-        <Descriptions.Item label="已解锁徽章" span={2}>
+        <Descriptions.Item label={t('scBadges')} span={2}>
           {unlockedBadges.length > 0 ? (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {unlockedBadges.map((b) => (
@@ -71,10 +73,10 @@ const ShowcasePreviewModal: React.FC<Props> = ({ card, open, onClose, onLikeChan
               ))}
             </div>
           ) : (
-            <Text type="secondary">暂无</Text>
+            <Text type="secondary">{t('scNone')}</Text>
           )}
         </Descriptions.Item>
-        <Descriptions.Item label="学科称号" span={2}>
+        <Descriptions.Item label={t('scSubjectTitles')} span={2}>
           {subject_titles?.length > 0 ? (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {subject_titles.map((st) => (
@@ -84,7 +86,7 @@ const ShowcasePreviewModal: React.FC<Props> = ({ card, open, onClose, onLikeChan
               ))}
             </div>
           ) : (
-            <Text type="secondary">暂无</Text>
+            <Text type="secondary">{t('scNone')}</Text>
           )}
         </Descriptions.Item>
       </Descriptions>
@@ -100,7 +102,7 @@ const ShowcasePreviewModal: React.FC<Props> = ({ card, open, onClose, onLikeChan
         />
         <span style={{ color: '#888' }}>
           <EyeOutlined style={{ marginRight: 4 }} />
-          {card.view_count} 次浏览
+          {t('scViews', { count: card.view_count })}
         </span>
       </div>
     </Modal>

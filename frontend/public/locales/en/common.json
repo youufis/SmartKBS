@@ -195,5 +195,24 @@
     "stage2": "Stage 2: Generating HTML code...",
     "stage3": "Stage 3: Saving files + generating images...",
     "waitingStage": "⏳ {{stage}} (waited {{minutes}} min)"
-  }
+  },
+  "nbTitle": "Notifications",
+  "nbReadAll": "Mark all read",
+  "nbEmpty": "No notifications",
+  "nbSystem": "System",
+  "nbNew": "New",
+  "nbCompanion": "Companion messages",
+  "nbCompanionTag": "Mate",
+  "nbViewAll": "View all notifications",
+  "ebTitle": "Page render error",
+  "ebDesc": "Sorry, the page hit an unexpected error. Please try refreshing.",
+  "ebDetails": "Error details",
+  "ebRetry": "Retry",
+  "ebRefresh": "Refresh page",
+  "svCopied": "SVG code copied",
+  "svZoomTip": "Click to zoom",
+  "svDefault": "SVG figure",
+  "svDownloadPng": "💾 Download PNG",
+  "svCopyCode": "📋 Copy code",
+  "mdQuestionFigure": "Question figure"
 }

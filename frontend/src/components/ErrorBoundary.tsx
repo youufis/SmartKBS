@@ -1,3 +1,4 @@
+import i18n from '../i18n'
 import React from 'react'
 import { Button, Result } from 'antd'
 
@@ -54,13 +55,13 @@ class ErrorBoundary extends React.Component<Props, State> {
         }}>
           <Result
             status="error"
-            title="页面渲染出错"
+            title={i18n.t('common:ebTitle')}
             subTitle={
               <span style={{ color: '#999', fontSize: 13 }}>
-                抱歉，页面遇到了一个意外错误。请尝试刷新页面。
+                {i18n.t('common:ebDesc')}
                 {this.state.error && (
                   <details style={{ marginTop: 8, textAlign: 'left', maxWidth: 500 }}>
-                    <summary style={{ cursor: 'pointer', color: '#1677ff' }}>错误详情</summary>
+                    <summary style={{ cursor: 'pointer', color: '#1677ff' }}>{i18n.t('common:ebDetails')}</summary>
                     <pre style={{
                       fontSize: 12,
                       color: '#ff4d4f',
@@ -81,10 +82,10 @@ class ErrorBoundary extends React.Component<Props, State> {
             }
             extra={[
               <Button key="retry" type="primary" onClick={this.handleReset}>
-                重试
+                {i18n.t('common:ebRetry')}
               </Button>,
               <Button key="reload" onClick={this.handleReload}>
-                刷新页面
+                {i18n.t('common:ebRefresh')}
               </Button>,
             ]}
           />

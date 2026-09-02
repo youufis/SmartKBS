@@ -7,6 +7,7 @@
  * - 下载为 PNG
  * - 复制 SVG 代码
  */
+import { useTranslation } from 'react-i18next'
 import React, { useState } from 'react'
 import { Modal, Tooltip, message, Image } from 'antd'
 
@@ -27,6 +28,7 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
   expandable = true,
   thumbHeight = 60,
 }) => {
+  const { t } = useTranslation('common')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [imgError, setImgError] = useState(false)
 
@@ -54,7 +56,7 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
 
   // 复制 SVG 代码
   const handleCopy = () => {
-    navigator.clipboard.writeText(svgCode).then(() => message.success('SVG 代码已复制'))
+    navigator.clipboard.writeText(svgCode).then(() => message.success(t('svCopied')))
   }
 
   // 缩略图内容
@@ -92,9 +94,9 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
 
   return (
     <>
-      <Tooltip title="点击放大预览">{thumbBox}</Tooltip>
+      <Tooltip title={t('svZoomTip')}>{thumbBox}</Tooltip>
       <Modal
-        title={description || 'SVG 配图'}
+        title={description || t('svDefault')}
         open={previewOpen}
         onCancel={() => setPreviewOpen(false)}
         footer={null} width={700} destroyOnHidden
@@ -104,10 +106,10 @@ const SVGViewer: React.FC<SVGViewerProps> = ({
         </div>
         <div style={{ marginTop: 12, textAlign: 'center', display: 'flex', gap: 16, justifyContent: 'center' }}>
           <span style={{ color: '#1677ff', cursor: 'pointer', fontSize: 14 }} onClick={handleDownload}>
-            💾 下载为 PNG
+            {t('svDownloadPng')}
           </span>
           <span style={{ color: '#1677ff', cursor: 'pointer', fontSize: 14 }} onClick={handleCopy}>
-            📋 复制代码
+            {t('svCopyCode')}
           </span>
         </div>
       </Modal>

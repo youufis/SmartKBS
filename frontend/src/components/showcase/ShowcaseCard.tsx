@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import React, { useState, useCallback } from 'react'
 import { Tag, Tooltip, Popover, message } from 'antd'
 import { EyeOutlined, BgColorsOutlined } from '@ant-design/icons'
@@ -58,6 +59,7 @@ function getStars(points: number): { filled: number; total: number } {
 }
 
 const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeChange }) => {
+  const { t } = useTranslation('dashboard')
   const user = useAuthStore((s) => s.user)
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [localTheme, setLocalTheme] = useState(card.theme_style || 'golden')
@@ -83,9 +85,9 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
       await updateShowcaseTheme(card.id, key)
       setLocalTheme(key)
       onThemeChange?.(card.id, key)
-      message.success('主题已更新')
+      message.success(t('scThemeUpdated'))
     } catch {
-      message.error('主题更新失败')
+      message.error(t('scThemeUpdateFailed'))
     }
     setPopoverOpen(false)
   }, [card.id, localTheme, onThemeChange])
@@ -121,7 +123,7 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
       {isOwnerOrTeacher && (
         <Popover
           content={themeContent}
-          title="选择卡片主题"
+          title={t('scPickTheme')}
           trigger="click"
           open={popoverOpen}
           onOpenChange={setPopoverOpen}
@@ -164,14 +166,14 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
             {'☆'.repeat(stars.total - stars.filled)}
           </div>
           <div className="points-number">{total_points.toLocaleString()}</div>
-          <div className="points-label">总积分</div>
+          <div className="points-label">{t('scTotalPoints')}</div>
         </div>
 
         {/* 下一级进度条 */}
         {progress?.next && (
           <div className="showcase-progress">
             <div className="progress-label">
-              下一级：{progress.next.emoji} {progress.next.name}
+              {t('scNextLevel')}：{progress.next.emoji} {progress.next.name}
             </div>
             <div className="progress-track">
               <div
@@ -179,7 +181,7 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
                 style={{ width: `${Math.min(progress.progress_percent, 100)}%` }}
               />
             </div>
-            <div className="progress-text">还需 {progress.points_needed} 分升级</div>
+            <div className="progress-text">{t('scNeedPointsUp', { count: progress.points_needed })}</div>
           </div>
         )}
 
@@ -192,7 +194,7 @@ const ShowcaseCard: React.FC<Props> = ({ card, onLikeChange, onClick, onThemeCha
               </Tooltip>
             ))}
             {unlockedBadges.length > 8 && (
-              <Tooltip title={`还有 ${unlockedBadges.length - 8} 枚徽章`}>
+              <Tooltip title={t('scMoreBadges', { count: unlockedBadges.length - 8 })}>
                 <span className="showcase-badge" style={{ fontSize: 12, fontWeight: 600 }}>+{unlockedBadges.length - 8}</span>
               </Tooltip>
             )}

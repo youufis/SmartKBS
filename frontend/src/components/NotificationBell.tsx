@@ -7,6 +7,7 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
+import { useTranslation } from 'react-i18next'
 import * as notificationsApi from '../api/notifications'
 import * as companionApi from '../api/companion'
 import { useCompanionStore } from '../stores/companionStore'
@@ -33,6 +34,7 @@ const PUSH_TYPE_CONFIG: Record<string, { color: string; icon: string }> = {
 }
 
 const NotificationBell: React.FC = () => {
+  const { t } = useTranslation('common')
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isStudent = user?.role === 'student'
@@ -157,11 +159,11 @@ const NotificationBell: React.FC = () => {
   const content = (
     <div style={{ width: 360, maxHeight: 420, display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
-        <Text strong>消息通知</Text>
+        <Text strong>{t('nbTitle')}</Text>
         <Space size={4}>
           {unreadCount > 0 && (
             <Button type="text" size="small" icon={<CheckOutlined />} onClick={handleMarkAllRead}>
-              全部已读
+              {t('nbReadAll')}
             </Button>
           )}
         </Space>
@@ -170,12 +172,12 @@ const NotificationBell: React.FC = () => {
         {loading ? (
           <div style={{ textAlign: 'center', padding: 24 }}><Spin size="small" /></div>
         ) : notifications.length === 0 && (!isStudent || pushes.length === 0) ? (
-          <Empty description="暂无通知" style={{ padding: 24 }} />
+          <Empty description={t('nbEmpty')} style={{ padding: 24 }} />
         ) : (
           <>
             {/* 系统通知 */}
             {notifications.length > 0 && (
-              <div style={{ padding: '4px 12px', fontSize: 11, color: '#999', fontWeight: 600 }}>系统通知</div>
+              <div style={{ padding: '4px 12px', fontSize: 11, color: '#999', fontWeight: 600 }}>{t('nbSystem')}</div>
             )}
             <List
               dataSource={notifications}
@@ -214,7 +216,7 @@ const NotificationBell: React.FC = () => {
                       title={
                         <Space size={4}>
                           <Text strong={!item.is_read} style={{ fontSize: 13 }}>{item.title}</Text>
-                          {!item.is_read && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>新</Tag>}
+                          {!item.is_read && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('nbNew')}</Tag>}
                         </Space>
                       }
                       description={
@@ -234,7 +236,7 @@ const NotificationBell: React.FC = () => {
             {/* 学伴推送（仅学生） */}
             {isStudent && pushes.length > 0 && (
               <>
-                <div style={{ padding: '4px 12px', fontSize: 11, color: '#999', fontWeight: 600, borderTop: notifications.length > 0 ? '1px solid #f0f0f0' : 'none' }}>学伴消息</div>
+                <div style={{ padding: '4px 12px', fontSize: 11, color: '#999', fontWeight: 600, borderTop: notifications.length > 0 ? '1px solid #f0f0f0' : 'none' }}>{t('nbCompanion')}</div>
                 <List
                   dataSource={pushes}
                   renderItem={(item) => {
@@ -264,7 +266,7 @@ const NotificationBell: React.FC = () => {
                           title={
                             <Space size={4}>
                               <Text style={{ fontSize: 13 }}>{item.title}</Text>
-                              <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>学伴</Tag>
+                              <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('nbCompanionTag')}</Tag>
                             </Space>
                           }
                           description={
@@ -288,7 +290,7 @@ const NotificationBell: React.FC = () => {
       </div>
       <div style={{ borderTop: '1px solid #f0f0f0', padding: '6px 12px', textAlign: 'center' }}>
         <Button type="link" size="small" onClick={() => { setOpen(false); navigate('/notifications') }}>
-          查看全部通知 <RightOutlined />
+          {t('nbViewAll')} <RightOutlined />
         </Button>
       </div>
     </div>
@@ -302,7 +304,7 @@ const NotificationBell: React.FC = () => {
       onOpenChange={handleOpenChange}
       placement="bottomRight"
     >
-      <Tooltip title="消息通知">
+      <Tooltip title={t('nbTitle')}>
         <Badge count={unreadCount + pushUnreadCount} size="small" offset={[-2, 2]}>
           <BellOutlined style={{ fontSize: 18, cursor: 'pointer', color: '#666' }} />
         </Badge>

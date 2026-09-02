@@ -1,21 +1,23 @@
 import React from 'react'
 import { Select, Space, Typography, Tooltip } from 'antd'
 import { useThemeStore, themeMap, type ThemeName } from '../stores/themeStore'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
 const ThemeSwitcher: React.FC = () => {
+  const { t: tr } = useTranslation('login')
   const { current, setTheme } = useThemeStore()
 
   return (
-    <Tooltip title="切换主题">
+    <Tooltip title={tr('theme.switch')}>
       <Select
         value={current}
         onChange={(val: ThemeName) => setTheme(val)}
         style={{ width: 140 }}
         size="small"
         variant="borderless"
-        options={Object.entries(themeMap).map(([key, t]) => ({
+        options={Object.entries(themeMap).map(([key, th]) => ({
           value: key,
           label: (
             <Space size={6}>
@@ -25,12 +27,12 @@ const ThemeSwitcher: React.FC = () => {
                   width: 10,
                   height: 10,
                   borderRadius: '50%',
-                  backgroundColor: t.antdConfig.token?.colorPrimary as string,
+                  backgroundColor: th.antdConfig.token?.colorPrimary as string,
                   flexShrink: 0,
                 }}
               />
-              <Text style={{ fontSize: 13 }}>{t.icon}</Text>
-              <Text style={{ fontSize: 13 }}>{t.label}</Text>
+              <Text style={{ fontSize: 13 }}>{th.icon}</Text>
+              <Text style={{ fontSize: 13 }}>{tr(`theme.${key}`)}</Text>
             </Space>
           ),
         }))}

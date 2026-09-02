@@ -195,5 +195,24 @@
     "stage2": "第二阶段：生成 HTML 代码...",
     "stage3": "第三阶段：保存文件 + 生成配图...",
     "waitingStage": "⏳ {{stage}}（已等待 {{minutes}} 分钟）"
-  }
+  },
+  "nbTitle": "消息通知",
+  "nbReadAll": "全部已读",
+  "nbEmpty": "暂无通知",
+  "nbSystem": "系统通知",
+  "nbNew": "新",
+  "nbCompanion": "学伴消息",
+  "nbCompanionTag": "学伴",
+  "nbViewAll": "查看全部通知",
+  "ebTitle": "页面渲染出错",
+  "ebDesc": "抱歉，页面遇到了一个意外错误。请尝试刷新页面。",
+  "ebDetails": "错误详情",
+  "ebRetry": "重试",
+  "ebRefresh": "刷新页面",
+  "svCopied": "SVG 代码已复制",
+  "svZoomTip": "点击放大预览",
+  "svDefault": "SVG 配图",
+  "svDownloadPng": "💾 下载为 PNG",
+  "svCopyCode": "📋 复制代码",
+  "mdQuestionFigure": "题目配图"
 }
