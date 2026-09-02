@@ -209,12 +209,12 @@ const PortraitPage: React.FC = () => {
       } else {
         await share(sharingPortrait.id, shareScope)
         message.success(SCOPE_MAP[shareScope]?.label
-          ? `已分享到「${SCOPE_MAP[shareScope].label}」`
-          : '分享成功')
+          ? t('ptSharedToScope', { scope: SCOPE_MAP[shareScope].label })
+          : t('ptShareOk'))
       }
       setShareModalVisible(false)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '操作失败')
+      message.error(e?.response?.data?.detail || t('ptOpFailed'))
     }
   }
 
@@ -295,7 +295,7 @@ const PortraitPage: React.FC = () => {
               cover={
                 todayPortrait.image_url ? (
                   <img
-                    alt="今日画像"
+                    alt={t('ptTodayPortrait')}
                     src={todayPortrait.image_url}
                     style={{ width: '100%', maxHeight: 400, objectFit: 'contain', background: theme.bgTint }}
                   />
@@ -311,7 +311,7 @@ const PortraitPage: React.FC = () => {
                     fontSize: 18,
                   }}>
                     <PictureOutlined style={{ fontSize: 64, marginBottom: 16 }} />
-                    <Text style={{ color: 'rgba(255,255,255,0.8)' }}>图片生成中或暂不可用</Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.8)' }}>{t('ptImgPending')}</Text>
                   </div>
                 )
               }
@@ -327,7 +327,7 @@ const PortraitPage: React.FC = () => {
                       {SCOPE_MAP[todayPortrait.share_scope]?.icon} {SCOPE_MAP[todayPortrait.share_scope]?.label}
                     </Tag>
                   ) : (
-                    <Tag><LockOutlined /> 私密</Tag>
+                    <Tag><LockOutlined /> {t('ptPrivate')}</Tag>
                   )}
                 </Space>
                 <Space>
@@ -344,7 +344,7 @@ const PortraitPage: React.FC = () => {
                     onClick={() => openShareModal(todayPortrait)}
                     style={{ color: todayPortrait.is_shared ? '#52c41a' : undefined }}
                   >
-                    {todayPortrait.is_shared ? '已分享' : '分享'}
+                    {todayPortrait.is_shared ? t('ptShared') : t('ptShare')}
                   </Button>
                   {todayPortrait.image_url && (
                     <Button
@@ -354,7 +354,7 @@ const PortraitPage: React.FC = () => {
                       target="_blank"
                       download
                     >
-                      下载
+                      {t('ptDownload')}
                     </Button>
                   )}
                 </Space>
@@ -369,7 +369,7 @@ const PortraitPage: React.FC = () => {
                 borderLeft: `5px solid ${theme.color}`,
                 background: theme.bgTint,
               }}
-              title={<Space><EditOutlined style={{ color: theme.color }} /><Text strong>AI 本周寄语</Text></Space>}
+              title={<Space><EditOutlined style={{ color: theme.color }} /><Text strong>{t('ptWeeklyNote')}</Text></Space>}
             >
               <div style={{ maxHeight: 400, overflow: 'auto' }}>
                 <Paragraph
@@ -381,7 +381,7 @@ const PortraitPage: React.FC = () => {
                     color: '#595959',
                   }}
                 >
-                  {todayPortrait.ai_comment || '暂无寄语'}
+                  {todayPortrait.ai_comment || t('ptNoNote')}
                 </Paragraph>
               </div>
             </Card>
@@ -403,7 +403,7 @@ const PortraitPage: React.FC = () => {
               disabled={!canGenerate}
               style={{ height: 40, borderRadius: 20, paddingLeft: 24, paddingRight: 24 }}
             >
-              {generating ? '✨ AI 创意中...' : `🔥 ${t('regenerateWithPoints')}`}
+              {generating ? '✨ ' + t('ptCreating') : `🔥 ${t('regenerateWithPoints')}`}
             </Button>
             {error && (
               <Alert type="error" message={error} showIcon closable
@@ -430,10 +430,10 @@ const PortraitPage: React.FC = () => {
                   style={{ width: '100%' }}
                   value={selectedStyle}
                   onChange={setSelectedStyle}
-                  placeholder="选择风格"
+                  placeholder={t('ptPickStyle')}
                   size="large"
                   options={[
-                    { label: '🎲 随机创意（由AI决定）', value: 'random' },
+                    { label: t('ptRandomStyle'), value: 'random' },
                     ...styles
                       .filter(s => s.key !== 'random')
                       .map(s => ({
@@ -474,7 +474,7 @@ const PortraitPage: React.FC = () => {
                   fontSize: 16,
                 }}
               >
-                {generating ? '✨ AI 创意中...' : todayExists ? `🔥 ${t('regenerateWithPoints')}` : `✨ ${t('generateTodayPortrait')}`}
+                {generating ? '✨ ' + t('ptCreating') : todayExists ? `🔥 ${t('regenerateWithPoints')}` : `✨ ${t('generateTodayPortrait')}`}
               </Button>
 
               {error && (
@@ -513,9 +513,9 @@ const PortraitPage: React.FC = () => {
     return (
     <Card style={{ borderRadius: 8 }}>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={4} style={{ margin: 0 }}><StarOutlined /> 我的画展 · 共 {filtered.length} 幅</Title>
+        <Title level={4} style={{ margin: 0 }}><StarOutlined /> {t('ptMyGallery')} · {t('ptCountFrames', { count: filtered.length })}</Title>
         <Input.Search
-          placeholder="搜索日期、风格、寄语…"
+          placeholder={t('ptSearchMine')}
           allowClear
           style={{ width: 240 }}
           value={historySearch}
@@ -524,7 +524,7 @@ const PortraitPage: React.FC = () => {
         />
       </div>
       {historyList.length === 0 ? (
-        <Empty description="还没有画像，去生成第一幅吧！" />
+        <Empty description={t('ptEmptyMine')} />
       ) : (
         <>
         <Row gutter={[16, 16]}>
@@ -571,7 +571,7 @@ const PortraitPage: React.FC = () => {
                     )
                   }
                   actions={[
-                    <Tooltip title={portrait.liked ? '取消点赞' : '点赞'}>
+                    <Tooltip title={portrait.liked ? t('ptUnlike') : t('ptLike')}>
                       <span onClick={() => handleLike(portrait.id)}>
                         {portrait.liked
                           ? <HeartFilled style={{ color: '#ff4d4f' }} />
@@ -579,10 +579,10 @@ const PortraitPage: React.FC = () => {
                         {' '}{portrait.like_count || 0}
                       </span>
                     </Tooltip>,
-                    <Tooltip title="分享">
+                    <Tooltip title={t('ptShare')}>
                       <ShareAltOutlined onClick={() => openShareModal(portrait)} style={{ color: portrait.is_shared ? '#52c41a' : undefined }} />
                     </Tooltip>,
-                    <Tooltip title="删除">
+                    <Tooltip title={t('ptDelete')}>
                       <DeleteOutlined onClick={() => handleDelete(portrait)} />
                     </Tooltip>,
                   ]}
@@ -616,7 +616,7 @@ const PortraitPage: React.FC = () => {
             onChange={(p, ps) => { setHistoryPage(p); setHistoryPageSize(ps) }}
             showSizeChanger
             pageSizeOptions={['12', '24', '48']}
-            showTotal={(t) => `共 ${t} 幅`}
+            showTotal={(num) => t('ptCountFrames', { count: num })}
           />
         </div>
         </>
@@ -651,12 +651,12 @@ const PortraitPage: React.FC = () => {
             optionType="button"
             buttonStyle="solid"
           >
-            <Radio.Button value="public"><GlobalOutlined /> 全校画廊</Radio.Button>
-            <Radio.Button value="class"><TeamOutlined /> 本班画廊</Radio.Button>
-            <Radio.Button value="hot"><FireOutlined /> 热门推荐</Radio.Button>
+            <Radio.Button value="public"><GlobalOutlined /> {t('ptSchoolGallery')}</Radio.Button>
+            <Radio.Button value="class"><TeamOutlined /> {t('ptClassGallery')}</Radio.Button>
+            <Radio.Button value="hot"><FireOutlined /> {t('ptHotGallery')}</Radio.Button>
           </Radio.Group>
           <Input.Search
-            placeholder="搜索姓名、风格、寄语…"
+            placeholder={t('ptSearchAll')}
             allowClear
             style={{ width: 220 }}
             value={gallerySearch}
@@ -666,12 +666,12 @@ const PortraitPage: React.FC = () => {
         </Space>
 
         {(filtered.length === 0 && gallerySearch) ? (
-          <Empty description="未找到匹配的画像" />
+          <Empty description={t('ptNoMatch')} />
         ) : data.length === 0 ? (
-          <Empty description={galleryTab === 'class' ? '同班同学还没有分享画像' : '还没有公开的画像'}>
+          <Empty description={galleryTab === 'class' ? t('ptEmptyClass') : t('ptEmptyPublic')}>
             {!todayExists && (
               <Button type="primary" onClick={() => setActiveTab('today')}>
-                去生成第一幅画像
+                {t('ptGoGenerate')}
               </Button>
             )}
           </Empty>
@@ -712,7 +712,7 @@ const PortraitPage: React.FC = () => {
                     )
                   }
                   actions={[
-                    <Tooltip title={portrait.liked ? '取消点赞' : '点赞'}>
+                    <Tooltip title={portrait.liked ? t('ptUnlike') : t('ptLike')}>
                       <span onClick={() => handleLike(portrait.id)}>
                         {portrait.liked
                           ? <HeartFilled style={{ color: '#ff4d4f' }} />
@@ -727,7 +727,7 @@ const PortraitPage: React.FC = () => {
                     title={
                       <Space>
                         <Text strong>{portrait.student_name || portrait.username}</Text>
-                        {portrait.grade && <Tag>{portrait.grade}{portrait.class_name ? ` ${portrait.class_name}班` : ''}</Tag>}
+                        {portrait.grade && <Tag>{portrait.grade}{portrait.class_name ? ' ' + t('ptClassSuffix', { cls: portrait.class_name }) : ''}</Tag>}
                       </Space>
                     }
                     description={
@@ -759,7 +759,7 @@ const PortraitPage: React.FC = () => {
               onChange={(p, ps) => { setGalleryPage(p); setGalleryPageSize(ps) }}
               showSizeChanger
               pageSizeOptions={['12', '24', '48']}
-              showTotal={(t) => `共 ${t} 张`}
+              showTotal={(num) => t('ptCountSheets', { count: num })}
             />
           </div>
           </>
@@ -788,7 +788,7 @@ const PortraitPage: React.FC = () => {
             <Col xs={24} md={12}>
               {detailPortrait.image_url ? (
                 <img
-                  alt="画像"
+                  alt={t('ptPortrait')}
                   src={detailPortrait.image_url}
                   style={{ width: '100%', borderRadius: 8 }}
                 />
@@ -822,10 +822,10 @@ const PortraitPage: React.FC = () => {
                 </div>
                 <Space split={<Text type="secondary">|</Text>}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    <EyeOutlined /> {detailPortrait.view_count || 0} 次浏览
+                    <EyeOutlined /> {t('ptViews', { count: detailPortrait.view_count || 0 })}
                   </Text>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    <HeartOutlined /> {detailPortrait.like_count || 0} 次点赞
+                    <HeartOutlined /> {t('ptLikes', { count: detailPortrait.like_count || 0 })}
                   </Text>
                 </Space>
               </div>
@@ -851,7 +851,7 @@ const PortraitPage: React.FC = () => {
                   borderLeft: `5px solid ${dt.color}`,
                 }}>
                   <Text strong style={{ display: 'block', marginBottom: 8 }}>
-                    <EditOutlined style={{ color: dt.color }} /> AI 寄语
+                    <EditOutlined style={{ color: dt.color }} /> {t('ptAiNote')}
                   </Text>
                   <div style={{
                     maxHeight: 300,
@@ -864,7 +864,7 @@ const PortraitPage: React.FC = () => {
                       fontStyle: 'italic',
                       margin: 0,
                     }}>
-                      {detailPortrait.ai_comment || '暂无寄语'}
+                      {detailPortrait.ai_comment || t('ptNoNote')}
                     </Paragraph>
                   </div>
                 </div>
@@ -874,7 +874,7 @@ const PortraitPage: React.FC = () => {
                     icon={detailPortrait.liked ? <HeartFilled style={{ color: '#ff4d4f' }} /> : <HeartOutlined />}
                     onClick={() => handleLike(detailPortrait.id)}
                   >
-                    {detailPortrait.like_count || 0} 人赞过
+                    {t('ptPeopleLiked', { count: detailPortrait.like_count || 0 })}
                   </Button>
                   {detailPortrait.username === currentUser?.username && (
                     <Button
@@ -884,7 +884,7 @@ const PortraitPage: React.FC = () => {
                         openShareModal(detailPortrait)
                       }}
                     >
-                      分享
+                      {t('ptShare')}
                     </Button>
                   )}
                   {detailPortrait.image_url && (
@@ -894,14 +894,14 @@ const PortraitPage: React.FC = () => {
                       target="_blank"
                       download
                     >
-                      下载
+                      {t('ptDownload')}
                     </Button>
                   )}
                 </Space>
 
                 <div>
                   <Text type="secondary">
-                    <EyeOutlined /> {detailPortrait.view_count || 0} 次浏览
+                    <EyeOutlined /> {t('ptViews', { count: detailPortrait.view_count || 0 })}
                   </Text>
                 </div>
               </Space>
@@ -917,12 +917,12 @@ const PortraitPage: React.FC = () => {
   // ─────────────────────────────────────────
   const renderShareModal = () => (
     <Modal
-      title={<span><ShareAltOutlined /> 分享画像</span>}
+      title={<span><ShareAltOutlined /> {t('ptSharePortrait')}</span>}
       open={shareModalVisible}
       onOk={handleShare}
       onCancel={() => setShareModalVisible(false)}
-      okText="确认分享"
-      cancelText="取消"
+      okText={t('ptConfirmShare')}
+      cancelText={t('ptCancel')}
     >
       {sharingPortrait && (() => {
         const st = getTheme(sharingPortrait.portrait_theme || themeKey, sharingPortrait.style)
@@ -939,7 +939,7 @@ const PortraitPage: React.FC = () => {
             {sharingPortrait.image_url ? (
               <img
                 src={sharingPortrait.image_url}
-                alt="预览"
+                alt={t('ptPreview')}
                 style={{ width: 80, height: 80, borderRadius: 8, objectFit: 'cover' }}
               />
             ) : (
@@ -955,7 +955,7 @@ const PortraitPage: React.FC = () => {
               </div>
             )}
             <div>
-              <Text strong>{sharingPortrait.created_date} 的画像</Text>
+              <Text strong>{sharingPortrait.created_date} {t('ptOfPortrait')}</Text>
               <br />
               <Text type="secondary">
                 {STYLE_EMOJI[sharingPortrait.style] || '🎨'}{' '}
@@ -965,7 +965,7 @@ const PortraitPage: React.FC = () => {
           </div>
 
           <Divider style={{ margin: '8px 0' }} />
-          <Text strong>选择分享范围：</Text>
+          <Text strong>{t('ptPickScope')}</Text>
           <Radio.Group
             value={shareScope}
             onChange={(e) => setShareScope(e.target.value)}
@@ -973,13 +973,13 @@ const PortraitPage: React.FC = () => {
           >
             <Space orientation="vertical" style={{ width: '100%' }}>
               <Radio.Button value="public" style={{ display: 'block', height: 44, lineHeight: '44px', marginBottom: 8 }}>
-                <GlobalOutlined /> 分享中心 — 全校可见
+                <GlobalOutlined /> {t('ptScopeCenter')}
               </Radio.Button>
               <Radio.Button value="class" style={{ display: 'block', height: 44, lineHeight: '44px', marginBottom: 8 }}>
                 <TeamOutlined /> 本班可见 — 仅同班同学可看
               </Radio.Button>
               <Radio.Button value="private" style={{ display: 'block', height: 44, lineHeight: '44px' }}>
-                <LockOutlined /> 仅自己可见 — 不公开
+                <LockOutlined /> {t('ptScopePrivate')}
               </Radio.Button>
             </Space>
           </Radio.Group>
@@ -1009,7 +1009,7 @@ const PortraitPage: React.FC = () => {
           }} />}
           onClick={() => setThemePickerOpen(!themePickerOpen)}
         >
-          {themeKey === 'auto' ? '🎨 自动匹配' : `🎨 ${theme.name}`}
+          {themeKey === 'auto' ? '🎨 ' + t('ptAutoTheme') : `🎨 ${theme.name}`}
         </Button>
       </div>
       {themePickerOpen && (
@@ -1018,11 +1018,11 @@ const PortraitPage: React.FC = () => {
           marginBottom: 16, border: '1px solid #f0f0f0',
         }}>
           <Text type="secondary" style={{ display: 'block', marginBottom: 10, fontSize: 13 }}>
-            选择卡片和详情窗口的主题配色
+            {t('ptThemeHint')}
           </Text>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             {/* 自动匹配 */}
-            <Tooltip title="自动匹配（跟随画像风格）">
+            <Tooltip title={t('ptAutoThemeTip')}>
               <div
                 onClick={() => { setThemeKey('auto'); setThemePickerOpen(false) }}
                 style={{

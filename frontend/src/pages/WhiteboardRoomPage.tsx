@@ -152,9 +152,9 @@ const WhiteboardRoomPage: React.FC = () => {
         try {
           await whiteboardApi.endRoom(rid)
           setRoomStatus('ended')
-          message.success('房间已结束')
+          message.success(t('wbEnded'))
         } catch {
-          message.error('操作失败')
+          message.error(t('wbOpFailed'))
         }
       },
     })
@@ -241,7 +241,7 @@ const WhiteboardRoomPage: React.FC = () => {
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `板书总结_${roomTitle}.docx`
+      a.download = `${t('wbBoardSummary')}_${roomTitle}.docx`
       a.click()
       window.URL.revokeObjectURL(url)
       message.success({ content: t('boardExported'), key: 'exportBoard' })
@@ -293,19 +293,19 @@ const WhiteboardRoomPage: React.FC = () => {
               value={mode}
               onChange={(val) => handleModeChange(val as string)}
               options={[
-                { value: 'demo', label: '演示' },
-                { value: 'interactive', label: '互动' },
-                { value: 'self_study', label: '自习' },
+                { value: 'demo', label: t('wbModeDemo') },
+                { value: 'interactive', label: t('wbModeInter') },
+                { value: 'self_study', label: t('wbModeSelf') },
               ]}
             />
           )}
           {isTeacher && (
             <Button icon={<TeamOutlined />} onClick={() => setMembersOpen(true)}>
-              成员 ({onlineCount})
+              {t('wbMembers')} ({onlineCount})
             </Button>
           )}
           {isTeacher && (
-            <Tooltip title="撤销 Ctrl+Z">
+            <Tooltip title={t('wbUndo')}>
               <Button
                 type="text"
                 icon={<UndoOutlined />}
@@ -314,7 +314,7 @@ const WhiteboardRoomPage: React.FC = () => {
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="恢复 Ctrl+Shift+Z">
+            <Tooltip title={t('wbRedo')}>
               <Button
                 type="text"
                 icon={<RedoOutlined />}
@@ -322,14 +322,14 @@ const WhiteboardRoomPage: React.FC = () => {
               />
             </Tooltip>
           )}
-          <Tooltip title="全屏">
+          <Tooltip title={t('wbFullscreen')}>
             <Button
               type="text"
               icon={fullscreen ? <CompressOutlined /> : <ExpandOutlined />}
               onClick={toggleFullscreen}
             />
           </Tooltip>
-          <Tooltip title="复制房间码">
+          <Tooltip title={t('wbCopyCode')}>
             <Button
               type="text"
               icon={<CopyOutlined />}
@@ -340,7 +340,7 @@ const WhiteboardRoomPage: React.FC = () => {
             />
           </Tooltip>
           {isTeacher && (
-            <Tooltip title="导出板书总结（Word）">
+            <Tooltip title={t('wbExportWord')}>
               <Button
                 type="text"
                 icon={<DownloadOutlined />}
@@ -349,7 +349,7 @@ const WhiteboardRoomPage: React.FC = () => {
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="清空白板">
+            <Tooltip title={t('wbClear')}>
               <Button
                 type="text"
                 icon={<ClearOutlined />}
@@ -358,7 +358,7 @@ const WhiteboardRoomPage: React.FC = () => {
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="AI白板助手">
+            <Tooltip title={t('wbAiAssistant')}>
               <Button
                 type={aiPanelOpen ? 'primary' : 'text'}
                 icon={<CustomerServiceOutlined />}
@@ -401,15 +401,15 @@ const WhiteboardRoomPage: React.FC = () => {
         background: '#fafafa', flexShrink: 0, fontSize: 12, color: '#888',
       }}>
         <span>
-          {readOnly ? '👁 只读模式' : '✏️ 可编辑'}
+          {readOnly ? '👁 ' + t('wbReadonly') : '✏️ ' + t('wbEditable')}
           {' '}|{' '}
-          {mode === 'demo' && '教师演示中 — 学生只读'}
-          {mode === 'demo' && isTeacher && <span style={{ color: '#faad14' }}>（学生看不到内容时，切互动再切回）</span>}
-          {mode === 'interactive' && '互动模式 — 教师授权后可操作'}
-          {mode === 'self_study' && '自习模式 — 各自独立白板'}
+          {mode === 'demo' && t('wbDemoHint')}
+          {mode === 'demo' && isTeacher && <span style={{ color: '#faad14' }}>{t('wbDemoHint2')}</span>}
+          {mode === 'interactive' && t('wbModeInterHint')}
+          {mode === 'self_study' && t('wbModeSelfHint')}
         </span>
         <span>
-          {ws.isConnected ? '🟢 已连接' : <Tooltip title="HTTP轮询模式不稳定，延迟严重，建议使用WebSocket模式">⚡ 已连接（HTTP轮询）</Tooltip>}
+          {ws.isConnected ? '\ud83d\udfe2 ' + t('wbConnected') : <Tooltip title={t('wbPollTip')}>\u26a1 {t('wbPollConnected')}</Tooltip>}
         </span>
       </div>
 
@@ -433,20 +433,20 @@ const WhiteboardRoomPage: React.FC = () => {
               <Space>
                 {m.granted ? (
                   <Button size="small" onClick={() => handleRevokeControl(m.username)}>
-                    收回
+                    {t('wbRevoke')}
                   </Button>
                 ) : (
                   <Button size="small" type="primary" onClick={() => handleGrantControl(m.username)}>
-                    授权
+                    {t('wbGrant')}
                   </Button>
                 )}
               </Space>
             )}
             {isTeacher && mode === 'self_study' && (
               <Space>
-                {m.self_snapshot && <Tag color="green">已提交</Tag>}
+                {m.self_snapshot && <Tag color="green">{t('wbSubmitted')}</Tag>}
                 <Button size="small" onClick={() => handleSpotlight(m.username)}>
-                  查看
+                  {t('wbView')}
                 </Button>
               </Space>
             )}

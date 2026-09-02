@@ -212,7 +212,7 @@ const WhiteboardPage: React.FC = () => {
       title: t('actions'), key: 'actions', width: 120,
       render: (_, record) => (
         <Space>
-          <Tooltip title="进入房间">
+          <Tooltip title={t('wpEnterRoom')}>
             <Button
               size="small"
               type="primary"
@@ -221,20 +221,20 @@ const WhiteboardPage: React.FC = () => {
             />
           </Tooltip>
           {isTeacher && record.status === 'active' && (
-            <Popconfirm title="确定结束此房间？" onConfirm={() => handleEnd(record.id)}>
-              <Tooltip title="结束房间">
+            <Popconfirm title={t('wpConfirmEnd')} onConfirm={() => handleEnd(record.id)}>
+              <Tooltip title={t('wpEndRoom')}>
                 <Button size="small" danger icon={<StopOutlined />} />
               </Tooltip>
             </Popconfirm>
           )}
           {isTeacher && (
-            <Tooltip title="编辑">
+            <Tooltip title={t('wpEdit')}>
               <Button size="small" icon={<EditOutlined />} onClick={() => handleEditOpen(record)} />
             </Tooltip>
           )}
           {isTeacher && (
-            <Popconfirm title="确定删除？" onConfirm={() => handleDelete(record.id)}>
-              <Tooltip title="删除房间">
+            <Popconfirm title={t('wpConfirmDel')} onConfirm={() => handleDelete(record.id)}>
+              <Tooltip title={t('wpDelRoom')}>
                 <Button size="small" danger icon={<DeleteOutlined />} />
               </Tooltip>
             </Popconfirm>
@@ -250,16 +250,16 @@ const WhiteboardPage: React.FC = () => {
         <Title level={3} style={{ margin: 0 }}>🎨 {t('whiteboard')}</Title>
         <Space>
           {isStudent && (
-            <Tooltip title="加入白板">
+            <Tooltip title={t('wpJoin')}>
               <Button type="default" icon={<EyeOutlined />} onClick={() => setJoinOpen(true)} />
             </Tooltip>
           )}
           {isTeacher && (
-            <Tooltip title="创建白板">
+            <Tooltip title={t('wpCreate')}>
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)} />
             </Tooltip>
           )}
-          <Tooltip title="刷新">
+          <Tooltip title={t('wpRefresh')}>
             <Button icon={<ReloadOutlined />} onClick={loadRooms} />
           </Tooltip>
         </Space>
@@ -281,14 +281,14 @@ const WhiteboardPage: React.FC = () => {
         onOk={handleCreate}
         onCancel={() => { setCreateOpen(false); setTitle('') }}
         confirmLoading={creating}
-        okText="创建"
-        cancelText="取消"
+        okText={t('wpCreateBtn')}
+        cancelText={t('wpCancel')}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <div>
             <Text strong>{t('whiteboardTitle')}</Text>
             <Input
-              placeholder="例如：串联电路分析"
+              placeholder={t('wpExamplePh')}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onPressEnter={handleCreate}
@@ -349,7 +349,7 @@ const WhiteboardPage: React.FC = () => {
 
       {/* ── 编辑房间弹窗 ── */}
       <Modal
-        title={`编辑${t('whiteboardRoom')}`}
+        title={t('wpEditPrefix') + t('whiteboardRoom')}
         open={editOpen}
         onOk={handleEdit}
         onCancel={() => setEditOpen(false)}
