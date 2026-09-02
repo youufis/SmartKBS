@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import React from 'react'
 import { Table, Tag, Typography, Space, Button, Popconfirm, Empty, Card, Row, Col, Statistic, Image } from 'antd'
 import { DeleteOutlined, ReloadOutlined, EyeOutlined } from '@ant-design/icons'
@@ -5,13 +6,13 @@ import FormulaRenderer from './FormulaRenderer'
 import SVGViewer from './SVGViewer'
 
 const TYPE_LABELS: Record<string, string> = {
-  single: '单选题',
-  multiple: '多选题',
-  true_false: '判断题',
-  short: '简答题',
-  fill: '填空题',
-  essay: '作文',
-  subjective: '主观题',
+  single: 'qt_single',
+  multiple: 'qt_multiple',
+  true_false: 'qt_true_false',
+  short: 'qt_short',
+  fill: 'qt_fill',
+  essay: 'qt_essay',
+  subjective: 'qt_subjective',
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -25,9 +26,9 @@ const TYPE_COLORS: Record<string, string> = {
 }
 
 const DIFFICULTY_LABELS: Record<string, string> = {
-  easy: '简单',
-  medium: '中等',
-  hard: '困难',
+  easy: 'df_easy',
+  medium: 'df_medium',
+  hard: 'df_hard',
 }
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -73,6 +74,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
   onRegenerate,
   readOnly = false,
 }) => {
+  const { t } = useTranslation('exam')
   const columns = [
     {
       title: '#',
@@ -81,17 +83,17 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
       render: (_: any, __: any, idx: number) => idx + 1,
     },
     {
-      title: '题型',
+      title: t('colType'),
       dataIndex: 'type',
       width: 70,
-      render: (t: string) => (
-        <Tag color={TYPE_COLORS[t] || 'default'} style={{ fontSize: 11 }}>
-          {TYPE_LABELS[t] || t}
+      render: (tv: string) => (
+        <Tag color={TYPE_COLORS[tv] || 'default'} style={{ fontSize: 11 }}>
+          {TYPE_LABELS[tv] ? t(TYPE_LABELS[tv]) : tv}
         </Tag>
       ),
     },
     {
-      title: '题目',
+      title: t('colQuestion'),
       dataIndex: 'question_text',
       ellipsis: true,
       render: (text: string, record: SelectedQuestion) => (
@@ -101,30 +103,30 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
           </Typography.Text>
           {/* 配图标记 */}
           {(record.svg_content || record.has_svg) && (
-            <EyeOutlined style={{ color: '#1677ff', fontSize: 12 }} title="含配图" />
+            <EyeOutlined style={{ color: '#1677ff', fontSize: 12 }} title={t('hasFigure')} />
           )}
         </Space>
       ),
     },
     {
-      title: '难度',
+      title: t('colDifficulty'),
       dataIndex: 'difficulty',
       width: 65,
       render: (d: string) => (
         <Tag color={DIFFICULTY_COLORS[d]} style={{ fontSize: 11 }}>
-          {DIFFICULTY_LABELS[d] || d}
+          {DIFFICULTY_LABELS[d] ? t(DIFFICULTY_LABELS[d]) : d}
         </Tag>
       ),
     },
     {
-      title: '知识点',
+      title: t('colKp'),
       dataIndex: 'knowledge_points',
       width: 110,
       ellipsis: true,
       render: (text: string) => text || '-',
     },
     {
-      title: '分值',
+      title: t('colScore'),
       dataIndex: 'score',
       width: 55,
       render: (s: number) => (
@@ -134,13 +136,13 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
     ...(!readOnly
       ? [
           {
-            title: '操作',
+            title: t('colActions'),
             width: 55,
             key: 'action',
             render: (_: any, record: SelectedQuestion) => (
               <Popconfirm
-                title="移除该题？"
-                description="组卷时将不再包含此题"
+                title={t('pmRemoveQTitle')}
+                description={t('pmRemoveQDesc')}
                 onConfirm={() => onRemoveQuestion?.(record.id)}
               >
                 <Button type="link" size="small" danger icon={<DeleteOutlined />} />
@@ -157,9 +159,9 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
         <Empty
           description={
             loading ? (
-              <span>正在生成题目...</span>
+              <span>{t('pvGenerating')}</span>
             ) : (
-              <span>暂无题目，请先配置参数并点击「开始组卷」</span>
+              <span>{t('pvNoQHint')}</span>
             )
           }
         />
@@ -174,9 +176,9 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
         <Col span={6}>
           <Card size="small">
             <Statistic
-              title="总题数"
+              title={t('pvTotalQ')}
               value={questions.length}
-              suffix="道"
+              suffix={t('unitDao')}
               styles={{ content: { color: '#1677ff' } }}
             />
           </Card>
@@ -184,9 +186,9 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
         <Col span={6}>
           <Card size="small">
             <Statistic
-              title="总分"
+              title={t('pvTotalScore')}
               value={totalScore}
-              suffix="分"
+              suffix={t('unitFen')}
               precision={1}
               styles={{ content: { color: '#52c41a' } }}
             />
@@ -194,7 +196,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
         </Col>
         <Col span={6}>
           <Card size="small">
-            <Statistic title="题型分布" valueRender={() => (
+            <Statistic title={t('pvTypeDist')} valueRender={() => (
               <Space size={4} wrap>
                 {Object.entries(typeStats).map(([type, count]) => (
                   <Tag key={type} color={TYPE_COLORS[type]}>
@@ -207,7 +209,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
         </Col>
         <Col span={6}>
           <Card size="small">
-            <Statistic title="难度分布" valueRender={() => (
+            <Statistic title={t('pvDiffDist')} valueRender={() => (
               <Space size={4} wrap>
                 {Object.entries(difficultyStats).map(([diff, count]) => (
                   <Tag key={diff} color={DIFFICULTY_COLORS[diff]}>
@@ -224,7 +226,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
       {onRegenerate && (
         <Space>
           <Button icon={<ReloadOutlined />} onClick={onRegenerate} loading={loading}>
-            重新生成
+            {t('regenerate')}
           </Button>
         </Space>
       )}
@@ -237,7 +239,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
         size="small"
         loading={loading}
         pagination={false}
-        locale={{ emptyText: <Empty description="暂无题目" /> }}
+        locale={{ emptyText: <Empty description={t('pvEmpty')} /> }}
         expandable={{
           expandedRowRender: (record: SelectedQuestion) => (
             <div style={{ padding: '8px 16px', maxWidth: 800 }}>
@@ -277,7 +279,7 @@ const QuestionPreview: React.FC<QuestionPreviewProps> = ({
                             alt={mf.alt || ''}
                             width={120}
                             style={{ borderRadius: 4, border: '1px solid #f0f0f0' }}
-                            preview={{ mask: '预览' }}
+                            preview={{ mask: t('preview') }}
                           />
                         ) : null
                       ))}

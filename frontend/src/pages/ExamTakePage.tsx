@@ -290,37 +290,37 @@ const ExamTakePage: React.FC = () => {
                           {detail.is_correct
                             ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />
                             : <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />}
-                          <span>你的答案：{detail.student_answer || '未作答'}</span>
+                          <span>{t('yourAnsColon')}{detail.student_answer || t('unanswered')}</span>
                           {!detail.is_correct && (
-                            <span style={{ color: '#888' }}>正确答案：{detail.correct_answer}</span>
+                            <span style={{ color: '#888' }}>{t('correctAnsColon')}{detail.correct_answer}</span>
                           )}
                           <Tag color={detail.is_correct ? 'green' : 'red'}>
-                            {detail.score}/{detail.max_score} 分
+                            {detail.score}/{detail.max_score} {t('fenUnit')}
                           </Tag>
                         </Space>
 
                         {/* AI 简答题评语 */}
                         {detail.comment && (
                           <div style={{ color: '#1677ff', fontSize: 13 }}>
-                            <strong>AI 评语：</strong>{detail.comment}
+                            <strong>{t('aiCommentColon')}</strong>{detail.comment}
                           </div>
                         )}
                         {detail.feedback && (
                           <div style={{ color: '#52c41a', fontSize: 13 }}>
-                            <strong>学习建议：</strong>{detail.feedback}
+                            <strong>{t('studyAdviceColon')}</strong>{detail.feedback}
                           </div>
                         )}
 
                         {/* AI 主观题/作文 多维评分 */}
                         {isEssay && detail.dimensions && (
                           <div style={{ background: '#fafafa', padding: 12, borderRadius: 6, width: '100%' }}>
-                            <div style={{ fontWeight: 'bold', marginBottom: 8 }}>📊 多维评分</div>
+                            <div style={{ fontWeight: 'bold', marginBottom: 8 }}>{t('multiScore')}</div>
                             <Row gutter={16}>
                               {detail.dimensions.content && (
                                 <Col span={8}>
                                   <div style={{ textAlign: 'center' }}>
                                     <div style={{ fontSize: 20, fontWeight: 'bold', color: '#1677ff' }}>{detail.dimensions.content.score}</div>
-                                    <div style={{ fontSize: 12, color: '#666' }}>内容/10</div>
+                                    <div style={{ fontSize: 12, color: '#666' }}>{t('dimContent')}/10</div>
                                     <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.content.comment}</div>
                                   </div>
                                 </Col>
@@ -329,7 +329,7 @@ const ExamTakePage: React.FC = () => {
                                 <Col span={8}>
                                   <div style={{ textAlign: 'center' }}>
                                     <div style={{ fontSize: 20, fontWeight: 'bold', color: '#52c41a' }}>{detail.dimensions.structure.score}</div>
-                                    <div style={{ fontSize: 12, color: '#666' }}>结构/10</div>
+                                    <div style={{ fontSize: 12, color: '#666' }}>{t('dimStructure')}/10</div>
                                     <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.structure.comment}</div>
                                   </div>
                                 </Col>
@@ -338,7 +338,7 @@ const ExamTakePage: React.FC = () => {
                                 <Col span={8}>
                                   <div style={{ textAlign: 'center' }}>
                                     <div style={{ fontSize: 20, fontWeight: 'bold', color: '#faad14' }}>{detail.dimensions.language.score}</div>
-                                    <div style={{ fontSize: 12, color: '#666' }}>语言/10</div>
+                                    <div style={{ fontSize: 12, color: '#666' }}>{t('dimLanguage')}/10</div>
                                     <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.language.comment}</div>
                                   </div>
                                 </Col>
@@ -346,12 +346,12 @@ const ExamTakePage: React.FC = () => {
                             </Row>
                             {detail.overall_comment && (
                               <div style={{ marginTop: 8, fontSize: 13, color: '#333' }}>
-                                <strong>总评：</strong>{detail.overall_comment}
+                                <strong>{t('overallColon')}</strong>{detail.overall_comment}
                               </div>
                             )}
                             {detail.improvement_suggestions?.length > 0 && (
                               <div style={{ marginTop: 6, fontSize: 13 }}>
-                                <strong>改进建议：</strong>
+                                <strong>{t('improveColon')}</strong>
                                 <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                                   {detail.improvement_suggestions.map((s: string, i: number) => (
                                     <li key={i} style={{ color: '#666' }}>{s}</li>
@@ -377,7 +377,7 @@ const ExamTakePage: React.FC = () => {
   if (loading) {
     return (
       <Layout style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f5f5f5' }}>
-        <Spin size="large" description="加载考试中..." />
+        <Spin size="large" description={t('loadingExam')} />
       </Layout>
     )
   }
@@ -385,9 +385,9 @@ const ExamTakePage: React.FC = () => {
   if (!exam || questions.length === 0) {
     return (
       <Layout style={{ minHeight: '100vh', background: '#f5f5f5', padding: 24 }}>
-        <Result status="warning" title="考试暂无题目"
-          subTitle="请联系教师添加题目"
-          extra={<Button onClick={handleBack}>返回</Button>} />
+        <Result status="warning" title={t('examNoQ')}
+          subTitle={t('contactTeacherAddQ')}
+          extra={<Button onClick={handleBack}>{t('backBtn')}</Button>} />
       </Layout>
     )
   }
@@ -406,29 +406,29 @@ const ExamTakePage: React.FC = () => {
         position: 'sticky', top: 0, zIndex: 100,
       }}>
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>退出</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>{t('exitBtn')}</Button>
           <Title level={5} style={{ margin: 0 }}>{exam.title}</Title>
         </Space>
         <Space size={24}>
           <span>
             <ClockCircleOutlined style={{ marginRight: 4 }} />
-            剩余时间：
+            {t('remainTime')}
             <Text strong style={{ color: timeLeft < 300 ? '#ff4d4f' : '#1677ff', fontSize: 18 }}>
               {formatTime(timeLeft)}
             </Text>
           </span>
           <span>
-            进度：{answeredCount}/{questions.length}
+            {t('progressLabel')}{answeredCount}/{questions.length}
           </span>
           <Button type="primary" icon={<SendOutlined />}
             loading={submitting}
             onClick={() => {
               if (answeredCount < questions.length) {
-                message.warning(`还有 ${questions.length - answeredCount} 题未作答，确认提交吗？`)
+                message.warning(t('unansweredConfirm', { count: questions.length - answeredCount }))
               }
               handleSubmit()
             }}>
-            提交
+            {t('submitBtn')}
           </Button>
         </Space>
       </div>
@@ -439,11 +439,11 @@ const ExamTakePage: React.FC = () => {
 
         {/* ── 题号导航 ── */}
         <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>题目导航：</Text>
+          <Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{t('qNavLabel')}</Text>
           <Space size={12}>
-            <Text style={{ fontSize: 12 }}><Tag color="#1677ff" style={{ lineHeight: '18px', padding: '0 6px' }}>1</Tag> 当前</Text>
-            <Text style={{ fontSize: 12 }}><Tag color="#52c41a" style={{ lineHeight: '18px', padding: '0 6px' }}>2</Tag> 已答</Text>
-            <Text style={{ fontSize: 12 }}><Tag color="#f0f0f0" style={{ lineHeight: '18px', padding: '0 6px', border: '1px solid #d9d9d9' }}>3</Tag> 未答</Text>
+            <Text style={{ fontSize: 12 }}><Tag color="#1677ff" style={{ lineHeight: '18px', padding: '0 6px' }}>1</Tag> {t('tkCurrent')}</Text>
+            <Text style={{ fontSize: 12 }}><Tag color="#52c41a" style={{ lineHeight: '18px', padding: '0 6px' }}>2</Tag> {t('tkAnswered')}</Text>
+            <Text style={{ fontSize: 12 }}><Tag color="#f0f0f0" style={{ lineHeight: '18px', padding: '0 6px', border: '1px solid #d9d9d9' }}>3</Tag> {t('tkUnanswered')}</Text>
           </Space>
         </div>
         <div style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -483,14 +483,14 @@ const ExamTakePage: React.FC = () => {
             <Button disabled={currentIndex === 0}
               onClick={() => setCurrentIndex((i) => i - 1)}
               icon={<ArrowLeftOutlined />}>
-              上一题
+              {t('prevQ')}
             </Button>
           </Col>
           <Col>
             <Button disabled={currentIndex >= questions.length - 1}
               type="primary"
               onClick={() => setCurrentIndex((i) => i + 1)}>
-              下一题 <ArrowRightOutlined />
+              {t('nextQ')} <ArrowRightOutlined />
             </Button>
           </Col>
         </Row>

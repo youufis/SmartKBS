@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import React, { useState } from 'react'
 import { Steps, Button, Space, message, Form, Spin, Typography, Card } from 'antd'
 import {
@@ -27,6 +28,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   grades,
   onClose,
 }) => {
+  const { t } = useTranslation('exam')
   const [currentStep, setCurrentStep] = useState(0)
   const [form] = Form.useForm()
   const [composing, setComposing] = useState(false)
@@ -86,15 +88,15 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   // ── 步骤定义 ──
   const steps = [
     {
-      title: '试卷信息',
+      title: t('cwStepExamInfo'),
       icon: <SettingOutlined />,
       content: (
         <div style={{ padding: '16px 0' }}>
           <Typography.Title level={5} style={{ marginBottom: 16 }}>
-            配置试卷基本信息
+            {t('cwCfgBasics')}
           </Typography.Title>
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-            考试：<strong>{examTitle}</strong>（ID: {examId}）
+            {t('cwExamLabel', { title: examTitle, id: examId })}
           </Typography.Text>
           <PaperConfigForm
             subjects={subjects}
@@ -107,21 +109,21 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
       ),
     },
     {
-      title: 'AI 组卷',
+      title: t('cwStepAi'),
       icon: <RobotOutlined />,
       content: (
         <div style={{ padding: '16px 0' }}>
           <Typography.Title level={5} style={{ marginBottom: 16 }}>
-            AI 正在智能组卷...
+            {t('cwAiComposing')}
           </Typography.Title>
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
-            系统将根据您的配置，从题库中智能选取最合适的题目组合
+            {t('cwAiHint')}
           </Typography.Text>
           {composing ? (
             <div style={{ textAlign: 'center', padding: '60px 0' }}>
               <Spin size="large" />
               <div style={{ marginTop: 16, color: '#666' }}>
-                AI 正在分析题库并组卷，请稍候...
+                {t('cwAiWorking')}
               </div>
             </div>
           ) : composeResult ? (
@@ -135,7 +137,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
               >
                 <Space orientation="vertical">
                   <Typography.Text style={{ fontSize: 16 }}>
-                    ✅ <strong>组卷完成！</strong>
+                    ✅ <strong>{t('cwDone')}！</strong>
                   </Typography.Text>
                   <Typography.Text>{composeResult.message}</Typography.Text>
                   <Typography.Text type="secondary">
@@ -156,7 +158,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
           ) : (
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <Typography.Text type="secondary">
-                请点击下方「开始组卷」按钮
+                {t('cwClickStart')}
               </Typography.Text>
             </div>
           )}
@@ -164,34 +166,34 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
       ),
     },
     {
-      title: '导出文档',
+      title: t('cwStepExport'),
       icon: <DownloadOutlined />,
       content: (
         <div style={{ padding: '16px 0' }}>
           <Typography.Title level={5} style={{ marginBottom: 16 }}>
-            导出试卷文档
+            {t('cwExportTitle')}
           </Typography.Title>
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
-            请选择要导出的文档类型
+            {t('cwExportPick')}
           </Typography.Text>
 
           <Space orientation="vertical" style={{ width: '100%' }} size={16}>
             <ExportCard
               icon={<FileTextOutlined style={{ fontSize: 32, color: '#1677ff' }} />}
-              title="学生试卷"
-              description="排版规范的试卷，含考生信息栏、题目、作答区，可直接打印"
+              title={t('cwPaper')}
+              description={t('cwPaperDesc')}
               onClick={() => handleExport('paper')}
             />
             <ExportCard
               icon={<FileTextOutlined style={{ fontSize: 32, color: '#52c41a' }} />}
-              title="教师答案卷"
-              description="含答案和解析，红色标注正确答案，蓝色标注解析内容"
+              title={t('cwAnswerKey')}
+              description={t('cwAnswerKeyDesc')}
               onClick={() => handleExport('answer-key')}
             />
             <ExportCard
               icon={<FileTextOutlined style={{ fontSize: 32, color: '#fa8c16' }} />}
-              title="答题卡"
-              description="含选择题填涂区域和简答题作答区，方便统一收取批改"
+              title={t('cwSheet')}
+              description={t('cwSheetDesc')}
               onClick={() => handleExport('answer-sheet')}
             />
           </Space>
@@ -237,11 +239,11 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
       if (err?.response?.data?.detail) {
         message.error(err.response.data.detail)
       } else if (err?.errorFields) {
-        message.warning('请完善配置信息: ' + err.errorFields.map((f: any) => f.name?.join('.')).join(', '))
+        message.warning(t('cwCfgIncomplete') + err.errorFields.map((f: any) => f.name?.join('.')).join(', '))
       } else if (err?.message) {
-        message.error('组卷失败: ' + err.message)
+        message.error(t('cwFailed') + err.message)
       } else {
-        message.error('组卷失败，请重试')
+        message.error(t('cwFailedRetry'))
       }
     } finally {
       setComposing(false)
@@ -275,7 +277,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   async function handleRemoveQuestion(questionId: number) {
     try {
       await examsApi.removeQuestionsFromExam(examId, [questionId])
-      message.success('已移除该题')
+      message.success(t('cwRemoved'))
       await loadExamQuestions()
 
       // 更新统计
@@ -292,7 +294,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
         })
       }
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '移除失败')
+      message.error(err?.response?.data?.detail || t('cwRemoveFailed'))
     }
   }
 
@@ -316,7 +318,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
 
     if (url) {
       window.open(url, '_blank')
-      message.success('正在下载文档...')
+      message.success(t('cwDownloading'))
     }
   }
 
@@ -375,11 +377,11 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
       >
         <div>
           {currentStep > 0 && (
-            <Button onClick={handlePrev}>上一步</Button>
+            <Button onClick={handlePrev}>{t('cwPrev')}</Button>
           )}
         </div>
         <Space>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}>{t('cancelBtn')}</Button>
           {currentStep < steps.length - 1 && (
             <Button
               type="primary"
@@ -387,7 +389,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
               loading={currentStep === 0 && composing}
               disabled={false} // 由 loading 控制防连点，不需要额外禁用
             >
-              {currentStep === 0 ? '开始组卷' : currentStep === 1 ? '下一步：导出文档' : ''}
+              {currentStep === 0 ? t('cwStart') : currentStep === 1 ? t('cwNextExport') : ''}
             </Button>
           )}
         </Space>

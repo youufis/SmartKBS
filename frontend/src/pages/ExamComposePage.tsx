@@ -128,18 +128,18 @@ const ExamComposePage: React.FC = () => {
             onClick={() => navigate('/exam')}
             type="text"
           >
-            返回
+            {t('backBtn')}
           </Button>
         </Space>
         <div style={{ marginTop: 8 }}>
           <Typography.Title level={4} style={{ margin: 0, fontSize: 20 }}>
             <RobotOutlined style={{ marginRight: 8, color: '#1677ff' }} />
-            智能组卷
+            {t('ecTitle')}
           </Typography.Title>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-            考试：<strong>{exam.title}</strong>
+            {t('ecExamPrefix')}<strong>{exam.title}</strong>
             <Tag style={{ marginLeft: 8 }}>{exam.subject}</Tag>
-            <Tag>{exam.status === 'draft' ? '草稿' : exam.status === 'published' ? '已发布' : '已结束'}</Tag>
+            <Tag>{exam.status === 'draft' ? t('ecDraft') : exam.status === 'published' ? t('ecPublished') : t('ecEnded')}</Tag>
           </Typography.Text>
         </div>
       </div>
@@ -161,11 +161,10 @@ const ExamComposePage: React.FC = () => {
       >
         <RobotOutlined style={{ fontSize: 48, color: '#1677ff', marginBottom: 16 }} />
         <Typography.Title level={4} style={{ marginBottom: 8 }}>
-          开启智能组卷
+          {t('ecOpen')}
         </Typography.Title>
         <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24, maxWidth: 500, margin: '0 auto 24px' }}>
-          配置题型题量、难度分布、知识点范围，AI 将从题库中智能选择最优试题组合，
-          并生成排版规范的 Word 文档供打印使用。
+          {t('ecDesc')}
         </Typography.Text>
         <Space size={16}>
           <Button
@@ -174,20 +173,20 @@ const ExamComposePage: React.FC = () => {
             icon={<RobotOutlined />}
             onClick={() => setWizardVisible(true)}
           >
-            开始智能组卷
+            {t('ecStart')}
           </Button>
           <Dropdown.Button
             size="large"
             icon={<DownloadOutlined />}
             menu={{
               items: [
-                { key: 'paper', icon: <DownloadOutlined />, label: '导出学生试卷', onClick: () => handleQuickExport('paper') },
-                { key: 'answer-key', icon: <DownloadOutlined />, label: '导出教师答案卷', onClick: () => handleQuickExport('answer-key') },
-                { key: 'answer-sheet', icon: <DownloadOutlined />, label: '导出答题卡', onClick: () => handleQuickExport('answer-sheet') },
+                { key: 'paper', icon: <DownloadOutlined />, label: t('ecExportPaper'), onClick: () => handleQuickExport('paper') },
+                { key: 'answer-key', icon: <DownloadOutlined />, label: t('ecExportAnswerKey'), onClick: () => handleQuickExport('answer-key') },
+                { key: 'answer-sheet', icon: <DownloadOutlined />, label: t('ecExportSheet'), onClick: () => handleQuickExport('answer-sheet') },
               ],
             }}
           >
-            导出文档
+            {t('ecExport')}
           </Dropdown.Button>
         </Space>
       </div>
@@ -197,7 +196,7 @@ const ExamComposePage: React.FC = () => {
         title={
           <Space>
             <RobotOutlined />
-            <span>智能组卷向导 - {exam.title}</span>
+            <span>{t('ecWizard')} - {exam.title}</span>
           </Space>
         }
         open={wizardVisible}
@@ -223,6 +222,7 @@ const ExamComposePage: React.FC = () => {
 
 /** 考试现有题目统计组件 */
 const ExamQuestionsSummary: React.FC<{ examId: number }> = ({ examId }) => {
+  const { t } = useTranslation('exam')
   const [questions, setQuestions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -237,7 +237,7 @@ const ExamQuestionsSummary: React.FC<{ examId: number }> = ({ examId }) => {
   if (questions.length === 0) {
     return (
       <Typography.Text type="secondary">
-        💡 当前考试还没有题目，请使用智能组卷或手动添加
+        {t('ecNoQHint')}
       </Typography.Text>
     )
   }
@@ -251,14 +251,14 @@ const ExamQuestionsSummary: React.FC<{ examId: number }> = ({ examId }) => {
 
   return (
     <Space wrap size={[8, 4]}>
-      <Typography.Text strong>已有题目：</Typography.Text>
+      <Typography.Text strong>{t('ecHaveQ')}</Typography.Text>
       {Object.entries(typeCount).map(([type, count]) => (
         <Tag key={type}>
-          {({single:'单选',multiple:'多选',true_false:'判断',short:'简答',fill:'填空',essay:'作文',subjective:'主观题'} as Record<string,string>)[type] || type}: {count}题
+          {({single:t('q_short_single'),multiple:t('q_short_multi'),true_false:t('q_short_tf'),short:t('q_short_short'),fill:t('q_short_fill'),essay:t('q_short_essay'),subjective:t('q_short_subj')} as Record<string,string>)[type] || type}: {count}题
         </Tag>
       ))}
-      <Tag color="blue">共 {questions.length} 题</Tag>
-      <Tag color="green">总分: {totalScore.toFixed(1)}</Tag>
+      <Tag color="blue">{t('ecTotalQ', { count: questions.length })}</Tag>
+      <Tag color="green">{t('pvTotalScore')}: {totalScore.toFixed(1)}</Tag>
     </Space>
   )
 }

@@ -514,7 +514,7 @@ const ExamPage: React.FC = () => {
       message.success(data.message || t('composeSuccess'))
       if (data.reason) {
         Modal.info({
-          title: 'AI 组卷思路',
+          title: t('cwPlanTitle'),
           content: data.reason,
         })
       }
@@ -1180,7 +1180,7 @@ const ExamPage: React.FC = () => {
                 { title: '#', key: 'index', width: 40,
                   render: (_: any, __: any, idx: number) => idx + 1 },
                 { title: t('questionType'), dataIndex: 'type', width: 70,
-                  render: (t: string) => <Tag>{t === 'single' ? '单选' : t === 'multiple' ? '多选' : t === 'true_false' ? '判断' : '简答'}</Tag> },
+                  render: (v: string) => <Tag>{v === 'single' ? t('q_short_single') : v === 'multiple' ? t('q_short_multi') : v === 'true_false' ? t('q_short_tf') : t('q_short_short')}</Tag> },
                 { title: t('questionText'), dataIndex: 'question_text', ellipsis: true },
                 { title: t('scorePerQuestion'), dataIndex: 'question_score', width: 100,
                   render: (_: any, rec: any) => (
@@ -1481,13 +1481,13 @@ const ExamPage: React.FC = () => {
                 const options = q.options || {}
                 const optionLabels = Object.keys(options)
                 const TYPE_MAP2: Record<string, string> = {
-                  single: '单选', multiple: '多选', true_false: '判断', short: '简答',
-                  fill: '填空', essay: '作文', subjective: '主观题',
+                  single: t('q_short_single'), multiple: t('q_short_multi'), true_false: t('q_short_tf'), short: t('q_short_short'),
+                  fill: t('q_short_fill'), essay: t('q_short_essay'), subjective: t('q_short_subj'),
                 }
                 return (
                   <Card key={q.id} size="small" style={{ marginBottom: 8 }}
-                    title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
-                      {TYPE_MAP2[q.type] || q.type} | 第{idx + 1}题</Space>}>
+                    title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? t('xCorrect') : t('xWrong')}</Tag>
+                      {TYPE_MAP2[q.type] || q.type} | {t('qLabelIdx', { no: idx + 1 })}</Space>}>
                     <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8 }}><FormulaRenderer content={q.question_text} /></Typography.Paragraph>
                     <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
                     {optionLabels.length > 0 && (
@@ -1504,8 +1504,8 @@ const ExamPage: React.FC = () => {
                             }}>
                               <Typography.Text style={{ fontSize: 13 }}>
                                 <strong>{key}.</strong> <FormulaRenderer content={options[key]} inline />
-                                {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 你的答案' : '✗ 你的答案'}</Tag>}
-                                {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>正确答案</Tag>}
+                                {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ ' + t('yourAns') : '✗ ' + t('yourAns')}</Tag>}
+                                {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>{t("correctAnsLabel")}</Tag>}
                               </Typography.Text>
                             </div>
                           )
@@ -1513,32 +1513,32 @@ const ExamPage: React.FC = () => {
                       </div>
                     )}
                     <Space orientation="vertical" style={{ width: '100%' }} size={4}>
-                      <Typography.Text><strong>你的答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
-                      <Typography.Text><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
-                      <Typography.Text><strong>得分：</strong>
+                      <Typography.Text><strong>{t('yourAnsColon')}</strong>{ans.student_answer || t('unanswered')}</Typography.Text>
+                      <Typography.Text><strong>{t('correctAnsColon')}</strong>{q.correct_answer}</Typography.Text>
+                      <Typography.Text><strong>{t('scoreColon')}</strong>
                         <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
                       </Typography.Text>
                       {q.explanation && (
-                        <Typography.Text><strong>解析：</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
+                        <Typography.Text><strong>{t('explanationColon')}</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
                       )}
 
                       {/* AI 简答评语 */}
                       {ans.comment && (
                         <div style={{ background: '#f6ffed', padding: 8, borderRadius: 4, marginTop: 4 }}>
-                          <Typography.Text style={{ color: '#1677ff' }}><strong>AI 评语：</strong>{ans.comment}</Typography.Text>
-                          {ans.feedback && <div style={{ marginTop: 4 }}><Typography.Text style={{ color: '#52c41a' }}><strong>学习建议：</strong>{ans.feedback}</Typography.Text></div>}
+                          <Typography.Text style={{ color: '#1677ff' }}><strong>{t('aiCommentColon')}</strong>{ans.comment}</Typography.Text>
+                          {ans.feedback && <div style={{ marginTop: 4 }}><Typography.Text style={{ color: '#52c41a' }}><strong>{t('studyAdviceColon')}</strong>{ans.feedback}</Typography.Text></div>}
                         </div>
                       )}
 
                       {/* AI 主观题/作文 多维评分 */}
                       {isEssay && (ans.dimensions || q.dimensions) && (
                         <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 6, marginTop: 4 }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>📊 AI 多维评分</div>
+                          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{t('aiMultiScore')}</div>
                           <Row gutter={8}>
                             {['content', 'structure', 'language'].map((dim) => {
                               const dimData = ans.dimensions?.[dim] || q.dimensions?.[dim]
                               if (!dimData) return null
-                              const labels2: Record<string, string> = { content: '内容', structure: '结构', language: '语言' }
+                              const labels2: Record<string, string> = { content: t('dimContent'), structure: t('dimStructure'), language: t('dimLanguage') }
                               return (
                                 <Col span={8} key={dim}>
                                   <div style={{ textAlign: 'center', background: '#fff', borderRadius: 4, padding: 4 }}>
@@ -1552,12 +1552,12 @@ const ExamPage: React.FC = () => {
                           </Row>
                           {(ans.overall_comment || q.overall_comment) && (
                             <div style={{ marginTop: 6, fontSize: 12, color: '#333' }}>
-                              <strong>总评：</strong>{ans.overall_comment || q.overall_comment}
+                              <strong>{t('overallColon')}</strong>{ans.overall_comment || q.overall_comment}
                             </div>
                           )}
                           {(ans.improvement_suggestions || q.improvement_suggestments)?.length > 0 && (
                             <div style={{ marginTop: 6, fontSize: 12 }}>
-                              <strong>改进建议：</strong>
+                              <strong>{t('improveColon')}</strong>
                               <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                                 {(ans.improvement_suggestions || q.improvement_suggestions || []).map((s: string, i: number) => (
                                   <li key={i} style={{ color: '#666' }}>{s}</li>
@@ -1573,11 +1573,11 @@ const ExamPage: React.FC = () => {
               })}
               </>
               ) : (
-                <Typography.Text type="danger">无法加载答题数据</Typography.Text>
+                <Typography.Text type="danger">{t('loadAnsFail')}</Typography.Text>
               )}
             </div>
           ) : (
-            <Typography.Text type="secondary">加载中...</Typography.Text>
+            <Typography.Text type="secondary">{t('loadingDots')}</Typography.Text>
           )}
         </Spin>
       </Modal>
@@ -1638,15 +1638,15 @@ const StudentExamDetail: React.FC<{
   }
 
   if (loading) return <Spin size="small" style={{ display: 'block', textAlign: 'center', padding: 24 }} />
-  if (!detail) return <Typography.Text type="danger">加载失败</Typography.Text>
+  if (!detail) return <Typography.Text type="danger">{t('loadFail')}</Typography.Text>
 
   const answers = detail.attempt?.answers || {}
   const questions = detail.questions || []
   const isReviewed = detail.attempt?.teacher_reviewed
 
   const TYPE_MAP: Record<string, string> = {
-    single: '单选', multiple: '多选', true_false: '判断', short: '简答',
-    fill: '填空', essay: '作文', subjective: '主观题',
+    single: t('q_short_single'), multiple: t('q_short_multi'), true_false: t('q_short_tf'), short: t('q_short_short'),
+    fill: t('q_short_fill'), essay: t('q_short_essay'), subjective: t('q_short_subj'),
   }
 
   return (
@@ -1654,18 +1654,18 @@ const StudentExamDetail: React.FC<{
       <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space>
           <Typography.Text strong>{studentName}</Typography.Text>
-          <Tag>{detail.attempt.score} / {detail.attempt.total_score} 分</Tag>
-          {isReviewed ? <Tag color="blue">已复核</Tag> : <Tag color="orange">AI 批改</Tag>}
+          <Tag>{detail.attempt.score} / {detail.attempt.total_score} {t('fenUnit')}</Tag>
+          {isReviewed ? <Tag color="blue">{t('recheckDone')}</Tag> : <Tag color="orange">{t('aiGraded')}</Tag>}
         </Space>
         {isTeacherOrAdmin && showReview && (
           <Button size="small" icon={<EditOutlined />} onClick={() => setReviewModal(true)}>
-            {isReviewed ? '修改复核' : '复核批改'}
+            {isReviewed ? t('modifyRecheck') : t('recheck')}
           </Button>
         )}
       </div>
 
       {questions.length === 0 ? (
-        <Typography.Text type="secondary">暂无题目数据</Typography.Text>
+        <Typography.Text type="secondary">{t('noQData')}</Typography.Text>
       ) : questions.map((q: any, idx: number) => {
         const ans = answers[String(q.id)] || {}
         const isCorrect = ans.is_correct
@@ -1676,9 +1676,9 @@ const StudentExamDetail: React.FC<{
         return (
           <Card key={q.id} size="small" style={{ marginBottom: 6 }}
             title={<Space>
-              <Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? '正确' : '错误'}</Tag>
-              {TYPE_MAP[q.type] || q.type} | 第{idx + 1}题
-              {ans.teacher_adjusted && <Tag color="purple">已调整</Tag>}
+              <Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? t('xCorrect') : t('xWrong')}</Tag>
+              {TYPE_MAP[q.type] || q.type} | {t('qLabelIdx', { no: idx + 1 })}
+              {ans.teacher_adjusted && <Tag color="purple">{t('adjusted')}</Tag>}
             </Space>}>
             <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8, fontSize: 13 }}>
               <FormulaRenderer content={q.question_text} />
@@ -1700,8 +1700,8 @@ const StudentExamDetail: React.FC<{
                     }}>
                       <Typography.Text style={{ fontSize: 13 }}>
                         <strong>{key}.</strong> <FormulaRenderer content={options[key]} inline />
-                        {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ 学生答案' : '✗ 学生答案'}</Tag>}
-                        {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>正确答案</Tag>}
+                        {isSelected && <Tag color={isCorrectOpt ? 'green' : 'red'} style={{ marginLeft: 6, fontSize: 10 }}>{isCorrectOpt ? '✓ ' + t('studentAns') : '✗ ' + t('studentAns')}</Tag>}
+                        {!isSelected && isCorrectOpt && <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>{t("correctAnsLabel")}</Tag>}
                       </Typography.Text>
                     </div>
                   )
@@ -1710,33 +1710,33 @@ const StudentExamDetail: React.FC<{
             )}
 
             <Space orientation="vertical" size={2} style={{ fontSize: 13, width: '100%' }}>
-              <Typography.Text style={{ fontSize: 13 }}><strong>学生答案：</strong>{ans.student_answer || '未作答'}</Typography.Text>
-              <Typography.Text style={{ fontSize: 13 }}><strong>正确答案：</strong>{q.correct_answer}</Typography.Text>
-              <Typography.Text style={{ fontSize: 13 }}><strong>得分：</strong>
+              <Typography.Text style={{ fontSize: 13 }}><strong>{t('studentAnsColon')}</strong>{ans.student_answer || t('unanswered')}</Typography.Text>
+              <Typography.Text style={{ fontSize: 13 }}><strong>{t('correctAnsColon')}</strong>{q.correct_answer}</Typography.Text>
+              <Typography.Text style={{ fontSize: 13 }}><strong>{t('scoreColon')}</strong>
                 <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
               </Typography.Text>
 
               {/* AI 简答评语 */}
               {ans.comment && (
                 <Typography.Text style={{ fontSize: 13, color: '#1677ff' }}>
-                  <strong>AI 评语：</strong>{ans.comment}
+                  <strong>{t('aiCommentColon')}</strong>{ans.comment}
                 </Typography.Text>
               )}
               {ans.feedback && (
                 <Typography.Text style={{ fontSize: 13, color: '#52c41a' }}>
-                  <strong>学习建议：</strong>{ans.feedback}
+                  <strong>{t('studyAdviceColon')}</strong>{ans.feedback}
                 </Typography.Text>
               )}
 
               {/* AI 主观题/作文 多维评分 */}
               {isEssay && (ans.dimensions?.content || q.dimensions?.content) && (
                 <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 6, marginTop: 4 }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>📊 AI 多维评分</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{t('aiMultiScore')}</div>
                   <Row gutter={8}>
                     {['content', 'structure', 'language'].map((dim) => {
                       const dimData = ans.dimensions?.[dim] || q.dimensions?.[dim]
                       if (!dimData) return null
-                      const labels: Record<string, string> = { content: '内容', structure: '结构', language: '语言' }
+                      const labels: Record<string, string> = { content: t('dimContent'), structure: t('dimStructure'), language: t('dimLanguage') }
                       return (
                         <Col span={8} key={dim}>
                           <div style={{ textAlign: 'center', background: '#fff', borderRadius: 4, padding: 4 }}>
@@ -1750,20 +1750,20 @@ const StudentExamDetail: React.FC<{
                   </Row>
                   {(ans.overall_comment || q.overall_comment) && (
                     <div style={{ marginTop: 6, fontSize: 12, color: '#333' }}>
-                      <strong>总评：</strong>{ans.overall_comment || q.overall_comment}
+                      <strong>{t('overallColon')}</strong>{ans.overall_comment || q.overall_comment}
                     </div>
                   )}
                 </div>
               )}
 
               {q.explanation && (
-                <Typography.Text style={{ fontSize: 13 }}><strong>解析：</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
+                <Typography.Text style={{ fontSize: 13 }}><strong>{t('explanationColon')}</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
               )}
 
               {/* 教师评语 */}
               {ans.teacher_comment && (
                 <Typography.Text style={{ fontSize: 13, color: '#722ed1' }}>
-                  <strong>教师评语：</strong>{ans.teacher_comment}
+                  <strong>{t('teacherCommentColon')}</strong>{ans.teacher_comment}
                 </Typography.Text>
               )}
             </Space>
@@ -1772,30 +1772,30 @@ const StudentExamDetail: React.FC<{
       })}
 
       {/* ── 教师复核弹窗 ── */}
-      <Modal title="复核 AI 批改" open={reviewModal} onCancel={() => setReviewModal(false)}
+      <Modal title={t('reviewAiTitle')} open={reviewModal} onCancel={() => setReviewModal(false)}
         onOk={handleReviewSubmit} confirmLoading={reviewing}
-        okText="确认复核" cancelText={t('cancel')}>
+        okText={t('confirmRecheck')} cancelText={t('cancel')}>
         <Space orientation="vertical" style={{ width: '100%' }}>
           <div>
-            <Typography.Text>当前 AI 评分：</Typography.Text>
+            <Typography.Text>{t('curAiScoreColon')}</Typography.Text>
             <Tag color="blue">{detail.attempt.score} / {detail.attempt.total_score}</Tag>
           </div>
           <div>
-            <Typography.Text>调整总分：</Typography.Text>
+            <Typography.Text>{t('adjustTotalColon')}</Typography.Text>
             <InputNumber
               min={0} max={detail.attempt.total_score}
               value={reviewScore}
               onChange={(v) => setReviewScore(v)}
               style={{ width: 120 }}
-              placeholder="留空则不调整"
+              placeholder={t('blankKeep')}
             />
             <Typography.Text type="secondary" style={{ marginLeft: 8 }}> / {detail.attempt.total_score}</Typography.Text>
           </div>
           <div style={{ width: '100%' }}>
-            <Typography.Text>教师评语：</Typography.Text>
+            <Typography.Text>{t('teacherCommentColon')}</Typography.Text>
             <TextArea rows={3} value={reviewComment}
               onChange={(e) => setReviewComment(e.target.value)}
-              placeholder="可选：添加教师评语" style={{ width: '100%' }} />
+              placeholder={t('teacherCommentPh')} style={{ width: '100%' }} />
           </div>
         </Space>
       </Modal>

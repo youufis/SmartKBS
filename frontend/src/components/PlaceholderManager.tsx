@@ -4,6 +4,7 @@
  * 教师端使用，展示试题的所有配图（SVG + 占位符图片 + 万相生图），
  * 支持：上传替换、AI 重新生成、删除配图、批量重试失败项。
  */
+import { useTranslation } from 'react-i18next'
 import React, { useCallback, useState } from 'react'
 import { Card, Button, Upload, Space, Tag, Spin, Image, Empty, message } from 'antd'
 import { UploadOutlined, ReloadOutlined, DeleteOutlined, PictureOutlined } from '@ant-design/icons'
@@ -53,6 +54,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
   onDeleteMedia,
   onGenerateImage,
 }) => {
+  const { t } = useTranslation('exam')
   const [uploadingKey, setUploadingKey] = useState<string | null>(null)
   const [loadingKeys, setLoadingKeys] = useState<Set<string>>(new Set())
 
@@ -94,7 +96,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
         })
       }
     }
-    message.success(`已重试 ${failedKeys.length} 个失败的占位符`)
+    message.success(t('pmRetryOk', { count: failedKeys.length }))
   }, [onGenerateMedia, placeholders])
 
   // 是否显示任何内容
@@ -106,7 +108,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
 
   if (!showSvgSection && !showPlaceholderSection && !showWanxiangSection) {
     return (
-      <Empty description="暂无配图" />
+      <Empty description={t('pmNoFigure')} />
     )
   }
 
@@ -143,7 +145,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
               src={mediaUrl}
               alt={description}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              preview={{ mask: '预览' }}
+              preview={{ mask: t('preview') }}
             />
           ) : isFailed ? (
             <div style={{
@@ -171,10 +173,10 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
             {description?.length > 60 ? '...' : ''}
           </div>
           <Space size={4} style={{ marginBottom: 4 }}>
-            {isDone && <Tag color="success">已配图</Tag>}
-            {isPending && <Tag color="warning">待配图</Tag>}
-            {isFailed && <Tag color="error">生成失败</Tag>}
-            {!status && <Tag color="success">已配图</Tag>}
+            {isDone && <Tag color="success">{t("pmDone")}</Tag>}
+            {isPending && <Tag color="warning">{t('pmPending')}</Tag>}
+            {isFailed && <Tag color="error">{t('pmFailed')}</Tag>}
+            {!status && <Tag color="success">{t("pmDone")}</Tag>}
             {purpose && <Tag>{purpose}</Tag>}
           </Space>
 
@@ -189,7 +191,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
                 loading={isLoading}
                 onClick={() => handleGenerateMedia(key)}
               >
-                {isFailed ? '重试' : 'AI 生图'}
+                {isFailed ? t('pmRetry') : t('pmAiGen')}
               </Button>
             )}
 
@@ -209,7 +211,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
                   icon={<UploadOutlined />}
                   loading={uploadingKey === key}
                 >
-                  上传
+                  {t('pmUpload')}
                 </Button>
               </Upload>
             )}
@@ -222,7 +224,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
                 icon={<DeleteOutlined />}
                 onClick={() => onDeleteMedia(key)}
               >
-                删除
+                {t('pmDelete')}
               </Button>
             )}
           </Space>
@@ -237,22 +239,22 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
       {showSvgSection && (
         <Card
           size="small"
-          title="🖼️ SVG 配图"
+          title={t('pmSvgTitle')}
           extra={
             <Space>
               {onDeleteSVG && hasSvg === 1 && (
                 <Button size="small" danger icon={<DeleteOutlined />} onClick={onDeleteSVG}>
-                  删除
+                  {t('pmDelete')}
                 </Button>
               )}
               {onGenerateImage && (
                 <Button size="small" icon={<PictureOutlined />} loading={wanxiangLoading} onClick={onGenerateImage}>
-                  万相生图
+                  {t('pmWanxiang')}
                 </Button>
               )}
               {onRegenerateSVG && (
                 <Button size="small" icon={<ReloadOutlined />} loading={svgLoading} onClick={onRegenerateSVG}>
-                  {hasSvg === 1 ? '重新生成' : '生成 SVG'}
+                  {hasSvg === 1 ? t('regenerate') : t('pmGenSvg')}
                 </Button>
               )}
             </Space>
@@ -263,7 +265,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
             <SVGViewer svgCode={svgContent} expandable={true} />
           ) : (
             <div style={{ padding: '20px 0', textAlign: 'center', color: '#999' }}>
-              暂无 SVG 配图，点击「生成 SVG」自动创建
+              {t('pmNoSvg')}
             </div>
           )}
         </Card>
@@ -273,12 +275,12 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
       {(showPlaceholderSection || showWanxiangSection) && (
         <Card
           size="small"
-          title={`📷 图片配图${showPlaceholderSection ? `（${placeholders.length} 个）` : ''}`}
+          title={showPlaceholderSection ? t('pmPhotoWithCount', { count: placeholders.length }) : t('pmPhoto')}
           extra={
             // 批量重试：有失败占位符时显示
             placeholders.filter(ph => ph.status === 'failed').length > 0 && onGenerateMedia ? (
               <Button size="small" icon={<ReloadOutlined />} onClick={handleRetryAllFailed}>
-                全部重试 ({placeholders.filter(ph => ph.status === 'failed').length})
+                {t('pmRetryAll')} ({placeholders.filter(ph => ph.status === 'failed').length})
               </Button>
             ) : undefined
           }
@@ -290,7 +292,7 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
             )}
             {/* wanxiang 独立配图条目（仅在无占位符时展示在此处） */}
             {showWanxiangSection && wanxiangEntries.map(f =>
-              renderMediaItem(f.key, f.alt || '配图')
+              renderMediaItem(f.key, f.alt || t('pmFigure'))
             )}
           </Space>
         </Card>
@@ -298,10 +300,10 @@ const PlaceholderManager: React.FC<PlaceholderManagerProps> = ({
 
       {/* 仅有 wanxiang 配图时，也保留展示（已被上面合并，这里兜底） */}
       {!showPlaceholderSection && !showWanxiangSection && wanxiangEntries.length > 0 && (
-        <Card size="small" title="📷 图片配图">
+        <Card size="small" title={t('pmPhoto')}>
           <Space orientation="vertical" style={{ width: '100%' }}>
             {wanxiangEntries.map(f =>
-              renderMediaItem(f.key, f.alt || '配图')
+              renderMediaItem(f.key, f.alt || t('pmFigure'))
             )}
           </Space>
         </Card>
