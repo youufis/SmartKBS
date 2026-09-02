@@ -8,6 +8,7 @@ import {
   UserOutlined, QuestionCircleOutlined, LockOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'
 import * as authApi from '../api/auth'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -16,7 +17,7 @@ interface Props {
   onClose: () => void
 }
 
-const STEP_LABELS = ['验证身份', '问题①', '问题②', '重置密码', '完成']
+const STEP_KEYS = ['fpVerifyIdentity', 'fpQuestion1', 'fpQuestion2', 'fpResetPwd', 'fpDone']
 const STEP_ICONS = [
   <UserOutlined />,
   <QuestionCircleOutlined />,
@@ -26,6 +27,7 @@ const STEP_ICONS = [
 ]
 
 const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
+  const { t } = useTranslation('login')
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(false)
   const [username, setUsername] = useState('')
@@ -59,11 +61,11 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
       const status = err?.response?.status
       const detail = err?.response?.data?.detail || ''
       if (status === 404) {
-        message.error('该用户不存在')
+        message.error(t('fpUserNotFound'))
       } else if (status === 400) {
-        message.error('该用户未设置密保问题，请联系管理员重置密码')
+        message.error(t('fpNoSecurity'))
       } else {
-        message.error(detail || '验证失败')
+        message.error(detail || t('fpVerifyFailed'))
       }
     } finally {
       setLoading(false)
@@ -77,7 +79,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
     try {
       await authApi.verifySecurity(username, values.answer, 0)
       answer1Ref.current = values.answer
-      message.success('第一题答案正确')
+      message.success(t('fpQ1Correct'))
       setStep(2)
     } catch (err: any) {
       const status = err?.response?.status
@@ -86,7 +88,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
         setLockedMsg(detail)
         message.error(detail)
       } else {
-        message.error(detail || '答案错误')
+        message.error(detail || t('fpAnswerWrong'))
       }
     } finally {
       setLoading(false)
@@ -100,7 +102,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
     try {
       await authApi.verifySecurity(username, values.answer, 1)
       answer2Ref.current = values.answer
-      message.success('第二题答案正确')
+      message.success(t('fpQ2Correct'))
       setStep(3)
     } catch (err: any) {
       const status = err?.response?.status
@@ -109,7 +111,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
         setLockedMsg(detail)
         message.error(detail)
       } else {
-        message.error(detail || '答案错误')
+        message.error(detail || t('fpAnswerWrong'))
       }
     } finally {
       setLoading(false)
@@ -126,7 +128,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
       message.success(msg)
       setStep(4)
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || '重置失败')
+      message.error(err?.response?.data?.detail || t('fpResetFailed'))
     } finally {
       setLoading(false)
     }
@@ -136,7 +138,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
 
   return (
     <Modal
-      title="找回密码"
+      title={t('fpTitle')}
       open={open}
       onCancel={onClose}
       footer={null}
@@ -148,8 +150,8 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
         current={step}
         size="small"
         style={{ marginBottom: 28, marginTop: 8 }}
-        items={STEP_LABELS.map((title, i) => ({
-          title,
+        items={STEP_KEYS.map((k, i) => ({
+          title: t(k),
           icon: STEP_ICONS[i],
         }))}
       />
@@ -167,18 +169,18 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
       {step === 0 && (
         <Form form={usernameForm} onFinish={handleCheckUsername} layout="vertical">
           <Text style={{ display: 'block', marginBottom: 16, color: 'var(--text-secondary)' }}>
-            请输入你的用户名，系统将验证你是否已设置密保问题。
+            {t('fpStep0Hint')}
           </Text>
           <Form.Item
             name="username"
-            label="用户名"
-            rules={[{ required: true, message: '请输入用户名' }]}
+            label={t('username')}
+            rules={[{ required: true, message: t('usernameRequired') }]}
           >
-            <Input prefix={<UserOutlined />} placeholder="请输入用户名" />
+            <Input prefix={<UserOutlined />} placeholder={t('fpEnterUsername')} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Button style={{ marginRight: 8 }} onClick={onClose}>取消</Button>
-            <Button type="primary" htmlType="submit" loading={loading}>下一步</Button>
+            <Button style={{ marginRight: 8 }} onClick={onClose}>{t('fpCancel')}</Button>
+            <Button type="primary" htmlType="submit" loading={loading}>{t('fpNext')}</Button>
           </Form.Item>
         </Form>
       )}
@@ -192,7 +194,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
             border: '1px solid var(--border-color)',
           }}>
             <Text style={{ fontSize: 12, color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>
-              密保问题 ①
+              {t('fpSecurityQ1')}
             </Text>
             <Text strong style={{ fontSize: 15 }}>
               <QuestionCircleOutlined style={{ marginRight: 8, color: 'var(--primary-color)' }} />
@@ -201,14 +203,14 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
           </div>
           <Form.Item
             name="answer"
-            label="答案"
-            rules={[{ required: true, message: '请输入答案' }]}
+            label={t("fpAnswer")}
+            rules={[{ required: true, message: t('fpAnswerRequired') }]}
           >
-            <Input.Password placeholder="请输入你的答案" />
+            <Input.Password placeholder={t('fpAnswerPlaceholder')} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Button style={{ marginRight: 8 }} onClick={() => setStep(0)}>上一步</Button>
-            <Button type="primary" htmlType="submit" loading={loading}>验证</Button>
+            <Button style={{ marginRight: 8 }} onClick={() => setStep(0)}>{t('fpPrev')}</Button>
+            <Button type="primary" htmlType="submit" loading={loading}>{t('fpVerify')}</Button>
           </Form.Item>
         </Form>
       )}
@@ -222,7 +224,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
             border: '1px solid var(--border-color)',
           }}>
             <Text style={{ fontSize: 12, color: 'var(--text-tertiary)', display: 'block', marginBottom: 4 }}>
-              密保问题 ②
+              {t('fpSecurityQ2')}
             </Text>
             <Text strong style={{ fontSize: 15 }}>
               <QuestionCircleOutlined style={{ marginRight: 8, color: 'var(--primary-color)' }} />
@@ -231,14 +233,14 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
           </div>
           <Form.Item
             name="answer"
-            label="答案"
-            rules={[{ required: true, message: '请输入答案' }]}
+            label={t("fpAnswer")}
+            rules={[{ required: true, message: t('fpAnswerRequired') }]}
           >
-            <Input.Password placeholder="请输入你的答案" />
+            <Input.Password placeholder={t('fpAnswerPlaceholder')} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Button style={{ marginRight: 8 }} onClick={() => setStep(1)}>上一步</Button>
-            <Button type="primary" htmlType="submit" loading={loading}>验证</Button>
+            <Button style={{ marginRight: 8 }} onClick={() => setStep(1)}>{t('fpPrev')}</Button>
+            <Button type="primary" htmlType="submit" loading={loading}>{t('fpVerify')}</Button>
           </Form.Item>
         </Form>
       )}
@@ -248,39 +250,39 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
         <Form form={passwordForm} onFinish={handleResetPassword} layout="vertical">
           <Alert
             type="success"
-            message="两道密保验证均已通过！"
+            message={t('fpBothPassed')}
             style={{ marginBottom: 16 }}
             showIcon
           />
           <Form.Item
             name="new_password"
-            label="新密码"
+            label={t('fpNewPassword')}
             rules={[
-              { required: true, message: '请输入新密码' },
-              { min: 4, message: '密码至少4个字符' },
+              { required: true, message: t('fpNewPwdRequired') },
+              { min: 4, message: t('fpMinLen') },
             ]}
           >
-            <Input.Password prefix={<LockOutlined />} placeholder="请输入新密码" />
+            <Input.Password prefix={<LockOutlined />} placeholder={t('fpEnterNewPwd')} />
           </Form.Item>
           <Form.Item
             name="confirm_password"
-            label="确认新密码"
+            label={t('fpConfirmNew')}
             dependencies={['new_password']}
             rules={[
-              { required: true, message: '请确认新密码' },
+              { required: true, message: t('fpConfirmRequired') },
               ({ getFieldValue }) => ({
                 validator(_, value) {
                   if (!value || getFieldValue('new_password') === value) return Promise.resolve()
-                  return Promise.reject(new Error('两次输入的密码不一致'))
+                  return Promise.reject(new Error(t('fpMismatch')))
                 },
               }),
             ]}
           >
-            <Input.Password prefix={<LockOutlined />} placeholder="请再次输入新密码" />
+            <Input.Password prefix={<LockOutlined />} placeholder={t('fpReenter')} />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Button style={{ marginRight: 8 }} onClick={() => setStep(2)}>上一步</Button>
-            <Button type="primary" htmlType="submit" loading={loading}>重置密码</Button>
+            <Button style={{ marginRight: 8 }} onClick={() => setStep(2)}>{t('fpPrev')}</Button>
+            <Button type="primary" htmlType="submit" loading={loading}>{t('fpResetBtn')}</Button>
           </Form.Item>
         </Form>
       )}
@@ -290,13 +292,13 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
         <div style={{ textAlign: 'center', padding: '20px 0' }}>
           <CheckCircleOutlined style={{ fontSize: 48, color: 'var(--success-color)' }} />
           <br /><br />
-          <Text strong style={{ fontSize: 16 }}>密码已成功重置！</Text>
+          <Text strong style={{ fontSize: 16 }}>{t('fpDoneTitle')}</Text>
           <br />
           <Text style={{ color: 'var(--text-secondary)' }}>
-            请使用新密码登录你的账号。
+            {t('fpDoneHint')}
           </Text>
           <br /><br />
-          <Button type="primary" onClick={handleDone}>返回登录</Button>
+          <Button type="primary" onClick={handleDone}>{t('fpBackToLogin')}</Button>
         </div>
       )}
     </Modal>
