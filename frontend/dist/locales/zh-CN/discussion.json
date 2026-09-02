@@ -177,7 +177,7 @@
   "exportingBoard": "AI 正在生成总结并导出 Word...",
   "exportFailed": "导出失败",
   "boardExported": "板书总结已导出",
-  "confirmClearShapes": "确定要删除全部 {{{count}}} 个形状吗？此操作不可撤销。",
+  "confirmClearShapes": "确定要删除全部 {{count}} 个形状吗？此操作不可撤销。",
   "demo": "演示",
   "interactive": "互动",
   "selfStudy": "自习",

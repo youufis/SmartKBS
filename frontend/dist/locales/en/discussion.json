@@ -177,7 +177,7 @@
   "exportingBoard": "AI is generating summary and exporting Word...",
   "exportFailed": "Export failed",
   "boardExported": "Board summary exported",
-  "confirmClearShapes": "Delete all {{{count}}} shapes? This cannot be undone.",
+  "confirmClearShapes": "Delete all {{count}} shapes? This cannot be undone.",
   "demo": "Demo",
   "interactive": "Interactive",
   "selfStudy": "Self Study",
