@@ -480,26 +480,25 @@ async def get_nav_html(request: Request):
         if os.path.exists(index_path):
             with open(index_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            # 系统自动生成的导航页（新版标记或旧版签名）→ 每次访问比对文件变化并刷新，
-            # 使上传/生成/重命名即时可见；用户自定义 index.html 不受影响
-            if (_NAV_AUTO_MARK in content) or ("SmartKB 资源中心" in content):
-                default_html = _generate_default_nav_html(html_dir)
-                if default_html != content:
-                    with open(index_path, "w", encoding="utf-8") as f:
-                        f.write(default_html)
-                    logger.info(f"资源中心导航页已自动刷新/升级: {index_path}")
-                return HTMLResponse(content=default_html)
-            base_url_path = html_dir.replace("\\", "/") + "/"
-            base_url = "/api/files/" + urllib.parse.quote(base_url_path)
-            content = _rewrite_html_links(content, base_url)
-            return HTMLResponse(content=content)
-        else:
-            # 自动创建默认导航（含文件列表）
-            default_html = _generate_default_nav_html(html_dir)
-            os.makedirs(html_dir, exist_ok=True)
-            with open(index_path, "w", encoding="utf-8") as f:
-                f.write(default_html)
-            return HTMLResponse(content=default_html)
+            # 机器生成的历史落盘页 → 删除文件并迁移为动态生成。
+            # 需同时命中自动标记，或（旧版页脚 + 旧版主标题）双重特征，避免误删用户自定义文件
+            is_auto = (_NAV_AUTO_MARK in content) or (
+                ("SmartKB 资源中心" in content) and ("<h1>\U0001F4DA 资源中心</h1>" in content)
+            )
+            if is_auto:
+                try:
+                    os.remove(index_path)
+                    logger.info(f"资源中心导航页迁移为动态生成，已删除旧自动文件: {index_path}")
+                except OSError as rm_err:
+                    logger.warning(f"删除旧自动导航页失败: {rm_err}")
+            else:
+                # 用户自定义 index.html → 继续原样服务（重写相对链接）
+                base_url_path = html_dir.replace("\\", "/") + "/"
+                base_url = "/api/files/" + urllib.parse.quote(base_url_path)
+                content = _rewrite_html_links(content, base_url)
+                return HTMLResponse(content=content)
+        # 默认导航：每次按当前文件实时生成、直接返回，不再落盘
+        return HTMLResponse(content=_generate_default_nav_html(html_dir))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"加载导航页失败: {str(e)}")
 
