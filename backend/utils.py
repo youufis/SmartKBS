@@ -6,7 +6,6 @@ import os
 import time
 import json
 import hashlib
-import shutil
 import re
 from pathlib import Path
 from typing import Optional, Any
@@ -169,28 +168,12 @@ def enhance_prompt_with_user_context(prompt: str, user_payload: dict[str, Any] |
 # ── 教师 HTML 资源同步 ──
 
 def ensure_teacher_html_files(username: str):
-    """确保教师用户的 HTML 目录中有必要的文件"""
+    """确保教师用户的 HTML 目录存在"""
     from backend.auth import is_teacher
     if not is_teacher(username):
         return
     html_dir = get_account_html_dir(username)
     os.makedirs(html_dir, exist_ok=True)
-    source_dir = _resolve_abs(os.path.join(ROOT_DIR, "html"))
-    required_files: list[str] = []
-    for filename in required_files:
-        target_path = os.path.join(html_dir, filename)
-        if not os.path.exists(target_path):
-            source_path = os.path.join(source_dir, filename)
-            if os.path.exists(source_path):
-                shutil.copy2(source_path, target_path)
-    # score_system 子目录
-    score_system_dir = os.path.join(html_dir, "score_system")
-    os.makedirs(score_system_dir, exist_ok=True)
-    index_html_path = os.path.join(score_system_dir, "index.html")
-    if not os.path.exists(index_html_path):
-        source_index = os.path.join(source_dir, "score_system", "index.html")
-        if os.path.exists(source_index):
-            shutil.copy2(source_index, index_html_path)
 
 
 # ── 每日请求限流（基于数据库，与日志完全解耦） ──
