@@ -994,7 +994,7 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
     # ── 积分奖励 ──
     try:
         from backend.reward_engine import award_participation, award_grade
-        quiz_title = quiz[0][2] if len(quiz[0]) > 2 else f"测验#{quiz_id}"
+        quiz_title = quiz_row.get("title") or f"测验#{quiz_id}"
         award_participation(username, "quiz", str(quiz_id), quiz_title)
         award_grade(username, "quiz", str(quiz_id), total_score, q_score, quiz_title)
     except Exception as e:
