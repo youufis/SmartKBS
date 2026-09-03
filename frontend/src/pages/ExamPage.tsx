@@ -127,6 +127,7 @@ const ExamPage: React.FC = () => {
   const [resultModal, setResultModal] = useState(false)
   const [resultExam, setResultExam] = useState<ExamInfo | null>(null)
   const [resultData, setResultData] = useState<any>(null)
+  const [resultSearch, setResultSearch] = useState('')
   const [resultLoading, setResultLoading] = useState(false)
 
   // ── 学生：我的成绩 ──
@@ -1387,19 +1388,31 @@ const ExamPage: React.FC = () => {
                   </Card>
                 </Col>
               </Row>
-              <Table dataSource={resultData.attempts} rowKey="id" size="small"
+              <Input allowClear size="small" style={{ width: 260, marginBottom: 8 }}
+                placeholder={t('exSearchStudent')} value={resultSearch} onChange={(e) => setResultSearch(e.target.value)} />
+              <Table
+                dataSource={(resultData.attempts || []).filter((r: any) => {
+                  const kw = resultSearch.trim().toLowerCase()
+                  if (!kw) return true
+                  return [r.student_username, r.student_name, r.grade, r.class_name]
+                    .some((x: any) => String(x || '').toLowerCase().includes(kw))
+                })}
+                rowKey="id" size="small"
+                pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (n: number) => t('exTotalStudents', { count: n }) }}
                 columns={[
-                  { title: t('student'), dataIndex: 'student_name', key: 'student_name', width: 100 },
+                  { title: t('exName'), dataIndex: 'student_name', key: 'student_name', width: 90, ellipsis: true },
+                  { title: t('exStudentId'), dataIndex: 'student_username', key: 'student_username', width: 100, ellipsis: true },
+                  { title: t('exGrade'), dataIndex: 'grade', key: 'grade', width: 64 },
+                  { title: t('exClass'), dataIndex: 'class_name', key: 'class_name', width: 88 },
                   { title: t('score'), key: 'score', width: 100,
                     render: (_: any, r: ExamAttempt) => {
                       const passed = r.score >= (resultExam?.pass_score || 60)
                       return <span style={{ color: passed ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>{r.score} / {r.total_score}</span>
                     },
                   },
-                  { title: t('submittedAt'), dataIndex: 'submitted_at', key: 'submitted_at', width: 160,
+                  { title: t('submittedAt'), dataIndex: 'submitted_at', key: 'submitted_at', width: 150,
                     render: (t: string) => t ? t.slice(0, 16) : '-' },
                 ]}
-                pagination={false}
                 expandable={{
                   expandedRowRender: (record: any) => <StudentExamDetail
                     examId={resultExam?.id ?? 0}

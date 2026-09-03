@@ -215,7 +215,8 @@
         "username": "用户名",
         "viewCount": "查看次数"
       }
-    }
+    },
+    "studentSearchPh": "搜索学生姓名 / 学号 / 班级"
   },
   "analytics": {
     "title": "AI 学情分析",

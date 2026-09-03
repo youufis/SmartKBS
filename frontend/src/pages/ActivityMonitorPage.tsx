@@ -107,6 +107,7 @@ const ActivityMonitorPage: React.FC = () => {
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'all' | 'completed' | 'incomplete'>('all');
   const [statusPage, setStatusPage] = useState(1);
+  const [studentKeyword, setStudentKeyword] = useState('');
 
   // ── 加载年级班级 ──
   useEffect(() => {
@@ -155,7 +156,8 @@ const ActivityMonitorPage: React.FC = () => {
     gradeId?: number,
     classId?: number,
     filter: 'all' | 'completed' | 'incomplete' = 'all',
-    p: number = 1
+    p: number = 1,
+    kw?: string
   ) => {
     if (!gradeId || !classId) return;
     setStatusLoading(true);
@@ -163,7 +165,7 @@ const ActivityMonitorPage: React.FC = () => {
       const res = await activityMonitorApi.getActivityStatus(
         activity.activity_type as any,
         activity.id,
-        { grade_id: gradeId, class_id: classId, status_filter: filter, page: p, page_size: 20 }
+        { grade_id: gradeId, class_id: classId, status_filter: filter, student_kw: (kw ?? studentKeyword) || undefined, page: p, page_size: 20 }
       );
       setStatusDetail(res);
       setStatusPage(p);
@@ -515,6 +517,16 @@ const ActivityMonitorPage: React.FC = () => {
                   <Radio.Button value="completed"><CheckCircleOutlined /> {t('activityMonitor.completed')}</Radio.Button>
                   <Radio.Button value="incomplete"><CloseCircleOutlined /> {t('activityMonitor.incomplete')}</Radio.Button>
                 </Radio.Group>
+                <Input allowClear size="small" style={{ width: 220 }}
+                  placeholder={t('activityMonitor.studentSearchPh')}
+                  value={studentKeyword}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setStudentKeyword(v)
+                    if (selectedActivity && selectedGradeId && selectedClassId) {
+                      loadStatusData(selectedActivity, selectedGradeId, selectedClassId, statusFilter, 1, v)
+                    }
+                  }} />
               </Space>
 
               {/* 学生列表 */}

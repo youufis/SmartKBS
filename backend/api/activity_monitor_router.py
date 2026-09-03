@@ -685,6 +685,7 @@ async def get_activity_completion_status(
     grade_id: int = Query(None, description="年级ID"),
     class_id: int = Query(None, description="班级ID"),
     status_filter: str = Query("all", description="筛选: all/completed/incomplete"),
+    student_kw: str = Query("", description="学生姓名/学号/班级关键字"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -721,6 +722,16 @@ async def get_activity_completion_status(
     else:
         students = completed + incomplete
 
+    # 学生关键字过滤（姓名/学号/年级/班级）——仅过滤列表，统计卡片保持过滤前口径
+    _stats_base = len(students)
+    _kw = (student_kw or "").strip().lower()
+    if _kw:
+        students = [
+            s for s in students
+            if any(_kw in str(s.get(f, "") or "").lower()
+                   for f in ("username", "name", "grade", "class", "class_name"))
+        ]
+
     total = len(students)
     offset = (page - 1) * page_size
     page_items = students[offset:offset + page_size]
@@ -746,11 +757,11 @@ async def get_activity_completion_status(
         },
         "students": page_items,
         "statistics": {
-            "total_students": total,
+            "total_students": _stats_base,
             "completed_count": completed_count,
             "incomplete_count": incomplete_count,
             "avg_score": avg_score,
-            "completion_rate": round(completed_count / max(total, 1) * 100, 1),
+            "completion_rate": round(completed_count / max(_stats_base, 1) * 100, 1),
         },
         "page": page,
         "page_size": page_size,

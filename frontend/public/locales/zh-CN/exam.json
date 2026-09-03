@@ -439,5 +439,11 @@
   "ecHaveQ": "已有题目：",
   "ecTotalQ": "共 {{count}} 题",
   "unanswered": "未作答",
-  "tkUnanswered": "未答"
+  "tkUnanswered": "未答",
+  "exName": "姓名",
+  "exStudentId": "学号",
+  "exGrade": "年级",
+  "exClass": "班级",
+  "exSearchStudent": "搜索姓名 / 学号 / 年级 / 班级",
+  "exTotalStudents": "共 {{count}} 名学生"
 }

@@ -102,6 +102,7 @@ export async function getActivityStatus(
     grade_id?: number;
     class_id?: number;
     status_filter?: 'all' | 'completed' | 'incomplete';
+    student_kw?: string;
     page?: number;
     page_size?: number;
   }

@@ -439,5 +439,11 @@
   "ecHaveQ": "Existing questions: ",
   "ecTotalQ": "{{count}} questions",
   "unanswered": "(unanswered)",
-  "tkUnanswered": "unanswered"
+  "tkUnanswered": "unanswered",
+  "exName": "Name",
+  "exStudentId": "Student ID",
+  "exGrade": "Grade",
+  "exClass": "Class",
+  "exSearchStudent": "Search name / ID / grade / class",
+  "exTotalStudents": "{{count}} students"
 }

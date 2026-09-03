@@ -1847,6 +1847,36 @@ async def get_exam_results(exam_id: int, request: Request):
     max_score = max((a["score"] for a in attempts), default=0)
     min_score = min((a["score"] for a in attempts), default=0)
 
+    # 补充学生年级/班级（users/classes 在主库，批量查询；班级优先 classes.display_name）
+    try:
+        sus = [a["student_username"] for a in attempts if a.get("student_username")]
+        if sus:
+            _ph = ",".join("?" * len(sus))
+            urows = user_query(
+                f"SELECT username, grade, class, class_id FROM users WHERE username IN ({_ph})",
+                tuple(sus),
+            )
+            cids = sorted({r[3] for r in urows if r[3]})
+            cdisp = {}
+            if cids:
+                _cph = ",".join("?" * len(cids))
+                for cid, dname in user_query(f"SELECT id, display_name FROM classes WHERE id IN ({_cph})", tuple(cids)):
+                    cdisp[cid] = dname
+            umap = {r[0]: r for r in urows}
+            for a in attempts:
+                u = umap.get(a.get("student_username"))
+                cls_v = ""
+                if u:
+                    cls_v = cdisp.get(u[3], "") if u[3] else ""
+                    if not cls_v:
+                        raw = str(u[2] or "").strip()
+                        if raw:
+                            cls_v = raw if ("班" in raw or not raw.isdigit()) else f"{raw}班"
+                a["grade"] = str((u[1] if u else "") or "")
+                a["class_name"] = cls_v.strip()
+    except Exception:
+        pass
+
     return {
         "exam": exam,
         "attempts": attempts,
