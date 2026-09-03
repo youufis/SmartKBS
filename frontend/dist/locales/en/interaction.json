@@ -528,5 +528,10 @@
   "qqRanking": "🏆 Live ranking",
   "qqCollapse": "Collapse",
   "qqViewAll": "View all",
-  "qqRightUnit": "right"
+  "qqRightUnit": "right",
+  "ipName": "Name",
+  "ipUsername": "Student ID",
+  "ipGrade": "Grade",
+  "ipClass": "Class",
+  "ipSearchStudent": "Search name / ID / class"
 }

@@ -37,6 +37,7 @@ const InteractionPage: React.FC = () => {
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({})
   const [quizResult, setQuizResult] = useState<any>(null)
   const [quizResultsView, setQuizResultsView] = useState<any>(null)
+  const [quizStuSearch, setQuizStuSearch] = useState('')
   const [quizAiAnalysis, setQuizAiAnalysis] = useState<string | null>(null)
   const [quizAiAnalysisLoading, setQuizAiAnalysisLoading] = useState(false)
   const [aiQuizModal, setAiQuizModal] = useState(false)
@@ -383,7 +384,7 @@ const InteractionPage: React.FC = () => {
       {/* ── 测验结果统计弹窗 ── */}
       <Modal title={quizResultsView?.quiz_title ? t('ipMyScore', { title: quizResultsView.quiz_title }) : t('ipQuizResult')}
         open={!!quizResultsView} onCancel={() => setQuizResultsView(null)}
-        footer={null} width={720}>
+        footer={null} width={900}>
         {quizResultsView && (
           <>
             {/* 学生端：个人答题结果 */}
@@ -443,21 +444,33 @@ const InteractionPage: React.FC = () => {
                 </Row>
                 {/* 学生答题汇总 */}
                 {quizResultsView.student_answers?.length > 0 && (
-                  <Card title={t('ipStudentTable')} size="small" style={{ marginBottom: 16 }}>
-                    <Table dataSource={quizResultsView.student_answers} rowKey="student" size="small"
-                      pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }}
+                  <Card title={t('ipStudentTable')} size="small" style={{ marginBottom: 16 }}
+                    extra={<Input allowClear size="small" style={{ width: 220 }} placeholder={t('ipSearchStudent')}
+                      value={quizStuSearch} onChange={(e) => setQuizStuSearch(e.target.value)} />}>
+                    <Table
+                      dataSource={(quizResultsView.student_answers || []).filter((r: any) => {
+                        const kw = quizStuSearch.trim().toLowerCase()
+                        if (!kw) return true
+                        return [r.student, r.student_name, r.class_name, r.grade]
+                          .some((x: any) => String(x || '').toLowerCase().includes(kw))
+                      })}
+                      rowKey="student" size="small"
+                      pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'], showTotal: (num: number) => t('ipNTotal', { count: num }) }}
                       columns={[
-                        { title: t('ipIdx'), key: 'idx', width: 50, render: (_: any, __: any, i: number) => i + 1 },
-                        { title: t('ipStudent'), dataIndex: 'student', width: 120 },
-                        { title: t('ipCorrectCol'), dataIndex: 'correct_count', width: 80,
+                        { title: t('ipIdx'), key: 'idx', width: 48, render: (_: any, __: any, i: number) => i + 1 },
+                        { title: t('ipName'), dataIndex: 'student_name', width: 90, ellipsis: true },
+                        { title: t('ipUsername'), dataIndex: 'student', width: 100, ellipsis: true },
+                        { title: t('ipGrade'), dataIndex: 'grade', width: 64 },
+                        { title: t('ipClass'), dataIndex: 'class_name', width: 88 },
+                        { title: t('ipCorrectCol'), dataIndex: 'correct_count', width: 72,
                           render: (v: number, r: any) => (
                             <Text strong style={{ color: v === r.total_questions ? '#52c41a' : v > 0 ? '#faad14' : '#ff4d4f' }}>
                               {v}/{r.total_questions}
                             </Text>
                           ),
                         },
-                        { title: t('ipScoreCol'), dataIndex: 'score', width: 80 },
-                        { title: t('ipSubmitted'), dataIndex: 'submitted_at', width: 160 },
+                        { title: t('ipScoreCol'), dataIndex: 'score', width: 64 },
+                        { title: t('ipSubmitted'), dataIndex: 'submitted_at', width: 150 },
                       ]} />
                   </Card>
                 )}

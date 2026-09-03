@@ -528,5 +528,10 @@
   "qqRanking": "🏆 当前排行榜",
   "qqCollapse": "收起",
   "qqViewAll": "查看全部",
-  "qqRightUnit": "对"
+  "qqRightUnit": "对",
+  "ipName": "姓名",
+  "ipUsername": "学号",
+  "ipGrade": "年级",
+  "ipClass": "班级",
+  "ipSearchStudent": "搜索姓名 / 学号 / 班级"
 }

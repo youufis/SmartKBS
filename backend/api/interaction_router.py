@@ -1159,16 +1159,28 @@ async def get_quiz_results(quiz_id: int, request: Request):
             "correct_rate": round(correct_count / max(len(answers), 1) * 100, 1),
         })
 
-    # 建立学生用户名→姓名映射（批量查询）
+    # 建立学生用户名→姓名/年级/班级映射（批量查询，班级优先用 classes.display_name）
     usernames = [a[0] for a in answers]
-    name_map = {}
+    stu_map: dict[str, dict] = {}
     if usernames:
         placeholders = ",".join("?" * len(usernames))
         name_rows = execute_query(
-            f"SELECT username, name FROM users WHERE username IN ({placeholders})",
+            f"SELECT username, name, grade, class, class_id FROM users WHERE username IN ({placeholders})",
             tuple(usernames),
         )
-        name_map = {r[0]: r[1] or r[0] for r in name_rows}
+        class_ids = sorted({r[4] for r in name_rows if r[4]})
+        cdisp: dict = {}
+        if class_ids:
+            cph = ",".join("?" * len(class_ids))
+            for cid, dname in execute_query(f"SELECT id, display_name FROM classes WHERE id IN ({cph})", tuple(class_ids)):
+                cdisp[cid] = dname
+        for r in name_rows:
+            cls_disp = cdisp.get(r[4]) if r[4] else None
+            if not cls_disp:
+                raw = str(r[3] or "").strip()
+                if raw:
+                    cls_disp = raw if ("班" in raw or not raw.isdigit()) else f"{raw}班"
+            stu_map[r[0]] = {"name": r[1] or r[0], "grade": str(r[2] or "").strip(), "class_name": (cls_disp or "").strip()}
 
     return {
         "quiz": {
@@ -1181,7 +1193,9 @@ async def get_quiz_results(quiz_id: int, request: Request):
         "student_answers": [
             {
                 "student": a[0],
-                "student_name": name_map.get(a[0], a[0]),
+                "student_name": stu_map.get(a[0], {}).get("name", a[0]),
+                "grade": stu_map.get(a[0], {}).get("grade", ""),
+                "class_name": stu_map.get(a[0], {}).get("class_name", ""),
                 "score": a[2],
                 "submitted_at": a[3],
                 "correct_count": _calc_student_correct_count(a, questions),
