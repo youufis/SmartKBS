@@ -160,5 +160,6 @@
   "operationFailed": "Save failed",
   "fileTag": "(file)",
   "unknownError": "Unknown error",
-  "loadFailed": "Load failed"
+  "loadFailed": "Load failed",
+  "aiThinking": "AI is thinking..."
 }

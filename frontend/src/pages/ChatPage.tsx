@@ -128,7 +128,11 @@ const MessageBubble: React.FC<{
               >
                 {msg.content || ''}
               </ReactMarkdown>
-              {isStreaming && <TypingCursor />}
+              {isStreaming && (msg.content ? <TypingCursor /> : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#999', fontSize: 13 }}>
+                  <Spin size="small" /> {t('aiThinking')}
+                </span>
+              ))}
             </div>
           </div>
         </div>
@@ -159,7 +163,11 @@ const MessageBubble: React.FC<{
             >
               {msg.content || ''}
             </ReactMarkdown>
-            {isStreaming && <TypingCursor />}
+            {isStreaming && (msg.content ? <TypingCursor /> : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#999', fontSize: 13 }}>
+                  <Spin size="small" /> {t('aiThinking')}
+                </span>
+              ))}
           </div>
         )}
       </div>

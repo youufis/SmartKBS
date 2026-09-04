@@ -160,5 +160,6 @@
   "question": "提问",
   "fileTag": "(文件)",
   "unknownError": "未知错误",
-  "loadFailed": "加载失败"
+  "loadFailed": "加载失败",
+  "aiThinking": "AI 思考中..."
 }
