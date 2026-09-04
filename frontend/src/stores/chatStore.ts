@@ -82,7 +82,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   historyFilename: null,
 
   sendMessage: async (prompt: string) => {
-    const { sessionId, filePaths, contextEnhance, useAgent, messages } = get();
+    const { sessionId, filePaths, contextEnhance, useAgent, ragEnabled, messages } = get();
     if (!prompt.trim() && filePaths.length === 0) return;
 
     const userMsg: Message = {
@@ -126,7 +126,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     abortController = new AbortController();
 
     await chatStream(
-      { prompt, file_paths: serverFilePaths, session_id: sessionId, context_enhance: contextEnhance, use_agent: useAgent },
+      { prompt, file_paths: serverFilePaths, session_id: sessionId, context_enhance: contextEnhance, use_agent: useAgent, rag_enabled: ragEnabled },
       (text: string) => {
         set({ currentText: text });
         const msgs = get().messages;

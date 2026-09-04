@@ -46,6 +46,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     context_enhance: bool = False
     use_agent: bool = True  # True=优先使用智能体(有APPID时)；False=强制直连大模型
+    rag_enabled: bool = False  # 「知识」开关：开启后从试题库/课程大纲检索相关知识辅助回答
 
 
 # ── API Key 获取 ──
@@ -329,6 +330,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             dashscope_api_key=dashscope_api_key,
             context_enhance=req.context_enhance,
             use_agent=req.use_agent,
+            rag_enabled=req.rag_enabled,
         ),
         media_type="text/event-stream",
     )
@@ -339,30 +341,33 @@ def _chat_event_generator(
     username: str, user_payload: dict[str, Any] | None,
     dashscope_api_key: str, context_enhance: bool,
     use_agent: bool = True,
+    rag_enabled: bool = False,
 ):
     """SSE 事件生成器（同步）"""
     try:
         enhanced_prompt = enhance_prompt_with_user_context(prompt, user_payload)
         valid_file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
 
-        # ── V3.2 RAG 增强：从试题库和课程大纲检索相关知识 ──
-        try:
-            from backend.rag import retrieve_knowledge
-            rag_context = retrieve_knowledge(prompt, username)
-            if rag_context:
-                from backend.prompts import build_ai_role
-                from backend.permission_service import get_teacher_subjects
-                from backend.auth import get_user_role
-                # 教师/管理员：使用其任教学科；学生：使用通用角色
-                user_role = get_user_role(username)
-                teacher_subjects = get_teacher_subjects(username) if user_role in (0, 1) else []
-                ai_role = build_ai_role(subjects=teacher_subjects) if teacher_subjects else build_ai_role()
-                system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
-                if "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
-                    rag_context = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
-                enhanced_prompt = f"{system_role}\n\n{rag_context}\n\n用户问题：{enhanced_prompt}"
-        except Exception as e:
-            logger.warning(f"RAG 检索失败: {e}")
+        # ── V3.2 RAG 增强：由「知识」开关(rag_enabled)控制，从试题库和课程大纲检索相关知识 ──
+        if rag_enabled:
+            try:
+                from backend.rag import retrieve_knowledge
+                rag_context = retrieve_knowledge(prompt, username)
+                logger.info(f"[RAG] 知识检索已执行 (user={username}, context_len={len(rag_context or '')})")
+                if rag_context:
+                    from backend.prompts import build_ai_role
+                    from backend.permission_service import get_teacher_subjects
+                    from backend.auth import get_user_role
+                    # 教师/管理员：使用其任教学科；学生：使用通用角色
+                    user_role = get_user_role(username)
+                    teacher_subjects = get_teacher_subjects(username) if user_role in (0, 1) else []
+                    ai_role = build_ai_role(subjects=teacher_subjects) if teacher_subjects else build_ai_role()
+                    system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
+                    if "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
+                        rag_context = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
+                    enhanced_prompt = f"{system_role}\n\n{rag_context}\n\n用户问题：{enhanced_prompt}"
+            except Exception as e:
+                logger.warning(f"RAG 检索失败: {e}")
 
         # ── 判断是否启用多模态 ──
         multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)

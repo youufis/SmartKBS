@@ -43,6 +43,7 @@ export interface ChatParams {
   session_id?: string | null;
   context_enhance?: boolean;
   use_agent?: boolean;
+  rag_enabled?: boolean;
 }
 
 /**
