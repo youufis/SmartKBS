@@ -75,7 +75,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   filePaths: [],
   contextEnhance: false,
   ragEnabled: false,
-  useAgent: true,  // 默认勾选智能体（有 APPID 时生效）
+  useAgent: false,  // 默认直连大模型（响应更快）；有 APPID 时可勾选智能体
   historyTree: [],
   historyLoading: false,
   historyContent: '',
@@ -125,22 +125,39 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
     abortController = new AbortController();
 
+    // S1: 后端按「增量」推送，前端累积并节流渲染（约 ≤16 次/秒），结束/出错时最终落屏
+    let acc = '';
+    let lastFlush = 0;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      lastFlush = Date.now();
+      const msgs = get().messages;
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === 'assistant') {
+        last.content = acc;
+        set({ messages: [...msgs], currentText: acc });
+      }
+    };
+    const scheduleFlush = () => {
+      if (flushTimer) return;
+      const wait = Math.max(0, 60 - (Date.now() - lastFlush));
+      flushTimer = setTimeout(() => { flushTimer = null; flush(); }, wait);
+    };
+
     await chatStream(
       { prompt, file_paths: serverFilePaths, session_id: sessionId, context_enhance: contextEnhance, use_agent: useAgent, rag_enabled: ragEnabled },
-      (text: string) => {
-        set({ currentText: text });
-        const msgs = get().messages;
-        const last = msgs[msgs.length - 1];
-        if (last && last.role === 'assistant') {
-          last.content = text;
-          set({ messages: [...msgs] });
-        }
+      (inc: string) => {
+        acc += inc;
+        scheduleFlush();
       },
       (newSessionId: string) => {
+        flush();
         set({ isStreaming: false, sessionId: newSessionId || null, currentText: '' });
         abortController = null;
       },
       (error: string) => {
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
         const msgs = get().messages;
         const last = msgs[msgs.length - 1];
         if (last && last.role === 'assistant') {

@@ -45,7 +45,7 @@ class ChatRequest(BaseModel):
     file_paths: list[str] = []
     session_id: Optional[str] = None
     context_enhance: bool = False
-    use_agent: bool = True  # True=优先使用智能体(有APPID时)；False=强制直连大模型
+    use_agent: bool = False  # False=直连大模型(默认,响应快)；True=优先使用智能体(有APPID时)
     rag_enabled: bool = False  # 「知识」开关：开启后从试题库/课程大纲检索相关知识辅助回答
 
 
@@ -397,6 +397,7 @@ def _chat_event_generator(
             image_files_for_mm = [] if _summaries_generated else image_files
 
             full_text = ""
+            _prev = ""
             for chunk in call_multimodal_stream(
                 prompt=enhanced_prompt,
                 api_key=dashscope_api_key,
@@ -404,8 +405,12 @@ def _chat_event_generator(
                 api_base=api_base,
                 image_paths=image_files_for_mm,
             ):
-                full_text = chunk["text"]
-                yield f"data: {json.dumps({'type': 'delta', 'content': full_text})}\n\n"
+                _full = chunk["text"]
+                inc = _full[len(_prev):] if _full.startswith(_prev) else _full
+                _prev = _full
+                full_text = _full
+                if inc:
+                    yield f"data: {json.dumps({'type': 'delta', 'content': inc}, ensure_ascii=False)}\n\n"
 
             # 多模态处理完图片后，继续处理剩余的非图片文件（文档等）
             non_image_files = [fp for fp in valid_file_paths if fp not in image_files]
@@ -414,10 +419,14 @@ def _chat_event_generator(
                 for fp in non_image_files:
                     if is_document_file(fp):
                         doc_content = ""
+                        _prev2 = ""
+                        yield f"data: {json.dumps({'type': 'delta', 'content': _sep}, ensure_ascii=False)}\n\n"
                         for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
                             doc_content = chunk['text']
-                            combined = full_text + _sep + doc_content
-                            yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
+                            inc2 = doc_content[len(_prev2):] if doc_content.startswith(_prev2) else doc_content
+                            _prev2 = doc_content
+                            if inc2:
+                                yield f"data: {json.dumps({'type': 'delta', 'content': inc2}, ensure_ascii=False)}\n\n"
                         full_text += _sep + doc_content
                     else:
                         err = f'不支持的文件类型: {fp}'
@@ -428,8 +437,14 @@ def _chat_event_generator(
             return
 
         if not valid_file_paths:
+            _prev = ""
             for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key, username, use_agent=use_agent):
-                yield f"data: {json.dumps({'type': 'delta', 'content': chunk['text']})}\n\n"
+                _full = chunk["text"]
+                # 增量推送：仅发送相对上一帧的新增片段（回退切换等场景下前缀不匹配时整段补发）
+                inc = _full[len(_prev):] if _full.startswith(_prev) else _full
+                _prev = _full
+                if inc:
+                    yield f"data: {json.dumps({'type': 'delta', 'content': inc}, ensure_ascii=False)}\n\n"
                 session_id = chunk.get("session_id") or session_id
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
             return
@@ -440,18 +455,28 @@ def _chat_event_generator(
             if len(valid_file_paths) > 1:
                 header = f'--- 文件 {i+1}/{len(valid_file_paths)} ---\n\n'
                 combined += header
-                yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
+                yield f"data: {json.dumps({'type': 'delta', 'content': header}, ensure_ascii=False)}\n\n"
             if is_image_file(fp):
                 content = ""
+                _prev3 = ""
                 for chunk in _agent_chat_image_stream(fp, enhanced_prompt, dashscope_api_key):
-                    content = chunk['text']
-                    yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
+                    _f3 = chunk['text']
+                    inc3 = _f3[len(_prev3):] if _f3.startswith(_prev3) else _f3
+                    _prev3 = _f3
+                    content = _f3
+                    if inc3:
+                        yield f"data: {json.dumps({'type': 'delta', 'content': inc3}, ensure_ascii=False)}\n\n"
                 combined += content
             elif is_document_file(fp):
                 content = ""
+                _prev3 = ""
                 for chunk in _agent_chat_document_stream(fp, enhanced_prompt, dashscope_api_key):
-                    content = chunk['text']
-                    yield f"data: {json.dumps({'type': 'delta', 'content': combined + content})}\n\n"
+                    _f3 = chunk['text']
+                    inc3 = _f3[len(_prev3):] if _f3.startswith(_prev3) else _f3
+                    _prev3 = _f3
+                    content = _f3
+                    if inc3:
+                        yield f"data: {json.dumps({'type': 'delta', 'content': inc3}, ensure_ascii=False)}\n\n"
                 combined += content
             else:
                 err = f'不支持的文件类型: {fp}'
