@@ -35,14 +35,6 @@ def _get_app_version() -> str:
 APP_VERSION = _get_app_version()
 
 # ── 过滤 uvicorn 访问日志中的同步上报请求 ──
-import logging
-
-class _SyncReportFilter(logging.Filter):
-    def filter(self, record):
-        msg = record.getMessage()
-        return "/api/config-sync/" not in msg
-
-logging.getLogger("uvicorn.access").addFilter(_SyncReportFilter())
 
 
 # ── 应用生命周期 ──
@@ -64,6 +56,12 @@ async def lifespan(app: FastAPI):
         run_bind_repair()
     except Exception as e:
         print(f"[main] 启动自动清理资源绑定残留失败: {e}", file=sys.stderr)
+    try:
+        # 业务日志保留策略: 后台线程延迟清理, 防登录/浏览/通知等日志表无限增长
+        from backend.log_retention import start as start_log_retention
+        start_log_retention()
+    except Exception as e:
+        print(f"[main] 日志保留任务启动失败: {e}", file=sys.stderr)
     try:
         from backend.config_sync import try_sync_remote_config
         import asyncio

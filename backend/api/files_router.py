@@ -274,6 +274,26 @@ def _log_resource_access(rel_path: str, username: str, role: int, path_parts: li
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     client_ip = request.client.host if request.client else ""
 
+    # 去重: 前端埋点通常已记一条, 60 秒内同人同资源存在记录则跳过(消除 total_views 双计)
+    try:
+        from datetime import timedelta as _td
+        from backend.database import execute_query_one as _q1
+        _cut = (datetime.now() - _td(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
+        if resource_id > 0:
+            _dup = _q1(
+                "SELECT id FROM resource_view_logs WHERE student_username=? AND resource_type=? AND resource_id=? AND viewed_at>=? LIMIT 1",
+                (username, dir_type, resource_id, _cut),
+            )
+        else:
+            _dup = _q1(
+                "SELECT id FROM resource_view_logs WHERE student_username=? AND resource_type=? AND file_path=? AND viewed_at>=? LIMIT 1",
+                (username, dir_type, rel_path, _cut),
+            )
+        if _dup:
+            return
+    except Exception:
+        pass
+
     try:
         execute_insert_update(
             """INSERT INTO resource_view_logs
