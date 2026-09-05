@@ -1355,10 +1355,7 @@ const ExamPage: React.FC = () => {
         footer={[
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!resultExam?.id}
-            onClick={() => {
-              const token = localStorage.getItem('smartkb_token')
-              window.open(`/api/export/exam/${resultExam?.id}?token=${token}`, '_blank')
-            }}>{t('exportReport')}</Button>,
+            onClick={() => window.open(`/api/export/exam/${resultExam?.id}`, '_blank')}>{t('exportReport')}</Button>,
           <Button key="close" onClick={() => setResultModal(false)}>{t('close')}</Button>,
         ]}>
         <Spin spinning={resultLoading}>

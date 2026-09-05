@@ -63,8 +63,33 @@ def _dedupe_view_logs() -> None:
         logger.warning(f"[log_retention] 浏览日志去重失败: {e}")
 
 
+def _maintain_exam_attempts() -> None:
+    """考试尝试维护(X1/X4):
+    - 超 24h 未完结的 in_progress/grading → expired
+    - 确保"同一考试同一学生至多一条进行中"部分唯一索引存在
+    """
+    try:
+        from backend.question_db import get_connection as _qconn
+        with _qconn() as conn:
+            cutoff = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+            cur = conn.execute(
+                "UPDATE exam_attempts SET status='expired' WHERE status IN ('in_progress','grading') AND started_at < ?",
+                (cutoff,),
+            )
+            if cur.rowcount:
+                logger.info(f"[log_retention] exam_attempts 超期未完结尝试置为 expired: {cur.rowcount} 条")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_ea_one_active ON exam_attempts(exam_id, student_username) "
+                "WHERE status IN ('in_progress','grading')"
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"[log_retention] exam_attempts 维护失败: {e}")
+
+
 def purge_once() -> None:
     _dedupe_view_logs()
+    _maintain_exam_attempts()
     for table, cands, days, extra in _ITEMS:
         try:
             with get_connection() as conn:

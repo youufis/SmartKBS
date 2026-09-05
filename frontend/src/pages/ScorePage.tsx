@@ -488,9 +488,8 @@ const ScorePage: React.FC = () => {
               </Tooltip>
               <Tooltip title={t('exportExcel')}>
                 <Button icon={<DownloadOutlined />} onClick={() => {
-                  const token = localStorage.getItem('smartkb_token')
-                  const url = `/api/export/scores?teacher=${currentTeacher}&grade=${grade}&cls=${cls}`
-                  window.open(`${url}&token=${token}`, '_blank')
+                  const params = new URLSearchParams({ teacher: currentTeacher, grade, cls })
+                  window.open(`/api/export/scores?${params.toString()}`, '_blank')
                 }} disabled={!cls} />
               </Tooltip>
             </Space>

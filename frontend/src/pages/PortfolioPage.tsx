@@ -620,8 +620,7 @@ const PortfolioPage: React.FC = () => {
             <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
               <Button icon={<DownloadOutlined />} onClick={() => {
                 if (!targetUsername) return
-                const token = localStorage.getItem('smartkb_token')
-                window.open(`/api/portfolio/${targetUsername}/report/export?days=${reportDays}&period=${encodeURIComponent(t('portfolio.recentDays', { days: reportDays }))}&token=${token}`, '_blank')
+                window.open(`/api/portfolio/${targetUsername}/report/export?${new URLSearchParams({ days: String(reportDays), period: t('portfolio.recentDays', { days: reportDays }) }).toString()}`, '_blank')
               }}>{t('portfolio.exportWord')}</Button>
               <Button onClick={() => setReportModal(false)}>{t('cancel')}</Button>
             </Space>

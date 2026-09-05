@@ -122,13 +122,11 @@ const ClassSummaryPage: React.FC = () => {
                 type="primary"
                 ghost
                 onClick={() => {
-                  const token = localStorage.getItem('smartkb_token')
                   const params = new URLSearchParams({
-                      grade,
-                      cls,
+                    grade,
+                    cls,
                     subject: '',
                     teacher_username: user?.username || '',
-                    token: token || '',
                   })
                   window.open(`/api/interaction/class-summary/export?${params.toString()}`, '_blank')
                 }}

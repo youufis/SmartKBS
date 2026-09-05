@@ -661,10 +661,7 @@ const SessionsManager: React.FC = () => {
           </Space>
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadSessions} loading={loading}>{t('refresh')}</Button>
-            <Button icon={<DownloadOutlined />} onClick={() => {
-              const token = localStorage.getItem('smartkb_token')
-              window.open(`/api/export/rollcall?token=${token}`, '_blank')
-            }}>
+            <Button icon={<DownloadOutlined />} onClick={() => window.open('/api/export/rollcall', '_blank')}>
               {t('exportRecords')}
             </Button>
           </Space>

@@ -257,10 +257,7 @@ const QuickPollPage: React.FC = () => {
                             <Button size="small" icon={<BarChartOutlined />}
                               onClick={() => handleViewPollResults(poll.id)}>{t('results')}</Button>
                             <Button size="small" icon={<DownloadOutlined />}
-                              onClick={() => {
-                                const token = localStorage.getItem('smartkb_token')
-                                window.open(`/api/export/poll/${poll.id}?token=${token}`, '_blank')
-                              }}>{t('export')}</Button>
+                              onClick={() => window.open(`/api/export/poll/${poll.id}`, '_blank')}>{t('export')}</Button>
                             <Button size="small" type="text" icon={<EditOutlined />}
                               onClick={() => {
                                 editPollForm.setFieldsValue({

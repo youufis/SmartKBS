@@ -568,8 +568,7 @@ const DiscussionRoomPage: React.FC = () => {
           <Button key="export" icon={<DownloadOutlined />}
             disabled={!summaryData?.content && !summaryData?.parsed}
             onClick={() => {
-              const token = localStorage.getItem('smartkb_token')
-              window.open(`/api/interaction/groups/${groupId}/summary/export?token=${token}`, '_blank')
+              window.open(`/api/interaction/groups/${groupId}/summary/export`, '_blank')
             }}>
             {t('exportWord')}
           </Button>,

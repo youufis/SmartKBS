@@ -309,20 +309,19 @@ const AnalyticsPage: React.FC = () => {
 
   const exportExamExcel = () => {
     if (!selectedExam) return
-    const token = localStorage.getItem('smartkb_token')
-    window.open(`/api/export/exam/${selectedExam}?token=${token}`, '_blank')
+    window.open(`/api/export/exam/${selectedExam}`, '_blank')
   }
 
   const exportProgressExcel = () => {
-    const token = localStorage.getItem('smartkb_token')
-    let url = `/api/export/progress?token=${token}`
-    if (courseId) url += `&course_id=${courseId}`
-    if (progressGrade) url += `&grade=${progressGrade}`
+    const params = new URLSearchParams()
+    if (courseId) params.set('course_id', String(courseId))
+    if (progressGrade) params.set('grade', progressGrade)
     if (progressClass) {
-      const match = progressClass.match(/(\d+)/)
-      url += `&class_name=${match ? match[1] : progressClass}`
+      const m = progressClass.match(/(\d+)/)
+      params.set('class_name', m ? m[1] : progressClass)
     }
-    window.open(url, '_blank')
+    const qs = params.toString()
+    window.open(`/api/export/progress${qs ? `?${qs}` : ''}`, '_blank')
   }
 
   const typeLabel: Record<string, string> = {
@@ -404,8 +403,7 @@ const AnalyticsPage: React.FC = () => {
                         <Space>
                           <Button icon={<DownloadOutlined />} onClick={() => {
                             if (!cls) return
-                            const token = localStorage.getItem('smartkb_token')
-                            window.open(`/api/analytics/class-overview/export?grade=${grade}&cls=${cls}&teacher=${user?.username}&token=${token}`, '_blank')
+                            window.open(`/api/analytics/class-overview/export?${new URLSearchParams({ grade, cls, teacher: user?.username || '' }).toString()}`, '_blank')
                           }}>{t('analytics.exportWord')}</Button>
                           <Button icon={<DownloadOutlined />} onClick={exportReportAsMarkdown}>{t('analytics.exportMarkdown')}</Button>
                         </Space>
@@ -433,8 +431,7 @@ const AnalyticsPage: React.FC = () => {
                       <Space style={{ marginBottom: 12, justifyContent: 'flex-end', width: '100%' }}>
                         <Button icon={<DownloadOutlined />} onClick={() => {
                           if (!cls) return
-                          const token = localStorage.getItem('smartkb_token')
-                          window.open(`/api/analytics/teaching-suggestions/export?grade=${grade}&cls=${cls}&teacher_username=${user?.username}&token=${token}`, '_blank')
+                          window.open(`/api/analytics/teaching-suggestions/export?${new URLSearchParams({ grade, cls, teacher_username: user?.username || '' }).toString()}`, '_blank')
                         }}>{t('analytics.exportWord')}</Button>
                       </Space>
                       <Card style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
@@ -506,8 +503,7 @@ const AnalyticsPage: React.FC = () => {
                         <Space>
                           <Button icon={<DownloadOutlined />} onClick={() => {
                             if (!selectedExam) return
-                            const token = localStorage.getItem('smartkb_token')
-                            window.open(`/api/analytics/exam/${selectedExam}/report/export?token=${token}`, '_blank')
+                            window.open(`/api/analytics/exam/${selectedExam}/report/export`, '_blank')
                           }}>{t('analytics.exportWord')}</Button>
                           <Button icon={<DownloadOutlined />} onClick={exportExamExcel}>{t('analytics.exportExcel')}</Button>
                         </Space>

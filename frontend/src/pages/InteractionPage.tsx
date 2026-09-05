@@ -268,10 +268,7 @@ const InteractionPage: React.FC = () => {
                             <Button size="small" icon={<BarChartOutlined />}
                               onClick={() => handleViewQuizResults(quiz.id)}>{t('results')}</Button>
                             <Button size="small" icon={<DownloadOutlined />}
-                              onClick={() => {
-                                const token = localStorage.getItem('smartkb_token')
-                                window.open(`/api/export/quiz/${quiz.id}?token=${token}`, '_blank')
-                              }}>{t('ipExport')}</Button>
+                              onClick={() => window.open(`/api/export/quiz/${quiz.id}`, '_blank')}>{t('ipExport')}</Button>
                             <Button size="small" icon={<EditOutlined />}
                               onClick={() => { editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }}>{t('ipEdit')}</Button>
                             <Popconfirm title={t('confirmDeleteQuiz')} onConfirm={() => handleDeleteQuiz(quiz.id)}>

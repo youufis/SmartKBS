@@ -232,8 +232,7 @@ export async function getKnowledgePoints(): Promise<{
 
 /** 导出 Word 试卷（学生用） */
 export function getExportPaperUrl(examId: number, schoolName?: string, semester?: string): string {
-  const token = localStorage.getItem('smartkb_token');
-  const params = new URLSearchParams({ token: token || '' });
+  const params = new URLSearchParams();
   if (schoolName) params.set('school_name', schoolName);
   if (semester) params.set('semester', semester);
   return `/api/exams/${examId}/export-paper?${params.toString()}`;
@@ -241,8 +240,7 @@ export function getExportPaperUrl(examId: number, schoolName?: string, semester?
 
 /** 导出 Word 答案卷（教师用） */
 export function getExportAnswerKeyUrl(examId: number, schoolName?: string, semester?: string): string {
-  const token = localStorage.getItem('smartkb_token');
-  const params = new URLSearchParams({ token: token || '' });
+  const params = new URLSearchParams();
   if (schoolName) params.set('school_name', schoolName);
   if (semester) params.set('semester', semester);
   return `/api/exams/${examId}/export-answer-key?${params.toString()}`;
@@ -250,8 +248,7 @@ export function getExportAnswerKeyUrl(examId: number, schoolName?: string, semes
 
 /** 导出 Word 答题卡 */
 export function getExportAnswerSheetUrl(examId: number): string {
-  const token = localStorage.getItem('smartkb_token');
-  const params = new URLSearchParams({ token: token || '' });
+  const params = new URLSearchParams();
   return `/api/exams/${examId}/export-answer-sheet?${params.toString()}`;
 }
 

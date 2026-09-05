@@ -373,9 +373,10 @@ const WrongBookPage: React.FC = () => {
           planLoading ? null : (
             <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
               <Button icon={<DownloadOutlined />} onClick={() => {
-                const token = localStorage.getItem('smartkb_token')
-                const studentParam = selectedStudent ? `&student_username=${selectedStudent}` : ''
-                window.open(`/api/wrong-book/review-plan/export?token=${token}${studentParam}`, '_blank')
+                const params = new URLSearchParams()
+                if (selectedStudent) params.set('student_username', selectedStudent)
+                const qs = params.toString()
+                window.open(`/api/wrong-book/review-plan/export${qs ? `?${qs}` : ''}`, '_blank')
               }}>{t('exportWord')}</Button>
               <Button onClick={() => setPlanModal(false)}>{t('close')}</Button>
             </Space>

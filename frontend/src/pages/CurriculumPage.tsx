@@ -1764,9 +1764,7 @@ const CurriculumPage: React.FC = () => {
               <Button icon={<DownloadOutlined />} onClick={() => {
                 if (!lessonPlanData) { message.warning(t('generateLessonPlanFirst')); return }
                 if (!selectedKp) { message.warning(t('noKpSelected')); return }
-                const token = localStorage.getItem('smartkb_token')
-                const url = `/api/curriculum/ai-lesson-plan/${selectedKp.id}/export${token ? `?token=${token}` : ''}`
-                window.open(url, '_blank')
+                window.open(`/api/curriculum/ai-lesson-plan/${selectedKp.id}/export`, '_blank')
               }}>{t('exportWord')}</Button>
               <Button onClick={() => setLessonPlanModal(false)}>{t('close')}</Button>
             </Space>

@@ -5,7 +5,7 @@
 import asyncio
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -247,11 +247,11 @@ async def list_exams(
             attempt = execute_query_one(
                 """SELECT id, exam_id, status, score, total_score
                    FROM exam_attempts
-                   WHERE exam_id = ? AND student_username = ?
+                   WHERE exam_id = ? AND student_username = ? AND status <> 'expired'
                    ORDER BY id DESC LIMIT 1""",
                 (row["id"], username),
             )
-            row["my_attempt"] = attempt
+            row["my_attempt"] = _normalize_client_attempt(attempt)
     else:
         # 非学生：常规分页查询
         count_row = execute_query_one(
@@ -355,11 +355,11 @@ async def get_exam(exam_id: int, request: Request):
     if role == 2:
         attempt = execute_query_one(
             """SELECT * FROM exam_attempts
-               WHERE exam_id = ? AND student_username = ?
+               WHERE exam_id = ? AND student_username = ? AND status <> 'expired'
                ORDER BY id DESC LIMIT 1""",
             (exam_id, username),
         )
-        exam["my_attempt"] = attempt
+        exam["my_attempt"] = _normalize_client_attempt(attempt)
 
     return exam
 
@@ -909,6 +909,29 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
 
 # ── 学生答题 ──
 
+def _attempt_deadline(attempt: dict, exam: dict):
+    """X1: 个人作答截止时间 = 开始时间 + 考试时长(+3 分钟宽限)；未设时长返回 None(仅受考试起止窗约束)"""
+    try:
+        dur = float(exam.get("duration") or 0)
+    except (TypeError, ValueError):
+        dur = 0
+    if dur <= 0:
+        return None
+    try:
+        started = datetime.strptime(attempt["started_at"], "%Y-%m-%d %H:%M:%S")
+    except (KeyError, TypeError, ValueError):
+        return None
+    return started + timedelta(minutes=dur, seconds=180)
+
+
+def _normalize_client_attempt(attempt):
+    """客户端只识别 in_progress/submitted: 过期记录不返回, 批改中短暂表现为进行中"""
+    if attempt and attempt.get("status") == "grading":
+        attempt = dict(attempt)
+        attempt["status"] = "in_progress"
+    return attempt
+
+
 @router.post("/{exam_id}/start")
 async def start_exam(exam_id: int, request: Request):
     """学生开始考试（创建答题记录）"""
@@ -971,30 +994,53 @@ async def start_exam(exam_id: int, request: Request):
         raise HTTPException(status_code=400,
                             detail=f"已达到最大答题次数 ({exam['max_attempts']}次)")
 
-    # 检查是否有进行中的答题
+    # 检查是否有进行中的答题（X1: 超时未交的旧尝试置为 expired, 允许重新开始）
     in_progress = execute_query_one(
         """SELECT * FROM exam_attempts
-           WHERE exam_id = ? AND student_username = ? AND status = 'in_progress'""",
+           WHERE exam_id = ? AND student_username = ? AND status IN ('in_progress','grading')
+           ORDER BY id DESC LIMIT 1""",
         (exam_id, username),
     )
     if in_progress:
-        return {
-            "message": "检测到进行中的答题，继续作答",
-            "attempt_id": in_progress["id"],
-            "existing": True,
-        }
+        _dl = _attempt_deadline(in_progress, exam)
+        if _dl is None or now <= _dl:
+            return {
+                "message": "检测到进行中的答题，继续作答",
+                "attempt_id": in_progress["id"],
+                "existing": True,
+            }
+        execute_update(
+            "UPDATE exam_attempts SET status='expired' WHERE id=? AND status IN ('in_progress','grading')",
+            (in_progress["id"],),
+        )
 
     # 获取学生姓名
     name_rows = user_query("SELECT name FROM users WHERE username=?", (username,))
     student_name = name_rows[0][0] if name_rows and name_rows[0][0] else username
 
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    attempt_id = execute_insert(
-        """INSERT INTO exam_attempts
-           (exam_id, student_username, student_name, started_at, status, total_score)
-           VALUES (?, ?, ?, ?, 'in_progress', ?)""",
-        (exam_id, username, student_name, now_str, exam["total_score"]),
-    )
+    try:
+        attempt_id = execute_insert(
+            """INSERT INTO exam_attempts
+               (exam_id, student_username, student_name, started_at, status, total_score)
+               VALUES (?, ?, ?, ?, 'in_progress', ?)""",
+            (exam_id, username, student_name, now_str, exam["total_score"]),
+        )
+    except Exception:
+        # X4: 并发下另一请求已创建进行中记录(唯一索引拦截), 复用既有记录
+        _active = execute_query_one(
+            """SELECT id FROM exam_attempts
+               WHERE exam_id = ? AND student_username = ? AND status IN ('in_progress','grading')
+               ORDER BY id DESC LIMIT 1""",
+            (exam_id, username),
+        )
+        if _active:
+            return {
+                "message": "检测到进行中的答题，继续作答",
+                "attempt_id": _active["id"],
+                "existing": True,
+            }
+        raise
 
     return {
         "message": "考试开始",
@@ -1183,7 +1229,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
 
     # 获取进行中的答题记录
     attempt = execute_query_one(
-        """SELECT id FROM exam_attempts
+        """SELECT id, started_at FROM exam_attempts
            WHERE exam_id = ? AND student_username = ? AND status = 'in_progress'
            ORDER BY id DESC LIMIT 1""",
         (exam_id, username),
@@ -1192,6 +1238,23 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         raise HTTPException(status_code=400, detail="没有进行中的答题记录")
 
     attempt_id = attempt["id"]
+
+    # X2: 原子占坑 in_progress→grading, 并发重复提交只放行第一个(避免 AI 批改重复计费)
+    claimed = execute_update(
+        "UPDATE exam_attempts SET status='grading' WHERE id=? AND status='in_progress'",
+        (attempt_id,),
+    )
+    if claimed == 0:
+        _st = execute_query_one("SELECT status FROM exam_attempts WHERE id=?", (attempt_id,))
+        if _st and _st["status"] == "submitted":
+            raise HTTPException(status_code=400, detail="该考试已提交，请勿重复提交")
+        raise HTTPException(status_code=400, detail="答题记录状态已变化(批改中或已过期), 请刷新后查看结果")
+
+    # X1: 个人时长校验(开始时间+时长+宽限)
+    _dl = _attempt_deadline(attempt, exam)
+    if _dl is not None and datetime.now() > _dl:
+        execute_update("UPDATE exam_attempts SET status='expired' WHERE id=? AND status='grading'", (attempt_id,))
+        raise HTTPException(status_code=400, detail="答题已超出考试时长限制, 请重新进入考试页面开始作答")
 
     # 校验考试是否已过期
     now_dt = datetime.now()
@@ -1338,7 +1401,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
            SET status = 'submitted', submitted_at = ?, score = ?, answers = ?,
                auto_graded = 1, graded_by = 'ai',
                grading_details = ?
-           WHERE id = ? AND status = 'in_progress'""",
+           WHERE id = ? AND status = 'grading'""",
         (now, earned_score,
          json.dumps(graded_answers, ensure_ascii=False),
          json.dumps(grading_details, ensure_ascii=False) if grading_details else '',
@@ -1674,9 +1737,14 @@ async def get_my_attempt_detail(exam_id: int, attempt_id: int, request: Request)
     if not attempt:
         raise HTTPException(status_code=404, detail="答题记录不存在")
 
-    # 权限检查：学生只能看自己的，教师/管理员可看任何
-    if role == 2 and attempt["student_username"] != username:
-        raise HTTPException(status_code=403, detail="无权查看他人的答题详情")
+    # 权限检查：学生只能看自己的；教师/管理员限本考试管理范围(X3, 与复核端点一致)
+    if role == 2:
+        if attempt["student_username"] != username:
+            raise HTTPException(status_code=403, detail="无权查看他人的答题详情")
+    else:
+        _exam_row = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+        if not _exam_row or not _can_manage_exam(username, _exam_row):
+            raise HTTPException(status_code=403, detail="无权查看该考试的答题详情")
 
     # 解析答案
     answers = attempt.get("answers")

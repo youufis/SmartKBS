@@ -122,15 +122,15 @@ const CurriculumProgressPage: React.FC = () => {
 
   // ── 导出 Excel ──
   const exportProgressExcel = () => {
-    const token = localStorage.getItem('smartkb_token')
-    let url = `/api/export/progress?token=${token}`
-    if (courseId) url += `&course_id=${courseId}`
-    if (grade) url += `&grade=${grade}`
+    const params = new URLSearchParams()
+    if (courseId) params.set('course_id', String(courseId))
+    if (grade) params.set('grade', String(grade))
     if (className) {
-      const match = String(className).match(/(\d+)/)
-      url += `&class_name=${match ? match[1] : className}`
+      const m = String(className).match(/(\d+)/)
+      params.set('class_name', m ? m[1] : String(className))
     }
-    window.open(url, '_blank')
+    const qs = params.toString()
+    window.open(`/api/export/progress${qs ? `?${qs}` : ''}`, '_blank')
   }
 
   // ── 筛选条件变化时重新加载（仅当用户主动选择过课程） ──
