@@ -15,7 +15,10 @@ from backend.database import get_connection
 from backend.logger import logger
 
 _ITEMS = [
-    ("config_sync_logs", ("synced_at", "created_at", "timestamp", "log_time"), 30, ""),
+    # B1: 原候选列名(synced_at/created_at/timestamp/log_time)在该表里一个都不存在,
+    # _pick_col 返回 None -> 该条目被静默跳过, 30 天保留从不执行。真实列为
+    # first_sync/last_sync(本地时间字符串, 与 datetime.now() 同基准)。
+    ("config_sync_logs", ("last_sync", "first_sync"), 30, ""),
     ("login_logs", ("login_time",), 180, ""),
     ("resource_view_logs", ("viewed_at",), 365, ""),
     ("notifications", ("created_at",), 90, "is_read=1"),

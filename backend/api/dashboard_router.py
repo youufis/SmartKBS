@@ -1101,30 +1101,30 @@ async def recent_activity(request: Request):
             })
 
         # 最近的投票活动
-        if role == 0:
-            poll_acts = _act_q(
-                """SELECT v.created_at, p.question
+        # B2: 旧写法 SELECT 里没取投票者却按 poll_id 分组, 返回的是不确定行,
+        # 教师只看到"有学生参与了投票"却不知道是谁。改为取每个投票的最新一票。
+        _latest_vote = """SELECT v.created_at, p.question, v.student_username
                    FROM interaction_poll_votes v
                    JOIN interaction_polls p ON v.poll_id = p.id
-                   GROUP BY v.poll_id
-                   ORDER BY v.created_at DESC LIMIT 5""",
-            )
+                   JOIN (SELECT MAX(id) AS mid FROM interaction_poll_votes GROUP BY poll_id) t
+                     ON v.id = t.mid"""
+        if role == 0:
+            poll_acts = _act_q(_latest_vote + " ORDER BY v.created_at DESC LIMIT 5")
         else:
             poll_acts = _act_q(
-                """SELECT v.created_at, p.question
-                   FROM interaction_poll_votes v
-                   JOIN interaction_polls p ON v.poll_id = p.id
-                   WHERE p.creator_username = ?
-                   GROUP BY v.poll_id
-                   ORDER BY v.created_at DESC LIMIT 5""",
+                _latest_vote + " WHERE p.creator_username = ? ORDER BY v.created_at DESC LIMIT 5",
                 (username,),
             )
+        poll_info = _student_labels([act[2] for act in poll_acts])
         for act in poll_acts:
+            su = str(act[2] or "")
+            info = poll_info.get(su) or {}
+            who = f"学生 {su} {info.get('name') or ''}".strip() if su else "有学生"
             activities.append({
                 "time": act[0],
                 "type": "poll",
-                "title": "有学生参与了投票",
-                "detail": f"「{act[1]}」",
+                "title": f"{who} 参与了投票",
+                "detail": _with_tag(info.get("tag", ""), f"「{act[1]}」"),
             })
 
         # 最近的讨论活动（仅最近30天，避免全表扫描）
