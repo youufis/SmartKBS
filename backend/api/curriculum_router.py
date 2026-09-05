@@ -2066,8 +2066,8 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
     # 支持 token 参数认证（用于 window.open 下载）
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
 

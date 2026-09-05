@@ -13,7 +13,12 @@ from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 from starlette.types import Message, Receive, Scope, Send
 
-from backend.auth import decode_jwt_token, update_active_token, verify_token_version
+from backend.auth import (
+    authenticate_payload,
+    decode_jwt_token,
+    update_active_token,
+    verify_token_version,
+)
 from backend.request_ctx import set_current_user
 
 
@@ -70,28 +75,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
             token = request.query_params.get("token")
 
         if token:
-            payload = decode_jwt_token(token)
+            # A2/A3: 统一走 authenticate_payload —— 校验签名 + 账号真实存在 + 版本号一致,
+            # 并用数据库里的 role 覆盖令牌里的 role(防止旧令牌角色残留与伪造提权)
+            payload = authenticate_payload(token)
             if payload:
-                # 校验 token 版本号（防止多设备同时登录）
-                if not verify_token_version(payload):
-                    request.state.user = None
-                    if not is_public:
-                        return JSONResponse(
-                            status_code=401,
-                            content={"detail": "登录已过期：该账号已在其他地方登录"},
-                        )
-                else:
-                    # 注入用户信息
-                    request.state.user = payload
-                    set_current_user(payload)
-                    update_active_token(token)
+                request.state.user = payload
+                set_current_user(payload)
+                update_active_token(token)
             else:
-                # token 无效
+                request.state.user = None
+                set_current_user(None)
                 if not is_public:
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "无效的认证令牌"},
-                    )
+                    detail = "无效的认证令牌" if not decode_jwt_token(token) else "登录已过期，请重新登录"
+                    return JSONResponse(status_code=401, content={"detail": detail})
         else:
             request.state.user = None
             set_current_user(None)

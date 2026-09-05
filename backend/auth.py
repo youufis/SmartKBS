@@ -79,6 +79,42 @@ def get_token_version(username: str) -> int:
     return rows[0][0] if rows else 0
 
 
+def get_user_credential(username: str) -> tuple[int, int] | None:
+    """A1: 一次查询取回 (role, token_version); 账号不存在返回 None"""
+    rows = execute_query("SELECT role, token_version FROM users WHERE username=?", (username,))
+    if not rows:
+        return None
+    role_val = rows[0][0] if rows[0][0] is not None else 2
+    version_val = rows[0][1] if rows[0][1] is not None else 0
+    return int(role_val), int(version_val)
+
+
+def authenticate_payload(token: str) -> dict[str, Any] | None:
+    """校验令牌: 签名有效 + 账号存在 + 版本号一致, 并把角色改写为数据库真值。
+
+    A2: 版本号必须 >=1 —— 只有登录流程会签发令牌, 而登录前必然先递增 token_version,
+    因此 version=0 的令牌只可能是用仓库里的默认 JWT 密钥伪造出来的(针对从未登录过的
+    账号或不存在的用户名)。未配置 JWT_SECRET_KEY 环境变量时, 这条是最后一道闸。
+    """
+    if not token:
+        return None
+    payload = decode_jwt_token(token)
+    if not payload:
+        return None
+    username = payload.get("username", "")
+    if not username:
+        return None
+    cred = get_user_credential(username)
+    if cred is None or cred[1] < 1:
+        return None
+    if int(payload.get("token_version", 0) or 0) != cred[1]:
+        return None
+    fixed = dict(payload)
+    fixed["role"] = cred[0]
+    fixed["username"] = username
+    return fixed
+
+
 def increment_token_version(username: str) -> int:
     """递增 token 版本号（使旧 token 失效），返回新版本号"""
     with get_connection() as conn:

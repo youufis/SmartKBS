@@ -2560,8 +2560,8 @@ async def export_class_summary_docx(
 
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
 

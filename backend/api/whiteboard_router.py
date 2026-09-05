@@ -2118,14 +2118,14 @@ async def ai_generate_bilingual(request: Request):
 async def whiteboard_websocket(websocket: WebSocket, room_id: int):
     """白板 WebSocket 实时通信"""
     # 1. 认证
-    from backend.auth import decode_jwt_token
+    from backend.auth import authenticate_payload
     token = websocket.query_params.get("token", "")
     if not token:
         await websocket.close(code=4001, reason="缺少认证令牌")
         return
 
     try:
-        payload = decode_jwt_token(token)
+        payload = authenticate_payload(token)
         if payload is None:
             await websocket.close(code=4001, reason="认证失败")
             return

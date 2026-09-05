@@ -1859,11 +1859,11 @@ async def quick_quiz_websocket(websocket: WebSocket, room_id: int):
     并直接采信客户端传来的 username, 任何人可连任意房间、冒充任意学号,
     还会收到广播出去的正确答案与解析。
     """
-    from backend.auth import decode_jwt_token, verify_token_version
+    from backend.auth import authenticate_payload
 
     token = websocket.query_params.get("token") or ""
-    payload = decode_jwt_token(token) if token else None
-    if not payload or not verify_token_version(payload):
+    payload = authenticate_payload(token)
+    if not payload:
         await websocket.close(code=4401)
         return
 

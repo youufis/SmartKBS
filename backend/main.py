@@ -46,6 +46,17 @@ async def lifespan(app: FastAPI):
     init_db()
     init_question_db()
     try:
+        # U-SEC: 未设置 JWT_SECRET_KEY 环境变量时沿用仓库内默认密钥, 存在令牌伪造面,
+        # 已在中间件里加"账号必须存在且 token_version>=1"的兜底, 这里仍提示运维改配置
+        from backend.config import JWT_SECRET_IS_DEFAULT
+        if JWT_SECRET_IS_DEFAULT:
+            logger.warning(
+                "[安全提示] 未设置环境变量 JWT_SECRET_KEY, 正在使用内置默认密钥; "
+                "请在部署环境设置随机密钥(设置后所有用户需重新登录)"
+            )
+    except Exception:
+        pass
+    try:
         from backend.api.sharing_router import cleanup_empty_dir_shares
         cleanup_empty_dir_shares()
     except Exception:

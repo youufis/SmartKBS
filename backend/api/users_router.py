@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -24,6 +24,8 @@ from backend.auth import (
     can_manage_users,
     can_manage_html_files,
     can_import_users,
+    increment_token_version,
+    remove_active_token_by_username,
 )
 from backend.api.dependencies import get_current_user
 from backend.config import STU_DIR, ROOT_DIR, DATA_DIR
@@ -34,7 +36,12 @@ from backend.permission_service import (
     assign_teacher,
     clear_teacher_assignments,
     parse_legacy_teacher_grade_class,
+    get_teacher_grades,
+    get_teacher_classes,
+    get_teacher_subjects,
+    is_student_in_teacher_scope,
 )
+from backend.utils import like_escape
 
 router = APIRouter()
 
@@ -103,6 +110,78 @@ def _standardize_role(role_value) -> int:
     if r in ("1", "teacher", "教师"):
         return 1
     return 2
+
+
+# ── 用户管理权限助手(U-SCOPE) ──
+
+def _caller_role(user: dict) -> int:
+    """A2: 中间件已用数据库真值校正过 role, 这里直接采信"""
+    return user.get("role", 2)
+
+
+def _cls_no(v) -> str:
+    return str(v if v is not None else "").replace("班", "").strip()
+
+
+def _teacher_can_assign_class(teacher: str, grade_name: str, class_val: str) -> bool:
+    """教师能否在指定年级/班级下建号或改号"""
+    grade_name = (grade_name or "").strip()
+    if not grade_name:
+        return False
+    grades = {g["name"]: g["id"] for g in get_teacher_grades(teacher)}
+    if grade_name not in grades:
+        return False
+    allowed = [_cls_no(c["name"]) for c in get_teacher_classes(teacher, grades[grade_name])]
+    allowed = [a for a in allowed if a]
+    if not allowed:
+        return True  # 该年级不限班级
+    want = [_cls_no(x) for x in str(class_val or "").replace("，", ",").split("|")[0].split(",") if _cls_no(x)]
+    if not want:
+        return True
+    return all(w in allowed for w in want)
+
+
+def _assert_can_manage_target(user: dict, target: str, action: str = "管理") -> None:
+    """教师可以管用户, 但仅限自己任教范围内的学生; role!=2 的账号只能由管理员动"""
+    if _caller_role(user) == 0:
+        return
+    teacher = user.get("username", "")
+    if _caller_role(user) != 1:
+        raise HTTPException(status_code=403, detail=f"权限不足：仅管理员或教师可以{action}用户")
+    rows = execute_query("SELECT role FROM users WHERE username=?", (target,))
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"用户 '{target}' 不存在")
+    if rows[0][0] != 2:
+        raise HTTPException(status_code=403, detail="教师只能管理学生账号，教师与管理员账号请联系管理员")
+    if not is_student_in_teacher_scope(target, teacher):
+        raise HTTPException(status_code=403, detail=f"该学生不在您的任教范围内，无法{action}")
+
+
+def _teacher_visibility_filter(teacher: str) -> tuple[str, list]:
+    """教师可见记录 = 非学生账号(同事目录) + 自己任教范围内的学生"""
+    from backend.permission_service import get_teacher_assignments
+    parts: list[str] = []
+    params: list = []
+    for a in (get_teacher_assignments(teacher) or []):
+        gid = a.get("grade_id")
+        cid = a.get("class_id")
+        if not gid:
+            continue
+        if cid:
+            parts.append("(role=2 AND grade_id=? AND class_id=?)")
+            params.extend([gid, cid])
+        else:
+            parts.append("(role=2 AND grade_id=?)")
+            params.append(gid)
+    if not parts:
+        return "role IN (0,1)", []
+    return "role IN (0,1) OR " + " OR ".join(parts), params
+
+
+def _scoped_usernames_for_teacher(teacher: str) -> set[str]:
+    """教师可见/可管的学生用户名集合"""
+    rows = execute_query("SELECT username FROM users WHERE role=2")
+    return {r[0] for r in rows if is_student_in_teacher_scope(r[0], teacher)}
 
 
 # ── 批量删除：用户名匹配辅助 ──
@@ -379,6 +458,13 @@ async def register_user(req: RegisterRequest, request: Request):
     gender_num = _standardize_gender(req.gender)
     role_num = _standardize_role(req.role)
 
+    # U-SCOPE: 教师可建号, 但只能建自己任教范围内的学生, 且不能造出教师/管理员
+    if _caller_role(current_user) != 0:
+        if role_num != 2:
+            raise HTTPException(status_code=403, detail="教师只能创建学生账号，创建教师/管理员请联系管理员")
+        if not _teacher_can_assign_class(current_user["username"], req.grade or "", req.class_val or ""):
+            raise HTTPException(status_code=403, detail="只能在本人任教范围内的年级班级建号")
+
     try:
         # 解析年级/班级 ID
         grade_id = None
@@ -427,16 +513,24 @@ async def register_user(req: RegisterRequest, request: Request):
 async def update_user_info(req: UpdateUserRequest, request: Request):
     """更新用户信息（管理员和教师均可）"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以更新用户信息")
-
     username = req.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="用户名不能为空")
 
-    existing = execute_query("SELECT username FROM users WHERE username=?", (username,))
+    existing = execute_query(
+        "SELECT username, role, grade, class FROM users WHERE username=?", (username,)
+    )
     if not existing:
         raise HTTPException(status_code=404, detail=f"用户 '{username}' 不存在")
+
+    # U-SCOPE: 管理员不限; 教师可改自己(仅限姓名/性别, 任教范围不得自改)或自己范围内的学生
+    if _caller_role(current_user) == 1 and username == current_user["username"]:
+        old_grade = existing[0][2] or ""
+        old_class = str(existing[0][3] or "")
+        if (req.grade or "") != old_grade or _normalize_class(req.class_val or "") != _normalize_class(old_class):
+            raise HTTPException(status_code=403, detail="任教范围只能由管理员调整")
+    else:
+        _assert_can_manage_target(current_user, username, "更新")
 
     gender_num = _standardize_gender(req.gender)
     class_val = _normalize_class(req.class_val or "")
@@ -461,24 +555,31 @@ async def update_user_info(req: UpdateUserRequest, request: Request):
             (class_val, req.name, gender_num, grade_val, grade_id, class_id, username),
         )
 
-        # 教师：更新 teacher_assignments
+        # 教师：重建 teacher_assignments
+        # U5: 旧实现"先清空, 再仅按请求里的 subjects 重建", 于是任何不带 subjects 字段的
+        #     局部更新都会把该教师的任教范围整体清空(实测一次即让一位教师失去全部 13 条授权),
+        #     表现为他在积分/资源/点名/展示卡等所有模块里突然看不到自己的学生。
         if role_num == 1 and grade_val:
-            from backend.permission_service import clear_teacher_assignments, assign_teacher
-            clear_teacher_assignments(username)
-            subj_list = req.subjects or []
+            subj_list = req.subjects if req.subjects else list(get_teacher_subjects(username) or [])
             gcm = parse_legacy_teacher_grade_class(grade_val, class_val)
+            pending: list[tuple] = []
             for g_name, cls_names in gcm.items():
                 gid = upsert_grade(g_name)
-                assert gid is not None
-                for subj in subj_list:
+                if gid is None:
+                    continue
+                for subj in (subj_list or [None]):
                     if not cls_names:
-                        assign_teacher(username, gid, None, subj)  # type: ignore[arg-type]
+                        pending.append((gid, None, subj))
                     else:
                         for cn in cls_names:
                             if "班" not in cn:
                                 cn = f"{cn}班"
-                            cid = upsert_class(gid, cn)
-                            assign_teacher(username, gid, cid, subj)
+                            pending.append((gid, upsert_class(gid, cn), subj))
+            if not pending:
+                raise HTTPException(status_code=400, detail="任教范围解析为空，已保留原有任教范围")
+            clear_teacher_assignments(username)
+            for gid, cid, subj in pending:
+                assign_teacher(username, gid, cid, subj)  # type: ignore[arg-type]
 
         logger.info(f"用户信息已更新: {username}")
         return {"message": f"用户 '{username}' 信息已更新"}
@@ -499,8 +600,9 @@ async def change_password(req: ChangePasswordRequest, request: Request):
     if not username or not new_password:
         raise HTTPException(status_code=400, detail="用户名和新密码不能为空")
 
-    # 普通用户只能改自己的密码
-    if current_username != "root" and username != current_username:
+    # U-PWD: 以角色判定管理员(旧实现把管理员用户名写死成 "root", 换部署即失效)
+    is_admin_caller = _caller_role(current_user) == 0
+    if not is_admin_caller and username != current_username:
         raise HTTPException(status_code=403, detail="权限不足：只能修改自己的密码")
 
     hashed = hash_password(new_password)
@@ -510,6 +612,10 @@ async def change_password(req: ChangePasswordRequest, request: Request):
             "UPDATE users SET password=? WHERE username=?",
             (hashed, username),
         )
+        # U-PWD: 管理员代改他人密码后, 让对方已有的会话立即失效(自己改密则不断线, 避免正在用的窗口被踢)
+        if is_admin_caller and username != current_username:
+            increment_token_version(username)
+            remove_active_token_by_username(username)
         logger.info(f"密码已修改: {username}")
         return {"message": f"用户 '{username}' 密码已修改"}
     except Exception as e:
@@ -521,21 +627,20 @@ async def change_password(req: ChangePasswordRequest, request: Request):
 async def delete_user(username: str, request: Request):
     """彻底删除用户及其所有相关数据（管理员和教师均可）"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以删除用户")
 
-    # 检查用户是否存在并获取角色
+    # 禁止删除任何管理员账号（role=0）
     rows = execute_query("SELECT username, role FROM users WHERE username=?", (username,))
     if not rows:
         raise HTTPException(status_code=404, detail=f"用户 '{username}' 不存在")
-
-    user_role = rows[0][1]
-
-    # 禁止删除任何管理员账号（role=0）
-    if user_role == 0:
+    if rows[0][1] == 0:
         raise HTTPException(status_code=400, detail="不能删除管理员账号")
+    if username == current_user.get("username"):
+        raise HTTPException(status_code=400, detail="不能删除自己的账号")
+    # U-SCOPE: 管理员可删任何非管理员账号; 教师只能删自己任教范围内的学生
+    _assert_can_manage_target(current_user, username, "删除")
 
     try:
+        remove_active_token_by_username(username)
         _delete_user_completely(username)
         logger.info(f"用户已彻底删除: {username}")
         return {"message": f"用户 '{username}' 已彻底删除"}
@@ -548,19 +653,24 @@ async def delete_user(username: str, request: Request):
 async def export_users(request: Request, keyword: Optional[str] = None):
     """导出用户为 CSV 文件"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
+    if _caller_role(current_user) == 2:
         raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以导出用户")
 
+    conds, params = [], []
     if keyword and keyword.strip():
-        kw = f"%{keyword.strip()}%"
-        rows = execute_query(
-            "SELECT username, class, name, gender, role, grade FROM users WHERE username LIKE ? OR name LIKE ? ORDER BY username",
-            (kw, kw),
-        )
-    else:
-        rows = execute_query(
-            "SELECT username, class, name, gender, role, grade FROM users ORDER BY username"
-        )
+        kw = f"%{like_escape(keyword.strip())}%"
+        conds.append("(username LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')")
+        params.extend([kw, kw])
+    if _caller_role(current_user) == 1:
+        # U-SCOPE: 教师导出同样限定在任教范围内(同事目录一并保留, 便于分享对象选择)
+        scope_sql, scope_params = _teacher_visibility_filter(current_user["username"])
+        conds.append("(" + scope_sql + ")")
+        params.extend(scope_params)
+    where = " WHERE " + " AND ".join(conds) if conds else ""
+    rows = execute_query(
+        "SELECT username, class, name, gender, role, grade FROM users" + where + " ORDER BY username",
+        tuple(params),
+    )
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -591,8 +701,10 @@ async def export_users(request: Request, keyword: Optional[str] = None):
 
 @router.get("/{username}")
 async def get_user_info(username: str, request: Request):
-    """查询用户信息"""
+    """查询用户信息(U-SCOPE: 本人或管理员不限; 教师限自己任教范围内的学生)"""
     current_user = get_current_user(request)
+    if _caller_role(current_user) != 0 and username != current_user.get("username", ""):
+        _assert_can_manage_target(current_user, username, "查看")
 
     rows = execute_query(
         "SELECT username, class, name, gender, role, grade FROM users WHERE username=?",
@@ -624,20 +736,38 @@ async def get_user_info(username: str, request: Request):
 
 
 @router.get("")
-async def get_all_users(request: Request, keyword: Optional[str] = None):
-    """查看所有用户，支持按用户名/姓名模糊搜索"""
-    get_current_user(request)  # 只需登录
+async def get_all_users(
+    request: Request,
+    keyword: Optional[str] = None,
+    page: int = Query(0, ge=0, description="0 表示不分页(默认, 兼容旧前端); >0 时按分页返回"),
+    page_size: int = Query(200, ge=1, le=500, description="分页大小, 上限 500"),
+):
+    """查看所有用户，支持按用户名/姓名模糊搜索
 
-    if keyword and keyword.strip():
-        kw = f"%{keyword.strip()}%"
-        rows = execute_query(
-            "SELECT username, class, name, gender, role, grade FROM users WHERE username LIKE ? OR name LIKE ? ORDER BY username",
-            (kw, kw),
-        )
-    else:
-        rows = execute_query(
-            "SELECT username, class, name, gender, role, grade FROM users ORDER BY username"
-        )
+    U-SCOPE: 学生不再可见(旧实现只需登录即可导出全校 1410 个账号的姓名/班级/年级/角色);
+    教师仅能看到同事目录 + 自己任教范围内的学生; 管理员不限。
+    """
+    current_user = get_current_user(request)
+    caller_role = _caller_role(current_user)
+    if caller_role == 2:
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以查看用户列表")
+
+    conds = ["(username LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')"] if (keyword and keyword.strip()) else []
+    params: list = []
+    if conds:
+        kw = f"%{like_escape(keyword.strip())}%"
+        params = [kw, kw]
+    if caller_role == 1:
+        scope_sql, scope_params = _teacher_visibility_filter(current_user["username"])
+        conds.append("(" + scope_sql + ")")
+        params.extend(scope_params)
+    where = " WHERE " + " AND ".join(conds) if conds else ""
+    sql = "SELECT username, class, name, gender, role, grade FROM users" + where + " ORDER BY username"
+    limit_sql = ""
+    if page > 0:
+        limit_sql = " LIMIT ? OFFSET ?"
+        params.extend([page_size, (page - 1) * page_size])
+    rows = execute_query(sql + limit_sql, tuple(params))
     users = []
     for username, class_val, name_val, gender_val, role_val, grade_val in rows:
         role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
@@ -664,8 +794,10 @@ async def get_all_users(request: Request, keyword: Optional[str] = None):
 async def preview_bulk_delete_users(req: BulkDeleteRequest, request: Request):
     """批量删除预览：只统计匹配用户并返回样例，不做任何删除，供前端二次确认"""
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以批量删除")
+    # U-SCOPE: 批量删除按用户名模式匹配, 教师一旦可用即可一次抹掉全校学生
+    # (实测 pattern="s" 前缀匹配命中 1406 人), 而前端本就把这块标成"仅管理员可用"
+    if _caller_role(current_user) != 0:
+        raise HTTPException(status_code=403, detail="权限不足：批量删除仅限管理员使用")
 
     pattern = req.pattern.strip()
     if not pattern:
@@ -694,8 +826,8 @@ async def bulk_delete_users(req: BulkDeleteRequest, request: Request):
     /bulk-delete/preview 展示确认框，用户确认后再以 confirm=true 重发本接口。
     """
     current_user = get_current_user(request)
-    if not can_manage_users(current_user["username"]) and not is_teacher(current_user["username"]):
-        raise HTTPException(status_code=403, detail="权限不足：仅管理员或教师可以批量删除")
+    if _caller_role(current_user) != 0:
+        raise HTTPException(status_code=403, detail="权限不足：批量删除仅限管理员使用")
 
     pattern = req.pattern.strip()
     if not pattern:
@@ -819,6 +951,10 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
     async def event_generator():
         imported = 0
         errors = []
+        # U-SCOPE: 记录本次导入者身份与是否管理员(CSV 的 role 列对教师一律降级为学生)
+        importer_name = current_user["username"]
+        is_admin_importer = _caller_role(current_user) == 0
+        role_clamped = 0
 
         # 发送开始事件
         yield f"data: {json.dumps({'type': 'start', 'total': total}, ensure_ascii=False)}\n\n"
@@ -875,6 +1011,17 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
                     gender_val = _standardize_gender(row.get("gender", "0"))
                     role_val = _standardize_role(row.get("role", "2"))
                     grade_val = row.get("grade", "").strip()
+
+                    # U-SCOPE: 教师导入不得造出教师/管理员账号, 且只能建自己任教范围内的学生
+                    if not is_admin_importer:
+                        if role_val != 2:
+                            role_clamped += 1
+                            role_val = 2
+                        first_grade = grade_val.split("|")[0].strip()
+                        if not _teacher_can_assign_class(importer_name, first_grade, class_val):
+                            errors.append(f"第{row_num}行：年级「{first_grade or '空'}」班级「{class_val or '空'}」不在您的任教范围内")
+                            await asyncio.sleep(0)
+                            continue
 
                     # 解析年级/班级 ID
                     grade_id = None
@@ -976,10 +1123,13 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
 
         # 发送完成事件
         logger.info(f"批量导入用户: imported={imported}, errors={len(errors)}")
+        if role_clamped:
+            errors.append(f"注：{role_clamped} 行的 role 列被降级为学生（教师账号无权创建教师/管理员）")
         done_msg = f"成功导入 {imported} 个用户，{len(errors)} 个错误"
         done_data = {
             'type': 'done',
             'imported': imported,
+            'role_clamped': role_clamped,
             'error_count': len(errors),
             'errors': errors[:50],
             'message': done_msg,
@@ -990,8 +1140,9 @@ async def import_users(file: UploadFile = File(...), request: Request = None):  
 
 
 @router.get("/import/template")
-async def download_import_template():
-    """下载用户导入 CSV 模板"""
+async def download_import_template(request: Request):
+    """下载用户导入 CSV 模板(需登录; 模板含账号结构说明, 不再对匿名开放)"""
+    get_current_user(request)
     import tempfile
 
     csv_content = "username,password,class,name,gender,role,grade,subjects\n"

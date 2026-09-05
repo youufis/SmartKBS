@@ -694,8 +694,8 @@ async def export_class_overview_docx(
 
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
 
@@ -845,8 +845,8 @@ async def export_teaching_suggestions_docx(
 
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
 
@@ -1002,8 +1002,8 @@ async def export_exam_report_docx(
 
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
 

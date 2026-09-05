@@ -50,7 +50,9 @@ TEACHERS_SUMMARY_DIR = "teachers"
 ADMIN_SUMMARY_DIR = "admin"
 
 # ── JWT ──
-JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "smartkb-jwt-secret-key-change-in-production")
+JWT_SECRET_FALLBACK = "smartkb-jwt-secret-key-change-in-production"
+JWT_SECRET_IS_DEFAULT = "JWT_SECRET_KEY" not in os.environ
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", JWT_SECRET_FALLBACK)
 JWT_ALGORITHM = "HS256"
 
 # ── 静态文件路径 ──

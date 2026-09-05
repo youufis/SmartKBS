@@ -508,11 +508,13 @@ const UserMgmtPage: React.FC = () => {
     { label: t('male'), value: '男' },
     { label: t('female'), value: '女' },
   ]
-  const roleRadios = [
+  const roleRadiosAll = [
     { label: t('student'), value: '普通用户' },
     { label: t('teacher'), value: '教师' },
     { label: t('admin'), value: '管理员' },
   ]
+  // U-SCOPE: 教师只能创建/管理学生账号, 角色选项同步收紧(后端也会拒绝)
+  const roleRadios = isAdmin ? roleRadiosAll : roleRadiosAll.slice(0, 1)
 
   const userColumns = [
     { title: t('username'), dataIndex: 'username', key: 'username', width: 120 },
@@ -594,7 +596,7 @@ const UserMgmtPage: React.FC = () => {
             <Input placeholder={t('usernameSearchPlaceholder')} onBlur={handleUpdateUsernameBlur} />
           </Form.Item>
           <Form.Item name="role" label={t('roleLabel')}>
-            <Radio.Group options={roleRadios} />
+            <Radio.Group options={roleRadios} disabled={!isAdmin} />
           </Form.Item>
           <Form.Item shouldUpdate={(prev, cur) => prev.role !== cur.role} noStyle>
             {({ getFieldValue }) => {

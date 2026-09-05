@@ -240,7 +240,9 @@ async def update_title_config_api(req: ConfigUpdate, request: Request):
 
 
 @router.get("/subjects", summary="获取启用的课程列表")
-async def get_subjects():
+async def get_subjects(request: Request):
+    # U-CFG: 这些枚举页仅供已登录页面使用(匿名只有 /config/public)
+    get_current_user(request)
     """从系统配置返回课程列表"""
     from backend.subject_config import get_subjects, get_default_subject
     return {
@@ -259,7 +261,8 @@ async def get_question_types():
     }
 
 @router.get("/grades", summary="获取年级列表")
-async def get_grades(stage: str | None = None):
+async def get_grades(request: Request, stage: str | None = None):
+    get_current_user(request)
     """获取年级列表，支持按学段筛选（小学/初中/高中）"""
     from backend.permission_service import get_all_grades, get_all_stages
     grades = get_all_grades(stage or "")
@@ -271,7 +274,8 @@ async def get_grades(stage: str | None = None):
 
 
 @router.get("/grades/{grade_id}/classes", summary="获取某年级的班级列表")
-async def get_classes_by_grade(grade_id: int):
+async def get_classes_by_grade(grade_id: int, request: Request):
+    get_current_user(request)
     """获取指定年级下的所有班级"""
     from backend.permission_service import get_all_classes, get_grade_by_id
     grade = get_grade_by_id(grade_id)
@@ -285,7 +289,8 @@ async def get_classes_by_grade(grade_id: int):
 
 
 @router.get("/stages", summary="获取学段列表")
-async def get_stages():
+async def get_stages(request: Request):
+    get_current_user(request)
     """获取所有学段"""
     from backend.permission_service import get_all_stages
     return {"stages": get_all_stages()}

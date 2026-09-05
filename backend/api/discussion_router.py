@@ -1375,8 +1375,8 @@ async def export_group_summary_docx(
 
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
 
@@ -1634,11 +1634,11 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int):
     S2: 握手必须携带有效 token, 且必须是该组成员(学生)/任教范围内教师/管理员。
     旧实现匿名也能 accept 并回 pong, 任意 group_id 均可挂接。
     """
-    from backend.auth import decode_jwt_token, verify_token_version
+    from backend.auth import authenticate_payload
 
     token = websocket.query_params.get("token", "")
-    payload = decode_jwt_token(token) if token else None
-    if not payload or not verify_token_version(payload):
+    payload = authenticate_payload(token)
+    if not payload:
         logger.warning(f"[讨论WS] 拒绝未认证连接 group={group_id}")
         await websocket.close(code=4401, reason="未认证")
         return

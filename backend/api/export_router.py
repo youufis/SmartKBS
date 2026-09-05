@@ -632,8 +632,8 @@ async def export_quiz_result(quiz_id: int, request: Request,
     # 支持 token 参数认证（用于 window.open 下载）
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
     user = get_current_user(request)
@@ -697,8 +697,8 @@ async def export_poll_result(poll_id: int, request: Request,
     # 支持 token 参数认证（用于 window.open 下载）
     if token:
         request.state.user = None
-        from backend.auth import decode_jwt_token
-        payload = decode_jwt_token(token)
+        from backend.auth import authenticate_payload
+        payload = authenticate_payload(token)
         if payload:
             request.state.user = payload
     user = get_current_user(request)
