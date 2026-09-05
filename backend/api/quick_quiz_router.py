@@ -160,6 +160,27 @@ def _can_view_room(room: dict[str, Any], username: str, role: int) -> bool:
     return False
 
 
+def _assert_room_manager(room: dict[str, Any], username: str, role: int, action: str = "操作") -> None:
+    """S2: 只有创建者或管理员能推进活动进度(reveal 等)"""
+    if role != 0 and room["creator_username"] != username:
+        raise HTTPException(status_code=403, detail=f"仅创建者可{action}")
+
+
+def _require_room_member(room: dict[str, Any], username: str, role: int, doing: str) -> None:
+    """S6/S7: 活动进行中只允许已加入的玩家(或创建者/管理员)作答与看实时题面/排行"""
+    if role == 0 or room["creator_username"] == username:
+        return
+    joined = execute_query_one(
+        "SELECT id FROM quick_quiz_players WHERE room_id=? AND student_username=?",
+        (room["id"], username),
+    )
+    if joined:
+        return
+    if room.get("status") != "playing" and _can_view_room(room, username, role):
+        return      # 未开始/已结束时按可见性放行(教师复盘、学生回看)
+    raise HTTPException(status_code=403, detail=f"请先加入该抢答房间后再{doing}")
+
+
 def _room_to_dict(room: dict[str, Any]) -> dict[str, Any]:
     """将房间数据库行转为返回字典"""
     return {
@@ -559,7 +580,7 @@ async def list_rooms(
     request: Request,
     status: str = Query("", description="筛选状态"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1),
+    page_size: int = Query(20, ge=1, le=100),   # S11: 分页上限
 ):
     """获取抢答房间列表
     管理员：全部可见
@@ -867,6 +888,8 @@ async def reveal_answer(room_id: int, request: Request):
     room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
     if not room:
         raise HTTPException(status_code=404, detail="房间不存在")
+    # S2: 旧实现取了 role 却完全不校验, 任何学生都能自行公布答案并推进进度
+    _assert_room_manager(room, username, role, "公布答案")
 
     result = await _do_reveal(room_id)
     if not result:
@@ -1164,6 +1187,8 @@ async def submit_answer(room_id: int, request: Request):
         raise HTTPException(status_code=404, detail="房间不存在")
     if room["status"] != "playing":
         raise HTTPException(status_code=400, detail="活动未在进行中")
+    # S7: 必须先通过房间码 join, 否则答案写进明细却进不了 players/排行, 数据自相矛盾
+    _require_room_member(room, username, user.get("role", 2), "作答")
 
     state = game_manager.get_room(room_id)
     if not state or state["phase"] != "question":
@@ -1236,7 +1261,8 @@ async def submit_answer(room_id: int, request: Request):
     new_score = (player["total_score"] if player else 0) + score
     new_max_streak = max(player["max_streak"] if player else 0, streak)
 
-    execute_insert_update(
+    new_score = max(0, new_score)   # S11: 扣分模式不让排行榜出现负分
+    updated = execute_insert_update(
         """UPDATE quick_quiz_players
            SET total_score=?, correct_count=?, wrong_count=?, total_time=?,
                streak=?, max_streak=?
@@ -1244,6 +1270,19 @@ async def submit_answer(room_id: int, request: Request):
         (new_score, new_correct, new_wrong, new_total_time,
          streak, new_max_streak, room_id, username),
     )
+    if not updated:
+        # S7: 兜底补建玩家行, 避免"答案已入库但统计里没有这个人"
+        grade, cls = _get_student_grade_class(username)
+        name_row = execute_query_one("SELECT name FROM users WHERE username=?", (username,))
+        execute_insert_update(
+            """INSERT OR IGNORE INTO quick_quiz_players
+               (room_id, student_username, student_name, grade, class_name, total_score,
+                correct_count, wrong_count, total_time, streak, max_streak, joined_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (room_id, username, (name_row["name"] if name_row else "") or username,
+             grade, cls, new_score, new_correct, new_wrong, new_total_time,
+             streak, new_max_streak, now),
+        )
 
     # 标记已作答
     state["answered_players"].add(username)
@@ -1307,6 +1346,8 @@ async def get_current_question(room_id: int, request: Request):
     room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
     if not room:
         raise HTTPException(status_code=404, detail="房间不存在")
+    # S6: 进行中不把题面发给未加入者(可提前偷题)
+    _require_room_member(room, user["username"], user.get("role", 2), "获取题目")
 
     state = game_manager.get_room(room_id)
     phase = state["phase"] if state else room.get("status", "waiting")
@@ -1364,10 +1405,17 @@ async def get_result(room_id: int, request: Request):
     """获取抢答活动的完整结果"""
     user = get_current_user(request)
     username = user["username"]
+    role = user.get("role", 2)
 
     room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
     if not room:
         raise HTTPException(status_code=404, detail="房间不存在")
+    # S3: 结果页含每题正确答案/解析与他人逐题作答, 必须先过房间可见性
+    if not _can_view_room(room, username, role):
+        raise HTTPException(status_code=403, detail="无权查看此房间")
+    # 学生只看自己的作答; 活动结束前不下发正确答案与解析
+    student_view = role == 2 and room["creator_username"] != username
+    hide_answer = student_view and room.get("status") != "ended"
 
     # 排行榜
     ranking = execute_query_dict(
@@ -1385,14 +1433,22 @@ async def get_result(room_id: int, request: Request):
         (room_id,),
     )
 
+    # S3/S9: 一次取回全部作答并按题目分组(旧实现每题一次查询)
+    all_answers = execute_query_dict(
+        """SELECT a.question_id, a.student_username, a.answer, a.is_correct, a.time_spent, a.score
+           FROM quick_quiz_answers a
+           JOIN quick_quiz_questions q2 ON q2.id = a.question_id
+           WHERE q2.room_id = ?
+           ORDER BY a.time_spent ASC""",
+        (room_id,),
+    )
+    answers_by_q: dict[int, list[dict[str, Any]]] = {}
+    for a in all_answers:
+        answers_by_q.setdefault(a["question_id"], []).append(a)
+
     question_details = []
     for q in questions:
-        answers = execute_query_dict(
-            """SELECT student_username, answer, is_correct, time_spent, score
-               FROM quick_quiz_answers WHERE question_id=?
-               ORDER BY time_spent ASC""",
-            (q["id"],),
-        )
+        answers = answers_by_q.get(q["id"], [])
         options = json.loads(q["options"]) if isinstance(q["options"], str) else q["options"]
 
         # 统计各选项分布
@@ -1404,12 +1460,13 @@ async def get_result(room_id: int, request: Request):
             if ans in option_stats:
                 option_stats[ans] += 1
 
+        shown_answers = [a for a in answers if a["student_username"] == username] if student_view else answers
         question_details.append({
             "sort_order": q["sort_order"],
             "question_text": q["question_text"],
             "options": options,
-            "correct_answer": q["correct_answer"],
-            "explanation": q["explanation"],
+            "correct_answer": "" if hide_answer else q["correct_answer"],
+            "explanation": "" if hide_answer else q["explanation"],
             "svg_content": q.get("svg_content", ""),
             "has_svg": q.get("has_svg", 0),
             "media_files": q.get("media_files", ""),
@@ -1417,7 +1474,7 @@ async def get_result(room_id: int, request: Request):
             "correct_count": sum(1 for a in answers if a["is_correct"] == 1),
             "total_answers": len(answers),
             "option_stats": option_stats,
-            "answers": answers,
+            "answers": shown_answers,
         })
 
     # 我的信息
@@ -1438,6 +1495,11 @@ async def get_result(room_id: int, request: Request):
 async def get_ranking(room_id: int, request: Request):
     """获取当前排行榜"""
     user = get_current_user(request)
+    room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
+    if not room:
+        raise HTTPException(status_code=404, detail="房间不存在")
+    # S6: 排行含全班学号与姓名, 进行中只对玩家/创建者/管理员开放
+    _require_room_member(room, user["username"], user.get("role", 2), "查看排行")
 
     ranking = execute_query_dict(
         """SELECT student_username, student_name, total_score, correct_count, wrong_count,
@@ -1458,7 +1520,7 @@ async def get_ranking(room_id: int, request: Request):
 async def get_history(
     request: Request,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1),
+    page_size: int = Query(20, ge=1, le=100),   # S11: 原来无上限, ?page_size=99999 可整库拖取
 ):
     """学生查看自己参与过的抢答活动"""
     user = get_current_user(request)
@@ -1791,19 +1853,56 @@ def _get_room_coro():
 
 @router.websocket("/ws/quick-quiz/{room_id}")
 async def quick_quiz_websocket(websocket: WebSocket, room_id: int):
-    """抢答活动 WebSocket 连接"""
+    """抢答活动 WebSocket 连接
+
+    S1: 握手必须带 token(?token=), 且身份一律以 token 为准 —— 旧实现不校验任何凭证,
+    并直接采信客户端传来的 username, 任何人可连任意房间、冒充任意学号,
+    还会收到广播出去的正确答案与解析。
+    """
+    from backend.auth import decode_jwt_token, verify_token_version
+
+    token = websocket.query_params.get("token") or ""
+    payload = decode_jwt_token(token) if token else None
+    if not payload or not verify_token_version(payload):
+        await websocket.close(code=4401)
+        return
+
+    username = payload.get("username", "")
+    role = payload.get("role", 2)
+    room = execute_query_one("SELECT * FROM quick_quiz_rooms WHERE id=?", (room_id,))
+    if not room:
+        await websocket.close(code=4404)
+        return
+    if not _can_view_room(room, username, role):
+        await websocket.close(code=4403)
+        return
+
+    # S13: 进程重启后内存态丢失时按房间配置自愈, 否则连接根本不被登记(收不到任何推送)
+    if game_manager.get_room(room_id) is None:
+        game_manager.create_room_state(room_id, room.get("time_limit") or 15)
+
     # 接受连接
     await game_manager.add_connection(room_id, websocket)
 
     try:
         while True:
-            data = await websocket.receive_json()
+            try:
+                data = await websocket.receive_json()
+            except WebSocketDisconnect:
+                raise
+            except Exception as parse_err:
+                logger.warning(f"WebSocket 收到无法解析的帧 (room={room_id}): {parse_err}")
+                continue
+            if not isinstance(data, dict):
+                continue
             msg_type = data.get("type", "")
-            msg_data = data.get("data", {})
+            msg_data = data.get("data", {}) if isinstance(data.get("data"), dict) else {}
 
             if msg_type == "register":
-                # 注册玩家连接
-                username = msg_data.get("username", "")
+                # 注册玩家连接(S1: 忽略客户端自报的 username, 防止冒充)
+                claimed = msg_data.get("username", "")
+                if claimed and claimed != username:
+                    logger.warning(f"[quick-quiz WS] 拒绝身份不一致的注册请求(声称={claimed}, 实际={username})")
                 if username:
                     game_manager.register_player(room_id, username, websocket)
                     # 发送当前状态
@@ -1827,6 +1926,7 @@ async def quick_quiz_websocket(websocket: WebSocket, room_id: int):
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.error(f"WebSocket 错误 (room={room_id}): {e}")
+        # S1: 单条异常消息(如非 JSON 帧)不应终止会话, 记录后继续
+        logger.warning(f"WebSocket 消息处理异常 (room={room_id}): {e}")
     finally:
         game_manager.remove_connection(room_id, websocket)

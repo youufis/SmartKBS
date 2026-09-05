@@ -14,6 +14,7 @@ from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 from starlette.types import Message, Receive, Scope, Send
 
 from backend.auth import decode_jwt_token, update_active_token, verify_token_version
+from backend.request_ctx import set_current_user
 
 
 def extract_token(request: Request) -> Optional[str]:
@@ -82,6 +83,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 else:
                     # 注入用户信息
                     request.state.user = payload
+                    set_current_user(payload)
                     update_active_token(token)
             else:
                 # token 无效
@@ -92,6 +94,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     )
         else:
             request.state.user = None
+            set_current_user(None)
 
         response = await call_next(request)
         return response

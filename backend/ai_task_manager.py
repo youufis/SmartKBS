@@ -21,7 +21,7 @@ async def create_ai_task(description: str, prompt: str, api_key: str) -> str:
     """
     if not api_key:
         task_id = uuid.uuid4().hex[:12]
-        task = AITask(task_id, description)
+        task = AITask(task_id, description, _resolve_owner())
         task.status = TaskStatus.FAILED
         task.error = "API Key 未配置"
         task.completed_at = time.time()
@@ -45,9 +45,11 @@ class TaskStatus(str, Enum):
 
 class AITask:
     """单个 AI 任务"""
-    def __init__(self, task_id: str, description: str):
+    def __init__(self, task_id: str, description: str, owner_username: str = ""):
         self.task_id = task_id
         self.description = description
+        # S5: 任务归属者(创建时自动取自请求上下文), 查询接口据此鉴权
+        self.owner = owner_username or ""
         self.status = TaskStatus.PENDING
         self.result: Any = None
         self.error: Optional[str] = None
@@ -63,7 +65,20 @@ class AITask:
             "error": self.error,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
+            # S5: 供查询端点做归属校验, 返回前会被 pop 掉, 不下发给客户端
+            "owner": self.owner,
         }
+
+
+def _resolve_owner(explicit: str | None = None) -> str:
+    """任务归属者: 显式传入优先, 否则取当前请求上下文"""
+    if explicit:
+        return explicit
+    try:
+        from backend.request_ctx import get_current_username
+        return get_current_username() or ""
+    except Exception:
+        return ""
 
 
 class AITaskManager:
@@ -80,6 +95,7 @@ class AITaskManager:
         self,
         description: str,
         coro_factory: Callable[[], Coroutine[Any, Any, Any]],
+        owner_username: str | None = None,
     ) -> str:
         """创建后台任务，返回 task_id
 
@@ -88,7 +104,7 @@ class AITaskManager:
             coro_factory: 返回协程的可调用对象（延迟创建，避免事件循环问题）
         """
         task_id = uuid.uuid4().hex[:12]
-        task = AITask(task_id, description)
+        task = AITask(task_id, description, _resolve_owner(owner_username))
         async with self._lock:
             self._tasks[task_id] = task
 

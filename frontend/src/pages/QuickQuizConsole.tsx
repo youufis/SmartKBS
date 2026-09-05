@@ -168,6 +168,11 @@ const QuickQuizConsole: React.FC = () => {
     if (!roomId) return
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const token = localStorage.getItem('smartkb_token') || ''
+    // S1: WS 现在必须带有效 token, 无凭证时不再反复重连(旧代码会 3 秒一次无限重试)
+    if (!token) {
+      console.warn('[quick-quiz] 缺少登录凭证, 跳过 WebSocket 连接')
+      return
+    }
     const wsUrl = `${protocol}//${window.location.host}/api/ws/quick-quiz/${roomId}?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws

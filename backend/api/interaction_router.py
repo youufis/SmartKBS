@@ -4,6 +4,7 @@
 随堂测验、快速投票、课堂提问
 """
 import asyncio
+import traceback
 import json
 import random
 import re
@@ -490,6 +491,57 @@ class QuestionUpdate(BaseModel):
 
 # ── 随堂测验 ──
 
+def _get_quiz_row(quiz_id: int) -> dict[str, Any] | None:
+    """S10: 统一按字典取测验字段, 淘汰 quiz[0][4] 这类位置索引"""
+    rows = execute_query_dict("SELECT * FROM interaction_quizzes WHERE id = ?", (quiz_id,))
+    return rows[0] if rows else None
+
+
+def _quiz_questions(quiz_row: dict[str, Any]) -> list[Any]:
+    raw = quiz_row.get("questions")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    return raw if isinstance(raw, list) else []
+
+
+def _answer_matches(user_ans: str, correct_ans: str, q_type: str) -> bool:
+    """判分口径与提交端保持一致: 多选按集合比较, 其余忽略大小写与空白"""
+    if q_type == "multiple":
+        us = sorted([x.strip().upper() for x in str(user_ans or "").split(",") if x.strip()])
+        cs = sorted([x.strip().upper() for x in str(correct_ans or "").split(",") if x.strip()])
+        return bool(cs) and us == cs
+    return str(user_ans or "").strip().upper() == str(correct_ans or "").strip().upper()
+
+
+def _teacher_hits_scope(viewer: str, target_grade: str, target_class: str) -> bool:
+    """教师任教范围与目标年级/班级是否有交集"""
+    from backend.permission_service import get_teacher_grades
+    grades = [g.strip() for g in str(target_grade or "").replace("，", ",").split(",") if g.strip()]
+    teacher_grades = {str(g.get("name") or "").strip() for g in get_teacher_grades(viewer)}
+    if grades:
+        return bool(set(grades) & teacher_grades)
+    return False
+
+
+def _can_view_activity_results(username: str, role: int, row: dict[str, Any]) -> bool:
+    """S4/S8: 成绩与投票统计的查看权限 = 管理员 / 创建者 / 任教范围有交集"""
+    if role == 0:
+        return True
+    if (row.get("creator_username") or "") == username:
+        return True
+    if role != 1:
+        return False
+    scope = (row.get("target_scope") or "teacher_classes").strip()
+    if scope in ("all", "school"):
+        return True
+    if scope in ("teacher_classes", "class", "grade"):
+        return _teacher_hits_scope(username, row.get("target_grade") or "", row.get("target_class") or "")
+    return False
+
+
 @router.post("/quizzes", summary="创建随堂测验")
 async def create_quiz(req: QuizCreate, request: Request):
     """教师创建随堂测验"""
@@ -765,7 +817,7 @@ async def list_quizzes(
     request: Request,
     status: str = Query("", description="筛选状态"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     """获取随堂测验列表"""
     user = get_current_user(request)
@@ -911,11 +963,16 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         (quiz_id, username),
     )
     if existing:
-        raise HTTPException(status_code=400, detail="您已经答过此题")
+        raise HTTPException(status_code=400, detail="您已提交过该测验，不能重复作答")
 
     # 解析答案并评分
-    questions = json.loads(quiz_row["questions"]) if isinstance(quiz_row["questions"], str) else quiz_row["questions"]
-    user_answers = json.loads(req.answers)
+    try:
+        questions = json.loads(quiz_row["questions"]) if isinstance(quiz_row["questions"], str) else quiz_row["questions"]
+        user_answers = json.loads(req.answers)
+    except (json.JSONDecodeError, TypeError) as parse_err:
+        raise HTTPException(status_code=400, detail=f"答题数据格式不正确: {parse_err}")
+    if not isinstance(user_answers, list):
+        raise HTTPException(status_code=400, detail="答题数据必须是数组")
 
     total_score = 0
     q_score = sum(q.get("score", 1) for q in questions)
@@ -998,7 +1055,9 @@ async def submit_quiz_answer(quiz_id: int, req: QuizAnswerSubmit, request: Reque
         award_participation(username, "quiz", str(quiz_id), quiz_title)
         award_grade(username, "quiz", str(quiz_id), total_score, q_score, quiz_title)
     except Exception as e:
+        # 带堆栈输出(此前线上 name 'quiz' is not defined 只留一行提示, 难以定位)
         logger.warning(f"测验积分发放失败 (user={username}, quiz_id={quiz_id}): {e}")
+        logger.warning(traceback.format_exc())
 
     return {
         "message": "提交成功",
@@ -1017,11 +1076,8 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
     if role != 2:
         raise HTTPException(status_code=403, detail="仅学生可查看")
 
-    quiz = execute_query(
-        "SELECT * FROM interaction_quizzes WHERE id = ?",
-        (quiz_id,),
-    )
-    if not quiz:
+    quiz_row0 = _get_quiz_row(quiz_id)
+    if not quiz_row0:
         raise HTTPException(status_code=404, detail="测验不存在")
 
     # 查询该学生的答题记录
@@ -1032,7 +1088,7 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
     if not answers:
         raise HTTPException(status_code=404, detail="未找到答题记录")
 
-    questions = json.loads(quiz[0][4]) if isinstance(quiz[0][4], str) else quiz[0][4]
+    questions = _quiz_questions(quiz_row0)
     user_answers = json.loads(answers[0][0]) if isinstance(answers[0][0], str) else answers[0][0]
     total_score = answers[0][1]
     q_score = sum(q.get("score", 1) for q in questions)
@@ -1071,7 +1127,7 @@ async def get_my_quiz_result(quiz_id: int, request: Request):
         })
 
     return {
-        "quiz_title": quiz[0][2],
+        "quiz_title": quiz_row0.get("title"),
         "score": total_score,
         "total_score": q_score,
         "percentage": round(total_score / max(q_score, 1) * 100, 1),
@@ -1112,45 +1168,48 @@ async def get_quiz_results(quiz_id: int, request: Request):
     if role == 2:
         raise HTTPException(status_code=403, detail="无权查看")
 
-    quiz = execute_query(
-        "SELECT * FROM interaction_quizzes WHERE id = ?",
-        (quiz_id,),
-    )
-    if not quiz:
+    quiz_row = _get_quiz_row(quiz_id)
+    if not quiz_row:
         raise HTTPException(status_code=404, detail="测验不存在")
+    # S4: 旧实现只挡学生, 任何教师都能读他人测验的逐人成绩(含学号/姓名/班级)
+    if not _can_view_activity_results(user["username"], role, quiz_row):
+        raise HTTPException(status_code=403, detail="无权查看该测验的统计")
 
-    questions = json.loads(quiz[0][4]) if isinstance(quiz[0][4], str) else quiz[0][4]
+    questions = _quiz_questions(quiz_row)
     answers = execute_query(
         "SELECT student_username, answers, score, submitted_at FROM interaction_quiz_answers WHERE quiz_id = ?",
         (quiz_id,),
     )
 
-    # 每题正确率统计
+    # S9: 每份答卷只解析一次并按题号建索引(旧实现是"题数 × 人数"次重复 json.loads)
+    parsed: list[tuple[Any, dict[int, str]]] = []
+    for a in answers:
+        raw = a[1]
+        try:
+            user_answers = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        except (json.JSONDecodeError, TypeError):
+            user_answers = []
+        idx_map: dict[int, str] = {}
+        if isinstance(user_answers, list):
+            for ua in user_answers:
+                if isinstance(ua, dict) and ua.get("question_index") is not None:
+                    try:
+                        idx_map[int(ua["question_index"])] = str(ua.get("answer", "")).strip()
+                    except (TypeError, ValueError):
+                        continue
+        parsed.append((a, idx_map))
+
     question_stats = []
     for i, q in enumerate(questions):
-        correct_count = 0
         q_type = q.get("type", "single")
         correct_ans = str(q.get("answer", "")).strip()
-        for a in answers:
-            user_ans = json.loads(a[1]) if isinstance(a[1], str) else a[1]
-            for ua in user_ans:
-                if ua.get("question_index") == i:
-                    user_ans_str = str(ua.get("answer", "")).strip()
-                    if q_type == "multiple":
-                        user_set = sorted([x.strip().upper() for x in user_ans_str.split(",") if x.strip()])
-                        correct_set = sorted([x.strip().upper() for x in correct_ans.split(",") if x.strip()])
-                        if user_set == correct_set:
-                            correct_count += 1
-                    else:
-                        if user_ans_str.upper() == correct_ans.upper():
-                            correct_count += 1
-                    break
+        correct_count = sum(1 for _a, m in parsed if _answer_matches(m.get(i, ""), correct_ans, q_type))
         question_stats.append({
             "index": i,
             "question": q.get("question", q.get("question_text", "")),
             "options": q.get("options", []),
-            "correct_answer": q.get("answer", ""),
-            "type": q.get("type", "single"),
+            "correct_answer": correct_ans,
+            "type": q_type,
             "svg_content": q.get("svg_content") or q.get("svg_code", ""),
             "has_svg": q.get("has_svg", 1 if q.get("svg_code") or q.get("svg_content") else 0),
             "media_placeholders": q.get("media_placeholders", []),
@@ -1177,15 +1236,15 @@ async def get_quiz_results(quiz_id: int, request: Request):
         for r in name_rows:
             cls_disp = cdisp.get(r[4]) if r[4] else None
             if not cls_disp:
-                raw = str(r[3] or "").strip()
-                if raw:
-                    cls_disp = raw if ("班" in raw or not raw.isdigit()) else f"{raw}班"
+                raw_cls = str(r[3] or "").strip()
+                if raw_cls:
+                    cls_disp = raw_cls if ("班" in raw_cls or not raw_cls.isdigit()) else f"{raw_cls}班"
             stu_map[r[0]] = {"name": r[1] or r[0], "grade": str(r[2] or "").strip(), "class_name": (cls_disp or "").strip()}
 
     return {
         "quiz": {
-            "id": quiz[0][0],
-            "title": quiz[0][2],
+            "id": quiz_row.get("id"),
+            "title": quiz_row.get("title"),
             "question_count": len(questions),
         },
         "total_answers": len(answers),
@@ -1198,10 +1257,13 @@ async def get_quiz_results(quiz_id: int, request: Request):
                 "class_name": stu_map.get(a[0], {}).get("class_name", ""),
                 "score": a[2],
                 "submitted_at": a[3],
-                "correct_count": _calc_student_correct_count(a, questions),
+                "correct_count": sum(
+                    1 for i2, q2 in enumerate(questions)
+                    if _answer_matches(m.get(i2, ""), str(q2.get("answer", "")).strip(), q2.get("type", "single"))
+                ),
                 "total_questions": len(questions),
             }
-            for a in answers
+            for a, m in parsed
         ],
     }
 
@@ -1459,6 +1521,8 @@ async def submit_vote(
 @router.get("/polls/{poll_id}/results", summary="查看投票结果")
 async def get_poll_results(poll_id: int, request: Request):
     """获取投票实时结果"""
+    # S8: 旧实现连登录都不要求, 未登录即可读到题目与各选项票数
+    user = get_current_user(request)
     poll_rows = execute_query_dict(
         "SELECT * FROM interaction_polls WHERE id = ?",
         (poll_id,),
@@ -1467,14 +1531,18 @@ async def get_poll_results(poll_id: int, request: Request):
         raise HTTPException(status_code=404, detail="投票不存在")
 
     poll_row = poll_rows[0]
+    if not _can_view_activity_results(user["username"], user.get("role", 2), poll_row):
+        raise HTTPException(status_code=403, detail="无权查看该投票结果")
     options = json.loads(poll_row["options"]) if isinstance(poll_row["options"], str) else poll_row["options"]
-    vote_counts = []
-    for i in range(len(options)):
-        cnt = execute_query(
-            "SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = ? AND selected_option = ?",
-            (poll_id, i),
+    # S8: 一次 GROUP BY 统计(旧实现每个选项一次查询)
+    counts_map = {
+        (r[0] if r[0] is not None else -1): r[1]
+        for r in execute_query(
+            "SELECT selected_option, COUNT(*) FROM interaction_poll_votes WHERE poll_id = ? GROUP BY selected_option",
+            (poll_id,),
         )
-        vote_counts.append(cnt[0][0] if cnt else 0)
+    }
+    vote_counts = [int(counts_map.get(i, 0)) for i in range(len(options))]
 
     total = sum(vote_counts)
     # 计算实际参与人数（去重）
@@ -2183,20 +2251,35 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
 
-    quiz = execute_query(
-        "SELECT * FROM interaction_quizzes WHERE id = ?",
-        (quiz_id,),
-    )
-    if not quiz:
+    quiz_row0 = _get_quiz_row(quiz_id)
+    if not quiz_row0:
         raise HTTPException(status_code=404, detail="测验不存在")
+    # S4: AI 学情分析含逐人成绩, 同样需要范围校验
+    if not _can_view_activity_results(user["username"], role, quiz_row0):
+        raise HTTPException(status_code=403, detail="无权分析该测验的答题数据")
 
-    quiz_data = quiz[0]
-    questions = json.loads(quiz_data[4]) if isinstance(quiz_data[4], str) else quiz_data[4]
+    questions = _quiz_questions(quiz_row0)
 
     answers = execute_query(
         "SELECT student_username, answers, score FROM interaction_quiz_answers WHERE quiz_id = ?",
         (quiz_id,),
     )
+    # S9: 每份答卷只解析一次
+    parsed_list = []
+    for a in answers:
+        try:
+            ua_list = json.loads(a[1]) if isinstance(a[1], str) else (a[1] or [])
+        except (json.JSONDecodeError, TypeError):
+            ua_list = []
+        idx_map = {}
+        if isinstance(ua_list, list):
+            for ua in ua_list:
+                if isinstance(ua, dict) and ua.get("question_index") is not None:
+                    try:
+                        idx_map[int(ua["question_index"])] = str(ua.get("answer", "")).strip()
+                    except (TypeError, ValueError):
+                        continue
+        parsed_list.append((a, idx_map))
 
     participant_count = len(answers)
     total_possible = sum(q.get("score", 1) for q in questions)
@@ -2209,13 +2292,8 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
         correct_ans = str(q.get("answer", "")).strip()
         wrong_options = {}  # 统计错误选项分布
 
-        for a in answers:
-            user_ans_list = json.loads(a[1]) if isinstance(a[1], str) else a[1]
-            user_ans = ""
-            for ua in user_ans_list:
-                if ua.get("question_index") == i:
-                    user_ans = str(ua.get("answer", "")).strip()
-                    break
+        for _a, _m in parsed_list:
+            user_ans = _m.get(i, "")
 
             if q_type == "multiple":
                 user_set = sorted([x.strip().upper() for x in user_ans.split(",") if x.strip()])
@@ -2271,7 +2349,7 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
 
         ai_role = build_ai_role()
         prompt = f"{ai_role}" + QUIZ_ANALYSIS_PROMPT.format(
-            quiz_title=_safe(quiz_data[2] or ""),
+            quiz_title=_safe(quiz_row0.get("title") or ""),
             subject=_safe(""),
             participant_count=_safe(participant_count),
             question_stats=_safe(stats_text),
@@ -2707,10 +2785,18 @@ def _markdown_to_docx(doc, text: str):
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/ai-task/{task_id}", summary="查询 AI 异步任务状态")
-async def get_ai_task_status(task_id: str):
-    """查询 AI 后台任务的执行状态和结果"""
+async def get_ai_task_status(task_id: str, request: Request):
+    """查询 AI 后台任务的执行状态和结果。
+
+    S5: 旧实现完全无鉴权(未登录也能凭 task_id 读到 AI 生成的整套试题/复习计划/学情总结),
+    现要求登录, 且只有任务归属者或管理员可读。
+    """
+    user = get_current_user(request)
     from backend.ai_task_manager import task_manager
     task = task_manager.get_task_dict(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    owner = task.pop("owner", "") or ""
+    if owner and user.get("role", 2) != 0 and owner != user["username"]:
+        raise HTTPException(status_code=403, detail="无权查看该任务")
     return task
