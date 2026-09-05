@@ -347,7 +347,6 @@
   "codePrecached": "📦 代码已预缓存到本地，升级无需网络拉取",
   "releaseDate": "发布日期",
   "changelogTitle": "📋 更新日志",
-  "breakingChanges": "⚠️ 不兼容变更",
   "checkUpdate": "检测更新",
   "installGitFirst": "请先安装 Git",
   "codePrecachedTitle": "代码已预缓存到本地，升级速度更快",

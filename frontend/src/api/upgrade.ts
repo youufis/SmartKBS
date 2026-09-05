@@ -8,7 +8,7 @@ export interface VersionInfo {
   latest_version: string
   has_update: boolean
   changelog: string[]
-  breaking_changes: string[]
+  breaking_changes: string[]  // 接口仍返回, 升级页面不再展示(避免对使用者造成困扰)
   release_date: string
   behind_commits: number
   last_checked: string

@@ -339,7 +339,6 @@
   "codePrecached": "📦 Code pre-cached locally, upgrade without network fetch",
   "releaseDate": "Release Date",
   "changelogTitle": "📋 Changelog",
-  "breakingChanges": "⚠️ Breaking Changes",
   "checkUpdate": "Check Update",
   "installGitFirst": "Please install Git first",
   "codePrecachedTitle": "Code pre-cached locally for faster upgrade",

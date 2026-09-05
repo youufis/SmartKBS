@@ -719,17 +719,6 @@ const UpgradePanel: React.FC = () => {
             </>
           )}
 
-          {/* 不兼容变更警告 */}
-          {verInfo.breaking_changes && verInfo.breaking_changes.length > 0 && (
-            <Alert
-              type="warning"
-              message={t('breakingChanges')}
-              description={verInfo.breaking_changes.join('；')}
-              showIcon
-              style={{ marginTop: 16 }}
-            />
-          )}
-
           <Divider />
           <Space>
             <Button icon={<SearchOutlined />} onClick={loadVersion}>
