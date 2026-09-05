@@ -13,7 +13,13 @@ from pydantic import BaseModel
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
 from backend.api.config_router import get_config_value
-from backend.database import execute_query, execute_insert_update, get_connection
+from backend.database import (
+    execute_query,
+    execute_query_one,
+    execute_insert_update,
+    get_connection,
+)
+from backend.permission_service import parse_legacy_teacher_grade_class
 from backend.whiteboard_ws import whiteboard_manager
 from backend.logger import logger
 from backend.prompts import apply_skills
@@ -35,6 +41,109 @@ def _is_teacher_or_admin(user: dict) -> bool: # type: ignore
 
 def _is_admin(user: dict) -> bool: # type: ignore
     return _get_user_role(user) == 0
+
+
+# ═══════════════════════════════════════════════════════════
+# 房间归属权限助手（S3/S4/S5）
+# 旧实现: 房间详情/快照/页面 仅要求"已登录"; 页面写入/授权/巡览 仅要求"是教师"
+#         => 任何学生可读任意房间完整板书, 任何教师可改写他人房间
+# ═══════════════════════════════════════════════════════════
+
+def _room_brief(room_id: int) -> dict | None:
+    row = execute_query_one(
+        "SELECT id, creator_username, grade, class_name, status FROM whiteboard_rooms WHERE id=?",
+        (room_id,),
+    )
+    if not row:
+        return None
+    return {
+        "id": row["id"], "creator_username": row["creator_username"] or "",
+        "grade": row["grade"] or "", "class_name": row["class_name"] or "",
+        "status": row["status"] or "",
+    }
+
+
+def _is_room_member(username: str, room_id: int) -> bool:
+    return bool(execute_query(
+        "SELECT 1 FROM whiteboard_room_members WHERE room_id=? AND username=?",
+        (room_id, username),
+    ))
+
+
+def _teacher_covers_room(teacher: str, room: dict) -> bool:
+    """教师可读他人房间: 管理员创建的房间对全体教师开放(与学生侧口径一致),
+    否则要求房间所属年级落在自己的任教范围内"""
+    crow = execute_query("SELECT role FROM users WHERE username=?",
+                         (room.get("creator_username") or "",))
+    if crow and crow[0][0] == 0:
+        return True
+    r_grade = str(room.get("grade") or "").strip()
+    if not r_grade:
+        return False
+    trow = execute_query("SELECT grade, class FROM users WHERE username=?", (teacher,))
+    if not trow:
+        return False
+    try:
+        tmap = parse_legacy_teacher_grade_class(str(trow[0][0] or ""), str(trow[0][1] or ""))
+    except Exception:
+        return False
+    return r_grade in tmap
+
+
+def _student_can_join_room(user: dict, room: dict) -> bool:
+    """学生可访问判定, 与 join-by-code 完全一致(管理员房间不限/未设范围不限/年级班级需匹配)"""
+    creator = room.get("creator_username") or ""
+    crow = execute_query("SELECT role, grade, class FROM users WHERE username=?", (creator,))
+    if crow and crow[0][0] == 0:
+        return True
+    if not crow:
+        return True
+    t_grade, t_class = str(crow[0][1] or "").strip(), str(crow[0][2] or "").strip()
+    if not t_grade and not t_class:
+        return True
+    srow = execute_query("SELECT grade, class FROM users WHERE username=?", (user.get("username", ""),))
+    s_grade = (srow[0][0] or "").strip() if srow else ""
+    s_class = str(srow[0][1] or "").strip() if srow else ""
+    try:
+        gcm = parse_legacy_teacher_grade_class(t_grade, t_class)
+    except Exception:
+        return True
+    if s_grade and s_grade in gcm:
+        allowed = gcm[s_grade]
+        return (not allowed) or (s_class in allowed)
+    return False
+
+
+def _as_room_id(raw) -> int:
+    """请求体里的 room_id 由前端传入, 非数字时返回 400 而非 500"""
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="房间 ID 无效")
+
+
+def _is_room_manager(user: dict, room: dict) -> bool:
+    return _is_admin(user) or (room.get("creator_username") or "") == user.get("username", "")
+
+
+def _assert_room_access(user: dict, room_id: int, need_manage: bool = False,
+                        what: str = "白板数据") -> dict:
+    """读: 房主/管理员/成员/年级范围匹配; 写: 仅房主与管理员(S4)"""
+    room = _room_brief(room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="房间不存在")
+    if _is_room_manager(user, room):
+        return room
+    if need_manage:
+        raise HTTPException(status_code=403, detail=f"仅房主和管理员可以{what}")
+    username = user.get("username", "")
+    if _get_user_role(user) == 1:
+        if _is_room_member(username, room_id) or _teacher_covers_room(username, room):
+            return room
+        raise HTTPException(status_code=403, detail=f"无权访问该房间的{what}")
+    if _is_room_member(username, room_id) or _student_can_join_room(user, room):
+        return room
+    raise HTTPException(status_code=403, detail=f"无权访问该房间的{what}")
 
 
 def _get_ai_timeout() -> int:
@@ -171,8 +280,7 @@ async def list_rooms(
         admin_rows = execute_query("SELECT username FROM users WHERE role=0")
         admin_set = set(row[0] for row in admin_rows) if admin_rows else set()
 
-        from backend.permission_service import parse_legacy_teacher_grade_class
-
+        creator_cache: dict[str, tuple] = {}
         filtered = []
         for room in all_rows:
             creator = room[5]  # creator_username
@@ -180,10 +288,12 @@ async def list_rooms(
             if creator in admin_set:
                 filtered.append(room)
                 continue
-            # 查询创建者的年级班级信息
-            teacher_rows = execute_query(
-                "SELECT grade, class FROM users WHERE username=?", (creator,),
-            )
+            # 查询创建者的年级班级信息(同房间多个学生共享缓存, 避免逐条查库)
+            if creator not in creator_cache:
+                creator_cache[creator] = execute_query(
+                    "SELECT grade, class FROM users WHERE username=?", (creator,),
+                )
+            teacher_rows = creator_cache[creator]
             if not teacher_rows:
                 filtered.append(room)
                 continue
@@ -222,6 +332,7 @@ async def list_rooms(
 @router.get("/rooms/{room_id}", summary="获取房间详情")
 async def get_room(room_id: int, request: Request):
     user = get_current_user(request)
+    _assert_room_access(user, room_id, what="详情")
     rows = execute_query(
         "SELECT * FROM whiteboard_rooms WHERE id=?", (room_id,),
     )
@@ -239,6 +350,7 @@ async def get_snapshot(room_id: int, request: Request):
     """通过 HTTP 获取当前快照和授权状态，IIS 下 WebSocket 不可用时作为兜底"""
     user = get_current_user(request)
     username = user["username"]
+    _assert_room_access(user, room_id, what="快照")
     # 优先从内存取快照
     snap = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot", "")
     if not snap:
@@ -395,6 +507,9 @@ async def join_by_code(req: JoinByCodeRequest, request: Request):
 @router.post("/rooms/{room_id}/leave", summary="离开房间")
 async def leave_room_api(room_id: int, request: Request):
     user = get_current_user(request)
+    # S9: 只更新本人记录, 先确认房间存在
+    if _room_brief(room_id) is None:
+        raise HTTPException(status_code=404, detail="房间不存在")
     execute_insert_update(
         "UPDATE whiteboard_room_members SET leave_time=? WHERE room_id=? AND username=?",
         (_now(), room_id, user["username"]),
@@ -408,7 +523,8 @@ async def leave_room_api(room_id: int, request: Request):
 
 @router.get("/rooms/{room_id}/pages", summary="获取所有页面")
 async def list_pages(room_id: int, request: Request):
-    get_current_user(request)
+    user = get_current_user(request)
+    _assert_room_access(user, room_id, what="页面")
     rows = execute_query(
         """SELECT page_number, title, snapshot_data, thumbnail, is_current, duration_seconds
            FROM whiteboard_pages WHERE room_id=?
@@ -427,7 +543,8 @@ async def list_pages(room_id: int, request: Request):
 
 @router.get("/rooms/{room_id}/pages/{page_number}", summary="获取指定页面快照")
 async def get_page(room_id: int, page_number: int, request: Request):
-    get_current_user(request)
+    user = get_current_user(request)
+    _assert_room_access(user, room_id, what="页面")
     rows = execute_query(
         "SELECT snapshot_data, title FROM whiteboard_pages WHERE room_id=? AND page_number=?",
         (room_id, page_number),
@@ -442,6 +559,7 @@ async def save_page(room_id: int, page_number: int, req: SavePageRequest, reques
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可保存页面")
+    _assert_room_access(user, room_id, need_manage=True, what="保存页面")
     now = _now()
     execute_insert_update(
         """INSERT OR REPLACE INTO whiteboard_pages
@@ -458,6 +576,7 @@ async def add_page(room_id: int, request: Request):
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可新增页面")
+    _assert_room_access(user, room_id, need_manage=True, what="新增页面")
 
     # 获取最大页码
     rows = execute_query(
@@ -477,6 +596,7 @@ async def delete_page(room_id: int, page_number: int, request: Request):
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可删除页面")
+    _assert_room_access(user, room_id, need_manage=True, what="删除页面")
     execute_insert_update(
         "DELETE FROM whiteboard_pages WHERE room_id=? AND page_number=?",
         (room_id, page_number),
@@ -493,6 +613,7 @@ async def grant_control(room_id: int, req: GrantControlRequest, request: Request
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可授权")
+    _assert_room_access(user, room_id, need_manage=True, what="授权学生操作")
     await whiteboard_manager.grant_control(room_id, req.username, user["username"])
     return {"status": "ok"}
 
@@ -502,6 +623,7 @@ async def revoke_control(room_id: int, req: GrantControlRequest, request: Reques
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可收回")
+    _assert_room_access(user, room_id, need_manage=True, what="收回操作权")
     await whiteboard_manager.revoke_control(room_id, req.username)
     return {"status": "ok"}
 
@@ -515,6 +637,7 @@ async def list_students(room_id: int, request: Request):
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可查看")
+    _assert_room_access(user, room_id, need_manage=True, what="巡览学生")
 
     # 从 WebSocket 内存中获取当前真实在线的学生
     room_data = whiteboard_manager.rooms.get(room_id)
@@ -558,6 +681,8 @@ async def list_students(room_id: int, request: Request):
 async def register_room(room_id: int, request: Request):
     """HTTP 方式注册学生进入房间（IIS 下 WS 不通时替代 join_room）"""
     user = get_current_user(request)
+    # S3: 注册即成为成员, 必须先通过房间可见性判定, 否则任何学生可挂进任意房间
+    _assert_room_access(user, room_id, what="加入")
     role = "teacher" if _is_teacher_or_admin(user) else "student"
     execute_insert_update(
         """INSERT OR REPLACE INTO whiteboard_room_members
@@ -573,6 +698,7 @@ async def spotlight_student(room_id: int, request: Request):
     user = get_current_user(request)
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可投屏")
+    _assert_room_access(user, room_id, need_manage=True, what="投屏")
     body = await request.json()
     target = body.get("username", "")
     rows = execute_query(
@@ -1244,6 +1370,18 @@ async def ai_chat_stream(request: Request):
     if not prompt:
         raise HTTPException(status_code=400, detail="请输入问题")
 
+    # S8: 白板助手学生也可使用(AI 学伴), 但与知识问答共用每日配额, 防止被刷
+    if _get_user_role(user) == 2:
+        from backend.utils import check_user_daily_requests
+        allowed, _remaining = check_user_daily_requests(username, 2)
+        if not allowed:
+            return StreamingResponse(
+                _error_stream("今日 AI 请求次数已用完，请明天再试"),
+                media_type="text/event-stream",
+            )
+    if room_id:
+        _assert_room_access(user, _as_room_id(room_id), what="白板内容")
+
     # 获取 API Key
     dashscope_api_key, _ = get_api_keys(username)
     if not dashscope_api_key:
@@ -1570,6 +1708,8 @@ async def ai_beautify_board(request: Request):
     subject = body.get("subject", "通用技术")
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
+    # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
+    _assert_room_access(user, _as_room_id(room_id), what="白板内容")
 
     dashscope_api_key, _ = get_api_keys(user["username"])
     if not dashscope_api_key:
@@ -1653,6 +1793,8 @@ async def ai_generate_mindmap(request: Request):
     subject = body.get("subject", "通用技术")
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
+    # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
+    _assert_room_access(user, _as_room_id(room_id), what="白板内容")
 
     dashscope_api_key, _ = get_api_keys(user["username"])
     if not dashscope_api_key:
@@ -1686,7 +1828,10 @@ async def ai_generate_mindmap(request: Request):
 
 @router.post("/ai/suggest", summary="AI 根据当前内容推荐下一步")
 async def ai_suggest(request: Request):
+    # S8: 该接口消耗调用者 API Key 并返回教学建议, 前端仅在教师工具区暴露
     user = get_current_user(request)
+    if not _is_teacher_or_admin(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可使用教学建议")
     body = await request.json()
     current_content = body.get("content", "")
     kp_name = body.get("kp_name", "")
@@ -1723,6 +1868,7 @@ async def export_board_summary(room_id: int, request: Request):
     if not _is_teacher_or_admin(user):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     username = user["username"]
+    _assert_room_access(user, room_id, what="板书总结")
 
     dashscope_api_key, _ = get_api_keys(username)
     if not dashscope_api_key:
@@ -1841,6 +1987,8 @@ async def ai_generate_quiz(request: Request):
     kp_name = body.get("kp_name", "")
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
+    # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
+    _assert_room_access(user, _as_room_id(room_id), what="白板内容")
 
     dashscope_api_key, _ = get_api_keys(user["username"])
     if not dashscope_api_key:
@@ -1887,6 +2035,8 @@ async def ai_generate_bilingual(request: Request):
     subject = body.get("subject", "通用技术")
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
+    # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
+    _assert_room_access(user, _as_room_id(room_id), what="白板内容")
 
     dashscope_api_key, _ = get_api_keys(user["username"])
     if not dashscope_api_key:
@@ -2003,7 +2153,7 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
 
     # 3. 验证房间存在
     room_rows = execute_query(
-        "SELECT id, mode, creator_username FROM whiteboard_rooms WHERE id=? AND status='active'",
+        "SELECT id, mode, creator_username, grade FROM whiteboard_rooms WHERE id=? AND status='active'",
         (room_id,),
     )
     if not room_rows:
@@ -2011,6 +2161,25 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
         return
 
     room_mode = room_rows[0][1]
+
+    # S5: 仅验 token + 房间活跃是不够的 —— 还要确认该用户与房间的归属关系
+    room_ref = {
+        "id": room_rows[0][0],
+        "creator_username": room_rows[0][2] or "",
+        "grade": room_rows[0][3] or "",
+        "class_name": "",
+        "status": "active",
+    }
+    can_manage = (role_num == 0) or (username == room_ref["creator_username"])
+    if not can_manage:
+        joined = _is_room_member(username, room_id)
+        if role == "teacher":
+            permitted = joined or _teacher_covers_room(username, room_ref)
+        else:
+            permitted = joined or _student_can_join_room({"username": username}, room_ref)
+        if not permitted:
+            await websocket.close(code=4403, reason="无权访问该房间")
+            return
 
     # 4. 加入房间
     await whiteboard_manager.join_room(room_id, username, role, websocket)
@@ -2026,7 +2195,7 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
             if msg_type == "op":
                 # 使用管理器中的实时模式，而非连接时的缓存值
                 live_mode = whiteboard_manager.get_mode(room_id)
-                if _can_operate(room_id, username, role, live_mode):
+                if _can_operate(room_id, username, role, live_mode, can_manage):
                     await whiteboard_manager.handle_op(room_id, username, data)
                 else:
                     logger.warning(f"[白板WS] op denied for {username}({role}), room={room_id}, mode={live_mode}")
@@ -2037,7 +2206,7 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
 
             # ── 切换页面（教师）──
             elif msg_type == "switch_page":
-                if role == "teacher":
+                if role == "teacher" and can_manage:
                     page = data.get("page", 1)
                     whiteboard_manager.set_current_page(room_id, page)
                     # 加载新页面快照
@@ -2053,7 +2222,7 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
 
             # ── 切换模式（教师）──
             elif msg_type == "mode_change":
-                if role == "teacher":
+                if role == "teacher" and can_manage:
                     new_mode = data.get("mode", "demo")
                     old_mode = whiteboard_manager.get_mode(room_id)
                     whiteboard_manager.set_mode(room_id, new_mode)
@@ -2117,10 +2286,14 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
         await whiteboard_manager.leave_room(room_id, username)
 
 
-def _can_operate(room_id: int, username: str, role: str, mode: str) -> bool:
-    """检查操作权限"""
+def _can_operate(room_id: int, username: str, role: str, mode: str,
+                 can_manage: bool = True) -> bool:
+    """检查操作权限
+
+    S5: 教师侧收敛为"房主/管理员可书写", 其他教师(仅同年级可见)只读旁观。
+    """
     if role == "teacher":
-        return True
+        return can_manage
     if mode == "interactive":
         return whiteboard_manager.is_granted(room_id, username)
     if mode == "self_study":

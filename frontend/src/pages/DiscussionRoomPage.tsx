@@ -122,6 +122,9 @@ const DiscussionRoomPage: React.FC = () => {
     const wsUrl = `${protocol}//${host}/api/interaction/ws/${groupId}?token=${encodeURIComponent(token)}`
     const aiAssistantName = t('aiAssistant')
     let reconnectTimer: ReturnType<typeof setTimeout>
+    // 服务端会以 4401/4403/4404 拒绝握手, 但浏览器只能看到 1006, 因此用重试次数上限兜底
+    let reconnectAttempts = 0
+    const MAX_RECONNECT = 5
     let currentPollId = lastPollId
 
     const updatePollId = (newId: number) => {
@@ -137,7 +140,8 @@ const DiscussionRoomPage: React.FC = () => {
         wsRef.current = ws
 
         ws.onopen = () => {
-          // 连接成功
+          // 连接成功，重置重连计数
+          reconnectAttempts = 0
         }
 
         ws.onmessage = (event) => {
@@ -169,6 +173,8 @@ const DiscussionRoomPage: React.FC = () => {
 
         ws.onclose = () => {
           wsRef.current = null
+          if (reconnectAttempts >= MAX_RECONNECT) return  // 交给轮询兜底
+          reconnectAttempts++
           // 3 秒后重连
           reconnectTimer = setTimeout(connectWs, 3000)
         }

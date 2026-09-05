@@ -14,13 +14,137 @@ from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query, execute_insert_update, execute_query_dict
-from backend.permission_service import filter_activities_by_scope, check_activity_visibility
+from backend.permission_service import (
+    filter_activities_by_scope,
+    check_activity_visibility,
+    is_student_in_teacher_scope,
+    parse_legacy_teacher_grade_class,
+)
 from backend.logger import logger
 from backend.ws_manager import manager as ws_manager
 from backend.prompts import apply_skills, build_ai_role
 from backend.utils import extract_json_from_text
 
 router = APIRouter()
+
+
+# ═══════════════════════════════════════════════
+# 权限助手(S1/S2/S6)
+# ═══════════════════════════════════════════════
+
+_DISC_COLS = ["id", "creator_username", "title", "status", "grade", "classes",
+              "target_scope", "target_grade", "target_class", "target_users"]
+
+
+def _disc_dict(disc_id: int) -> dict | None:
+    """按列名读取讨论记录
+
+    S11: 旧代码把硬编码列序 zip 到 SELECT * 上, 而 discussions 表的 created_at/updated_at
+    位于 target_* 之前, 导致 target_scope/target_grade/... 全部错位,
+    学生可见性判定拿到垃圾值后回落到"教师任教范围", 于是管理员建的"仅高一可见"讨论
+    对全体年级放行。
+    """
+    rows = execute_query_dict("SELECT * FROM discussions WHERE id=?", (disc_id,))
+    return rows[0] if rows else None
+
+
+def _disc_brief(disc_id: int) -> dict | None:
+    rows = execute_query_dict(
+        "SELECT id, creator_username, title, status, grade, classes, target_scope, "
+        "target_grade, target_class, target_users FROM discussions WHERE id=?",
+        (disc_id,),
+    )
+    return rows[0] if rows else None
+
+
+def _group_discussion_id(group_id: int) -> int | None:
+    rows = execute_query("SELECT discussion_id FROM discussion_groups WHERE id=?", (group_id,))
+    return rows[0][0] if rows else None
+
+
+def _is_disc_member(username: str, disc_id: int) -> bool:
+    return bool(execute_query(
+        """SELECT 1 FROM discussion_members dm
+           JOIN discussion_groups dg ON dm.group_id = dg.id
+           WHERE dg.discussion_id=? AND dm.username=?""",
+        (disc_id, username),
+    ))
+
+
+def _teacher_covers_discussion(teacher: str, disc: dict) -> bool:
+    """教师可见判定: 创建者本人 / 组内有我任教的学生 / 目标年级在我任教范围内"""
+    if not disc:
+        return False
+    if (disc.get("creator_username") or "") == teacher:
+        return True
+    members = execute_query(
+        """SELECT DISTINCT dm.username FROM discussion_members dm
+           JOIN discussion_groups dg ON dg.id = dm.group_id
+           WHERE dg.discussion_id=?""",
+        (disc.get("id"),),
+    ) or []
+    for m in members[:60]:
+        try:
+            if m[0] and is_student_in_teacher_scope(m[0], teacher):
+                return True
+        except Exception:
+            continue
+    trow = execute_query("SELECT grade, class FROM users WHERE username=?", (teacher,))
+    if not trow:
+        return False
+    try:
+        tmap = parse_legacy_teacher_grade_class(str(trow[0][0] or ""), str(trow[0][1] or ""))
+    except Exception:
+        tmap = {}
+    targets = [g.strip() for g in str(disc.get("target_grade") or disc.get("grade") or "").replace("，", ",").split(",") if g.strip()]
+    return bool(targets) and any(g in tmap for g in targets)
+
+
+def _assert_can_access_discussion(user: dict, disc: dict | None, what: str = "讨论数据") -> None:
+    """教师须在该讨论范围内, 学生须是成员, 管理员不限(S1/S6)"""
+    role = user.get("role", 2)
+    username = user.get("username", "")
+    if role == 0:
+        return
+    if not disc:
+        raise HTTPException(status_code=404, detail="讨论不存在")
+    if role == 1:
+        if _teacher_covers_discussion(username, disc):
+            return
+        raise HTTPException(status_code=403, detail=f"无权查看该讨论的{what}")
+    if _is_disc_member(username, disc["id"]):
+        return
+    raise HTTPException(status_code=403, detail=f"无权访问该{what}")
+
+
+def _assert_can_access_group(user: dict, group_id: int, what: str = "小组数据") -> None:
+    disc_id = _group_discussion_id(group_id)
+    if disc_id is None:
+        raise HTTPException(status_code=404, detail="小组不存在")
+    _assert_can_access_discussion(user, _disc_brief(disc_id), what)
+
+
+def _assert_discussion_owner(user: dict, disc: dict | None, action: str = "") -> None:
+    """教师仅能管理自己创建的讨论(与 update/delete/start/end 口径一致)"""
+    if user.get("role", 2) == 1 and (disc or {}).get("creator_username") != user.get("username", ""):
+        raise HTTPException(status_code=403, detail="只能管理自己的讨论")
+
+
+def _student_scope_ok(user: dict, item: dict) -> bool:
+    """学生可见性(S7): 声明按年级/班级共享但目标为空的讨论不应放行"""
+    if user.get("role", 2) != 2:
+        return True
+    scope = (item.get("target_scope") or "teacher_classes")
+    if scope in ("grade", "class") and not str(item.get("target_grade") or "").strip():
+        return False
+    srow = execute_query("SELECT grade, class FROM users WHERE username=?", (user.get("username", ""),))
+    grade = str(srow[0][0] or "") if srow else ""
+    cls = str(srow[0][1] or "") if srow else ""
+    return check_activity_visibility(
+        user.get("username", ""), grade, cls,
+        item.get("creator_username", ""), scope,
+        item.get("target_grade", ""), item.get("target_class", ""), item.get("target_users", ""),
+    )
 
 
 # ── AI 内容审核 + 重复/频率限制（发言合规检查） ──
@@ -275,6 +399,88 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
 
 # ── 获取讨论列表 ──
 
+def _group_col_counts(table: str, ids: list[int]) -> dict[int, int]:
+    """按 group_id 批量计数(S7: 取代逐组 COUNT 查询)"""
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    rows = execute_query(
+        f"SELECT group_id, COUNT(*) FROM {table} WHERE group_id IN ({ph}) GROUP BY group_id",
+        tuple(ids),
+    )
+    return {r[0]: r[1] for r in rows}
+
+
+def _enrich_discussions(rows: list[dict], username: str, role: int) -> list[dict]:
+    """批量富化讨论列表: 分组/消息数/成员数/创建者姓名/报告标记/我的小组"""
+    if not rows:
+        return []
+    disc_ids = [r["id"] for r in rows]
+    ph = ",".join("?" * len(disc_ids))
+
+    g_rows = execute_query(
+        f"""SELECT id, discussion_id, group_index, name FROM discussion_groups
+            WHERE discussion_id IN ({ph}) ORDER BY discussion_id, group_index""",
+        tuple(disc_ids),
+    )
+    group_ids = [g[0] for g in g_rows]
+    msg_counts = _group_col_counts("discussion_messages", group_ids)
+    mem_counts = _group_col_counts("discussion_members", group_ids)
+    groups_by_disc: dict[int, list] = {}
+    for gid, did, gidx, gname in g_rows:
+        groups_by_disc.setdefault(did, []).append({
+            "id": gid, "group_index": gidx, "name": gname,
+            "member_count": mem_counts.get(gid, 0),
+            "message_count": msg_counts.get(gid, 0),
+        })
+
+    creator_names: dict[str, str] = {}
+    creators = [r.get("creator_username") for r in rows if r.get("creator_username")]
+    if creators:
+        cph = ",".join("?" * len(set(creators)))
+        for uname, cname in execute_query(
+            f"SELECT username, name FROM users WHERE username IN ({cph})", tuple(set(creators))
+        ):
+            creator_names[uname] = cname or ""
+
+    summary_counts: dict[int, int] = {}
+    s_rows = execute_query(
+        f"""SELECT discussion_id, COUNT(*) FROM discussion_reports
+            WHERE discussion_id IN ({ph}) AND group_id IS NOT NULL GROUP BY discussion_id""",
+        tuple(disc_ids),
+    )
+    summary_counts = {r[0]: r[1] for r in s_rows}
+
+    my_groups: dict[int, tuple] = {}
+    if role == 2:
+        for did, gid, gidx, gname in execute_query(
+            f"""SELECT dg.discussion_id, dg.id, dg.group_index, dg.name
+                FROM discussion_members dm JOIN discussion_groups dg ON dm.group_id = dg.id
+                WHERE dg.discussion_id IN ({ph}) AND dm.username=?""",
+            tuple(disc_ids) + (username,),
+        ):
+            my_groups.setdefault(did, (gid, gidx, gname))
+
+    results = []
+    for item in rows:
+        item = dict(item)
+        gl = groups_by_disc.get(item["id"], [])
+        item["groups"] = gl
+        item["total_messages"] = sum(g["message_count"] for g in gl)
+        item["total_members"] = sum(g["member_count"] for g in gl)
+        item["require_summary"] = bool(item.get("require_summary"))
+        creator = item.get("creator_username") or ""
+        item["creator_name"] = creator_names.get(creator) or creator
+        item["has_summary"] = summary_counts.get(item["id"], 0) > 0
+        if role == 2:
+            mine = my_groups.get(item["id"])
+            item["has_joined"] = mine is not None
+            if mine:
+                item["my_group"] = {"id": mine[0], "group_index": mine[1], "name": mine[2]}
+        results.append(item)
+    return results
+
+
 @router.get("/discussions", summary="获取讨论列表")
 async def list_discussions(
     request: Request,
@@ -284,115 +490,27 @@ async def list_discussions(
     role = user.get("role", 2)
     username = user["username"]
 
-    if role == 0:
-        # 管理员：查看全部讨论
-        if status:
-            rows = execute_query(
-                "SELECT * FROM discussions WHERE status=? ORDER BY created_at DESC",
-                (status,),
-            )
-        else:
-            rows = execute_query(
-                "SELECT * FROM discussions ORDER BY created_at DESC"
-            )
-    elif role == 1:
+    # ── 先按可见性取出讨论(S7: 学生先过滤再富化, 避免逐条 5 类查询) ──
+    conds, params = [], []
+    if status:
+        conds.append("status=?")
+        params.append(status)
+    if role == 1:
         # 教师：只查看自己创建的讨论
-        if status:
-            rows = execute_query(
-                """SELECT * FROM discussions
-                   WHERE status=? AND creator_username=?
-                   ORDER BY created_at DESC""",
-                (status, username),
-            )
-        else:
-            rows = execute_query(
-                """SELECT * FROM discussions
-                   WHERE creator_username=?
-                   ORDER BY created_at DESC""",
-                (username,),
-            )
-    else:
-        # 学生：先查出所有讨论，再按 target_scope 过滤
-        if status:
-            rows = execute_query(
-                "SELECT * FROM discussions WHERE status=? ORDER BY created_at DESC",
-                (status,),
-            )
-        else:
-            rows = execute_query(
-                "SELECT * FROM discussions ORDER BY created_at DESC"
-            )
+        conds.append("creator_username=?")
+        params.append(username)
+    sql = "SELECT * FROM discussions"
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
+    sql += " ORDER BY created_at DESC"
+    rows = execute_query_dict(sql, tuple(params))
 
-    columns = ["id", "creator_username", "title", "description", "subject",
-               "group_mode", "group_count", "members_per_group", "ai_role",
-               "duration_minutes", "status", "grade", "classes",
-               "require_summary", "target_scope", "target_grade",
-               "target_class", "target_users", "created_at", "updated_at"]
-    results = []
-    for row in rows:
-        item = dict(zip(columns, row))
-        # 统计各组消息数
-        groups = execute_query(
-            "SELECT id, group_index, name FROM discussion_groups WHERE discussion_id=?",
-            (item["id"],),
-        )
-        group_list = []
-        total_messages = 0
-        for g in groups:
-            msg_count = execute_query(
-                "SELECT COUNT(*) FROM discussion_messages WHERE group_id=?",
-                (g[0],),
-            )[0][0]
-            member_count = execute_query(
-                "SELECT COUNT(*) FROM discussion_members WHERE group_id=?",
-                (g[0],),
-            )[0][0]
-            total_messages += msg_count
-            group_list.append({
-                "id": g[0], "group_index": g[1], "name": g[2],
-                "member_count": member_count, "message_count": msg_count,
-            })
-        item["groups"] = group_list
-        item["total_messages"] = total_messages
-        item["total_members"] = sum(g["member_count"] for g in group_list)
-        item["require_summary"] = bool(item["require_summary"])
-        # 查询创建者姓名
-        creator_info = execute_query(
-            "SELECT name FROM users WHERE username=?",
-            (item["creator_username"],),
-        )
-        item["creator_name"] = creator_info[0][0] if creator_info and creator_info[0] and creator_info[0][0] else item["creator_username"]
-        # 检查是否有 AI 总结报告
-        summary_count = execute_query(
-            "SELECT COUNT(*) FROM discussion_reports WHERE discussion_id=? AND group_id IS NOT NULL",
-            (item["id"],),
-        )[0][0]
-        item["has_summary"] = summary_count > 0
-        # 学生标记是否已加入
-        if role == 2:
-            joined = execute_query(
-                """SELECT 1 FROM discussion_members dm
-                   JOIN discussion_groups dg ON dm.group_id = dg.id
-                   WHERE dg.discussion_id=? AND dm.username=?""",
-                (item["id"], username),
-            )
-            item["has_joined"] = len(joined) > 0
-            if item["has_joined"]:
-                my_g = execute_query(
-                    """SELECT dg.id, dg.group_index, dg.name FROM discussion_groups dg
-                       JOIN discussion_members dm ON dm.group_id = dg.id
-                       WHERE dg.discussion_id=? AND dm.username=?""",
-                    (item["id"], username),
-                )
-                if my_g:
-                    item["my_group"] = {"id": my_g[0][0], "group_index": my_g[0][1], "name": my_g[0][2]}
-        results.append(item)
-
-    # 学生端按 target_scope 过滤可见性
     if role == 2:
-        results = filter_activities_by_scope(results, username)
+        # 学生：声明按年级/班级共享但目标为空的讨论不放行, 再走统一可见性过滤
+        rows = [r for r in rows if _student_scope_ok(user, r)]
+        rows = filter_activities_by_scope(rows, username)
 
-    return results
+    return _enrich_discussions(rows, username, role)
 
 
 # ── 获取讨论详情 ──
@@ -401,38 +519,18 @@ async def list_discussions(
 async def get_discussion(disc_id: int, request: Request):
     user = get_current_user(request)
     role = user.get("role", 2)
-    rows = execute_query("SELECT * FROM discussions WHERE id=?", (disc_id,))
-    if not rows:
+    disc = _disc_dict(disc_id)
+    if disc is None:
         raise HTTPException(status_code=404, detail="讨论不存在")
 
     # 教师只能查看自己的讨论，管理员可以全部
-    if role == 1 and rows[0][1] != user["username"]:
+    if role == 1 and disc.get("creator_username") != user["username"]:
         raise HTTPException(status_code=403, detail="只能查看自己创建的讨论详情")
 
-    columns = ["id", "creator_username", "title", "description", "subject",
-               "group_mode", "group_count", "members_per_group", "ai_role",
-               "duration_minutes", "status", "grade", "classes",
-               "require_summary", "target_scope", "target_grade",
-               "target_class", "target_users", "created_at", "updated_at"]
-    disc = dict(zip(columns, rows[0]))
-
-    # 学生只能查看自己范围内的讨论
-    if role == 2:
-        student_rows = execute_query_dict(
-            "SELECT grade, class FROM users WHERE username=?", (user["username"],)
-        )
-        if student_rows:
-            s_grade = str(student_rows[0].get("grade") or "").strip()
-            s_class = str(student_rows[0].get("class") or "").strip()
-            if not check_activity_visibility(
-                user["username"], s_grade, s_class,
-                disc.get("creator_username", ""),
-                disc.get("target_scope", "teacher_classes"),
-                disc.get("target_grade", ""),
-                disc.get("target_class", ""),
-                disc.get("target_users", ""),
-            ):
-                raise HTTPException(status_code=403, detail="无权查看该讨论")
+    # 学生只能查看自己范围内的讨论(S11: 已加入本讨论的学生始终可查看)
+    if role == 2 and not _is_disc_member(user["username"], disc_id):
+        if not _student_scope_ok(user, disc):
+            raise HTTPException(status_code=403, detail="无权查看该讨论")
 
     # 获取所有小组
     groups = execute_query(
@@ -472,6 +570,8 @@ async def get_discussion(disc_id: int, request: Request):
 async def update_discussion(disc_id: int, req: DiscussionUpdate, request: Request):
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    _assert_can_access_discussion(user, _disc_brief(disc_id), "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可编辑讨论")
 
@@ -513,20 +613,13 @@ async def start_discussion(disc_id: int, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可开始讨论")
 
-    rows = execute_query("SELECT * FROM discussions WHERE id=?", (disc_id,))
-    if not rows:
+    disc = _disc_dict(disc_id)
+    if disc is None:
         raise HTTPException(status_code=404, detail="讨论不存在")
 
     # 教师只能管理自己的讨论
-    if role == 1 and rows[0][1] != user["username"]:
+    if role == 1 and disc.get("creator_username") != user["username"]:
         raise HTTPException(status_code=403, detail="只能管理自己的讨论")
-
-    columns = ["id", "creator_username", "title", "description", "subject",
-               "group_mode", "group_count", "members_per_group", "ai_role",
-               "duration_minutes", "status", "grade", "classes",
-               "require_summary", "target_scope", "target_grade",
-               "target_class", "target_users", "created_at", "updated_at"]
-    disc = dict(zip(columns, rows[0]))
 
     if disc["status"] != "pending":
         raise HTTPException(status_code=400, detail="讨论已开始或已结束")
@@ -608,26 +701,13 @@ async def _auto_generate_report(disc_id: int):
     from backend.api.config_router import get_config_value, load_config
     import os
 
-    rows = execute_query("SELECT * FROM discussions WHERE id=?", (disc_id,))
-    if not rows:
+    disc = _disc_dict(disc_id)
+    if disc is None:
         return
     # 检查是否要求生成报告
-    columns_all = ["id", "creator_username", "title", "description", "subject",
-                   "group_mode", "group_count", "members_per_group", "ai_role",
-                   "duration_minutes", "status", "grade", "classes",
-                   "require_summary"]
-    if not dict(zip(columns_all, rows[0])).get("require_summary"):
+    if not disc.get("require_summary"):
         logger.info(f"讨论 #{disc_id} 未开启总结报告，跳过自动生成")
         return
-    if not rows:
-        return
-
-    columns = ["id", "creator_username", "title", "description", "subject",
-               "group_mode", "group_count", "members_per_group", "ai_role",
-               "duration_minutes", "status", "grade", "classes",
-               "require_summary", "target_scope", "target_grade",
-               "target_class", "target_users", "created_at", "updated_at"]
-    disc = dict(zip(columns, rows[0]))
 
     groups = execute_query(
         "SELECT id, group_index, name FROM discussion_groups WHERE discussion_id=? ORDER BY group_index",
@@ -723,6 +803,8 @@ async def _auto_generate_report(disc_id: int):
 async def restart_discussion(disc_id: int, request: Request):
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    _assert_can_access_discussion(user, _disc_brief(disc_id), "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
 
@@ -748,6 +830,8 @@ async def restart_discussion(disc_id: int, request: Request):
 async def delete_discussion(disc_id: int, request: Request):
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    _assert_can_access_discussion(user, _disc_brief(disc_id), "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可删除讨论")
 
@@ -779,10 +863,16 @@ async def join_discussion(disc_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    rows = execute_query("SELECT status, group_mode FROM discussions WHERE id=?", (disc_id,))
-    if not rows:
+    disc = _disc_brief(disc_id)
+    if disc is None:
         raise HTTPException(status_code=404, detail="讨论不存在")
-    status = rows[0][0]
+    status = disc["status"]
+
+    # S10: 学生只能加入对自己可见的讨论 —— 旧实现任何学生按 ID 即可加入任意讨论,
+    #      拿到成员身份后就能读写该组消息、查看 AI 报告
+    if user.get("role", 2) == 2:
+        if not _student_scope_ok(user, disc) or not filter_activities_by_scope([disc], username):
+            raise HTTPException(status_code=403, detail="该讨论不在你的可见范围内")
 
     # 检查是否已在某个小组中
     existing = execute_query(
@@ -858,8 +948,12 @@ async def join_discussion(disc_id: int, request: Request):
 async def broadcast_message(disc_id: int, req: BroadcastMessage, request: Request):
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    disc = _disc_brief(disc_id)
+    _assert_can_access_discussion(user, disc, "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可广播")
+    _assert_discussion_owner(user, disc)
 
     groups = execute_query("SELECT id FROM discussion_groups WHERE discussion_id=?", (disc_id,))
     now = _now()
@@ -888,6 +982,8 @@ async def send_message(group_id: int, req: MessageSend, request: Request):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+
+    _assert_can_access_group(user, group_id, "数据")
 
     # 验证是该组成员（管理员/教师例外，可发到任意组）
     if role == 2:
@@ -932,10 +1028,13 @@ async def get_messages(
     group_id: int,
     request: Request,
     after_id: int = Query(0, description="只返回大于此 ID 的新消息"),
+    limit: int = Query(200, ge=1, le=1000, description="单次最多返回条数"),
 ):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+
+    _assert_can_access_group(user, group_id, "数据")
 
     # 校验权限：管理员/教师可看任意组，学生只能看自己所在组
     if role == 2:
@@ -950,8 +1049,8 @@ async def get_messages(
         """SELECT id, username, content, msg_type, created_at
            FROM discussion_messages
            WHERE group_id=? AND id>?
-           ORDER BY id ASC""",
-        (group_id, after_id),
+           ORDER BY id ASC LIMIT ?""",
+        (group_id, after_id, limit),
     )
     return [
         {
@@ -972,7 +1071,7 @@ async def get_my_discussions(request: Request):
     user = get_current_user(request)
     username = user["username"]
 
-    rows = execute_query(
+    rows = execute_query_dict(
         """SELECT DISTINCT d.* FROM discussions d
            JOIN discussion_groups dg ON dg.discussion_id = d.id
            JOIN discussion_members dm ON dm.group_id = dg.id
@@ -980,14 +1079,9 @@ async def get_my_discussions(request: Request):
            ORDER BY d.created_at DESC""",
         (username,),
     )
-    columns = ["id", "creator_username", "title", "description", "subject",
-               "group_mode", "group_count", "members_per_group", "ai_role",
-               "duration_minutes", "status", "grade", "classes",
-               "require_summary", "target_scope", "target_grade",
-               "target_class", "target_users", "created_at", "updated_at"]
     results = []
-    for row in rows:
-        item = dict(zip(columns, row))
+    for item in rows:
+        item = dict(item)
         item["require_summary"] = bool(item["require_summary"])
         # 找出该学生所在的小组
         my_group = execute_query(
@@ -1016,6 +1110,8 @@ async def ai_suggest(group_id: int, request: Request):
     """手动触发 AI 助教生成讨论引导（仅教师/管理员可用）"""
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    _assert_can_access_group(user, group_id, "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可触发 AI 助教")
 
@@ -1111,6 +1207,8 @@ async def generate_group_ai_summary(group_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+
+    _assert_can_access_group(user, group_id, "数据")
 
     # 仅教师和管理员可用
     if role not in (0, 1):
@@ -1225,6 +1323,8 @@ async def get_group_summary(group_id: int, request: Request):
     username = user["username"]
     role = user.get("role", 2)
 
+    _assert_can_access_group(user, group_id, "数据")
+
     # 仅教师和管理员可用
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看 AI 总结")
@@ -1282,6 +1382,8 @@ async def export_group_summary_docx(
 
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    _assert_can_access_group(user, group_id, "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
 
@@ -1397,19 +1499,14 @@ async def export_group_summary_docx(
 async def generate_report(disc_id: int, request: Request):
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    disc = _disc_dict(disc_id)
+    if disc is None:
+        raise HTTPException(status_code=404, detail="讨论不存在")
+    _assert_can_access_discussion(user, disc, "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可生成报告")
-
-    rows = execute_query("SELECT * FROM discussions WHERE id=?", (disc_id,))
-    if not rows:
-        raise HTTPException(status_code=404, detail="讨论不存在")
-
-    columns = ["id", "creator_username", "title", "description", "subject",
-               "group_mode", "group_count", "members_per_group", "ai_role",
-               "duration_minutes", "status", "grade", "classes",
-               "require_summary", "target_scope", "target_grade",
-               "target_class", "target_users", "created_at", "updated_at"]
-    disc = dict(zip(columns, rows[0]))
+    _assert_discussion_owner(user, disc)
 
     # 获取所有小组的消息
     groups = execute_query(
@@ -1502,6 +1599,9 @@ async def generate_report(disc_id: int, request: Request):
 
 @router.get("/discussions/{disc_id}/reports", summary="获取讨论报告")
 async def get_reports(disc_id: int, request: Request):
+    # S1: 旧实现无任何鉴权, 未登录即可拉到 AI 小组/整体报告全文
+    user = get_current_user(request)
+    _assert_can_access_discussion(user, _disc_brief(disc_id), "报告")
     rows = execute_query(
         "SELECT dr.id, dr.group_id, dr.report_content, dr.generated_at, "
         "dg.group_index, dg.name "
@@ -1529,12 +1629,34 @@ async def get_reports(disc_id: int, request: Request):
 
 @router.websocket("/ws/{group_id}")
 async def websocket_endpoint(websocket: WebSocket, group_id: int):
-    """WebSocket 端点，客户端连接后实时接收新消息"""
-    # 从 query 参数中获取 token 验证身份
-    from backend.auth import decode_jwt_token
+    """WebSocket 端点，客户端连接后实时接收新消息
+
+    S2: 握手必须携带有效 token, 且必须是该组成员(学生)/任教范围内教师/管理员。
+    旧实现匿名也能 accept 并回 pong, 任意 group_id 均可挂接。
+    """
+    from backend.auth import decode_jwt_token, verify_token_version
+
     token = websocket.query_params.get("token", "")
     payload = decode_jwt_token(token) if token else None
-    username = payload.get("username", "anonymous") if payload else "anonymous"
+    if not payload or not verify_token_version(payload):
+        logger.warning(f"[讨论WS] 拒绝未认证连接 group={group_id}")
+        await websocket.close(code=4401, reason="未认证")
+        return
+    username = payload.get("username", "")
+    if not username:
+        await websocket.close(code=4401, reason="未认证")
+        return
+    try:
+        _assert_can_access_group(
+            {"username": username, "role": payload.get("role", 2)}, group_id, "消息",
+        )
+    except HTTPException:
+        logger.warning(f"[讨论WS] 拒绝越权连接 user={username} group={group_id}")
+        await websocket.close(code=4403, reason="无权访问该小组")
+        return
+    except Exception:
+        await websocket.close(code=4404, reason="小组不存在")
+        return
 
     await ws_manager.connect(group_id, websocket)
     try:
@@ -1555,6 +1677,8 @@ async def websocket_endpoint(websocket: WebSocket, group_id: int):
 async def monitor_discussion(disc_id: int, request: Request):
     user = get_current_user(request)
     role = user.get("role", 2)
+
+    _assert_can_access_discussion(user, _disc_brief(disc_id), "数据")
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看监控")
 

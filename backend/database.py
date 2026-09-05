@@ -721,6 +721,7 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_dmsg_group ON discussion_messages(group_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_dmsg_time ON discussion_messages(created_at)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_dmsg_type ON discussion_messages(msg_type)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_dmsg_group_id ON discussion_messages(group_id, id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_dm_username ON discussion_members(username)")
             except sqlite3.OperationalError:
                 pass
