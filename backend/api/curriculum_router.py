@@ -2114,28 +2114,45 @@ async def get_class_progress_overview(
 ):
     """教师查看课程完成进度概览
 
-    G1: 旧实现为"每个学生 x 每门课程"各发一次查询, 并给每个学生铺开全部知识点明细,
-    1400 人规模下单次请求要跑 5000+ 条 SQL、返回 8.9MB, 而且整段同步跑在事件循环里
-    (实测 31.6 秒内全站其它请求都在排队)。现在: 条件下推 + 一次聚合 + 分页,
-    知识点明细改由 /progress/student/{username} 按需获取。
+    G1: 旧实现按"每个学生 x 每门课程"各发一次查询并给每人铺开全部知识点明细,
+    714 人单次请求 = 5000+ 条 SQL + 8.9MB 响应 + 31.6 秒同步占满事件循环(期间全站排队)。
+    现在条件下推 + 一次聚合 + 服务端分页, 明细改由 /progress/student/{username} 按需获取。
     """
     user = get_current_user(request)
-    role = user.get("role", 2)
-    if role not in (0, 1):
+    if user.get("role", 2) not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
+    return await build_progress_overview(user, course_id, grade, class_name, page, page_size)
 
+
+async def build_progress_overview(
+    user: dict[str, Any], course_id: int | None, grade: str | None,
+    class_name: str | None, page: int | None = 1, page_size: int = 50,
+) -> dict[str, Any]:
+    """G1: 进度总览的共用数据装配(端点与 Excel 导出共用, 不依赖 FastAPI 的 Query 默认值)
+
+    page=None 表示不分页(导出需要全量学生)。
+    """
     conds, params = _progress_student_conditions(user, grade, class_name)
     where = " AND ".join(conds)
 
     cnt_rows = execute_query(f"SELECT COUNT(*) AS c FROM users WHERE {where}", tuple(params))
     total_students = cnt_rows[0]["c"] if cnt_rows else 0
 
-    offset = (page - 1) * page_size
-    students = execute_query(
-        f"SELECT username, name, grade, class FROM users WHERE {where}"
-        f" ORDER BY grade, class, name LIMIT ? OFFSET ?",
-        tuple(params) + (page_size, offset),
-    )
+    if page is None:
+        # 导出场景: 取全量学生(不分页)
+        offset = 0
+        students = execute_query(
+            f"SELECT username, name, grade, class FROM users WHERE {where}"
+            f" ORDER BY grade, class, name",
+            tuple(params),
+        )
+    else:
+        offset = (page - 1) * page_size
+        students = execute_query(
+            f"SELECT username, name, grade, class FROM users WHERE {where}"
+            f" ORDER BY grade, class, name LIMIT ? OFFSET ?",
+            tuple(params) + (page_size, offset),
+        )
 
     if course_id:
         courses_list = execute_query(
@@ -2221,7 +2238,7 @@ async def get_class_progress_overview(
         "total": total_students,
         "page": page,
         "page_size": page_size,
-        "has_more": offset + len(result) < total_students,
+        "has_more": (page is not None) and (offset + len(result) < total_students),
         "stats": {"total_students": total_students, "avg_rate": avg_rate},
     }
 

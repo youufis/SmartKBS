@@ -531,10 +531,11 @@ async def export_progress(
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    from backend.api.curriculum_router import get_class_progress_overview as fetch_progress
+    # R1: 与进度总览共用装配函数(旧实现直接调用端点函数, 一旦端点带 Query 默认参数就会
+    #     把 Query 对象当数字运算 -> TypeError 500); page=None 表示导出全量学生
+    from backend.api.curriculum_router import build_progress_overview
 
-    # 复用进度总览接口的数据逻辑
-    raw = await fetch_progress(request, course_id, grade, class_name)
+    raw = await build_progress_overview(user, course_id, grade, class_name, page=None)
     students = raw.get("students", [])
 
     if not students:
