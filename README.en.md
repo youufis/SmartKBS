@@ -14,7 +14,7 @@
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-7.6.0-blue)
+![Version](https://img.shields.io/badge/Version-8.0.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,12 +30,12 @@
 
 ---
 
-> 📌 **V7.6.0 Highlights**:
-> 🎯 **Skill Document System**: 20 modular AI skills, auto-injected by scene into 25 API routes
-> ⚡ **Three-Stage Quality Enhancement**: Deep Analysis → Structured Output → Self-Review, verified by A/B testing
-> 🧩 **8 Core Skills + 12 Domain Skills**: Covering chat, exams, quizzes, whiteboard, code review and all scenarios
-> 📋 **Skill Management Page**: Visual list, toggle all on/off, detail preview, paginated search
-> 🔌 **Unified Injection**: one-liner across all routers
+> 📌 **V8.0.0 Highlights**:
+> 🔒 **Site-wide authorization hardening**: 16 rounds of feature-by-feature audit, anonymous reads and cross-teacher writes closed
+> 🎯 **Roll call & class interaction**: ownership pinned to the login identity, publish scope limited to assigned classes, class analytics fixed
+> ⚙️ **System config & skills**: atomic writes with backup fallback, value validation, masked secret echo
+> 📝 **i18n completion**: untranslated keys in security setup, question bank, paper composer, announcements, interaction and whiteboard filled (zh/en)
+> 🧹 **Resource center**: stale bindings auto-purged on rename, per-type file icons, cleaner share statistics
 
 ---
 
@@ -957,6 +957,17 @@ Git-based online incremental upgrade system:
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
 ## 📦 Changelog
+
+### v8.0.0 (2026-09-05)
+
+- 🔒 **Site-wide Authorization Hardening**: 16 rounds of feature-by-feature audit; anonymous reads and cross-teacher writes closed
+- 🎯 **Roll Call & Class Interaction**: ownership pinned to the login identity, publish scope limited to assigned classes, class analytics fixed (score/roll-call dimensions were permanently 0)
+- ⚙️ **System Config & Skill Management**: atomic writes with backup fallback, value validation, masked secret echo; skill detail/write endpoints restricted to admins
+- 📊 **Export · Announcements · Dashboard · Resources**: broken pagination, publish scope, token leaked via URL, duplicated activity, stale rename bindings all fixed
+- 📝 **Frontend i18n**: untranslated keys completed in both languages for security setup, question bank editor, paper composer, announcements, interaction and whiteboard
+- ⚠️ **Breaking Changes**: roll-call write endpoints and history now require login within assigned scope; quizzes/polls may only target the teacher's own assignments; config API masks secrets
+
+---
 
 ### v7.6.0 (2026-07-08)
 
