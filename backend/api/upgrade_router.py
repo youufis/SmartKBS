@@ -1104,6 +1104,60 @@ async def _auto_check_worker():
         await asyncio.sleep(_AUTO_CHECK_INTERVAL)
 
 
+def _auto_pull_enabled() -> bool:
+    """自动同步开关(system_config.json 的 auto_pull_enabled, 默认开启)"""
+    try:
+        from backend.api.config_router import get_config_value
+        return bool(get_config_value("auto_pull_enabled", True))
+    except Exception:
+        return True
+
+
+async def _try_auto_ff_sync() -> str | None:
+    """安全自动同步: 工作区干净 + 仅快进才拉取运行目录; 成功返回新短哈希, 失败返回 None 回退人工通知"""
+    try:
+        st = await _run_git(["status", "--porcelain"], timeout=30)
+        if (st or "").strip():
+            logger.debug(f"[auto-upgrade] 工作区存在 {len(st.splitlines())} 处本地改动, 跳过自动同步(转人工确认)")
+            return None
+        await _run_git(["merge", "--ff-only", "origin/master"], timeout=180)
+        # 不依赖命令输出判断成败: 复查剩余落后数
+        left_s = (await _run_git(["rev-list", "--count", "HEAD..origin/master"], timeout=30) or "").strip()
+        try:
+            left = int(left_s) if left_s else 0
+        except ValueError:
+            left = 0
+        if left > 0:
+            logger.warning(f"[auto-upgrade] 快进未生效(仍落后 {left} 个提交, 可能已分叉), 转人工升级")
+            return None
+        sha = (await _run_git(["rev-parse", "--short", "HEAD"], timeout=30) or "").strip()
+        try:
+            stt = _load_state()
+            stt[_AUTO_CHECK_STATE_KEY] = ""  # 清通知去重位, 后续真正版本更新仍可提醒
+            _save_state(stt)
+        except Exception:
+            pass
+        try:
+            from backend.database import execute_query as _eq
+            rows = _eq("SELECT username FROM users WHERE role=0")
+            admins = [r[0] for r in rows] if rows else []
+            if admins:
+                from backend.api.notification_router import notify_users
+                notify_users(
+                    usernames=admins,
+                    type_="system",
+                    title="\u2705 已自动同步到最新版",
+                    content=f"检测到新提交, 已自动快进同步至 {sha}; uvicorn --reload 将热加载改动, 无需手动升级。",
+                    related_link="/admin/system-config",
+                )
+        except Exception as e:
+            logger.debug(f"[auto-upgrade] 自动同步通知发送失败: {e}")
+        return sha or "unknown"
+    except Exception as e:
+        logger.warning(f"[auto-upgrade] 自动同步异常, 回退人工通知模式: {e}")
+        return None
+
+
 async def _perform_version_check():
     """执行一次版本检测，发现新版本则通知管理员"""
     # 持久化记录本次检测时间
@@ -1151,7 +1205,20 @@ async def _perform_version_check():
         logger.debug(f"[auto-upgrade] 当前已是最新 (v{current})，无需通知")
         return
 
-    logger.info(f"[auto-upgrade] 检测到新版本！当前: v{current}, 最新: v{latest}, 落后提交: {behind}")
+    # ── 自动同步(默认开启; auto_pull_enabled=false 可关): 干净工作区+可快进时直接拉取运行目录 ──
+    if behind > 0 and _auto_pull_enabled():
+        synced = await _try_auto_ff_sync()
+        if synced:
+            logger.info(f"[auto-upgrade] 已自动快进同步至 {synced}, 无需人工升级")
+            return
+
+    # 文案: 区分「新版本」「同版本热修复提交」「未取到远端版本仅按提交检测」
+    if has_new_version and latest:
+        logger.info(f"[auto-upgrade] 检测到新版本！当前: v{current}, 最新: v{latest}, 落后提交: {behind}")
+    elif behind > 0 and remote is None:
+        logger.info(f"[auto-upgrade] 检测到 {behind} 个未同步提交(当前 v{current}; 远端版本未取到, 仅按提交检测)")
+    else:
+        logger.info(f"[auto-upgrade] 检测到 {behind} 个未同步修复提交(当前 v{current}, 版本相同)")
 
     # 构建通知所需信息
     if remote:
