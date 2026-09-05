@@ -119,6 +119,14 @@ def safe_join(base_dir: str, *parts: str) -> str | None:
     return candidate if path_within(base_dir, candidate) else None
 
 
+def like_escape(v: str) -> str:
+    r"""转义 LIKE 模式中的 % 与 _ (以及转义符本身), 需配合 SQL 的 ESCAPE 反斜杠使用。
+
+    未转义时 "100%.md" 这类文件名会当成通配符, 误伤其它行。
+    """
+    return str(v).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 # ── 文件类型检测 ──
 
 def is_image_file(file_path: str) -> bool:

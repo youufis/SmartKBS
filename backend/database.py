@@ -1616,6 +1616,14 @@ def init_db():
             )""")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_dvl_user_date ON discovery_view_log(username, date(created_at))")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                # DC3: 同一学生同一卡片每天只允许计一次分, 用唯一索引做幂等兜底
+                c.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_dvl_user_card_date "
+                    "ON discovery_view_log(username, pool_card_id, date(created_at))"
+                )
             except sqlite3.OperationalError: pass
 
             # 4. 收藏表

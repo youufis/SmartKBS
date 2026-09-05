@@ -9,18 +9,13 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from typing import Any
 
 from backend.api.dependencies import get_current_user
-from backend.utils import get_account_chat_history_dir, path_within
+from backend.utils import get_account_chat_history_dir, path_within, like_escape as _like_prefix_escape
 from backend.database import execute_query, execute_insert_update
 from backend.logger import logger
 
 # H1: 单次写入与单文件上限, 防止 /save 被无限追加撑爆磁盘
 _MAX_HISTORY_APPEND_BYTES = 2 * 1024 * 1024
 _MAX_HISTORY_FILE_BYTES = 20 * 1024 * 1024
-
-
-def _like_prefix_escape(v: str) -> str:
-    """H3: LIKE 前缀匹配需转义 % 与 _, 否则文件名含通配符会误删他人索引"""
-    return v.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 router = APIRouter()

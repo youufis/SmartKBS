@@ -10,7 +10,6 @@
 5. 72小时清理一次过期新闻
 """
 import json
-import asyncio
 import re
 import time
 from datetime import date, datetime, timedelta
@@ -19,9 +18,12 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
+from starlette.concurrency import run_in_threadpool
+
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_sync_direct
+from backend.async_utils import spawn_bg
 from backend.database import execute_query, execute_insert_update, execute_query_one
 from backend.prompts.news import NEWS_SUMMARIZE_PROMPT, NEWS_DAILY_BRIEFING_PROMPT
 from backend.logger import logger
@@ -35,7 +37,9 @@ CACHE_DURATION_MINUTES = 120    # 缓存有效期2小时
 NEWS_WINDOW_HOURS = 72          # 只保留72小时内新闻
 DAILY_POINTS_MAX = 3            # 每日积分上限
 POINTS_PER_VIEW = 1
-RSS_TIMEOUT = 15                # RSS抓取超时（秒）
+RSS_TIMEOUT = 15                # RSS抓取超时（秒）— NW1: 真正传给网络层使用
+FETCH_RETRY_MINUTES = 10       # NW3: 两次抓取尝试的最小间隔
+FETCH_FAIL_BACKOFF_MINUTES = 30  # NW3: 抓取失败后的退避时间
 
 # ── RSS 新闻源（全部免费，无需API Key） ──
 RSS_FEEDS = {
@@ -139,6 +143,19 @@ class NewsService:
             f"SELECT COUNT(*) FROM news_articles {where}", tuple(params)
         )
         total = count_row[0][0] if count_row else 0
+        if total == 0 and not category:
+            # NW5: 抓取长期失败时不让新闻页整页空白, 回退展示最近一批
+            rows = execute_query(
+                f"""SELECT id, title, url, source_name,
+                          CASE WHEN is_ai_summarized=1 THEN COALESCE(ai_one_liner, '') ELSE '' END as display_summary,
+                          category, image_url, published_at, fetched_at
+                   FROM news_articles
+                   WHERE fetched_at = (SELECT MAX(fetched_at) FROM news_articles)
+                   ORDER BY COALESCE(published_at, fetched_at) DESC
+                   LIMIT ? OFFSET ?""",
+                (page_size, (page - 1) * page_size),
+            )
+            total = len(rows)
 
         # 查出该学生已读和已收藏的新闻ID
         viewed_ids = set()
@@ -192,9 +209,9 @@ class NewsService:
 
         r = row[0]
         need_ai = not r[12]  # is_ai_summarized == 0
-
         if need_ai:
-            NewsService._generate_ai_summary(news_id, r)
+            # NW: 摘要生成丢后台线程, 首屏立即返回, 再次打开即可看到 AI 摘要
+            spawn_bg(NewsService._generate_ai_summary, news_id, r, name="news_ai_summary")
 
         points = NewsService._record_view(username, news_id, role)
 
@@ -213,29 +230,52 @@ class NewsService:
     # ── 按需抓取触发 ──
 
     @staticmethod
+    def _last_attempt() -> tuple:
+        """NW3: 返回 (上次抓取尝试时间, 是否失败)；以 news_fetch_meta 为准"""
+        row = execute_query(
+            "SELECT fetched_at, status FROM news_fetch_meta ORDER BY fetched_at DESC LIMIT 1"
+        )
+        if not row:
+            return None, False
+        try:
+            return datetime.fromisoformat(str(row[0][0])), str(row[0][1] or "") == "failed"
+        except Exception:
+            return None, False
+
+    @staticmethod
     def _trigger_fetch_if_needed():
-        """缓存过期才触发抓取"""
+        """NW2/NW3: 抓取放到线程池后台执行, 并按"上次尝试"节流, 失败再退避,
+        不再出现"每次请求都同步重抓一遍、把事件循环卡死"的情况。"""
         if NewsService._is_cache_fresh():
             return
+        last_at, last_failed = NewsService._last_attempt()
+        if last_at:
+            gap = (datetime.now() - last_at).total_seconds()
+            limit = FETCH_FAIL_BACKOFF_MINUTES if last_failed else FETCH_RETRY_MINUTES
+            if gap < limit * 60:
+                return
         lock_key = "news_fetch"
         if not _acquire_lock(lock_key):
             return
-        asyncio.ensure_future(NewsService._fetch_async(lock_key))
+        spawn_bg(NewsService._fetch_and_store, lock_key, name="news_rss_fetch")
 
     @staticmethod
     def _is_cache_fresh() -> bool:
-        row = execute_query("SELECT MAX(fetched_at) FROM news_articles")
-        if not row or not row[0][0]:
-            return False
-        try:
-            last = datetime.fromisoformat(row[0][0])
-            return (datetime.now() - last).total_seconds() < CACHE_DURATION_MINUTES * 60
-        except Exception:
-            return False
+        # NW3: 旧实现看的是"最近一次成功入库时间", 抓到 0 条时永远算过期 -> 无限重抓
+        last_at, _failed = NewsService._last_attempt()
+        if not last_at:
+            row = execute_query("SELECT MAX(fetched_at) FROM news_articles")
+            if not row or not row[0][0]:
+                return False
+            try:
+                last_at = datetime.fromisoformat(str(row[0][0]))
+            except Exception:
+                return False
+        return (datetime.now() - last_at).total_seconds() < CACHE_DURATION_MINUTES * 60
 
     @staticmethod
-    async def _fetch_async(lock_key: str):
-        """异步RSS抓取（免费，不调用AI）"""
+    def _fetch_and_store(lock_key: str):
+        """NW2: RSS抓取+入库（同步, 由 spawn_bg 放线程池执行, 不阻塞事件循环）"""
         batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
             articles = NewsService._fetch_from_rss()
@@ -280,8 +320,10 @@ class NewsService:
 
     @staticmethod
     def _fetch_from_rss() -> list[dict]:
-        """从RSS源抓取最新新闻"""
+        """从RSS源抓取最新新闻(NW1: 带超时, 且只在线程池里被调用)"""
         import feedparser
+        import socket
+        socket.setdefaulttimeout(RSS_TIMEOUT)  # feedparser 内部 urllib 无默认超时
         all_articles = []
         for source_name, rss_url in RSS_FEEDS.items():
             try:
@@ -400,11 +442,16 @@ class NewsService:
         if existing:
             return 0
 
-        execute_insert_update(
-            "INSERT INTO news_view_log (username, news_id, points_awarded, created_at) "
-            "VALUES (?, ?, ?, ?)",
-            (username, news_id, POINTS_PER_VIEW, _now())
-        )
+        # NW7: UNIQUE(username,news_id) + 先查后插并非原子, 并发双击会 500
+        try:
+            execute_insert_update(
+                "INSERT OR IGNORE INTO news_view_log (username, news_id, points_awarded, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (username, news_id, POINTS_PER_VIEW, _now())
+            )
+        except Exception as e:
+            logger.warning(f"[新闻] 浏览记录写入失败(忽略): {e}")
+            return 0
 
         NewsService._update_daily_stats(username, today_str, POINTS_PER_VIEW)
 
@@ -422,6 +469,8 @@ class NewsService:
 
     @staticmethod
     def toggle_favorite(username: str, news_id: int, action: str):
+        if action not in ("favorite", "unfavorite"):
+            raise HTTPException(status_code=400, detail="无效的收藏操作")
         if action == "favorite":
             execute_insert_update(
                 "INSERT OR IGNORE INTO news_favorites (username, news_id, created_at) "
@@ -614,23 +663,10 @@ async def get_news_list(
 
 
 @router.get("/news/categories")
-async def get_news_categories():
-    """获取新闻分类列表"""
+async def get_news_categories(request: Request):
+    """获取新闻分类列表(NW6: 与其余新闻端点一致, 需要登录)"""
+    get_current_user(request)
     return {"categories": NewsService.get_categories()}
-
-
-@router.get("/news/{news_id}")
-async def get_news_detail(news_id: int, request: Request):
-    """获取新闻详情（触发AI摘要和积分，仅学生计分）"""
-    user = get_current_user(request)
-    role = user.get("role", 2)
-    try:
-        return NewsService.get_article_detail(news_id, user["username"], role)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning(f"获取新闻详情异常 id={news_id}: {e}")
-        raise HTTPException(500, "获取新闻详情失败")
 
 
 @router.post("/news/favorite")
@@ -652,7 +688,8 @@ async def get_news_favorites(request: Request):
 async def get_today_briefing(request: Request):
     """获取今日简报"""
     user = get_current_user(request)
-    return NewsService.get_daily_briefing(user["username"])
+    # NW3: 简报每天首次访问会同步调 AI, 必须放线程池, 否则整站卡住几十秒
+    return await run_in_threadpool(NewsService.get_daily_briefing, user["username"])
 
 
 @router.get("/news/stats")
@@ -660,3 +697,21 @@ async def get_news_stats(request: Request):
     """获取个人新闻统计"""
     user = get_current_user(request)
     return NewsService.get_stats(user["username"])
+
+
+# NW4: /news/{news_id} 是通配段, 必须放在 /news/stats 等字面路径之后,
+#      否则 "stats" 会被当成 news_id -> 恒 422(旧实现即如此)
+@router.get("/news/{news_id}")
+async def get_news_detail(news_id: int, request: Request):
+    """获取新闻详情（触发AI摘要和积分，仅学生计分）"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    try:
+        return await run_in_threadpool(
+            NewsService.get_article_detail, news_id, user["username"], role
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"获取新闻详情异常 id={news_id}: {e}")
+        raise HTTPException(500, "获取新闻详情失败")

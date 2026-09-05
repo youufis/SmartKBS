@@ -11,17 +11,19 @@
 import json
 import random
 import re
-import asyncio
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from starlette.concurrency import run_in_threadpool
+
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_sync_direct
-from backend.database import execute_query, execute_insert_update
+from backend.database import execute_query, execute_insert_update, get_connection
+from backend.async_utils import spawn_bg
 from backend.prompts.daily_discovery import (
     DAILY_DISCOVERY_GENERATE_PROMPT,
     DAILY_DISCOVERY_REFRESH_PROMPT,
@@ -36,6 +38,9 @@ DAILY_CARD_COUNT = 6               # 每次展示 N 条
 POOL_REFILL_THRESHOLD = 30         # 池中活跃卡片少于此值时触发补充
 DAILY_REFRESH_LIMIT = 3            # 每人每日手动刷新上限
 DAILY_POINTS_MAX = 5               # 每日通过浏览获得积分上限
+TEACHER_REFRESH_LIMIT = 10         # DC1: 教师/管理员每日刷新上限(旧实现无限制)
+REFILL_MIN_INTERVAL = 600          # DC5: 知识池补充的最小间隔(秒), 防止并发重复烧 AI
+REFRESH_CARD_KEEP_DAYS = 7         # DC7: 刷新专属卡片保留天数
 POINTS_PER_VIEW = 1
 
 
@@ -50,6 +55,27 @@ class ViewRequest(BaseModel):
 
 
 # ── 辅助函数 ──
+
+_refill_gate = {"last": 0.0}
+
+
+def _acquire_refill_lock() -> bool:
+    """DC5: 进程内节流(不在结束时释放, 因此天然限定了重复触发的最小间隔)"""
+    import time as _t
+    now = _t.time()
+    if now - _refill_gate["last"] < REFILL_MIN_INTERVAL:
+        return False
+    _refill_gate["last"] = now
+    return True
+
+
+def _norm_grade_hint(grade: str) -> str:
+    """DC6: 教师 JWT 里的 grade 是任教范围串(如 "高一|高二"), 不能当年级塞进提示词"""
+    g = str(grade or "").strip()
+    if not g or "|" in g or len(g) > 12:
+        return ""
+    return g
+
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -245,9 +271,9 @@ class DiscoveryService:
         # 第1步：查出可看卡片
         available = DiscoveryService._get_available_cards(username)
 
-        # 第2步：不足时触发补充
+        # 第2步：不足时触发补充(DC2: 传入可用余量, 由节流锁决定是否真的补充)
         if len(available) < DAILY_CARD_COUNT:
-            DiscoveryService._trigger_refill_if_needed(grade)
+            DiscoveryService._trigger_refill_if_needed(grade, len(available))
 
         # 第3步：随机抽取
         if len(available) >= DAILY_CARD_COUNT:
@@ -331,8 +357,8 @@ class DiscoveryService:
         if len(cards) >= DAILY_CARD_COUNT:
             return cards
 
-        # 池中不足，触发异步补充后再抽
-        DiscoveryService._trigger_refill_if_needed(grade)
+        # 池中不足，触发后台补充后再抽
+        DiscoveryService._trigger_refill_if_needed(grade, len(cards))
         rows = execute_query(
             "SELECT id, emoji, category, title, summary, detail, "
             "source, fun_level, related_subject, tags "
@@ -358,16 +384,20 @@ class DiscoveryService:
     # ── 池补充 ──
 
     @staticmethod
-    def _trigger_refill_if_needed(grade: str):
-        """检查池中活跃卡片数，不足则异步补充"""
+    def _trigger_refill_if_needed(grade: str, available_count: int = -1):
+        """DC2/DC5: 旧实现只看"池内活跃总数 >= 30 就不补", 但每人每次抽 6 张且 7 日内去重,
+        32 张的池 5 次就见底却永远不触发补充。现同时看"该生可用余量", 并加 10 分钟节流。"""
         try:
-            row = execute_query(
-                "SELECT COUNT(*) FROM discovery_pool WHERE pool_status='active'"
-            )
-            total = row[0][0] if row else 0
-            if total >= POOL_REFILL_THRESHOLD:
+            total = DiscoveryService._get_pool_size()
+            need = total < POOL_REFILL_THRESHOLD
+            if not need and available_count >= 0:
+                need = available_count < DAILY_CARD_COUNT * 2
+            if not need:
                 return
-            asyncio.ensure_future(DiscoveryService._refill_pool_async(grade))
+            if not _acquire_refill_lock():
+                return
+            spawn_bg(DiscoveryService._refill_pool_sync, _norm_grade_hint(grade),
+                     name="discovery_refill")
         except Exception as e:
             logger.warning(f"检查知识池状态失败: {e}")
 
@@ -414,8 +444,8 @@ class DiscoveryService:
             logger.warning(f"首次同步填充失败: {e}")
 
     @staticmethod
-    async def _refill_pool_async(grade: str):
-        """异步补充知识池（分批次，幂等去重）"""
+    def _refill_pool_sync(grade: str):
+        """DC1/DC5: 补充知识池（同步函数, 由 spawn_bg 放线程池执行, 不再冻结事件循环）"""
         api_key = _get_dashscope_api_key()
         if not api_key:
             return
@@ -430,6 +460,7 @@ class DiscoveryService:
         if low_cats:
             extra = f"请优先覆盖以下领域：{', '.join(low_cats)}。"
 
+        before = DiscoveryService._get_pool_size()
         for batch in range(2):
             prompt = DAILY_DISCOVERY_GENERATE_PROMPT.format(
                 grade=grade or "中学生",
@@ -458,7 +489,7 @@ class DiscoveryService:
                         saved += 1  # INSERT OR IGNORE 幂等，不影响真实新增数
                     except Exception:
                         continue
-                logger.info(f"知识池补充: batch {batch}, 新增 {saved} 条")
+                logger.info(f"知识池补充: batch {batch}, 尝试写入 {saved} 条(重复的会被忽略)")
             except Exception as e:
                 logger.error(f"知识池补充失败(batch {batch}): {e}")
                 continue
@@ -477,7 +508,15 @@ class DiscoveryService:
             if remaining <= 0:
                 raise HTTPException(400, f"今日刷新次数已达上限({DAILY_REFRESH_LIMIT}次)")
         else:
-            remaining = 99  # 教师无限制
+            # DC1: 教师/管理员同样限次(旧实现无限制, 一次刷新=一次几十秒的同步 AI 调用)
+            trow = execute_query(
+                "SELECT COUNT(*) FROM discovery_refresh_cards WHERE username=? AND date=?",
+                (username, today_str),
+            )
+            used = trow[0][0] if trow else 0
+            if used >= TEACHER_REFRESH_LIMIT:
+                raise HTTPException(400, f"今日刷新次数已达上限({TEACHER_REFRESH_LIMIT}次)")
+            remaining = TEACHER_REFRESH_LIMIT - used
 
         # 统计已看领域，避免重复
         used_cats = DiscoveryService._get_viewed_categories(username)
@@ -498,11 +537,15 @@ class DiscoveryService:
             logger.warning(f"AI 刷新失败: {e}")
             raise HTTPException(502, "AI 生成失败，请稍后重试")
 
-        # 存入刷新记录
+        # 存入刷新记录(DC7: 顺带清理过期刷新卡, 避免无界增长)
         execute_insert_update(
             "INSERT INTO discovery_refresh_cards (username, date, card_data, created_at) "
             "VALUES (?, ?, ?, ?)",
             (username, today_str, json.dumps(new_cards, ensure_ascii=False), _now())
+        )
+        cutoff = (datetime.now() - timedelta(days=REFRESH_CARD_KEEP_DAYS)).strftime("%Y-%m-%d")
+        execute_insert_update(
+            "DELETE FROM discovery_refresh_cards WHERE date < ?", (cutoff,)
         )
 
         # 学生更新统计（教师不计数）
@@ -528,25 +571,44 @@ class DiscoveryService:
         today_str = _today()
         is_student = (role == 2)
 
+        # DC3: 卡片必须真实存在且处于活跃状态, 否则不给分(旧实现对任意 card_id 都发积分)
+        card = execute_query(
+            "SELECT id, grade_level FROM discovery_pool WHERE id=? AND pool_status='active'",
+            (card_id,),
+        )
+        if not card:
+            logger.info(f"[每日精选] 忽略无效卡片浏览 card_id={card_id} user={username}")
+            return 0
+
         if is_student:
+            # DC3: 年级定向卡片只对同年级学生计分
+            grade_level = str(card[0][1] or "all")
+            if grade_level not in ("", "all"):
+                grows = execute_query("SELECT grade FROM users WHERE username=?", (username,))
+                s_grade = str(grows[0][0] or "").strip() if grows else ""
+                if s_grade and s_grade != grade_level:
+                    return 0
+
             stats = DiscoveryService._get_daily_stats(username, today_str)
             if stats["points_earned"] >= DAILY_POINTS_MAX:
                 return 0
 
-            # 检查今天是否已对该卡片计过分
-            existing = execute_query(
-                "SELECT id FROM discovery_view_log WHERE username=? "
-                "AND pool_card_id=? AND date(created_at)=?",
-                (username, card_id, today_str)
-            )
-            if existing:
+            # DC3: 先查后插并非原子, 依赖唯一索引 ux_dvl_user_card_date 做幂等
+            try:
+                with get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "INSERT OR IGNORE INTO discovery_view_log "
+                        "(username, pool_card_id, points_awarded, created_at) VALUES (?, ?, ?, ?)",
+                        (username, card_id, POINTS_PER_VIEW, _now()),
+                    )
+                    inserted = cur.rowcount > 0
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"[每日精选] 浏览记录写入失败: {e}")
                 return 0
-
-            execute_insert_update(
-                "INSERT INTO discovery_view_log (username, pool_card_id, points_awarded, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (username, card_id, POINTS_PER_VIEW, _now())
-            )
+            if not inserted:
+                return 0
 
             # 更新日统计
             execute_insert_update(
@@ -565,6 +627,11 @@ class DiscoveryService:
             except Exception as e:
                 logger.warning(f"每日精选积分发放失败: {e}")
 
+            # view_count 是"最少人看过优先出卡"的依据, 学生浏览同样要计
+            execute_insert_update(
+                "UPDATE discovery_pool SET view_count = view_count + 1 WHERE id=?",
+                (card_id,)
+            )
             return POINTS_PER_VIEW
 
         # 教师/管理员：记录浏览但不计分
@@ -578,26 +645,36 @@ class DiscoveryService:
 
     @staticmethod
     def toggle_favorite(username: str, card_id: int, action: str):
-        """收藏/取消收藏"""
+        """DC4: 收藏/取消收藏
+
+        旧实现用 favorite_count ± 1 维护计数, 但 INSERT OR IGNORE 不判断是否真的新增,
+        于是同一张卡反复点收藏会把计数刷成 3/5/10(实际只有 1 条收藏),
+        而未收藏过的用户发 unfavorite 又会把别人的计数减掉。
+        现改为: action 白名单 + 计数一律由 discovery_favorites 表聚合得出(自愈)。
+        """
+        if action not in ("favorite", "unfavorite"):
+            raise HTTPException(status_code=400, detail="无效的收藏操作")
+        if not execute_query(
+            "SELECT id FROM discovery_pool WHERE id=?", (card_id,)
+        ):
+            raise HTTPException(status_code=404, detail="卡片不存在")
+
         if action == "favorite":
             execute_insert_update(
                 "INSERT OR IGNORE INTO discovery_favorites (username, pool_card_id, created_at) "
                 "VALUES (?, ?, ?)",
                 (username, card_id, _now())
             )
-            execute_insert_update(
-                "UPDATE discovery_pool SET favorite_count = favorite_count + 1 WHERE id=?",
-                (card_id,)
-            )
-        elif action == "unfavorite":
+        else:
             execute_insert_update(
                 "DELETE FROM discovery_favorites WHERE username=? AND pool_card_id=?",
                 (username, card_id)
             )
-            execute_insert_update(
-                "UPDATE discovery_pool SET favorite_count = MAX(0, favorite_count - 1) WHERE id=?",
-                (card_id,)
-            )
+        execute_insert_update(
+            """UPDATE discovery_pool SET favorite_count =
+               (SELECT COUNT(*) FROM discovery_favorites WHERE pool_card_id=?) WHERE id=?""",
+            (card_id, card_id)
+        )
 
     @staticmethod
     def get_favorites(username: str) -> list[dict]:
@@ -706,7 +783,8 @@ async def get_feed(request: Request):
     grade = user.get("grade", "")
     role = user.get("role", 2)
     try:
-        result = DiscoveryService.get_feed(username, grade)
+        # DC1: get_feed 可能触发首次同步填充(AI), 放线程池避免冻结事件循环
+        result = await run_in_threadpool(DiscoveryService.get_feed, username, grade)
     except Exception as e:
         logger.warning(f"获取精选Feed异常: {e}")
         result = {
@@ -735,7 +813,8 @@ async def refresh_feed(request: Request):
     grade = user.get("grade", "")
     role = user.get("role", 2)
     try:
-        return DiscoveryService.refresh(username, grade, role)
+        # DC1: 刷新是几十秒级的同步 AI 调用, 必须在 worker 线程里跑, 否则整站卡死
+        return await run_in_threadpool(DiscoveryService.refresh, username, grade, role)
     except HTTPException:
         raise
     except Exception as e:
@@ -804,7 +883,9 @@ async def refill_pool(request: Request):
     user = get_current_user(request)
     if user.get("role", 2) not in (0, 1):
         raise HTTPException(403, "仅管理员和教师可触发")
-    asyncio.ensure_future(DiscoveryService._refill_pool_async(
-        user.get("grade", "中学生")
-    ))
+    # DC5: 加节流锁, 重复触发不再并行烧 AI; DC6: 教师年级不是学生年级
+    if not _acquire_refill_lock():
+        return {"success": False, "message": "补充任务刚刚已触发，请稍后再试"}
+    spawn_bg(DiscoveryService._refill_pool_sync, _norm_grade_hint(user.get("grade", "")),
+             name="discovery_pool_refill")
     return {"success": True, "message": "知识池补充已触发，请稍后查看"}

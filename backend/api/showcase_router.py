@@ -9,11 +9,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from starlette.concurrency import run_in_threadpool
+
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
 from backend.permission_service import get_teacher_grades, get_teacher_classes, get_grade_by_name
+from backend.utils import like_escape
 from backend.reward_engine import get_student_total
 from backend.title_system import (
     get_main_title, get_main_title_progress,
@@ -136,6 +139,55 @@ def _format_showcase_row(row: tuple) -> dict[str, Any]:
     }
 
 
+def _card_rows_with_scope(ids: list[int]) -> dict[int, dict[str, Any]]:
+    """一次查出卡片及其学生的年级班级(SH1)"""
+    ids = [int(i) for i in ids]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    rows = execute_query(
+        f"""SELECT sc.id, sc.student_username, sc.generated_by,
+                   COALESCE(u.grade, ''), COALESCE(u.class, '')
+            FROM student_showcase sc
+            LEFT JOIN users u ON u.username = sc.student_username
+            WHERE sc.id IN ({ph})""",
+        tuple(ids),
+    )
+    return {r[0]: {"id": r[0], "student_username": r[1], "generated_by": r[2] or "",
+                   "grade": str(r[3] or ""), "class": str(r[4] or "")} for r in rows}
+
+
+def _teacher_covers_card(teacher: str, card: dict[str, Any]) -> bool:
+    """教师是否管辖该卡片对应的学生(与 generate 的年级+班级口径一致)"""
+    grade = card.get("grade") or ""
+    if not grade:
+        return False
+    grades = [g["name"] for g in get_teacher_grades(teacher)]
+    if grade not in grades:
+        return False
+    gi = get_grade_by_name(grade)
+    if not gi:
+        return False
+    allowed = [str(c["name"]).replace("班", "").strip() for c in get_teacher_classes(teacher, gi["id"])]
+    if not allowed:
+        return True  # 该年级不限班级
+    cls = str(card.get("class") or "").replace("班", "").strip()
+    return (not cls) or (cls in allowed)
+
+
+def _assert_can_manage_card(user: dict, card: dict[str, Any]) -> None:
+    """SH1: 管理员不限; 教师仅限自己任教的学生或自己生成的卡"""
+    role = user.get("role", 2)
+    username = user.get("username", "")
+    if role == 0:
+        return
+    if role != 1:
+        raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+    if card.get("generated_by") == username or _teacher_covers_card(username, card):
+        return
+    raise HTTPException(status_code=403, detail="该学生不在您的任教范围内")
+
+
 def _check_liked(showcase_id: int, username: str) -> bool:
     """检查用户是否已点赞"""
     rows = execute_query(
@@ -170,8 +222,8 @@ async def generate_showcase(request: Request, body: GenerateRequest):
     params: list[Any] = []
 
     if body.student_name:
-        conditions.append("u.name LIKE ?")
-        params.append(f"%{body.student_name}%")
+        conditions.append("u.name LIKE ? ESCAPE '\\'")
+        params.append(f"%{like_escape(body.student_name)}%")
 
     # 教师权限过滤（管理员跳过）
     if role == 1 and not is_admin(username):
@@ -225,7 +277,8 @@ async def generate_showcase(request: Request, body: GenerateRequest):
     """
     params.append(count)
 
-    rows = execute_query(sql, tuple(params))
+    # SH3: 最多 200 张卡, 每张要重建快照(实测人均 27ms, 合计约 5s), 放线程池执行
+    rows = await run_in_threadpool(execute_query, sql, tuple(params))
     if not rows:
         raise HTTPException(status_code=404, detail="未找到符合条件的学生")
 
@@ -316,8 +369,8 @@ async def list_showcase(
         conditions.append("u.class=?")
         params.append(cls_num)
     if student_name:
-        conditions.append("u.name LIKE ?")
-        params.append(f"%{student_name}%")
+        conditions.append("u.name LIKE ? ESCAPE '\\'")
+        params.append(f"%{like_escape(student_name)}%")
 
     where_clause = " AND ".join(conditions) if conditions else "1=1"
 
@@ -352,10 +405,20 @@ async def list_showcase(
     """
     rows = execute_query(data_sql, tuple(params) + (page_size, offset))
 
+    # SH4: 一次查出"我点过赞的卡", 取代逐行 _check_liked 的 N+1
+    liked_ids: set[int] = set()
+    card_ids = [r[0] for r in rows]
+    if card_ids:
+        lph = ",".join("?" * len(card_ids))
+        liked_ids = {r[0] for r in execute_query(
+            f"SELECT showcase_id FROM showcase_likes WHERE username=? AND showcase_id IN ({lph})",
+            tuple([current_username] + card_ids),
+        )}
+
     cards = []
     for row in rows:
         card = _format_showcase_row(row)
-        card["liked"] = _check_liked(card["id"], current_username)
+        card["liked"] = card["id"] in liked_ids
         cards.append(card)
 
     return {
@@ -422,7 +485,7 @@ async def toggle_like(showcase_id: int, request: Request):
     if not rows[0][1]:
         raise HTTPException(status_code=400, detail="展示卡已下架")
 
-    # 检查是否已点赞
+    # SH5: 表上已有 UNIQUE(showcase_id, username), 旧写法"先查后插"在并发双击时会 500
     existing = execute_query(
         "SELECT id FROM showcase_likes WHERE showcase_id=? AND username=?",
         (showcase_id, current_username),
@@ -437,7 +500,7 @@ async def toggle_like(showcase_id: int, request: Request):
         action = "unliked"
     else:
         execute_insert_update(
-            "INSERT INTO showcase_likes (showcase_id, username, created_at) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO showcase_likes (showcase_id, username, created_at) VALUES (?, ?, ?)",
             (showcase_id, current_username, now_str),
         )
         action = "liked"
@@ -472,6 +535,8 @@ async def deactivate_showcase(showcase_id: int, request: Request):
     )
     if not rows:
         raise HTTPException(status_code=404, detail="展示卡不存在")
+    # SH1: 旧实现只判"是教师", 任一教师可下架任意年级的卡
+    _assert_can_manage_card(user, _card_rows_with_scope([showcase_id]).get(showcase_id, {}))
 
     execute_insert_update(
         "UPDATE student_showcase SET is_active=0 WHERE id=?",
@@ -489,6 +554,16 @@ async def reorder_showcase(request: Request, body: ReorderRequest):
 
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可操作")
+    if len(body.ids) > 500:
+        raise HTTPException(status_code=400, detail="单次最多调整 500 张卡片")
+
+    # SH1: 逐张校验任教范围
+    scope = _card_rows_with_scope(body.ids)
+    for card_id in body.ids:
+        card = scope.get(int(card_id))
+        if card is None:
+            raise HTTPException(status_code=404, detail=f"展示卡 {card_id} 不存在")
+        _assert_can_manage_card(user, card)
 
     with get_connection() as conn:
         c = conn.cursor()
@@ -498,6 +573,9 @@ async def reorder_showcase(request: Request, body: ReorderRequest):
                 (idx, card_id),
             )
         conn.commit()
+
+    # SH2: 旧实现漏了 return, 响应体恒为 null(那句 return 掉到了 update_theme 后面成死代码)
+    return {"message": "排序已更新", "count": len(body.ids)}
 
 
 @router.get("/showcase/themes", summary="获取所有预设主题")
@@ -541,7 +619,9 @@ async def update_theme(showcase_id: int, request: Request, body: ThemeUpdateRequ
         "UPDATE student_showcase SET theme_style=?, updated_at=? WHERE id=?",
         (body.theme, now_str, showcase_id),
     )
+    # SH1: 非卡片主人的教师同样需要任教范围校验
+    if owner != username:
+        _assert_can_manage_card(user, _card_rows_with_scope([showcase_id]).get(showcase_id, {}))
+
     logger.info(f"展示卡主题更新: id={showcase_id}, theme={body.theme}, operator={username}")
     return {"message": f"主题已更新为「{PRESET_THEMES[body.theme]['name']}」"}
-
-    return {"message": "排序已更新"}
