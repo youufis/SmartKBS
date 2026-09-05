@@ -118,6 +118,10 @@ const AnalyticsPage: React.FC = () => {
   const [classOptions, setClassOptions] = useState<string[]>([])
   const [gradeOptions, setGradeOptions] = useState<string[]>([])
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([])
+  // G1: 总览改服务端分页, 知识点明细改按需拉取
+  const [progressPage, setProgressPage] = useState(1)
+  const [progressTotal, setProgressTotal] = useState(0)
+  const [progressDetails, setProgressDetails] = useState<Record<string, any[]>>({})
 
   // 加载教师可见年级（学情分析用）
   useEffect(() => {
@@ -193,11 +197,11 @@ const AnalyticsPage: React.FC = () => {
     }
   }, [progressGrade, user?.username])
 
-  // 加载进度
-  const loadProgress = async () => {
+  // 加载进度（服务端分页：一次只取一页学生，明细另行懒加载）
+  const loadProgress = async (page = 1) => {
     setProgressLoading(true)
     try {
-      const params: Record<string, unknown> = { course_id: courseId }
+      const params: Record<string, unknown> = { course_id: courseId, page, page_size: 50 }
       if (progressGrade) params.grade = progressGrade
       // class_name 只需班级数字（从 "高一1班" 中提取 "1"）
       if (progressClass) {
@@ -205,20 +209,35 @@ const AnalyticsPage: React.FC = () => {
         params.class_name = match ? match[1] : progressClass
       }
       const { data } = await apiClient.get('/api/curriculum/progress/overview', { params })
-      setProgressStudents(data.students || [])
-      if (data.students?.length > 0) setExpandedRowKeys([data.students[0].username])
-      const total = data.students?.length || 0
-      let totalRate = 0
-      if (total > 0) {
-        for (const stu of data.students) {
-          for (const c of stu.courses || []) totalRate += c.rate
-        }
-        totalRate = totalRate / total
-      }
-      setProgressStats({ totalStudents: total, avgRate: totalRate })
+      const rows: ProgressStudent[] = data.students || []
+      setProgressPage(page)
+      setProgressTotal(data.total || rows.length)
+      setProgressStudents(rows)
+      setProgressDetails({})
+      setExpandedRowKeys(rows.length > 0 ? [rows[0].username] : [])
+      const stats = data.stats || {}
+      setProgressStats({
+        totalStudents: stats.total_students ?? data.total ?? 0,
+        avgRate: stats.avg_rate ?? 0,
+      })
     } catch { /* ignore */ }
     setProgressLoading(false)
   }
+
+  // 展开某一行时才拉取该学生的知识点掌握明细
+  useEffect(() => {
+    (expandedRowKeys as React.Key[]).forEach((k) => {
+      const uname = String(k || '')
+      if (!uname || progressDetails[uname]) return
+      apiClient
+        .get(`/api/curriculum/progress/student/${encodeURIComponent(uname)}`, {
+          params: courseId ? { course_id: courseId } : {},
+        })
+        .then(({ data }) => setProgressDetails((prev) => ({ ...prev, [uname]: data?.courses || [] })))
+        .catch(() => setProgressDetails((prev) => ({ ...prev, [uname]: [] })))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedRowKeys, courseId])
 
   // 班级学情分析
   const handleClassAnalysis = async () => {
@@ -544,7 +563,7 @@ const AnalyticsPage: React.FC = () => {
                       value={progressClass} onChange={setProgressClass} style={{ width: 120 }}
                       placeholder={t('analytics.allClasses')} allowClear
                       options={classOptions.map(c => ({ label: c, value: c }))} />
-                    <Button type="primary" icon={<ReloadOutlined />} onClick={loadProgress} loading={progressLoading}>{t('analytics.query')}</Button>
+                    <Button type="primary" icon={<ReloadOutlined />} onClick={() => void loadProgress(1)} loading={progressLoading}>{t('analytics.query')}</Button>
                     <Button icon={<DownloadOutlined />} onClick={exportProgressExcel}
                       disabled={progressStudents.length === 0}>{t('analytics.exportExcel')}</Button>
                   </Space>
@@ -562,12 +581,19 @@ const AnalyticsPage: React.FC = () => {
                     dataSource={progressStudents}
                     rowKey="username"
                     loading={progressLoading}
-                    pagination={{ pageSize: 20, showTotal: (total) => t('analytics.totalStudentsFormat', { count: total }) }}
+                    pagination={{
+                      current: progressPage,
+                      pageSize: 50,
+                      total: progressTotal,
+                      showSizeChanger: false,
+                      showTotal: (total) => t('analytics.totalStudentsFormat', { count: total }),
+                      onChange: (p: number) => void loadProgress(p),
+                    }}
                     expandable={{
                       expandedRowRender: (record: ProgressStudent) => {
-                        const stuCourses = record.courses || []
-                        const detail = stuCourses.find((c) => c.course_id === courseId) || stuCourses[0]
-                        const details = detail?.details || []
+                        const stuCourses = progressDetails[record.username] || record.courses || []
+                        const detail = stuCourses.find((c: any) => c.course_id === courseId) || stuCourses[0]
+                        const details = (detail?.details || []) as { kp_id: number; kp_name: string; status: string }[]
                         if (!details.length) return <Text type="secondary">{t('analytics.noKnowledgePoints')}</Text>
                         return (
                           <Space wrap>

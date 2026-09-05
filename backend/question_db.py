@@ -236,6 +236,12 @@ def init_question_db():
                 c.execute("ALTER TABLE ai_practice_results ADD COLUMN reward_points INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
+            # G3: AI 练习答案键(按知识点保存本次生成的题目顺序), 用于服务端判分
+            c.execute("""CREATE TABLE IF NOT EXISTS ai_practice_keys (
+                kp_id INTEGER PRIMARY KEY,
+                question_ids TEXT NOT NULL DEFAULT '[]',
+                updated_at TEXT NOT NULL
+            )""")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_apr_kp ON ai_practice_results(kp_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_apr_student ON ai_practice_results(student_username)")

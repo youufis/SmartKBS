@@ -15,13 +15,19 @@ from pydantic import BaseModel
 from backend.database import execute_query_dict as execute_query, execute_insert_update, get_connection
 from backend.question_db import execute_query as q_execute_query
 from backend.api.dependencies import get_current_user
-from backend.permission_service import check_share_visibility
+from backend.permission_service import (
+    check_share_visibility,
+    get_grade_by_name,
+    is_student_in_teacher_scope,
+)
 from backend.auth import is_admin, is_teacher
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
+
+LESSON_PLAN_CACHE_DAYS = 7   # G8: 教案缓存有效期(天)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -168,6 +174,41 @@ def _ensure_subject(course_dict: dict[str, Any]) -> dict[str, Any]:
     return course_dict
 
 
+def _chapter_row(chapter_id: int) -> dict[str, Any] | None:
+    row = execute_query_one(
+        "SELECT id, course_id, parent_id FROM chapters WHERE id=?", (chapter_id,),
+    )
+    return row
+
+
+def _assert_chapter_parent(child_id: int | None, course_id: int, parent_id: int | None) -> str | None:
+    """G2: 校验"把 child 挂到 parent 下"是否合法, 返回错误原因(None=合法)
+
+    旧实现只查父章节是否存在, 于是可以把章节挂到别的课程、或挂进自己的子树,
+    结果该章节(连同其下知识点)在 /tree 里再无根可达 -> 整块内容静默消失;
+    挂成环时递归建树还会 RecursionError, 让全校的课程树页面直接 500。
+    """
+    if not parent_id or parent_id <= 0:
+        return None
+    parent = _chapter_row(parent_id)
+    if not parent:
+        return "父章节不存在"
+    if int(parent["course_id"]) != int(course_id):
+        return "父章节不属于同一门课程"
+    if child_id and int(parent_id) == int(child_id):
+        return "不能把章节挂到自己下面"
+    if child_id:
+        cur: int | None = int(parent_id)
+        seen: set[int] = set()
+        while cur and cur not in seen:
+            if cur == int(child_id):
+                return "不能把章节挂到自己的子章节下(会形成环)"
+            seen.add(cur)
+            row = _chapter_row(cur)
+            cur = int(row["parent_id"]) if row and row.get("parent_id") else None
+    return None
+
+
 def _build_course_tree(course_id: int) -> list[dict[str, Any]]:
     """构建课程的完整章节-知识点树（批量查询优化版）
 
@@ -203,9 +244,13 @@ def _build_course_tree(course_id: int) -> list[dict[str, Any]]:
             resource_count_map[row["knowledge_point_id"]] = row["cnt"]
 
     # 3) 构建 parent_id → 章节列表 的映射
+    ids_in_course = {ch["id"] for ch in all_chapters}
     children_map: dict[int, list[dict[str, Any]]] = {}
     for ch in all_chapters:
         pid = ch["parent_id"] or 0  # 顶层用 0 表示
+        if pid and pid not in ids_in_course:
+            # G2: 父章节被删/跨课程误挂等脏数据 -> 按顶层展示, 不再让整块内容隐身
+            pid = 0
         children_map.setdefault(pid, []).append(ch)
 
     # 4) 构建 chapter_id → 知识点列表 的映射
@@ -214,10 +259,15 @@ def _build_course_tree(course_id: int) -> list[dict[str, Any]]:
         kp_map.setdefault(kp["chapter_id"], []).append(kp)
 
     # 5) 递归组装树
-    def _build_node(ch: dict[str, Any]) -> dict[str, Any]:
+    def _build_node(ch: dict[str, Any], _seen: frozenset = frozenset()) -> dict[str, Any]:
         node = dict(ch)
-        # 子章节
-        node["children"] = [_build_node(c) for c in children_map.get(ch["id"], [])]
+        # 子章节(G2: 带访问集合, 万一库里已存在环也不会 RecursionError)
+        if ch["id"] in _seen:
+            node["children"] = []
+            node["knowledge_points"] = []
+            return node
+        seen2 = _seen | {ch["id"]}
+        node["children"] = [_build_node(c, seen2) for c in children_map.get(ch["id"], [])]
         # 知识点
         kps = kp_map.get(ch["id"], [])
         for kp in kps:
@@ -1019,11 +1069,13 @@ async def create_chapter(req: ChapterCreate, request: Request):
     if not course:
         raise HTTPException(status_code=404, detail="课程不存在")
 
-    # 校验父章节存在（如果有）
+    # 校验父章节存在且同课程(G2)
     if req.parent_id:
-        parent = execute_query_one("SELECT id FROM chapters WHERE id=?", (req.parent_id,))
+        parent = _chapter_row(req.parent_id)
         if not parent:
             raise HTTPException(status_code=404, detail="父章节不存在")
+        if int(parent["course_id"]) != int(req.course_id):
+            raise HTTPException(status_code=400, detail="父章节不属于该课程")
 
     now = _now()
     chapter_id = execute_insert_update(
@@ -1051,6 +1103,12 @@ async def update_chapter(chapter_id: int, req: ChapterUpdate, request: Request):
         val = getattr(req, field, None)
         if val is not None:
             updates[field] = val
+
+    # G2: 改父章节时同样要求同课程且不是自己的子孙
+    if "parent_id" in updates:
+        err = _assert_chapter_parent(chapter_id, ch["course_id"], updates["parent_id"])
+        if err:
+            raise HTTPException(status_code=400, detail="父章节设置无效：" + err)
 
     if not updates:
         return {"message": "无更新内容"}
@@ -1649,20 +1707,21 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
 
     now = _now()
     updated = {"chapters": 0, "knowledge_points": 0}
+    skipped: list[dict[str, Any]] = []
 
     for item in req.items:
         if item.type == "chapter":
             # 校验章节存在
-            ch = execute_query_one("SELECT id FROM chapters WHERE id=?", (item.id,))
+            ch = execute_query_one("SELECT id, course_id FROM chapters WHERE id=?", (item.id,))
             if not ch:
-                logger.warning(f"排序跳过: 章节 id={item.id} 不存在")
+                skipped.append({"id": item.id, "type": "chapter", "reason": "章节不存在"})
                 continue
-            # 校验目标父章节存在（parent_id>0 时）
-            if item.parent_id is not None and item.parent_id > 0:
-                parent_ch = execute_query_one("SELECT id FROM chapters WHERE id=?", (item.parent_id,))
-                if not parent_ch:
-                    logger.warning(f"排序跳过: 父章节 id={item.parent_id} 不存在")
-                    continue
+            # G2: 父章节必须同课程且不是自己的子孙
+            err = _assert_chapter_parent(item.id, ch["course_id"], item.parent_id)
+            if err:
+                logger.warning(f"排序拒绝: 章节 {item.id} -> 父 {item.parent_id}: {err}")
+                skipped.append({"id": item.id, "type": "chapter", "reason": err})
+                continue
             execute_insert_update(
                 "UPDATE chapters SET sort_order=?, parent_id=?, updated_at=? WHERE id=?",
                 (item.sort_order, item.parent_id if item.parent_id and item.parent_id > 0 else None, now, item.id),
@@ -1691,8 +1750,10 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
                 )
             updated["knowledge_points"] += 1
 
+    if skipped:
+        logger.warning(f"用户 {user['username']} 拖动排序被拒 {len(skipped)} 项: {skipped[:5]}")
     logger.info(f"用户 {user['username']} 拖动排序: {updated}")
-    return {"message": "排序已更新", "updated": updated}
+    return {"message": "排序已更新", "updated": updated, "skipped": skipped}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1843,128 +1904,289 @@ async def get_progress_stats(request: Request, course_id: int = Query(None)):
         return {"stats": stats}
 
 
+def _cache_lesson_plan(kp_id: int, content: str) -> None:
+    """G8: 教案文本缓存, 避免每次点"导出 Word"都重新调用大模型"""
+    if not content:
+        return
+    try:
+        execute_insert_update(
+            """INSERT OR REPLACE INTO ai_lesson_plan_cache (kp_id, content, updated_at)
+               VALUES (?, ?, ?)""",
+            (kp_id, content, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+    except Exception as e:
+        logger.warning(f"[备课助手] 教案缓存写入失败 kp_id={kp_id}: {e}")
+
+
+def _load_cached_lesson_plan(kp_id: int) -> str:
+    try:
+        rows = execute_query(
+            "SELECT content, updated_at FROM ai_lesson_plan_cache WHERE kp_id=?", (kp_id,),
+        )
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+    try:
+        age_days = (datetime.now() - datetime.strptime(str(rows[0]["updated_at"]), "%Y-%m-%d %H:%M:%S")).days
+    except Exception:
+        age_days = 0
+    if age_days > LESSON_PLAN_CACHE_DAYS:
+        return ""
+    return str(rows[0]["content"] or "")
+
+
+def _safe_artifact_name(kp_name: Any, limit: int = 40) -> str:
+    """G7: 产物文件名只保留安全字符并限长
+
+    旧实现只替换了空格与斜杠, 知识点名里出现 : * ? " < > | 等 Windows 非法字符或超长时
+    open() 直接抛错 —— 此时 AI 已经调用完, 等于白烧一次钱, 任务只报"生成失败"。
+    """
+    import re as _re
+    s = _re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", str(kp_name or ""))
+    s = _re.sub(r"\s+", "_", s).strip("._ ")
+    return (s[:limit].strip("._ ")) or "kp"
+
+
+def _find_shared_artifact(kp_id: int, suffix: str) -> str | None:
+    """G6: 在全体账号的 html 目录里找该知识点已生成的产物(供教师只读复用)"""
+    import glob as _glob
+    from backend.config import DATA_DIR, STU_DIR
+    hits: list[str] = []
+    for base in (os.path.join(DATA_DIR, STU_DIR, "*", "html"), os.path.join(DATA_DIR, "*", "html")):
+        try:
+            hits.extend(_glob.glob(os.path.join(base, f"{kp_id}_*{suffix}")))
+        except Exception:
+            continue
+    return max(hits, key=os.path.getmtime) if hits else None
+
+
+def _save_practice_key(kp_id: int, question_ids: list[int]) -> None:
+    """G3: 记录本次练习使用的题目顺序(含答案在 question_bank 中), 供服务端判分"""
+    from backend.question_db import execute_update as q_update
+    try:
+        q_update(
+            "INSERT OR REPLACE INTO ai_practice_keys (kp_id, question_ids, updated_at) VALUES (?, ?, ?)",
+            (kp_id, json.dumps([int(i) for i in question_ids if i]), datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+    except Exception as e:
+        logger.warning(f"[AI练习] 答案键写入失败 kp_id={kp_id}: {e}")
+
+
+def _progress_student_conditions(user: dict[str, Any], grade: str | None,
+                                 class_name: str | None) -> tuple[list[str], list]:
+    """G1: "待统计学生"的筛选条件全部下推 SQL(教师范围用 EXISTS, 不再把用户名拉到内存拼 IN)"""
+    role = user.get("role", 2)
+    conds = ["role=2"]
+    params: list = []
+    if role == 1:
+        conds.append(
+            "EXISTS (SELECT 1 FROM teacher_assignments ta WHERE ta.teacher_username=?"
+            " AND ta.grade_id=users.grade_id"
+            " AND (ta.class_id IS NULL OR ta.class_id=users.class_id))"
+        )
+        params.append(user.get("username", ""))
+    if grade:
+        ginfo = get_grade_by_name(grade)
+        if ginfo:
+            conds.append("grade_id=?")
+            params.append(ginfo["id"])
+        else:
+            conds.append("grade=?")
+            params.append(grade)
+    if class_name:
+        import re as _re
+        cn = _re.sub(r"[^\d]", "", str(class_name))
+        gid = None
+        if grade:
+            gi = get_grade_by_name(grade)
+            if gi:
+                gid = gi["id"]
+        if gid:
+            conds.append("class_id=(SELECT id FROM classes WHERE grade_id=? AND (name=? OR name=?))")
+            params.extend([gid, cn + "\u73ed", cn])
+        else:
+            conds.append("(class=? OR class=?)")
+            params.extend([cn, cn + "\u73ed"])
+    return conds, params
+
+
 @router.get("/progress/overview", summary="班级进度总览（教师用）")
 async def get_class_progress_overview(
     request: Request,
     course_id: int = Query(None, description="课程 ID"),
     grade: str = Query(None, description="年级"),
     class_name: str = Query(None, description="班级"),
+    page: int = Query(1, ge=1, description="页码(从 1 开始)"),
+    page_size: int = Query(50, ge=1, le=200, description="每页学生数"),
 ):
-    """教师查看指定班级的课程完成进度概览"""
+    """教师查看课程完成进度概览
+
+    G1: 旧实现为"每个学生 x 每门课程"各发一次查询, 并给每个学生铺开全部知识点明细,
+    1400 人规模下单次请求要跑 5000+ 条 SQL、返回 8.9MB, 而且整段同步跑在事件循环里
+    (实测 31.6 秒内全站其它请求都在排队)。现在: 条件下推 + 一次聚合 + 分页,
+    知识点明细改由 /progress/student/{username} 按需获取。
+    """
     user = get_current_user(request)
     role = user.get("role", 2)
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    username = user["username"]
+    conds, params = _progress_student_conditions(user, grade, class_name)
+    where = " AND ".join(conds)
 
-    # 构建学生查询条件
-    conditions = ["role=2"]
-    params = []
+    cnt_rows = execute_query(f"SELECT COUNT(*) AS c FROM users WHERE {where}", tuple(params))
+    total_students = cnt_rows[0]["c"] if cnt_rows else 0
 
-    # 教师只能查看自己班级的学生
-    if role == 1:
-        from backend.permission_service import get_students_in_scope, get_grade_by_name
-        # 使用统一权限服务获取教师管辖学生
-        scoped = get_students_in_scope(username)
-        if scoped:
-            scoped_usernames = [s["username"] for s in scoped]
-            placeholders = ",".join("?" * len(scoped_usernames))
-            conditions.append(f"username IN ({placeholders})")
-            params.extend(scoped_usernames)
-        else:
-            # 没有任教信息，不返回任何学生
-            return {"students": [], "total": 0}
-
-    # 用户选择的额外筛选条件
-    if grade:
-        from backend.permission_service import get_grade_by_name
-        ginfo = get_grade_by_name(grade)
-        if ginfo:
-            conditions.append("grade_id=?")
-            params.append(ginfo["id"])
-        else:
-            conditions.append("grade=?")
-            params.append(grade)
-    if class_name:
-        import re
-        cn = re.sub(r'[^\d]', '', str(class_name))
-        gid = None
-        if grade:
-            from backend.permission_service import get_grade_by_name
-            gi = get_grade_by_name(grade)
-            if gi:
-                gid = gi["id"]
-        if gid:
-            conditions.append("class_id=(SELECT id FROM classes WHERE grade_id=? AND (name=? OR name=?))")
-            params.extend([gid, f"{cn}班", cn])
-        else:
-            conditions.append("(class=? OR class=?)")
-            params.extend([cn, f"{cn}班"])
-
-    where = " AND ".join(conditions)
+    offset = (page - 1) * page_size
     students = execute_query(
-        f"SELECT username, name, grade, class FROM users WHERE {where} ORDER BY grade, class, name",
-        tuple(params),
+        f"SELECT username, name, grade, class FROM users WHERE {where}"
+        f" ORDER BY grade, class, name LIMIT ? OFFSET ?",
+        tuple(params) + (page_size, offset),
     )
 
-    if not students:
-        return {"students": [], "total": 0}
-
-    # 确定课程
     if course_id:
-        courses_list = [{"id": course_id}]
+        courses_list = execute_query(
+            "SELECT id, name FROM courses WHERE id=? AND status='active'", (course_id,)
+        )
     else:
         courses_list = execute_query("SELECT id, name FROM courses WHERE status='active'")
+    course_ids = [c["id"] for c in courses_list]
+    empty_stats = {"total_students": total_students, "avg_rate": 0.0}
+    if not course_ids:
+        return {"students": [], "total": total_students, "page": page,
+                "page_size": page_size, "has_more": False, "stats": empty_stats}
 
-    # 构建知识点 ID 列表
-    kp_map = {}  # course_id -> [(kp_id, kp_name)]
-    for c in courses_list:
-        kps = execute_query(
-            """SELECT kp.id, kp.name FROM knowledge_points kp
-               JOIN chapters ch ON ch.id = kp.chapter_id
-               WHERE ch.course_id=? AND kp.status='active'
-               ORDER BY kp.sort_order, kp.id""",
-            (c["id"],),
+    cph = ",".join("?" * len(course_ids))
+    total_rows = execute_query(
+        f"""SELECT ch.course_id, COUNT(kp.id) AS cnt
+            FROM knowledge_points kp JOIN chapters ch ON ch.id = kp.chapter_id
+            WHERE kp.status='active' AND ch.status='active' AND ch.course_id IN ({cph})
+            GROUP BY ch.course_id""",
+        tuple(course_ids),
+    )
+    kp_total_map = {r["course_id"]: r["cnt"] for r in total_rows}
+
+    # 当前页学生的完成数(一次查询)
+    s_usernames = [s["username"] for s in students]
+    done_map: dict[tuple[int, str], int] = {}
+    if s_usernames:
+        sph = ",".join("?" * len(s_usernames))
+        done_rows = execute_query(
+            f"""SELECT lp.student_username, ch.course_id,
+                       SUM(CASE WHEN lp.status='completed' THEN 1 ELSE 0 END) AS done
+                FROM learning_progress lp
+                JOIN knowledge_points kp ON kp.id = lp.knowledge_point_id AND kp.status='active'
+                JOIN chapters ch ON ch.id = kp.chapter_id AND ch.status='active'
+                WHERE ch.course_id IN ({cph}) AND lp.student_username IN ({sph})
+                GROUP BY lp.student_username, ch.course_id""",
+            tuple(course_ids) + tuple(s_usernames),
         )
-        if kps:
-            kp_map[c["id"]] = kps
+        done_map = {(r["course_id"], r["student_username"]): r["done"] for r in done_rows}
 
-    # 构建每位学生的进度矩阵
+    # 平均完成率: 对"全部命中学生"一次聚合(有记录者按实际, 无记录者按 0% 计入)
+    avg_rows = execute_query(
+        f"""SELECT ch.course_id, lp.student_username,
+                   SUM(CASE WHEN lp.status='completed' THEN 1 ELSE 0 END) AS done
+            FROM learning_progress lp
+            JOIN knowledge_points kp ON kp.id = lp.knowledge_point_id AND kp.status='active'
+            JOIN chapters ch ON ch.id = kp.chapter_id AND ch.status='active'
+            JOIN users ON users.username = lp.student_username
+            WHERE ch.course_id IN ({cph}) AND {where}
+            GROUP BY ch.course_id, lp.student_username""",
+        tuple(course_ids) + tuple(params),
+    )
+    # 平均完成率: 每门课程都以"全部命中学生"为分母(没有任何学习记录的学生按 0% 计入)
+    rate_sum = 0.0
+    rate_n = 0
+    for cid in course_ids:
+        tot = kp_total_map.get(cid, 0)
+        if not tot or total_students <= 0:
+            continue
+        for r in [x for x in avg_rows if x["course_id"] == cid]:
+            rate_sum += (r["done"] or 0) / tot * 100
+        rate_n += total_students
+    avg_rate = round(rate_sum / rate_n, 1) if rate_n else 0.0
+
     result = []
     for stu in students:
-        stu_progress = {
-            "username": stu["username"],
-            "name": stu["name"],
-            "grade": stu["grade"],
-            "class": stu["class"],
-            "courses": [],
-        }
+        row = {"username": stu["username"], "name": stu["name"],
+               "grade": stu["grade"], "class": stu["class"], "courses": []}
         for c in courses_list:
-            kps = kp_map.get(c["id"], [])
-            if not kps:
+            tot = kp_total_map.get(c["id"], 0)
+            if not tot:
                 continue
-            kp_ids = [k["id"] for k in kps]
-            placeholders = ",".join("?" for _ in kp_ids)
-            progress_rows = execute_query(
-                f"SELECT knowledge_point_id, status FROM learning_progress WHERE student_username=? AND knowledge_point_id IN ({placeholders})",
-                (stu["username"], *kp_ids),
-            )
-            p_map = {r["knowledge_point_id"]: r["status"] for r in progress_rows}
-            completed = sum(1 for kp_id in kp_ids if p_map.get(kp_id) == "completed")
-            stu_progress["courses"].append({
-                "course_id": c["id"],
-                "total_kps": len(kps),
-                "completed_kps": completed,
-                "rate": round(completed / len(kps) * 100, 1) if kps else 0,
-                "details": [
-                    {"kp_id": k["id"], "kp_name": k["name"], "status": p_map.get(k["id"], "not_started")}
-                    for k in kps
-                ],
+            done = done_map.get((c["id"], stu["username"]), 0)
+            row["courses"].append({
+                "course_id": c["id"], "course_name": c["name"],
+                "total_kps": tot, "completed_kps": done,
+                "rate": round(done / tot * 100, 1),
             })
-        result.append(stu_progress)
+        result.append(row)
 
-    return {"students": result, "total": len(result)}
+    return {
+        "students": result,
+        "total": total_students,
+        "page": page,
+        "page_size": page_size,
+        "has_more": offset + len(result) < total_students,
+        "stats": {"total_students": total_students, "avg_rate": avg_rate},
+    }
+
+
+@router.get("/progress/student/{student_username}", summary="单个学生知识点掌握明细（按需）")
+async def get_student_progress_detail(
+    student_username: str,
+    request: Request,
+    course_id: int = Query(None, description="限定课程, 缺省返回全部"),
+):
+    """G1: 展开某一行时才取明细, 总览接口不再携带百 MB 级 payload"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    me = user.get("username", "")
+    if role == 2 and student_username != me:
+        raise HTTPException(status_code=403, detail="只能查看自己的学习明细")
+    if role == 1 and student_username != me and not is_student_in_teacher_scope(student_username, me):
+        raise HTTPException(status_code=403, detail="该学生不在您的任教范围内")
+
+    rows = execute_query(
+        """SELECT ch.course_id, co.name AS course_name, kp.id AS kp_id, kp.name AS kp_name,
+                  lp.status AS lp_status, lp.score AS lp_score
+           FROM knowledge_points kp
+           JOIN chapters ch ON ch.id = kp.chapter_id AND ch.status='active'
+           JOIN courses co ON co.id = ch.course_id AND co.status='active'
+           LEFT JOIN learning_progress lp ON lp.knowledge_point_id = kp.id AND lp.student_username=?
+           WHERE kp.status='active' AND (? IS NULL OR ch.course_id=?)
+           ORDER BY co.sort_order, ch.sort_order, kp.sort_order, kp.id""",
+        (student_username, course_id, course_id),
+    )
+    stu = execute_query_one("SELECT username, name, grade, class FROM users WHERE username=?", (student_username,))
+    by_course: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        c = by_course.setdefault(r["course_id"], {
+            "course_id": r["course_id"], "course_name": r["course_name"],
+            "total_kps": 0, "completed_kps": 0, "details": [],
+        })
+        c["total_kps"] += 1
+        status = r["lp_status"] or "not_started"
+        if status == "completed":
+            c["completed_kps"] += 1
+        c["details"].append({
+            "kp_id": r["kp_id"], "kp_name": r["kp_name"],
+            "status": status, "score": r["lp_score"] or 0,
+        })
+    courses = []
+    for c in by_course.values():
+        c["rate"] = round(c["completed_kps"] / c["total_kps"] * 100, 1) if c["total_kps"] else 0.0
+        courses.append(c)
+    courses.sort(key=lambda x: x["course_id"])
+    return {
+        "username": student_username,
+        "name": (stu or {}).get("name", student_username),
+        "grade": (stu or {}).get("grade", ""),
+        "class": (stu or {}).get("class", ""),
+        "courses": courses,
+    }
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2035,6 +2257,7 @@ async def ai_lesson_plan(
     async def _do_plan() -> dict[str, Any]:
         try:
             result = await call_ai_async(prompt, api_key)
+            _cache_lesson_plan(knowledge_point_id, result)  # G8: 导出时复用, 不再重复烧 AI
             return {
                 "knowledge_point": kp["name"],
                 "chapter_name": kp["chapter_name"],
@@ -2054,7 +2277,11 @@ async def ai_lesson_plan(
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/ai-lesson-plan/{kp_id}/export")
-async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Query("")):
+async def export_lesson_plan_docx(
+    kp_id: int, request: Request,
+    token: str = Query(""),
+    refresh: int = Query(0, description="1=忽略缓存重新生成教案"),
+):
     """导出 AI 教案为 Word 文档"""
     import io
     import traceback
@@ -2105,28 +2332,31 @@ async def export_lesson_plan_docx(kp_id: int, request: Request, token: str = Que
     from backend.api.chat_router import get_api_keys
     from backend.api.ai_service import call_ai_async
 
-    keys = get_api_keys(username)
-    api_key = keys[0] if keys and keys[0] else ""
-    if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 API Key")
+    # G8: 优先复用备课助手已生成的教案(可用 ?refresh=1 强制重生成)
+    lesson_plan_text = "" if refresh else _load_cached_lesson_plan(kp_id)
+    if not lesson_plan_text:
+        keys = get_api_keys(username)
+        api_key = keys[0] if keys and keys[0] else ""
+        if not api_key:
+            raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    def _safe(s):
-        return str(s).replace('{', '{{').replace('}', '}}')
+        def _safe(s):
+            return str(s).replace('{', '{{').replace('}', '}}')
 
-    ai_role = build_ai_role(subject=kp.get("course_name", ""), grade=kp.get("grade", ""))
-    prompt = f"{ai_role}" + LESSON_PLAN_PROMPT.format(
-        course_name=_safe(kp["course_name"]),
-        chapter_name=_safe(kp["chapter_name"]),
-        knowledge_point=_safe(kp["name"]),
-        grade=_safe(kp.get("grade", "")),
-        subject=_safe(kp.get("course_name", "")),
-    )
-
-    try:
-        lesson_plan_text = await call_ai_async(prompt, api_key)
-    except Exception as e:
-        logger.error(f"AI 备课助手生成失败: {e}")
-        raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
+        ai_role = build_ai_role(subject=kp.get("course_name", ""), grade=kp.get("grade", ""))
+        prompt = f"{ai_role}" + LESSON_PLAN_PROMPT.format(
+            course_name=_safe(kp["course_name"]),
+            chapter_name=_safe(kp["chapter_name"]),
+            knowledge_point=_safe(kp["name"]),
+            grade=_safe(kp.get("grade", "")),
+            subject=_safe(kp.get("course_name", "")),
+        )
+        try:
+            lesson_plan_text = await call_ai_async(prompt, api_key)
+            _cache_lesson_plan(kp_id, lesson_plan_text)
+        except Exception as e:
+            logger.error(f"AI 备课助手生成失败: {e}")
+            raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
 
     doc = Document()
     style = doc.styles['Normal']  # type: ignore[union-attr]
@@ -2270,7 +2500,7 @@ async def ai_generate_courseware(kp_id: int, request: Request):
             # 保存到用户的 html 目录
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
-            safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
+            safe_name = _safe_artifact_name(kp["name"])
             filename = f"{kp_id}_{safe_name}_课件.html"
             filepath = os.path.join(html_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
@@ -2286,7 +2516,6 @@ async def ai_generate_courseware(kp_id: int, request: Request):
                 "kp_name": kp["name"],
                 "file_url": file_url,
                 "filename": filename,
-                "filepath": filepath,
             }
         except Exception as e:
             logger.error(f"AI 课件生成失败: {e}", exc_info=True)
@@ -2302,11 +2531,18 @@ async def preview_courseware(kp_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
+    # G6: 课件是按知识点生成的公共产物, 本人没有时回退到他人已生成的版本(只读),
+    # 避免同一知识点被不同教师反复烧 AI 生成
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可预览课件")
     from backend.utils import get_account_html_dir
-    html_dir = get_account_html_dir(username)
-    import glob
-    pattern = os.path.join(html_dir, f"{kp_id}_*_课件.html")
-    files = glob.glob(pattern)
+    files = []
+    own = os.path.join(get_account_html_dir(username), f"{kp_id}_*_课件.html")
+    import glob as _glob
+    files = _glob.glob(own)
+    if not files:
+        shared = _find_shared_artifact(kp_id, "_课件.html")
+        files = [shared] if shared else []
     if not files:
         raise HTTPException(status_code=404, detail="尚未生成课件，请先使用 AI 生成")
     # 取最新的文件
@@ -2630,10 +2866,11 @@ async def ai_generate_practice(kp_id: int, request: Request):
                     q["svg_code"] = q.get("svg_content") or ""
 
             # 生成 HTML 答题页面（AI练习独立存储，不创建 practice_sessions）
+            _save_practice_key(kp_id, [q.get("id") for q in final_questions if q.get("id")])
             html_content = _generate_practice_html(kp, final_questions, session_id=0, subject=subject, kp_id=kp_id, theme=theme)
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
-            safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
+            safe_name = _safe_artifact_name(kp["name"])
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"{kp_id}_{safe_name}_{ts}_练习.html"
             filepath = os.path.join(html_dir, filename)
@@ -2686,7 +2923,12 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
     }
     tc = theme_colors.get(theme, theme_colors["ai-smart"])
 
-    questions_json = json.dumps(questions, ensure_ascii=False)
+    # G3: 页面数据里剔除答案, 学生端只能提交作答、由服务端判分(防止查看源码偷答案)
+    _leak_keys = {"answer", "correct_answer"}
+    questions_json = json.dumps(
+        [{k: v for k, v in q.items() if k not in _leak_keys} for q in questions],
+        ensure_ascii=False,
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -3031,7 +3273,7 @@ function renderMath() {{
     }}
 }}
 
-// 本地批改：直接对比答案，即时显示结果
+// G3: 本地不再判分(页面已不含答案), 只提交作答, 由服务端核对 question_bank 后返回结果
 function submitPractice() {{
     const total = questions.length;
     const answered = Object.keys(userAnswers).length;
@@ -3039,30 +3281,9 @@ function submitPractice() {{
         if (!confirm('还有 ' + (total - answered) + ' 道题未作答，确定提交吗？')) return;
     }}
 
-    // 1. 本地批改
-    let earned = 0;
-    const totalScore = total * 10;
-    const results = {{}};
-    questions.forEach((q, i) => {{
-        const studentAns = userAnswers[i] || '';
-        const correctAns = q.answer || '';
-        const isCorrect = studentAns.toUpperCase() === correctAns.toUpperCase();
-        const s = isCorrect ? 10 : 0;
-        earned += s;
-        results[q.id] = {{
-            student_answer: studentAns,
-            correct_answer: correctAns,
-            score: s,
-            max_score: 10,
-            is_correct: isCorrect
-        }};
-    }});
-    const accuracy = Math.round(earned / totalScore * 100);
+    const payload = {{}};
+    questions.forEach((q, i) => {{ payload[q.id] = {{ student_answer: userAnswers[i] || '' }}; }});
 
-    // 2. 即时显示结果
-    showResults(accuracy, earned, totalScore, results);
-
-    // 3. 提交到后端（独立 API，不依赖 practice_sessions）
     const token = localStorage.getItem('smartkb_token');
     if (!token) {{
         var errMsg = document.getElementById('resultNote');
@@ -3077,20 +3298,18 @@ function submitPractice() {{
             'Authorization': 'Bearer ' + token,
             'Content-Type': 'application/json'
         }},
-        body: JSON.stringify({{
-            score: earned,
-            total_score: totalScore,
-            answers: results
-        }})
+        body: JSON.stringify({{ answers: payload }})
     }})
     .then(function(r) {{
-        if (submitBtn) {{ submitBtn.textContent = '📤 提交答案'; }}
+        if (submitBtn) {{ submitBtn.textContent = '📤 提交答案'; submitBtn.disabled = false; }}
         if (!r.ok) {{
-            return r.json().then(function(e) {{ throw new Error(e.detail || '提交失败'); }});
+            return r.json().then(function(e) {{ throw new Error((e && e.detail) || '提交失败'); }});
         }}
         return r.json();
     }})
     .then(function(data) {{
+        // data.results 已按题序排列, 交给统一的渲染函数
+        showResults(data.accuracy || 0, data.score || 0, data.total_score || (total * 10), null, data.results || []);
         var noteEl = document.getElementById('resultNote');
         if (noteEl) {{
             var txt = '✅ 成绩已记录';
@@ -3144,7 +3363,7 @@ function showResults(accuracy, score, totalScore, results, prevResults) {{
         var isCorrect = res && res.is_correct;
         // 从 prevResults 中取学生答案
         var studentAns = '';
-        var correctAns = q.answer || '';
+        var correctAns = '';  # G3: 答案只来自服务端返回, 页面数据不再携带
         if (usePrev && res) {{
             studentAns = res.student_answer || '';
             correctAns = res.correct_answer || correctAns;
@@ -3532,12 +3751,13 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
     if session_id is None:
         raise HTTPException(status_code=500, detail="创建练习任务失败")
 
+    _save_practice_key(kp_id, [q.get("id") for q in final_questions if q.get("id")])  # G3
     html_content = _generate_practice_html(kp, final_questions, session_id, subject, kp_id)
     from backend.utils import get_account_html_dir
     from backend.config import BASE_DIR
     html_dir = get_account_html_dir(username)
     os.makedirs(html_dir, exist_ok=True)
-    safe_name = kp_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    safe_name = _safe_artifact_name(kp_name)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{kp_id}_{safe_name}_{ts}_练习.html"
     filepath = os.path.join(html_dir, filename)
@@ -3663,10 +3883,11 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
     if session_id is None:
         raise HTTPException(status_code=500, detail="创建练习任务失败")
 
+    _save_practice_key(kp_id, [q.get("id") for q in questions if q.get("id")])  # G3
     html_content = _generate_practice_html(kp, questions, session_id, subject, kp_id)
     html_dir = get_account_html_dir(username)
     os.makedirs(html_dir, exist_ok=True)
-    safe_name = kp["name"].replace(" ", "_").replace("/", "_").replace("\\", "_")
+    safe_name = _safe_artifact_name(kp["name"])
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{kp_id}_{safe_name}_{ts}_练习.html"
     filepath = os.path.join(html_dir, filename)
@@ -3676,7 +3897,7 @@ async def ai_practice_from_bank(kp_id: int, request: Request):
     rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
     file_url = f"/api/files/{rel_path}"
 
-    logger.info(f"教师 {username} 从题库生成练习: session_id={session_id}, file={filepath}")
+    logger.info(f"教师 {username} 从题库生成练习: session_id={session_id}")
     return {
         "session_id": session_id,
         "file_url": file_url,
@@ -3694,11 +3915,15 @@ async def preview_ai_practice(kp_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
 
+    # G6: 练习页同理(题目与答案键按知识点共享), 且只允许教师/管理员预览
+    if not _can_manage(user):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可预览练习")
     from backend.utils import get_account_html_dir
-    html_dir = get_account_html_dir(username)
-    import glob
-    pattern = os.path.join(html_dir, f"{kp_id}_*_练习.html")
-    files = glob.glob(pattern)
+    import glob as _glob
+    files = _glob.glob(os.path.join(get_account_html_dir(username), f"{kp_id}_*_练习.html"))
+    if not files:
+        shared = _find_shared_artifact(kp_id, "_练习.html")
+        files = [shared] if shared else []
     if not files:
         raise HTTPException(status_code=404, detail="尚未生成练习，请先使用 AI 生成")
     latest = max(files, key=os.path.getmtime)
@@ -3738,8 +3963,49 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     if existing:
         raise HTTPException(status_code=409, detail="你已作答过此练习，不能重复提交")
 
+    # ── G3: 以服务端为准判分(旧实现完全采信客户端提交的 score/answers.correct_answer) ──
+    submitted = req.answers if isinstance(req.answers, dict) else {}
+    from backend.question_db import execute_query as q_query
+    key_rows = q_query("SELECT question_ids FROM ai_practice_keys WHERE kp_id=?", (kp_id,))
+    try:
+        graded_ids = [int(x) for x in (json.loads(key_rows[0]["question_ids"]) if key_rows else [])]
+    except Exception:
+        graded_ids = []
+    if not graded_ids:
+        # 兼容改造前生成的页面: 退化为按提交里的题目 ID 判分(仍然用库里的答案, 不信客户端分数)
+        graded_ids = [int(k) for k in list(submitted.keys()) if str(k).isdigit()][:10]
+    ans_map: dict[int, str] = {}
+    if graded_ids:
+        ph = ",".join("?" * len(graded_ids))
+        for r in q_query(f"SELECT id, correct_answer FROM question_bank WHERE id IN ({ph})", tuple(graded_ids)):
+            ans_map[int(r["id"])] = str(r.get("correct_answer") or "").strip()
+
+    results_list = []
+    earned = 0
+    for qid in graded_ids:
+        raw = submitted.get(str(qid))
+        if not isinstance(raw, dict):
+            raw = {}
+        sa = str(raw.get("student_answer", "") or "").strip()
+        ca = ans_map.get(qid, "")
+        is_ok = bool(ca) and sa.upper() == ca.upper()
+        if is_ok:
+            earned += 10
+        results_list.append({
+            "question_id": qid, "student_answer": sa, "correct_answer": ca,
+            "score": 10 if is_ok else 0, "max_score": 10, "is_correct": is_ok,
+        })
+
+    if results_list and ans_map:
+        score = earned
+        total_score = len(graded_ids) * 10
+    else:
+        # 没有任何可核对的答案(历史数据/题目已下架) -> 保留客户端数值但记录告警便于排查
+        score, total_score = req.score, max(req.total_score, 1)
+        logger.warning(f"[AI练习] kp_id={kp_id} 无可用答案键, 退回客户端分数 user={username}")
+
     # ── 生成评价 ──
-    accuracy = round(req.score / max(req.total_score, 1) * 100, 1)
+    accuracy = round(score / max(total_score, 1) * 100, 1)
     if accuracy >= 90:
         evaluation = "🏆 优秀！掌握情况非常好！"
     elif accuracy >= 80:
@@ -3750,7 +4016,10 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
         evaluation = "💪 需要加强练习，建议回顾知识点后重试"
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    answers_json = json.dumps(req.answers, ensure_ascii=False)
+    answers_json = json.dumps(
+        {str(x["question_id"]): x for x in results_list} if results_list else req.answers,
+        ensure_ascii=False,
+    )
 
     # ── 发放积分奖励 ──
     from backend.reward_engine import award_participation, award_grade
@@ -3760,12 +4029,10 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
 
     total_reward = 0
     try:
-        total_reward += award_participation(
-            username, "practice", str(kp_id), kp_title, user.get("username", ""),
-        )
+        # G10: 第 5/7 个位置参数是 teacher_username, 不应填学生自己
+        total_reward += award_participation(username, "practice", str(kp_id), kp_title)
         total_reward += award_grade(
-            username, "practice", str(kp_id),
-            req.score, req.total_score, kp_title, user.get("username", ""),
+            username, "practice", str(kp_id), score, total_score, kp_title,
         )
     except Exception as e:
         logger.warning(f"积分发放失败 (kp_id={kp_id}): {e}")
@@ -3783,10 +4050,12 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     logger.info(f"AI 练习成绩已保存: kp_id={kp_id}, username={username}, score={req.score}/{req.total_score}, reward={total_reward}")
     return {
         "message": "成绩已记录",
-        "score": req.score,
-        "total_score": req.total_score,
+        "score": score,
+        "total_score": total_score,
+        "accuracy": accuracy,
         "evaluation": evaluation,
         "reward_points": total_reward,
+        "results": results_list,
     }
 
 

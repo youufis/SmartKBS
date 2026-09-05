@@ -739,6 +739,13 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── AI 教案缓存表（G8: 导出教案不再重复调用大模型）──
+            c.execute("""CREATE TABLE IF NOT EXISTS ai_lesson_plan_cache (
+                kp_id INTEGER PRIMARY KEY,
+                content TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+
             # ═══════════════════════════════════════════════
             # 课程大纲模块（v2.3）
             # ═══════════════════════════════════════════════
