@@ -18,7 +18,6 @@ export interface SkillInfo {
   requires: string[]
   conflicts_with: string[]
   sections: string[]
-  file_path: string
   parse_error: string | null
 }
 
