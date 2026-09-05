@@ -80,6 +80,17 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        # C1: 配置文件损坏时不再静默用默认值覆盖, 启动阶段显式告警
+        from backend.api.config_router import config_health
+        _cfg_health = config_health()
+        if _cfg_health.get("status") != "ok":
+            logger.error(
+                "[配置健康] system_config.json 状态异常: "
+                f"{_cfg_health}；请尽快在系统配置页面复核并重新保存"
+            )
+    except Exception as e:
+        print(f"[main] 配置文件健康检查失败: {e}", file=sys.stderr)
+    try:
         from backend.api.upgrade_router import start_auto_version_check
         start_auto_version_check()
     except Exception as e:

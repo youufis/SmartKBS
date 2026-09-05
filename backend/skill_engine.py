@@ -294,6 +294,21 @@ class SkillEngine:
 
         return count
 
+    def ensure_fresh(self, max_age: float = 5.0) -> int:
+        """惰性刷新缓存
+
+        距上次加载不足 max_age 秒时直接复用内存中的技能，避免每个 API 请求
+        都重新扫描并解析整个 skills 目录（原来每请求 load_all() 全量重扫 20 个文件）。
+        clear_cache() 会把 _loaded_at 置 0，因此管理员改过配置后仍会立刻重扫。
+
+        Returns:
+            当前可用技能数量
+        """
+        now = time.time()
+        if self._skills and (now - self._loaded_at) < max_age:
+            return len(self._skills)
+        return self.load_all()
+
     def get(self, name: str) -> Optional[SkillDoc]:
         """获取指定技能文档"""
         self._ensure_loaded()
@@ -578,9 +593,13 @@ class SkillEngine:
 
         return "\n\n".join(parts)
 
-    def to_dict(self, skill: SkillDoc) -> dict[str, Any]:
-        """将技能文档转为字典（用于 API 输出）"""
-        return {
+    def to_dict(self, skill: SkillDoc, include_private: bool = False) -> dict[str, Any]:
+        """将技能文档转为字典（用于 API 输出）
+
+        默认不再输出 file_path（服务器绝对路径，属内部信息）；
+        parse_error 详情只在 include_private=True（管理员）时返回。
+        """
+        data: dict[str, Any] = {
             "name": skill.name,
             "version": skill.version,
             "display_name": skill.display_name,
@@ -592,9 +611,9 @@ class SkillEngine:
             "requires": skill.compose.requires,
             "conflicts_with": skill.compose.conflicts_with,
             "sections": list(skill.sections.keys()),
-            "file_path": skill.file_path,
-            "parse_error": skill.parse_error,
+            "parse_error": skill.parse_error if include_private else None,
         }
+        return data
 
 
 # ═══════════════════════════════════════════════

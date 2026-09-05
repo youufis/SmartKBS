@@ -4,7 +4,10 @@
 配置存储于 backend/system_config.json
 """
 import json
+import os
+import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +21,15 @@ router = APIRouter()
 
 # ── 配置文件路径 ──
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "system_config.json"
+
+
+def _backup_file() -> Path:
+    """C1: 上一次成功保存的副本路径（随 CONFIG_FILE 动态派生，便于测试与迁移）"""
+    return CONFIG_FILE.with_name(CONFIG_FILE.name + ".bak")
+
+
+_SECRET_KEYS = ("dashscope_api_key", "APPID")                          # C3: 不回显明文
+_MASK_PREFIX = "****"
 
 # ── 默认配置（与 config.py 保持一致） ──
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -86,37 +98,255 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-def load_config() -> dict[str, Any]:
-    """加载配置文件，不存在时返回默认值"""
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-            # 合并默认值，确保新字段存在
-            merged = dict(DEFAULT_CONFIG)
-            merged.update(data)
-            return merged
-        except Exception as e:
-            logger.warning(f"读取配置文件失败: {e}")
-    return dict(DEFAULT_CONFIG)
-
-
 _config_lock = threading.Lock()
+_cache_lock = threading.RLock()
+_cfg_cache: dict[str, Any] | None = None
+_cfg_cache_key: tuple | None = None
+_cfg_corrupt: dict[str, Any] = {"corrupt": False, "recovered_from_backup": False, "detail": ""}
+
+
+def _config_stat_key() -> tuple | None:
+    """C4: 用 (mtime_ns, size) 作为缓存键, 避免每次读盘 + 解析整份 JSON"""
+    try:
+        st = CONFIG_FILE.stat()
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def _read_json_config(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def load_config() -> dict[str, Any]:
+    """加载系统配置（C1/C4）
+
+    - 带 (mtime,size) 缓存, 配置改动即时生效但不再每次读盘解析;
+    - 文件损坏(如写入过程中掉电)时先回退上一次备份, 并记录可见状态, 不再静默丢配置;
+    - 合并默认值保证新字段存在。
+    """
+    global _cfg_cache, _cfg_cache_key
+    key = _config_stat_key()
+    with _cache_lock:
+        if _cfg_cache is not None and _cfg_cache_key == key:
+            return dict(_cfg_cache)
+
+        data: dict[str, Any] | None = None
+        corrupt = {"corrupt": False, "recovered_from_backup": False, "detail": ""}
+        if key is None:
+            if CONFIG_FILE.exists():
+                corrupt = {"corrupt": True, "recovered_from_backup": False,
+                           "detail": "配置文件无法读取"}
+        else:
+            data = _read_json_config(CONFIG_FILE)
+            if data is None:
+                backup = _read_json_config(_backup_file())
+                corrupt = {
+                    "corrupt": True,
+                    "recovered_from_backup": backup is not None,
+                    "detail": f"{CONFIG_FILE.name} 解析失败"
+                              + ("，已回退到上一次备份" if backup is not None else "，且无可用备份"),
+                }
+                data = backup
+        if data is None:
+            if not corrupt["corrupt"] and key is not None:
+                corrupt = {"corrupt": True, "recovered_from_backup": False,
+                           "detail": "无可用配置，已使用系统默认值"}
+            data = {}
+        _cfg_corrupt.clear()
+        _cfg_corrupt.update(corrupt)
+        if corrupt["corrupt"]:
+            logger.error(f"[配置] {corrupt['detail']}；请管理员尽快在系统配置页重新保存以修复配置文件")
+
+        merged = dict(DEFAULT_CONFIG)
+        merged.update(data)
+        _cfg_cache = merged
+        _cfg_cache_key = key
+        return dict(merged)
 
 
 def save_config(config: dict[str, Any]):
-    """保存配置到文件（线程安全）"""
+    """保存配置（C1: 先备份 + 临时文件原子替换, 不再出现半截文件）"""
+    global _cfg_cache, _cfg_cache_key
+    payload = json.dumps(config, ensure_ascii=False, indent=2)
     with _config_lock:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(
-            json.dumps(config, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        try:
+            if CONFIG_FILE.exists():
+                shutil.copy2(CONFIG_FILE, _backup_file())
+        except OSError as e:
+            logger.warning(f"[配置] 备份写入失败(不影响本次保存): {e}")
+        tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CONFIG_FILE)          # 同盘原子替换
+    with _cache_lock:
+        _cfg_cache = None
+        _cfg_cache_key = None
 
 
 def get_config_value(key: str, default: Any = None) -> Any:
-    """运行时获取配置值（供其他模块使用）"""
+    """运行时获取配置值（供其他模块使用，走 mtime 缓存）"""
     cfg = load_config()
     return cfg.get(key, default)
+
+
+def config_health() -> dict[str, Any]:
+    """C1: 配置健康状态(供 /config/health 与启动自检使用)"""
+    load_config()
+    with _cache_lock:
+        info = dict(_cfg_corrupt)
+    return {
+        "status": ("corrupt_recovered_from_backup" if info.get("recovered_from_backup")
+                   else ("corrupt" if info.get("corrupt") else "ok")),
+        "ok": not info.get("corrupt", False),
+        "detail": info.get("detail", ""),
+        "file": str(CONFIG_FILE),
+        "backup_exists": _backup_file().exists(),
+    }
+
+
+def _mask_secret(value: Any) -> Any:
+    if not isinstance(value, str) or not value:
+        return value
+    return _MASK_PREFIX + (value[-4:] if len(value) > 4 else "")
+
+
+def _mask_config(config: dict[str, Any]) -> dict[str, Any]:
+    out = dict(config)
+    for k in _SECRET_KEYS:
+        if out.get(k):
+            out[k] = _mask_secret(out[k])
+    return out
+
+
+# ── C2/C5: 配置写入校验 ──
+
+_NUM_RANGES: dict[str, tuple[float, float]] = {
+    "JWT_EXPIRATION_HOURS": (1, 720),
+    "ONLINE_USER_TIMEOUT_SECONDS": (60, 86400),
+    "MAX_DOC_SIZE_MB": (1, 200),
+    "MAX_IMAGE_SIZE_MB": (1, 200),
+    "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
+    "MAX_ALLOWED_REQUESTS": (1, 10000),
+    "AI_REQUEST_TIMEOUT": (5, 900),
+}
+_BOOL_KEYS = {
+    "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
+    "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
+}
+_STR_LIMITS: dict[str, int] = {
+    "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
+    "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80,
+    "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
+    "dashscope_api_key": 200, "APPID": 128,
+}
+_STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
+                 "SUBJECTS": 40, "enabled_notification_types": 40}
+_TITLE_LIST_KEYS = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG"}
+_EXT_RE = None
+
+
+def _bad_ext(ext: Any) -> bool:
+    global _EXT_RE
+    if _EXT_RE is None:
+        import re as _re
+        _EXT_RE = _re.compile(r"^\.[A-Za-z0-9]{1,10}$")
+    return not (isinstance(ext, str) and _EXT_RE.match(ext))
+
+
+def _validate_title_config(key: str, value: Any) -> None:
+    """C5: 称号/徽章配置结构校验, 避免写坏后称号子系统全线报错"""
+    if not isinstance(value, list) or not value:
+        raise HTTPException(status_code=400, detail=f"{key} 必须是非空列表")
+    if key == "BADGE_CONFIG":
+        seen: set[str] = set()
+        for i, item in enumerate(value):
+            if not isinstance(item, dict) or not item.get("id") or not item.get("name"):
+                raise HTTPException(status_code=400, detail=f"{key} 第 {i + 1} 项需包含 id 与 name")
+            if str(item["id"]) in seen:
+                raise HTTPException(status_code=400, detail=f"{key} 存在重复 id: {item['id']}")
+            seen.add(str(item["id"]))
+        return
+    points_field = "min_points" if key == "TITLE_CONFIG" else "min_questions"
+    prev_level = -1
+    prev_points = -1
+    for i, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail=f"{key} 第 {i + 1} 项必须是对象")
+        for need in ("level", "name", points_field):
+            if need not in item:
+                raise HTTPException(status_code=400, detail=f"{key} 第 {i + 1} 项缺少字段 {need}")
+        try:
+            level = int(item["level"])
+            points = int(item[points_field])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{key} 第 {i + 1} 项的 level/{points_field} 必须是整数")
+        if not str(item["name"]).strip():
+            raise HTTPException(status_code=400, detail=f"{key} 第 {i + 1} 项 name 不能为空")
+        if points < 0:
+            raise HTTPException(status_code=400, detail=f"{key} 第 {i + 1} 项 {points_field} 不能为负")
+        if level <= prev_level or points < prev_points:
+            raise HTTPException(status_code=400,
+                                detail=f"{key} 第 {i + 1} 项的 level/{points_field} 必须逐级递增(不能低于上一档)")
+        prev_level, prev_points = level, points
+
+
+def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
+    """C2: 校验并规范化配置更新; 未知键忽略(与旧行为一致)"""
+    out: dict[str, Any] = {}
+    for key, value in updates.items():
+        if key in _NUM_RANGES:
+            lo, hi = _NUM_RANGES[key]
+            try:
+                num = int(float(value))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{key} 必须是数字（{lo}~{hi}）")
+            if not lo <= num <= hi:
+                raise HTTPException(status_code=400, detail=f"{key} 需在 {lo}~{hi} 之间，当前 {num}")
+            out[key] = num
+        elif key in _BOOL_KEYS:
+            if isinstance(value, bool):
+                out[key] = value
+            elif isinstance(value, str) and value.strip().lower() in ("true", "false", "1", "0"):
+                out[key] = value.strip().lower() in ("true", "1")
+            else:
+                raise HTTPException(status_code=400, detail=f"{key} 必须是布尔值")
+        elif key in _STR_LIMITS:
+            if not isinstance(value, str):
+                raise HTTPException(status_code=400, detail=f"{key} 必须是文本")
+            if len(value) > _STR_LIMITS[key]:
+                raise HTTPException(status_code=400, detail=f"{key} 最长 {_STR_LIMITS[key]} 字")
+            out[key] = value.strip() if key in ("dashscope_api_key", "APPID") else value
+        elif key in _STRLIST_KEYS:
+            if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
+                raise HTTPException(status_code=400, detail=f"{key} 必须是非空字符串列表")
+            if len(value) > _STRLIST_KEYS[key]:
+                raise HTTPException(status_code=400, detail=f"{key} 最多 {_STRLIST_KEYS[key]} 项")
+            if key.endswith("EXTENSIONS") and any(_bad_ext(x) for x in value):
+                raise HTTPException(status_code=400, detail=f"{key} 每一项需形如 .pdf（点号 + 1~10 位字母数字）")
+            out[key] = [x.strip() for x in value]
+        elif key == "ENABLE_AI_CHAT_FOR_ROLES":
+            if not isinstance(value, list) or not all(isinstance(x, int) and x in (0, 1, 2) for x in value):
+                raise HTTPException(status_code=400, detail="ENABLE_AI_CHAT_FOR_ROLES 需为角色编号列表(1=教师, 2=学生)")
+            out[key] = list(value)
+        elif key == "QUESTION_TYPES":
+            if not isinstance(value, list) or not value:
+                raise HTTPException(status_code=400, detail="QUESTION_TYPES 必须是非空列表")
+            for i, item in enumerate(value):
+                if not isinstance(item, dict) or not str(item.get("key", "")).strip() or not str(item.get("label", "")).strip():
+                    raise HTTPException(status_code=400, detail=f"QUESTION_TYPES 第 {i + 1} 项需包含 key 与 label")
+            out[key] = value
+        elif key in _TITLE_LIST_KEYS:
+            _validate_title_config(key, value)
+            out[key] = value
+    return out
 
 
 # ── API 端点 ──
@@ -124,10 +354,18 @@ def get_config_value(key: str, default: Any = None) -> Any:
 
 @router.get("")
 async def get_config(request: Request):
-    """获取全部系统配置（管理员）"""
+    """获取全部系统配置（管理员；C3: 密钥类字段掩码回显，不回传明文）"""
     user = get_current_user(request)
     require_admin(user)
-    return load_config()
+    return _mask_config(load_config())
+
+
+@router.get("/health", summary="配置文件健康状态（管理员）")
+async def get_config_health(request: Request):
+    """C1: 配置文件损坏/回退状态可见, 不再静默用默认值覆盖真实配置"""
+    user = get_current_user(request)
+    require_admin(user)
+    return config_health()
 
 
 class ConfigUpdate(BaseModel):
@@ -141,12 +379,21 @@ async def update_config(req: ConfigUpdate, request: Request):
     require_admin(user)
     current = load_config()
     # 允许更新已知的 key + 称号配置相关 key
-    _title_keys = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG", "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK"}
-    for key, value in req.config.items():
-        if key in DEFAULT_CONFIG or key in _title_keys:
-            current[key] = value
+    _title_keys = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG", "ENABLE_BADGES",
+                   "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK"}
+    known = {k: v for k, v in req.config.items() if k in DEFAULT_CONFIG or k in _title_keys}
+    # C3: 掩码回显的值代表"未修改"（前端表单会原样提交），空串才是主动清空
+    for k in _SECRET_KEYS:
+        if isinstance(known.get(k), str) and known[k].startswith(_MASK_PREFIX):
+            known.pop(k)
+    # C2: 类型/范围校验, 不合法整批拒绝(不做部分写入)
+    known = _validate_config_updates(known)
+    if not known:
+        # 没有实际变更(例如只提交了掩码密钥)时不写盘, 避免无意义的文件重写
+        return {"status": "ok", "config": _mask_config(current), "updated": []}
+    current.update(known)
     save_config(current)
-    logger.info(f"管理员 {user['username']} 更新了系统配置 ({len(req.config)} 项)")
+    logger.info(f"管理员 {user['username']} 更新了系统配置 ({len(known)} 项)")
 
     # 更新 API Key 后清除聊天模块的缓存，使新 key 即时生效
     if any(k in ('dashscope_api_key', 'deepseek_api_key') for k in req.config):
@@ -156,7 +403,8 @@ async def update_config(req: ConfigUpdate, request: Request):
         except Exception:
             pass
 
-    return {"status": "ok", "config": current}
+    # C3: 响应同样掩码, 不回传明文密钥
+    return {"status": "ok", "config": _mask_config(current), "updated": sorted(known.keys())}
 
 
 @router.get("/public")
@@ -203,8 +451,9 @@ async def get_apikey_status(request: Request):
 
 
 @router.get("/multimodal-status")
-async def get_multimodal_status():
-    """公开接口：获取多模态模型启用状态（无需管理员权限）"""
+async def get_multimodal_status(request: Request):
+    """获取多模态模型启用状态（需登录，无需管理员权限）"""
+    get_current_user(request)
     cfg = load_config()
     return {"multimodal_enabled": cfg.get("ENABLE_MULTIMODAL", False)}
 
@@ -231,9 +480,14 @@ async def update_title_config_api(req: ConfigUpdate, request: Request):
     user = get_current_user(request)
     require_admin(user)
     current = load_config()
-    for key, value in req.config.items():
-        if key in ("TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG", "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES"):
-            current[key] = value
+    allowed = {k: v for k, v in req.config.items()
+               if k in ("TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG",
+                        "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES")}
+    # C5: 结构校验后再落盘, 避免写坏称号/徽章配置把积分子系统整体打挂
+    allowed = _validate_config_updates(allowed)
+    if not allowed:
+        raise HTTPException(status_code=400, detail="没有可更新的称号配置项")
+    current.update(allowed)
     save_config(current)
     logger.info(f"管理员 {user['username']} 更新了称号配置")
     return {"status": "ok"}

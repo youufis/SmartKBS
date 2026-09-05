@@ -1,5 +1,7 @@
 # ── 密钥 / 配置 ──
 backend/system_config.json
+backend/system_config.json.bak
+backend/system_config.json.tmp
 .env
 **/.env
 
