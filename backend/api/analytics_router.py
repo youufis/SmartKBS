@@ -392,6 +392,9 @@ async def exam_analytics(exam_id: int, request: Request):
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
     exam = exam[0]
+    # E2c: 单次考试分析含全部学生成绩与逐题数据, 仅限创建者或管理员
+    from backend.api.export_router import _assert_can_view_exam
+    _assert_can_view_exam(user, dict(exam))
 
     attempts = q_execute_query(
         "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded') AND auto_graded = 1 AND answers IS NOT NULL AND answers != '' ORDER BY score DESC",
@@ -697,7 +700,9 @@ async def export_class_overview_docx(
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
 
-    query_teacher = teacher or username
+    # E1b: 与 /export/scores 同口径 —— 管理员可指定教师, 教师固定为自己
+    from backend.api.export_router import _resolve_export_teacher
+    query_teacher = _resolve_export_teacher(user, teacher)
     class_num = _extract_class_num(cls)
 
     student_count = execute_query(
@@ -992,6 +997,9 @@ async def export_exam_report_docx(
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
     exam = exam[0]
+    # E2b: 考试分析报告含每题正确答案, 仅限创建者或管理员
+    from backend.api.export_router import _assert_can_view_exam
+    _assert_can_view_exam(user, dict(exam))
 
     attempts = q_execute_query(
         "SELECT * FROM exam_attempts WHERE exam_id = ? AND status IN ('submitted', 'graded') AND auto_graded = 1 AND answers IS NOT NULL AND answers != '' ORDER BY score DESC",
