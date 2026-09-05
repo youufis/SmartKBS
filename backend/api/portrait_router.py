@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
@@ -53,6 +53,65 @@ def _get_portrait_dir(username: str) -> Path:
     portrait_dir = base / "portraits"
     portrait_dir.mkdir(parents=True, exist_ok=True)
     return portrait_dir
+
+
+def _user_grade_class(username: str) -> tuple[str, str]:
+    rows = execute_query("SELECT grade, class FROM users WHERE username=?", (username,))
+    if not rows:
+        return "", ""
+    return str(rows[0][0] or "").strip(), str(rows[0][1] or "").strip()
+
+
+def _norm_cls(v: str) -> str:
+    """班级归一化: '1' / '1班' / '01' -> '1'; '1,2,3' -> '123'(教师串, 仅用于非学生角色兜底)"""
+    import re as _re
+    digits = _re.sub(r"\D", "", str(v or ""))
+    return digits.lstrip("0") or digits
+
+
+def _can_view_portrait(owner: str, is_shared: int, share_scope: str, viewer: str, role: int) -> bool:
+    """R5: share_scope='class' 必须同年级且同班。
+
+    旧实现写的是 `viewer_info[0] != owner_info[0]`(比较年级), 导致"仅同班可见"
+    实际变成"整个年级 + 任意教师可见"。
+    """
+    if owner == viewer or role == 0:
+        return True
+    if not is_shared or (share_scope or "private") in ("", "private"):
+        return False
+    scope = share_scope or "public"
+    if scope == "public":
+        return True
+    if scope == "class":
+        if role == 1:
+            try:
+                from backend.permission_service import is_student_in_teacher_scope
+                return bool(is_student_in_teacher_scope(owner, viewer))
+            except Exception:
+                return False
+        og, oc = _user_grade_class(owner)
+        vg, vc = _user_grade_class(viewer)
+        return bool(og) and og == vg and bool(_norm_cls(vc)) and _norm_cls(oc) == _norm_cls(vc)
+    return False
+
+
+def _refund_points(username: str, points: int, reason: str) -> None:
+    """R2: 兑换型操作失败时冲正积分(写一条 refund 流水, 保持账目可追溯)"""
+    if points <= 0:
+        return
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        execute_insert_update(
+            """INSERT INTO activity_rewards
+               (student_username, activity_type, activity_id, activity_title, reward_type, points, reason, created_at)
+               VALUES (?, 'portrait', ?, '自我画像', 'refund', ?, ?, ?)""",
+            (username, now, points, f"{reason}(+{points})", now),
+        )
+        from backend.reward_engine import update_student_total
+        update_student_total(username)
+        logger.info(f"画像积分退还: {username} +{points} ({reason})")
+    except Exception as e:
+        logger.error(f"画像积分退还失败({username}, {points}): {e}")
 
 
 def _to_portrait_url(image_path: str, portrait_id: int = 0) -> str:
@@ -329,40 +388,20 @@ async def serve_portrait_image(portrait_id: int, request: Request):
     from fastapi.responses import FileResponse
 
     rows = execute_query(
-        "SELECT id, username, image_path, is_shared, share_scope FROM student_portraits WHERE id=?",
+        "SELECT id, username, image_path, is_shared, share_scope, status FROM student_portraits WHERE id=?",
         (portrait_id,),
     )
-    if not rows:
+    if not rows or (rows[0][5] or "active") != "active":
         raise HTTPException(status_code=404, detail="画像不存在")
 
     rec = rows[0]
-    owner = rec[1]
     image_path = rec[2] or ""
-    is_shared = rec[3] or 0
-    share_scope = rec[4] or "private"
-
     if not image_path or not os.path.exists(image_path):
         raise HTTPException(status_code=404, detail="图片文件不存在")
 
-    # 权限检查
     user = get_current_user(request)
-    viewer = user["username"]
-
-    if viewer != owner:
-        if not is_shared or share_scope == "private":
-            raise HTTPException(status_code=403, detail="无权查看该画像")
-        if share_scope == "class":
-            viewer_info = execute_query(
-                "SELECT grade, class FROM users WHERE username=?", (viewer,)
-            )
-            owner_info = execute_query(
-                "SELECT grade, class FROM users WHERE username=?", (owner,)
-            )
-            if viewer_info and owner_info:
-                if viewer_info[0] != owner_info[0]:
-                    raise HTTPException(status_code=403, detail="仅同班同学可查看")
-            else:
-                raise HTTPException(status_code=403, detail="无权查看该画像")
+    if not _can_view_portrait(rec[1], rec[3] or 0, rec[4] or "private", user["username"], user.get("role", 2)):
+        raise HTTPException(status_code=403, detail="无权查看该画像")
 
     return FileResponse(image_path)
 
@@ -446,25 +485,30 @@ async def generate_portrait(request: Request, body: GenerateRequest):
 
     week_start, week_end = _get_week_range()
 
+    # R2: 先确认 AI 可用, 避免"扣了分却什么都生成不出来"
+    api_key = _get_api_key()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 AI 服务 Key，暂时无法生成画像，请联系管理员")
+
     # 检查本周是否已生成
     existing = execute_query(
         "SELECT id FROM student_portraits WHERE username=? AND created_date BETWEEN ? AND ?",
         (username, week_start, week_end),
     )
+    charged = 0
     if existing:
         if body.use_points:
-            # 尝试用 100 积分兑换额外生成机会
+            # 用 100 积分兑换本周额外生成机会
             from backend.reward_engine import deduct_points, get_student_total
             total = get_student_total(username)
             if total < 100:
                 raise HTTPException(status_code=400, detail=f"积分不足，当前仅有 {total} 积分，需要 100 积分才能兑换额外生成机会 📉")
-            deduct_points(username, "消耗100积分兑换画像生成", 100)
-            logger.info(f"学生 {username} 消耗 100 积分兑换了本周额外画像生成")
+            charged = deduct_points(username, "消耗100积分兑换画像生成", 100)
+            if charged <= 0:
+                raise HTTPException(status_code=400, detail="积分扣除未成功（可用积分不足），请刷新后重试")
+            logger.info(f"学生 {username} 消耗 {charged} 积分兑换了本周额外画像生成")
         else:
             raise HTTPException(status_code=400, detail="本周画像已生成，消耗 100 积分可再生成一次 ✨")
-
-    # 检查 API Key
-    api_key = _get_api_key()
 
     # 确定风格
     style = body.style or "random"
@@ -474,94 +518,144 @@ async def generate_portrait(request: Request, body: GenerateRequest):
     # 当前日期字符串
     today_str = datetime.now().strftime("%Y-%m-%d")
 
-    # 1. 聚合用户数据
-    profile = get_student_profile(username)
-    profile["username"] = username
-    profile["role"] = user.get("role", 2)
-    role_names = {0: "管理员", 1: "教师", 2: "学生"}
-    profile["role_name"] = role_names.get(profile["role"], "用户")
-
-    # 1b. 补充教师/管理员特有数据
-    _enrich_role_data(profile)
-
-    # 2. 构建生图 Prompt（直接用于通义万相，无需 LLM 二次处理）
-    logger.info(f"构建生图 prompt: username={username}, role={profile['role_name']}, style={style}")
-    img_prompt = build_portrait_image_prompt(profile, style)
-
-    # 3. LLM 生成创意寄语
-    logger.info(f"开始生成寄语: username={username}")
     try:
-        comment_prompt = apply_skills(build_portrait_comment_prompt(profile, style), "portrait")
-        comment = await call_ai_sync_with_timeout(
-            comment_prompt,
-            api_key,
-            timeout=150,
-        )
-        comment = comment.strip().strip('"\'')
-    except Exception as e:
-        logger.error(f"生成寄语失败: {e}")
-        role_name = profile.get('role_name', '用户')
-        fallbacks = {
-            '教师': '三尺讲台育桃李，一支粉笔写春秋。今日的你依然在发光发热 🌟',
-            '管理员': '运筹帷幄之中，决胜千里之外。平台因你而精彩 🚀',
-        }
-        comment = fallbacks.get(role_name, '今日份的努力，是明日惊喜的铺垫！继续加油哦 🌟')
+        # 1. 聚合用户数据
+        profile = get_student_profile(username)
+        profile["username"] = username
+        profile["role"] = user.get("role", 2)
+        role_names = {0: "管理员", 1: "教师", 2: "学生"}
+        profile["role_name"] = role_names.get(profile["role"], "用户")
 
-    # 4. 通义万相生图
-    logger.info(f"开始生成图片: username={username}")
-    save_dir = _get_portrait_dir(username)
-    style_key = style
-    filename = f"{today_str}_{style_key}"
+        # 1b. 补充教师/管理员特有数据
+        _enrich_role_data(profile)
 
-    try:
-        image_path = await generate_and_save_image(
-            prompt=img_prompt,
-            save_dir=str(save_dir),
-            filename=filename,
-        )
-        if not image_path:
-            logger.warning(f"生图失败，使用占位: username={username}")
+        # 2. 构建生图 Prompt（直接用于通义万相，无需 LLM 二次处理）
+        logger.info(f"构建生图 prompt: username={username}, role={profile['role_name']}, style={style}")
+        img_prompt = build_portrait_image_prompt(profile, style)
+
+        # 3. LLM 生成创意寄语（失败有兜底文案, 不影响出图）
+        logger.info(f"开始生成寄语: username={username}")
+        try:
+            comment_prompt = apply_skills(build_portrait_comment_prompt(profile, style), "portrait")
+            comment = await call_ai_sync_with_timeout(comment_prompt, api_key, timeout=150)
+            comment = comment.strip().strip('"\'')
+            comment_ok = True
+        except Exception as e:
+            logger.error(f"生成寄语失败: {e}")
+            role_name = profile.get('role_name', '用户')
+            fallbacks = {
+                '教师': '三尺讲台育桃李，一支粉笔写春秋。今日的你依然在发光发热 🌟',
+                '管理员': '运筹帷幄之中，决胜千里之外。平台因你而精彩 🚀',
+            }
+            comment = fallbacks.get(role_name, '今日份的努力，是明日惊喜的铺垫！继续加油哦 🌟')
+            comment_ok = False
+
+        # 4. 通义万相生图
+        logger.info(f"开始生成图片: username={username}")
+        save_dir = _get_portrait_dir(username)
+        style_key = style
+        filename = f"{today_str}_{style_key}"
+        img_err = ""
+        try:
+            image_path = await generate_and_save_image(
+                prompt=img_prompt,
+                save_dir=str(save_dir),
+                filename=filename,
+            )
+            if not image_path:
+                logger.warning(f"生图失败: username={username}")
+                img_err = "配图服务未返回图片"
+                image_path = ""
+        except Exception as e:
+            logger.error(f"生图异常: {e}")
+            img_err = str(e)[:120]
             image_path = ""
+
+        # 5. 保存到数据库（R2: 同一天再次生成 = 覆盖当天记录, 不再撞 UNIQUE(username, created_date)）
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        old_row = execute_query(
+            "SELECT id, image_path FROM student_portraits WHERE username=? AND created_date=?",
+            (username, today_str),
+        )
+        if old_row:
+            keep_path = old_row[0][1] if (image_path == "" and old_row[0][1]) else image_path
+            execute_insert_update(
+                """UPDATE student_portraits
+                   SET style=?, image_path=?, ai_comment=?, prompt=?, generated_at=?, status='active'
+                   WHERE id=?""",
+                (style_key, keep_path, comment, img_prompt, now_str, old_row[0][0]),
+            )
+            image_path = keep_path
+        else:
+            execute_insert_update(
+                """INSERT INTO student_portraits
+                   (username, created_date, style, image_path, ai_comment, prompt, generated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (username, today_str, style_key, image_path, comment, img_prompt, now_str),
+            )
+    except HTTPException:
+        if charged:
+            _refund_points(username, charged, "画像生成中断")
+        raise
     except Exception as e:
-        logger.error(f"生图异常: {e}")
-        image_path = ""
+        # R2: 任何失败都冲正积分, 绝不白扣学生积分
+        if charged:
+            _refund_points(username, charged, "画像生成失败")
+        logger.error(f"画像生成失败({username}): {e}")
+        raise HTTPException(status_code=502, detail=f"画像生成失败，已退还 {charged} 积分，请稍后再试")
 
-    # 5. 保存到数据库
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    execute_insert_update(
-        """INSERT INTO student_portraits
-           (username, created_date, style, image_path, ai_comment, prompt, generated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (username, today_str, style_key, image_path, comment, img_prompt, now_str),
-    )
-
-    # 重新查询
+    # 重新查询本次结果(优先当天那条: 同日再生成会覆盖当天记录, 周内有多个历史画像时不能取到旧的那条)
     rows = execute_query(
         """SELECT id, username, created_date, style, image_path, ai_comment,
                   prompt, generated_at, view_count, is_shared, share_scope, like_count
-           FROM student_portraits WHERE username=? AND created_date BETWEEN ? AND ?""",
+           FROM student_portraits WHERE username=? AND created_date=?""",
+        (username, today_str),
+    ) or execute_query(
+        """SELECT id, username, created_date, style, image_path, ai_comment,
+                  prompt, generated_at, view_count, is_shared, share_scope, like_count
+           FROM student_portraits WHERE username=? AND created_date BETWEEN ? AND ?
+           ORDER BY created_date DESC""",
         (username, week_start, week_end),
     )
     portrait = _format_portrait_row(rows[0]) if rows else {}
     portrait["liked"] = False
 
+    # R11: 不再一律高喊"成功", 如实反映配图/寄语状态
+    #      付费兑换却本次没出图 → 无论库里是否还留着旧图, 都退还本次积分
+    if charged and img_err:
+        _refund_points(username, charged, "本次配图未产出")
+        message = f"本次未生成新配图，{charged} 积分已退还 🙏（{img_err}）"
+        charged = 0
+    elif not portrait.get("image_path"):
+        if charged:
+            _refund_points(username, charged, "配图未产出")
+            message = f"配图未生成，本次积分已退还 🙏（{img_err or '请稍后再试'}）"
+        else:
+            message = "寄语已生成，但配图未成功，稍后可再试一次 ✨"
+    elif not comment_ok:
+        message = "画像已生成（寄语使用了默认文案）🎨"
+    else:
+        message = "今日画像生成成功 🎉"
+
     return {
-        "message": "今日画像生成成功 🎉",
+        "message": message,
         "portrait": portrait,
+        "charged_points": charged,
     }
 
 
 @router.get("/list")
-async def list_portraits(request: Request):
-    """获取用户的所有画像"""
+async def list_portraits(request: Request, include_deleted: bool = Query(False)):
+    """获取用户的所有画像(默认只列有效记录; include_deleted 可回看已删除的寄语)"""
     user = get_current_user(request)
     username = user["username"]
 
+    status_sql = "" if include_deleted else "AND status='active'"
     rows = execute_query(
-        """SELECT id, username, created_date, style, image_path, ai_comment,
+        f"""SELECT id, username, created_date, style, image_path, ai_comment,
                   prompt, generated_at, view_count, is_shared, share_scope, like_count
            FROM student_portraits
-           WHERE username=? AND status='active'
+           WHERE username=? {status_sql}
            ORDER BY created_date DESC""",
         (username,),
     )
@@ -584,17 +678,19 @@ async def get_portrait_detail(portrait_id: int, request: Request):
 
     rows = execute_query(
         """SELECT id, username, created_date, style, image_path, ai_comment,
-                  prompt, generated_at, view_count, is_shared, share_scope, like_count
+                  prompt, generated_at, view_count, is_shared, share_scope, like_count, status
            FROM student_portraits WHERE id=?""",
         (portrait_id,),
     )
-    if not rows:
+    if not rows or (rows[0][12] or "active") != "active":
         raise HTTPException(status_code=404, detail="画像不存在")
 
     portrait = _format_portrait_row(rows[0])
 
-    # 权限：只能看自己的或公开的
-    if portrait["username"] != username and not (portrait["is_shared"] and portrait["share_scope"] in ("public", "class")) and not is_admin(username):
+    # R5: 统一可见性判断(同班必须真的同班)
+    if not _can_view_portrait(portrait["username"], portrait.get("is_shared") or 0,
+                              portrait.get("share_scope") or "private", username,
+                              user.get("role", 2)):
         raise HTTPException(status_code=403, detail="无权查看该画像")
 
     # 增加浏览次数
@@ -669,11 +765,15 @@ async def toggle_like(portrait_id: int, request: Request):
     username = user["username"]
 
     rows = execute_query(
-        "SELECT id FROM student_portraits WHERE id=?",
+        "SELECT id, username, is_shared, share_scope, status FROM student_portraits WHERE id=?",
         (portrait_id,),
     )
-    if not rows:
+    if not rows or (rows[0][4] or "active") != "active":
         raise HTTPException(status_code=404, detail="画像不存在")
+    # R9: 私有/已删除画像不可被点赞(否则 like_count 可被任意刷)
+    if not _can_view_portrait(rows[0][1], rows[0][2] or 0, rows[0][3] or "private",
+                              username, user.get("role", 2)):
+        raise HTTPException(status_code=403, detail="该画像未公开，无法点赞")
 
     # 检查是否已点赞
     existing = execute_query(
@@ -857,4 +957,4 @@ async def delete_portrait(portrait_id: int, request: Request):
         (portrait_id,),
     )
 
-    return {"message": "画像已删除，今日无法再次生成"}
+    return {"message": "画像已删除并取消分享；本周生成额度已使用，删除后本周不能再免费生成"}

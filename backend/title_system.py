@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backend.database import execute_query, execute_insert_update
+from backend.database import execute_query, execute_query as _db_query, execute_insert_update
 from backend.logger import logger
 
 # ── 配置文件路径 ──
@@ -386,199 +386,193 @@ def get_student_subject_titles(student_username: str) -> list[dict[str, Any]]:
 # ── 成就徽章计算 ──
 
 
-def check_and_unlock_badges(student_username: str) -> list[dict[str, Any]]:
-    """检测学生所有可解锁的徽章，并自动解锁
+def _login_streak_from_dates(dates: list[str]) -> int:
+    """从日期串(YYYY-MM-DD, 建议倒序)算连续登录天数"""
+    if not dates:
+        return 0
+    uniq = sorted({d[:10] for d in dates if d}, reverse=True)
+    try:
+        from datetime import datetime as _dt
+        streak = 1
+        for i in range(1, len(uniq)):
+            d1 = _dt.strptime(uniq[i - 1], "%Y-%m-%d")
+            d2 = _dt.strptime(uniq[i], "%Y-%m-%d")
+            if (d1 - d2).days == 1:
+                streak += 1
+            else:
+                break
+        return streak
+    except Exception:
+        return 0
 
-    Returns:
-        新解锁的徽章列表（空列表表示没有新徽章）
+
+def _collect_badge_facts(student_username: str) -> dict[str, Any]:
+    """R10: 一次性把徽章判定要用到的事实全部查出来。
+
+    旧实现是"每枚徽章各查一遍"(徽章数 × 若干 SQL), 而它挂在积分变动路径上,
+    学生每得一次分就可能触发几十条查询。改成一份 facts 复用后只剩个位数查询。
+    """
+    facts: dict[str, Any] = {
+        "reward_rows": 0, "activity_types": 0, "total_points": 0,
+        "full_score_exams": 0, "total_questions": 0, "submitted_exams": 0,
+        "chat_count": 0, "discussion_count": 0,
+        "rollcall_correct": 0, "rollcall_total": 0,
+        "login_streak": 0, "month_login_days": 0,
+    }
+    try:
+        row = _db_query(
+            "SELECT COUNT(*), COUNT(DISTINCT activity_type), COALESCE(SUM(points),0) FROM activity_rewards WHERE student_username=?",
+            (student_username,),
+        )
+        if row and row[0]:
+            facts["reward_rows"] = int(row[0][0] or 0)
+            facts["activity_types"] = int(row[0][1] or 0)
+            facts["total_points"] = int(row[0][2] or 0)
+    except Exception as e:
+        logger.warning(f"[badge] 奖励统计失败({student_username}): {e}")
+
+    try:
+        rows = _db_query(
+            "SELECT DISTINCT substr(login_time, 1, 10) FROM login_logs WHERE username=? ORDER BY 1 DESC LIMIT 120",
+            (student_username,),
+        ) or []
+        dates = [r[0] for r in rows if r[0]]
+        facts["login_streak"] = _login_streak_from_dates(dates)
+        month = datetime.now().strftime("%Y-%m")
+        # 注释说的是"当月至少 20 天", 旧实现数的是登录次数(同一秒不同时间戳也算多次), 口径修正为按天
+        facts["month_login_days"] = len({d for d in dates if d.startswith(month)})
+    except Exception as e:
+        logger.warning(f"[badge] 登录统计失败({student_username}): {e}")
+
+    try:
+        from backend.question_db import execute_query as q_execute
+        rows = q_execute(
+            """SELECT
+                   COALESCE(SUM(CASE WHEN score = total_score AND total_score > 0 THEN 1 ELSE 0 END), 0),
+                   COUNT(*)
+               FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')""",
+            (student_username,),
+        )
+        if rows:
+            facts["full_score_exams"] = int(rows[0]["COALESCE(SUM(CASE WHEN score = total_score AND total_score > 0 THEN 1 ELSE 0 END), 0)"] if isinstance(rows[0], dict) else rows[0][0])
+            facts["submitted_exams"] = int(rows[0]["COUNT(*)"] if isinstance(rows[0], dict) else rows[0][1])
+        rows = q_execute(
+            """SELECT (SELECT COUNT(*) FROM exam_attempts WHERE student_username=?) +
+                       (SELECT COUNT(*) FROM practice_attempts WHERE student_username=?) AS total_questions""",
+            (student_username, student_username),
+        )
+        if rows:
+            v = rows[0]["total_questions"] if isinstance(rows[0], dict) else rows[0][0]
+            facts["total_questions"] = int(v or 0)
+    except Exception as e:
+        logger.warning(f"[badge] 答题统计失败({student_username}): {e}")
+
+    try:
+        row = _db_query("SELECT COUNT(*) FROM conversations WHERE username=?", (student_username,))
+        facts["chat_count"] = int(row[0][0]) if row and row[0] else 0
+        row = _db_query(
+            """SELECT COUNT(*) FROM discussion_groups dg
+               JOIN discussion_members dm ON dg.id = dm.group_id WHERE dm.username=?""",
+            (student_username,),
+        )
+        facts["discussion_count"] = int(row[0][0]) if row and row[0] else 0
+        # rollcall_history.student_name 存的是姓名而非学号, 旧写法用 username 匹配 → 徽章永不解锁
+        row = _db_query(
+            """SELECT COALESCE(SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END), 0), COUNT(*)
+               FROM rollcall_history
+               WHERE student_name = ? OR student_name = COALESCE((SELECT name FROM users WHERE username=?), '')""",
+            (student_username, student_username),
+        )
+        if row and row[0]:
+            facts["rollcall_correct"] = int(row[0][0] or 0)
+            facts["rollcall_total"] = int(row[0][1] or 0)
+    except Exception as e:
+        logger.warning(f"[badge] 对话/讨论/签到统计失败({student_username}): {e}")
+
+    return facts
+
+
+def check_and_unlock_badges(student_username: str, only_badge_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    """检测学生可解锁的徽章并自动解锁(R10: 已解锁集合一次查出 + 事实一次查全)。
+
+    only_badge_ids: 增量检测时只判定相关徽章, None 表示全量。
     """
     badges = _load_badge_config()
-    newly_unlocked = []
+    if only_badge_ids:
+        want = set(only_badge_ids)
+        badges = [b for b in badges if str(b.get("id")) in want]
+    if not badges:
+        return []
 
-    for badge in badges:
-        # 检查是否已解锁
-        existing = execute_query(
-            "SELECT id FROM student_badges WHERE student_username=? AND badge_id=?",
-            (student_username, badge["id"]),
-        )
-        if existing:
+    try:
+        unlocked_rows = execute_query(
+            "SELECT badge_id FROM student_badges WHERE student_username=?", (student_username,)
+        ) or []
+        unlocked = {r[0] for r in unlocked_rows}
+    except Exception:
+        unlocked = set()
+    todo = [b for b in badges if str(b.get("id")) not in unlocked]
+    if not todo:
+        return []
+
+    facts = _collect_badge_facts(student_username)
+    newly_unlocked: list[dict[str, Any]] = []
+    for badge in todo:
+        try:
+            hit = _check_badge_condition(student_username, badge, facts)
+        except Exception as e:
+            logger.warning(f"[badge] 条件判定异常 {badge.get('id')}: {e}")
+            hit = False
+        if not hit:
             continue
-
-        # 检测条件
-        unlocked = _check_badge_condition(student_username, badge)
-        if unlocked:
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            execute_insert_update(
-                "INSERT INTO student_badges (student_username, badge_id, badge_name, unlocked_at) VALUES (?, ?, ?, ?)",
-                (student_username, badge["id"], badge["name"], now),
-            )
-            newly_unlocked.append(badge)
-
-            # 写入升级历史
-            execute_insert_update(
-                """INSERT INTO title_upgrade_history
-                   (student_username, old_title, new_title, title_type, created_at)
-                   VALUES (?, '', ?, 'badge', ?)""",
-                (student_username, badge["name"], now),
-            )
-
-            # 创建通知
-            _create_badge_notification(student_username, badge)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        execute_insert_update(
+            "INSERT OR IGNORE INTO student_badges (student_username, badge_id, badge_name, unlocked_at) VALUES (?, ?, ?, ?)",
+            (student_username, badge["id"], badge["name"], now),
+        )
+        execute_insert_update(
+            """INSERT INTO title_upgrade_history
+               (student_username, old_title, new_title, title_type, created_at)
+               VALUES (?, '', ?, 'badge', ?)""",
+            (student_username, badge["name"], now),
+        )
+        _create_badge_notification(student_username, badge)
+        newly_unlocked.append(badge)
 
     return newly_unlocked
 
 
-def _check_badge_condition(student_username: str, badge: dict[str, Any]) -> bool:
-    """检查单个徽章条件是否满足"""
+def _check_badge_condition(student_username: str, badge: dict[str, Any], facts: dict[str, Any] | None = None) -> bool:
+    """检查单个徽章条件(全部读 facts, 不再各自查库)"""
+    if facts is None:
+        facts = _collect_badge_facts(student_username)
     ctype = badge.get("condition_type", "")
     cvalue = badge.get("condition_value")
 
     if ctype == "first_points":
-        try:
-            row = execute_query(
-                "SELECT COUNT(*) FROM activity_rewards WHERE student_username=?",
-                (student_username,),
-            )
-            return bool(row and row[0][0] > 0)
-        except Exception:
-            return False
-
+        return facts["reward_rows"] > 0
     if ctype == "full_score":
-        # 从 question_db 查询满分
-        try:
-            from backend.question_db import execute_query as q_execute
-            rows = q_execute(
-                """SELECT COUNT(*) FROM exam_attempts
-                   WHERE student_username=? AND score = total_score AND total_score > 0""",
-                (student_username,),
-            )
-            return bool(rows and rows[0]["COUNT(*)"] > 0)
-        except Exception:
-            return False
-
+        return facts["full_score_exams"] > 0
     if ctype == "login_streak":
-        # 查询连续登录天数（简化：看 login_logs 最近连续记录）
-        try:
-            rows = execute_query(
-                """SELECT DISTINCT login_time FROM login_logs
-                   WHERE username=? ORDER BY login_time DESC LIMIT 30""",
-                (student_username,),
-            )
-            if not rows:
-                return False
-            dates = sorted(set(r[0][:10] for r in rows if r[0]), reverse=True)
-            streak = 1
-            from datetime import datetime, timedelta
-            for i in range(1, len(dates)):
-                d1 = datetime.strptime(dates[i - 1], "%Y-%m-%d")
-                d2 = datetime.strptime(dates[i], "%Y-%m-%d")
-                if (d1 - d2).days == 1:
-                    streak += 1
-                else:
-                    break
-            return streak >= (cvalue or 7)
-        except Exception:
-            return False
-
+        return facts["login_streak"] >= (cvalue or 7)
     if ctype == "total_questions":
-        try:
-            from backend.question_db import execute_query as q_execute
-            rows = q_execute(
-                """SELECT COALESCE(SUM(question_count), 0) AS total FROM (
-                       SELECT COUNT(*) as question_count FROM exam_attempts WHERE student_username=?
-                       UNION ALL
-                       SELECT COUNT(*) FROM practice_attempts WHERE student_username=?
-                   )""",
-                (student_username, student_username),
-            )
-            total = rows[0]["total"] if rows else 0
-            return total >= (cvalue or 100)
-        except Exception:
-            return False
-
+        return facts["total_questions"] >= (cvalue or 100)
     if ctype == "all_activity_types":
-        try:
-            rows = execute_query(
-                "SELECT COUNT(DISTINCT activity_type) FROM activity_rewards WHERE student_username=?",
-                (student_username,),
-            )
-            total_types = len(set(t["activity_type"] for t in _get_all_activity_types()))
-            return bool(rows and rows[0][0] >= total_types)
-        except Exception:
-            return False
-
+        total_types = len({t.get("activity_type") for t in _get_all_activity_types() if t.get("activity_type")})
+        return total_types > 0 and facts["activity_types"] >= total_types
     if ctype == "chat_count":
-        try:
-            rows = execute_query(
-                "SELECT COUNT(*) FROM conversations WHERE username=?",
-                (student_username,),
-            )
-            return bool(rows and rows[0][0] >= (cvalue or 50))
-        except Exception:
-            return False
-
+        return facts["chat_count"] >= (cvalue or 50)
     if ctype == "discussion_count":
-        try:
-            rows = execute_query(
-                """SELECT COUNT(*) FROM discussion_groups dg
-                   JOIN discussion_members dm ON dg.id = dm.group_id
-                   WHERE dm.username=?""",
-                (student_username,),
-            )
-            return bool(rows and rows[0][0] >= (cvalue or 10))
-        except Exception:
-            return False
-
+        return facts["discussion_count"] >= (cvalue or 10)
     if ctype == "punctual_3":
-        try:
-            from backend.question_db import execute_query as q_execute
-            rows = q_execute(
-                """SELECT submitted_at FROM exam_attempts
-                   WHERE student_username=? AND status IN ('submitted', 'graded')
-                   ORDER BY submitted_at DESC LIMIT 3""",
-                (student_username,),
-            )
-            if not rows or len(rows) < 3:
-                return False
-            # 检查最近 3 次考试是否都在截止时间前提交
-            # 简化处理：只要最近 3 次都有提交记录就算
-            return True
-        except Exception:
-            return False
-
+        return facts["submitted_exams"] >= 3
     if ctype == "rollcall_accuracy":
-        try:
-            rows = execute_query(
-                """SELECT 
-                       COALESCE(SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END), 0) as correct,
-                       COUNT(*) as total
-                   FROM rollcall_history WHERE student_name=?""",
-                (student_username,),
-            )
-            if rows:
-                total = rows[0][1] if len(rows[0]) > 1 else 0
-                correct = rows[0][0] if len(rows[0]) > 0 else 0
-                if total >= 10 and total > 0:
-                    return (correct / total * 100) >= (cvalue or 90)
+        total = facts["rollcall_total"]
+        if total < 10:
             return False
-        except Exception:
-            return False
-
+        return (facts["rollcall_correct"] / total * 100) >= (cvalue or 90)
     if ctype == "monthly_full_attendance":
-        # 当月全部签到（简化：有签到记录即为当月签到）
-        try:
-            from datetime import datetime
-            month = datetime.now().strftime("%Y-%m")
-            rows = execute_query(
-                """SELECT COUNT(DISTINCT login_time) FROM login_logs
-                   WHERE username=? AND login_time LIKE ?""",
-                (student_username, f"{month}%"),
-            )
-            # 当月至少有 20 天登录（按上课日估算）
-            return bool(rows and rows[0][0] >= 20)
-        except Exception:
-            return False
-
+        return facts["month_login_days"] >= 20
     return False
 
 

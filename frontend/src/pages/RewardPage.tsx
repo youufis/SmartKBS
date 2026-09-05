@@ -415,12 +415,15 @@ const RewardPage: React.FC = () => {
       ])
       setRanking(Array.isArray(rankRes.data) ? rankRes.data : [])
       setStats(statsRes.data || null)
-    } catch {
-      // 忽略
+    } catch (err: any) {
+      // R3/R8: 后端会按任教范围拦截(403), 必须显示原因, 否则界面看起来像坏了
+      setRanking([])
+      setStats(null)
+      message.warning(err?.response?.data?.detail || t('loadFailed'))
     } finally {
       setRankingLoading(false)
     }
-  }, [selectedGrade, selectedClass])
+  }, [selectedGrade, selectedClass, t])
 
   useEffect(() => {
     if (!isTeacherOrAdmin || !selectedGrade) return
@@ -438,7 +441,13 @@ const RewardPage: React.FC = () => {
           setRanking(Array.isArray(rankRes.data) ? rankRes.data : [])
           setStats(statsRes.data || null)
         }
-      } catch { /* 忽略 */ }
+      } catch (err: any) {
+        if (!ignore) {
+          setRanking([])
+          setStats(null)
+          message.warning(err?.response?.data?.detail || t('loadFailed'))
+        }
+      }
       if (!ignore) setRankingLoading(false)
     }
     fetchData()

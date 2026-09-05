@@ -962,6 +962,7 @@ def init_db():
             )""")
             try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ar_student ON activity_rewards(student_username)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_tuh_student ON title_upgrade_history(student_username, created_at)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ar_activity ON activity_rewards(activity_type, activity_id)")
                 c.execute("CREATE INDEX IF NOT EXISTS idx_ar_created ON activity_rewards(created_at)")
             except sqlite3.OperationalError:

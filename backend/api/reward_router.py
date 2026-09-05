@@ -27,8 +27,39 @@ from backend.title_system import (
     get_subject_list,
 )
 from backend.database import execute_query
+from backend.permission_service import (
+    get_grade_by_name,
+    get_teacher_classes,
+    get_teacher_grades,
+    is_student_in_teacher_scope,
+)
 
 router = APIRouter()
+
+
+def _class_nums(username: str, grade: str) -> list[str]:
+    """教师在指定年级任教的班级编号(如 ['1','2'])，年级不存在或未任教时返回空列表"""
+    gi = get_grade_by_name(grade)
+    if not gi:
+        return []
+    out: list[str] = []
+    for c in get_teacher_classes(username, gi["id"]) or []:
+        name = str(c.get("name") or "").replace("班", "").strip()
+        if name:
+            out.append(name)
+    return out
+
+
+def _assert_student_visible(user: dict, target: str, what: str = "数据") -> None:
+    """R3: 教师只能查看自己任教范围内学生的积分/流水/称号/档案"""
+    role = user.get("role", 2)
+    username = user.get("username", "")
+    if role == 0 or target == username:
+        return
+    if role != 1:
+        raise HTTPException(status_code=403, detail="无权查看他人数据")
+    if not is_student_in_teacher_scope(target, username):
+        raise HTTPException(status_code=403, detail=f"只能查看本班学生的{what}")
 
 
 @router.get("/rewards/my-points", summary="获取我的积分")
@@ -48,7 +79,7 @@ async def my_points(request: Request):
 @router.get("/rewards/my-history", summary="获取我的积分流水")
 async def my_reward_history(
     request: Request,
-    limit: int = Query(50, description="返回条数"),
+    limit: int = Query(50, ge=1, le=500, description="返回条数"),
     activity_type: str = Query("", description="筛选活动类型"),
 ):
     """获取当前学生的积分流水"""
@@ -68,7 +99,7 @@ async def ranking(
     request: Request,
     grade: str = Query(..., description="年级"),
     class_name: str = Query("", description="班级，空表示全年级"),
-    teacher: str = Query("", description="教师用户名，用于权限过滤"),
+    teacher: str = Query("", description="仅管理员生效：以指定教师视角过滤"),
 ):
     """获取班级或年级的积分排名（教师只能看自己任教班级）"""
     user = get_current_user(request)
@@ -77,18 +108,19 @@ async def ranking(
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看排名")
 
-    # 教师权限过滤
-    allowed_classes = None
+    allowed_classes: list[str] | None = None   # None = 管理员不过滤
+    # R4: teacher 参数只有管理员可用, 教师一律按自己的任教范围过滤
+    #      (旧写法 teacher=root 就能借管理员视角看任意班级)
     if role == 1:
-        # 教师只能看自己任教的班级
-        t = teacher or user["username"]
-        grade_info = get_grade_by_name(grade)
-        allowed = []
-        if grade_info:
-            classes = get_teacher_classes(t, grade_info["id"])
-            allowed = [c["name"].replace("班", "") for c in classes]
-        if allowed:
-            allowed_classes = allowed
+        allowed_classes = _class_nums(user["username"], grade)
+        if not allowed_classes:
+            raise HTTPException(status_code=403, detail="你在该年级没有任教班级，无权查看排名")
+        if class_name:
+            import re as _re
+            nums = _re.findall(r"\d+", class_name)
+            cls_num = nums[0] if nums else class_name
+            if cls_num not in allowed_classes:
+                raise HTTPException(status_code=403, detail="只能查看自己任教班级的排名")
 
     ranking_list = get_class_ranking(grade, class_name, allowed_classes)
 
@@ -111,6 +143,20 @@ async def statistics(
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看统计")
 
+    # R8: 教师必须指定任教年级(旧实现任意 grade/class 都能查全校统计)
+    if role == 1:
+        if not grade:
+            raise HTTPException(status_code=403, detail="请指定年级：教师只能查看任教年级的统计")
+        own = {str(g.get("name") or "").strip() for g in get_teacher_grades(user["username"])}
+        if grade not in own:
+            raise HTTPException(status_code=403, detail="只能查看任教年级的统计")
+        if class_name:
+            import re as _re
+            nums = _re.findall(r"\d+", class_name)
+            cls_num = nums[0] if nums else class_name
+            if cls_num not in _class_nums(user["username"], grade):
+                raise HTTPException(status_code=403, detail="只能查看自己任教班级的统计")
+
     stats = get_activity_statistics(grade=grade, class_name=class_name)
     return stats
 
@@ -131,6 +177,7 @@ async def student_points(student_username: str, request: Request):
     if not rows:
         raise HTTPException(status_code=404, detail="学生不存在")
 
+    _assert_student_visible(user, student_username, "积分数据")
     total = get_student_total(student_username)
     history = get_student_rewards(student_username, limit=100)
     title_info = get_full_title_info(student_username, total)
@@ -177,7 +224,7 @@ async def title_config(request: Request):
 @router.get("/rewards/title-history", summary="获取称号升级历史")
 async def title_history(
     request: Request,
-    limit: int = Query(20, description="返回条数"),
+    limit: int = Query(20, ge=1, le=200, description="返回条数"),
     student_username: str = Query("", description="指定学生（教师专用）"),
 ):
     """获取称号/徽章升级历史"""
@@ -187,6 +234,7 @@ async def title_history(
     if student_username:
         if role not in (0, 1):
             raise HTTPException(status_code=403, detail="仅教师和管理员可查询他人记录")
+        _assert_student_visible(user, student_username, "称号升级记录")   # R3
         username = student_username
     else:
         username = user["username"]

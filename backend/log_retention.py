@@ -194,11 +194,49 @@ def _check_question_references() -> None:
         logger.warning(f"[log_retention] 引用一致性巡检失败: {e}")
 
 
+def _reconcile_points_and_badges() -> None:
+    """R6/R10 日常维护:
+    - student_total_points 与 activity_rewards 对账(删活动会删奖励流水但没人重算汇总, 排行榜会长期虚高)
+    - 对近 7 天有积分变动的学生做一次全量徽章检测(事件驱动的增量兜底)
+    """
+    try:
+        from backend.reward_engine import reconcile_student_totals
+        res = reconcile_student_totals(auto_fix=True)
+        if res.get("mismatch") or res.get("orphan"):
+            logger.info(
+                f"[log_retention] 积分对账: 校正 {res['mismatch']} 人, 清理无流水汇总 {res['orphan']} 人 "
+                f"(共检查 {res['checked']}), 样例={res['samples'][:3]}"
+            )
+    except Exception as e:
+        logger.warning(f"[log_retention] 积分对账失败: {e}")
+
+    try:
+        from backend.database import execute_query as dbq
+        from backend.title_system import check_and_unlock_badges
+        rows = dbq(
+            """SELECT DISTINCT student_username FROM activity_rewards
+               WHERE created_at >= datetime('now', '-7 day')"""
+        ) or []
+        students = [r[0] for r in rows if r[0]]
+        unlocked = 0
+        for stu in students[:800]:          # 单次上限, 避免凌晨任务跑太久
+            try:
+                if check_and_unlock_badges(stu):
+                    unlocked += 1
+            except Exception:
+                continue
+        if students:
+            logger.info(f"[log_retention] 徽章兜底检测完成: {len(students)} 人, 新解锁 {unlocked} 人")
+    except Exception as e:
+        logger.warning(f"[log_retention] 徽章兜底检测失败: {e}")
+
+
 def purge_once() -> None:
     _dedupe_view_logs()
     _maintain_exam_attempts()
     _maintain_question_media()
     _check_question_references()
+    _reconcile_points_and_badges()
     for table, cands, days, extra in _ITEMS:
         try:
             with get_connection() as conn:

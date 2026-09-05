@@ -13,9 +13,22 @@ from backend.database import execute_query
 from backend.question_db import execute_query as q_execute_query
 from backend.reward_engine import ACTIVITY_TYPE_NAMES, REWARD_TYPE_NAMES
 from backend.logger import logger
+from backend.permission_service import is_student_in_teacher_scope
 from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
+
+
+def _assert_can_view_student(user: dict, target: str, what: str = "档案") -> None:
+    """R3: 学生只看自己, 教师只看任教范围内学生, 管理员不限"""
+    username = user.get("username", "")
+    role = user.get("role", 2)
+    if target == username or role == 0:
+        return
+    if role != 1:
+        raise HTTPException(status_code=403, detail="无权查看其他学生的%s" % what)
+    if not is_student_in_teacher_scope(target, username):
+        raise HTTPException(status_code=403, detail="只能查看本班学生的%s" % what)
 
 
 @router.get("/{username}", summary="获取学生完整成长档案")
@@ -25,9 +38,7 @@ async def get_portfolio(username: str, request: Request):
     current_username = user["username"]
     role = user.get("role", 2)
 
-    # 权限：学生只能看自己，教师/管理员可看任何学生
-    if role == 2 and current_username != username:
-        raise HTTPException(status_code=403, detail="无权查看其他学生的档案")
+    _assert_can_view_student(user, username, "成长档案")
 
     # 获取学生基本信息
     user_rows = execute_query(
@@ -323,8 +334,7 @@ async def get_timeline(username: str, request: Request):
     current_username = user["username"]
     role = user.get("role", 2)
 
-    if role == 2 and current_username != username:
-        raise HTTPException(status_code=403, detail="无权查看")
+    _assert_can_view_student(user, username, "成长时间轴")
 
     user_rows = execute_query(
         "SELECT name FROM users WHERE username = ?",
@@ -454,8 +464,7 @@ async def get_learning_report(username: str, request: Request):
     current_username = user["username"]
     role = user.get("role", 2)
 
-    if role == 2 and current_username != username:
-        raise HTTPException(status_code=403, detail="无权查看其他学生的报告")
+    _assert_can_view_student(user, username, "学习报告")
 
     # 获取学生信息
     user_rows = execute_query(
@@ -469,7 +478,11 @@ async def get_learning_report(username: str, request: Request):
     student_class = user_rows[0][2] or ""
 
     # 获取报告周期参数
-    days = int(request.query_params.get("days", 30))
+    try:
+        days = int(request.query_params.get("days", 30) or 30)
+    except (TypeError, ValueError):
+        days = 30
+    days = min(max(days, 1), 365)          # 防 ?days=999999 / 非法值
     period = request.query_params.get("period", f"近{days}天")
     since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
@@ -638,8 +651,7 @@ async def export_learning_report_docx(username: str, request: Request, token: st
     current_username = user["username"]
     role = user.get("role", 2)
 
-    if role == 2 and current_username != username:
-        raise HTTPException(status_code=403, detail="无权查看其他学生的报告")
+    _assert_can_view_student(user, username, "学习报告")
 
     # 获取学生信息
     user_rows = execute_query(
@@ -652,7 +664,11 @@ async def export_learning_report_docx(username: str, request: Request, token: st
     student_grade = user_rows[0][3] or ""
     student_class = user_rows[0][2] or ""
 
-    days = int(request.query_params.get("days", 30))
+    try:
+        days = int(request.query_params.get("days", 30) or 30)
+    except (TypeError, ValueError):
+        days = 30
+    days = min(max(days, 1), 365)          # 防 ?days=999999 / 非法值
     period = request.query_params.get("period", f"近{days}天")
     since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 

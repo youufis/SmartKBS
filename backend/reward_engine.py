@@ -16,7 +16,9 @@ REWARD_CONFIG = {
     # activity_type: (participation_points, has_grade_levels)
     "quiz":       {"participation": 2,  "has_grade": True},
     "poll":       {"participation": 2,  "has_grade": False},
-    "question":   {"participation": 2,  "has_grade": True},   # 优质提问=优秀
+    # 提问目前只有参与分: 全仓只调用过 award_participation, 等级奖从未接入
+    # (旧注释"优质提问=优秀"与实际不符, 会误导维护者), 故 has_grade=False
+    "question":   {"participation": 2,  "has_grade": False},
     "exam":       {"participation": 2,  "has_grade": True},
     "practice":   {"participation": 2,  "has_grade": True},
     "discussion": {"participation": 2,  "has_grade": True},
@@ -56,14 +58,18 @@ ACTIVITY_TYPE_NAMES = {
     "quest":      "知识闯关",
     "quick_quiz": "知识抢答",
     "course_practice": "课程练习",
-    "resource_view":  "资源浏览",    "daily_discovery": "每日精选",
-    "news_view": "热点新闻",}
+    "resource_view":    "资源浏览",
+    "daily_discovery":  "每日精选",
+    "news_view":        "热点新闻",
+}
 
 REWARD_TYPE_NAMES = {
     "participation": "参与基础分",
     "excellent":     "优秀奖励",
     "good":          "良好奖励",
     "pass":          "及格奖励",
+    "penalty":       "扣分",
+    "refund":        "失败退还",
 }
 
 
@@ -92,12 +98,16 @@ def update_student_total(student_username: str, check_upgrade: bool = True):
         "SELECT COALESCE(SUM(points), 0) FROM activity_rewards WHERE student_username=?",
         (student_username,),
     )
-    new_total = row[0][0] if row else 0
+    new_total = int(row[0][0] or 0) if row else 0
 
+    # R12: UPSERT 只更新分数与时间, 不再整行替换
     execute_insert_update(
-        "INSERT OR REPLACE INTO student_total_points (student_username, total_points, updated_at) VALUES (?, ?, ?)",
+        """INSERT INTO student_total_points (student_username, total_points, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(student_username) DO UPDATE SET total_points=excluded.total_points, updated_at=excluded.updated_at""",
         (student_username, new_total, _now()),
     )
+    _cache_invalidate(student_username)   # R7: 总分变化必须让 30s 读缓存失效
 
     # 称号升级检测
     if check_upgrade and new_total != old_total:
@@ -120,7 +130,9 @@ def update_student_total(student_username: str, check_upgrade: bool = True):
 
 def deduct_points(student_username: str, reason: str, points: int = 2) -> int:
     """扣除学生积分（记录为负数 reward），返回实际扣除的分数"""
+    points = int(min(points, max(get_student_total(student_username), 0)))   # R7: 不为负
     if points <= 0:
+        logger.info(f"积分扣除跳过: {student_username} 可用积分为 0 ({reason})")
         return 0
     now = _now()
     execute_insert_update(
@@ -130,7 +142,7 @@ def deduct_points(student_username: str, reason: str, points: int = 2) -> int:
         (student_username, "penalty", f"{now}_{student_username}", reason, -points, reason, now),
     )
     update_student_total(student_username)
-    logger.info(f"积分扣除: {student_username} {points} 分 ({reason})")
+    logger.info(f"积分扣除: {student_username} -{points} 分 ({reason})")
     return points
 
 
@@ -346,6 +358,47 @@ _student_total_cache: dict[str, tuple[float, int]] = {}
 _STUDENT_TOTAL_CACHE_TTL = 30
 
 
+def _cache_invalidate(student_username: str) -> None:
+    """R7: 积分变动后清读缓存, 否则 30 秒窗口内会按旧余额重复兑换/误判不足"""
+    _student_total_cache.pop(student_username, None)
+
+
+def _cache_put(student_username: str, total: int) -> None:
+    if len(_student_total_cache) > 3000:      # 防止长期运行内存无上限
+        _student_total_cache.clear()
+    _student_total_cache[student_username] = (time.time(), total)
+
+
+def reconcile_student_totals(auto_fix: bool = True) -> dict[str, Any]:
+    """R6: 对账 student_total_points 与 activity_rewards 真实合计。
+
+    删除考试/练习/题目会连带删掉奖励流水, 但没人重算汇总, 排行榜会长期虚高。
+    此函数幂等, 由日志保留任务每日调用。
+    """
+    rows = execute_query(
+        "SELECT student_username, COALESCE(SUM(points), 0) FROM activity_rewards GROUP BY student_username"
+    ) or []
+    real = {r[0]: int(r[1] or 0) for r in rows if r[0]}
+    cached = {r[0]: int(r[1] or 0) for r in (execute_query(
+        "SELECT student_username, total_points FROM student_total_points") or [])}
+
+    mismatch = [(u, cached.get(u, 0), t) for u, t in real.items() if cached.get(u, 0) != t]
+    orphan = [(u, c, 0) for u, c in cached.items() if u not in real]
+    if auto_fix:
+        for u, _old, _new in mismatch + orphan:
+            try:
+                update_student_total(u, check_upgrade=False)
+            except Exception as e:
+                logger.warning(f"[reconcile] 重算 {u} 总分失败: {e}")
+    return {
+        "checked": len(real) + len(orphan),
+        "mismatch": len(mismatch),
+        "orphan": len(orphan),
+        "samples": (mismatch + orphan)[:5],
+        "fixed": bool(auto_fix),
+    }
+
+
 def get_student_total(student_username: str) -> int:
     """获取学生总积分（带 30 秒缓存）"""
     now = time.time()
@@ -357,11 +410,11 @@ def get_student_total(student_username: str) -> int:
         (student_username,),
     )
     if row:
-        total = row[0][0]
-        _student_total_cache[student_username] = (now, total)
+        total = int(row[0][0] or 0)
+        _cache_put(student_username, total)
         return total
     total = update_student_total(student_username)
-    _student_total_cache[student_username] = (now, total)
+    _cache_put(student_username, total)
     return total
 
 
@@ -379,6 +432,10 @@ def get_class_ranking(grade: str, class_name: str = "",
         import re
         cls_nums = re.findall(r'\d+', class_name)
         cls_num = cls_nums[0] if cls_nums else class_name
+        if allowed_classes is not None and str(cls_num) not in [str(x) for x in allowed_classes]:
+            # R4: 越权班级直接返回空, 不泄露排名
+            logger.warning(f"[ranking] 请求了非授权班级 {cls_num}, 已返回空列表")
+            return []
         gid_rows = execute_query("SELECT id FROM grades WHERE name=?", (grade,))
         if gid_rows:
             grade_id = gid_rows[0][0]
@@ -412,7 +469,9 @@ def get_class_ranking(grade: str, class_name: str = "",
                    ORDER BY points DESC""",
                 (grade, cls_num, f"{cls_num}班"),
             )
-    elif allowed_classes:
+    elif allowed_classes is not None:
+        if not allowed_classes:
+            return []              # 教师无任何授权班级 → 不给全校数据
         placeholders = ",".join(["?" for _ in allowed_classes])
         rows = execute_query(
             f"""SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
