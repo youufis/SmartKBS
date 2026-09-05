@@ -127,14 +127,17 @@ def _to_portrait_url(image_path: str, portrait_id: int = 0) -> str:
     return f"/api/files/{rel}"
 
 
-def _format_portrait_row(row: tuple) -> dict[str, Any]:
-    """将数据库行转为响应字典"""
-    return {
+def _format_portrait_row(row: tuple, include_path: bool = True) -> dict[str, Any]:
+    """将数据库行转为响应字典
+
+    K6: include_path=False 时不返回服务器绝对路径(用于"看别人画像"的列表场景),
+    图片一律通过 image_url(/api/portrait/image/{id}) 走权限校验访问。
+    """
+    result = {
         "id": row[0],
         "username": row[1],
         "created_date": row[2],
         "style": row[3],
-        "image_path": row[4] or "",
         "image_url": _to_portrait_url("", portrait_id=row[0]),
         "ai_comment": row[5] or "",
         "prompt": row[6] or "",
@@ -145,6 +148,9 @@ def _format_portrait_row(row: tuple) -> dict[str, Any]:
         "like_count": row[11] or 0,
         "status": row[12] if len(row) > 12 else "active",
     }
+    if include_path:
+        result["image_path"] = row[4] or ""
+    return result
 
 
 def _enrich_with_student_info(portrait: dict[str, Any]) -> dict[str, Any]:
@@ -685,7 +691,9 @@ async def get_portrait_detail(portrait_id: int, request: Request):
     if not rows or (rows[0][12] or "active") != "active":
         raise HTTPException(status_code=404, detail="画像不存在")
 
-    portrait = _format_portrait_row(rows[0])
+    # K6: 看别人的画像时不返回服务器绝对路径(自己的与管理员保留, 生成流程依赖该字段)
+    _owner = rows[0][1]
+    portrait = _format_portrait_row(rows[0], include_path=(_owner == username or user.get("role", 2) == 0))
 
     # R5: 统一可见性判断(同班必须真的同班)
     if not _can_view_portrait(portrait["username"], portrait.get("is_shared") or 0,
@@ -828,7 +836,6 @@ async def get_public_gallery(request: Request):
             "username": row[1],
             "created_date": row[2],
             "style": row[3],
-            "image_path": row[4] or "",
             "image_url": _to_portrait_url("", portrait_id=row[0]),
             "ai_comment": (row[5] or ""),
             "like_count": row[6] or 0,
@@ -878,7 +885,6 @@ async def get_class_gallery(request: Request):
             "username": row[1],
             "created_date": row[2],
             "style": row[3],
-            "image_path": row[4] or "",
             "image_url": _to_portrait_url("", portrait_id=row[0]),
             "ai_comment": (row[5] or ""),
             "like_count": row[6] or 0,
@@ -910,7 +916,6 @@ async def get_hot_gallery(request: Request):
             "username": row[1],
             "created_date": row[2],
             "style": row[3],
-            "image_path": row[4] or "",
             "image_url": _to_portrait_url("", portrait_id=row[0]),
             "ai_comment": (row[5] or ""),
             "like_count": row[6] or 0,
