@@ -11,7 +11,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from backend.api.chat_router import get_api_keys, _chat_event_generator
+from backend.api.chat_router import (
+    get_api_keys,
+    _chat_event_generator,
+    _filter_allowed_file_paths,
+    _MAX_PROMPT_CHARS,
+)
+from backend.permission_service import is_student_in_teacher_scope
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.companion_profile import (
@@ -73,6 +79,11 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+
+    if len(req.prompt) > _MAX_PROMPT_CHARS:
+        raise HTTPException(status_code=400, detail=f"提问内容过长（限 {_MAX_PROMPT_CHARS} 字）")
+    # C7: 与智答模式一致, 附件只允许指向本人上传目录
+    req.file_paths = _filter_allowed_file_paths(req.file_paths, username)
 
     # 仅学生可使用学伴完整功能；教师/管理员可体验但无画像
     if role not in (0, 1, 2):
@@ -285,7 +296,10 @@ async def get_profile(request: Request):
     target = username
     if role in (0, 1):
         student = request.query_params.get("student_username", "")
-        if student:
+        if student and student != username:
+            # C6: 教师只能看自己任教范围内的学生画像(与积分/档案口径统一)
+            if role == 1 and not is_student_in_teacher_scope(student, username):
+                raise HTTPException(status_code=403, detail="无权查看该学生的学伴画像")
             target = student
 
     profile = get_student_profile(target)

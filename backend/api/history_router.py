@@ -6,15 +6,22 @@ import os
 import shutil
 
 from fastapi import APIRouter, HTTPException, Request, Query
-from fastapi.responses import JSONResponse
-
 from typing import Any
 
 from backend.api.dependencies import get_current_user
-from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir
+from backend.utils import get_account_chat_history_dir, path_within
 from backend.database import execute_query, execute_insert_update
-from backend.config import DEFAULT_LOGGED_IN_NAME, ROOT_DIR
 from backend.logger import logger
+
+# H1: 单次写入与单文件上限, 防止 /save 被无限追加撑爆磁盘
+_MAX_HISTORY_APPEND_BYTES = 2 * 1024 * 1024
+_MAX_HISTORY_FILE_BYTES = 20 * 1024 * 1024
+
+
+def _like_prefix_escape(v: str) -> str:
+    """H3: LIKE 前缀匹配需转义 % 与 _, 否则文件名含通配符会误删他人索引"""
+    return v.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 router = APIRouter()
 
@@ -96,27 +103,19 @@ async def get_history_tree(request: Request):
     if not os.path.exists(chat_dir):
         return {"tree": []}
     tree = _scan_tree(chat_dir)
-    return {"tree": tree, "root": chat_dir}
+    # H4: 不再向客户端下发服务器绝对路径(前端未使用该字段)
+    return {"tree": tree}
 
 
 @router.get("/file")
-async def read_history_file(path: str = Query(...), request: Request = None):  # type: ignore[assignment]
+async def read_history_file(request: Request, path: str = Query(...)):
     """读取历史文件内容"""
-    if request:
-        user = get_current_user(request)
-        username = user["username"]
-        chat_dir = os.path.abspath(get_account_chat_history_dir(username))
-    else:
-        chat_dir = os.path.abspath(get_admin_chat_history_dir())
-
-    # 如果 path 是相对路径，拼接用户目录
-    if not os.path.isabs(path):
-        target_path = os.path.abspath(os.path.join(chat_dir, path))
-    else:
-        target_path = os.path.abspath(path)
-
-    # 安全校验
-    if not target_path.startswith(chat_dir):
+    # H2: 旧实现 request 带默认值(为 None 时改读管理员目录), 且用 startswith 判边界,
+    #     兄弟目录(如 ChatHistoryBak)会被当成合法前缀; 现统一走 path_within
+    user = get_current_user(request)
+    chat_dir = os.path.realpath(get_account_chat_history_dir(user["username"]))
+    target_path = os.path.realpath(os.path.join(chat_dir, path))
+    if not path_within(chat_dir, target_path):
         raise HTTPException(status_code=403, detail="无权访问该文件")
 
     if not os.path.isfile(target_path):
@@ -142,23 +141,14 @@ async def read_history_file(path: str = Query(...), request: Request = None):  #
 
 
 @router.delete("/file")
-async def delete_history_file(path: str = Query(...), request: Request = None):  # type: ignore[assignment]
-    """删除历史文件或目录"""
-    username = ""
-    """删除历史文件或目录"""
-    if request:
-        user = get_current_user(request)
-        username = user["username"]
-        chat_dir = os.path.abspath(get_account_chat_history_dir(username))
-    else:
-        chat_dir = os.path.abspath(get_admin_chat_history_dir())
-
-    if not os.path.isabs(path):
-        target_path = os.path.abspath(os.path.join(chat_dir, path))
-    else:
-        target_path = os.path.abspath(path)
-
-    if not target_path.startswith(chat_dir):
+async def delete_history_file(request: Request, path: str = Query(...)):
+    """删除历史文件或目录(仅限本人 ChatHistory 之内)"""
+    user = get_current_user(request)
+    username = user["username"]
+    chat_dir = os.path.realpath(get_account_chat_history_dir(username))
+    target_path = os.path.realpath(os.path.join(chat_dir, path))
+    # H2: 禁止删根目录本身
+    if not path_within(chat_dir, target_path) or target_path == chat_dir:
         raise HTTPException(status_code=403, detail="无权删除该文件")
 
     if not os.path.exists(target_path):
@@ -172,8 +162,8 @@ async def delete_history_file(path: str = Query(...), request: Request = None): 
         try:
             # 删除与该文件或目录匹配的索引（文件精确匹配或目录前缀匹配）
             execute_insert_update(
-                "DELETE FROM conversations WHERE username=? AND (filename=? OR filename LIKE ?)",
-                (username, rel, f"{rel}%"),
+                "DELETE FROM conversations WHERE username=? AND (filename=? OR filename LIKE ? ESCAPE '\\')",
+                (username, rel, _like_prefix_escape(rel) + "/%"),
             )
             msg = f"路径在磁盘上不存在，已从索引中移除: {rel}"
             logger.info(f"历史记录索引已移除: username={username}, rel={rel}")
@@ -193,7 +183,10 @@ async def delete_history_file(path: str = Query(...), request: Request = None): 
             shutil.rmtree(target_path)
             # 删除 DB 索引（匹配该日期目录下所有文件）
             rel_prefix = os.path.relpath(target_path, chat_dir).replace("\\", "/")
-            execute_insert_update("DELETE FROM conversations WHERE username=? AND filename LIKE ?", (username, f"{rel_prefix}%"))
+            execute_insert_update(
+                "DELETE FROM conversations WHERE username=? AND filename LIKE ? ESCAPE '\\'",
+                (username, _like_prefix_escape(rel_prefix) + "/%"),
+            )
             msg = f"目录 {os.path.basename(target_path)} 已删除"
         else:
             raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
@@ -223,11 +216,28 @@ async def save_conversation(request: Request):
     date_dir = os.path.join(chat_dir, date_str)
     os.makedirs(date_dir, exist_ok=True)
 
-    if not filename:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"conversation_{timestamp}.md"
+    def _ts_name() -> str:
+        return "conversation_%s.md" % datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    file_path = os.path.join(date_dir, filename)
+    # H1: filename 由前端传入, 旧实现直接 os.path.join(date_dir, filename):
+    #     传绝对路径时 os.path.join 会丢弃前缀 -> 可把文件写到 ChatHistory 之外;
+    #     传 ../x.md 可逃逸日期目录。现只取 basename 并强制 .md 后缀。
+    safe_name = os.path.basename(str(filename or "").replace("\\", "/")).strip()
+    if not safe_name or safe_name.startswith(".") or safe_name in (".", ".."):
+        safe_name = _ts_name()
+    if not safe_name.lower().endswith(".md"):
+        safe_name += ".md"
+    safe_name = safe_name[:120]
+
+    payload = str(content)
+    if len(payload.encode("utf-8")) > _MAX_HISTORY_APPEND_BYTES:
+        raise HTTPException(status_code=413, detail="单次保存内容过大，请分段保存")
+
+    file_path = os.path.join(date_dir, safe_name)
+    if os.path.isfile(file_path) and os.path.getsize(file_path) > _MAX_HISTORY_FILE_BYTES:
+        file_path = os.path.join(date_dir, _ts_name())  # 单文件过大 -> 另起新文件
+    if not path_within(os.path.realpath(chat_dir), os.path.realpath(file_path)):
+        raise HTTPException(status_code=400, detail="文件名不合法")
 
     try:
         file_exists = os.path.exists(file_path)
@@ -236,8 +246,8 @@ async def save_conversation(request: Request):
                 f.write(f"创建时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n---\n\n")
             f.write(f"{content}\n\n---\n\n")
 
-        # 更新 DB 索引
-        rel_path = f"{date_str}/{filename}"
+        # 更新 DB 索引(统一用相对 chat_dir 的路径)
+        rel_path = os.path.relpath(file_path, chat_dir).replace("\\", "/")
         fsize = os.path.getsize(file_path)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         execute_insert_update(
@@ -247,7 +257,8 @@ async def save_conversation(request: Request):
             (username, session_id or "", date_str, rel_path, fsize, now),
         )
 
-        return {"message": "对话已保存", "path": file_path}
+        # H4: 不再回传服务器绝对路径
+        return {"message": "对话已保存", "path": rel_path, "filename": os.path.basename(file_path)}
     except Exception as e:
         logger.error(f"保存对话记录失败: {e}")
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")

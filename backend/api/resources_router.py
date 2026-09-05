@@ -121,7 +121,7 @@ async def get_resource_tree(request: Request):
     username = user["username"]
     html_dir = get_account_html_dir(username)
     if not os.path.exists(html_dir):
-        return {"tree": [], "root": html_dir}
+        return {"tree": []}
     budget = [_TREE_MAX_ENTRIES, False]
     tree = _scan_tree(html_dir, with_meta=True, _budget=budget)
     # T6: 不再返回服务器绝对路径(前端未使用)

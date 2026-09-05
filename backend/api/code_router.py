@@ -411,7 +411,8 @@ async def delete_code_problem(problem_id: int, request: Request):
 
 @router.post("/code/problems/{problem_id}/test-cases", summary="[教师] 添加测试用例")
 async def add_test_cases(problem_id: int, request: Request, cases: list[dict[str, Any]]):
-    if request.state.user.get("role", 2) not in (0, 1):
+    # C3: 旧写法在匿名请求下 request.state.user 为 None -> AttributeError 500
+    if get_current_user(request).get("role", 2) not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
     now = _now()
     for i, tc in enumerate(cases):
@@ -422,7 +423,7 @@ async def add_test_cases(problem_id: int, request: Request, cases: list[dict[str
 
 @router.get("/code/problems/{problem_id}/test-cases", summary="[教师] 获取测试用例")
 async def get_test_cases(problem_id: int, request: Request):
-    if request.state.user.get("role", 2) not in (0, 1):
+    if get_current_user(request).get("role", 2) not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
     return {"test_cases": q_query("SELECT id,input,expected_output,is_sample,score,sort_order,description FROM code_test_cases WHERE problem_id=? ORDER BY sort_order", (problem_id,))}
 
@@ -512,6 +513,6 @@ async def ai_generate_code_problem(req: AiGenerateCodeProblem, request: Request)
 
 @router.post("/code/ai-generate/save", summary="[教师] 保存 AI 生成的代码题")
 async def save_ai_generated_problem(req: CodeProblemCreate, request: Request):
-    if request.state.user.get("role", 2) not in (0, 1):
+    if get_current_user(request).get("role", 2) not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
     return await create_code_problem(req, request)

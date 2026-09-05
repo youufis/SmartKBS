@@ -15,14 +15,12 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from backend.config import (
-    DEFAULT_LOGGED_IN_NAME,
-)
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import get_user_role
 from backend.utils import (
     encode_image_to_base64,
+    path_within,
     get_image_mime_type,
     is_image_file,
     is_document_file,
@@ -47,6 +45,46 @@ class ChatRequest(BaseModel):
     context_enhance: bool = False
     use_agent: bool = False  # False=直连大模型(默认,响应快)；True=优先使用智能体(有APPID时)
     rag_enabled: bool = False  # 「知识」开关：开启后从试题库/课程大纲检索相关知识辅助回答
+
+
+# ── 附件路径白名单（C2）──
+
+_MAX_PROMPT_CHARS = 20000
+
+
+def _allowed_file_roots(username: str) -> list[str]:
+    """AI 附件允许读取的根目录: 本人临时上传目录 + 本人对话历史目录"""
+    roots: list[str] = []
+    if not username:
+        return roots
+    try:
+        from backend.api.files_router import TEMP_UPLOAD_DIR
+        roots.append(os.path.join(str(TEMP_UPLOAD_DIR), username))
+    except Exception as e:
+        logger.warning(f"临时上传目录不可用: {e}")
+    try:
+        roots.append(get_account_chat_history_dir(username))
+    except Exception:
+        pass
+    return [os.path.realpath(r) for r in roots if r]
+
+
+def _filter_allowed_file_paths(file_paths: list[str], username: str) -> list[str]:
+    """C2: 旧实现把客户端传来的任意绝对路径直接 os.path.exists 后读取并喂给模型,
+    等于任意文件读取。越界路径直接拒绝(400)而不是静默丢弃, 以免掩盖探测行为。"""
+    if not file_paths:
+        return []
+    roots = _allowed_file_roots(username)
+    kept: list[str] = []
+    for fp in file_paths:
+        if not fp:
+            continue
+        real = os.path.realpath(str(fp))
+        if not any(path_within(root, real) for root in roots):
+            logger.warning(f"[AI对话] 拒绝越界附件 user={username} path={str(fp)[:160]}")
+            raise HTTPException(status_code=400, detail="附件路径不合法，请重新上传文件后再试")
+        kept.append(real)
+    return kept
 
 
 # ── API Key 获取 ──
@@ -235,10 +273,8 @@ file_summary_cache = FileSummaryCache()
 @router.get("/usage")
 async def get_usage(request: Request):
     """获取当前用户的每日用量信息"""
-    user = request.state.user
-    if not user:
-        return {"enabled": False, "used": 0, "max": 0, "remaining": 0}
-
+    # C1: 未登录一律 401(旧实现对匿名请求返回一份"看起来正常"的空用量)
+    user = get_current_user(request)
     username = user["username"]
     role_val = user.get("role", 2)
 
@@ -280,12 +316,18 @@ async def get_usage(request: Request):
 @router.post("/stream")
 async def chat_stream(req: ChatRequest, request: Request):
     """SSE 流式对话端点"""
+    # C1: 旧实现取 request.state.user, 为 None 时回退 DEFAULT_LOGGED_IN_NAME("root"),
+    #     导致未登录访客即可消耗学校 API Key, 并以 root 名义记账/发积分
+    user = get_current_user(request)
+    username = user["username"]
+    role_val = user.get("role", 2)
+
     if not req.prompt and not req.file_paths:
         raise HTTPException(status_code=400, detail="提示词或文件不能为空")
-
-    user = request.state.user
-    username = user["username"] if user else DEFAULT_LOGGED_IN_NAME
-    role_val = user.get("role", 2) if user else 2
+    if len(req.prompt) > _MAX_PROMPT_CHARS:
+        raise HTTPException(status_code=400, detail=f"提问内容过长（限 {_MAX_PROMPT_CHARS} 字）")
+    # C2: 附件路径限定在本人上传/历史目录内
+    req.file_paths = _filter_allowed_file_paths(req.file_paths, username)
 
     # AI 对话权限检查（管理员 role=0 始终可用，教师和学生按配置决定）
     if role_val != 0:
@@ -306,8 +348,8 @@ async def chat_stream(req: ChatRequest, request: Request):
 
     dashscope_api_key, _ = get_api_keys(username)
 
-    # ── AI 对话积分奖励（仅学生，每次对话） ──
-    if role_val == 2:
+    # ── AI 对话积分奖励（仅学生，每次对话）── C4: 账号需真实存在且确为学生 ──
+    if role_val == 2 and get_user_role(username) == 2:
         try:
             from backend.reward_engine import award_participation
             import datetime
