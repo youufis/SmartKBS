@@ -1331,8 +1331,17 @@ async def recent_activity(request: Request):
         a for a in activities
         if not (len(a.get("time") or "") <= 10 and ":" in (a.get("time") or ""))
     ]
-    activities.sort(key=lambda x: x["time"] or "", reverse=True)
-    result = activities[:20]
+    # 兜底去重: 同事件多源写入(如浏览日志历史双写)不再重复成多条动态
+    _seen = set()
+    _deduped = []
+    for a in activities:
+        k = (a.get("time") or "", a.get("type") or "", a.get("title") or "", a.get("detail") or "")
+        if k in _seen:
+            continue
+        _seen.add(k)
+        _deduped.append(a)
+    _deduped.sort(key=lambda x: x["time"] or "", reverse=True)
+    result = _deduped[:20]
     _set_cache(act_cache_key, result)
     return result
 

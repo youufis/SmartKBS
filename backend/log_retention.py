@@ -33,7 +33,38 @@ def _pick_col(conn, table, candidates):
     return None
 
 
+def _dedupe_view_logs() -> None:
+    """清理历史双写产生的「同人+同资源+同秒」重复浏览记录(保留信息最全的一条):
+    优先保留带 knowledge_point/binding 上下文或非 direct 来源, 再按最小 id; 幂等安全"""
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, student_username, resource_type, resource_id, file_path, viewed_at,"
+                " source, knowledge_point_id, binding_id FROM resource_view_logs"
+            ).fetchall()
+            groups: dict = {}
+            for r in rows:
+                key = (r[1], r[2], r[3] or 0, r[4] or "", r[5])
+                groups.setdefault(key, []).append(r)
+            to_delete = []
+            for members in groups.values():
+                if len(members) < 2:
+                    continue
+                def rank(m):
+                    return (1 if m[7] else 0, 1 if m[8] else 0, 1 if (m[6] or "") != "direct" else 0, -m[0])
+                keep = max(members, key=rank)
+                to_delete.extend([m[0] for m in members if m[0] != keep[0]])
+            if to_delete:
+                ph = ",".join("?" * len(to_delete))
+                conn.execute("DELETE FROM resource_view_logs WHERE id IN (%s)" % ph, tuple(to_delete))
+                conn.commit()
+                logger.info(f"[log_retention] resource_view_logs 清理历史双写重复 {len(to_delete)} 条")
+    except Exception as e:
+        logger.warning(f"[log_retention] 浏览日志去重失败: {e}")
+
+
 def purge_once() -> None:
+    _dedupe_view_logs()
     for table, cands, days, extra in _ITEMS:
         try:
             with get_connection() as conn:
