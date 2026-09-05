@@ -27,12 +27,19 @@ def spawn_bg(fn, *args, name: str = "") -> bool:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        try:
-            fn(*args)
-        except Exception as e:
-            logger.warning(f"[async_utils] 同步执行后台任务失败: {label} -> {e}")
-            return False
-        return False
+        # 关键: 在 worker 线程里(例如端点用 run_in_threadpool 包住同步函数时)没有运行中的
+        # 事件循环, 旧实现在当前线程内联执行 -> "后台任务"会阻塞请求本身(实测每日精选 feed 被
+        # 拖到 60s+)。改为丢给独立的守护线程, 语义与"后台执行"一致。
+        import threading
+
+        def _run():
+            try:
+                fn(*args)
+            except Exception as e:
+                logger.warning(f"[async_utils] 后台线程执行失败: {label} -> {e!r}")
+
+        threading.Thread(target=_run, name=f"bg-{label}", daemon=True).start()
+        return True
 
     task = loop.create_task(asyncio.to_thread(fn, *args))
     _BG_TASKS.add(task)

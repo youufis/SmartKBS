@@ -18,6 +18,8 @@ from backend.api.dependencies import get_current_user
 from backend.permission_service import (
     check_share_visibility,
     get_grade_by_name,
+    get_teacher_grades,
+    get_teacher_subjects,
     is_student_in_teacher_scope,
 )
 from backend.auth import is_admin, is_teacher
@@ -172,6 +174,65 @@ def _ensure_subject(course_dict: dict[str, Any]) -> dict[str, Any]:
         subject = _infer_subject(course_dict.get("name", ""))
         course_dict["subject"] = subject
     return course_dict
+
+
+def _course_brief(course_id: int) -> dict[str, Any] | None:
+    return execute_query_one("SELECT id, name, subject, grade FROM courses WHERE id=?", (course_id,))
+
+
+def _course_of_chapter(chapter_id: int) -> dict[str, Any] | None:
+    return execute_query_one(
+        """SELECT co.id, co.name, co.subject, co.grade FROM chapters ch
+           JOIN courses co ON co.id = ch.course_id WHERE ch.id=?""",
+        (chapter_id,),
+    )
+
+
+def _course_of_kp(kp_id: int) -> dict[str, Any] | None:
+    return execute_query_one(
+        """SELECT co.id, co.name, co.subject, co.grade FROM knowledge_points kp
+           JOIN chapters ch ON ch.id = kp.chapter_id
+           JOIN courses co ON co.id = ch.course_id WHERE kp.id=?""",
+        (kp_id,),
+    )
+
+
+def _course_edit_denial(user: dict[str, Any], course: dict[str, Any] | None) -> str | None:
+    """G4: 返回不可维护的原因文本; None 表示允许
+
+    收口前 _can_manage 只判"是教师", 任一教师可增删改全校任意课程的章节/知识点/绑定
+    (实测信息科技教师可改写「技术与设计1(通用技术)」的知识点)。
+    备课类只读能力(AI 备课助手、课件/练习预览)不受此限制。
+    """
+    role = user.get("role", 2)
+    if role == 0:
+        return None
+    if role != 1:
+        return "权限不足：仅教师和管理员可以维护课程大纲"
+    if not course:
+        return "课程不存在"
+    teacher = user.get("username", "")
+    subjects = {s for s in (get_teacher_subjects(teacher) or []) if s}
+    c_subject = str(course.get("subject") or "").strip()
+    if subjects and c_subject and c_subject not in subjects:
+        return (f"该课程属于「{c_subject}」，不在您的任教学科"
+                f"（{('、'.join(sorted(subjects)) or '未设置')}）范围内")
+    grades = {g["name"] for g in (get_teacher_grades(teacher) or [])}
+    c_grades = [x.strip() for x in str(course.get("grade") or "").replace("，", ",").split("|") if x.strip()]
+    if grades and c_grades and not (set(c_grades) & grades):
+        return f"该课程面向 {'、'.join(c_grades)}，不在您的任教年级（{'、'.join(sorted(grades))}）范围内"
+    return None
+
+
+def _assert_can_edit_course(user: dict[str, Any], course: dict[str, Any] | None,
+                            action: str = "编辑") -> None:
+    """G4: 范围不满足即 403(课程不存在则 404)"""
+    denial = _course_edit_denial(user, course)
+    if denial is None:
+        return
+    if denial == "课程不存在":
+        raise HTTPException(status_code=404, detail="课程不存在")
+    raise HTTPException(status_code=403, detail=denial)
 
 
 def _chapter_row(chapter_id: int) -> dict[str, Any] | None:
@@ -914,6 +975,7 @@ async def create_course(req: CourseCreate, request: Request):
 
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="请输入课程名称")
+    _assert_can_edit_course(user, {"id": 0, "subject": req.subject, "grade": req.grade}, "创建")
 
     now = _now()
     course_id = execute_insert_update(
@@ -935,6 +997,13 @@ async def update_course(course_id: int, req: CourseUpdate, request: Request):
     course = execute_query_one("SELECT * FROM courses WHERE id=?", (course_id,))
     if not course:
         raise HTTPException(status_code=404, detail="课程不存在")
+    _assert_can_edit_course(user, course, "更新")
+    if getattr(req, "subject", None) is not None or getattr(req, "grade", None) is not None:
+        _assert_can_edit_course(user, {
+            "id": course_id,
+            "subject": req.subject if getattr(req, "subject", None) is not None else course.get("subject"),
+            "grade": req.grade if getattr(req, "grade", None) is not None else course.get("grade"),
+        }, "更新")
 
     updates = {}
     for field in ["name", "code", "description", "grade", "cover_image", "sort_order", "status", "subject"]:
@@ -1068,6 +1137,8 @@ async def create_chapter(req: ChapterCreate, request: Request):
     course = execute_query_one("SELECT id FROM courses WHERE id=?", (req.course_id,))
     if not course:
         raise HTTPException(status_code=404, detail="课程不存在")
+    course = _course_brief(req.course_id)
+    _assert_can_edit_course(user, course, "创建章节")
 
     # 校验父章节存在且同课程(G2)
     if req.parent_id:
@@ -1097,6 +1168,7 @@ async def update_chapter(chapter_id: int, req: ChapterUpdate, request: Request):
     ch = execute_query_one("SELECT * FROM chapters WHERE id=?", (chapter_id,))
     if not ch:
         raise HTTPException(status_code=404, detail="章节不存在")
+    _assert_can_edit_course(user, _course_of_chapter(chapter_id), "更新章节")
 
     updates = {}
     for field in ["name", "description", "parent_id", "sort_order", "status"]:
@@ -1134,6 +1206,7 @@ async def delete_chapter(chapter_id: int, request: Request):
     ch = execute_query("SELECT * FROM chapters WHERE id=?", (chapter_id,))
     if not ch:
         raise HTTPException(status_code=404, detail="章节不存在")
+    _assert_can_edit_course(user, _course_of_chapter(chapter_id), "删除章节")
 
     # 收集所有子章节ID
     children = execute_query(
@@ -1279,6 +1352,7 @@ async def create_knowledge_point(req: KnowledgePointCreate, request: Request):
     ch = execute_query_one("SELECT id FROM chapters WHERE id=?", (req.chapter_id,))
     if not ch:
         raise HTTPException(status_code=404, detail="章节不存在")
+    _assert_can_edit_course(user, _course_of_chapter(req.chapter_id), "创建知识点")
 
     now = _now()
     kp_id = execute_insert_update(
@@ -1301,6 +1375,7 @@ async def update_knowledge_point(kp_id: int, req: KnowledgePointUpdate, request:
     kp = execute_query_one("SELECT * FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
+    _assert_can_edit_course(user, _course_of_kp(kp_id), "更新知识点")
 
     updates = {}
     for field in ["name", "description", "learning_objectives", "difficulty", "estimated_minutes", "sort_order", "status"]:
@@ -1332,6 +1407,7 @@ async def delete_knowledge_point(kp_id: int, request: Request):
     kp = execute_query("SELECT * FROM knowledge_points WHERE id=?", (kp_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
+    _assert_can_edit_course(user, _course_of_kp(kp_id), "删除知识点")
 
     execute_insert_update("DELETE FROM learning_progress WHERE knowledge_point_id=?", (kp_id,))
     execute_insert_update("DELETE FROM curriculum_bindings WHERE knowledge_point_id=?", (kp_id,))
@@ -1431,6 +1507,7 @@ async def create_binding(req: BindingCreate, request: Request):
     kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (req.knowledge_point_id,))
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
+    _assert_can_edit_course(user, _course_of_kp(req.knowledge_point_id), "绑定资源")
 
     valid_types = {"html", "download", "exam", "discussion", "interaction_quiz", "task"}
     if req.resource_type not in valid_types:
@@ -1516,6 +1593,7 @@ async def delete_binding(binding_id: int, request: Request):
     binding = execute_query_one("SELECT * FROM curriculum_bindings WHERE id=?", (binding_id,))
     if not binding:
         raise HTTPException(status_code=404, detail="绑定记录不存在")
+    _assert_can_edit_course(user, _course_of_kp(binding["knowledge_point_id"]), "解绑资源")
 
     # 解绑练习资源时清空学生作答记录
     if binding["resource_type"] == "html":
@@ -1716,6 +1794,11 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
             if not ch:
                 skipped.append({"id": item.id, "type": "chapter", "reason": "章节不存在"})
                 continue
+            # G4: 只能拖动自己任教学科/年级内的课程结构
+            denial = _course_edit_denial(user, _course_brief(ch["course_id"]))
+            if denial:
+                skipped.append({"id": item.id, "type": "chapter", "reason": denial})
+                continue
             # G2: 父章节必须同课程且不是自己的子孙
             err = _assert_chapter_parent(item.id, ch["course_id"], item.parent_id)
             if err:
@@ -1729,9 +1812,18 @@ async def reorder_nodes(req: ReorderRequest, request: Request):
             updated["chapters"] += 1
         elif item.type == "knowledge_point":
             # 校验知识点存在
-            kp = execute_query_one("SELECT id FROM knowledge_points WHERE id=?", (item.id,))
+            kp = execute_query_one(
+                "SELECT kp.id, ch.course_id FROM knowledge_points kp"
+                " JOIN chapters ch ON ch.id = kp.chapter_id WHERE kp.id=?",
+                (item.id,),
+            )
             if not kp:
                 logger.warning(f"排序跳过: 知识点 id={item.id} 不存在")
+                skipped.append({"id": item.id, "type": "knowledge_point", "reason": "知识点不存在"})
+                continue
+            denial = _course_edit_denial(user, _course_brief(kp["course_id"]))
+            if denial:
+                skipped.append({"id": item.id, "type": "knowledge_point", "reason": denial})
                 continue
             # 校验目标章节存在
             if item.chapter_id is not None:
