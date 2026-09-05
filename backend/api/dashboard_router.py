@@ -57,6 +57,53 @@ def _act_q_db(sql: str, params=()):
         return []
 
 
+def _student_labels(usernames: list[Any]) -> dict[str, dict[str, str]]:
+    """批量解析学生标识: 姓名 + 年级 + 班级, 供"最近动态"使用
+
+    原实现每个数据源各自查一次 users 且只取姓名, 教师看动态时分不清是哪个班的学生,
+    只能看到"学号 + 姓名"。这里一次查齐姓名/年级/班级, 并合并掉原先 6 处重复的取名代码。
+    年级/班级优先取规范表(grades/classes), 再回退 users 的遗留文本列。
+    """
+    out: dict[str, dict[str, str]] = {}
+    names = [str(x or "").strip() for x in usernames]
+    names = [n for n in dict.fromkeys(names) if n]
+    if not names:
+        return out
+    ph = ",".join("?" for _ in names)
+    rows = _act_q(
+        f"""SELECT u.username, u.name,
+                   COALESCE(g.name, u.grade, ''),
+                   COALESCE(c.display_name, c.name, u.class, '')
+            FROM users u
+            LEFT JOIN grades g ON u.grade_id = g.id
+            LEFT JOIN classes c ON u.class_id = c.id
+            WHERE u.username IN ({ph})""",
+        tuple(names),
+    )
+    for r in rows or []:
+        uname = r[0]
+        real = str(r[1] or uname)
+        grade = str(r[2] or "").strip()
+        cls = str(r[3] or "").strip()
+        if cls.isdigit():                      # 遗留列可能只存了数字班级号
+            cls = f"{grade}{cls}班" if grade else f"{cls}班"
+        if grade and cls.startswith(grade):    # 班级名已含年级前缀, 不重复显示
+            tag = cls
+        elif grade and cls:
+            tag = f"{grade}·{cls}"
+        else:
+            tag = grade or cls
+        out[uname] = {"name": real, "grade": grade, "class": cls, "tag": tag}
+    return out
+
+
+def _with_tag(tag: str, detail: str) -> str:
+    """把年级·班级拼到 detail 前面, 缺任一侧时不留孤立分隔符"""
+    if tag and detail:
+        return f"{tag} · {detail}"
+    return tag or detail
+
+
 def _set_cache(key: str, data: dict[str, Any]):
     """设置缓存"""
     _dashboard_cache[key] = (time.time(), data)
@@ -967,24 +1014,14 @@ async def recent_activity(request: Request):
                    ORDER BY ts.submitted_at DESC LIMIT 10""",
                 (username,),
             )
-        # 批量获取学生姓名
-        sub_usernames = list(set(act[2] for act in sub_activities))
-        sub_name_map = {}
-        if sub_usernames:
-            ph = ",".join("?" for _ in sub_usernames)
-            u_rows = _act_q(
-                f"SELECT username, name FROM users WHERE username IN ({ph})",
-                tuple(sub_usernames),
-            )
-            for ur in u_rows:
-                sub_name_map[ur[0]] = ur[1] or ur[0]
+        sub_info = _student_labels([act[2] for act in sub_activities])
         for act in sub_activities:
-            s_name = sub_name_map.get(act[2], act[2])
+            info = sub_info.get(act[2]) or {}
             activities.append({
                 "time": act[0],
                 "type": "task",
-                "title": f"学生 {act[2]} {s_name} 提交了任务「{act[1]}」",
-                "detail": "",
+                "title": f"学生 {act[2]} {info.get('name') or act[2]} 提交了任务「{act[1]}」",
+                "detail": info.get("tag", ""),
             })
 
         # 最近创建的考试 (question_db 返回 dict)
@@ -1024,7 +1061,11 @@ async def recent_activity(request: Request):
                 (username,),
             )
         for act in rc_activities:
-            result_label = "正确" if act[2] == "1" else ("错误" if act[2] == "0" else act[2] or "待定")
+            # 点名结果实际存的是 correct/incorrect/skip 文本, 旧代码按 "1"/"0" 判定,
+            # 永远落到兜底分支 -> 教师看到的是英文原文 correct
+            _rc_map = {"correct": "正确", "incorrect": "错误", "skip": "跳过",
+                       "picked": "已点名", "quiz": "随堂作答", "1": "正确", "0": "错误"}
+            result_label = _rc_map.get(str(act[2] or "").strip().lower(), act[2] or "待定")
             activities.append({
                 "time": act[0],
                 "type": "rollcall",
@@ -1049,23 +1090,14 @@ async def recent_activity(request: Request):
                    ORDER BY a.submitted_at DESC LIMIT 5""",
                 (username,),
             )
-        quiz_usernames = list(set(act[2] for act in quiz_acts))
-        quiz_name_map = {}
-        if quiz_usernames:
-            ph = ",".join("?" for _ in quiz_usernames)
-            u_rows = _act_q(
-                f"SELECT username, name FROM users WHERE username IN ({ph})",
-                tuple(quiz_usernames),
-            )
-            for ur in u_rows:
-                quiz_name_map[ur[0]] = ur[1] or ur[0]
+        quiz_info = _student_labels([act[2] for act in quiz_acts])
         for act in quiz_acts:
-            s_name = quiz_name_map.get(act[2], act[2])
+            info = quiz_info.get(act[2]) or {}
             activities.append({
                 "time": act[0],
                 "type": "quiz",
-                "title": f"学生 {act[2]} {s_name} 完成了测验「{act[1]}」",
-                "detail": "",
+                "title": f"学生 {act[2]} {info.get('name') or act[2]} 完成了测验「{act[1]}」",
+                "detail": info.get("tag", ""),
             })
 
         # 最近的投票活动
@@ -1177,23 +1209,15 @@ async def recent_activity(request: Request):
                    ORDER BY pa.submitted_at DESC LIMIT 5""",
                 (username,),
             )
-        prac_usernames = list(set(act['student_username'] for act in practice_acts))
-        prac_name_map = {}
-        if prac_usernames:
-            ph = ",".join("?" for _ in prac_usernames)
-            u_rows = _act_q(
-                f"SELECT username, name FROM users WHERE username IN ({ph})",
-                tuple(prac_usernames),
-            )
-            for ur in u_rows:
-                prac_name_map[ur[0]] = ur[1] or ur[0]
+        prac_info = _student_labels([act['student_username'] for act in practice_acts])
         for act in practice_acts:
-            s_name = prac_name_map.get(act['student_username'], act['student_username'])
+            su = act['student_username']
+            info = prac_info.get(su) or {}
             activities.append({
                 "time": act['submitted_at'],
                 "type": "practice",
-                "title": f"学生 {act['student_username']} {s_name} 完成了智能练习",
-                "detail": f"「{act['title']}」得分 {act['score']}/{act['total_score']}",
+                "title": f"学生 {su} {info.get('name') or su} 完成了智能练习",
+                "detail": _with_tag(info.get("tag", ""), f"「{act['title']}」得分 {act['score']}/{act['total_score']}"),
             })
 
         # 最近的知识抢答活动
@@ -1239,24 +1263,16 @@ async def recent_activity(request: Request):
             )
         else:
             cp_acts = []
-        # 批量获取学生姓名
-        cp_usernames = list(set(act['student_username'] for act in cp_acts))
-        cp_name_map = {}
-        if cp_usernames:
-            ph3 = ",".join("?" for _ in cp_usernames)
-            u_rows = _act_q(
-                f"SELECT username, name FROM users WHERE username IN ({ph3})",
-                tuple(cp_usernames),
-            )
-            for ur in u_rows:
-                cp_name_map[ur[0]] = ur[1] or ur[0]
+        cp_info = _student_labels([act['student_username'] for act in cp_acts])
         for act in cp_acts:
-            s_name = cp_name_map.get(act['student_username'], act['student_username'])
+            su = act['student_username']
+            info = cp_info.get(su) or {}
             activities.append({
                 "time": act['submitted_at'],
                 "type": "practice",
-                "title": f"学生 {act['student_username']} {s_name} 完成了课程练习",
-                "detail": f"得分 {act['score']}/{act['total_score']} · 正确率 {act['accuracy']}%",
+                "title": f"学生 {su} {info.get('name') or su} 完成了课程练习",
+                "detail": _with_tag(info.get("tag", ""),
+                                    f"得分 {act['score']}/{act['total_score']} · 正确率 {act['accuracy']}%"),
             })
 
         # 最近的知识闯关完成记录
@@ -1270,23 +1286,14 @@ async def recent_activity(request: Request):
             )
         else:
             quest_acts = []
-        quest_usernames = list(set(act[1] for act in quest_acts))
-        quest_name_map = {}
-        if quest_usernames:
-            ph2 = ",".join("?" for _ in quest_usernames)
-            u_rows2 = _act_q(
-                f"SELECT username, name FROM users WHERE username IN ({ph2})",
-                tuple(quest_usernames),
-            )
-            for ur in u_rows2:
-                quest_name_map[ur[0]] = ur[1] or ur[0]
+        quest_info = _student_labels([act[1] for act in quest_acts])
         for act in quest_acts:
-            s_name = quest_name_map.get(act[1], act[1])
+            info = quest_info.get(act[1]) or {}
             activities.append({
                 "time": act[0],
                 "type": "quest",
-                "title": f"学生 {act[1]} {s_name} 完成了知识闯关",
-                "detail": f"答对 {act[3]}/{act[4]} 题，得分 {act[2]} 分",
+                "title": f"学生 {act[1]} {info.get('name') or act[1]} 完成了知识闯关",
+                "detail": _with_tag(info.get("tag", ""), f"答对 {act[3]}/{act[4]} 题，得分 {act[2]} 分"),
             })
 
         # 最近的资源浏览记录
@@ -1303,24 +1310,17 @@ async def recent_activity(request: Request):
                 )
             else:
                 rv_acts = []
-            rv_usernames = list(set(act[1] for act in rv_acts))
-            rv_name_map = {}
-            if rv_usernames:
-                ph4 = ",".join("?" for _ in rv_usernames)
-                u_rows3 = _act_q(
-                    f"SELECT username, name FROM users WHERE username IN ({ph4})",
-                    tuple(rv_usernames),
-                )
-                for ur in u_rows3:
-                    rv_name_map[ur[0]] = ur[1] or ur[0]
+            rv_info = _student_labels([act[1] for act in rv_acts])
             for act in rv_acts:
-                s_name = rv_name_map.get(act[1], act[1])
+                info = rv_info.get(act[1]) or {}
                 res_type_label = "HTML 资源" if act[2] == "html" else "下载文件"
+                res_name = str(act[3] or "")
                 activities.append({
                     "time": act[0],
                     "type": "resource_view",
-                    "title": f"学生 {act[1]} {s_name} 浏览了{res_type_label}",
-                    "detail": f"「{act[3][:40]}{'...' if len(act[3]) > 40 else ''}」",
+                    "title": f"学生 {act[1]} {info.get('name') or act[1]} 浏览了{res_type_label}",
+                    "detail": _with_tag(info.get("tag", ""),
+                                        f"「{res_name[:40]}{'...' if len(res_name) > 40 else ''}」"),
                 })
         except Exception as e:
             logger.warning(f"[recent-activity] 查询资源浏览记录失败: {e}")
