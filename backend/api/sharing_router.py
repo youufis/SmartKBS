@@ -197,7 +197,7 @@ async def share_resource(request: Request, body: ShareRequest):
     """共享一个资源，支持多选教师、多选年级/班级"""
     user = get_current_user(request)
     username = user["username"]
-    role = user["role"]
+    role = user.get("role", 2)   # JWT 缺字段时不应 500
 
     if role not in (ROLE_ADMIN, ROLE_TEACHER):
         raise HTTPException(status_code=403, detail="仅管理员和教师可以共享资源")
@@ -554,7 +554,7 @@ async def unshare_resource(request: Request, id: int = Query(...)):
     """取消共享（含通知）"""
     user = get_current_user(request)
     username = user["username"]
-    role = user["role"]
+    role = user.get("role", 2)   # JWT 缺字段时不应 500
 
     # 在删除前查出完整的共享信息（用于后续通知）
     rows = execute_query(
@@ -787,7 +787,7 @@ async def received_shares(request: Request, include_self: bool = False):
     自己拥有且只共享给自己的资源属于个人资源，无需出现在"共享给我的"列表。"""
     user = get_current_user(request)
     username = user["username"]
-    role = user["role"]
+    role = user.get("role", 2)   # JWT 缺字段时不应 500
 
     # 构建可见条件：
     #   scope='all'       → 所有人可见

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse
 
 from backend.api.dependencies import get_current_user
+from backend.utils import path_within
 from backend.auth import is_admin
 from backend.config import BASE_DIR
 from backend.api.config_router import get_config_value
@@ -20,6 +21,14 @@ from backend.database import execute_insert_update
 from backend.logger import logger
 
 router = APIRouter()
+
+# 任何角色都不得通过文件接口读取运行时代码/依赖目录(内含 system_config.json 等敏感配置)
+_DENY_TOP_DIRS = {
+    ".venv", "venv", "node_modules", ".git", ".vscode", ".codex",
+    "backend", "frontend", "Temp", "__pycache__", "dist",
+}
+# 允许匿名访问的公开文档(必须位于项目根目录)
+_PUBLIC_ROOT_FILES = {"USER_MANUAL.md", "README.md", "README.en.md"}
 
 TEMP_UPLOAD_DIR = BASE_DIR / "temp_uploads"
 TEMP_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -145,11 +154,10 @@ async def serve_static_file(path: str, request: Request):
     
     共享覆盖：管理员共享给所有人的资源、教师共享给对应年级/班级的资源也可访问。
     """
-    requested_path = os.path.abspath(os.path.join(str(BASE_DIR), path))
-    base_dir_abs = os.path.abspath(str(BASE_DIR))
-    
-    # 安全校验：必须在项目目录内
-    if not requested_path.startswith(base_dir_abs):
+    base_dir_abs = os.path.realpath(str(BASE_DIR))
+    # T8: 用 realpath + 路径段比较判边界(旧写法 startswith 会把兄弟目录当成前缀放行)
+    requested_path = os.path.realpath(os.path.join(base_dir_abs, path))
+    if not path_within(base_dir_abs, requested_path):
         raise HTTPException(status_code=403, detail="无权访问该文件")
     
     if not os.path.exists(requested_path):
@@ -159,16 +167,12 @@ async def serve_static_file(path: str, request: Request):
     user = request.state.user  # 由中间件注入
     basename = os.path.basename(requested_path)
     
-    # 公开文件：未登录也可访问
-    public_files = {"USER_MANUAL.md", "README.md", "README.en.md"}
-    if basename in public_files:
+    # T7: 公开文件必须确实位于项目根目录, 不再按"任意目录同名文件"放行
+    if basename in _PUBLIC_ROOT_FILES and os.path.dirname(requested_path) == base_dir_abs:
         return FileResponse(requested_path)
 
-    # question_media 目录：试题配图，未登录可访问
-    if "/question_media/" in request.url.path:
-        return FileResponse(requested_path)
-
-    # 必须登录
+    # T7: 试题配图也要登录(旧实现只要 URL 含 /question_media/ 即匿名放行,
+    #     凭 uuid 文件名即可批量拖走全部教学配图)
     if user is None:
         raise HTTPException(status_code=401, detail="需要登录才能访问资源文件")
     
@@ -176,21 +180,21 @@ async def serve_static_file(path: str, request: Request):
     role = user.get("role", 2)  # 默认学生
     rel_path = os.path.relpath(requested_path, base_dir_abs).replace("\\", "/")
     path_parts = rel_path.split("/")
+    if path_parts and path_parts[0] in _DENY_TOP_DIRS:
+        raise HTTPException(status_code=403, detail="无权访问该位置")
     
     # 标记是否允许访问
-    allowed = False
+    # 试题配图(question_media)本就随考题下发给学生: 收口为"登录即可读", 但不再匿名可枚举
+    allowed = path_parts[0] == "question_media"
     
-    # 管理员：可访问所有文件
+    # 管理员：除上面 deny 列表(运行时代码/依赖目录)外均可
     if role == 0:
         allowed = True
     
     # 教师：可访问 root/（共享）和自己名下的资源
     elif role == 1:
-        if path_parts[0] == ROOT_DIR:
-            allowed = True
-        elif path_parts[0] == "backend" and len(path_parts) > 1 and path_parts[1] == "data":
-            allowed = True
-        elif path_parts[0] == username:
+        # 原来的 backend/data 放行分支指向一个不存在的目录, 反而成了口子, 已移除
+        if path_parts[0] == ROOT_DIR or path_parts[0] == username:
             allowed = True
     
     # 学生：仅可访问 stu/自己学号/ 下的资源
@@ -225,8 +229,9 @@ async def serve_static_file(path: str, request: Request):
     if role == 2 and (path_parts[-1].endswith('.html') or path_parts[-1].endswith('.htm') or "downloads" in path_parts):
         try:
             _log_resource_access(rel_path, username, role, path_parts, request)
-        except Exception:
-            pass  # 日志记录失败不影响文件访问
+        except Exception as log_err:
+            # 不阻断访问, 但要留下线索(旧实现静默 pass, 统计缺失时无从排查)
+            logger.warning(f"记录资源查看日志失败: {log_err}")
     
     return FileResponse(requested_path)
 

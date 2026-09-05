@@ -65,6 +65,60 @@ def get_account_html_dir(logged_in_name: Optional[str]) -> str:
     return os.path.join(base, "html")
 
 
+# ── 路径安全：防止 ../ 逃逸与兄弟目录前缀误判 ──
+
+
+def normalize_rel_path(rel: str) -> str:
+    """把外部传入的相对路径规范成安全形态。
+
+    规则：去掉盘符与前导 /，逐段拒绝 `..`（上级跳转）与隐藏文件（以 . 开头）。
+    返回 "" 表示该路径不可安全使用，调用方应拒绝而不是"尽力清洗"。
+    """
+    import re as _re
+    if not rel:
+        return ""
+    p = str(rel).replace("\\", "/")
+    p = _re.sub(r"^[A-Za-z]:", "", p).lstrip("/")
+    parts: list[str] = []
+    for seg in p.split("/"):
+        seg = seg.strip()
+        if not seg or seg == ".":
+            continue
+        if seg == ".." or seg.startswith("."):
+            return ""
+        parts.append(seg)
+    return "/".join(parts)
+
+
+def path_within(base_dir: str, target: str) -> bool:
+    """target 是否真的在 base_dir 内。
+
+    用 realpath + 路径段比较，避免 `startswith` 把兄弟目录（如 html 与 html_bypass）
+    误判为合法。
+    """
+    import os as _os
+    try:
+        b = _os.path.realpath(base_dir)
+        t = _os.path.realpath(target)
+    except (OSError, ValueError, TypeError):
+        return False
+    bs = _os.path.splitdrive(b)[1].replace("\\", "/").rstrip("/").casefold()
+    ts = _os.path.splitdrive(t)[1].replace("\\", "/").rstrip("/").casefold()
+    if not bs:
+        return False
+    return ts == bs or ts.startswith(bs + "/")
+
+
+def safe_join(base_dir: str, *parts: str) -> str | None:
+    """拼接子路径并校验落点仍在 base_dir 内；越界返回 None。"""
+    import os as _os
+    rel = normalize_rel_path("/".join(str(p) for p in parts if p))
+    if not rel:
+        return None
+    candidate = _os.path.realpath(_os.path.join(base_dir, rel))
+    return candidate if path_within(base_dir, candidate) else None
+
+
 # ── 文件类型检测 ──
 
 def is_image_file(file_path: str) -> bool:

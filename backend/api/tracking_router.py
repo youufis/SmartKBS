@@ -75,6 +75,31 @@ async def log_resource_view(request: Request):
         return {"message": "ok"}  # 不影响用户操作
 
 
+def _is_self_only_share(resource_type: str, resource_id: int) -> bool:
+    """该共享记录是否"仅共享给所有者自己"(含个人目录自动登记的私有行)。
+
+    与 /tracking/resource-view-stats/all 的排除口径保持一致(T11):
+    私有登记不是"共享出来的资源", 不应出现在教师端的浏览统计里。
+    """
+    try:
+        rows = execute_query_dict(
+            """SELECT share_scope, target_users, target_grade, target_class, owner_username
+               FROM shared_resources WHERE resource_type=? AND id=? LIMIT 1""",
+            (resource_type, resource_id),
+        )
+    except Exception:
+        return False
+    if not rows:
+        return False
+    r = rows[0]
+    return (
+        (r.get("share_scope") or "") == "teacher"
+        and not (r.get("target_grade") or "")
+        and not (r.get("target_class") or "")
+        and (r.get("target_users") or "") == (r.get("owner_username") or "")
+    )
+
+
 # ═══════════════════════════════════════════════════════════
 # 获取单个资源的查看统计
 # ═══════════════════════════════════════════════════════════
@@ -90,6 +115,10 @@ async def get_resource_view_stats(
     role = user.get("role", 2)
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
+
+    # T11: 仅共享给自己/私有登记的资源不参与教师端统计(与 /all 版口径一致)
+    if _is_self_only_share(resource_type, resource_id):
+        return {"total_views": 0, "unique_viewers": 0, "last_view": None, "excluded": True}
 
     # 总查看次数
     total_views = execute_query_one(

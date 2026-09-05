@@ -19,6 +19,9 @@ from backend.auth import can_manage_html_files, is_admin, is_teacher
 from backend.config import ROOT_DIR, DEFAULT_LOGGED_IN_NAME
 from backend.prompts.html_generator import build_html_prompt
 from backend.utils import (
+    normalize_rel_path,
+    path_within,
+    safe_join,
     get_account_html_dir,
     get_user_base_dir,
     ensure_teacher_html_files,
@@ -55,7 +58,8 @@ async def list_resources(request: Request):
                 rel_path = os.path.relpath(fpath, str(BASE_DIR)).replace("\\", "/")
                 files.append({
                     "name": fname,
-                    "path": fpath,
+                    # T6: 前端用 path 做 key/重命名/删除参数, 只需相对 html 根, 不再泄露服务器绝对路径
+                    "path": os.path.relpath(fpath, html_dir).replace("\\", "/"),
                     "url_path": rel_path,
                     "size": os.path.getsize(fpath),
                     "display_name": os.path.splitext(fname)[0],
@@ -63,31 +67,50 @@ async def list_resources(request: Request):
     except Exception as e:
         logger.error(f"获取资源列表失败: {e}")
 
-    return {"files": files, "html_dir": html_dir}
+    return {"files": files, "count": len(files)}
 
 
 # ── 目录树 ──
 
-def _scan_tree(dirpath: str, base_rel: str = "", with_meta: bool = True) -> list[dict[str, Any]]:
-    entries = []
+_TREE_MAX_DEPTH = 8
+_TREE_MAX_ENTRIES = 4000
+
+
+def _scan_tree(dirpath: str, base_rel: str = "", with_meta: bool = True,
+               _depth: int = 0, _budget: list | None = None) -> list[dict[str, Any]]:
+    """扫描目录树; 限制深度与条目数, 避免大目录把响应撑到几百 KB 并卡住前端渲染。"""
+    if _budget is None:
+        _budget = [0, False]        # [剩余条目, 是否截断]
+    entries: list[dict[str, Any]] = []
+    if _depth >= _TREE_MAX_DEPTH:
+        _budget[1] = True
+        return entries
     try:
-        for name in sorted(os.listdir(dirpath), key=str.lower):
-            full = os.path.join(dirpath, name)
-            rel = os.path.join(base_rel, name) if base_rel else name
-            if os.path.isfile(full):
+        names = sorted(os.listdir(dirpath), key=str.lower)
+    except (PermissionError, OSError):
+        return entries
+    for name in names:
+        if _budget[0] <= 0:
+            _budget[1] = True
+            break
+        _budget[0] -= 1
+        full = os.path.join(dirpath, name)
+        rel = os.path.join(base_rel, name) if base_rel else name
+        if os.path.isfile(full):
+            try:
                 stat = os.stat(full)
-                _, ext = os.path.splitext(name.lower())
-                entry = {"title": name, "key": rel, "isLeaf": True}
-                if with_meta:
-                    entry["size"] = stat.st_size
-                    entry["mtime"] = __import__("datetime").datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-                    entry["ext"] = ext
-                entries.append(entry)
-            elif os.path.isdir(full):
-                children = _scan_tree(full, rel, with_meta)
-                entries.append({"title": name, "key": rel, "isLeaf": False, "children": children})
-    except PermissionError:
-        pass
+            except OSError:
+                continue
+            _, ext = os.path.splitext(name.lower())
+            entry = {"title": name, "key": rel.replace("\\", "/"), "isLeaf": True}
+            if with_meta:
+                entry["size"] = stat.st_size
+                entry["mtime"] = __import__("datetime").datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                entry["ext"] = ext
+            entries.append(entry)
+        elif os.path.isdir(full):
+            children = _scan_tree(full, rel, with_meta, _depth + 1, _budget)
+            entries.append({"title": name, "key": rel.replace("\\", "/"), "isLeaf": False, "children": children})
     return entries
 
 
@@ -99,8 +122,10 @@ async def get_resource_tree(request: Request):
     html_dir = get_account_html_dir(username)
     if not os.path.exists(html_dir):
         return {"tree": [], "root": html_dir}
-    tree = _scan_tree(html_dir)
-    return {"tree": tree, "root": html_dir}
+    budget = [_TREE_MAX_ENTRIES, False]
+    tree = _scan_tree(html_dir, with_meta=True, _budget=budget)
+    # T6: 不再返回服务器绝对路径(前端未使用)
+    return {"tree": tree, "truncated": bool(budget[1])}
 
 
 # ── 上传文件 ──
@@ -145,10 +170,12 @@ async def upload_resource(request: Request):
         if not filename:
             continue
 
-        # 使用 webkitRelativePath 或 subpath 构建相对路径
-        rel_path = getattr(item, 'filename', '')
-        if subpath:
-            rel_path = os.path.join(subpath, os.path.basename(filename))
+        # T1: 客户端可传 path<idx> 子目录, 必须规范化并禁止 ../ / 隐藏文件 / 绝对路径逃逸
+        raw_rel = os.path.join(subpath, os.path.basename(filename)) if subpath else filename
+        rel_path = normalize_rel_path(raw_rel)
+        if not rel_path:
+            errors.append(f"文件 '{filename}' 路径不合法（禁止上级目录或以 . 开头的名称）")
+            continue
 
         # 检查扩展名
         _, ext = os.path.splitext(rel_path.lower())
@@ -162,8 +189,11 @@ async def upload_resource(request: Request):
             errors.append(f"文件 '{filename}' 超过 {MAX_UPLOAD_SIZE_MB}MB 限制")
             continue
 
-        # 目标路径（含子目录）
-        target_path = os.path.join(html_dir, rel_path)
+        # 目标路径（含子目录）—— 必须仍在本次账户 html 目录内
+        target_path = safe_join(html_dir, rel_path)
+        if not target_path:
+            errors.append(f"文件 '{filename}' 目标路径越界，已拒绝")
+            continue
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
         # 处理重名
@@ -195,114 +225,114 @@ async def upload_resource(request: Request):
 # ── 删除文件 ──
 
 @router.delete("/file")
-async def delete_resource(path: str = Query(...), request: Request = None):  # type: ignore[assignment]
+async def delete_resource(request: Request, path: str = Query(...)):
     """删除资源文件或目录（仅管理员/教师）"""
-    if request:
-        user = get_current_user(request)
-        username = user["username"]
+    # T5: 鉴权与边界检查无条件执行(旧写法包在 `if request:` 内, 参数缺失即整体跳过)
+    user = get_current_user(request)
+    username = user["username"]
 
-        if not can_manage_html_files(username):
-            raise HTTPException(status_code=403, detail="权限不足：仅管理员和教师可以删除")
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员和教师可以删除")
 
-        html_dir = os.path.abspath(get_account_html_dir(username))
-        # 如果 path 是相对路径（来自树节点的 key），拼接到 html_dir
-        if not os.path.isabs(path):
-            target_path = os.path.abspath(os.path.join(html_dir, path))
+    html_dir = os.path.abspath(get_account_html_dir(username))
+    # 如果 path 是相对路径（来自树节点的 key），拼接到 html_dir
+    if not os.path.isabs(path):
+        target_path = os.path.abspath(os.path.join(html_dir, path))
+    else:
+        target_path = os.path.abspath(path)
+
+    if not path_within(html_dir, target_path):
+        raise HTTPException(status_code=403, detail="只能删除自己 HTML 目录下的文件")
+
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        if os.path.isfile(target_path):
+            os.remove(target_path)
+            msg = f"文件 {os.path.basename(target_path)} 已删除"
+        elif os.path.isdir(target_path):
+            shutil.rmtree(target_path)
+            msg = f"目录 {os.path.basename(target_path)} 已删除"
         else:
-            target_path = os.path.abspath(path)
+            raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
 
-        if not target_path.startswith(html_dir):
-            raise HTTPException(status_code=403, detail="只能删除自己 HTML 目录下的文件")
+        logger.info(f"资源已删除: {target_path}")
 
-        if not os.path.exists(target_path):
-            raise HTTPException(status_code=404, detail="文件不存在")
-
+        # 同步清理资源分组中的引用
+        rel_path = path if not os.path.isabs(path) else os.path.relpath(target_path, html_dir)
+        # 统一将路径分隔符转为正斜杠（数据库中用正斜杠）
+        db_path = rel_path.replace("\\", "/")
         try:
-            if os.path.isfile(target_path):
-                os.remove(target_path)
-                msg = f"文件 {os.path.basename(target_path)} 已删除"
-            elif os.path.isdir(target_path):
-                shutil.rmtree(target_path)
-                msg = f"目录 {os.path.basename(target_path)} 已删除"
-            else:
-                raise HTTPException(status_code=400, detail="路径不是文件也不是目录")
+            from backend.database import execute_insert_update
+            execute_insert_update(
+                "DELETE FROM resource_group_items WHERE file_path=?",
+                (db_path,),
+            )
+            # 也尝试清理绝对路径格式的引用
+            execute_insert_update(
+                "DELETE FROM resource_group_items WHERE file_path=?",
+                (target_path.replace("\\", "/"),),
+            )
+        except Exception as cleanup_err:
+            logger.warning(f"清理资源分组引用失败: {cleanup_err}")
 
-            logger.info(f"资源已删除: {target_path}")
-
-            # 同步清理资源分组中的引用
-            rel_path = path if not os.path.isabs(path) else os.path.relpath(target_path, html_dir)
-            # 统一将路径分隔符转为正斜杠（数据库中用正斜杠）
-            db_path = rel_path.replace("\\", "/")
-            try:
-                from backend.database import execute_insert_update
-                execute_insert_update(
-                    "DELETE FROM resource_group_items WHERE file_path=?",
-                    (db_path,),
-                )
-                # 也尝试清理绝对路径格式的引用
-                execute_insert_update(
-                    "DELETE FROM resource_group_items WHERE file_path=?",
-                    (target_path.replace("\\", "/"),),
-                )
-            except Exception as cleanup_err:
-                logger.warning(f"清理资源分组引用失败: {cleanup_err}")
-
-            # 同步清理共享记录和关联的课程绑定
-            try:
-                from backend.database import execute_insert_update, execute_query_dict
-                basename = os.path.basename(target_path)
-                # 尝试多种路径格式匹配，确保能找到共享记录
+        # 同步清理共享记录和关联的课程绑定
+        try:
+            from backend.database import execute_insert_update, execute_query_dict
+            basename = os.path.basename(target_path)
+            # 尝试多种路径格式匹配，确保能找到共享记录
+            share_rows = execute_query_dict(
+                """SELECT id FROM shared_resources
+                   WHERE owner_username=? AND resource_type='html'
+                   AND (file_path=? OR file_path=? OR file_path LIKE ? OR file_path LIKE ?)""",
+                (username, db_path, basename, f"%/{db_path}", f"%/{basename}"),
+            )
+            if not share_rows:
+                # 再试一次：用文件名后缀匹配（兼容路径格式差异）
                 share_rows = execute_query_dict(
                     """SELECT id FROM shared_resources
                        WHERE owner_username=? AND resource_type='html'
-                       AND (file_path=? OR file_path=? OR file_path LIKE ? OR file_path LIKE ?)""",
-                    (username, db_path, basename, f"%/{db_path}", f"%/{basename}"),
+                       AND file_path LIKE ?""",
+                    (username, f"%{basename}"),
                 )
-                if not share_rows:
-                    # 再试一次：用文件名后缀匹配（兼容路径格式差异）
-                    share_rows = execute_query_dict(
-                        """SELECT id FROM shared_resources
-                           WHERE owner_username=? AND resource_type='html'
-                           AND file_path LIKE ?""",
-                        (username, f"%{basename}"),
-                    )
-                for row in share_rows:
-                    sid = row["id"]
-                    # 清理该共享关联的课程绑定
+            for row in share_rows:
+                sid = row["id"]
+                # 清理该共享关联的课程绑定
+                execute_insert_update(
+                    "DELETE FROM curriculum_bindings WHERE resource_type='html' AND resource_id=?",
+                    (sid,),
+                )
+                # 清理资源查看日志
+                try:
                     execute_insert_update(
-                        "DELETE FROM curriculum_bindings WHERE resource_type='html' AND resource_id=?",
+                        "DELETE FROM resource_view_logs WHERE resource_id=? AND resource_type='html'",
                         (sid,),
                     )
-                    # 清理资源查看日志
-                    try:
-                        execute_insert_update(
-                            "DELETE FROM resource_view_logs WHERE resource_id=? AND resource_type='html'",
-                            (sid,),
-                        )
-                    except Exception:
-                        pass
-                    # 清理共享记录
-                    execute_insert_update(
-                        "DELETE FROM shared_resources WHERE id=?",
-                        (sid,),
-                    )
-                if share_rows:
-                    logger.info(f"已同步清理 {len(share_rows)} 条共享记录及关联绑定")
+                except Exception:
+                    pass
+                # 清理共享记录
+                execute_insert_update(
+                    "DELETE FROM shared_resources WHERE id=?",
+                    (sid,),
+                )
+            if share_rows:
+                logger.info(f"已同步清理 {len(share_rows)} 条共享记录及关联绑定")
 
-                # ── 额外清理：如果文件名匹配 AI 练习模式 {kp_id}_*_练习.html，清理练习成绩 ──
-                practice_match = re.match(r'^(\d+)_.*_练习\.html$', basename)
-                if practice_match:
-                    kp_id = int(practice_match.group(1))
-                    from backend.question_db import execute_insert as q_exec_i
-                    q_exec_i("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
-                    logger.info(f"已清理知识点 {kp_id} 的 AI 练习成绩记录")
-            except Exception as cleanup_err:
-                logger.warning(f"清理共享记录失败: {cleanup_err}")
+            # ── 额外清理：如果文件名匹配 AI 练习模式 {kp_id}_*_练习.html，清理练习成绩 ──
+            practice_match = re.match(r'^(\d+)_.*_练习\.html$', basename)
+            if practice_match:
+                kp_id = int(practice_match.group(1))
+                from backend.question_db import execute_insert as q_exec_i
+                q_exec_i("DELETE FROM ai_practice_results WHERE kp_id=?", (kp_id,))
+                logger.info(f"已清理知识点 {kp_id} 的 AI 练习成绩记录")
+        except Exception as cleanup_err:
+            logger.warning(f"清理共享记录失败: {cleanup_err}")
 
-            return {"message": msg}
-        except Exception as e:
-            logger.error(f"删除资源失败: {e}")
-            raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+        return {"message": msg}
+    except Exception as e:
+        logger.error(f"删除资源失败: {e}")
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
     raise HTTPException(status_code=401, detail="未登录")
 
@@ -324,8 +354,10 @@ async def rename_resource(request: Request):
 
     if not path or not new_name:
         raise HTTPException(status_code=400, detail="缺少 path 或 new_name")
-    if "/" in new_name or "\\" in new_name:
+    if "/" in new_name or "\\" in new_name or ".." in new_name:
         raise HTTPException(status_code=400, detail="新名称不能包含路径分隔符")
+    if new_name.startswith("."):
+        raise HTTPException(status_code=400, detail="新名称不能以 . 开头")
 
     html_dir = os.path.abspath(get_account_html_dir(username))
     if not os.path.isabs(path):
@@ -333,13 +365,16 @@ async def rename_resource(request: Request):
     else:
         old_path = os.path.abspath(path)
 
-    if not old_path.startswith(html_dir):
+    # T2: 旧实现用 startswith, 兄弟目录 html_bypass 也能通过
+    if not path_within(html_dir, old_path):
         raise HTTPException(status_code=403, detail="无权操作该文件")
 
     if not os.path.exists(old_path):
         raise HTTPException(status_code=404, detail="文件或目录不存在")
 
     new_path = os.path.join(os.path.dirname(old_path), new_name)
+    if not path_within(html_dir, new_path):
+        raise HTTPException(status_code=403, detail="目标位置超出资源目录范围")
     if os.path.exists(new_path):
         raise HTTPException(status_code=409, detail="目标名称已存在")
 
@@ -1695,13 +1730,19 @@ async def ai_generate_async(request: Request):
 
 @router.get("/ai-task/{task_id}")
 async def get_ai_task_status(task_id: str, request: Request):
-    """获取异步 AI 生成任务的状态和结果"""
+    """获取异步 AI 生成任务的状态和结果（T3: 必须登录且只能读自己/管理员可读的任务）"""
+    user = get_current_user(request)
     from backend.ai_task_manager import task_manager as _task_manager
     task = _task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在或已过期")
 
+    owner = getattr(task, "owner", "") or ""
+    if owner and user.get("role", 2) != 0 and owner != user["username"]:
+        raise HTTPException(status_code=403, detail="无权查看该任务")
+
     result = task.to_dict()
+    result.pop("owner", None)
     # 如果已完成且有 saved_info，格式化输出
     if task.status.value == "completed" and task.result:
         result["data"] = task.result

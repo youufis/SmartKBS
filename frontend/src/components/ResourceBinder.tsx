@@ -7,21 +7,23 @@ import {
   TeamOutlined, CheckCircleOutlined, PlusOutlined, DeleteOutlined, SearchOutlined,
 } from '@ant-design/icons'
 import * as curriculumApi from '../api/curriculum'
+import { useTranslation } from 'react-i18next'
 
 const { Search } = Input
 const { Option } = Select
 
+// 类型标签走 i18n(键在 curriculum 命名空间: 该组件只在课程/知识点页使用)
 const RESOURCE_TYPE_OPTIONS = [
-  { value: 'html', label: 'HTML 资源', icon: <FileOutlined /> },
-  { value: 'download', label: '下载文件', icon: <DownloadOutlined /> },
-  { value: 'exam', label: '考试', icon: <FormOutlined /> },
-  { value: 'discussion', label: '讨论', icon: <TeamOutlined /> },
-  { value: 'interaction_quiz', label: '随堂测验', icon: <FormOutlined /> },
-  { value: 'task', label: '任务', icon: <CheckCircleOutlined /> },
+  { value: 'html', labelKey: 'rbTypeHtml', icon: <FileOutlined /> },
+  { value: 'download', labelKey: 'rbTypeDownload', icon: <DownloadOutlined /> },
+  { value: 'exam', labelKey: 'rbTypeExam', icon: <FormOutlined /> },
+  { value: 'discussion', labelKey: 'rbTypeDiscussion', icon: <TeamOutlined /> },
+  { value: 'interaction_quiz', labelKey: 'rbTypeQuiz', icon: <FormOutlined /> },
+  { value: 'task', labelKey: 'rbTypeTask', icon: <CheckCircleOutlined /> },
 ]
 
-const RESOURCE_TYPE_MAP = Object.fromEntries(
-  RESOURCE_TYPE_OPTIONS.map((t) => [t.value, t.label]),
+const RESOURCE_TYPE_KEYS: Record<string, string> = Object.fromEntries(
+  RESOURCE_TYPE_OPTIONS.map((o) => [o.value, o.labelKey]),
 )
 
 interface ResourceBinderProps {
@@ -38,6 +40,7 @@ interface ResourceBinderProps {
 }
 
 const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onClose, onRefresh }) => {
+  const { t } = useTranslation('curriculum')
   // ── 已绑定的资源列表 ──
   const [boundResources, setBoundResources] = useState<any[]>([])
   const [boundLoading, setBoundLoading] = useState(false)
@@ -97,7 +100,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
   // ── 绑定资源 ──
   const handleBind = async () => {
     if (selectedResourceIds.length === 0) {
-      message.warning('请选择要绑定的资源')
+      message.warning(t('rbSelectResources'))
       return
     }
     setBinding(true)
@@ -118,7 +121,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
       }
     }
     if (successCount > 0) {
-      message.success(`成功绑定 ${successCount} 个资源`)
+      message.success(t('rbBindSuccess', { count: successCount }))
       setSelectedResourceIds([])
       loadBoundResources()
       loadAvailableResources()
@@ -131,29 +134,29 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
   const handleUnbind = async (bindingId: number) => {
     try {
       await curriculumApi.unbindResource(bindingId)
-      message.success('资源已解绑')
+      message.success(t('rbUnbindSuccess'))
       loadBoundResources()
       loadAvailableResources()
       onRefresh?.()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(detail || '解绑失败')
+      message.error(detail || t('rbUnbindFailed'))
     }
   }
 
   // ── 已绑定资源表格列 ──
   const boundColumns = [
     {
-      title: '类型',
+      title: t('rbColType'),
       dataIndex: 'resource_type',
       key: 'type',
       width: 100,
       render: (type: string) => (
-        <Tag>{RESOURCE_TYPE_MAP[type] || type}</Tag>
+        <Tag>{RESOURCE_TYPE_KEYS[type] ? t(RESOURCE_TYPE_KEYS[type]) : type}</Tag>
       ),
     },
     {
-      title: '名称',
+      title: t('rbColName'),
       dataIndex: 'resource_name',
       key: 'name',
       ellipsis: true,
@@ -165,7 +168,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
       ),
     },
     {
-      title: '操作',
+      title: t('rbColActions'),
       key: 'action',
       width: 80,
       render: (_: any, record: any) => (
@@ -176,7 +179,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
           icon={<DeleteOutlined />}
           onClick={() => handleUnbind(record.binding_id)}
         >
-          解绑
+          {t('rbUnbind')}
         </Button>
       ),
     },
@@ -191,12 +194,12 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
       width: 60,
     },
     {
-      title: '名称',
+      title: t('rbColName'),
       dataIndex: 'name',
       key: 'name',
       ellipsis: true,
       render: (name: string) => (
-        <Typography.Text>{name || '(无名称)'}</Typography.Text>
+        <Typography.Text>{name || t('rbNoName')}</Typography.Text>
       ),
     },
   ]
@@ -206,7 +209,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
       title={
         <Space>
           <PlusOutlined />
-          <span>管理绑定资源</span>
+          <span>{t('rbModalTitle')}</span>
           <Typography.Text type="secondary" style={{ fontSize: 13 }}>
             — {kpName}
           </Typography.Text>
@@ -219,7 +222,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
     >
       {/* ── 已绑定资源列表 ── */}
       <Typography.Title level={5} style={{ marginTop: 0 }}>
-        已绑定的资源 ({boundResources.length})
+        {t('rbBoundTitle', { count: boundResources.length })}
       </Typography.Title>
       <Table
         dataSource={boundResources}
@@ -228,12 +231,12 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
         loading={boundLoading}
         size="small"
         pagination={false}
-        locale={{ emptyText: <Empty description="暂未绑定资源" /> }}
+        locale={{ emptyText: <Empty description={t('rbNoBound')} /> }}
         style={{ marginBottom: 24 }}
       />
 
       {/* ── 绑定新资源 ── */}
-      <Typography.Title level={5}>绑定新资源</Typography.Title>
+      <Typography.Title level={5}>{t('rbBindNewTitle')}</Typography.Title>
       <Space style={{ marginBottom: 12 }} wrap>
         <Select
           value={resourceType}
@@ -243,17 +246,17 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
           }}
           style={{ width: 140 }}
         >
-          {RESOURCE_TYPE_OPTIONS.map((t) => (
-            <Option key={t.value} value={t.value}>
+          {RESOURCE_TYPE_OPTIONS.map((opt) => (
+            <Option key={opt.value} value={opt.value}>
               <Space size={4}>
-                {t.icon}
-                {t.label}
+                {opt.icon}
+                {opt.labelKey ? t(opt.labelKey) : opt.value}
               </Space>
             </Option>
           ))}
         </Select>
         <Search
-          placeholder="搜索资源名称..."
+          placeholder={t('rbSearchPlaceholder')}
           allowClear
           value={keyword}
           onChange={(e) => setKeyword(e.target.value)}
@@ -268,7 +271,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
           loading={binding}
           disabled={selectedResourceIds.length === 0}
         >
-          绑定选中 ({selectedResourceIds.length})
+          {t('rbBindSelected', { count: selectedResourceIds.length })}
         </Button>
       </Space>
 
@@ -284,7 +287,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
           selectedRowKeys: selectedResourceIds,
           onChange: (keys) => setSelectedResourceIds(keys as number[]),
         }}
-        locale={{ emptyText: <Empty description="没有可绑定的资源" /> }}
+        locale={{ emptyText: <Empty description={t('rbNoAvailable')} /> }}
         style={{ marginBottom: 16 }}
       />
     </Modal>

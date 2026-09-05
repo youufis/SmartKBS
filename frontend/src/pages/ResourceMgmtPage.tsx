@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { Layout, Card, Space, Button, message, Tree, Modal, Typography, Dropdown, Tooltip, Input, Tabs, Tag, Empty, Segmented, Select, Radio, Switch, Pagination } from 'antd'
-import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined, CodeOutlined, FilePdfOutlined, FileImageOutlined, FileZipOutlined, FileUnknownOutlined, BulbOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons'
+import { UploadOutlined, DeleteOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, EditOutlined, SearchOutlined, AppstoreOutlined, UnorderedListOutlined, BulbOutlined, LoadingOutlined, EyeOutlined } from '@ant-design/icons'
 import * as resourcesApi from '../api/resources'
 import apiClient from '../api/client'
 import type { TreeNode } from '../types'
+import { getFileIcon } from '../utils/fileIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 
@@ -20,38 +21,6 @@ function flattenTree(nodes: TreeNode[], basePath = ''): { name: string; path: st
     }
   }
   return result
-}
-
-// 根据扩展名获取文件图标
-function getFileIcon(name: string) {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  const iconMap: Record<string, React.ReactNode> = {
-    html: <FileTextOutlined style={{ color: '#e44d26' }} />,
-    htm: <FileTextOutlined style={{ color: '#e44d26' }} />,
-    css: <CodeOutlined style={{ color: '#264de4' }} />,
-    js: <CodeOutlined style={{ color: '#f7df1e' }} />,
-    ts: <CodeOutlined style={{ color: '#3178c6' }} />,
-    tsx: <CodeOutlined style={{ color: '#3178c6' }} />,
-    jsx: <CodeOutlined style={{ color: '#61dafb' }} />,
-    py: <CodeOutlined style={{ color: '#3776ab' }} />,
-    json: <CodeOutlined style={{ color: '#292929' }} />,
-    md: <FileTextOutlined style={{ color: '#083fa1' }} />,
-    pdf: <FilePdfOutlined style={{ color: '#f40f02' }} />,
-    png: <FileImageOutlined style={{ color: '#00a98f' }} />,
-    jpg: <FileImageOutlined style={{ color: '#00a98f' }} />,
-    jpeg: <FileImageOutlined style={{ color: '#00a98f' }} />,
-    gif: <FileImageOutlined style={{ color: '#00a98f' }} />,
-    svg: <FileImageOutlined style={{ color: '#ffb13b' }} />,
-    zip: <FileZipOutlined style={{ color: '#ebc441' }} />,
-    rar: <FileZipOutlined style={{ color: '#ebc441' }} />,
-    doc: <FileTextOutlined style={{ color: '#2b579a' }} />,
-    docx: <FileTextOutlined style={{ color: '#2b579a' }} />,
-    xls: <FileTextOutlined style={{ color: '#217346' }} />,
-    xlsx: <FileTextOutlined style={{ color: '#217346' }} />,
-    ppt: <FileTextOutlined style={{ color: '#d24726' }} />,
-    pptx: <FileTextOutlined style={{ color: '#d24726' }} />,
-  }
-  return iconMap[ext] || <FileUnknownOutlined style={{ color: '#999' }} />
 }
 
 
