@@ -189,7 +189,9 @@ const QuestionBankPage: React.FC = () => {
 
   // ── 删除重复试题 ──
   const [dedupResult, setDedupResult] = useState<{
+    dry_run?: boolean;
     total_deleted: number;
+    deletable_count?: number;
     total_skipped_owner?: number;
     total_skipped_ref?: number;
     groups: { question_text: string; count: number }[];
@@ -197,25 +199,30 @@ const QuestionBankPage: React.FC = () => {
   } | null>(null)
   const [dedupLoading, setDedupLoading] = useState(false)
 
+  // Q4: 先预览重复组(不写库), 用户在结果弹窗里点“确认清理”才真正执行
   const handleDedup = async () => {
-    Modal.confirm({
-      title: t('dedupTitle'),
-      content: t('dedupConfirm'),
-      onOk: async () => {
-        setDedupLoading(true)
-        try {
-          const res = await questionsApi.dedupQuestions()
-          setDedupResult(res)
-          if (res.total_deleted > 0) {
-            loadQuestions()
-          }
-        } catch {
-          message.error(t('dedupFail'))
-        } finally {
-          setDedupLoading(false)
-        }
-      },
-    })
+    setDedupLoading(true)
+    try {
+      const res = await questionsApi.dedupQuestions(false)
+      setDedupResult(res)
+    } catch {
+      message.error(t('dedupFail'))
+    } finally {
+      setDedupLoading(false)
+    }
+  }
+
+  const runDedupConfirm = async () => {
+    setDedupLoading(true)
+    try {
+      const res = await questionsApi.dedupQuestions(true)
+      setDedupResult(res)
+      if (res.total_deleted > 0) loadQuestions()
+    } catch {
+      message.error(t('dedupFail'))
+    } finally {
+      setDedupLoading(false)
+    }
   }
 
   // ── 配图管理（粒度 loading 状态） ──
@@ -332,6 +339,8 @@ const QuestionBankPage: React.FC = () => {
       explanation: q.explanation,
       knowledge_points: q.knowledge_points,
       difficulty: q.difficulty,
+      type: q.type,
+      subject: (q as any).subject || '',
     })
     setEditModal(true)
   }
@@ -372,23 +381,26 @@ const QuestionBankPage: React.FC = () => {
       const updates: any = {
         question_text: values.question_text,
         correct_answer: values.correct_answer,
-        explanation: values.explanation,
-        knowledge_points: values.knowledge_points,
+        explanation: values.explanation ?? '',
+        knowledge_points: values.knowledge_points ?? '',
         difficulty: values.difficulty,
+        type: values.type,
+        subject: values.subject ?? '',
+        // 总是回传 options：后端按“字段是否出现”区分未改动与显式清空(Q8)
+        options: optionsStr,
       }
 
-      if (optionsStr) {
-        updates.options = optionsStr
-      }
-
-      await questionsApi.updateQuestion(editingQuestion.id, updates)
+      const res = await questionsApi.updateQuestion(editingQuestion.id, updates)
       message.success(t('editSuccess'))
+      ;(res?.warnings || []).forEach((w) => message.warning(w, 8))
       setEditModal(false)
       loadQuestions()
     } catch (err: any) {
-      if (err?.response?.data?.detail) {
-        message.error(err.response.data.detail)
+      if (err?.errorFields) {
+        // 表单校验失败, antd 已在字段上标红, 不再重复弹提示
+        return
       }
+      message.error(err?.response?.data?.detail || err?.message || t('updateFail'))
     } finally {
       setSaving(false)
     }
@@ -399,13 +411,19 @@ const QuestionBankPage: React.FC = () => {
     try {
       const res = await questionsApi.deleteQuestion(id) as any
       if (res?.status === 'error') {
-        message.warning(res.message + (res.refs ? `\n${res.refs}` : ''))
+        message.warning(res.message)
         return
       }
       message.success(t('deleteSuccess'))
       loadQuestions()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || t('deleteFail'))
+      const detail = err?.response?.data?.detail
+      if (err?.response?.status === 409) {
+        // 题目正被考试/练习引用: 提示里已带具体活动名
+        message.warning(typeof detail === 'string' ? detail : t('deleteFail'), 10)
+      } else {
+        message.error(typeof detail === 'string' ? detail : t('deleteFail'))
+      }
     }
   }
 
@@ -494,7 +512,7 @@ const QuestionBankPage: React.FC = () => {
         }
         // 有 SVG 配图 → 显示 SVG 缩略图
         if (has_svg && record.svg_content) {
-          return <SVGViewer svgCode={record.svg_content} description="预览" thumbHeight={50} />
+          return <SVGViewer svgCode={record.svg_content} description={t('preview')} thumbHeight={50} />
         }
         // 有万相/上传的图片 → 显示第一张缩略图
         if (mf.length > 0 && mf[0].url) {
@@ -508,7 +526,7 @@ const QuestionBankPage: React.FC = () => {
         // 有占位符未生成 → 显示数量标记
         if ((record.media_placeholders?.length || 0) > 0) {
           return (
-            <Tooltip title={`${record.media_placeholders?.length} 个占位符`}>
+            <Tooltip title={t('placeholderCount', { count: record.media_placeholders?.length || 0 })}>
               <Tag color="orange">📷 {record.media_placeholders?.length}</Tag>
             </Tooltip>
           )
@@ -1013,14 +1031,37 @@ const QuestionBankPage: React.FC = () => {
         cancelText={t('cancel')}
         destroyOnHidden
       >
-        <Form form={editForm} layout="vertical">
-          <Form.Item label={t('questionType')}>
-            <Typography.Text>
-              <Tag color={TYPE_COLORS[editingQuestion?.type || '']}>
-                {TYPE_LABELS[editingQuestion?.type || '']}
-              </Tag>
-            </Typography.Text>
-          </Form.Item>
+        <Form
+          form={editForm}
+          layout="vertical"
+          onValuesChange={(_, all: any) => setEditingQuestion((prev) => (
+            prev ? { ...prev, type: all.type ?? prev.type, subject: all.subject ?? prev.subject } : prev
+          ))}
+        >
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label={t('questionType')} name="type">
+                <Select
+                  showSearch
+                  optionFilterProp="children"
+                  suffixIcon={
+                    <Tag color={TYPE_COLORS[editingQuestion?.type || '']} style={{ margin: 0, lineHeight: '18px' }}>
+                      {TYPE_LABELS[editingQuestion?.type || '']}
+                    </Tag>
+                  }
+                >
+                  {TYPE_OPTIONS.map((o) => (
+                    <Option key={o.value} value={o.value}>{o.label}</Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={t('subject')} name="subject">
+                <Input placeholder={t('subject')} allowClear />
+              </Form.Item>
+            </Col>
+          </Row>
 
           {/* ── 题目内容（含公式预览） ── */}
           <Form.Item
@@ -1065,14 +1106,14 @@ const QuestionBankPage: React.FC = () => {
                       style={{ width: 56, textAlign: 'center', fontWeight: 'bold' }}
                       value={entry.key}
                       onChange={(e) => handleOptionKeyChange(idx, e.target.value)}
-                      placeholder="键"
+                      placeholder={t('optionKeyPlaceholder')}
                     />
                     <div style={{ flex: 1 }}>
                       <TextArea
                         rows={1}
                         value={entry.value}
                         onChange={(e) => handleOptionValueChange(idx, e.target.value)}
-                        placeholder="选项内容（支持公式 $...$）"
+                        placeholder={t('optionValuePlaceholder')}
                         style={{ minHeight: 32 }}
                       />
                       {/* 选项预览 */}
@@ -1127,7 +1168,7 @@ const QuestionBankPage: React.FC = () => {
                   marginTop: -16, marginBottom: 16, padding: '4px 12px',
                   background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f',
                 }}>
-                  <span style={{ fontSize: 12, color: '#52c41a' }}>✅ 预览：</span>
+                  <span style={{ fontSize: 12, color: '#52c41a' }}>✅ {t('preview')}：</span>
                   <FormulaRenderer content={ca} inline />
                 </div>
               )
@@ -1149,7 +1190,7 @@ const QuestionBankPage: React.FC = () => {
                   background: '#f0f5ff', borderRadius: 6, border: '1px solid #d6e4ff',
                   fontSize: 13,
                 }}>
-                  <span style={{ fontSize: 12, color: '#1677ff' }}>📖 解析预览：</span>
+                  <span style={{ fontSize: 12, color: '#1677ff' }}>📖 {t('explanationPreview')}：</span>
                   <FormulaRenderer content={exp} />
                 </div>
               )
@@ -1187,13 +1228,13 @@ const QuestionBankPage: React.FC = () => {
                   {t('imageManagement')}
                 </Button>
                 {editingQuestion.has_svg === 1 && (
-                  <Tag color="blue">有 SVG</Tag>
+                  <Tag color="blue">{t('hasSvg')}</Tag>
                 )}
                 {editingQuestion.media_files && Array.isArray(editingQuestion.media_files) && editingQuestion.media_files.length > 0 && (
                   <Tag color="green">{t('imageCount', { count: editingQuestion.media_files.length })}</Tag>
                 )}
                 {(editingQuestion.media_placeholders?.length || 0) > 0 && (
-                  <Tag color="orange">{editingQuestion.media_placeholders?.length} 个占位符</Tag>
+                  <Tag color="orange">{t('placeholderCount', { count: editingQuestion.media_placeholders?.length || 0 })}</Tag>
                 )}
               </Space>
             </div>
@@ -1215,7 +1256,7 @@ const QuestionBankPage: React.FC = () => {
               padding: '8px 12px', background: '#f6f8fa', borderRadius: 6,
               border: '1px solid #e8e8e8', fontSize: 12, lineHeight: 2, marginBottom: 8,
             }}>
-              <Typography.Text strong style={{ fontSize: 13 }}>LaTeX 公式语法示例：</Typography.Text>
+              <Typography.Text strong style={{ fontSize: 13 }}>{t('latexExamplesTitle')}</Typography.Text>
               <table style={{ width: '100%', marginTop: 4, borderCollapse: 'collapse' }}>
                 <tbody>
                   {[
@@ -1275,30 +1316,43 @@ const QuestionBankPage: React.FC = () => {
         title="🧹"
         open={dedupResult !== null}
         onCancel={() => setDedupResult(null)}
-        footer={<Button onClick={() => setDedupResult(null)}>{t('close')}</Button>}
+        footer={
+          <Space>
+            <Button onClick={() => setDedupResult(null)}>{t('close')}</Button>
+            {dedupResult?.dry_run && (dedupResult?.deletable_count ?? 0) > 0 && (
+              <Button type="primary" danger loading={dedupLoading} onClick={runDedupConfirm}>
+                {t('dedupRun')}
+              </Button>
+            )}
+          </Space>
+        }
         width={600}
       >
         {dedupResult && (
           <div>
             <Typography.Title level={4} style={{ color: dedupResult.total_deleted > 0 ? '#52c41a' : '#999' }}>
-              {dedupResult.total_deleted > 0
-                ? `${t('deleteSuccess')} ${dedupResult.total_deleted} ${t('dedupTitle')}`
-                : t('noDuplicates')}
+              {dedupResult.dry_run
+                ? (dedupResult.deletable_count ?? 0) > 0
+                  ? t('dedupFound', { groups: dedupResult.groups.length, count: dedupResult.deletable_count ?? 0 })
+                  : t('noDuplicates')
+                : dedupResult.total_deleted > 0
+                  ? t('dedupDeletedCount', { count: dedupResult.total_deleted })
+                  : t('noDuplicates')}
             </Typography.Title>
             {(dedupResult.total_skipped_owner ?? 0) > 0 || (dedupResult.total_skipped_ref ?? 0) > 0 ? (
               <div style={{ marginBottom: 12 }}>
                 {(dedupResult.total_skipped_owner ?? 0) > 0 && (
-                  <Tag color="orange">{dedupResult.total_skipped_owner} 条因权限不足跳过</Tag>
+                  <Tag color="orange">{t('dedupSkipOwner', { count: dedupResult.total_skipped_owner ?? 0 })}</Tag>
                 )}
                 {(dedupResult.total_skipped_ref ?? 0) > 0 && (
-                  <Tag color="blue">{dedupResult.total_skipped_ref} 条因被活动引用跳过</Tag>
+                  <Tag color="blue">{t('dedupSkipRef', { count: dedupResult.total_skipped_ref ?? 0 })}</Tag>
                 )}
               </div>
             ) : null}
             {dedupResult.groups.length > 0 && (
               <>
                 <Divider />
-                <Typography.Text strong>重复组详情：</Typography.Text>
+                <Typography.Text strong>{t('dupGroupDetail')}</Typography.Text>
                 <div style={{ maxHeight: 300, overflow: 'auto', marginTop: 12 }}>
                   {dedupResult.groups.map((g, i) => (
                     <div key={i} style={{
@@ -1307,7 +1361,7 @@ const QuestionBankPage: React.FC = () => {
                       border: '1px solid #ffe58f',
                     }}>
                       <Typography.Text style={{ fontSize: 13 }}>{g.question_text}</Typography.Text>
-                      <Tag color="red" style={{ marginLeft: 8 }}>重复 {g.count} 次</Tag>
+                      <Tag color="red" style={{ marginLeft: 8 }}>{t('dupTimes', { count: g.count })}</Tag>
                     </div>
                   ))}
                 </div>

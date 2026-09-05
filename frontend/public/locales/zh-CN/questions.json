@@ -375,5 +375,17 @@
     "wrong": "错误",
     "notAnswered": "未作答",
     "timeout": "⏱ 超时未答"
-  }
+  },
+  "optionKeyPlaceholder": "键（如 A）",
+  "optionValuePlaceholder": "选项内容（支持公式 $...$）",
+  "explanationPreview": "解析预览",
+  "hasSvg": "有 SVG",
+  "latexExamplesTitle": "LaTeX 公式语法示例：",
+  "dupGroupDetail": "重复组详情：",
+  "dupTimes": "重复 {{count}} 条",
+  "dedupSkipOwner": "{{count}} 条不属于当前教师，已跳过",
+  "dedupSkipRef": "{{count}} 条因被考试/练习引用而保留",
+  "dedupFound": "发现 {{groups}} 组重复，可清理 {{count}} 条（每组保留最早创建的一条）。",
+  "dedupRun": "确认清理",
+  "dedupDeletedCount": "{{count}} 条重复题目已清理"
 }

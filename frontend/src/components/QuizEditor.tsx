@@ -345,8 +345,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               <div style={{ marginBottom: 12 }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('qeOptionsLbl')}</Text>
                 <div style={{ marginTop: 4 }}>
-                  <Tag>对</Tag>
-                  <Tag>错</Tag>
+                  <Tag>{t('judgeTrue')}</Tag>
+                  <Tag>{t('judgeFalse')}</Tag>
                 </div>
               </div>
             )}
@@ -383,8 +383,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
                   value={q.answer}
                   onChange={e => updateQuestion(q.id, 'answer', e.target.value)}
                 >
-                  <Radio value="对">对</Radio>
-                  <Radio value="错">错</Radio>
+                  <Radio value="对">{t('judgeTrue')}</Radio>
+                  <Radio value="错">{t('judgeFalse')}</Radio>
                 </Radio.Group>
               )}
             </div>

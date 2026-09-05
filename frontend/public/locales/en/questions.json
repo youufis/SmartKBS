@@ -375,5 +375,17 @@
   "eresponsedatadetailAIFailed": "AI generation failed",
   "eresponsedatadetailFailed": "Failed to use lifeline",
   "eresponsedatadetailSVGFailed": "SVG generation failed",
-  "operationSuccess": "AI successfully generated {{saved}}/{{total}} questions"
+  "operationSuccess": "AI successfully generated {{saved}}/{{total}} questions",
+  "optionKeyPlaceholder": "Key (e.g. A)",
+  "optionValuePlaceholder": "Option text (supports $...$ formulas)",
+  "explanationPreview": "Explanation preview",
+  "hasSvg": "Has SVG",
+  "latexExamplesTitle": "LaTeX syntax examples:",
+  "dupGroupDetail": "Duplicate groups:",
+  "dupTimes": "{{count}} copies",
+  "dedupSkipOwner": "{{count}} skipped (not created by you)",
+  "dedupSkipRef": "{{count}} kept (referenced by exams/practice)",
+  "dedupFound": "Found {{groups}} duplicate groups, {{count}} removable (earliest one kept per group).",
+  "dedupRun": "Run cleanup",
+  "dedupDeletedCount": "{{count}} duplicate questions cleaned"
 }

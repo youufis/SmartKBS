@@ -87,9 +87,118 @@ def _maintain_exam_attempts() -> None:
         logger.warning(f"[log_retention] exam_attempts 维护失败: {e}")
 
 
+def _maintain_question_media() -> None:
+    """题库配图磁盘治理(Q6):
+    - question_media/.archived/ 里超过 30 天的归档目录物理清除(软删题目的图先归档保留 30 天以便恢复)
+    - 完全找不到对应题目的孤儿目录(存在超过 30 天)一并回收
+    """
+    import os
+    import shutil
+    import time
+    try:
+        from backend.config import BASE_DIR
+        from backend.question_db import execute_query as q_exec
+        root = BASE_DIR / "question_media"
+        if not root.exists():
+            return
+        month_ago = time.time() - 30 * 86400
+        freed = 0
+        removed = 0
+
+        def _dir_size(p):
+            total = 0
+            for dp, _dirs, files in os.walk(p):
+                for f in files:
+                    try:
+                        total += os.path.getsize(os.path.join(dp, f))
+                    except OSError:
+                        pass
+            return total
+
+        archived = root / ".archived"
+        if archived.exists():
+            for name in os.listdir(archived):
+                p = archived / name
+                try:
+                    if p.is_dir() and p.stat().st_mtime < month_ago:
+                        freed += _dir_size(p)
+                        shutil.rmtree(p, ignore_errors=True)
+                        removed += 1
+                except OSError:
+                    continue
+
+        # 先收敛历史状态: 软删题若仍留着配图目录, 移入归档(新删除路径已在 delete 时归档)
+        archived.mkdir(parents=True, exist_ok=True)
+        soft_deleted = [str(r["id"]) for r in q_exec("SELECT id FROM question_bank WHERE status <> 'active'")]
+        for sid in soft_deleted:
+            p = root / sid
+            try:
+                if p.is_dir():
+                    dst = archived / ("%s__legacy_%s" % (sid, datetime.now().strftime("%Y%m%d%H%M%S")))
+                    shutil.move(str(p), str(dst))
+                    freed += _dir_size(dst)
+                    removed += 1
+            except OSError:
+                continue
+
+        known = {str(r["id"]) for r in q_exec("SELECT id FROM question_bank")}
+        for name in os.listdir(root):
+            p = root / name
+            try:
+                if not p.is_dir() or name == ".archived":
+                    continue
+                if name in known:
+                    continue
+                if p.stat().st_mtime < month_ago:
+                    freed += _dir_size(p)
+                    shutil.rmtree(p, ignore_errors=True)
+                    removed += 1
+            except OSError:
+                continue
+
+        if removed:
+            logger.info(f"[log_retention] 题库配图回收 {removed} 个目录, 释放 {round(freed / 1024, 1)} KB")
+    except Exception as e:
+        logger.warning(f"[log_retention] 题库配图治理失败: {e}")
+
+
+def _check_question_references() -> None:
+    """引用一致性巡检(Q3): 只记录告警不自动改数据, 便于及时发现"题目已删但仍被考试/练习引用" """
+    try:
+        from backend.question_db import execute_query as q_exec
+        bad_exam = q_exec(
+            """SELECT DISTINCT eq.exam_id, e.title AS exam_title, eq.question_id
+               FROM exam_questions eq
+               JOIN exams e ON e.id = eq.exam_id
+               JOIN question_bank qb ON qb.id = eq.question_id
+               WHERE qb.status <> 'active'"""
+        )
+        bad_practice = q_exec(
+            """SELECT DISTINCT psq.session_id, ps.title AS session_title, psq.question_id
+               FROM practice_session_questions psq
+               JOIN practice_sessions ps ON ps.id = psq.session_id
+               JOIN question_bank qb ON qb.id = psq.question_id
+               WHERE qb.status <> 'active'"""
+        )
+        for r in bad_exam:
+            logger.warning(
+                f"[log_retention] 数据一致性: 考试「{r['exam_title']}」(id={r['exam_id']}) "
+                f"仍引用已删除题目 id={r['question_id']}, 该题会在组卷/答卷中被跳过"
+            )
+        for r in bad_practice:
+            logger.warning(
+                f"[log_retention] 数据一致性: 练习「{r['session_title']}」(id={r['session_id']}) "
+                f"仍引用已删除题目 id={r['question_id']}"
+            )
+    except Exception as e:
+        logger.warning(f"[log_retention] 引用一致性巡检失败: {e}")
+
+
 def purge_once() -> None:
     _dedupe_view_logs()
     _maintain_exam_attempts()
+    _maintain_question_media()
+    _check_question_references()
     for table, cands, days, extra in _ITEMS:
         try:
             with get_connection() as conn:

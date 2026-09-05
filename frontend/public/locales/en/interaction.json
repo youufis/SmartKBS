@@ -533,5 +533,7 @@
   "ipUsername": "Student ID",
   "ipGrade": "Grade",
   "ipClass": "Class",
-  "ipSearchStudent": "Search name / ID / class"
+  "ipSearchStudent": "Search name / ID / class",
+  "judgeTrue": "True",
+  "judgeFalse": "False"
 }

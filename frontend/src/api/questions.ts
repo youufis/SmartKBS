@@ -1,5 +1,6 @@
 /** 试题库 API */
 import apiClient from './client';
+import { pollAiTask } from './aiTask';
 import type {
   QuestionInfo,
   QuestionGenerateRequest,
@@ -8,19 +9,31 @@ import type {
   QuestionTypeOption,
 } from '../types';
 
-export async function generateQuestions(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
-  const { data } = await apiClient.post('/api/questions/generate', req, {
-    timeout: 600000,
-  });
-  return data;
+/**
+ * 提交 AI 后台任务并轮询结果。
+ * 出题/生图这类调用在单条 HTTP 请求里可长达数分钟, 容易被网关/代理掐断,
+ * 因此统一走 ai_task_manager 的异步任务(Q7)。
+ */
+async function runAiTask<T>(url: string, body: unknown, maxWait = 600000): Promise<T> {
+  const { data } = await apiClient.post(url, body);
+  const result = await pollAiTask(data.task_id, maxWait);
+  if (!result) {
+    // 超时: 不带 message, 由调用方回落到本地化文案
+    const err: any = new Error('');
+    err.aiTaskTimeout = true;
+    throw err;
+  }
+  if (result.error) throw new Error(result.error);
+  return result as T;
 }
 
-/** AI 生成试题（含SVG配图+公式+自动生图） */
+export async function generateQuestions(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
+  return runAiTask<QuestionGenerateResponse>('/api/questions/generate-async', req);
+}
+
+/** AI 生成试题（含SVG配图+公式+自动生图，异步任务版） */
 export async function generateQuestionsWithMedia(req: QuestionGenerateRequest): Promise<QuestionGenerateResponse> {
-  const { data } = await apiClient.post('/api/questions/generate-with-media', req, {
-    timeout: 600000,
-  });
-  return data;
+  return runAiTask<QuestionGenerateResponse>('/api/questions/generate-with-media-async', req);
 }
 
 export async function listQuestions(params?: {
@@ -50,8 +63,10 @@ export async function updateQuestion(
     explanation: string;
     knowledge_points: string;
     difficulty: string;
+    type: string;
+    subject: string;
   }>
-): Promise<{ message: string }> {
+): Promise<{ message: string; warnings?: string[] }> {
   const { data } = await apiClient.put(`/api/questions/${id}`, updates);
   return data;
 }
@@ -66,12 +81,28 @@ export async function getQuestionTypes(): Promise<{ types: QuestionTypeOption[] 
   return data;
 }
 
-export async function dedupQuestions(): Promise<{
+export interface DedupResult {
+  dry_run?: boolean;
   total_deleted: number;
-  groups: { question_text: string; keep_id: number; deleted_ids: number[]; count: number }[];
+  deletable_count?: number;
+  total_skipped_owner?: number;
+  total_skipped_ref?: number;
+  groups: {
+    question_text: string;
+    type?: string;
+    correct_answer?: string;
+    keep_id: number;
+    deleted_ids: number[];
+    count: number;
+    skipped_owner?: number;
+    skipped_ref?: number;
+  }[];
   message: string;
-}> {
-  const { data } = await apiClient.post('/api/questions/dedup');
+}
+
+/** 题库去重：默认只做预览，confirm=true 才真正清理(Q4 两步式) */
+export async function dedupQuestions(confirm = false): Promise<DedupResult> {
+  const { data } = await apiClient.post('/api/questions/dedup', { confirm });
   return data;
 }
 

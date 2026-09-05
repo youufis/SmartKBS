@@ -12,7 +12,7 @@ import shutil
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Query, UploadFile, File, Form
+from fastapi import APIRouter, Body, HTTPException, Request, Query, UploadFile, File, Form
 from pydantic import BaseModel
 
 from backend.api.config_router import get_config_value
@@ -47,11 +47,13 @@ class GenerateRequest(BaseModel):
 class QuestionUpdate(BaseModel):
     """更新题目请求"""
     question_text: str | None = None
-    options: str | None = None
+    options: str | dict[str, Any] | list[Any] | None = None
     correct_answer: str | None = None
     explanation: str | None = None
     knowledge_points: str | None = None
     difficulty: str | None = None
+    type: str | None = None          # Q8: 题型录错应可修正
+    subject: str | None = None       # Q8: 科目挂错应可修正
 
 
 _VALID_SOURCES = {"manual", "ai", "quiz_import", "batch_import", "exam_import"}
@@ -160,6 +162,67 @@ async def import_question(req: ImportQuestion, request: Request):
 
 # ── 公共辅助函数 ──
 
+_MEDIA_ARCHIVE_DIR = ".archived"
+
+
+_LIKE_ESCAPE = "!"
+
+
+def _esc_like(v: str) -> str:
+    """转义 LIKE 通配符, 避免用户输入的 % 与 _ 改变搜索语义(Q11)。
+
+    用 ! 作为 ESCAPE 字符而不是反斜杠: SQL 字面量里不需要二次转义, 不会踩
+    "ESCAPE '\\'" 变成两个字符而被 SQLite 拒绝的坑。
+    """
+    return re.sub(r"([%_!])", "!\\1", v or "")
+
+
+def _question_refs(question_id: int) -> tuple[list, list]:
+    """Q2: 返回引用该题的(考试, 智能练习)。
+
+    practice_* 表与题库同在 questions.db。旧实现从 backend.database(主库 smartkb.db)
+    查同名空表, 且外层 except: pass, 导致"正在使用中"保护恒判定为无引用。
+    """
+    exam_refs = execute_query(
+        """SELECT DISTINCT e.id, e.title, e.status FROM exams e
+           JOIN exam_questions eq ON eq.exam_id = e.id
+           WHERE eq.question_id = ?""",
+        (question_id,),
+    )
+    practice_refs = execute_query(
+        """SELECT DISTINCT ps.id, ps.title, ps.status FROM practice_sessions ps
+           JOIN practice_session_questions psq ON psq.session_id = ps.id
+           WHERE psq.question_id = ?""",
+        (question_id,),
+    )
+    return exam_refs, practice_refs
+
+
+def _format_refs(exam_refs: list, practice_refs: list) -> str:
+    parts = []
+    if exam_refs:
+        parts.append("考试(%d个)：%s" % (len(exam_refs), "、".join("「%s」" % r["title"] for r in exam_refs)))
+    if practice_refs:
+        parts.append("智能练习(%d个)：%s" % (len(practice_refs), "、".join("「%s」" % r["title"] for r in practice_refs)))
+    return "；".join(parts)
+
+
+def _archive_media_dir(question_id: int) -> None:
+    """Q6: 题目软删时归档配图目录(可完整恢复), 由日志保留任务到期清理"""
+    try:
+        from backend.config import BASE_DIR
+        src = BASE_DIR / "question_media" / str(question_id)
+        if not src.exists():
+            return
+        dst_root = BASE_DIR / "question_media" / _MEDIA_ARCHIVE_DIR
+        dst_root.mkdir(parents=True, exist_ok=True)
+        dst = dst_root / ("%s__%s" % (question_id, datetime.now().strftime("%Y%m%d%H%M%S")))
+        shutil.move(str(src), str(dst))
+        logger.info(f"试题配图已归档: question_media/{_MEDIA_ARCHIVE_DIR}/{dst.name}")
+    except Exception as e:
+        logger.warning(f"归档试题配图目录失败 (id={question_id}): {e}")
+
+
 async def _verify_question_owner(
     question_id: int, username: str, role: int,
 ) -> dict[str, Any]:
@@ -184,6 +247,27 @@ def _delete_physical_media(
     file_path = BASE_DIR / "question_media" / str(question_id) / filename
     if file_path.exists():
         file_path.unlink()
+
+
+class _InternalRequest:
+    """在后台任务里复用端点实现。
+
+    这些出题/生成端点只通过 request 读取登录用户(request.state.user),
+    因此用一个最小替身即可把同一份实现挂到 ai_task_manager 上跑,
+    避免长 AI 调用占住一条 HTTP 连接(Q7)。
+    """
+
+    def __init__(self, user: dict[str, Any]):
+        self.state = type("_State", (), {"user": user})()
+        self.query_params: dict[str, str] = {}
+        self.headers: dict[str, str] = {}
+        self.cookies: dict[str, str] = {}
+        self.client = None
+
+
+async def _submit_ai_task(corps, description: str) -> str:
+    from backend.ai_task_manager import task_manager
+    return await task_manager.create_task(description=description, coro_factory=corps)
 
 
 # ── AI 生成试题 ──
@@ -289,6 +373,25 @@ async def generate_questions(req: GenerateRequest, request: Request):
         "questions": saved_questions,
         "total": len(saved_questions),
     }
+
+
+@router.post("/generate-async", summary="AI 生成试题(异步任务版)")
+async def generate_questions_async(req: GenerateRequest, request: Request):
+    """与 /generate 相同, 但放到后台任务里跑, 前端用 pollAiTask 轮询(Q7)"""
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    if not req.knowledge_points.strip():
+        raise HTTPException(status_code=400, detail="请输入知识点")
+    if req.count < 1 or req.count > 50:
+        raise HTTPException(status_code=400, detail="生成数量范围为 1-50")
+
+    task_id = await _submit_ai_task(
+        lambda: generate_questions(req, _InternalRequest(user)),
+        f"教师 {username} AI 出题：{req.knowledge_points}({req.count}题)",
+    )
+    return {"task_id": task_id, "message": "AI 已开始出题，请稍候..."}
 
 
 def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, count: int, difficulty: str, username: str = "") -> str:
@@ -406,7 +509,7 @@ async def list_questions(
     difficulty: str = Query(None, description="筛选难度"),
     subject: str = Query(None, description="筛选科目"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=100),
 ):
     """查询题库列表（支持筛选、搜索、分页）"""
     user = get_current_user(request)
@@ -425,8 +528,9 @@ async def list_questions(
         conditions.append("q.type = ?")
         params.append(type)
     if keyword:
-        conditions.append("(q.question_text LIKE ? OR q.knowledge_points LIKE ?)")
-        kw = f"%{keyword}%"
+        # Q11: 转义 LIKE 通配符, 用户输入 % 或 _ 时按字面量搜索
+        conditions.append("(q.question_text LIKE ? ESCAPE \'!\' OR q.knowledge_points LIKE ? ESCAPE \'!\')")
+        kw = f"%{_esc_like(keyword)}%"
         params.extend([kw, kw])
     if creator:
         conditions.append("q.creator_username = ?")
@@ -479,8 +583,11 @@ async def list_questions(
 
 @router.get("/{question_id}")
 async def get_question(question_id: int, request: Request):
-    """获取单道试题详情"""
-    get_current_user(request)  # 仅验证登录
+    """获取单道试题详情（含参考答案与解析, 学生不可访问）"""
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        # 列表端点已禁止学生, 详情不校验就会被连续 id 枚举出整库答案(Q1)
+        raise HTTPException(status_code=403, detail="学生无权访问题库")
 
     row = execute_query_one("SELECT * FROM question_bank WHERE id = ?", (question_id,))
     if not row:
@@ -517,19 +624,75 @@ async def update_question(question_id: int, req: QuestionUpdate, request: Reques
     if role != 0 and row["creator_username"] != username:
         raise HTTPException(status_code=403, detail="只能编辑自己创建的试题")
 
-    # 构建更新字段
-    updates = []
-    params = []
-    for field in ["question_text", "options", "correct_answer", "explanation", "knowledge_points", "difficulty"]:
-        val = getattr(req, field, None)
-        if val is not None:
-            if field == "options" and isinstance(val, dict):
-                val = json.dumps(val, ensure_ascii=False)
-            updates.append(f"{field} = ?")
-            params.append(val)
-
-    if not updates:
+    provided = set(req.model_fields_set)
+    if not provided:
         raise HTTPException(status_code=400, detail="没有需要更新的字段")
+
+    if "type" in provided and req.type not in QUESTION_TYPE_MAP:
+        raise HTTPException(status_code=400, detail=f"未知题型: {req.type}")
+    if "difficulty" in provided and req.difficulty not in ("easy", "medium", "hard"):
+        raise HTTPException(status_code=400, detail=f"未知难度: {req.difficulty}")
+
+    def _options_to_str(val: Any) -> str:
+        # Q8: 显式传 options=null/"" 表示清空选项(旧实现 if val is not None + 前端 if(optionsStr) 双重导致清不掉)
+        if val is None:
+            return ""
+        if isinstance(val, (dict, list)):
+            return json.dumps(val, ensure_ascii=False)
+        text = str(val).strip()
+        if not text:
+            return ""
+        try:
+            json.loads(text)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="options 必须是合法的 JSON 字符串")
+        return text
+
+    opts_str = _options_to_str(req.options) if "options" in provided else (row.get("options") or "")
+
+    # 校验合并后的最终状态, 避免保存出"永远判错"的题
+    final_type = req.type if "type" in provided else (row.get("type") or "single")
+    final_ans = (req.correct_answer if "correct_answer" in provided else row.get("correct_answer")) or ""
+    if final_type in ("single", "multiple"):
+        try:
+            opt_map = json.loads(opts_str) if opts_str else {}
+        except json.JSONDecodeError:
+            opt_map = {}
+        keys = {str(k) for k in (opt_map or {}).keys()}
+        if len(keys) < 2:
+            raise HTTPException(status_code=400, detail="选择题至少需要 2 个选项, 请补全后再保存")
+        letters = re.sub(r"[^A-Za-z]", "", final_ans).upper()
+        if final_type == "multiple" and len(letters) < 2:
+            raise HTTPException(status_code=400, detail="多选题的正确答案至少 2 个字母")
+        if final_type == "single" and len(letters) != 1:
+            raise HTTPException(status_code=400, detail="单选题的正确答案只能是 1 个字母")
+        bad = sorted({ch for ch in letters if ch not in keys})
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail="正确答案包含不在选项中的字母: %s（现有选项: %s）" % ("".join(bad), "".join(sorted(keys))),
+            )
+    elif final_type == "true_false":
+        if (final_ans or "").strip() not in ("对", "错", "T", "F", "true", "false", "TRUE", "FALSE"):
+            raise HTTPException(status_code=400, detail="判断题的正确答案只能是「对」或「错」")
+    elif final_type in ("short", "fill", "essay", "subjective") and "correct_answer" in provided \
+            and not (final_ans or "").strip():
+        raise HTTPException(status_code=400, detail="主观题/填空题必须填写参考答案, 否则无法批改")
+
+    updates, params = [], []
+    for field in ("question_text", "options", "correct_answer", "explanation",
+                  "knowledge_points", "difficulty", "type", "subject"):
+        if field not in provided:
+            continue
+        if field == "options":
+            updates.append("options = ?")
+            params.append(opts_str)
+            continue
+        val = getattr(req, field, None)
+        if field == "question_text" and not str(val or "").strip():
+            raise HTTPException(status_code=400, detail="题干不能为空")
+        updates.append(f"{field} = ?")
+        params.append(val)
 
     updates.append("updated_at = ?")
     params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -540,7 +703,32 @@ async def update_question(question_id: int, req: QuestionUpdate, request: Reques
         tuple(params),
     )
 
-    return {"message": "更新成功"}
+    # 题库审计: 关键字段变更留痕, 误改时可以从日志里回查原值(避免"改完找不回")
+    _audit_fields = ("question_text", "correct_answer", "type", "options", "subject", "difficulty", "explanation")
+    changes = {}
+    for field in _audit_fields:
+        if field not in provided:
+            continue
+        old_val = str(row.get(field) or "")
+        new_val = str(opts_str if field == "options" else (getattr(req, field, None) or ""))
+        if old_val != new_val:
+            changes[field] = {"from": old_val[:200], "to": new_val[:200]}
+    if changes:
+        logger.info("题库变更 id=%s by=%s: %s" % (question_id, username, json.dumps(changes, ensure_ascii=False)))
+
+    # 该题正被哪些活动使用: 修改会立即影响未开始的考试/练习, 给教师明确提示
+    try:
+        exam_refs, practice_refs = _question_refs(question_id)
+    except Exception as ref_err:
+        logger.warning(f"查询试题引用失败 (id={question_id}): {ref_err}")
+        exam_refs, practice_refs = [], []
+    warnings = []
+    if exam_refs or practice_refs:
+        warnings.append("该题正被以下活动使用（%s），修改会立即生效于尚未作答的考试/练习" % _format_refs(exam_refs, practice_refs))
+    if row.get("status") != "active":
+        warnings.append("该题当前处于已删除状态, 本次修改不会让它自动重新出现在题库列表中")
+
+    return {"message": "更新成功", "warnings": warnings}
 
 
 @router.delete("/{question_id}")
@@ -557,62 +745,48 @@ async def delete_question(question_id: int, request: Request):
     if role != 0 and row["creator_username"] != username:
         raise HTTPException(status_code=403, detail="只能删除自己创建的试题")
 
-    # 检查是否有考试引用该题
-    exam_refs = execute_query(
-        """SELECT e.id, e.title FROM exams e
-           JOIN exam_questions eq ON eq.exam_id = e.id
-           WHERE eq.question_id = ?""",
-        (question_id,),
-    )
-    # 检查是否有智能练习引用该题
-    practice_refs = []
-    try:
-        from backend.database import execute_query_dict as db_query
-        practice_refs = db_query(
-            """SELECT ps.id, ps.title FROM practice_sessions ps
-               JOIN practice_session_questions psq ON psq.session_id = ps.id
-               WHERE psq.question_id = ?""",
-            (question_id,),
-        )
-    except Exception:
-        pass
-
+    # Q2: 题库与 practice_* 同在 questions.db, 统一走 _question_refs
+    #     (旧实现去主库查同名空表 + except pass, 保护恒失效)
+    exam_refs, practice_refs = _question_refs(question_id)
     if exam_refs or practice_refs:
-        details = []
-        if exam_refs:
-            exam_names = "、".join([f"「{r['title']}」" for r in exam_refs])
-            details.append(f"考试({len(exam_refs)}个)：{exam_names}")
-        if practice_refs:
-            practice_names = "、".join([f"「{r['title']}」" for r in practice_refs])
-            details.append(f"智能练习({len(practice_refs)}个)：{practice_names}")
-        return {
-            "status": "error",
-            "message": "该试题正在被使用中，无法删除。请先在相关活动中移除该题后再试。",
-            "refs": "；".join(details),
-        }
+        # Q11: 被占用用 409 表达, 不再返回 HTTP 200 + status="error"
+        raise HTTPException(
+            status_code=409,
+            detail="该试题正在被使用中，无法删除。请先在相关活动中移除该题后再试。（%s）"
+                   % _format_refs(exam_refs, practice_refs),
+        )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    logger.info(
+        "题目软删 id=%s by=%s: 题型=%s 答案=%s 题干=%s"
+        % (question_id, username, row.get("type"), str(row.get("correct_answer"))[:40],
+           str(row.get("question_text"))[:60].replace("\n", " "))
+    )
     execute_update(
         "UPDATE question_bank SET status = 'deleted', updated_at = ? WHERE id = ?",
         (now, question_id),
     )
 
-    # 清理配图目录
-    try:
-        from backend.config import BASE_DIR
-        media_dir = BASE_DIR / "question_media" / str(question_id)
-        if media_dir.exists():
-            shutil.rmtree(media_dir)
-            logger.info(f"已清理试题配图目录: question_media/{question_id}")
-    except Exception as e:
-        logger.warning(f"清理试题配图目录失败 (id={question_id}): {e}")
+    # Q6: 配图目录归档而非物理删除, 保证以后"恢复题目"不会丢图
+    _archive_media_dir(question_id)
 
     return {"message": "删除成功"}
 
 
-@router.post("/dedup")
-async def dedup_questions(request: Request):
-    """查找并删除重复试题（基于题目文本完全匹配），保留最早创建的那条"""
+class DedupRequest(BaseModel):
+    """题库去重请求(Q4: 默认只做预览)"""
+    confirm: bool = False
+    include_all_creators: bool = False
+
+
+@router.post("/dedup", summary="查找/清理重复试题(默认仅预览)")
+async def dedup_questions(req: DedupRequest | None = Body(default=None), request: Request = None):
+    """查找重复试题; `confirm=false` 只返回清单, `confirm=true` 才执行软删除。
+
+    重复判定 = 题干 + 题型 + 参考答案 三者完全一致
+    (旧实现只比 question_text, 同题干不同题型/答案的题会被误删)。
+    """
+    req = req or DedupRequest()   # 兼容旧调用(不带 body 即预览模式)
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -620,98 +794,106 @@ async def dedup_questions(request: Request):
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
 
-    # 查找重复的 question_text（只统计 active 状态的）
-    rows = execute_query(
-        """SELECT question_text, COUNT(*) as cnt, GROUP_CONCAT(id) as ids
+    groups = execute_query(
+        """SELECT question_text, type, IFNULL(correct_answer, '') AS ans,
+                  COUNT(*) AS cnt, GROUP_CONCAT(id) AS ids
            FROM question_bank
            WHERE status = 'active'
-           GROUP BY question_text
-           HAVING cnt > 1"""
+           GROUP BY question_text, type, ans
+           HAVING cnt > 1
+           ORDER BY cnt DESC, MIN(id) ASC"""
     )
+    candidate_ids: list[int] = []
+    for g in groups:
+        candidate_ids.extend(int(x) for x in (g["ids"] or "").split(",") if x)
+
+    owners: dict[int, str] = {}
+    exam_ref_ids: set[int] = set()
+    prac_ref_ids: set[int] = set()
+    if candidate_ids:
+        idph = ",".join("?" for _ in candidate_ids)
+        params = tuple(candidate_ids)
+        owners = {r["id"]: (r["creator_username"] or "") for r in execute_query(
+            f"SELECT id, creator_username FROM question_bank WHERE id IN ({idph})", params)}
+        exam_ref_ids = {r["question_id"] for r in execute_query(
+            f"SELECT DISTINCT question_id FROM exam_questions WHERE question_id IN ({idph})", params)}
+        prac_ref_ids = {r["question_id"] for r in execute_query(
+            f"SELECT DISTINCT question_id FROM practice_session_questions WHERE question_id IN ({idph})", params)}
 
     results = []
-    total_deleted = 0
+    delete_ids: list[int] = []
     total_skipped_owner = 0
     total_skipped_ref = 0
 
-    for row in rows:
-        question_text = row["question_text"]
-        id_list = sorted([int(x) for x in row["ids"].split(",")])
-        keep_id = id_list[0]
-        delete_ids = id_list[1:]
-
-        allowed_delete = []
-        skipped_owner = 0
-        skipped_ref = 0
-        for did in delete_ids:
-            q = execute_query_one(
-                "SELECT creator_username FROM question_bank WHERE id = ?", (did,)
-            )
-            if not q or (role != 0 and q["creator_username"] != username):
+    for g in groups:
+        ids = sorted(int(x) for x in (g["ids"] or "").split(",") if x)
+        keep_id, dup_ids = ids[0], ids[1:]
+        allowed, skipped_owner, skipped_ref = [], 0, 0
+        for did in dup_ids:
+            owner = owners.get(did, "")
+            if role != 0 and owner != username and not req.include_all_creators:
                 skipped_owner += 1
                 continue
-            # 检查是否被考试引用
-            ref_exam = execute_query_one(
-                "SELECT COUNT(*) as cnt FROM exam_questions WHERE question_id=?",
-                (did,),
-            )
-            if ref_exam and ref_exam["cnt"] > 0:
+            if did in exam_ref_ids or did in prac_ref_ids:
                 skipped_ref += 1
                 continue
-            # 检查是否被智能练习引用
-            try:
-                from backend.database import execute_query_dict as db_query
-                ref_practice = db_query(
-                    "SELECT 1 FROM practice_session_questions WHERE question_id=? LIMIT 1",
-                    (did,),
-                )
-                if ref_practice:
-                    skipped_ref += 1
-                    continue
-            except Exception:
-                pass
-            allowed_delete.append(did)
-
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for did in allowed_delete:
-            execute_update(
-                "UPDATE question_bank SET status = 'deleted', updated_at = ? WHERE id = ?",
-                (now, did),
-            )
-            # 清理配图目录
-            try:
-                from backend.config import BASE_DIR
-                media_dir = BASE_DIR / "question_media" / str(did)
-                if media_dir.exists():
-                    shutil.rmtree(media_dir)
-            except Exception:
-                pass
-
-        if allowed_delete or skipped_owner or skipped_ref:
+            allowed.append(did)
+        delete_ids.extend(allowed)
+        total_skipped_owner += skipped_owner
+        total_skipped_ref += skipped_ref
+        if allowed or skipped_owner or skipped_ref:
+            text = g["question_text"] or ""
             results.append({
-                "question_text": question_text[:60] + ("..." if len(question_text) > 60 else ""),
+                "question_text": text[:60] + ("..." if len(text) > 60 else ""),
+                "type": g["type"],
+                "correct_answer": g["ans"],
                 "keep_id": keep_id,
-                "deleted_ids": allowed_delete,
-                "count": len(allowed_delete),
+                "deleted_ids": allowed,
+                "count": len(allowed),
                 "skipped_owner": skipped_owner,
                 "skipped_ref": skipped_ref,
             })
-            total_deleted += len(allowed_delete)
-            total_skipped_owner += skipped_owner
-            total_skipped_ref += skipped_ref
 
-    msg = f"共删除 {total_deleted} 条重复试题"
+    if not req.confirm:
+        # Q4: 预览模式, 不做任何写入
+        parts = []
+        if delete_ids:
+            parts.append("可删除 %d 条重复试题(保留每组最早的一条)" % len(delete_ids))
+        if total_skipped_ref:
+            parts.append("%d 条因被考试/练习引用而保留" % total_skipped_ref)
+        if total_skipped_owner:
+            parts.append("%d 条因不属于当前教师而跳过" % total_skipped_owner)
+        return {
+            "dry_run": True,
+            "total_deleted": 0,
+            "deletable_count": len(delete_ids),
+            "total_skipped_owner": total_skipped_owner,
+            "total_skipped_ref": total_skipped_ref,
+            "groups": results,
+            "message": ("；".join(parts) if parts else "未发现可清理的重复试题"),
+        }
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for did in delete_ids:
+        execute_update(
+            "UPDATE question_bank SET status = 'deleted', updated_at = ? WHERE id = ?",
+            (now, did),
+        )
+        _archive_media_dir(did)   # Q6: 归档而不是物理删除
+
     parts = []
-    if total_deleted:
-        parts.append(f"删除 {total_deleted} 条")
+    if delete_ids:
+        parts.append("删除 %d 条" % len(delete_ids))
     if total_skipped_owner:
-        parts.append(f"{total_skipped_owner} 条因权限不足跳过")
+        parts.append("%d 条因权限不足跳过" % total_skipped_owner)
     if total_skipped_ref:
-        parts.append(f"{total_skipped_ref} 条因被活动引用跳过")
+        parts.append("%d 条因被活动引用跳过" % total_skipped_ref)
     msg = "，".join(parts) if parts else "未发现重复试题"
     logger.info(f"去重完成: {msg}, by={username}")
     return {
-        "total_deleted": total_deleted,
+        "dry_run": False,
+        "total_deleted": len(delete_ids),
+        "deletable_count": len(delete_ids),
         "total_skipped_owner": total_skipped_owner,
         "total_skipped_ref": total_skipped_ref,
         "groups": results,
@@ -762,7 +944,8 @@ async def extract_questions_from_text(
             raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}，支持 docx/txt/md/pdf/json")
         try:
             file_bytes = await file.read()
-            content = _extract_text_from_file(file_bytes, ext)
+            # docx/pypdf 解析是纯 CPU 活, 放线程里做, 避免冻结事件循环(Q7)
+            content = await asyncio.to_thread(_extract_text_from_file, file_bytes, ext)
             source_label = ext.lstrip(".")
         except Exception as e:
             logger.error(f"解析文件失败: {e}")
@@ -929,7 +1112,7 @@ async def extract_questions_from_image(
     mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
                 '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
     mime_type = mime_map.get(ext, 'image/jpeg')
-    encoded = base64.b64encode(file_bytes).decode("utf-8")
+    encoded = await asyncio.to_thread(lambda: base64.b64encode(file_bytes).decode("utf-8"))
 
     # 获取 API Key
     api_key, _ = get_api_keys(username)
@@ -1401,6 +1584,23 @@ def _parse_ai_response_with_media(text: str) -> list[dict[str, Any]]:
     return questions
 
 
+@router.post("/generate-with-media-async", summary="AI 生成试题(含配图, 异步任务版)")
+async def generate_questions_with_media_async(req: GenerateWithMediaRequest, request: Request):
+    """与 /generate-with-media 相同, 但放到后台任务里跑(Q7: 出题+生图最耗时)"""
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_manage_html_files(username):
+        raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
+    if not req.knowledge_points.strip():
+        raise HTTPException(status_code=400, detail="请输入知识点")
+
+    task_id = await _submit_ai_task(
+        lambda: generate_questions_with_media(req, _InternalRequest(user)),
+        f"教师 {username} AI 出题(含配图)：{req.knowledge_points}",
+    )
+    return {"task_id": task_id, "message": "AI 已开始出题，请稍候..."}
+
+
 @router.post("/{question_id}/generate-svg", summary="为指定试题生成/重新生成SVG配图")
 async def generate_svg_for_question(question_id: int, request: Request):
     """为已有试题单独生成或重新生成SVG配图"""
@@ -1464,6 +1664,8 @@ async def generate_media_for_placeholder(
     username = user["username"]
 
     row = await _verify_question_owner(question_id, username, user.get("role", 2))
+    if not get_config_value("IMAGE_GEN_ENABLED", True):
+        raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
 
     # 查找占位符
     placeholders = json.loads(row["media_placeholders"] or "[]")
@@ -1533,6 +1735,9 @@ async def generate_image_for_question(question_id: int, request: Request):
     row = await _verify_question_owner(question_id, username, user.get("role", 2))
 
     # 用题干前 200 字作为生图描述
+    if not get_config_value("IMAGE_GEN_ENABLED", True):
+        raise HTTPException(status_code=400, detail="系统未开启 AI 生图功能（系统配置 → IMAGE_GEN_ENABLED）")
+
     q_text = (row["question_text"] or "")[:200]
     if len(q_text) < 10:
         raise HTTPException(status_code=400, detail="题干过短，无法生成配图")
@@ -1636,6 +1841,8 @@ async def upload_media_for_placeholder(
     media_files = json.loads(row["media_files"] or "[]")
     file_entry = next((f for f in media_files if f["key"] == placeholder_key), None)
     if file_entry:
+        # Q6: 覆盖前先删掉旧物理文件, 否则每次重传都在磁盘上留一份孤儿
+        _delete_physical_media(question_id, file_entry.get("url", ""))
         file_entry["url"] = relative_url
         file_entry["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     else:
