@@ -391,5 +391,7 @@
   "scThemeUpdateFailed": "Theme update failed",
   "scPickTheme": "Choose card theme",
   "scNeedPointsUp": "{{count}} pts to level up",
-  "scMoreBadges": "{{count}} more badges"
+  "scMoreBadges": "{{count}} more badges",
+  "activityLoadFailed": "Failed to load activity, please retry",
+  "retry": "Retry"
 }

@@ -38,6 +38,25 @@ def _get_cached(key: str) -> dict[str, Any] | None:
     return None
 
 
+def _act_q(sql: str, params=()):
+    """recent-activity 单源容错查询: 任何数据源失败只丢该源并记日志, 不再整体 500;
+    同时天然兜住空范围 IN () 等非法 SQL(K5)"""
+    try:
+        return execute_query(sql, tuple(params) if params else ())
+    except Exception as e:
+        logger.warning(f"[recent-activity] 数据源查询失败已跳过: {e} | SQL={sql.strip()[:120]}")
+        return []
+
+
+def _act_q_db(sql: str, params=()):
+    """同上, 题库库(questions.db)版本"""
+    try:
+        return q_execute_query(sql, tuple(params) if params else ())
+    except Exception as e:
+        logger.warning(f"[recent-activity] 题库数据源查询失败已跳过: {e} | SQL={sql.strip()[:120]}")
+        return []
+
+
 def _set_cache(key: str, data: dict[str, Any]):
     """设置缓存"""
     _dashboard_cache[key] = (time.time(), data)
@@ -701,10 +720,15 @@ async def dashboard_summary(request: Request):
 
 @router.get("/recent-activity", summary="获取最近活动动态")
 async def recent_activity(request: Request):
-    """返回系统最近活动的时间线"""
+    """返回系统最近活动的时间线(30 秒缓存, 与 summary 同策略)"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
+
+    act_cache_key = f"act:{role}:{username}"
+    cached_act = _get_cached(act_cache_key)
+    if cached_act is not None:
+        return cached_act
 
     activities = []
     now = datetime.now()
@@ -713,14 +737,14 @@ async def recent_activity(request: Request):
         # 获取学生显示名（与 summary 逻辑一致）
         _display_name = user.get("name", "")
         if not _display_name or _display_name == username:
-            name_row = execute_query(
+            name_row = _act_q(
                 "SELECT name FROM users WHERE username=?",
                 (username,),
             )
             _display_name = name_row[0][0] if name_row and name_row[0][0] else username
 
         # 最近的考试结果 (question_db 返回 dict)
-        exam_activities = q_execute_query(
+        exam_activities = _act_q_db(
             """SELECT ea.submitted_at, e.title, ea.score, ea.total_score
                FROM exam_attempts ea
                JOIN exams e ON ea.exam_id = e.id
@@ -737,7 +761,7 @@ async def recent_activity(request: Request):
             })
 
         # 最近的积分变化
-        score_activities = execute_query(
+        score_activities = _act_q(
             """SELECT updated_at, score, class_name
                FROM scores WHERE student_name = ?
                ORDER BY updated_at DESC LIMIT 5""",
@@ -752,7 +776,7 @@ async def recent_activity(request: Request):
             })
 
         # 最近的随堂测验结果
-        quiz_activities = execute_query(
+        quiz_activities = _act_q(
             """SELECT a.submitted_at, q.title, a.score
                FROM interaction_quiz_answers a
                JOIN interaction_quizzes q ON a.quiz_id = q.id
@@ -769,7 +793,7 @@ async def recent_activity(request: Request):
             })
 
         # 最近的投票参与
-        vote_activities = execute_query(
+        vote_activities = _act_q(
             """SELECT v.created_at, p.question
                FROM interaction_poll_votes v
                JOIN interaction_polls p ON v.poll_id = p.id
@@ -788,7 +812,7 @@ async def recent_activity(request: Request):
 
         # 最近的讨论消息（仅最近30天）
         week_ago_ts = (now - timedelta(days=30)).strftime("%Y-%m-%d")
-        disc_activities = execute_query(
+        disc_activities = _act_q(
             """SELECT m.created_at, d.title, m.content, dg.group_index, dg.name
                FROM discussion_messages m
                JOIN discussion_groups dg ON m.group_id = dg.id
@@ -807,7 +831,7 @@ async def recent_activity(request: Request):
             })
 
         # 最近加入的讨论
-        join_activities = execute_query(
+        join_activities = _act_q(
             """SELECT dm.joined_at, d.title
                FROM discussion_members dm
                JOIN discussion_groups dg ON dm.group_id = dg.id
@@ -825,7 +849,7 @@ async def recent_activity(request: Request):
             })
 
         # 最近的知识闯关完成记录
-        quest_activities = execute_query(
+        quest_activities = _act_q(
             """SELECT completed_at, score, correct_count, total_questions
                FROM quest_records
                WHERE student_username = ? AND completed != 0 AND completed_at IS NOT NULL
@@ -841,7 +865,7 @@ async def recent_activity(request: Request):
             })
 
         # 最近的知识抢答参与记录
-        qq_activities = execute_query(
+        qq_activities = _act_q(
             """SELECT qp.joined_at, qr.title, qp.total_score, qp.correct_count
                FROM quick_quiz_players qp
                JOIN quick_quiz_rooms qr ON qp.room_id = qr.id
@@ -858,7 +882,7 @@ async def recent_activity(request: Request):
             })
 
         # 最近的智能练习记录
-        practice_activities = q_execute_query(
+        practice_activities = _act_q_db(
             """SELECT pa.submitted_at, ps.title, pa.score, pa.total_score
                FROM practice_attempts pa
                JOIN practice_sessions ps ON pa.session_id = ps.id
@@ -876,7 +900,7 @@ async def recent_activity(request: Request):
 
         # 最近的课程练习（知识点练习）记录
         # 注：ai_practice_results 在 questions.db，knowledge_points 在 smartkb.db
-        kp_raw = q_execute_query(
+        kp_raw = _act_q_db(
             """SELECT kp_id, submitted_at, score, total_score, accuracy
                FROM ai_practice_results
                WHERE student_username = ? AND submitted_at IS NOT NULL
@@ -888,7 +912,7 @@ async def recent_activity(request: Request):
             k_name_map = {}
             if k_ids:
                 ph = ",".join("?" for _ in k_ids)
-                k_rows = execute_query(
+                k_rows = _act_q(
                     f"SELECT id, name FROM knowledge_points WHERE id IN ({ph})",
                     tuple(k_ids),
                 )
@@ -905,7 +929,7 @@ async def recent_activity(request: Request):
 
         # 最近的资源浏览记录
         try:
-            rv_acts = execute_query(
+            rv_acts = _act_q(
                 """SELECT rvl.viewed_at, rvl.resource_type,
                           COALESCE(sr.file_name, rvl.file_path) as resource_name
                    FROM resource_view_logs rvl
@@ -928,14 +952,14 @@ async def recent_activity(request: Request):
     else:  # 教师/管理员
         # 最近的任务提交
         if role == 0:
-            sub_activities = execute_query(
+            sub_activities = _act_q(
                 """SELECT ts.submitted_at, t.name, ts.student_username
                    FROM task_submissions ts
                    JOIN tasks t ON ts.task_id = t.id
                    ORDER BY ts.submitted_at DESC LIMIT 10""",
             )
         else:
-            sub_activities = execute_query(
+            sub_activities = _act_q(
                 """SELECT ts.submitted_at, t.name, ts.student_username
                    FROM task_submissions ts
                    JOIN tasks t ON ts.task_id = t.id
@@ -948,7 +972,7 @@ async def recent_activity(request: Request):
         sub_name_map = {}
         if sub_usernames:
             ph = ",".join("?" for _ in sub_usernames)
-            u_rows = execute_query(
+            u_rows = _act_q(
                 f"SELECT username, name FROM users WHERE username IN ({ph})",
                 tuple(sub_usernames),
             )
@@ -965,12 +989,12 @@ async def recent_activity(request: Request):
 
         # 最近创建的考试 (question_db 返回 dict)
         if role == 0:
-            exam_creations = q_execute_query(
+            exam_creations = _act_q_db(
                 """SELECT created_at, title, status
                    FROM exams ORDER BY created_at DESC LIMIT 5""",
             )
         else:
-            exam_creations = q_execute_query(
+            exam_creations = _act_q_db(
                 """SELECT created_at, title, status
                    FROM exams WHERE creator_username = ?
                    ORDER BY created_at DESC LIMIT 5""",
@@ -987,13 +1011,13 @@ async def recent_activity(request: Request):
 
         # 最近的点名记录
         if role == 0:
-            rc_activities = execute_query(
+            rc_activities = _act_q(
                 """SELECT created_at, student_name, result, class_name
                    FROM rollcall_history
                    ORDER BY created_at DESC LIMIT 5""",
             )
         else:
-            rc_activities = execute_query(
+            rc_activities = _act_q(
                 """SELECT created_at, student_name, result, class_name
                    FROM rollcall_history WHERE teacher_username = ?
                    ORDER BY created_at DESC LIMIT 5""",
@@ -1010,14 +1034,14 @@ async def recent_activity(request: Request):
 
         # 最近的随堂测验提交
         if role == 0:
-            quiz_acts = execute_query(
+            quiz_acts = _act_q(
                 """SELECT a.submitted_at, q.title, a.student_username
                    FROM interaction_quiz_answers a
                    JOIN interaction_quizzes q ON a.quiz_id = q.id
                    ORDER BY a.submitted_at DESC LIMIT 5""",
             )
         else:
-            quiz_acts = execute_query(
+            quiz_acts = _act_q(
                 """SELECT a.submitted_at, q.title, a.student_username
                    FROM interaction_quiz_answers a
                    JOIN interaction_quizzes q ON a.quiz_id = q.id
@@ -1029,7 +1053,7 @@ async def recent_activity(request: Request):
         quiz_name_map = {}
         if quiz_usernames:
             ph = ",".join("?" for _ in quiz_usernames)
-            u_rows = execute_query(
+            u_rows = _act_q(
                 f"SELECT username, name FROM users WHERE username IN ({ph})",
                 tuple(quiz_usernames),
             )
@@ -1046,7 +1070,7 @@ async def recent_activity(request: Request):
 
         # 最近的投票活动
         if role == 0:
-            poll_acts = execute_query(
+            poll_acts = _act_q(
                 """SELECT v.created_at, p.question
                    FROM interaction_poll_votes v
                    JOIN interaction_polls p ON v.poll_id = p.id
@@ -1054,7 +1078,7 @@ async def recent_activity(request: Request):
                    ORDER BY v.created_at DESC LIMIT 5""",
             )
         else:
-            poll_acts = execute_query(
+            poll_acts = _act_q(
                 """SELECT v.created_at, p.question
                    FROM interaction_poll_votes v
                    JOIN interaction_polls p ON v.poll_id = p.id
@@ -1074,7 +1098,7 @@ async def recent_activity(request: Request):
         # 最近的讨论活动（仅最近30天，避免全表扫描）
         week_ago_ts = (now - timedelta(days=30)).strftime("%Y-%m-%d")
         if role == 0:
-            disc_acts = execute_query(
+            disc_acts = _act_q(
                 """SELECT m.created_at, d.title, dg.group_index, m.username
                    FROM discussion_messages m
                    JOIN discussion_groups dg ON m.group_id = dg.id
@@ -1084,7 +1108,7 @@ async def recent_activity(request: Request):
                 (week_ago_ts,),
             )
         else:
-            disc_acts = execute_query(
+            disc_acts = _act_q(
                 """SELECT m.created_at, d.title, dg.group_index, m.username
                    FROM discussion_messages m
                    JOIN discussion_groups dg ON m.group_id = dg.id
@@ -1111,7 +1135,7 @@ async def recent_activity(request: Request):
 
         # 讨论创建/结束活动
         if role == 0:
-            disc_events = execute_query(
+            disc_events = _act_q(
                 """SELECT created_at, title, 'created' as event_type FROM discussions WHERE created_at >= ?
                    UNION ALL
                    SELECT updated_at, title, 'ended' FROM discussions WHERE status='ended' AND updated_at >= ?
@@ -1119,7 +1143,7 @@ async def recent_activity(request: Request):
                 (week_ago_ts, week_ago_ts),
             )
         else:
-            disc_events = execute_query(
+            disc_events = _act_q(
                 """SELECT created_at, title, 'created' as event_type FROM discussions WHERE creator_username=? AND created_at >= ?
                    UNION ALL
                    SELECT updated_at, title, 'ended' FROM discussions WHERE creator_username=? AND status='ended' AND updated_at >= ?
@@ -1137,7 +1161,7 @@ async def recent_activity(request: Request):
 
         # 最近的智能练习提交（学生提交到教师的练习）
         if role == 0:
-            practice_acts = q_execute_query(
+            practice_acts = _act_q_db(
                 """SELECT pa.submitted_at, ps.title, pa.student_username, pa.score, pa.total_score
                    FROM practice_attempts pa
                    JOIN practice_sessions ps ON pa.session_id = ps.id
@@ -1145,7 +1169,7 @@ async def recent_activity(request: Request):
                    ORDER BY pa.submitted_at DESC LIMIT 5""",
             )
         else:
-            practice_acts = q_execute_query(
+            practice_acts = _act_q_db(
                 """SELECT pa.submitted_at, ps.title, pa.student_username, pa.score, pa.total_score
                    FROM practice_attempts pa
                    JOIN practice_sessions ps ON pa.session_id = ps.id
@@ -1157,7 +1181,7 @@ async def recent_activity(request: Request):
         prac_name_map = {}
         if prac_usernames:
             ph = ",".join("?" for _ in prac_usernames)
-            u_rows = execute_query(
+            u_rows = _act_q(
                 f"SELECT username, name FROM users WHERE username IN ({ph})",
                 tuple(prac_usernames),
             )
@@ -1174,7 +1198,7 @@ async def recent_activity(request: Request):
 
         # 最近的知识抢答活动
         if role == 0:
-            qq_acts = execute_query(
+            qq_acts = _act_q(
                 """SELECT qr.ended_at, qr.title, COUNT(qp.id) as player_count
                    FROM quick_quiz_rooms qr
                    LEFT JOIN quick_quiz_players qp ON qp.room_id = qr.id
@@ -1183,7 +1207,7 @@ async def recent_activity(request: Request):
                    ORDER BY qr.ended_at DESC LIMIT 5""",
             )
         else:
-            qq_acts = execute_query(
+            qq_acts = _act_q(
                 """SELECT qr.ended_at, qr.title, COUNT(qp.id) as player_count
                    FROM quick_quiz_rooms qr
                    LEFT JOIN quick_quiz_players qp ON qp.room_id = qr.id
@@ -1206,7 +1230,7 @@ async def recent_activity(request: Request):
         cp_student_names = [s["username"] for s in cp_students]
         ph = ",".join("?" for _ in cp_student_names) if cp_student_names else ""
         if cp_student_names:
-            cp_acts = q_execute_query(
+            cp_acts = _act_q_db(
                 f"""SELECT ar.submitted_at, ar.student_username, ar.score, ar.total_score, ar.accuracy
                     FROM ai_practice_results ar
                     WHERE ar.submitted_at IS NOT NULL AND ar.student_username IN ({ph})
@@ -1220,7 +1244,7 @@ async def recent_activity(request: Request):
         cp_name_map = {}
         if cp_usernames:
             ph3 = ",".join("?" for _ in cp_usernames)
-            u_rows = execute_query(
+            u_rows = _act_q(
                 f"SELECT username, name FROM users WHERE username IN ({ph3})",
                 tuple(cp_usernames),
             )
@@ -1237,7 +1261,7 @@ async def recent_activity(request: Request):
 
         # 最近的知识闯关完成记录
         if cp_student_names:
-            quest_acts = execute_query(
+            quest_acts = _act_q(
                 f"""SELECT qr.completed_at, qr.student_username, qr.score, qr.correct_count, qr.total_questions
                     FROM quest_records qr
                     WHERE qr.student_username IN ({ph}) AND qr.completed != 0 AND qr.completed_at IS NOT NULL
@@ -1250,7 +1274,7 @@ async def recent_activity(request: Request):
         quest_name_map = {}
         if quest_usernames:
             ph2 = ",".join("?" for _ in quest_usernames)
-            u_rows2 = execute_query(
+            u_rows2 = _act_q(
                 f"SELECT username, name FROM users WHERE username IN ({ph2})",
                 tuple(quest_usernames),
             )
@@ -1268,7 +1292,7 @@ async def recent_activity(request: Request):
         # 最近的资源浏览记录
         try:
             if cp_student_names:
-                rv_acts = execute_query(
+                rv_acts = _act_q(
                     f"""SELECT rvl.viewed_at, rvl.student_username, rvl.resource_type,
                                COALESCE(sr.file_name, rvl.file_path) as resource_name
                         FROM resource_view_logs rvl
@@ -1283,7 +1307,7 @@ async def recent_activity(request: Request):
             rv_name_map = {}
             if rv_usernames:
                 ph4 = ",".join("?" for _ in rv_usernames)
-                u_rows3 = execute_query(
+                u_rows3 = _act_q(
                     f"SELECT username, name FROM users WHERE username IN ({ph4})",
                     tuple(rv_usernames),
                 )
@@ -1308,7 +1332,9 @@ async def recent_activity(request: Request):
         if not (len(a.get("time") or "") <= 10 and ":" in (a.get("time") or ""))
     ]
     activities.sort(key=lambda x: x["time"] or "", reverse=True)
-    return activities[:20]
+    result = activities[:20]
+    _set_cache(act_cache_key, result)
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════

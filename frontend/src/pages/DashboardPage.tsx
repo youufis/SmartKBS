@@ -161,6 +161,7 @@ const DashboardPage: React.FC = () => {
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
   const [loading, setLoading] = useState(true)
   const [activityLoading, setActivityLoading] = useState(true)
+  const [activityError, setActivityError] = useState(false)
   const [todoTotal, setTodoTotal] = useState(0)
 
   const { t } = useTranslation('dashboard')
@@ -174,8 +175,10 @@ const DashboardPage: React.FC = () => {
     try {
       const { data } = await apiClient.get('/api/dashboard/recent-activity')
       setActivities(data || [])
+      setActivityError(false)
     } catch {
-      // ignore
+      // K3: 区分加载失败与暂无数据
+      setActivityError(true)
     }
     setActivityLoading(false)
   }
@@ -186,11 +189,12 @@ const DashboardPage: React.FC = () => {
       try {
         const [sumRes, actRes] = await Promise.all([
           apiClient.get('/api/dashboard/summary'),
-          apiClient.get('/api/dashboard/recent-activity').catch(() => ({ data: [] })),
+          apiClient.get('/api/dashboard/recent-activity').catch(() => ({ data: null })),
         ])
         if (cancelled) return
         setSummary(sumRes.data)
-        setActivities(Array.isArray(actRes.data) ? actRes.data : [])
+        if (actRes.data === null) { setActivityError(true); setActivities([]) }
+        else { setActivityError(false); setActivities(Array.isArray(actRes.data) ? actRes.data : []) }
         // 学生端获取任务清单总数作为徽标
         if (user?.role === 'student') {
           getTaskTodo().then(todo => {
@@ -879,7 +883,17 @@ const DashboardPage: React.FC = () => {
             {activityLoading ? (
               <Spin style={{ display: 'block', margin: '40px auto' }} />
             ) : activities.length === 0 ? (
-              <Empty description={t('noActivity')} />
+              activityError ? (
+                <div style={{ textAlign: 'center', marginTop: 40 }}>
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={t('activityLoadFailed')}
+                  />
+                  <Button size="small" onClick={fetchActivities}>{t('retry')}</Button>
+                </div>
+              ) : (
+                <Empty description={t('noActivity')} />
+              )
             ) : (
               <Timeline
                 items={activities.slice(0, 30).map((act) => ({

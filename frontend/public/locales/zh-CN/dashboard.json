@@ -391,5 +391,7 @@
   "scThemeUpdateFailed": "主题更新失败",
   "scPickTheme": "选择卡片主题",
   "scNeedPointsUp": "还需 {{count}} 分升级",
-  "scMoreBadges": "还有 {{count}} 枚徽章"
+  "scMoreBadges": "还有 {{count}} 枚徽章",
+  "activityLoadFailed": "动态加载失败，请重试",
+  "retry": "重试"
 }
