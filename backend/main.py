@@ -68,6 +68,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] 启动自动清理资源绑定残留失败: {e}", file=sys.stderr)
     try:
+        # R8: 清理点名临时状态表里"年级与班级名互相矛盾"的历史脏行
+        from backend.api.rollcall_router import prune_stale_rollcall_meta
+        prune_stale_rollcall_meta()
+    except Exception as e:
+        print(f"[main] 点名脏状态清理失败: {e}", file=sys.stderr)
+    try:
         # 业务日志保留策略: 后台线程延迟清理, 防登录/浏览/通知等日志表无限增长
         from backend.log_retention import start as start_log_retention
         start_log_retention()

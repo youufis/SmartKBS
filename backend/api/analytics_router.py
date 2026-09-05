@@ -115,6 +115,32 @@ def _extract_class_num(cls_val: str) -> str:
     return nums[0] if nums else cls_val
 
 
+def _class_name_variants(grade: str, cls_val: str) -> list[str]:
+    """R3: 班级名在各表里写法并不统一(点名册存 "高一1班", 积分表可能存 "1" 或 "1班"),
+    统一生成候选集合, 避免"换一个入口就查不到数据"的口径不一致。
+    年级由查询的另一个条件限定, 因此候选集不会跨年级误匹配。
+    """
+    import re as _re
+    out: list[str] = []
+    v = str(cls_val or "").strip()
+    if not v:
+        return out
+    out.append(v)
+    if grade and v.startswith(grade):
+        out.append(v[len(grade):])
+    nums = _re.findall(r"\d+", v)
+    if nums:
+        n = nums[0]
+        out.extend([n, f"{n}班", f"{grade}{n}班"])
+    seen, res = set(), []
+    for x in out:
+        x = (x or "").strip()
+        if x and x not in seen:
+            seen.add(x)
+            res.append(x)
+    return res
+
+
 @router.get("/class-overview", summary="班级学情总览（AI 生成）")
 async def class_overview(
     request: Request,
@@ -158,39 +184,26 @@ async def class_overview(
     if total_students == 0:
         return {"report": "暂无该班级的学生数据", "data": {}}
 
-    # 2. 积分统计（使用 FK 列或降级 TEXT）
-    if grade_id and class_id:
-        score_stats = execute_query(
-            """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
-                      COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-               FROM scores WHERE teacher_username=? AND grade_id=? AND class_id=?""",
-            (query_teacher, grade_id, class_id),
-        )
-    else:
-        score_stats = execute_query(
-            """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
-                      COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-               FROM scores WHERE teacher_username=? AND grade=? AND class_name=?""",
-            (query_teacher, grade, cls),
-        )
-
-    # 3. 点名统计（使用 FK 列或降级 TEXT）
-    if grade_id and class_id:
-        rc_stats = execute_query(
-            """SELECT COUNT(*),
-                      SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
-                      SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-               FROM rollcall_history WHERE teacher_username=? AND grade_id=? AND class_id=?""",
-            (query_teacher, grade_id, class_id),
-        )
-    else:
-        rc_stats = execute_query(
-            """SELECT COUNT(*),
-                      SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
-                      SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-               FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=?""",
-            (query_teacher, grade, cls),
-        )
+    # 2/3. 积分与点名统计
+    # R3: scores / rollcall_history 的写入路径(rollcall_router._save_history、
+    # score_utils.save_teacher_scores)只写 grade/class_name 文本列, 从不填 grade_id/class_id,
+    # 旧实现却优先走 FK 分支 -> 命中率 100% 为 0 行, 班级学情总览的"积分/点名"两维恒为 0,
+    # 而导出 Word 走文本分支有数据, 两个入口口径相反。现统一按文本候选集匹配。
+    cls_variants = _class_name_variants(grade, cls) or [cls]
+    _ph = ",".join(["?"] * len(cls_variants))
+    score_stats = execute_query(
+        f"""SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
+                  COALESCE(MAX(score),0), COALESCE(MIN(score),0)
+           FROM scores WHERE teacher_username=? AND grade=? AND class_name IN ({_ph})""",
+        (query_teacher, grade, *cls_variants),
+    )
+    rc_stats = execute_query(
+        f"""SELECT COUNT(*),
+                  SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
+           FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name IN ({_ph})""",
+        (query_teacher, grade, *cls_variants),
+    )
 
     # 4. 考试统计（该班级最近的考试）
     exam_stats = q_execute_query(
@@ -704,6 +717,8 @@ async def export_class_overview_docx(
     from backend.api.export_router import _resolve_export_teacher
     query_teacher = _resolve_export_teacher(user, teacher)
     class_num = _extract_class_num(cls)
+    cls_variants = _class_name_variants(grade, cls) or [cls]
+    _ph = ",".join(["?"] * len(cls_variants))
 
     student_count = execute_query(
         "SELECT COUNT(*) FROM users WHERE role = 2 AND grade = ? AND (class = ? OR class = ?)",
@@ -714,17 +729,17 @@ async def export_class_overview_docx(
         raise HTTPException(status_code=400, detail="暂无该班级的学生数据")
 
     score_stats = execute_query(
-        """SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
+        f"""SELECT COUNT(*), COALESCE(SUM(score),0), COALESCE(AVG(score),0),
                   COALESCE(MAX(score),0), COALESCE(MIN(score),0)
-           FROM scores WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls),
+           FROM scores WHERE teacher_username = ? AND grade = ? AND class_name IN ({_ph})""",
+        (query_teacher, grade, *cls_variants),
     )
     rc_stats = execute_query(
-        """SELECT COUNT(*),
+        f"""SELECT COUNT(*),
                   SUM(CASE WHEN result='correct' THEN 1 ELSE 0 END),
                   SUM(CASE WHEN result='incorrect' THEN 1 ELSE 0 END)
-           FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name = ?""",
-        (query_teacher, grade, cls),
+           FROM rollcall_history WHERE teacher_username = ? AND grade = ? AND class_name IN ({_ph})""",
+        (query_teacher, grade, *cls_variants),
     )
     exam_stats = q_execute_query(
         """SELECT e.title, e.subject, COUNT(ea.id) as attempt_count,

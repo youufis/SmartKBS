@@ -1928,6 +1928,28 @@ def _backfill_grade_class_ids(c):
                 c.execute(f"UPDATE {table} SET grade_id=(SELECT id FROM grades WHERE name={table}.grade) "
                           f"WHERE grade_id IS NULL")
                 logger.info(f"已自动回填 {table} 表 grade_id")
+            # R8: 旧迁移只回填了 grade_id, class_id 永远是 NULL, 任何按 class_id 过滤的
+            # 统计都会恒为 0。这里做一次幂等回填(仅填 NULL)。class_name 在不同表里有
+            # "高一1班"/"1班"/"1" 三种写法, 按精确形态逐一匹配; 匹配不上就保持 NULL,
+            # 不做模糊猜测以免张冠李戴。
+            if c.execute(f"SELECT COUNT(*) FROM {table} WHERE class_id IS NULL").fetchone()[0]:
+                c.execute(f"""
+                    UPDATE {table} SET class_id = (
+                        SELECT cl.id FROM classes cl
+                        JOIN grades g ON cl.grade_id = g.id
+                        WHERE g.name = {table}.grade
+                          AND (cl.display_name = {table}.class_name
+                               OR cl.name = {table}.class_name
+                               OR cl.display_name = {table}.grade || {table}.class_name
+                               OR cl.display_name = {table}.grade || {table}.class_name || '班')
+                        ORDER BY cl.id LIMIT 1
+                    )
+                    WHERE class_id IS NULL
+                      AND class_name IS NOT NULL AND class_name != ''
+                      AND grade IS NOT NULL AND grade != ''
+                """)
+                _left = c.execute(f"SELECT COUNT(*) FROM {table} WHERE class_id IS NULL").fetchone()[0]
+                logger.info(f"已尝试回填 {table} 表 class_id, 仍有 {_left} 行未能唯一定位到班级")
 
         conn = c.connection
         conn.commit()

@@ -1,10 +1,9 @@
 """
 智能点名 · 公平版 API 路由
 """
-import json, os, random, time
+import json, os, random, re, time
 from typing import Any
 
-import jwt as pyjwt
 from fastapi import APIRouter, Request, HTTPException
 
 from backend.config import DATA_DIR, ROOT_DIR, STU_DIR
@@ -25,22 +24,20 @@ router = APIRouter()
 
 # ── 工具函数 ──
 
-def _get_rollcall_teacher(request: Request, body: dict[str, Any] | None = None) -> str:
-    """从请求中提取教师用户名"""
-    teacher = request.query_params.get("teacher", "")
-    if teacher:
-        return teacher
-    if body and body.get("teacher"):
-        return body["teacher"]
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        try:
-            from backend.auth import JWT_SECRET_KEY, JWT_ALGORITHM
-            payload = pyjwt.decode(auth[7:], JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-            return payload.get("username", "root")
-        except Exception:
-            pass
-    return "root"
+def _get_rollcall_teacher(request: Request, user: dict[str, Any] | None = None,
+                          body: dict[str, Any] | None = None) -> str:
+    """R2: 点名数据的归属一律以"登录身份"为准
+
+    - 管理员可用 ?teacher= 或 body.teacher 指名查看/操作某位教师的点名册;
+    - 其他角色忽略客户端传入的 teacher, 强制使用本人用户名。
+      (前端点名页本来就只传自己的用户名, 因此正常操作行为不变, 只是不再可伪造)
+    旧实现允许 ?teacher=<任意用户名> 切换归属, 且未登录时回退成 "root"。
+    """
+    if user is not None and user.get("role") == ROLE_ADMIN:
+        requested = (request.query_params.get("teacher") or (body or {}).get("teacher") or "").strip()
+        if requested:
+            return requested
+    return (user or {}).get("username") or "root"
 
 
 def _load_students(grade: str = ""):
@@ -65,8 +62,10 @@ def _is_teacher_allowed(username: str, grade: str, cls: str) -> bool:
     # 兼容 int 型班级（users.class 存在 1 这类数字），避免 .replace 抛 AttributeError
     grade = str(grade or "").strip()
     cls = str(cls or "").strip()
+    # R4: 年级/班级都拿不到时一律拒绝(旧实现默认放行, 导致教师可翻查
+    # 任意"年级字段为空"的账号(含管理员/同事)的登录日志与考勤明细)
     if not grade and not cls:
-        return True
+        return False
     if is_admin(username):
         return True
 
@@ -197,17 +196,42 @@ def _apply_decay(weights, last_time):
     return last_time
 
 
-def _save_to_student_chat(student_name, cls, content):
-    """将课堂记录写入学生个人的 ChatHistory 目录"""
+def _save_to_student_chat(student_name, cls, content, grade="", actor="", actor_is_admin=False):
+    """将课堂记录写入学生个人的 ChatHistory 目录
+
+    R7: 旧实现只按姓名匹配学生且忽略班级, 重名时会把记录写进别人的目录;
+    现按 姓名 + 年级 + 班级 共同定位, 并把范围限制在操作教师的任教班级内。
+    """
     username = None
     try:
-        rows = execute_query("SELECT username FROM users WHERE name=?", (student_name,))
-        if rows:
-            username = rows[0][0]
+        rows = execute_query(
+            "SELECT username, grade_id, class_id FROM users WHERE role=2 AND name=?",
+            (student_name,),
+        )
     except Exception as e:
         logger.warning(f"点名-查找学生用户名失败 (name={student_name}): {e}")
-    if not username:
         return None
+    if not rows:
+        return None
+    cnum = re.sub(r"[^\d]", "", str(cls or "")) if cls else ""
+    cands = []
+    for r in rows:
+        if len(rows) > 1 and cnum:
+            crow = execute_query("SELECT display_name FROM classes WHERE id=?", (r[2],))
+            cname = str(crow[0][0]) if crow and crow[0][0] else ""
+            if cnum not in re.sub(r"[^\d]", "", cname):
+                continue
+        cands.append(r[0])
+    if len(cands) != 1:
+        # 无法唯一定位时不写, 避免把记录写进同名他人的目录
+        logger.warning(f"课堂记录未定位到唯一学生: name={student_name} 候选={cands}")
+        return None
+    username = cands[0]
+    if not actor_is_admin:
+        from backend.permission_service import check_teacher_access_to_student
+        if not check_teacher_access_to_student(actor, username):
+            logger.warning(f"课堂记录越权写入被拒绝: actor={actor} student={username}")
+            return None
     # 安全校验：只允许字母数字下划线
     import re as _re
     if not _re.match(r'^\w+$', username):
@@ -330,7 +354,7 @@ async def api_students(request: Request):
     username = user["username"]
     role = user.get("role", 2)
 
-    teacher = _get_rollcall_teacher(request)
+    teacher = _get_rollcall_teacher(request, user)
     grade = request.query_params.get("grade", "")
     cls = request.query_params.get("class", "")
 
@@ -356,15 +380,15 @@ async def api_students(request: Request):
 
 
 async def api_pick(request: Request):
+    user = get_current_user(request)          # R1: 点名操作必须登录
     body = await request.json()
-    grade, cls = body.get("grade", ""), body.get("class", "")
-    teacher = body.get("teacher") or _get_rollcall_teacher(request, body)
+    grade, cls = _normalize_grade_class(body.get("grade", ""), body.get("class", ""))   # R11
+    teacher = _get_rollcall_teacher(request, user, body)   # R2: 归属以登录身份为准
     if not grade or not cls:
         return {"error": "缺少年级/班级"}
 
     # 教师只能操作自己班级的点名
-    user = get_current_user(request)
-    if user.get("role") != 0 and not _is_teacher_allowed(user["username"], grade, cls):
+    if user.get("role") != ROLE_ADMIN and not _is_teacher_allowed(user["username"], grade, cls):
         return {"error": "无权操作该班级"}
 
     state = _load_history(teacher, grade, cls)
@@ -409,13 +433,21 @@ async def api_pick(request: Request):
 
 
 async def api_mark(request: Request):
+    user = get_current_user(request)          # R1: 旧实现完全匿名, 任何人可给任意学生加分
     body = await request.json()
-    grade, cls = body.get("grade", ""), body.get("class", "")
-    student = body.get("student", "")
+    grade, cls = _normalize_grade_class(body.get("grade", ""), body.get("class", ""))   # R11
+    student = str(body.get("student", "")).strip()
     result = body.get("result", "skip")
-    teacher = body.get("teacher") or _get_rollcall_teacher(request, body)
+    teacher = _get_rollcall_teacher(request, user, body)   # R2
     noScore = body.get("noScore", False)
     customPoints = body.get("points")
+    if user.get("role") != ROLE_ADMIN and not _is_teacher_allowed(user["username"], grade, cls):
+        raise HTTPException(status_code=403, detail="无权操作该班级的点名")
+    if customPoints is not None:
+        try:
+            customPoints = max(-100, min(100, int(customPoints)))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="积分需为整数")
 
     state = _load_history(teacher, grade, cls)
     points_added = 0
@@ -478,9 +510,14 @@ async def api_mark(request: Request):
 
 
 async def api_history(request: Request):
-    teacher = _get_rollcall_teacher(request)
+    user = get_current_user(request)      # R1
+    teacher = _get_rollcall_teacher(request, user)
     grade = request.query_params.get("grade", "")
     cls = request.query_params.get("class", "")
+    grade, cls = _normalize_grade_class(grade, cls)   # R11
+    # R2: 非管理员只能读自己任教班级
+    if user.get("role") != ROLE_ADMIN and not _is_teacher_allowed(user["username"], grade, cls):
+        raise HTTPException(status_code=403, detail="无权查看该班级点名记录")
     state = _load_history(teacher, grade, cls)
     students = _load_students(grade)
     names = [s["name"] for s in students if s.get("class") == cls]
@@ -498,26 +535,25 @@ async def api_history(request: Request):
 
 
 async def api_reset(request: Request):
+    """重置点名数据(需登录; 教师仅限自己任教班级)"""
+    user = get_current_user(request)
     body = await request.json()
-    grade, cls = body.get("grade", ""), body.get("class", "")
-    teacher = body.get("teacher") or _get_rollcall_teacher(request, body)
-    students = _load_students(grade)
-    names = [s["name"] for s in students if s.get("class") == cls]
-    state = {
-        "weights": {n: 10 for n in names},
-        "history": [],
-        "picked_in_round": [],
-        "last_time": time.time(),
-    }
-    _save_history(teacher, grade, cls, state)
-    return {"success": True, "total": len(names), "teacher": teacher}
+    grade, cls = _normalize_grade_class(body.get("grade", ""), body.get("class", ""))   # R11
+    teacher = _get_rollcall_teacher(request, user, body)
+    if not grade or not cls:
+        raise HTTPException(status_code=400, detail="缺少 grade/class 参数")
+    if user.get("role") != ROLE_ADMIN and not _is_teacher_allowed(user["username"], grade, cls):
+        raise HTTPException(status_code=403, detail="无权重置该班级的点名数据")
+    total = _reset_rollcall(teacher, grade, cls)
+    return {"success": True, "total": total, "teacher": teacher}
 
 
 async def api_save_record(request: Request):
+    user = get_current_user(request)      # R1: 旧实现匿名, 可向任意学生目录写文件
     body = await request.json()
     grade = body.get("grade", "")
     cls = body.get("class", "")
-    student = body.get("student", "")
+    student = str(body.get("student", "")).strip()
     rec_type = body.get("type", "课堂互动")
     title = body.get("title", "")
     correct_count = body.get("correctCount", 0)
@@ -573,7 +609,13 @@ async def api_save_record(request: Request):
             lines.append("")
     lines.append("\n---\n")
     lines.append("*由 SmartKB 自动记录*")
-    _save_to_student_chat(student, cls, "\n".join(lines))
+    content = "\n".join(lines)
+    if len(content) > 60_000:
+        raise HTTPException(status_code=400, detail="课堂记录内容过长")
+    path = _save_to_student_chat(student, cls, content, grade=grade, actor=user["username"],
+                                actor_is_admin=user.get("role") == ROLE_ADMIN)
+    if not path:
+        logger.warning(f"课堂记录未写入: student={student} class={cls} by={user['username']}")
     return {"success": True}
 
 
@@ -646,6 +688,7 @@ async def admin_session_detail(request: Request):
     teacher = request.query_params.get("teacher", username)
     grade = request.query_params.get("grade", "")
     cls = request.query_params.get("class", "")
+    grade, cls = _normalize_grade_class(grade, cls)   # R11
 
     if not grade or not cls:
         raise HTTPException(status_code=400, detail="缺少 grade/class 参数")
@@ -684,17 +727,8 @@ async def admin_reset_session(request: Request):
     if not is_admin(username) and teacher != username:
         raise HTTPException(status_code=403, detail="只能重置自己的班级")
 
-    students = _load_students(grade)
-    names = [s["name"] for s in students if s.get("class") == cls]
-    state = {
-        "weights": {n: 10 for n in names},
-        "history": [],
-        "picked_in_round": [],
-        "last_time": time.time(),
-    }
-    _save_history(teacher, grade, cls, state)
-
-    return {"success": True, "total": len(names), "teacher": teacher}
+    total = _reset_rollcall(teacher, grade, cls)
+    return {"success": True, "total": total, "teacher": teacher}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -854,16 +888,14 @@ async def attendance_logs(request: Request):
     if not target_username:
         raise HTTPException(status_code=400, detail="缺少 username 参数")
 
-    # 权限：管理员可查看任何学生，教师需要确认同班级
+    # 权限：管理员可查看任何学生，教师只能看自己任教范围内的学生
     if role != 0:
-        # 查询目标学生的年级班级
-        stu_rows = execute_query(
-            "SELECT grade, class FROM users WHERE username=?", (target_username,)
-        )
-        if stu_rows:
-            s_grade, s_class = stu_rows[0]
-            if not _is_teacher_allowed(username, s_grade or "", s_class or ""):
-                raise HTTPException(status_code=403, detail="无权查看该学生考勤记录")
+        from backend.permission_service import check_teacher_access_to_student
+        # R4: 旧实现用 users 的遗留文本列判定, 目标(如管理员/同事)该列为空时
+        # 会被 _is_teacher_allowed 的"空即放行"分支放过, 导致教师能翻别人的登录日志;
+        # 改为直接走 teacher_assignments 的统一判定(非学生一律 False)
+        if not check_teacher_access_to_student(username, target_username):
+            raise HTTPException(status_code=403, detail="无权查看该学生考勤记录")
 
     logs = execute_query_dict(
         """SELECT id, username, student_name, login_time, login_ip, user_agent, logout_time
@@ -903,8 +935,10 @@ async def attendance_online_students(request: Request):
     if role != 0:
         allowed_rows = []
         for r in rows:
-            s_grade = r.get("grade_name", r.get("old_grade", ""))
-            s_class = r.get("class_display", r.get("old_class", ""))
+            # LEFT JOIN 无匹配时键存在但值为 NULL, dict.get 的默认值不生效,
+            # 会退化成"空年级"而被放行 -> 统一用 or 归一
+            s_grade = r.get("grade_name") or r.get("old_grade") or ""
+            s_class = r.get("class_display") or r.get("old_class") or ""
             if _is_teacher_allowed(username, s_grade or "", s_class or ""):
                 allowed_rows.append(r)
         rows = allowed_rows
@@ -933,8 +967,8 @@ async def attendance_online_students(request: Request):
     student_list = []
     for r in rows:
         login_info = latest_logins.get(r["username"], {})
-        grade_val = r.get("grade_name", r.get("old_grade", ""))
-        class_val = r.get("class_display", r.get("old_class", ""))
+        grade_val = r.get("grade_name") or r.get("old_grade") or ""
+        class_val = r.get("class_display") or r.get("old_class") or ""
         student_list.append({
             "name": r["name"],
             "username": r["username"],
@@ -1071,3 +1105,70 @@ async def attendance_clear_login_logs(request: Request):
     except Exception as e:
         logger.error(f"清除登录日志失败: {e}")
         raise HTTPException(status_code=500, detail="清除登录日志失败")
+
+
+def _normalize_grade_class(grade: str, cls: str) -> tuple[str, str]:
+    """R11: 点名数据以 (教师, 年级, 班级) 为键, 年级与班级名不一致时会写出
+    "高二 / 高一1班" 这种永远查不出来的脏行(现库里 scores 有 49 行即如此)。
+    班级名自带年级前缀时以班级名为准, 保证键自洽, 也让权限判定落在真实班级上。
+    """
+    g = str(grade or "").strip()
+    cn = str(cls or "").strip()
+    if not cn:
+        return g, cn
+    try:
+        rows = execute_query_dict(
+            "SELECT g.name AS gname FROM classes c JOIN grades g ON c.grade_id = g.id "
+            "WHERE c.display_name = ? OR c.name = ?",
+            (cn, cn),
+        )
+    except Exception:
+        return g, cn
+    if rows and rows[0].get("gname") and str(rows[0]["gname"]) != g:
+        return str(rows[0]["gname"]), cn
+    return g, cn
+
+
+def prune_stale_rollcall_meta() -> int:
+    """R8: 清理 rollcall_meta 里年级与班级名互相矛盾的历史脏行
+
+    这些行只保存 last_time / picked_in_round 等临时状态, 不含任何点名成绩,
+    脏数据来源早期年级/班级归属调整。为避免误删, 仍有点名历史的键一律保留。
+    """
+    try:
+        rows = execute_query_dict("SELECT id, teacher_username, grade, class_name FROM rollcall_meta")
+    except Exception as e:
+        logger.warning(f"[rollcall] 读取 rollcall_meta 失败, 跳过脏行清理: {e}")
+        return 0
+    stale = []
+    for r in rows:
+        g = str(r.get("grade") or "").strip()
+        cn = str(r.get("class_name") or "").strip()
+        if not g or not cn or cn.startswith(g):
+            continue
+        has_hist = execute_query(
+            "SELECT 1 FROM rollcall_history WHERE teacher_username=? AND grade=? AND class_name=? LIMIT 1",
+            (r["teacher_username"], g, cn),
+        )
+        if not has_hist:
+            stale.append(r["id"])
+    if not stale:
+        return 0
+    ph = ",".join(["?"] * len(stale))
+    execute_insert_update(f"DELETE FROM rollcall_meta WHERE id IN ({ph})", tuple(stale))
+    logger.info(f"[rollcall] 已清理 {len(stale)} 行年级与班级不一致的点名临时状态")
+    return len(stale)
+
+
+def _reset_rollcall(teacher: str, grade: str, cls: str) -> int:
+    """R1: 重置某班点名状态(权重复原 + 清空本轮已点 + 清空历史), 供两处调用"""
+    students = _load_students(grade)
+    names = [s["name"] for s in students if s.get("class") == cls]
+    state = {
+        "weights": {n: 10 for n in names},
+        "history": [],
+        "picked_in_round": [],
+        "last_time": time.time(),
+    }
+    _save_history(teacher, grade, cls, state)
+    return len(names)

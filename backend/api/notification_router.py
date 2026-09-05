@@ -96,12 +96,25 @@ def _validate_announcement(user: dict, *, title=None, content=None, target_role=
         raise HTTPException(status_code=400, detail="优先级无效，可选: low / normal / important / urgent")
     if target_scope is not None and str(target_scope) not in _ANN_SCOPES:
         raise HTTPException(status_code=400, detail="发布范围无效")
+    validate_activity_scope(user, target_scope, target_grade, target_class,
+                            target_users, actor_role=actor_role, what="公告")
+
+
+def validate_activity_scope(user: dict, target_scope: str = "", target_grade: str = "",
+                            target_class: str = "", target_users: str = "",
+                            *, actor_role: int | None = None, what: str = "活动") -> None:
+    """R5: 教师发布范围校验(公告/随堂测验/投票共用同一道闸)
+
+    教师不得面向全体广播, 指定的年级/班级/学生必须都在本人任教范围内。
+    旧实现里这道闸只加在公告上, 测验与投票把 target_* 原样入库,
+    教师因此可以给完全不相干的班级/学生发布活动并使其可作答。
+    """
+    actor_role = user.get("role", 2) if actor_role is None else actor_role
     if actor_role == 0:
         return
-    # 教师: 不得全校广播, 年级/班级/指定人必须在本人任教范围内
     teacher = user.get("username", "")
     if (target_scope or "") == "all":
-        raise HTTPException(status_code=403, detail="面向全体用户的公告仅管理员可发布")
+        raise HTTPException(status_code=403, detail=f"面向全体用户的{what}仅管理员可发布")
     grades = {g["name"] for g in (get_teacher_grades(teacher) or [])}
     if target_grade:
         want = [x.strip() for x in str(target_grade).replace("，", ",").split(",") if x.strip()]
@@ -193,6 +206,9 @@ def notify_users(usernames: list[str], type_: str, title: str, content: str = ""
     if not usernames:
         return
     if not _is_notification_type_enabled(type_):
+        # R10: 以前这里是静默 return, 教师发布测验/投票后一直等不到通知又查不到原因
+        logger.info(f"[通知] 类型 {type_} 未在系统配置(通知类型)中启用, "
+                    f"本次未投递 {len(usernames)} 人: {title[:40]}")
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     sql = """INSERT INTO notifications

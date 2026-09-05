@@ -550,6 +550,11 @@ async def create_quiz(req: QuizCreate, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可创建测验")
 
+    # R5: 发布范围必须落在本人任教范围内(与公告共用同一道闸)
+    from backend.api.notification_router import validate_activity_scope
+    validate_activity_scope(user, req.target_scope, req.target_grade, req.target_class,
+                            req.target_users, what="随堂测验")
+
     # 验证 JSON
     try:
         questions = json.loads(req.questions)
@@ -789,7 +794,8 @@ async def delete_question(question_id: int, request: Request):
         execute_insert_update("DELETE FROM interaction_questions WHERE id=?", (question_id,))
 
     # 清理关联数据
-    execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='question' AND activity_id=?", (str(question_id),))
+    # R9: 不再连带删除该提问已发放的积分记录 —— 学生真实参与过, 悄悄把分扣回去更伤信任;
+    # 只清掉已经失去载体的通知。
     execute_insert_update("DELETE FROM notifications WHERE source_type='question' AND source_id=?", (str(question_id),))
     return {"message": "提问已删除"}
 
@@ -1284,6 +1290,13 @@ async def create_poll(req: PollCreate, request: Request):
     if req.poll_type not in ("single", "multiple"):
         raise HTTPException(status_code=400, detail="poll_type 必须是 single 或 multiple")
 
+    # R5: 发布范围必须落在本人任教范围内(与公告共用同一道闸)
+    from backend.api.notification_router import validate_activity_scope
+    validate_activity_scope(user, req.target_scope, req.target_grade, req.target_class,
+                            req.target_users, what="投票")
+
+
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     poll_id = execute_insert_update(
         """INSERT INTO interaction_polls (creator_username, question, options, poll_type, status, created_at,
@@ -1478,14 +1491,18 @@ async def submit_vote(
         if idx < 0 or idx >= len(options):
             raise HTTPException(status_code=400, detail=f"无效的选项索引: {idx}")
 
-    # 检查是否已投票
+    # R9: 统一"改答案"口径 —— 旧实现单选直接报错、多选静默覆盖, 两种投票行为不一致。
+    # 投票不是判分依据, 统一为"以最后一次为准"; 参与积分本身按 (学生,活动) 幂等, 不会因此刷分。
     existing = execute_query(
         "SELECT id FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?",
         (poll_id, username),
     )
-    if existing:
-        if poll_type == "single":
-            raise HTTPException(status_code=400, detail="您已经投过票")
+    re_vote = bool(existing)
+    if re_vote:
+        execute_insert_update(
+            "DELETE FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?",
+            (poll_id, username),
+        )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1515,7 +1532,8 @@ async def submit_vote(
     except Exception:
         pass
 
-    return {"message": "投票成功", "selected_count": len(selected_indices)}
+    return {"message": "投票已更新" if re_vote else "投票成功",
+            "selected_count": len(selected_indices), "updated": re_vote}
 
 
 @router.get("/polls/{poll_id}/results", summary="查看投票结果")
@@ -2391,7 +2409,16 @@ async def ai_class_summary(
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可查看")
 
+    # R6: 课堂总结会聚合"该教师名下"的测验/投票/提问数据, 归属只能由管理员指定;
+    # 教师传别人的用户名 -> 403(前端本来就只传自己), 并校验年级属于本人任教范围
     query_teacher = teacher_username or user["username"]
+    if role != 0:
+        if teacher_username and teacher_username != user["username"]:
+            raise HTTPException(status_code=403, detail="只能生成自己的课堂总结")
+        from backend.permission_service import can_access_grade, get_grade_by_name
+        _gi = get_grade_by_name(grade)
+        if _gi and not can_access_grade(user["username"], _gi["id"]):
+            raise HTTPException(status_code=403, detail="无权查看该年级的课堂数据")
 
     # 构建班级名称
     cls_display = cls
@@ -2562,7 +2589,16 @@ async def export_class_summary_docx(
     if role == 2:
         raise HTTPException(status_code=403, detail="仅教师和管理员可导出")
 
+    # R6: 课堂总结会聚合"该教师名下"的测验/投票/提问数据, 归属只能由管理员指定;
+    # 教师传别人的用户名 -> 403(前端本来就只传自己), 并校验年级属于本人任教范围
     query_teacher = teacher_username or user["username"]
+    if role != 0:
+        if teacher_username and teacher_username != user["username"]:
+            raise HTTPException(status_code=403, detail="只能生成自己的课堂总结")
+        from backend.permission_service import can_access_grade, get_grade_by_name
+        _gi = get_grade_by_name(grade)
+        if _gi and not can_access_grade(user["username"], _gi["id"]):
+            raise HTTPException(status_code=403, detail="无权查看该年级的课堂数据")
     cls_display = cls
     cls_name = f"{grade}{cls_display}班" if not cls.endswith("班") else f"{grade}{cls}"
 
