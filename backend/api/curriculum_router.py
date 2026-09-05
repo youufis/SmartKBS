@@ -2104,7 +2104,7 @@ def _progress_student_conditions(user: dict[str, Any], grade: str | None,
 
 
 @router.get("/progress/overview", summary="班级进度总览（教师用）")
-async def get_class_progress_overview(
+def get_class_progress_overview(
     request: Request,
     course_id: int = Query(None, description="课程 ID"),
     grade: str = Query(None, description="年级"),
@@ -2121,10 +2121,10 @@ async def get_class_progress_overview(
     user = get_current_user(request)
     if user.get("role", 2) not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
-    return await build_progress_overview(user, course_id, grade, class_name, page, page_size)
+    return build_progress_overview(user, course_id, grade, class_name, page, page_size)
 
 
-async def build_progress_overview(
+def build_progress_overview(
     user: dict[str, Any], course_id: int | None, grade: str | None,
     class_name: str | None, page: int | None = 1, page_size: int = 50,
 ) -> dict[str, Any]:
@@ -2388,7 +2388,6 @@ async def ai_lesson_plan(
 @router.get("/ai-lesson-plan/{kp_id}/export")
 async def export_lesson_plan_docx(
     kp_id: int, request: Request,
-    token: str = Query(""),
     refresh: int = Query(0, description="1=忽略缓存重新生成教案"),
 ):
     """导出 AI 教案为 Word 文档"""
@@ -2398,14 +2397,6 @@ async def export_lesson_plan_docx(
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
-
-    # 支持 token 参数认证（用于 window.open 下载）
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     try:
         user = get_current_user(request)

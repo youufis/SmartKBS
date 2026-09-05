@@ -1361,10 +1361,9 @@ async def get_group_summary(group_id: int, request: Request):
 
 
 @router.get("/groups/{group_id}/summary/export", summary="导出小组讨论总结为 Word 文档")
-async def export_group_summary_docx(
+def export_group_summary_docx(
     group_id: int,
     request: Request,
-    token: str = Query("", description="认证令牌"),
 ):
     """导出 AI 小组讨论归纳总结为 Word 文档"""
     import io
@@ -1372,13 +1371,6 @@ async def export_group_summary_docx(
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
-
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     user = get_current_user(request)
     role = user.get("role", 2)

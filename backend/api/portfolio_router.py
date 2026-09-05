@@ -630,7 +630,7 @@ async def get_learning_report(username: str, request: Request):
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/{username}/report/export", summary="导出学习报告为 Word 文档")
-async def export_learning_report_docx(username: str, request: Request, token: str = Query("")):
+async def export_learning_report_docx(username: str, request: Request):
     """导出 AI 学习报告为 Word 文档"""
     import io
     from docx import Document
@@ -638,14 +638,6 @@ async def export_learning_report_docx(username: str, request: Request, token: st
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
     import urllib.parse
-
-    # 支持 token 参数认证（用于 window.open 下载）
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     user = get_current_user(request)
     current_username = user["username"]

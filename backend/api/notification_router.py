@@ -14,7 +14,13 @@ from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.logger import logger
-from backend.permission_service import get_students_by_scope, filter_activities_by_scope
+from backend.permission_service import (
+    filter_activities_by_scope,
+    get_grade_by_name,
+    get_students_by_scope,
+    get_teacher_classes,
+    get_teacher_grades,
+)
 
 router = APIRouter()
 
@@ -55,6 +61,101 @@ class AiGenerateAnnouncement(BaseModel):
     target_class: str = ""
 
 # ── 辅助函数 ──
+
+_ROLE_ANN_TITLE_MAX = 200
+_ROLE_ANN_CONTENT_MAX = 20000
+_ANN_TARGET_ROLES = {"all", "teacher", "student"}
+_ANN_PRIORITIES = {"low", "normal", "important", "urgent"}
+_ANN_SCOPES = {"all", "teacher_classes", "grade", "class", "individual"}
+
+
+def _split_multi(v: str) -> list[str]:
+    return [x.strip().replace("班", "") for x in str(v or "").replace("，", ",").split(",") if x.strip()]
+
+
+def _validate_announcement(user: dict, *, title=None, content=None, target_role=None,
+                           target_scope=None, target_grade=None, target_class=None,
+                           priority=None, actor_role: int | None = None) -> None:
+    """A3: 枚举白名单 + 长度上限 + 教师发布范围限制"""
+    actor_role = user.get("role", 2) if actor_role is None else actor_role
+    if title is not None:
+        t = str(title).strip()
+        if not t:
+            raise HTTPException(status_code=400, detail="公告标题不能为空")
+        if len(t) > _ROLE_ANN_TITLE_MAX:
+            raise HTTPException(status_code=400, detail=f"公告标题最长 {_ROLE_ANN_TITLE_MAX} 字")
+    if content is not None:
+        str_c = str(content).strip()
+        if not str_c:
+            raise HTTPException(status_code=400, detail="公告内容不能为空")
+        if len(str_c) > _ROLE_ANN_CONTENT_MAX:
+            raise HTTPException(status_code=400, detail=f"公告内容最长 {_ROLE_ANN_CONTENT_MAX} 字")
+    if target_role is not None and str(target_role) not in _ANN_TARGET_ROLES:
+        raise HTTPException(status_code=400, detail="面向角色无效，可选: all / teacher / student")
+    if priority is not None and str(priority) not in _ANN_PRIORITIES:
+        raise HTTPException(status_code=400, detail="优先级无效，可选: low / normal / important / urgent")
+    if target_scope is not None and str(target_scope) not in _ANN_SCOPES:
+        raise HTTPException(status_code=400, detail="发布范围无效")
+    if actor_role == 0:
+        return
+    # 教师: 不得全校广播, 年级/班级/指定人必须在本人任教范围内
+    teacher = user.get("username", "")
+    if (target_scope or "") == "all":
+        raise HTTPException(status_code=403, detail="面向全体用户的公告仅管理员可发布")
+    grades = {g["name"] for g in (get_teacher_grades(teacher) or [])}
+    if target_grade:
+        want = [x.strip() for x in str(target_grade).replace("，", ",").split(",") if x.strip()]
+        if grades and not set(want) <= grades:
+            raise HTTPException(
+                status_code=403,
+                detail=f"只能面向自己任教的年级发布（可选项: {'、'.join(sorted(grades)) or '无'}）",
+            )
+    if target_scope == "class" and target_class:
+        gi = get_grade_by_name((target_grade or "").split(",")[0].strip())
+        allowed = {str(c["name"]).replace("班", "").strip() for c in (get_teacher_classes(teacher, gi["id"]) if gi else [])}
+        want_cls = _split_multi(target_class)
+        if allowed and not set(want_cls) <= allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"只能面向自己任教的班级发布（可选项: {'、'.join(sorted(a for a in allowed if a)) or '无'}）",
+            )
+    if target_scope == "individual" and target_users:
+        from backend.permission_service import is_student_in_teacher_scope
+        for stu in _split_multi(target_users):
+            if not is_student_in_teacher_scope(stu, teacher):
+                raise HTTPException(status_code=403, detail=f"学生 {stu} 不在您的任教范围内")
+
+
+def _announcement_item(row: tuple, creator_names: dict[str, str]) -> dict:
+    return {
+        "id": row[0],
+        "creator_username": row[1],
+        "creator_name": creator_names.get(row[1], row[1]),
+        "title": row[2],
+        "content": row[3],
+        "target_role": row[4] or "all",
+        "target_grade": row[5] or "",
+        "target_class": row[6] or "",
+        "priority": row[7] or "normal",
+        "is_pinned": bool(row[8]),
+        "created_at": row[9],
+        "updated_at": row[10],
+        "target_scope": row[11] if len(row) > 11 else "teacher_classes",
+        "target_users": row[12] if len(row) > 12 else "",
+    }
+
+
+def _creator_name_map(creators: list[str]) -> dict[str, str]:
+    """A5: 一次查出所有创建者姓名(旧实现每行一次查询)"""
+    uniq = [c for c in dict.fromkeys(creators) if c]
+    if not uniq:
+        return {}
+    ph = ",".join("?" for _ in uniq)
+    rows = execute_query(
+        f"SELECT username, COALESCE(NULLIF(name, ''), username) FROM users WHERE username IN ({ph})",
+        tuple(uniq),
+    )
+    return {r[0]: r[1] for r in rows}
 
 # ── 通知类型黑白名单 ──
 
@@ -321,6 +422,13 @@ async def create_announcement(req: AnnouncementCreate, request: Request):
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
+    # A3: 校验字段与发布范围
+    _validate_announcement(
+        user, title=req.title, content=req.content, target_role=req.target_role,
+        target_scope=req.target_scope, target_grade=req.target_grade,
+        target_class=req.target_class, priority=req.priority,
+    )
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     announcement_id = execute_insert_update(
         """INSERT INTO announcements
@@ -355,134 +463,72 @@ async def list_announcements(
     # 先获取 total 总数
     total = 0
 
+    cols = "id, creator_username, title, content, target_role, target_grade, target_class, priority, is_pinned, created_at, updated_at, target_scope, target_users"
     if role == 0:
-        # 管理员：全部可见
-        count_result = execute_query("SELECT COUNT(*) FROM announcements")
-        total = count_result[0][0] if count_result else 0
+        # 管理员: 全部可见, SQL 侧分页
+        total_row = execute_query("SELECT COUNT(*) FROM announcements")
+        total = total_row[0][0] if total_row else 0
         rows = execute_query(
-            """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
-                      priority, is_pinned, created_at, updated_at
-               FROM announcements
-               ORDER BY is_pinned DESC, created_at DESC
-               LIMIT ? OFFSET ?""",
+            f"""SELECT {cols} FROM announcements
+                ORDER BY is_pinned DESC, created_at DESC
+                LIMIT ? OFFSET ?""",
             (page_size, (page - 1) * page_size),
         )
-    elif role == 1:
-        # 教师：仅查看自己发布的公告
-        count_result = execute_query(
-            "SELECT COUNT(*) FROM announcements WHERE creator_username=?", (user["username"],)
-        )
-        total = count_result[0][0] if count_result else 0
-        rows = execute_query(
-            """SELECT id, creator_username, title, content, target_role, target_grade, target_class,
-                      priority, is_pinned, created_at, updated_at
-               FROM announcements WHERE creator_username=?
-               ORDER BY is_pinned DESC, created_at DESC
-               LIMIT ? OFFSET ?""",
-            (user["username"], page_size, (page - 1) * page_size),
-        )
-    else:
-        # 学生：管理员公告 + 匹配班级的教师公告，再按 target_scope 过滤
+        items = [_announcement_item(r, _creator_name_map([r[1] for r in rows])) for r in rows]
+        return {"announcements": items, "total": total, "page": page, "page_size": page_size}
+
+    if role == 1:
+        # 教师: 自己发布的公告 + 管理员发布且面向教师/全体的公告(A9)
         admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
-        teacher_rows = execute_query(
-            """SELECT DISTINCT ta.teacher_username FROM teacher_assignments ta
-               JOIN users u ON u.grade_id = ta.grade_id
-               WHERE u.username = ?
-               AND (ta.class_id IS NULL OR ta.class_id = u.class_id)""",
-            (user["username"],),
+        conds = ["creator_username = ?"]
+        params: list = [user["username"]]
+        if admin_names:
+            ph = ",".join("?" for _ in admin_names)
+            conds.append(f"(creator_username IN ({ph}) AND target_role IN ('all', 'teacher'))")
+            params.extend(admin_names)
+        where = " OR ".join(conds)
+        total_row = execute_query(f"SELECT COUNT(*) FROM announcements WHERE {where}", tuple(params))
+        total = total_row[0][0] if total_row else 0
+        rows = execute_query(
+            f"""SELECT {cols} FROM announcements WHERE {where}
+                ORDER BY is_pinned DESC, created_at DESC
+                LIMIT ? OFFSET ?""",
+            tuple(params) + (page_size, (page - 1) * page_size),
         )
-        teacher_names = [r[0] for r in teacher_rows]
+        items = [_announcement_item(r, _creator_name_map([r[1] for r in rows])) for r in rows]
+        return {"announcements": items, "total": total, "page": page, "page_size": page_size}
 
-        all_creator_names = admin_names + teacher_names
-        if all_creator_names:
-            placeholders = ",".join("?" for _ in all_creator_names)
-            # 总数
-            count_result = execute_query(
-                f"SELECT COUNT(*) FROM announcements WHERE creator_username IN ({placeholders})",
-                tuple(all_creator_names),
-            )
-            total = count_result[0][0] if count_result else 0
-            offset = (page - 1) * page_size
-            all_rows = execute_query(
-                f"""SELECT id, creator_username, title, content, target_role,
-                           target_grade, target_class, priority, is_pinned,
-                           created_at, updated_at, target_scope, target_users
-                   FROM announcements
-                   WHERE creator_username IN ({placeholders})
-                   ORDER BY is_pinned DESC, created_at DESC
-                   LIMIT ? OFFSET ?""",
-                tuple(all_creator_names + [page_size, offset]),
-            )
-        else:
-            all_rows = []
+    # 学生(A1): 先把可见条件下推到 SQL, 再用统一的 target_scope 过滤器复核,
+    # 最后才分页 —— 旧实现是"SQL 先 LIMIT/OFFSET -> 内存过滤 -> 再套一次 offset",
+    # 于是第 2 页恒为空, total 也只是第一页过滤后的条数, 超出首页的公告对学生永久不可见。
+    admin_names = [r[0] for r in execute_query("SELECT username FROM users WHERE role=0")]
+    teacher_rows = execute_query(
+        """SELECT DISTINCT ta.teacher_username FROM teacher_assignments ta
+           JOIN users u ON u.grade_id = ta.grade_id
+           WHERE u.username = ?
+             AND (ta.class_id IS NULL OR ta.class_id = u.class_id)""",
+        (user["username"],),
+    )
+    creators = admin_names + [r[0] for r in teacher_rows]
+    if not creators:
+        return {"announcements": [], "total": 0, "page": page, "page_size": page_size}
 
-        announcements = []
-        for r in all_rows:
-            creator_name_row = execute_query(
-                "SELECT COALESCE(NULLIF(name, ''), username) FROM users WHERE username = ?", (r[1],)
-            )
-            creator_name = creator_name_row[0][0] if creator_name_row else r[1]
-            announcements.append({
-                "id": r[0],
-                "creator_username": r[1],
-                "creator_name": creator_name,
-                "title": r[2],
-                "content": r[3],
-                "target_role": r[4],
-                "target_grade": r[5] or "",
-                "target_class": r[6] or "",
-                "priority": r[7],
-                "is_pinned": bool(r[8]),
-                "created_at": r[9],
-                "updated_at": r[10],
-                "target_scope": r[11] if len(r) > 11 else "teacher_classes",
-                "target_users": r[12] if len(r) > 12 else "",
-            })
-
-        # 按目标范围过滤
-        announcements = filter_activities_by_scope(announcements, user["username"])
-
-        # 内存分页
-        total = len(announcements)
-        offset = (page - 1) * page_size
-        announcements = announcements[offset:offset + page_size]
-
-        return {
-            "announcements": announcements,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-        }
-
-    announcements = []
-    for r in rows:
-        # 查询创建者姓名（name 为空时显示 username）
-        creator_name_row = execute_query(
-            "SELECT COALESCE(NULLIF(name, ''), username) FROM users WHERE username = ?", (r[1],)
-        )
-        creator_name = creator_name_row[0][0] if creator_name_row else r[1]
-
-        announcements.append({
-            "id": r[0],
-            "creator_username": r[1],
-            "creator_name": creator_name,
-            "title": r[2],
-            "content": r[3],
-            "target_role": r[4],
-            "target_grade": r[5] or "",
-            "target_class": r[6] or "",
-            "priority": r[7],
-            "is_pinned": bool(r[8]),
-            "created_at": r[9],
-            "updated_at": r[10],
-        })
-
-    return {
-        "announcements": announcements,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-    }
+    ph = ",".join("?" for _ in creators)
+    rows = execute_query(
+        f"""SELECT {cols} FROM announcements
+            WHERE creator_username IN ({ph})
+              AND COALESCE(target_role, 'all') IN ('all', 'student')
+            ORDER BY is_pinned DESC, created_at DESC""",
+        tuple(creators),
+    )
+    items = [_announcement_item(r, _creator_name_map([r[1] for r in rows])) for r in rows]
+    # A1b: 只保留面向学生/全体的公告, 并按目标范围过滤(与全站共享的可见性判定一致)
+    items = [x for x in items if x["target_role"] in ("all", "student")]
+    items = filter_activities_by_scope(items, user["username"])
+    total = len(items)
+    offset = (page - 1) * page_size
+    return {"announcements": items[offset:offset + page_size], "total": total,
+            "page": page, "page_size": page_size}
 
 
 @router.put("/announcements/{announcement_id}", summary="更新公告")
@@ -495,14 +541,22 @@ async def update_announcement(announcement_id: int, req: AnnouncementUpdate, req
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    # 检查是否为创建者或管理员
-    if role == 1:
-        ann = execute_query(
-            "SELECT creator_username FROM announcements WHERE id = ?",
-            (announcement_id,),
-        )
-        if not ann or ann[0][0] != username:
-            raise HTTPException(status_code=403, detail="无权修改此公告")
+    # 检查是否为创建者或管理员(A2: 不存在时给 404 而不是静默"已更新")
+    ann = execute_query(
+        "SELECT creator_username FROM announcements WHERE id = ?",
+        (announcement_id,),
+    )
+    if not ann:
+        raise HTTPException(status_code=404, detail="公告不存在")
+    if role == 1 and ann[0][0] != username:
+        raise HTTPException(status_code=403, detail="无权修改此公告")
+
+    _validate_announcement(
+        user,
+        title=req.title, content=req.content, target_role=req.target_role,
+        target_scope=req.target_scope, target_grade=req.target_grade,
+        target_class=req.target_class, priority=req.priority,
+    )
 
     updates = []
     params = []
@@ -535,14 +589,16 @@ async def delete_announcement(announcement_id: int, request: Request):
     username = user["username"]
     role = user.get("role", 2)
 
-    if role == 0:
-        execute_insert_update("DELETE FROM announcements WHERE id = ?", (announcement_id,))
-    elif role == 1:
-        execute_insert_update(
-            "DELETE FROM announcements WHERE id = ? AND creator_username = ?",
-            (announcement_id, username),
-        )
-    else:
+    if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
+    # A2: 旧实现对不存在的 id、以及教师删他人公告, 都返回"公告已删除"(0 行受影响) -> 误导性成功
+    ann = execute_query("SELECT creator_username FROM announcements WHERE id = ?", (announcement_id,))
+    if not ann:
+        raise HTTPException(status_code=404, detail="公告不存在")
+    if role == 1 and ann[0][0] != username:
+        raise HTTPException(status_code=403, detail="仅公告创建者和管理员可删除")
+
+    execute_insert_update("DELETE FROM announcements WHERE id = ?", (announcement_id,))
+    logger.info(f"用户 {username} 删除公告 id={announcement_id}")
     return {"message": "公告已删除"}

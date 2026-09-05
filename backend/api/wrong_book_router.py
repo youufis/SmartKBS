@@ -628,7 +628,6 @@ async def get_review_plan(request: Request):
 async def export_review_plan_docx(
     request: Request,
     student_username: str = Query("", description="学生用户名"),
-    token: str = Query("", description="JWT token 用于 window.open 下载"),
 ):
     """导出 AI 复习计划为 Word 文档"""
     import io
@@ -636,13 +635,6 @@ async def export_review_plan_docx(
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
-
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     user = get_current_user(request)
     username = user["username"]

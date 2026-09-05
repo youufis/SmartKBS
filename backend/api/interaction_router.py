@@ -2549,7 +2549,6 @@ async def export_class_summary_docx(
     cls: str = Query("", description="班级"),
     subject: str = Query("", description="学科"),
     teacher_username: str = Query("", description="教师用户名"),
-    token: str = Query("", description="认证令牌"),
 ):
     """导出 AI 课堂总结报告为 Word 文档"""
     import io
@@ -2557,13 +2556,6 @@ async def export_class_summary_docx(
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
-
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     user = get_current_user(request)
     role = user.get("role", 2)

@@ -23,6 +23,9 @@ from backend.logger import logger
 
 router = APIRouter()
 
+# E5: 单次导出的行数上限, 超限要求先筛选(而不是静默截断或撑爆内存)
+MAX_EXPORT_ROWS = 50000
+
 # ── 样式常量 ──
 HEADER_FONT = Font(name="微软雅黑", bold=True, size=11, color="FFFFFF")
 HEADER_FILL = PatternFill(start_color="1677FF", end_color="1677FF", fill_type="solid")
@@ -35,6 +38,49 @@ BORDER = Border(
     bottom=Side(style="thin"),
 )
 TITLE_FONT = Font(name="微软雅黑", bold=True, size=14)
+
+
+def _guard_row_count(total: int, what: str = "导出") -> None:
+    """E5: 行数超限直接报错并提示缩小范围"""
+    if total > MAX_EXPORT_ROWS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{what}约 {total} 行，超过单次上限 {MAX_EXPORT_ROWS} 行，请先缩小年级/班级/时间范围",
+        )
+
+
+def _resolve_export_teacher(user: dict, requested: str) -> str:
+    """E1: 管理员可指定任意教师; 教师只能导出自己的教学数据(与 /rollcall 口径一致)"""
+    if user.get("role", 2) == 0 and requested:
+        return requested
+    return user.get("username", "")
+
+
+def _assert_can_view_exam(user: dict, exam: dict) -> None:
+    """E2: 考试报告(含每题正确答案)仅限创建者或管理员, 与 exam_router._can_manage_exam 一致"""
+    if user.get("role", 2) == 0:
+        return
+    if (exam.get("creator_username") or "") == user.get("username", ""):
+        return
+    raise HTTPException(status_code=403, detail="仅考试创建者和管理员可导出该考试的成绩报告")
+
+
+def _assert_can_view_task(user: dict, task_creator: str) -> None:
+    """E3: 任务提交记录仅限创建者或管理员"""
+    if user.get("role", 2) == 0:
+        return
+    if (task_creator or "") == user.get("username", ""):
+        return
+    raise HTTPException(status_code=403, detail="仅任务创建者和管理员可导出该任务的提交记录")
+
+
+def _assert_can_view_interaction(user: dict, creator: str, kind: str = "测验") -> None:
+    """E2b: 随堂测验/投票结果仅限创建者或管理员"""
+    if user.get("role", 2) == 0:
+        return
+    if (creator or "") == user.get("username", ""):
+        return
+    raise HTTPException(status_code=403, detail=f"仅{kind}创建者和管理员可导出结果")
 
 
 def _style_header(ws, row: int, cols: int):
@@ -88,13 +134,18 @@ def _excel_response(wb, filename: str) -> StreamingResponse:
 # ── 1. 导出课堂积分 ──
 
 @router.get("/scores", summary="导出课堂积分表 (Excel)")
-async def export_scores(
+def export_scores(
     request: Request,
     teacher: str = Query("", description="教师用户名"),
     grade: str = Query("", description="年级"),
     cls: str = Query("", description="班级"),
 ):
-    """导出班级积分表为 Excel"""
+    """导出班级积分表为 Excel
+
+    E1: 旧实现把 teacher 参数直接当查询条件, 任一教师可导出同事名下的班级积分表
+        (实测 chenshaofeng 取到 youufis 全部学生姓名与分数)。
+    E4: 由 async def 改为 def, 交给 Starlette 线程池执行, 不再占住事件循环。
+    """
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
@@ -102,8 +153,10 @@ async def export_scores(
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="权限不足")
 
-    # 确定查询的教师
-    query_teacher = teacher or username
+    # 确定查询的教师(管理员可指定, 教师固定为自己)
+    query_teacher = _resolve_export_teacher(user, teacher)
+    cnt = execute_query("SELECT COUNT(*) FROM scores WHERE teacher_username = ?", (query_teacher,))
+    _guard_row_count(cnt[0][0] if cnt else 0, "班级积分表")
 
     # 构建条件
     conditions = ["teacher_username = ?"]
@@ -184,7 +237,7 @@ async def export_scores(
 # ── 2. 导出考试结果 ──
 
 @router.get("/exam/{exam_id}", summary="导出考试成绩报告 (Excel)")
-async def export_exam_result(exam_id: int, request: Request):
+def export_exam_result(exam_id: int, request: Request):
     """导出指定考试的完整成绩报告为 Excel"""
     user = get_current_user(request)
     username = user["username"]
@@ -196,6 +249,7 @@ async def export_exam_result(exam_id: int, request: Request):
     exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
     if not exam:
         raise HTTPException(status_code=404, detail="考试不存在")
+    _assert_can_view_exam(user, exam)
 
     # 获取提交记录（exam_attempts 在 questions.db 中）
     attempts = q_execute_query(
@@ -347,7 +401,7 @@ async def export_exam_result(exam_id: int, request: Request):
 # ── 3. 导出点名记录 ──
 
 @router.get("/rollcall", summary="导出点名记录 (Excel)")
-async def export_rollcall(
+def export_rollcall(
     request: Request,
     teacher: str = Query("", description="教师用户名"),
     grade: str = Query("", description="年级"),
@@ -387,6 +441,8 @@ async def export_rollcall(
         params.append(end_date + " 23:59:59")
 
     where = " AND ".join(conditions) if conditions else "1=1"
+    cnt = execute_query(f"SELECT COUNT(*) FROM rollcall_history WHERE {where}", tuple(params))
+    _guard_row_count(cnt[0][0] if cnt else 0, "点名记录")
     rows = execute_query(
         f"""SELECT teacher_username, grade, class_name, student_name, result, points, created_at
             FROM rollcall_history WHERE {where}
@@ -436,7 +492,7 @@ async def export_rollcall(
 # ── 4. 导出任务提交记录 ──
 
 @router.get("/tasks", summary="导出任务提交记录 (Excel)")
-async def export_tasks(
+def export_tasks(
     request: Request,
     task_id: str = Query("", description="任务ID"),
 ):
@@ -466,6 +522,16 @@ async def export_tasks(
 
     if not tasks:
         raise HTTPException(status_code=404, detail="没有找到任务")
+    # E3: 按 task_id 导出时同样校验归属(旧实现任一教师传 id 就能拿到他人任务的提交名单)
+    if role == 1:
+        for t in tasks:
+            _assert_can_view_task(user, t[1])
+    ph = ",".join("?" for _ in tasks)
+    cnt2 = execute_query(
+        f"SELECT COUNT(*) FROM task_submissions WHERE task_id IN ({ph})",
+        tuple(t[0] for t in tasks),
+    )
+    _guard_row_count(cnt2[0][0] if cnt2 else 0, "任务提交记录")
 
     wb = openpyxl.Workbook()
     first_sheet = True
@@ -519,7 +585,7 @@ async def export_tasks(
 # ── 5. 导出学情进度 ──
 
 @router.get("/progress", summary="导出学情进度 (Excel)")
-async def export_progress(
+def export_progress(
     request: Request,
     course_id: int = Query(None, description="课程 ID"),
     grade: str = Query(None, description="年级"),
@@ -535,8 +601,9 @@ async def export_progress(
     #     把 Query 对象当数字运算 -> TypeError 500); page=None 表示导出全量学生
     from backend.api.curriculum_router import build_progress_overview
 
-    raw = await build_progress_overview(user, course_id, grade, class_name, page=None)
+    raw = build_progress_overview(user, course_id, grade, class_name, page=None)
     students = raw.get("students", [])
+    _guard_row_count(len(students) * 10, "学情进度")
 
     if not students:
         raise HTTPException(status_code=404, detail="没有找到进度数据")
@@ -627,16 +694,8 @@ def _csv_response(rows: list[list[str]], headers: list[str], filename: str) -> S
 # ── 6. 导出随堂测验结果 ──
 
 @router.get("/quiz/{quiz_id}", summary="导出随堂测验结果 (CSV)")
-async def export_quiz_result(quiz_id: int, request: Request,
-                              token: str = Query("", description="JWT token 用于 window.open 下载")):
+def export_quiz_result(quiz_id: int, request: Request):
     """导出随堂测验的答题结果为 CSV 或 Excel"""
-    # 支持 token 参数认证（用于 window.open 下载）
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
     user = get_current_user(request)
     role = user.get("role", 2)
     if role not in (0, 1):
@@ -647,6 +706,10 @@ async def export_quiz_result(quiz_id: int, request: Request,
     if not quiz:
         raise HTTPException(status_code=404, detail="测验不存在")
     quiz = quiz[0]
+    qcreator = execute_query(
+        "SELECT creator_username FROM interaction_quizzes WHERE id = ?", (quiz_id,)
+    )
+    _assert_can_view_interaction(user, qcreator[0][0] if qcreator else "", "随堂测验")
     questions = json.loads(quiz[4]) if isinstance(quiz[4], str) else quiz[4]
 
     # 获取答题记录
@@ -692,16 +755,8 @@ async def export_quiz_result(quiz_id: int, request: Request,
 # ── 7. 导出投票结果 ──
 
 @router.get("/poll/{poll_id}", summary="导出投票结果 (CSV)")
-async def export_poll_result(poll_id: int, request: Request,
-                              token: str = Query("", description="JWT token 用于 window.open 下载")):
+def export_poll_result(poll_id: int, request: Request):
     """导出投票结果为 CSV"""
-    # 支持 token 参数认证（用于 window.open 下载）
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
     user = get_current_user(request)
     role = user.get("role", 2)
     if role not in (0, 1):
@@ -711,6 +766,10 @@ async def export_poll_result(poll_id: int, request: Request,
     if not poll:
         raise HTTPException(status_code=404, detail="投票不存在")
     poll = poll[0]
+    pcreator = execute_query(
+        "SELECT creator_username FROM interaction_polls WHERE id = ?", (poll_id,)
+    )
+    _assert_can_view_interaction(user, pcreator[0][0] if pcreator else "", "投票")
     options = json.loads(poll[3]) if isinstance(poll[3], str) else poll[3]
 
     # 获取投票记录

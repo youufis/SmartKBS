@@ -683,7 +683,6 @@ async def export_class_overview_docx(
     grade: str = Query(...),
     cls: str = Query(...),
     teacher: str = Query(""),
-    token: str = Query(""),
 ):
     """导出 AI 班级学情分析报告为 Word 文档"""
     import io
@@ -691,13 +690,6 @@ async def export_class_overview_docx(
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
-
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     user = get_current_user(request)
     username = user["username"]
@@ -834,7 +826,6 @@ async def export_teaching_suggestions_docx(
     grade: str = Query(...),
     cls: str = Query(...),
     teacher_username: str = Query(""),
-    token: str = Query(""),
 ):
     """导出 AI 教学建议为 Word 文档"""
     import io
@@ -842,13 +833,6 @@ async def export_teaching_suggestions_docx(
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
-
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     user = get_current_user(request)
     username = user["username"]
@@ -991,7 +975,6 @@ async def export_teaching_suggestions_docx(
 async def export_exam_report_docx(
     exam_id: int,
     request: Request,
-    token: str = Query(""),
 ):
     """导出 AI 考试分析报告为 Word 文档"""
     import io
@@ -999,13 +982,6 @@ async def export_exam_report_docx(
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from fastapi.responses import StreamingResponse
-
-    if token:
-        request.state.user = None
-        from backend.auth import authenticate_payload
-        payload = authenticate_payload(token)
-        if payload:
-            request.state.user = payload
 
     user = get_current_user(request)
     role = user.get("role", 2)
