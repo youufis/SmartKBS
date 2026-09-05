@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
-  Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination,
+  Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination, Checkbox,
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
@@ -17,6 +17,73 @@ import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTyp
 
 const { Title, Text } = Typography
 const { TextArea } = Input
+
+// ════════════════════════════════════════
+// 练习提交名册 — 已交/未交 + 班级 + 按学生查询
+// ════════════════════════════════════════
+const SessionRoster: React.FC<{ attempts: any[]; students: any[] }> = ({ attempts, students }) => {
+  const { t } = useTranslation('practice')
+  const [kw, setKw] = useState('')
+  const [filter, setFilter] = useState<'all' | 'done' | 'undone'>('all')
+
+  const rows = useMemo(() => {
+    const map = new Map<string, any>()
+    ;(students || []).forEach((x: any) => map.set(x.username, { ...x }))
+    ;(attempts || []).forEach((a: any) => {
+      if (!map.has(a.student_username)) {
+        map.set(a.student_username, {
+          username: a.student_username,
+          name: a.student_name || a.student_username,
+          class: a.student_class || '',
+          submitted: true, score: a.score, total_score: a.total_score, submitted_at: a.submitted_at,
+        })
+      }
+    })
+    const k = kw.trim().toLowerCase()
+    return Array.from(map.values()).filter((r: any) => {
+      if (filter === 'done' && !r.submitted) return false
+      if (filter === 'undone' && r.submitted) return false
+      if (!k) return true
+      return [r.name, r.username, String(r.class || '')].some(v => String(v).toLowerCase().includes(k))
+    })
+  }, [students, attempts, kw, filter])
+
+  return (
+    <div>
+      <Space style={{ marginBottom: 8 }} wrap>
+        <Input allowClear style={{ width: 200 }} value={kw} onChange={e => setKw(e.target.value)}
+          placeholder={`${t('studentName')} / ${t('student')}`} />
+        <Radio.Group value={filter} onChange={e => setFilter(e.target.value)}>
+          <Radio.Button value="all">{t('all')}</Radio.Button>
+          <Radio.Button value="done">{t('submitted')}</Radio.Button>
+          <Radio.Button value="undone">{t('notStarted')}</Radio.Button>
+        </Radio.Group>
+        <Text type="secondary">{t('totalItems', { count: rows.length })}</Text>
+      </Space>
+      <Table size="small" rowKey="username" dataSource={rows}
+        locale={{ emptyText: t('noStudentSubmissions') }}
+        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }) }}
+        columns={[
+          { title: t('studentName'), dataIndex: 'name', width: 120, ellipsis: true },
+          {
+            title: t('studentClass'), dataIndex: 'class', width: 70,
+            render: (v: string) => (v ? `${v}${t('classUnit')}` : '-'),
+          },
+          {
+            title: t('status'), dataIndex: 'submitted', width: 90,
+            render: (v: boolean) => (v ? <Tag color="success">{t('submitted')}</Tag> : <Tag>{t('notStarted')}</Tag>),
+          },
+          {
+            title: t('score'), key: 'score', width: 100,
+            render: (_: any, r: any) => (r.submitted ? `${r.score ?? 0}/${r.total_score ?? 0}` : '-'),
+          },
+          { title: t('submitTime'), dataIndex: 'submitted_at', ellipsis: true, render: (v: string) => v || '-' },
+          { title: t('actions'), key: 'user', width: 110, ellipsis: true, render: (_: any, r: any) => r.username },
+        ] as any}
+      />
+    </div>
+  )
+}
 
 // ════════════════════════════════════════
 // 学生端
@@ -103,6 +170,7 @@ const StudentView: React.FC = () => {
             <div style={{ marginTop: 8 }}>
               <Text>{t('yourAnswer')}：<Text type={r.is_correct ? 'success' : 'danger'}>{r.student_answer || t('noHistory')}</Text></Text>
               {!r.is_correct && <div><Text type="secondary">{t('correctAnswer')}：{r.correct_answer}</Text></div>}
+              {!!r.feedback && <div style={{ marginTop: 4 }}><Text type="secondary">{r.feedback}</Text></div>}
             </div>
             {r.explanation && (
               <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
@@ -112,7 +180,7 @@ const StudentView: React.FC = () => {
           </Card>
         ))}
         <Button icon={<FormOutlined />} onClick={() => { setSubmittedView(null); loadSessions() }}
-          style={{ marginTop: 16 }}>{t('retry')}</Button>
+          style={{ marginTop: 16 }}>{t('practiceHistory')}</Button>
       </div>
     )
   }
@@ -121,7 +189,7 @@ const StudentView: React.FC = () => {
     return (
       <div>
         <Title level={4}><FormOutlined /> {activeSession.title}</Title>
-        <Text type="secondary">{t('difficulty')}：{activeSession.knowledge_points}</Text>
+        <Text type="secondary">{t('knowledgePoints')}：{activeSession.knowledge_points}</Text>
         <Divider />
         {questions.map((q, i) => (
           <Card key={q.id} size="small" title={t('questionNWithType', { n: i+1, type: typeLabel[q.type] || q.type })}
@@ -143,8 +211,19 @@ const StudentView: React.FC = () => {
                 <Radio value="错" style={{ marginLeft: 24 }}>{t('false')}</Radio>
               </Radio.Group>
             )}
-            {q.type === 'short' && (
-              <TextArea rows={3} placeholder={t('inputAnswer')}
+            {q.type === 'multiple' && q.options && (
+              <Checkbox.Group
+                value={answers[String(q.id)] ? String(answers[String(q.id)]).split('') : []}
+                onChange={(v: any) => setAnswers(p => ({ ...p, [String(q.id)]: [...(v as string[])].sort().join('') }))}>
+                <Space orientation="vertical">
+                  {Object.entries(q.options).map(([k, v]) => (
+                    <Checkbox key={k} value={k} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{k}. <FormulaRenderer content={v as string} inline /></Checkbox>
+                  ))}
+                </Space>
+              </Checkbox.Group>
+            )}
+            {!['single', 'multiple', 'true_false'].includes(q.type) && (
+              <TextArea rows={q.type === 'short' || q.type === 'fill' ? 3 : 5} placeholder={t('inputAnswer')}
                 value={answers[String(q.id)] || ''}
                 onChange={e => setAnswers(p => ({...p, [String(q.id)]: e.target.value}))} />
             )}
@@ -155,7 +234,7 @@ const StudentView: React.FC = () => {
             onClick={submitAnswers}>
             {allAnswered ? `${t('submit')} (${Object.keys(answers).length}/${questions.length})` : t('answerAll')}
           </Button>
-          <Button style={{ marginLeft: 12 }} onClick={() => setActiveSession(null)}>{t('start')}</Button>
+          <Button style={{ marginLeft: 12 }} onClick={() => { setActiveSession(null); loadSessions() }}>{t('practiceHistory')}</Button>
         </div>
         {result && (
           <Card style={{ marginTop: 16, textAlign: 'center' }}>
@@ -164,8 +243,12 @@ const StudentView: React.FC = () => {
               format={p => `${p}%`}
               strokeColor={result.accuracy >= 80 ? '#52c41a' : result.accuracy >= 60 ? '#faad14' : '#ff4d4f'} />
             <div style={{ marginTop: 8 }}><Text>{t('score')}：{result.score}/{result.total_score}</Text></div>
-            <Button icon={<ReloadOutlined />} style={{ marginTop: 12 }}
-              onClick={() => { setActiveSession(null); setResult(null); loadSessions() }}>{t('retry')}</Button>
+            <Space style={{ marginTop: 12 }}>
+              <Button type="primary" icon={<CheckCircleOutlined />}
+                onClick={() => startPractice(activeSession.id)}>{t('detail')}</Button>
+              <Button icon={<ReloadOutlined />}
+                onClick={() => { setActiveSession(null); setResult(null); loadSessions() }}>{t('practiceHistory')}</Button>
+            </Space>
           </Card>
         )}
       </div>
@@ -187,13 +270,15 @@ const StudentView: React.FC = () => {
                 extra={s.attempted ? <Tag color="processing">{t('submitted')}</Tag> : <Tag color="default">{t('notStarted')}</Tag>}>
                 <Text strong>{s.title}</Text>
                 <div><Text type="secondary">{s.knowledge_points}</Text></div>
-                <div><Text type="secondary">{t('difficulty')}：{s.creator_name} · {s.question_count} {t('questionCount')}</Text></div>
+                <div><Text type="secondary">{t('publisher')}：{s.creator_name} · {s.question_count} {t('questionCount')}
+                  {s.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}
+                </Text></div>
               </Card>
             ))}
             <div style={{ marginTop: 12, textAlign: 'center' }}>
               <Pagination
                 current={stuPage} pageSize={stuPageSize} total={sessions.length}
-                showSizeChanger showTotal={(total) => `${t('totalScore')} ${total} ${t('questionCount')}`}
+                showSizeChanger showTotal={(total) => t('totalItems', { count: total })}
                 pageSizeOptions={['5', '10', '20', '50']}
                 onChange={(p, ps) => { setStuPage(p); setStuPageSize(ps) }}
                 size="small"
@@ -342,11 +427,7 @@ const TeacherView: React.FC = () => {
             ))}
             <Divider />
             <Text strong>{t('submissionStatus', { count: data.attempts?.length || 0 })}</Text>
-            {data.attempts?.map((a: any, i: number) => (
-              <div key={i} style={{ margin: '4px 0' }}>
-                {a.student_name}：{a.score}/{a.total_score} ({Math.round(a.score/a.total_score*100)}%)
-              </div>
-            ))}
+            <SessionRoster attempts={data.attempts || []} students={data.students || []} />
           </div>
         ),
       })
@@ -398,7 +479,7 @@ const TeacherView: React.FC = () => {
                   <Select.Option value="medium">{t('medium')}</Select.Option>
                   <Select.Option value="hard">{t('hard')}</Select.Option>
                 </Select>
-                <InputNumber min={1} max={50} value={count} onChange={v => setCount(v || 5)}
+                <InputNumber min={1} max={20} value={count} onChange={v => setCount(v || 5)}
                   style={{ width: 80 }} /> {t('questionCount')}
                 <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={generateQuestions}>
                   {t('aiGenerate')}
@@ -455,14 +536,15 @@ const TeacherView: React.FC = () => {
         loadingSessions ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : sessions.length === 0 ? <Result icon={<FileTextOutlined />} title={t('publishedRecords')} />
         : <Table dataSource={sessions} rowKey="id"
-            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalScore') + ' ' + total + ' ' + t('questionCount'), pageSizeOptions: ['5', '10', '20', '50'] }}
+            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }), pageSizeOptions: ['5', '10', '20', '50'] }}
             columns={[
               { title: t('title_'), dataIndex: 'title', ellipsis: true },
               { title: t('publisher'), dataIndex: 'creator_name', width: 100 },
               { title: t('gradeClass'), render: (_, r) => 
                 r.target_students?.length > 0 
                   ? <Tag color="green">{t('targeted')} {r.target_students.length} {t('people')}</Tag>
-                  : `${r.target_grade || t('all')} ${r.target_class ? r.target_class+t('classUnit') : t('all')}`
+                  : <>{`${r.target_grade || t('all')} ${r.target_class ? r.target_class+t('classUnit') : t('all')}`}
+                    {r.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}</>
               },
               { title: t('questionCount'), dataIndex: 'question_count', width: 60 },
               { title: t('status'), render: (_, r) => r.status === 'active' ? <Tag color="processing">{t('inProgress')}</Tag> : <Tag>{t('endedSuccess')}</Tag>, width: 80 },

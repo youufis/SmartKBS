@@ -94,6 +94,7 @@
   "all": "All",
   "classUnit": "",
   "status": "Status",
+  "sourceWrongBook": "Wrong-book drill",
   "detail": "Details",
   "delete": "Delete",
   "questionN": "Q{{n}}",

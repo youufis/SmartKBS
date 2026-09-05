@@ -95,6 +95,7 @@
   "all": "全部",
   "classUnit": "班",
   "status": "状态",
+  "sourceWrongBook": "错题巩固",
   "detail": "详情",
   "delete": "删除",
   "questionN": "第 {{n}} 题",

@@ -369,16 +369,21 @@ const CurriculumPage: React.FC = () => {
     if (!selectedKp || mixedAiCount < 1) return
     setMixedGenLoading(true)
     try {
-      const { data } = await apiClient.post('/api/practice/generate', {
+      // 改为异步出题 + 轮询: 同步端点会在一个请求里串完 AI 出题与配图, 容易超时
+      const { data } = await apiClient.post('/api/practice/generate-async', {
         knowledge_points: selectedKp.name,
         subject: activeCourse?.subject || '',
         question_type: 'single',
-        count: mixedAiCount,
+        count: Math.min(mixedAiCount, 20),
         difficulty: selectedKp.difficulty || 'medium',
       })
-      if (data.questions?.length > 0) {
-        setMixedAiQuestions(data.questions)
-        message.success(t('aiGeneratedCount', { count: data.questions.length }))
+      const result = await pollAiTask(data.task_id, 120000)
+      const questions = (result?.questions as any[]) || []
+      if (questions.length > 0) {
+        setMixedAiQuestions(questions)
+        message.success(t('aiGeneratedCount', { count: questions.length }))
+      } else {
+        message.error(result?.error || t('aiGenerateFailed'))
       }
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('aiGenerateFailed'))
