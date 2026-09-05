@@ -387,5 +387,10 @@
   "dedupSkipRef": "{{count}} 条因被考试/练习引用而保留",
   "dedupFound": "发现 {{groups}} 组重复，可清理 {{count}} 条（每组保留最早创建的一条）。",
   "dedupRun": "确认清理",
-  "dedupDeletedCount": "{{count}} 条重复题目已清理"
+  "dedupDeletedCount": "{{count}} 条重复题目已清理",
+  "wrongTimes": "错误 {{count}} 次",
+  "masteredCount": "已掌握 {{count}} 题",
+  "statusPending": "待掌握错题",
+  "statusMastered": "已掌握",
+  "statusAll": "全部"
 }

@@ -16,11 +16,16 @@ from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
 from backend.prompts import apply_skills, build_ai_role
-from backend.database import execute_query as db_exec, execute_insert_update as db_insert
+from backend.database import (
+    execute_query as db_exec,
+    execute_query_dict as db_dict,
+    execute_insert_update as db_insert,
+)
 from backend.permission_service import (
     parse_legacy_teacher_grade_class,
     is_student_in_teacher_scope,
 )
+from backend.async_utils import spawn_bg
 
 router = APIRouter()
 
@@ -33,312 +38,316 @@ def _check_teacher_can_view_student(teacher_username: str, student_username: str
         raise HTTPException(status_code=403, detail="无权查看其他班级学生的错题")
 
 
-@router.get("/list", summary="获取我的错题")
-async def get_wrong_questions(request: Request):
-    """获取当前学生的所有错题，按考试归类"""
-    user = get_current_user(request)
-    username = user["username"]
+# ═══════════════════════════════════════════════
+# 访问守卫与错题读模型（W1/W2/W4/W5/W14）
+# ═══════════════════════════════════════════════
+
+# 已确认"无错题可回填"的学生, 避免每次请求重复全量扫描考试记录
+_BACKFILL_SCANNED: set[str] = set()
+
+
+def _assert_can_access_student(user: dict, requested: str) -> str:
+    """统一的学生数据访问守卫(W1/W2)。
+
+    - 学生: 一律强制为本人(忽略请求参数)
+    - 教师: 指定他人时必须在其任教范围内
+    - 管理员(root): 不限
+    """
+    username = user.get("username", "")
     role = user.get("role", 2)
-
+    requested = (requested or "").strip()
     if role == 2:
-        # 学生看自己的
-        target_username = username
-    else:
-        # 教师/管理员看指定学生，默认看第一个有错题记录的学生
-        target = request.query_params.get("student_username", "")
-        if target:
-            # 教师只能查看自己班级的学生
-            if role == 1:
-                _check_teacher_can_view_student(username, target)
-            target_username = target
+        return username
+    if role == 0:
+        return requested or username
+    if not requested or requested == username:
+        return requested or username
+    _check_teacher_can_view_student(username, requested)
+    return requested
+
+
+def _db_write(sql: str, params: tuple = ()) -> int:
+    """主库写操作并返回受影响行数。
+
+    database.execute_query 不提交(execute_query 里的 DML 会被静默回滚),
+    execute_insert_update 返回 lastrowid 而非 rowcount, 故 UPDATE 计数需自己取。
+    """
+    from backend.database import get_connection
+    with get_connection() as conn:
+        cur = conn.execute(sql, params)
+        conn.commit()
+        return cur.rowcount
+
+
+def _to_int(v: Any) -> int | None:
+    try:
+        return int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _question_meta_map(qids: list) -> dict[int, dict[str, Any]]:
+    """批量取题目详情。
+
+    题库在 questions.db, wrong_book 在 smartkb.db, 不能跨库 JOIN(主库里的
+    question_bank 是历史遗留的空壳表, JOIN 会静默返回全 NULL 的题干与答案)。
+    注意不过滤 status: 题被软删后错题记录仍应可见(W14)。
+    """
+    ids = [i for i in (_to_int(q) for q in qids) if i is not None]
+    if not ids:
+        return {}
+    ph = ",".join("?" for _ in ids)
+    rows = execute_query(
+        f"""SELECT id, type, question_text, options, correct_answer, explanation,
+                   knowledge_points, subject, svg_content, has_svg, media_files, media_placeholders, status
+            FROM question_bank WHERE id IN ({ph})""",
+        tuple(ids),
+    )
+    return {r["id"]: r for r in rows}
+
+
+def _activity_meta_map(student: str, source: str, ids: list[int]) -> dict[int, dict[str, Any]]:
+    """批量取来源活动(考试/练习/随堂测验)的标题与成绩信息"""
+    ids = [i for i in ids if i]
+    if not ids:
+        return {}
+    ph = ",".join("?" for _ in ids)
+    try:
+        if source == "exam":
+            rows = execute_query(
+                f"""SELECT ea.exam_id AS rid, e.title, e.subject, ea.score, ea.total_score,
+                          ea.submitted_at, ea.id AS attempt_id
+                    FROM exam_attempts ea JOIN exams e ON e.id = ea.exam_id
+                    WHERE ea.student_username = ? AND ea.status = 'submitted' AND ea.exam_id IN ({ph})
+                    ORDER BY ea.submitted_at DESC""",
+                (student, *ids),
+            )
+        elif source == "practice":
+            rows = execute_query(
+                f"""SELECT pa.session_id AS rid, ps.title, ps.subject, pa.score, pa.total_score,
+                          pa.submitted_at, pa.id AS attempt_id
+                    FROM practice_attempts pa JOIN practice_sessions ps ON ps.id = pa.session_id
+                    WHERE pa.student_username = ? AND pa.status = 'submitted' AND pa.session_id IN ({ph})
+                    ORDER BY pa.submitted_at DESC""",
+                (student, *ids),
+            )
         else:
-            # 自动查找有错题记录的第一个学生（教师只能看自己班级的）
-            if role == 1:
-                teacher_rows = user_query(
-                    "SELECT grade, class FROM users WHERE username=?", (username,)
-                )
-                teacher_grade = (teacher_rows[0][0] or "").strip() if teacher_rows else ""
-                teacher_class = str(teacher_rows[0][1] or "").strip() if teacher_rows else ""
-                grade_class_map = parse_legacy_teacher_grade_class(teacher_grade, teacher_class)
+            return {}
+    except Exception as e:
+        logger.warning(f"读取错题来源活动失败 ({source}): {e}")
+        return {}
+    out: dict[int, dict[str, Any]] = {}
+    for r in rows:              # 已按时间倒序, 只保留每题最近一次
+        out.setdefault(r["rid"], r)
+    return out
 
-                # 构建教师班级的 OR 条件
-                grade_conditions = []
-                params = []
-                for g, classes in grade_class_map.items():
-                    if classes:
-                        cls_placeholders = ",".join("?" * len(classes))
-                        grade_conditions.append("(u.grade = ? AND u.class IN ({}))".format(cls_placeholders))
-                        params.extend([g] + classes)
-                    else:
-                        grade_conditions.append("u.grade = ?")
-                        params.append(g)
 
-                if grade_conditions:
-                    # 先在 smartkb.db 查出匹配的学生用户名
-                    student_where = " OR ".join(grade_conditions)
-                    matched_students = user_query(
-                        f"SELECT username FROM users WHERE ({student_where})",
-                        tuple(params),
-                    )
-                    matched_usernames = [r[0] for r in matched_students if r[0]]
-                    if matched_usernames:
-                        usernames_ph = ",".join("?" * len(matched_usernames))
-                        first = execute_query(
-                            f"""SELECT ea.student_username FROM exam_attempts ea
-                               WHERE ea.status = 'submitted'
-                               AND ea.student_username IN ({usernames_ph})
-                               ORDER BY ea.submitted_at DESC LIMIT 1""",
-                            tuple(matched_usernames),
-                        )
-                    else:
-                        first = []
-                else:
-                    first = []
-                target_username = first[0]["student_username"] if first else ""
-            else:
-                # 管理员看到所有
-                first = execute_query(
-                    """SELECT DISTINCT ea.student_username FROM exam_attempts ea
-                       WHERE ea.status = 'submitted' ORDER BY ea.submitted_at DESC LIMIT 1"""
-                )
-                target_username = first[0]["student_username"] if first else ""
+def _backfill_wrong_book(student: str) -> int:
+    """把只存在于 exam_attempts.answers 里的历史错题回填进 wrong_book(W5)。
 
+    每人只跑一次: 表内已有记录或已确认无错题则跳过。
+    """
+    if not student or student in _BACKFILL_SCANNED:
+        return 0
+    try:
+        has = db_exec("SELECT 1 FROM wrong_book WHERE student_username=? LIMIT 1", (student,))
+        if has:
+            _BACKFILL_SCANNED.add(student)
+            return 0
+        attempts = execute_query(
+            """SELECT exam_id, answers, submitted_at FROM exam_attempts
+               WHERE student_username = ? AND status = 'submitted'
+               ORDER BY submitted_at DESC""",
+            (student,),
+        )
+    except Exception as e:
+        logger.warning(f"错题回填失败 ({student}): {e}")
+        return 0
+
+    wrong: dict[int, tuple[str, str, int]] = {}
+    for a in attempts:
+        data = a.get("answers")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not isinstance(data, dict):
+            continue
+        for qid_raw, ans in data.items():
+            if not isinstance(ans, dict) or ans.get("is_correct", False):
+                continue
+            qid = _to_int(qid_raw)
+            if qid is None:
+                continue
+            wrong.setdefault(qid, (
+                str(ans.get("student_answer", ""))[:500],
+                a.get("submitted_at") or "",
+                a.get("exam_id") or 0,
+            ))
+    if not wrong:
+        _BACKFILL_SCANNED.add(student)
+        return 0
+
+    meta = _question_meta_map(list(wrong.keys()))
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    inserted = 0
+    for qid, (wrong_answer, when, exam_id) in wrong.items():
+        m = meta.get(qid, {})
+        db_insert(
+            """INSERT OR IGNORE INTO wrong_book
+               (student_username, question_id, source, source_id, knowledge_points, question_type,
+                status, wrong_answer, created_at, wrong_count, last_wrong_at)
+               VALUES (?, ?, 'exam', ?, ?, ?, 'pending', ?, ?, 1, ?)""",
+            (student, qid, exam_id, m.get("knowledge_points", ""), m.get("type", ""),
+             wrong_answer, when or now, when or now),
+        )
+        inserted += 1
+    _BACKFILL_SCANNED.add(student)
+    if inserted:
+        logger.info(f"错题本回填: {student} 共 {inserted} 道历史错题")
+    return inserted
+
+
+def _collect_wrong_for_plan(student: str) -> tuple[list[dict], set, set, str]:
+    """给复习计划用的错题汇总(W10: 读表 + 一次批量查题, 不再逐考试解析 JSON)"""
+    _backfill_wrong_book(student)
+    rows = db_dict(
+        """SELECT question_id, wrong_answer, knowledge_points, question_type
+           FROM wrong_book WHERE student_username = ? AND status = 'pending'
+           ORDER BY COALESCE(NULLIF(last_wrong_at, ''), created_at) DESC, id DESC""",
+        (student,),
+    ) or []
+    if not rows:
+        return [], set(), set(), ""
+    meta = _question_meta_map([r["question_id"] for r in rows])
+    all_wrong: list[dict] = []
+    kp_set: set = set()
+    type_set: set = set()
+    for r in rows:
+        q = meta.get(r["question_id"], {})
+        kp = (q.get("knowledge_points") or r.get("knowledge_points") or "未知")
+        kp_set.add(kp)
+        qtype = q.get("type") or r.get("question_type") or ""
+        if qtype:
+            type_set.add(qtype)
+        all_wrong.append({
+            "question": q.get("question_text") or f"(题目ID:{r['question_id']}，已不在题库)",
+            "type": qtype,
+            "correct": q.get("correct_answer", "") or "",
+            "your_answer": r.get("wrong_answer", "") or "",
+            "knowledge": kp,
+        })
+    subjects = {(m.get("subject") or "") for m in meta.values()} - {""}
+    subject = "、".join(sorted(subjects)) if subjects else "通用"
+    return all_wrong, kp_set, type_set, subject
+
+
+_SOURCE_FALLBACK_TITLES = {
+    "exam": "考试错题",
+    "practice": "智能练习错题",
+    "quiz": "随堂测验错题",
+    "auto": "系统自动归集",
+}
+
+
+@router.get("/list", summary="获取错题本(以 wrong_book 表为唯一事实源)")
+async def get_wrong_questions(
+    request: Request,
+    status: str = Query("pending", description="pending=待掌握 mastered=已掌握 all=全部"),
+):
+    """错题列表: 读 wrong_book 表 + 批量补题目详情, 按来源活动分组返回。
+
+    旧实现是每次现场解析该生全部 exam_attempts JSON, 并叠加两处"知识点连坐"过滤
+    (_is_kp_mastered / _is_question_mastered), 既与掌握状态表互不相干,
+    又会因逐题查询在错题多时明显变慢。
+    """
+    user = get_current_user(request)
+    target_username = _assert_can_access_student(
+        user, request.query_params.get("student_username", "")
+    )
     if not target_username:
-        return {"total_wrong": 0, "exams": []}
+        return {"total_wrong": 0, "exams": [], "mastered_total": 0, "student_username": ""}
 
-    attempts = execute_query(
-        """SELECT ea.id, ea.exam_id, ea.score, ea.total_score, ea.submitted_at, ea.answers,
-                  e.title as exam_title, e.subject as exam_subject
-           FROM exam_attempts ea
-           JOIN exams e ON e.id = ea.exam_id
-           WHERE ea.student_username = ? AND ea.status = 'submitted'
-           ORDER BY ea.submitted_at DESC""",
+    _backfill_wrong_book(target_username)
+
+    rows = db_dict(
+        """SELECT id, question_id, source, source_id, knowledge_points, question_type,
+                  status, wrong_answer, created_at, mastered_at, wrong_count, last_wrong_at
+           FROM wrong_book
+           WHERE student_username = ? AND (? = 'all' OR status = ?)""",
+        (target_username, status, status),
+    ) or []
+    mastered_rows = db_exec(
+        "SELECT COUNT(*) FROM wrong_book WHERE student_username=? AND status='mastered'",
         (target_username,),
     )
+    mastered_total = mastered_rows[0][0] if mastered_rows else 0
 
-    wrong_list = []
+    qmeta = _question_meta_map([r["question_id"] for r in rows])
+    grouped: dict[tuple[str, int], list[dict]] = {}
+    for r in rows:
+        grouped.setdefault((r["source"] or "exam", r["source_id"] or 0), []).append(r)
+    ameta = {}
+    for src in {k[0] for k in grouped}:
+        ameta[src] = _activity_meta_map(target_username, src, [k[1] for k in grouped if k[0] == src])
+
+    groups: list[dict] = []
     total_wrong = 0
-
-    if not attempts:
-        return {"total_wrong": 0, "exams": []}
-
-    # 批量查询所有考试关联的题目（替代 N+1）
-    exam_ids = [a["exam_id"] for a in attempts]
-    placeholders = ",".join("?" * len(exam_ids))
-    all_questions = execute_query(
-        f"""SELECT q.id, q.type, q.question_text, q.correct_answer,
-                   q.knowledge_points, q.options, eq.score as question_score,
-                   q.svg_content, q.has_svg, q.media_files, q.media_placeholders,
-                   eq.exam_id
-            FROM exam_questions eq
-            JOIN question_bank q ON q.id = eq.question_id
-            WHERE eq.exam_id IN ({placeholders}) AND q.status = 'active'""",
-        tuple(exam_ids),
-    )
-    # 按 exam_id 分组
-    questions_by_exam: dict[int, dict[str, Any]] = {}
-    for q in all_questions:
-        eid = q["exam_id"]
-        if eid not in questions_by_exam:
-            questions_by_exam[eid] = {}
-        questions_by_exam[eid][str(q["id"])] = q
-
-    for a in attempts:
-        answers_data = a.get("answers")
-        if isinstance(answers_data, str):
-            try:
-                answers_data = json.loads(answers_data)
-            except (json.JSONDecodeError, TypeError):
-                answers_data = {}
-
-        if not answers_data:
-            continue
-
-        q_map = questions_by_exam.get(a["exam_id"], {})
-
-        exam_wrong = []
-        for qid, ans in answers_data.items():
-            if isinstance(ans, dict) and not ans.get("is_correct", False):
-                # 检查该题在后来的考试/练习中是否已被答对
-                if _is_question_mastered(target_username, qid, a["submitted_at"]):
-                    continue
-                q_info = q_map.get(qid, {})
-                # 检查同知识点是否有已掌握的记录（针对 AI 新题匹配）
-                if _is_kp_mastered(target_username, q_info.get("knowledge_points", "")):
-                    continue
-                # 解析选项
-                options_raw = q_info.get("options", "")
-                options = {}
-                if options_raw:
-                    try:
-                        opts = json.loads(options_raw) if isinstance(options_raw, str) else options_raw
-                        if isinstance(opts, dict):
-                            options = opts
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                exam_wrong.append({
-                    "question_id": qid,
-                    "question_text": q_info.get("question_text", ""),
-                    "question_type": q_info.get("type", ""),
-                    "options": options,
-                    "correct_answer": q_info.get("correct_answer", ""),
-                    "student_answer": ans.get("student_answer", ""),
-                    "score": ans.get("score", 0),
-                    "max_score": ans.get("max_score", 0),
-                    "knowledge_points": q_info.get("knowledge_points", ""),
-                    "svg_content": q_info.get("svg_content", ""),
-                    "has_svg": q_info.get("has_svg", 0),
-                    "media_files": q_info.get("media_files", ""),
-                    "media_placeholders": q_info.get("media_placeholders", ""),
-                })
-                total_wrong += 1
-
-        if exam_wrong:
-            wrong_list.append({
-                "exam_id": a["exam_id"],
-                "exam_title": a["exam_title"],
-                "exam_subject": a["exam_subject"],
-                "submitted_at": a["submitted_at"],
-                "score": a["score"],
-                "total_score": a["total_score"],
-                "wrong_count": len(exam_wrong),
-                "wrong_questions": exam_wrong,
+    for (src, sid), items in grouped.items():
+        info = ameta.get(src, {}).get(sid, {})
+        wrong_questions = []
+        for it in sorted(items, key=lambda x: str(x.get("last_wrong_at") or x.get("created_at") or ""), reverse=True):
+            q = qmeta.get(it["question_id"], {})
+            options_raw = q.get("options") or ""
+            options = {}
+            if options_raw:
+                try:
+                    opts = json.loads(options_raw) if isinstance(options_raw, str) else options_raw
+                    if isinstance(opts, dict):
+                        options = opts
+                except (json.JSONDecodeError, TypeError):
+                    options = {}
+            wrong_questions.append({
+                "question_id": str(it["question_id"]),
+                "wrong_book_id": it["id"],
+                "question_text": q.get("question_text") or f"(题目ID:{it['question_id']}，已不在题库)",
+                "question_type": it.get("question_type") or q.get("type") or "",
+                "options": options,
+                "correct_answer": q.get("correct_answer", "") or "",
+                "student_answer": it.get("wrong_answer", "") or "",
+                "score": 0,
+                "max_score": 0,
+                "knowledge_points": it.get("knowledge_points") or q.get("knowledge_points") or "",
+                "svg_content": q.get("svg_content", "") or "",
+                "has_svg": q.get("has_svg", 0) or 0,
+                "media_files": q.get("media_files", "") or "",
+                "media_placeholders": q.get("media_placeholders", "") or "",
+                "wrong_count": it.get("wrong_count") or 1,
+                "wb_status": it.get("status"),
+                "mastered_at": it.get("mastered_at"),
+                "question_status": q.get("status") or "missing",
             })
+        total_wrong += len(wrong_questions)
+        groups.append({
+            "exam_id": sid,
+            "exam_title": info.get("title") or _SOURCE_FALLBACK_TITLES.get(src, "错题"),
+            "exam_subject": info.get("subject") or "",
+            "submitted_at": info.get("submitted_at") or (items[0].get("last_wrong_at") or items[0].get("created_at")),
+            "score": info.get("score"),
+            "total_score": info.get("total_score"),
+            "source": src,
+            "wrong_count": len(wrong_questions),
+            "wrong_questions": wrong_questions,
+        })
 
+    groups.sort(key=lambda g: str(g.get("submitted_at") or ""), reverse=True)
     return {
         "total_wrong": total_wrong,
-        "exams": wrong_list,
+        "exams": groups,
+        "mastered_total": mastered_total,
         "student_username": target_username,
     }
-
-
-def _is_kp_mastered(student_username: str, knowledge_points: str) -> bool:
-    """检查该知识点在 wrong_book 或练习/考试中是否有已掌握的记录"""
-    if not knowledge_points or not knowledge_points.strip():
-        return False
-    kp_list = [kp.strip() for kp in knowledge_points.replace("，", ",").split(",") if kp.strip()]
-
-    # 1. 查 wrong_book 表
-    for single_kp in kp_list:
-        kp_mastered = db_exec(
-            "SELECT id FROM wrong_book WHERE student_username=? AND knowledge_points LIKE ? AND status='mastered' LIMIT 1",
-            (student_username, f"%{single_kp}%"),
-        )
-        if kp_mastered:
-            return True
-
-    # 2. 查 practice_attempts 中是否有同知识点的答对记录（在 questions.db 中）
-    from backend.question_db import execute_query as q_exec
-    practice_attempts = execute_query(
-        """SELECT pa.answers FROM practice_attempts pa
-           WHERE pa.student_username = ? AND pa.status = 'submitted'
-           ORDER BY pa.submitted_at DESC LIMIT 20""",
-        (student_username,),
-    )
-    for attempt in practice_attempts:
-        p_answers = attempt.get("answers")
-        if isinstance(p_answers, str):
-            try:
-                p_answers = json.loads(p_answers)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if not isinstance(p_answers, dict):
-            continue
-        for qid_str, ans in p_answers.items():
-            if isinstance(ans, dict) and ans.get("is_correct", False):
-                q_info = q_exec(
-                    "SELECT knowledge_points FROM question_bank WHERE id = ? AND status = 'active'",
-                    (int(qid_str),),
-                )
-                if q_info and q_info[0] and q_info[0].get("knowledge_points"):
-                    practice_kp = q_info[0]["knowledge_points"]
-                    for single_kp in kp_list:
-                        if single_kp in practice_kp:
-                            return True
-
-    # 3. 查 exam_attempts 中是否有同知识点的答对记录
-    exam_attempts = execute_query(
-        """SELECT ea.answers FROM exam_attempts ea
-           WHERE ea.student_username = ? AND ea.status = 'submitted'
-           ORDER BY ea.submitted_at DESC LIMIT 20""",
-        (student_username,),
-    )
-    for attempt in exam_attempts:
-        e_answers = attempt.get("answers")
-        if isinstance(e_answers, str):
-            try:
-                e_answers = json.loads(e_answers)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if not isinstance(e_answers, dict):
-            continue
-        for qid_str, ans in e_answers.items():
-            if isinstance(ans, dict) and ans.get("is_correct", False):
-                q_info = q_exec(
-                    "SELECT knowledge_points FROM question_bank WHERE id = ? AND status = 'active'",
-                    (int(qid_str),),
-                )
-                if q_info and q_info[0] and q_info[0].get("knowledge_points"):
-                    exam_kp = q_info[0]["knowledge_points"]
-                    for single_kp in kp_list:
-                        if single_kp in exam_kp:
-                            return True
-
-    return False
-
-
-def _is_question_mastered(student_username: str, question_id: str, submitted_at: str) -> bool:
-    """检查学生在该次提交之后，是否在后续考试或练习中答对了该题"""
-    # 先检查 wrong_book 表中是否已标记为 mastered
-    mastered = db_exec(
-        "SELECT id FROM wrong_book WHERE student_username=? AND question_id=? AND status='mastered'",
-        (student_username, int(question_id)),
-    )
-    if mastered:
-        return True
-
-    # 检查后续的考试中是否答对（exam_attempts 在 question_db 中，用顶层 execute_query）
-    later_exams = execute_query(
-        """SELECT ea.answers
-           FROM exam_attempts ea
-           JOIN exams e ON e.id = ea.exam_id
-           WHERE ea.student_username = ? AND ea.status = 'submitted' AND ea.submitted_at > ?
-           ORDER BY ea.submitted_at DESC""",
-        (student_username, submitted_at),
-    )
-    for exam in later_exams:
-        answers = exam.get("answers")
-        if isinstance(answers, str):
-            try:
-                answers = json.loads(answers)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if isinstance(answers, dict) and question_id in answers:
-            ans = answers[question_id]
-            if isinstance(ans, dict) and ans.get("is_correct", False):
-                return True
-
-    # 检查练习中是否答对（practice_attempts 在 question_db 中，用 execute_query 查 questions.db）
-    practice_attempts = execute_query(
-        """SELECT pa.answers
-           FROM practice_attempts pa
-           WHERE pa.student_username = ? AND pa.status = 'submitted' AND pa.submitted_at > ?
-           ORDER BY pa.submitted_at DESC""",
-        (student_username, submitted_at),
-    )
-    for attempt in practice_attempts:
-        p_answers = attempt.get("answers")
-        if isinstance(p_answers, str):
-            try:
-                p_answers = json.loads(p_answers)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if isinstance(p_answers, dict) and question_id in p_answers:
-            ans = p_answers[question_id]
-            if isinstance(ans, dict) and ans.get("is_correct", False):
-                return True
-
-    return False
 
 
 @router.get("/students", summary="获取有错题记录的学生列表")
@@ -539,78 +548,25 @@ async def get_classes_with_wrong(
 
 @router.get("/review-plan", summary="AI 生成错题复习计划")
 async def get_review_plan(request: Request):
-    """AI 根据错题生成个性化复习计划"""
+    """AI 根据错题本生成个性化复习计划(异步任务)"""
     user = get_current_user(request)
     username = user["username"]
-    role = user.get("role", 2)
+    # W2: 教师指定他人时必须在其任教范围内
+    target_username = _assert_can_access_student(
+        user, request.query_params.get("student_username", "")
+    )
 
-    target_username = username
-    if role != 2:
-        target_username = request.query_params.get("student_username", username)
-
-    # 获取学生信息
     user_rows = user_query(
-        "SELECT name, grade, class FROM users WHERE username=?",
-        (target_username,),
+        "SELECT name, grade, class FROM users WHERE username=?", (target_username,)
     )
     student_name = user_rows[0][0] if user_rows and user_rows[0][0] else target_username
     student_grade = user_rows[0][1] if user_rows else ""
-    student_class = user_rows[0][2] if user_rows else ""
+    student_class = str(user_rows[0][2]) if user_rows and user_rows[0][2] is not None else ""
 
-    # 获取所有错题
-    attempts = execute_query(
-        """SELECT ea.id, ea.exam_id, ea.answers
-           FROM exam_attempts ea
-           JOIN exams e ON e.id = ea.exam_id
-           WHERE ea.student_username = ? AND ea.status = 'submitted'
-           ORDER BY ea.submitted_at DESC""",
-        (target_username,),
-    )
-
-    all_wrong = []
-    kp_set = set()
-    type_set = set()
-
-    for a in attempts:
-        answers_data = a.get("answers")
-        if isinstance(answers_data, str):
-            try:
-                answers_data = json.loads(answers_data)
-            except (json.JSONDecodeError, TypeError):
-                answers_data = {}
-
-        if not answers_data:
-            continue
-
-        questions = execute_query(
-            """SELECT q.id, q.type, q.question_text, q.correct_answer,
-                      q.knowledge_points
-               FROM exam_questions eq
-               JOIN question_bank q ON q.id = eq.question_id
-               WHERE eq.exam_id = ? AND q.status = 'active'""",
-            (a["exam_id"],),
-        )
-        q_map = {str(q["id"]): q for q in questions}
-
-        for qid, ans in answers_data.items():
-            if isinstance(ans, dict) and not ans.get("is_correct", False):
-                q_info = q_map.get(qid, {})
-                kp = q_info.get("knowledge_points", "") or "未知"
-                kp_set.add(kp)
-                q_type = q_info.get("type", "")
-                type_set.add(q_type)
-                all_wrong.append({
-                    "question": q_info.get("question_text", ""),
-                    "type": q_type,
-                    "correct": q_info.get("correct_answer", ""),
-                    "your_answer": ans.get("student_answer", ""),
-                    "knowledge": kp,
-                })
-
+    all_wrong, kp_set, type_set, subject = _collect_wrong_for_plan(target_username)
     if not all_wrong:
-        return {"plan": "暂无错题，继续保持！", "total_wrong": 0}
+        return {"plan": "暂无错题，继续保持！", "total_wrong": 0, "knowledge_points": [], "weak_types": []}
 
-    # 构建错题文本（最多 30 条，超出部分统计汇总）
     max_detail = 30
     wrong_text = ""
     for i, w in enumerate(all_wrong[:max_detail], 1):
@@ -626,10 +582,6 @@ async def get_review_plan(request: Request):
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
-    # 从考试记录中提取学科
-    subjects = set(a['exam_subject'] for a in attempts if a.get('exam_subject'))
-    subject = '、'.join(sorted(subjects)) if subjects else '通用'
-
     ai_role = build_ai_role(grade=student_grade)
     prompt = f"{ai_role}\n" + WRONG_BOOK_REVIEW_PROMPT.format(
         student_name=student_name,
@@ -639,7 +591,7 @@ async def get_review_plan(request: Request):
         knowledge_points="、".join(sorted(kp_set)[:10]),
         weak_types=weak_types,
         wrong_questions=wrong_text,
-        subject=subject,
+        subject=subject or "通用",
     )
     prompt = apply_skills(prompt, "wrong-book")
 
@@ -658,7 +610,9 @@ async def get_review_plan(request: Request):
             logger.error(f"AI 复习计划生成失败: {e}")
             return {"error": f"生成复习计划失败: {str(e)}"}
 
-    task_id = await task_manager.create_task(description="错题复习计划", coro_factory=_do_plan)
+    task_id = await task_manager.create_task(
+        description=f"错题复习计划({target_username})", coro_factory=_do_plan
+    )
 
     return {
         "task_id": task_id,
@@ -666,6 +620,7 @@ async def get_review_plan(request: Request):
         "total_wrong": len(all_wrong),
         "knowledge_points": list(kp_set),
         "weak_types": list(type_set),
+        "student_username": target_username,
     }
 
 
@@ -693,66 +648,18 @@ async def export_review_plan_docx(
     username = user["username"]
     role = user.get("role", 2)
 
-    target_username = username
-    if role != 2:
-        target_username = student_username or username
+    # W2: 教师导出别班学生的复习计划必须先过任教范围校验
+    target_username = _assert_can_access_student(user, student_username)
 
-    # 先调用 AI 生成复习计划
     user_rows = user_query(
         "SELECT name, grade, class FROM users WHERE username=?",
         (target_username,),
     )
     student_name = user_rows[0][0] if user_rows and user_rows[0][0] else target_username
     student_grade = user_rows[0][1] if user_rows else ""
-    student_class = user_rows[0][2] if user_rows else ""
+    student_class = str(user_rows[0][2]) if user_rows and user_rows[0][2] is not None else ""
 
-    attempts = execute_query(
-        """SELECT ea.id, ea.exam_id, ea.answers
-           FROM exam_attempts ea
-           JOIN exams e ON e.id = ea.exam_id
-           WHERE ea.student_username = ? AND ea.status = 'submitted'
-           ORDER BY ea.submitted_at DESC""",
-        (target_username,),
-    )
-
-    all_wrong = []
-    kp_set = set()
-    type_set = set()
-
-    for a in attempts:
-        answers_data = a.get("answers")
-        if isinstance(answers_data, str):
-            try:
-                answers_data = json.loads(answers_data)
-            except (json.JSONDecodeError, TypeError):
-                answers_data = {}
-        if not answers_data:
-            continue
-
-        questions = execute_query(
-            """SELECT q.id, q.type, q.question_text, q.correct_answer, q.knowledge_points,
-                      q.svg_content, q.has_svg, q.media_files, q.media_placeholders
-               FROM exam_questions eq
-               JOIN question_bank q ON q.id = eq.question_id
-               WHERE eq.exam_id = ? AND q.status = 'active'""",
-            (a["exam_id"],),
-        )
-        q_map = {str(q["id"]): q for q in questions}
-
-        for qid, ans in answers_data.items():
-            if isinstance(ans, dict) and not ans.get("is_correct", False):
-                q_info = q_map.get(qid, {})
-                kp = q_info.get("knowledge_points", "") or "未知"
-                kp_set.add(kp)
-                q_type = q_info.get("type", "")
-                type_set.add(q_type)
-                all_wrong.append({
-                    "question": q_info.get("question_text", ""),
-                    "type": q_type,
-                    "correct": q_info.get("correct_answer", ""),
-                    "your_answer": ans.get("student_answer", ""),
-                    "knowledge": kp,
-                })
+    all_wrong, kp_set, type_set, plan_subject = _collect_wrong_for_plan(target_username)
 
     if not all_wrong:
         raise HTTPException(status_code=400, detail="暂无错题，无需生成复习计划")
@@ -769,9 +676,7 @@ async def export_review_plan_docx(
 
     from backend.prompts.wrong_book import WRONG_BOOK_REVIEW_PROMPT
 
-    # 从考试记录中提取学科
-    subjects = set(a['exam_subject'] for a in attempts if a.get('exam_subject'))
-    subject = '、'.join(sorted(subjects)) if subjects else '通用'
+    subject = plan_subject or "通用"
 
     ai_role = build_ai_role(grade=student_grade)
     prompt = f"{ai_role}\n" + WRONG_BOOK_REVIEW_PROMPT.format(
@@ -785,7 +690,7 @@ async def export_review_plan_docx(
         subject=subject,
     )
 
-    keys = get_api_keys(username if role == 2 else username)
+    keys = get_api_keys(username)
     api_key = keys[0] if keys and keys[0] else ""
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
@@ -864,114 +769,119 @@ async def export_review_plan_docx(
     )
 
 
-# ═══════════════════════════════════════════════════════════
-# 错本题追踪系统（v5.3）
-# ═══════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════
+# 错题记账（W6/W7/W8/W9）
+# ═══════════════════════════════════════════════
 
-def record_wrong_answers(student_username: str, exam_id: int, graded_answers: dict[str, Any]):
-    """考试提交后，将答错的题目记录到 wrong_book 表"""
-    from backend.question_db import execute_query as q_exec
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for qid_str, ans in graded_answers.items():
-        if isinstance(ans, dict) and not ans.get("is_correct", False):
-            # 获取题目知识点和类型
-            q_info = q_exec(
-                "SELECT knowledge_points, type FROM question_bank WHERE id = ? AND status = 'active'",
-                (int(qid_str),),
-            )
-            kp = (q_info[0].get("knowledge_points") or "") if q_info else ""
-            qtype = (q_info[0].get("type") or "") if q_info else ""
-            db_insert(
-                """INSERT INTO wrong_book (student_username, question_id, source, source_id,
-                   knowledge_points, question_type, status, wrong_answer, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
-                (student_username, int(qid_str), 'exam', exam_id, kp, qtype,
-                 'pending', ans.get("student_answer", ""), now),
-            )
+def _upsert_wrong(student: str, qid: int, source: str, source_id: int,
+                  kp: str, qtype: str, wrong_answer: str, when: str) -> int:
+    """写入一条错题。
 
-
-def mark_wrong_mastered(student_username: str, correct_answers: dict[str, Any]):
-    """练习/考试答对后，标记 wrong_book 中的对应题目为已掌握"""
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    from backend.question_db import execute_query as q_exec
-    for qid_str, ans in correct_answers.items():
-        if isinstance(ans, dict) and ans.get("is_correct", False):
-            qid = int(qid_str)
-            # 精确匹配 question_id
-            db_insert(
-                "UPDATE wrong_book SET status='mastered', mastered_at=? WHERE student_username=? AND question_id=? AND status='pending'",
-                (now, student_username, qid),
-            )
-            # 也按知识点匹配—同知识点其他错题也标记掌握
-            q_info = q_exec(
-                "SELECT knowledge_points FROM question_bank WHERE id = ? AND status = 'active'",
-                (qid,),
-            )
-            if q_info and q_info[0].get("knowledge_points"):
-                kp = q_info[0]["knowledge_points"]
-                # 拆分为单个知识点，逐个模糊匹配（因为 wrong_book 中每个 KP 是单个值）
-                for single_kp in kp.replace("，", ",").split(","):
-                    single_kp = single_kp.strip()
-                    if single_kp:
-                        db_insert(
-                            "UPDATE wrong_book SET status='mastered', mastered_at=? WHERE student_username=? AND knowledge_points LIKE ? AND status='pending'",
-                            (now, student_username, f"%{single_kp}%"),
-                        )
-
-
-@router.get("/wrong-book/list", summary="从错题本获取待掌握错题")
-async def get_wrong_book_list(request: Request):
-    """从 wrong_book 表获取当前学生的待掌握错题"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-
-    if role == 2:
-        target_username = username
-    else:
-        target = request.query_params.get("student_username", "")
-        target_username = target or username
-
-    rows = db_exec(
-        """SELECT wb.id, wb.question_id, wb.source, wb.source_id,
-                  wb.knowledge_points, wb.question_type, wb.wrong_answer,
-                  wb.created_at, qb.question_text, qb.correct_answer,
-                  qb.options, qb.svg_content, qb.has_svg, qb.media_files
-           FROM wrong_book wb
-           LEFT JOIN question_bank qb ON qb.id = wb.question_id
-           WHERE wb.student_username = ? AND wb.status = 'pending'
-           ORDER BY wb.created_at DESC""",
-        (target_username,),
+    唯一索引 ux_wb_student_question 保证"一人一题一行":
+    - 新题: 插入 pending
+    - 已 pending: 累加 wrong_count 并更新最近错误答案/时间
+    - 曾 mastered 又答错: 重开为 pending(错题本不能只减不加)
+    """
+    existing = db_exec(
+        "SELECT id, status FROM wrong_book WHERE student_username=? AND question_id=?",
+        (student, qid),
+    )
+    if existing:
+        return _db_write(
+            """UPDATE wrong_book
+               SET status='pending', mastered_at=NULL,
+                   wrong_count=COALESCE(wrong_count, 1) + 1,
+                   wrong_answer=?, last_wrong_at=?, source=?, source_id=?,
+                   knowledge_points=CASE WHEN ? <> '' THEN ? ELSE knowledge_points END,
+                   question_type=CASE WHEN ? <> '' THEN ? ELSE question_type END
+               WHERE id=?""",
+            (wrong_answer[:500], when, source, source_id, kp, kp, qtype, qtype, existing[0][0]),
+        )
+    return db_insert(
+        """INSERT OR IGNORE INTO wrong_book
+           (student_username, question_id, source, source_id, knowledge_points, question_type,
+            status, wrong_answer, created_at, wrong_count, last_wrong_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, 1, ?)""",
+        (student, qid, source, source_id, kp, qtype, wrong_answer[:500], when, when),
     )
 
-    wrong_list = []
-    for r in rows:
-        options = {}
-        if r.get("options"):
-            try:
-                opts = json.loads(r["options"]) if isinstance(r["options"], str) else r["options"]
-                if isinstance(opts, dict):
-                    options = opts
-            except (json.JSONDecodeError, TypeError):
-                pass
-        wrong_list.append({
-            "id": r["id"],
-            "question_id": r["question_id"],
-            "question_text": r["question_text"] or f"(题目ID:{r['question_id']})",
-            "question_type": r["question_type"],
-            "options": options,
-            "correct_answer": r["correct_answer"] or "",
-            "wrong_answer": r["wrong_answer"],
-            "knowledge_points": r["knowledge_points"],
-            "source": r["source"],
-            "source_id": r["source_id"],
-            "created_at": r["created_at"],
-            "svg_content": r.get("svg_content", ""),
-            "has_svg": r.get("has_svg", 0),
-            "media_files": r.get("media_files", ""),
-        })
 
-    return {"total_wrong": len(wrong_list), "wrong_questions": wrong_list, "student_username": target_username}
+def _iter_graded(items: dict, want_correct: bool):
+    """安全遍历判分结果: 跳过非数字题目 ID(W8), 返回 (qid, student_answer)"""
+    out = []
+    skipped = 0
+    for qid_raw, ans in (items or {}).items():
+        if not isinstance(ans, dict):
+            skipped += 1
+            continue
+        if bool(ans.get("is_correct", False)) != want_correct:
+            continue
+        qid = _to_int(qid_raw)
+        if qid is None:
+            skipped += 1
+            continue
+        out.append((qid, str(ans.get("student_answer", "") or "")))
+    return out, skipped
+
+
+def record_wrong_answers(student_username: str, source_id: int, graded_answers: dict[str, Any],
+                         source: str = "exam") -> int:
+    """提交后把答错的题写入 wrong_book(考试/练习/随堂测验共用)"""
+    pairs, skipped = _iter_graded(graded_answers, want_correct=False)
+    if skipped:
+        logger.warning(f"错题入库跳过 {skipped} 条无效判分记录 (student={student_username})")
+    if not pairs:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    meta = _question_meta_map([qid for qid, _ in pairs])
+    written = 0
+    for qid, wrong_answer in pairs:
+        m = meta.get(qid, {})
+        _upsert_wrong(
+            student_username, qid, source, source_id or 0,
+            m.get("knowledge_points", "") or "", m.get("type", "") or "",
+            wrong_answer, now,
+        )
+        written += 1
+    logger.info(f"错题入库: {student_username} +{written} 条 (source={source}, id={source_id})")
+    return written
+
+
+def record_single_wrong(student_username: str, question_id: Any, wrong_answer: str,
+                        source: str = "quiz", source_id: int = 0) -> int:
+    """单条错题入库(随堂测验等零散场景用; 题已不在题库时只记 ID)"""
+    qid = _to_int(question_id)
+    if qid is None or not student_username:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    meta = _question_meta_map([qid]).get(qid, {})
+    return _upsert_wrong(
+        student_username, qid, source, source_id or 0,
+        meta.get("knowledge_points", "") or "", meta.get("type", "") or "",
+        str(wrong_answer or "")[:500], now,
+    )
+
+
+def mark_wrong_mastered(student_username: str, correct_answers: dict[str, Any]) -> int:
+    """答对后把对应错题标为已掌握。
+
+    W6: 旧实现还会按 knowledge_points LIKE 把同知识点的其它错题一并标掌握,
+    实测"只答对 1 题"就能清空整片错题, 现改为只按题目 ID 精确标记。
+    """
+    pairs, _skipped = _iter_graded(correct_answers, want_correct=True)
+    if not pairs:
+        return 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    marked = 0
+    for qid, _ans in pairs:
+        marked += _db_write(
+            """UPDATE wrong_book SET status='mastered', mastered_at=?
+               WHERE student_username=? AND question_id=? AND status='pending'""",
+            (now, student_username, qid),
+        ) or 0
+    if marked:
+        logger.info(f"错题标记已掌握: {student_username} 共 {marked} 条")
+    return marked
 
 
 class PracticeGenerateRequest(BaseModel):
@@ -982,322 +892,202 @@ class PracticeGenerateRequest(BaseModel):
 
 @router.post("/practice/generate", summary="错题练习—生成题目")
 async def generate_wrong_practice(req: PracticeGenerateRequest, request: Request):
-    """直接从错题记录中取出原题作为练习（优先 wrong_book 表，回退到 exam_attempts）"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
+    """从错题本取出该生待掌握的原题作为练习(教师布置前预览用)。
 
+    W1: 教师指定其他学生时必须在任教范围内;
+    W3: 学生自己调用时不下发 correct_answer / explanation, 避免未答先知。
+    """
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    target = _assert_can_access_student(user, req.student_username)
     if req.count < 1 or req.count > 20:
         req.count = 5
 
-    import random as _random
-
-    # 确定目标学生
-    target = username
-    if role != 2 and req.student_username.strip():
-        target = req.student_username.strip()
-
-    # 尝试从 wrong_book 表取 pending 题目的 ID（新系统）
-    wb_rows = db_exec(
-        "SELECT question_id FROM wrong_book WHERE student_username=? AND status='pending'",
+    _backfill_wrong_book(target)
+    rows = db_dict(
+        """SELECT question_id FROM wrong_book
+           WHERE student_username = ? AND status = 'pending'
+           ORDER BY COALESCE(NULLIF(last_wrong_at, ''), created_at) DESC, id DESC""",
         (target,),
-    )
-    question_ids = [str(r[0]) for r in wb_rows] if wb_rows else []
+    ) or []
+    qids = [r["question_id"] for r in rows]
+    if not qids:
+        return {"questions": [], "total": 0, "message": "暂无待巩固的错题"}
 
-    # 如果 wrong_book 没数据，回退到 exam_attempts 解析答题记录
-    if not question_ids:
-        from backend.question_db import execute_query as q_exec
-        attempts = q_exec(
-            """SELECT answers FROM exam_attempts
-               WHERE student_username=? AND status='submitted'
-               ORDER BY submitted_at DESC LIMIT 20""",
-            (target,),
-        )
-        seen = set()
-        for a in attempts:
-            ans_data = a.get("answers") or "{}"
-            if isinstance(ans_data, str):
-                try:
-                    ans_data = json.loads(ans_data)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-            if not ans_data:
-                continue
-            for qid_str, ans in ans_data.items():
-                if qid_str in seen:
-                    continue
-                seen.add(qid_str)
-                if isinstance(ans, dict) and not ans.get("is_correct", False):
-                    try:
-                        qid = int(qid_str)
-                        question_ids.append(qid_str)
-                    except (ValueError, TypeError):
-                        pass
+    import random as _random
+    picked = list(qids)
+    _random.shuffle(picked)
+    meta = _question_meta_map(picked)
 
-    if not question_ids:
-        return {"questions": [], "total": 0}
-
-    # 从 question_bank 批量取题目详情
-    from backend.question_db import execute_query as q_exec
-    placeholders = ",".join("?" for _ in question_ids)
-    qb_rows = q_exec(
-        f"""SELECT id, type, question_text, options, correct_answer,
-                   explanation, knowledge_points, difficulty,
-                   svg_content, has_svg, media_files
-            FROM question_bank
-            WHERE id IN ({placeholders}) AND status='active'""",
-        tuple(question_ids),
-    )
-
-    combined = []
-    for r in qb_rows:
-        qid = r["id"]
-        opts_raw = r.get("options") or "{}"
+    show_answer = role != 2
+    questions = []
+    for qid in picked:
+        if len(questions) >= req.count:
+            break
+        q = meta.get(qid)
+        if not q or q.get("status") != "active":
+            continue        # 题已不在题库: 不出练习, 但错题本仍保留记录(W14)
         try:
-            opts = json.loads(opts_raw) if isinstance(opts_raw, str) else opts_raw
+            opts = json.loads(q.get("options") or "{}")
+            if not isinstance(opts, dict):
+                opts = {}
         except (json.JSONDecodeError, TypeError):
             opts = {}
-        combined.append({
+        item = {
             "id": qid, "question_id": qid,
-            "question": r.get("question_text", ""), "question_text": r.get("question_text", ""),
-            "type": r.get("type", ""), "options": opts,
-            "answer": r.get("correct_answer", ""), "correct_answer": r.get("correct_answer", ""),
-            "explanation": r.get("explanation", ""),
-            "knowledge_points": r.get("knowledge_points", ""),
-            "difficulty": r.get("difficulty", ""),
-            "svg_content": r.get("svg_content", ""), "has_svg": r.get("has_svg", 0),
-            "media_files": r.get("media_files", ""),
-        })
+            "question": q.get("question_text", ""), "question_text": q.get("question_text", ""),
+            "type": q.get("type", ""), "options": opts,
+            "knowledge_points": q.get("knowledge_points", ""),
+            "difficulty": q.get("difficulty", ""),
+            "svg_content": q.get("svg_content", ""), "has_svg": q.get("has_svg", 0),
+            "media_files": q.get("media_files", ""),
+        }
+        if show_answer:
+            item["answer"] = q.get("correct_answer", "")
+            item["correct_answer"] = q.get("correct_answer", "")
+            item["explanation"] = q.get("explanation", "")
+        else:
+            item["answer"] = ""
+            item["correct_answer"] = ""
+            item["explanation"] = ""
+        questions.append(item)
 
-    _random.shuffle(combined)
-    questions = combined[:req.count]
+    return {
+        "questions": questions,
+        "total": len(questions),
+        "pending_total": len(qids),
+        "student_username": target,
+    }
 
-    return {"questions": questions, "total": len(questions)}
 
+def check_and_auto_generate_wrong_practice(student_username: str, threshold: int = 30) -> int:
+    """错题数超过阈值时自动生成"错题巩固练习"。
 
-def check_and_auto_generate_wrong_practice(student_username: str):
-    """检查错题数量是否超过30，自动生成错题巩固练习（如有未作答的则跳过）"""
+    W10: 只查 wrong_book(表已由回填保证有数据), 不再每次全量解析历史答卷 JSON;
+    本函数是同步的, 调用方应通过 backend.async_utils.spawn_bg 放到后台线程执行。
+    返回新建的 session_id, 0 表示未生成。
+    """
     import random as _random
-    from backend.question_db import execute_query as q_exec, execute_insert as q_ins, execute_update as q_upd
+    from backend.question_db import execute_insert as q_ins, execute_update as q_upd
 
-    # 1. 统计待掌握错题数量
-    # 优先统计 wrong_book 中的 pending 记录
-    wb_rows = db_exec(
+    if not student_username:
+        return 0
+    _backfill_wrong_book(student_username)
+    rows = db_dict(
         "SELECT question_id FROM wrong_book WHERE student_username=? AND status='pending'",
         (student_username,),
-    )
-    question_ids = [str(r[0]) for r in wb_rows] if wb_rows else []
+    ) or []
+    pending_ids = [r["question_id"] for r in rows if r.get("question_id") is not None]
+    if len(pending_ids) <= threshold:
+        return 0
 
-    # 如果 wrong_book 无数据，从 exam_attempts 解析
-    if not question_ids:
-        attempts = q_exec(
-            """SELECT answers FROM exam_attempts
-               WHERE student_username=? AND status='submitted'
-               ORDER BY submitted_at DESC""",
-            (student_username,),
-        )
-        seen = set()
-        for a in attempts:
-            ans_data = a.get("answers") or "{}"
-            if isinstance(ans_data, str):
-                try:
-                    ans_data = json.loads(ans_data)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-            if not ans_data:
-                continue
-            for qid_str, ans in ans_data.items():
-                if qid_str in seen:
-                    continue
-                seen.add(qid_str)
-                if isinstance(ans, dict) and not ans.get("is_correct", False):
-                    question_ids.append(qid_str)
-
-    wrong_count = len(question_ids)
-    if wrong_count <= 30:
-        return  # 未超过阈值，不触发
-
-    # 2. 检查是否已有未作答的错题巩固练习
-    pending = q_exec(
+    # 已有未作答的错题巩固练习就不再重复生成(一次 JOIN 判断)
+    outstanding = execute_query(
         """SELECT ps.id FROM practice_sessions ps
-           WHERE ps.source='wrong_book' AND ps.status='active'
-             AND ps.target_students LIKE ?
-           ORDER BY ps.created_at DESC""",
-        (f'%{student_username}%',),
+           LEFT JOIN practice_attempts pa
+                  ON pa.session_id = ps.id AND pa.student_username = ?
+           WHERE ps.source = 'wrong_book' AND ps.status = 'active'
+             AND ps.target_students LIKE ? AND pa.id IS NULL
+           LIMIT 1""",
+        (student_username, f'%"{student_username}"%'),
     )
-    for sess in pending:
-        sid = sess["id"]
-        attempt = q_exec(
-            "SELECT id FROM practice_attempts WHERE session_id=? AND student_username=?",
-            (sid, student_username),
-        )
-        if not attempt:
-            # 还有未作答的错题练习，不再重复生成
-            return
+    if outstanding:
+        return 0
 
-    # 3. 从 exam_attempts 解析错题 ID（同上逻辑）
-    attempts = q_exec(
-        """SELECT answers FROM exam_attempts
-           WHERE student_username=? AND status='submitted'
-           ORDER BY submitted_at DESC""",
-        (student_username,),
-    )
-    seen = set()
-    all_wrong_ids = []
-    for a in attempts:
-        ans_data = a.get("answers") or "{}"
-        if isinstance(ans_data, str):
-            try:
-                ans_data = json.loads(ans_data)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        if not ans_data:
-            continue
-        for qid_str, ans in ans_data.items():
-            if qid_str in seen:
-                continue
-            seen.add(qid_str)
-            if isinstance(ans, dict) and not ans.get("is_correct", False):
-                all_wrong_ids.append(qid_str)
+    meta = _question_meta_map(pending_ids)
+    usable = [qid for qid in pending_ids if (meta.get(qid) or {}).get("status") == "active"]
+    if not usable:
+        return 0
+    _random.shuffle(usable)
+    selected = usable[:5]
 
-    # 从 wrong_book 补充
-    for r in wb_rows if wb_rows else []:
-        qid = str(r[0]) if not isinstance(r, dict) else str(r["question_id"])
-        if qid not in seen:
-            all_wrong_ids.append(qid)
-            seen.add(qid)
-
-    if not all_wrong_ids:
-        return
-
-    # 4. 生成题目（固定 5 道）
-    _random.shuffle(all_wrong_ids)
-    selected_ids = all_wrong_ids[:5]
-
-    # 5. 创建错题巩固练习会话
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     title = f"错题巩固练习（{now[:10]}）"
-    kp_text = "错题巩固"
     target_students_str = json.dumps([student_username], ensure_ascii=False)
-
     session_id = q_ins(
         """INSERT INTO practice_sessions
            (title, knowledge_points, creator_username, subject, question_count,
             total_score, target_grade, target_class, target_students, source, status, created_at, updated_at)
            VALUES (?,?,?,?,?,?,?,?,?,'wrong_book','active',?,?)""",
-        (title, kp_text, "system", "信息科技",
-         len(selected_ids), 0, "", "", target_students_str, now, now),
+        (title, "错题巩固", "system", "", len(selected), 0, "", "", target_students_str, now, now),
     )
-
     total_score = 0
-    for i, qid in enumerate(selected_ids):
+    for i, qid in enumerate(selected):
         q_ins(
             "INSERT INTO practice_session_questions (session_id, question_id, sort_order, score) VALUES (?,?,?,?)",
             (session_id, int(qid), i, 10),
         )
         total_score += 10
     q_upd("UPDATE practice_sessions SET total_score=? WHERE id=?", (total_score, session_id))
+    logger.info(
+        f"自动生成错题巩固练习 session={session_id} 学生={student_username} "
+        f"抽题={len(selected)} 待掌握错题={len(pending_ids)}"
+    )
+    return session_id or 0
 
-    logger.info(f"自动生成错题巩固练习 session={session_id} 学生={student_username} 题目数={len(selected_ids)} 错题总数={wrong_count}")
+
+def _students_with_pending_wrong(limit: int = 200) -> list[str]:
+    rows = db_dict(
+        "SELECT DISTINCT student_username FROM wrong_book WHERE status='pending' LIMIT ?",
+        (limit,),
+    ) or []
+    return [str(r["student_username"]) for r in rows if r.get("student_username")]
 
 
-@router.get("/practice/check-auto", summary="学生登录后触发自动检查错题数")
+@router.get("/practice/check-auto", summary="学生端检查是否需要错题巩固练习")
 async def check_auto_wrong_practice(request: Request):
-    """学生登录后调用：如果错题数 > 30 且无未作答的错题练习，自动生成"""
+    """学生登录后触发: 超过阈值则后台生成巩固练习(W10: 不再在请求里做重活)"""
     user = get_current_user(request)
     username = user["username"]
-    role = user.get("role", 2)
-    if role != 2:
-        return {"message": "仅学生触发", "generated": False}
+    if user.get("role", 2) != 2:
+        return {"message": "仅学生触发", "checked": False}
 
-    try:
-        check_and_auto_generate_wrong_practice(username)
-        return {"message": "检查完成", "generated": True}
-    except Exception as e:
-        logger.warning(f"自动检查错题练习失败: {e}")
-        return {"message": "检查失败", "generated": False}
+    pending_rows = db_exec(
+        "SELECT COUNT(*) FROM wrong_book WHERE student_username=? AND status='pending'",
+        (username,),
+    )
+    pending_total = pending_rows[0][0] if pending_rows else 0
+    spawned = spawn_bg(check_and_auto_generate_wrong_practice, username, name=f"错题巩固练习检查({username})")
+    return {
+        "message": "错题巩固练习检查已提交后台" if spawned else "已同步完成检查",
+        "checked": True,
+        "pending_total": pending_total,
+    }
 
 
 @router.post("/practice/auto-trigger", summary="手动触发自动生成错题巩固练习")
 async def trigger_auto_wrong_practice(request: Request):
-    """教师或管理员手动触发错题巩固练习的自动生成"""
+    """教师/管理员触发错题巩固练习生成(W10: 限定任教范围 + 全部放后台执行)"""
     user = get_current_user(request)
     username = user["username"]
     role = user.get("role", 2)
     if role not in (0, 1):
         raise HTTPException(status_code=403, detail="仅教师和管理员可触发")
 
-    student = request.query_params.get("student_username", "")
-    body = await request.json()
-    target = body.get("student_username", student) if body else student
-    if not target:
-        # 不指定学生则检查全部有错题的学生
-        from backend.question_db import execute_query as q_exec2
-        students_with_wrong = q_exec2(
-            """SELECT DISTINCT ea.student_username FROM exam_attempts ea
-               WHERE ea.status='submitted'"""
-        )
-        triggered = 0
-        for sw in students_with_wrong:
-            s_user = sw["student_username"]
-            try:
-                check_and_auto_generate_wrong_practice(s_user)
-                triggered += 1
-            except Exception as e:
-                logger.warning(f"自动生成错题练习失败 {s_user}: {e}")
-        return {"message": f"已检查 {triggered} 名学生", "checked": triggered}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    target = (body.get("student_username") or request.query_params.get("student_username") or "").strip()
+
+    if target:
+        if role != 0:
+            _check_teacher_can_view_student(username, target)
+        spawn_bg(check_and_auto_generate_wrong_practice, target, name=f"错题巩固练习({target})")
+        return {"message": f"已为 {target} 提交后台检查", "dispatched": [target]}
+
+    candidates = _students_with_pending_wrong()
+    if role != 0:
+        allowed = [
+            stu for stu in candidates
+            if is_student_in_teacher_scope(stu, username)
+        ]
     else:
-        try:
-            check_and_auto_generate_wrong_practice(target)
-            return {"message": f"已为 {target} 触发错题巩固练习"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-
-class PracticeSubmitRequest(BaseModel):
-    answers: dict[str, str]
-
-@router.post("/practice/submit", summary="错题练习—提交答案")
-async def submit_wrong_practice(req: PracticeSubmitRequest, request: Request):
-    """提交错题练习答案，答对则标记 wrong_book 为 mastered"""
-    user = get_current_user(request)
-    username = user["username"]
-    role = user.get("role", 2)
-
-    from backend.question_db import execute_query as q_exec
-    total = 0
-    earned = 0
-    graded = {}
-    correct_grade = {}
-
-    for qid_str, student_ans in req.answers.items():
-        q_info = q_exec(
-            "SELECT type, correct_answer FROM question_bank WHERE id = ? AND status = 'active'",
-            (int(qid_str),),
-        )
-        if not q_info:
-            graded[qid_str] = {"is_correct": False, "score": 0, "max_score": 10}
-            continue
-        qtype = q_info[0].get("type", "")
-        correct = q_info[0].get("correct_answer", "")
-        q_score = 10
-        is_correct = student_ans.strip().upper() == (correct or "").strip().upper()
-        s = q_score if is_correct else 0
-        earned += s
-        total += q_score
-        graded[qid_str] = {
-            "student_answer": student_ans, "correct_answer": correct,
-            "score": s, "max_score": q_score, "is_correct": is_correct,
-        }
-        if is_correct:
-            correct_grade[qid_str] = graded[qid_str]
-
-    # 标记掌握的题目
-    if correct_grade:
-        mark_wrong_mastered(username, correct_grade)
-
+        allowed = candidates
+    for stu in allowed:
+        spawn_bg(check_and_auto_generate_wrong_practice, stu, name=f"错题巩固练习({stu})")
     return {
-        "score": earned, "total_score": total,
-        "percentage": round(earned / total * 100, 1) if total else 0,
-        "graded": graded,
+        "message": f"已提交 {len(allowed)} 名学生的错题巩固练习检查(后台执行)",
+        "dispatched": allowed[:50],
+        "dispatched_total": len(allowed),
     }

@@ -22,6 +22,7 @@ from backend.reward_engine import award_participation, award_grade, REWARD_CONFI
 from backend.title_system import check_and_unlock_badges
 from backend.question_db import execute_query as qb_execute_query, execute_query_one as qb_execute_query_one
 from backend.prompts import apply_skills
+from backend.async_utils import spawn_bg
 
 router = APIRouter()
 
@@ -1217,6 +1218,15 @@ async def submit_answer(room_id: int, request: Request):
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (room_id, question["id"], username, answer, is_correct, time_spent, score, now),
     )
+
+    # W7: 随堂测验答错也进错题本(仅题库来源的题目可追溯; 现场生成的题不在题库)
+    if not is_correct and (question.get("source") or "") == "bank" and question.get("source_question_id"):
+        try:
+            from backend.api.wrong_book_router import record_single_wrong
+            spawn_bg(record_single_wrong, username, question["source_question_id"], answer,
+                     "quiz", room_id, name="随堂测验错题入库")
+        except Exception as wb_err:
+            logger.warning(f"随堂测验错题入库失败 (room={room_id}, user={username}): {wb_err}")
 
     # 更新玩家统计
     old_streak = player["streak"] if player else 0

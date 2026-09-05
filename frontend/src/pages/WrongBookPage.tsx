@@ -47,7 +47,7 @@ const WrongBookPage: React.FC = () => {
   const isStudent = user?.role === 'student'
 
   const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<{ total_wrong: number; exams: ExamWrongGroup[]; student_username?: string } | null>(null)
+  const [data, setData] = useState<{ total_wrong: number; exams: ExamWrongGroup[]; student_username?: string; mastered_total?: number } | null>(null)
 
   // 考试列表分页
   const [examPage, setExamPage] = useState(1)
@@ -61,6 +61,7 @@ const WrongBookPage: React.FC = () => {
   const [selectedClass, setSelectedClass] = useState<string>('')
   const [selectedStudent, setSelectedStudent] = useState<string>('')
   const [selectedStudentName, setSelectedStudentName] = useState<string>('')
+  const [wrongStatus, setWrongStatus] = useState<'pending' | 'mastered' | 'all'>('pending')
 
   const [planModal, setPlanModal] = useState(false)
   const [planLoading, setPlanLoading] = useState(false)
@@ -131,7 +132,8 @@ const WrongBookPage: React.FC = () => {
   const loadData = async (studentUsername?: string) => {
     setLoading(true)
     try {
-      const params = studentUsername ? { student_username: studentUsername } : {}
+      const params: Record<string, string> = { status: wrongStatus }
+      if (studentUsername) params.student_username = studentUsername
       const { data: res } = await apiClient.get('/api/wrong-book/list', { params })
       setData(res)
     } catch {
@@ -291,8 +293,19 @@ const WrongBookPage: React.FC = () => {
           </Card>
         ) : (
           <div>
-            <div style={{ marginBottom: 12, textAlign: 'right' }}>
+            <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <Text type="secondary">{t('examCount', { count: data.exams.length })}，{t('totalQuestions', { count: data.total_wrong })}</Text>
+              <Space size={8}>
+                {!!data.mastered_total && wrongStatus === 'pending' && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>{t('masteredCount', { count: data.mastered_total })}</Text>
+                )}
+                <Select size="small" style={{ width: 130 }} value={wrongStatus}
+                  onChange={(v: any) => { setWrongStatus(v); loadData(isStudent ? undefined : selectedStudent) }}>
+                  <Select.Option value="pending">{t('statusPending')}</Select.Option>
+                  <Select.Option value="mastered">{t('statusMastered')}</Select.Option>
+                  <Select.Option value="all">{t('statusAll')}</Select.Option>
+                </Select>
+              </Space>
             </div>
             {pagedExams.map((exam) => (
               <Collapse key={exam.exam_id} size="small" style={{ marginBottom: 12 }}
@@ -323,11 +336,17 @@ const WrongBookPage: React.FC = () => {
                         { title: t('options'), key: 'options', width: 300,
                           render: (_: any, r: WrongQuestion) => {
                           const opts = r.options || {}
+                          // 答案归一化: 忽略大小写/空格/分隔符, 且多选题顺序无关
+                          const norm = (s: any) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9\u4e00-\u9fff]/g, '').split('').sort().join('')
+                          const keyOf = (s: any) => String(s ?? '').trim().toUpperCase()
+                          const ansKeys = new Set(String(r.student_answer ?? '').toUpperCase().replace(/[^A-Z]/g, '').split(''))
+                          const corKeys = new Set(String(r.correct_answer ?? '').toUpperCase().replace(/[^A-Z]/g, '').split(''))
+                          const sameAns = !!keyOf(r.student_answer) && norm(r.student_answer) === norm(r.correct_answer)
                           return (
                             <Space orientation="vertical" size={2} style={{ width: '100%' }}>
                               {Object.entries(opts).map(([k, v]) => {
-                                const isStudent = r.student_answer === k
-                                const isCorrect = r.correct_answer === k
+                                const isStudent = ansKeys.has(keyOf(k)) || (sameAns && keyOf(k) === keyOf(r.student_answer))
+                                const isCorrect = corKeys.has(keyOf(k)) || (sameAns && keyOf(k) === keyOf(r.correct_answer))
                                 let color = '#333'
                                 if (isStudent && isCorrect) color = '#52c41a'
                                 else if (isStudent) color = '#ff4d4f'
@@ -344,7 +363,12 @@ const WrongBookPage: React.FC = () => {
                           )
                         }},
                         { title: t('knowledgePoint'), dataIndex: 'knowledge_points', width: 150, ellipsis: true },
-                        { title: t('score'), key: 'score', width: 80, render: (_: any, r: WrongQuestion) => <Text type="danger">{r.score} / {r.max_score}</Text> },
+                        {
+                          title: t('wrongTimes'), key: 'times', width: 96,
+                          render: (_: any, r: any) => (r.max_score
+                            ? <Text type="danger">{r.score} / {r.max_score}</Text>
+                            : <Tag color="red">{t('wrongTimes', { count: r.wrong_count || 1 })}</Tag>),
+                        },
                       ]}
                     />
                   ),

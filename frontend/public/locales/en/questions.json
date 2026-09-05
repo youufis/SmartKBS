@@ -387,5 +387,10 @@
   "dedupSkipRef": "{{count}} kept (referenced by exams/practice)",
   "dedupFound": "Found {{groups}} duplicate groups, {{count}} removable (earliest one kept per group).",
   "dedupRun": "Run cleanup",
-  "dedupDeletedCount": "{{count}} duplicate questions cleaned"
+  "dedupDeletedCount": "{{count}} duplicate questions cleaned",
+  "wrongTimes": "{{count}} wrong tries",
+  "masteredCount": "{{count}} mastered",
+  "statusPending": "To review",
+  "statusMastered": "Mastered",
+  "statusAll": "All"
 }

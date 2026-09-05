@@ -70,18 +70,8 @@ function App() {
     restoreSession()
   }, [restoreSession])
 
-  // 学生登录后自动检查错题数，超过30则生成错题巩固练习
-  useEffect(() => {
-    if (!sessionRestoring && isLoggedIn && user?.role === 'student') {
-      (async () => {
-        try {
-          await fetch('/api/wrong-book/practice/check-auto')
-        } catch {
-          // 静默失败，不影响登录
-        }
-      })()
-    }
-  }, [sessionRestoring, isLoggedIn, user?.role])
+  // W10: 错题巩固练习的阈值检查改在"进入错题本页"时后台触发(见 WrongBookPage),
+  // 不再在每次应用启动时都做一次重活
 
   // 监听异地登录踢出事件
   useEffect(() => {

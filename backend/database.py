@@ -1358,6 +1358,38 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 错题本治理(W9): 同人同题唯一 + 错误次数统计 ──
+            # 旧版没有唯一约束, 同一题反复答错会堆多行, 且 mastered 与 pending 可并存
+            for _ddl in (
+                "ALTER TABLE wrong_book ADD COLUMN wrong_count INTEGER DEFAULT 1",
+                "ALTER TABLE wrong_book ADD COLUMN last_wrong_at TEXT DEFAULT ''",
+            ):
+                try:
+                    c.execute(_ddl)
+                except sqlite3.OperationalError:
+                    pass   # 列已存在
+            try:
+                c.execute(
+                    """UPDATE wrong_book SET wrong_count = (
+                           SELECT COUNT(*) FROM wrong_book w2
+                           WHERE w2.student_username = wrong_book.student_username
+                             AND w2.question_id = wrong_book.question_id)"""
+                )
+                c.execute(
+                    """UPDATE wrong_book SET last_wrong_at = COALESCE(NULLIF(last_wrong_at, ''), created_at)"""
+                )
+                # 合并历史重复行: 每组仅保留最早一条(已带累计次数)
+                c.execute(
+                    """DELETE FROM wrong_book WHERE id NOT IN (
+                           SELECT MIN(id) FROM wrong_book GROUP BY student_username, question_id)"""
+                )
+                c.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_wb_student_question "
+                    "ON wrong_book(student_username, question_id)"
+                )
+            except sqlite3.OperationalError as _e:
+                logger.warning(f"[db] wrong_book 唯一索引迁移未完成: {_e}")
+
             # ═══════════════════════════════════════════════
             # AI 学伴模块（v5.7）
             # ═══════════════════════════════════════════════

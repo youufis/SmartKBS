@@ -4,6 +4,7 @@
 """
 import asyncio
 import json
+import traceback
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,6 +24,7 @@ from backend.database import execute_query as user_query, execute_insert_update 
 from backend.logger import logger
 from backend.api.ai_service import call_ai_async
 from backend.prompts import apply_skills
+from backend.async_utils import spawn_bg
 from backend.utils import extract_json_from_text
 from backend.permission_service import check_activity_visibility
 
@@ -1450,10 +1452,12 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         correct_graded = {k: v for k, v in graded_answers.items() if isinstance(v, dict) and v.get("is_correct", False)}
         if correct_graded:
             mark_wrong_mastered(username, correct_graded)
-        # 检查并自动生成错题巩固练习
-        check_and_auto_generate_wrong_practice(username)
+        # W10: 阈值检查与练习生成放后台线程, 不拖慢考试提交响应
+        spawn_bg(check_and_auto_generate_wrong_practice, username,
+                 name=f"错题巩固练习检查({username})")
     except Exception as wb_err:
-        logger.warning(f"记录错题失败: {wb_err}")
+        logger.warning(f"记录错题失败 (user={username}, exam_id={exam_id}): {wb_err}")
+        logger.warning(traceback.format_exc())
 
     # ── 积分奖励 ──
     try:

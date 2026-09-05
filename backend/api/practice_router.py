@@ -23,6 +23,7 @@ from backend.utils import extract_json_from_text
 from backend.api.config_router import get_config_value
 from backend.logger import logger
 from backend.prompts import apply_skills, build_ai_role
+from backend.async_utils import spawn_bg as _spawn_bg
 
 router = APIRouter()
 
@@ -78,23 +79,6 @@ class PracticeSubmitRequest(BaseModel):
 AI_GRADED_TYPES = ("short", "fill", "essay", "subjective")
 
 _ANS_SEP_RE = re.compile(r"[,，;；、/\s|]+")
-
-_BG_TASKS: set = set()
-
-
-def _spawn_bg(fn, *args) -> None:
-    """P8: 重活(如错题巩固练习重建)丢到后台线程, 不阻塞学生提交响应"""
-    try:
-        task = asyncio.create_task(asyncio.to_thread(fn, *args))
-        _BG_TASKS.add(task)
-        task.add_done_callback(_BG_TASKS.discard)
-    except Exception as e:
-        logger.warning(f"后台任务启动失败, 退回同步执行: {e}")
-        try:
-            fn(*args)
-        except Exception:
-            logger.warning(traceback.format_exc())
-
 
 def _num_class(v: Any) -> str:
     """班级归一化: '高一1班' / '1班' / '01' / 1 -> '1'"""
@@ -882,12 +866,19 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
             return _existing_attempt_payload(again)
         raise
 
-    # ── 标记错题本中已掌握的题目 ──
+    # ── 错题本联动: 答对的标掌握, 答错的入库(W7: 练习错题从此不再漏记) ──
     try:
-        from backend.api.wrong_book_router import mark_wrong_mastered, check_and_auto_generate_wrong_practice
+        from backend.api.wrong_book_router import (
+            mark_wrong_mastered,
+            record_wrong_answers,
+            check_and_auto_generate_wrong_practice,
+        )
         correct_graded = {k: v for k, v in graded.items() if isinstance(v, dict) and v.get("is_correct", False)}
         if correct_graded:
             mark_wrong_mastered(username, correct_graded)
+        wrong_graded = {k: v for k, v in graded.items() if isinstance(v, dict) and not v.get("is_correct", False)}
+        if wrong_graded:
+            record_wrong_answers(username, session_id, wrong_graded, source="practice")
         # P8: 错题巩固练习重建要解析该生全部考试记录, 放后台执行
         _spawn_bg(check_and_auto_generate_wrong_practice, username)
     except Exception as wb_err:
