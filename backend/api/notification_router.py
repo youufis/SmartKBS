@@ -75,7 +75,7 @@ def _split_multi(v: str) -> list[str]:
 
 def _validate_announcement(user: dict, *, title=None, content=None, target_role=None,
                            target_scope=None, target_grade=None, target_class=None,
-                           priority=None, actor_role: int | None = None) -> None:
+                           target_users=None, priority=None, actor_role: int | None = None) -> None:
     """A3: 枚举白名单 + 长度上限 + 教师发布范围限制"""
     actor_role = user.get("role", 2) if actor_role is None else actor_role
     if title is not None:
@@ -96,8 +96,8 @@ def _validate_announcement(user: dict, *, title=None, content=None, target_role=
         raise HTTPException(status_code=400, detail="优先级无效，可选: low / normal / important / urgent")
     if target_scope is not None and str(target_scope) not in _ANN_SCOPES:
         raise HTTPException(status_code=400, detail="发布范围无效")
-    validate_activity_scope(user, target_scope, target_grade, target_class,
-                            target_users, actor_role=actor_role, what="公告")
+    validate_activity_scope(user, target_scope or "", target_grade or "", target_class or "",
+                            target_users or "", actor_role=actor_role, what="公告")
 
 
 def validate_activity_scope(user: dict, target_scope: str = "", target_grade: str = "",
@@ -442,7 +442,7 @@ async def create_announcement(req: AnnouncementCreate, request: Request):
     _validate_announcement(
         user, title=req.title, content=req.content, target_role=req.target_role,
         target_scope=req.target_scope, target_grade=req.target_grade,
-        target_class=req.target_class, priority=req.priority,
+        target_class=req.target_class, target_users=req.target_users, priority=req.priority,
     )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -571,7 +571,7 @@ async def update_announcement(announcement_id: int, req: AnnouncementUpdate, req
         user,
         title=req.title, content=req.content, target_role=req.target_role,
         target_scope=req.target_scope, target_grade=req.target_grade,
-        target_class=req.target_class, priority=req.priority,
+        target_class=req.target_class, target_users=req.target_users, priority=req.priority,
     )
 
     updates = []
