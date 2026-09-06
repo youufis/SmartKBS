@@ -58,7 +58,7 @@
   "activity": "课堂活动",
   "eresponsedatadetailFailed": "e?.response?.data?.detail || 刷新失败",
   "Failed": "生成简报失败",
-  "subj": "即将跳转到「${subj}」相关学习资源",
+  "subj": "即将跳转到「${{subj}}」相关学习资源",
   "refreshLimitReached": "今日刷新次数已用完，明天再来吧！",
   "loadFailed": "加载失败",
   "refreshed": "已刷新",

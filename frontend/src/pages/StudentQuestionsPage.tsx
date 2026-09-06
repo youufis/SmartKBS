@@ -2,6 +2,7 @@
  * StudentQuestionsPage — 课堂提问（独立页）
  * 从 InteractionPage 提取，独立的师生问答页面
  */
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -60,7 +61,7 @@ const QuestionItem: React.FC<QuestionItemProps> = ({ q, isTeacherOrAdmin, isStud
         <div style={{ flex: 1 }}>
           <Text strong>{qContent}</Text>
           <div style={{ marginTop: 4 }}>
-            {q.is_anonymous ? <Tag>{t('anonymous')}</Tag> : !isStudent && <Tag>{q.student_username}</Tag>}
+            {q.is_anonymous ? <Tag>{t('anonymous')}</Tag> : !isStudent && <Tag>{studentLabel(q)}</Tag>}
             {q.status === 'answered' && <Tag color="green">{t('answeredQuestions')}</Tag>}
             {q.status === 'pending' && <Tag color="orange">{t('pendingQuestions')}</Tag>}
             <Text type="secondary" style={{ fontSize: 12 }}>{q.created_at?.slice(0, 16)}</Text>
@@ -151,7 +152,7 @@ const QuestionItem: React.FC<QuestionItemProps> = ({ q, isTeacherOrAdmin, isStud
                             sa.status === 'rejected' ? '#ffccc7' : '#ffe58f',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text strong style={{ fontSize: 13 }}>{sa.student_username}</Text>
+                  <Text strong style={{ fontSize: 13 }}>{studentLabel(sa)}</Text>
                   <Space size="small">
                     {sa.status === 'pending_approval' && (
                       <>

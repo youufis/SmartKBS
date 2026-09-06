@@ -1,3 +1,4 @@
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Card, Table, Button, message, Modal, Input, Tag, Space,
@@ -568,9 +569,9 @@ const TaskPage: React.FC = () => {
                     render: (_: any, __: any, i: number) => i + 1,
                   },
                   {
-                    title: t('student'), key: 'student', width: 80,
+                    title: t('student'), key: 'student', width: 168,
                     render: (_: any, r: any) => (
-                      <Typography.Text strong style={{ fontSize: 12 }}>{r.name}</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: 12 }}>{studentLabel(r)}</Typography.Text>
                     ),
                   },
                   {

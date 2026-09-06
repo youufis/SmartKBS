@@ -1,3 +1,4 @@
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, Table, Tabs, Button, Space, Typography, Tag, Modal,
@@ -584,7 +585,7 @@ const DiscussionPage: React.FC = () => {
               >
                 <Space wrap>
                   {g.members?.length > 0 ? g.members.map((m: any) => (
-                    <Tag key={m.username} icon={<UserOutlined />}>{m.username}</Tag>
+                    <Tag key={m.username} icon={<UserOutlined />}>{studentLabel(m)}</Tag>
                   )) : <Text type="secondary">{t('noMembers')}</Text>}
                 </Space>
                 <div style={{ marginTop: 8 }}>

@@ -13,6 +13,7 @@ import MediaDisplay from '../components/MediaDisplay'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
+import { classText } from '../utils/studentLabel'
 import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTypes'
 
 const { Title, Text } = Typography
@@ -67,7 +68,7 @@ const SessionRoster: React.FC<{ attempts: any[]; students: any[] }> = ({ attempt
           { title: t('studentName'), dataIndex: 'name', width: 120, ellipsis: true },
           {
             title: t('studentClass'), dataIndex: 'class', width: 70,
-            render: (v: string) => (v ? `${v}${t('classUnit')}` : '-'),
+            render: (v: string) => classText(v) || '-',
           },
           {
             title: t('status'), dataIndex: 'submitted', width: 90,
@@ -518,7 +519,7 @@ const TeacherView: React.FC = () => {
                   </Select>
                   <Select value={targetClass} onChange={setTargetClass} placeholder={t('targetClass')} style={{ width: 150 }} allowClear>
                     {classOptions.map(n => (
-                      <Select.Option key={n} value={n}>{n}{t('classUnit')}</Select.Option>
+                      <Select.Option key={n} value={n}>{classText(n)}</Select.Option>
                     ))}
                     <Select.Option value="">{t('allClasses')}</Select.Option>
                   </Select>
@@ -543,7 +544,7 @@ const TeacherView: React.FC = () => {
               { title: t('gradeClass'), render: (_, r) => 
                 r.target_students?.length > 0 
                   ? <Tag color="green">{t('targeted')} {r.target_students.length} {t('people')}</Tag>
-                  : <>{`${r.target_grade || t('all')} ${r.target_class ? r.target_class+t('classUnit') : t('all')}`}
+                  : <>{`${r.target_grade || t('all')} ${r.target_class ? classText(r.target_class) : t('all')}`}
                     {r.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}</>
               },
               { title: t('questionCount'), dataIndex: 'question_count', width: 60 },

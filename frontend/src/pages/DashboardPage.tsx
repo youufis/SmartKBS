@@ -21,6 +21,7 @@ import { useCompanionStore } from '../stores/companionStore'
 import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
 import { getTaskTodo } from '../api/taskTodo'
+import { teacherScopeText } from '../utils/studentLabel'
 
 const { Text, Paragraph } = Typography
 
@@ -309,7 +310,7 @@ const DashboardPage: React.FC = () => {
           )}
           {isTeacher && summary.teacher_grades && (
             <span style={{ marginLeft: 'auto', fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>
-              <TeamOutlined /> {summary.teacher_grades} · {summary.teacher_classes}{t('classUnit')}
+              <TeamOutlined /> {teacherScopeText(summary.teacher_grades, summary.teacher_classes)}
             </span>
           )}
           {isTeacher && summary.teacher_subjects && summary.teacher_subjects.length > 0 && (

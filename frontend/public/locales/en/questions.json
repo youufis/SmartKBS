@@ -389,6 +389,7 @@
   "dedupRun": "Run cleanup",
   "dedupDeletedCount": "{{count}} duplicate questions cleaned",
   "wrongTimes": "{{count}} wrong tries",
+  "wrongTimesCol": "Wrong times",
   "masteredCount": "{{count}} mastered",
   "statusPending": "To review",
   "statusMastered": "Mastered",

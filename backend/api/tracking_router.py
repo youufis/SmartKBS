@@ -368,6 +368,10 @@ async def get_resource_view_students(
         (resource_type, resource_id),
     )
 
+    # 学生明细补年级班级(原本只有学号+姓名)
+    from backend.permission_service import attach_student_info
+    attach_student_info(rows, key="student_username", prefix="student_")
+
     return {"students": rows, "total": len(rows)}
 
 

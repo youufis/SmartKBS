@@ -751,6 +751,14 @@ const RewardPage: React.FC = () => {
                   title: t('username'), dataIndex: 'username', key: 'username',
                 },
                 {
+                  title: t('grade'), dataIndex: 'grade', key: 'grade', width: 90,
+                  render: (v: string) => v || '-',
+                },
+                {
+                  title: t('class_'), dataIndex: 'class_name', key: 'class_name', width: 110,
+                  render: (v: string) => v || '-',
+                },
+                {
                   title: t('totalScore'), dataIndex: 'total_points', key: 'total_points', width: 100,
                   render: (points: number) => (
                     <Text strong style={{ color: '#fa8c16', fontSize: 16 }}>{points}</Text>
@@ -768,7 +776,7 @@ const RewardPage: React.FC = () => {
                   },
                 },
                 {
-                  title: t('reward.nextLevel'), key: 'next', width: 100,
+                  title: t('reward.nextLevelCol'), key: 'next', width: 100,
                   render: (_: any, record: any) => {
                     const title = pointsToTitle(record.total_points, titleConfig)
                     const next = titleConfig.find(c => c.level === title.level + 1)

@@ -58,43 +58,9 @@ def _act_q_db(sql: str, params=()):
 
 
 def _student_labels(usernames: list[Any]) -> dict[str, dict[str, str]]:
-    """批量解析学生标识: 姓名 + 年级 + 班级, 供"最近动态"使用
-
-    原实现每个数据源各自查一次 users 且只取姓名, 教师看动态时分不清是哪个班的学生,
-    只能看到"学号 + 姓名"。这里一次查齐姓名/年级/班级, 并合并掉原先 6 处重复的取名代码。
-    年级/班级优先取规范表(grades/classes), 再回退 users 的遗留文本列。
-    """
-    out: dict[str, dict[str, str]] = {}
-    names = [str(x or "").strip() for x in usernames]
-    names = [n for n in dict.fromkeys(names) if n]
-    if not names:
-        return out
-    ph = ",".join("?" for _ in names)
-    rows = _act_q(
-        f"""SELECT u.username, u.name,
-                   COALESCE(g.name, u.grade, ''),
-                   COALESCE(c.display_name, c.name, u.class, '')
-            FROM users u
-            LEFT JOIN grades g ON u.grade_id = g.id
-            LEFT JOIN classes c ON u.class_id = c.id
-            WHERE u.username IN ({ph})""",
-        tuple(names),
-    )
-    for r in rows or []:
-        uname = r[0]
-        real = str(r[1] or uname)
-        grade = str(r[2] or "").strip()
-        cls = str(r[3] or "").strip()
-        if cls.isdigit():                      # 遗留列可能只存了数字班级号
-            cls = f"{grade}{cls}班" if grade else f"{cls}班"
-        if grade and cls.startswith(grade):    # 班级名已含年级前缀, 不重复显示
-            tag = cls
-        elif grade and cls:
-            tag = f"{grade}·{cls}"
-        else:
-            tag = grade or cls
-        out[uname] = {"name": real, "grade": grade, "class": cls, "tag": tag}
-    return out
+    """批量解析学生标识(实现已上移到 permission_service, 与全站共用一份)"""
+    from backend.permission_service import get_student_identity
+    return get_student_identity(usernames)
 
 
 def _with_tag(tag: str, detail: str) -> str:

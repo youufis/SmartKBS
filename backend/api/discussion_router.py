@@ -553,6 +553,10 @@ async def get_discussion(disc_id: int, request: Request):
             "message_count": msg_count,
         })
 
+    # 小组列表此前只有学号, 教师看不出是谁/哪个班: 统一补姓名+年级+班级
+    from backend.permission_service import attach_student_info
+    for _g in group_list:
+        attach_student_info(_g.get("members") or [], key="username", prefix="")
     disc["groups"] = group_list
     disc["require_summary"] = bool(disc["require_summary"])
     # 查询创建者姓名

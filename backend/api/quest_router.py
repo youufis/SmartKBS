@@ -1269,6 +1269,9 @@ async def get_admin_quest_records(
             "completed_at": r["completed_at"],
         })
 
+    # 班级列此前直出 users.class 裸数字(如 1), 统一纠正为规范班级名并补全身份
+    from backend.permission_service import attach_student_info
+    attach_student_info(records, key="student_username", prefix="", overwrite=True)
     return {
         "records": records,
         "total": total_count,

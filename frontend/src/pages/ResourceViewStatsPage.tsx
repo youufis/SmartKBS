@@ -316,6 +316,8 @@ const ResourceViewStatsPage: React.FC = () => {
             columns={[
               { title: t('activityMonitor.resourceViews.columns.student'), dataIndex: 'student_name', width: 120 },
               { title: t('activityMonitor.resourceViews.columns.username'), dataIndex: 'student_username', width: 120 },
+              { title: t('activityMonitor.columns.grade'), dataIndex: 'student_grade', width: 90, render: (v: string) => v || '-' },
+              { title: t('activityMonitor.columns.class'), dataIndex: 'student_class_name', width: 110, render: (v: string) => v || '-' },
               { title: t('activityMonitor.resourceViews.columns.viewCount'), dataIndex: 'view_count', width: 90 },
               { title: t('activityMonitor.resourceViews.columns.lastView'), dataIndex: 'last_viewed', width: 180 },
             ]}

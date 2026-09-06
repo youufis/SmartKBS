@@ -1,3 +1,4 @@
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Card, Button, Space, Typography, Input, Tag, message,
@@ -359,7 +360,7 @@ const DiscussionRoomPage: React.FC = () => {
             {/* 成员列表 */}
             <Tooltip title={
               members.length > 0
-                ? `${t('members')}: ${members.map((m: any) => m.username).join(', ')}`
+                ? `${t('members')}: ${members.map((m: any) => studentLabel(m)).join('、')}`
                 : t('noMembers')
             }>
               <Tag icon={<UserOutlined />}>

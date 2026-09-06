@@ -1483,6 +1483,12 @@ async def get_result(room_id: int, request: Request):
         (room_id, username),
     )
 
+    # 结果页: 排行榜与每题作答明细里的学生都补上年级班级
+    from backend.permission_service import attach_student_info
+    attach_student_info(ranking, key="student_username", prefix="student_")
+    for _qd in question_details:
+        if isinstance(_qd, dict):
+            attach_student_info(_qd.get("answers") or [], key="student_username", prefix="student_")
     return {
         "room": _room_to_dict(room),
         "ranking": ranking,
@@ -1513,6 +1519,8 @@ async def get_ranking(room_id: int, request: Request):
     for i, r in enumerate(ranking):
         r["rank"] = i + 1
 
+    from backend.permission_service import attach_student_info
+    attach_student_info(ranking, key="student_username", prefix="student_")   # 补姓名/年级/班级
     return {"ranking": ranking}
 
 
@@ -1673,6 +1681,8 @@ async def _do_reveal(room_id: int, push_next: bool = True) -> dict[str, Any] | N
     for i, r in enumerate(ranking):
         r["rank"] = i + 1
 
+    from backend.permission_service import attach_student_info
+    attach_student_info(ranking, key="student_username", prefix="student_")
     reveal_data = {
         "sort_order": question["sort_order"],
         "correct_answer": question["correct_answer"],
@@ -1771,6 +1781,8 @@ async def _do_end_game(room_id: int):
             await _award_rewards(room_id, room, ranking)
 
         # 广播结束
+        from backend.permission_service import attach_student_info
+        attach_student_info(ranking, key="student_username", prefix="student_")   # 广播里也带上年级班级
         await game_manager.broadcast(room_id, {
             "type": "game_end",
             "data": {
@@ -1831,6 +1843,8 @@ async def _broadcast_player_list(room_id: int):
         "SELECT student_username, student_name, total_score FROM quick_quiz_players WHERE room_id=?",
         (room_id,),
     )
+    from backend.permission_service import attach_student_info
+    attach_student_info(players, key="student_username", prefix="student_")   # 玩家列表补年级班级
     await game_manager.broadcast(room_id, {
         "type": "player_list",
         "data": {"players": players},

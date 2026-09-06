@@ -124,6 +124,10 @@ async def ranking(
 
     ranking_list = get_class_ranking(grade, class_name, allowed_classes)
 
+    # 排行榜此前只有姓名+学号, 看不出年级班级: 统一补全
+    from backend.permission_service import attach_student_info
+    attach_student_info(ranking_list, key="username", prefix="")
+
     # 补充排名序号
     for i, r in enumerate(ranking_list):
         r["rank"] = i + 1

@@ -142,6 +142,8 @@
   "submitCount": "Submissions",
   "student": "Student",
   "studentName": "Student Name",
+  "studentId": "Student ID",
+  "studentGrade": "Student grade",
   "studentClass": "Class",
   "passRate": "Pass Rate",
   "noSubmissions": "No submissions",

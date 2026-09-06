@@ -570,6 +570,9 @@ async def get_task_submissions(task_id: str, request: Request):
     if student:
         content = _read_student_submission(creator, task_info["name"], student)
 
+    # 提交名单补年级班级(此前只有学号+姓名)
+    from backend.permission_service import attach_student_info
+    attach_student_info(result, key="username", prefix="")
     return {
         "task_name": task_info["name"],
         "task_status": task_info["status"],
@@ -939,4 +942,7 @@ async def get_task_grades(task_id: str, request: Request):
             "graded_at": r[6],
         })
 
+    # 批改名单只有学号, 补姓名/年级/班级
+    from backend.permission_service import attach_student_info
+    attach_student_info(grades, key="student", prefix="")
     return {"summary": class_summary, "grades": grades, "graded_count": len(grades)}

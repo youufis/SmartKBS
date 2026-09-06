@@ -201,6 +201,7 @@
   "tagPass": "+5 Pass",
   "reward.pointsToNext": "{{points}} pts to next level",
   "reward.nextLevel": "Next: {{emoji}} {{name}}",
+  "reward.nextLevelCol": "Next level",
   "reward.maxLevel": "✨ Max level reached! You are the ultimate learning legend!",
   "reward.allTitles": "All Titles ({{count}} levels)",
   "reward.unlockAt": "Unlock at {{points}}pts",

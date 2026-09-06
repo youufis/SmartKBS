@@ -4,6 +4,7 @@
  *   1. 闯关记录 — 查看学生闯关记录
  *   2. 题库管理 — 闯关题目的 CRUD 管理
  */
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback, startTransition } from 'react'
 import {
   Card, Table, Tag, Typography, Space, Input, Select,
@@ -184,9 +185,9 @@ const QuestRecordsTab: React.FC = () => {
     {
       title: t('student'),
       key: 'student',
-      width: 120,
+      width: 200,
       render: (_: any, r: QuestRecord) => (
-        <Text strong>{r.student_name}</Text>
+        <Text strong>{studentLabel(r)}</Text>
       ),
     },
     {

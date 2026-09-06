@@ -228,7 +228,7 @@ const PortraitPage: React.FC = () => {
       onOk: async () => {
         try {
           await deletePortrait(portrait.id)
-          message.success(t('deleteSuccess'))
+          message.success(t('deleteSuccess', { name: portrait.created_date }))
         } catch {
           message.error(t('deleteFailed'))
         }

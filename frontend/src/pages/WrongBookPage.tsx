@@ -364,7 +364,7 @@ const WrongBookPage: React.FC = () => {
                         }},
                         { title: t('knowledgePoint'), dataIndex: 'knowledge_points', width: 150, ellipsis: true },
                         {
-                          title: t('wrongTimes'), key: 'times', width: 96,
+                          title: t('wrongTimesCol'), key: 'times', width: 96,
                           render: (_: any, r: any) => (r.max_score
                             ? <Text type="danger">{r.score} / {r.max_score}</Text>
                             : <Tag color="red">{t('wrongTimes', { count: r.wrong_count || 1 })}</Tag>),

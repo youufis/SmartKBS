@@ -201,6 +201,7 @@
   "tagPass": "及格+5",
   "reward.pointsToNext": "还需 {{points}} 分升级",
   "reward.nextLevel": "下一级：{{emoji}} {{name}}",
+  "reward.nextLevelCol": "下一级",
   "reward.maxLevel": "✨ 已达到最高等级！你是至高无上的学习传奇！",
   "reward.allTitles": "全部称号一览（共 {{count}} 级）",
   "reward.unlockAt": "{{points}}分解锁",

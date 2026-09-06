@@ -1955,6 +1955,9 @@ async def list_questions(
 
         questions.append(q)
 
+    # 提问管理: 补上学号对应的姓名/年级/班级
+    from backend.permission_service import attach_student_info
+    attach_student_info(questions, key="student_username", prefix="student_")
     return {"questions": questions, "total": total}
 
 
@@ -2128,6 +2131,9 @@ async def list_question_answers(question_id: int, request: Request):
         }
         answers.append(ans)
 
+    # 回答列表同样补学生身份
+    from backend.permission_service import attach_student_info
+    attach_student_info(answers, key="student_username", prefix="student_")
     return {"answers": answers}
 
 

@@ -509,6 +509,68 @@ def get_students_by_scope(
     return get_students_in_scope(creator_username)
 
 
+def get_student_identity(usernames: list) -> dict:
+    """批量解析学生的 姓名/年级/班级(规范名)。
+
+    年级班级优先取 grades/classes 规范表, 再回退 users 的遗留文本列;
+    遗留列里班级可能只存数字("1"), 统一补成"高一1班"这种可读形式。
+    """
+    names = [str(x or "").strip() for x in usernames]
+    names = [n for n in dict.fromkeys(names) if n]
+    out: dict[str, dict[str, str]] = {}
+    if not names:
+        return out
+    ph = ",".join("?" for _ in names)
+    rows = execute_query_dict(
+        f"""SELECT u.username, u.name,
+                   COALESCE(g.name, u.grade, '') AS grade_name,
+                   COALESCE(c.display_name, c.name, u.class, '') AS class_name
+            FROM users u
+            LEFT JOIN grades g ON u.grade_id = g.id
+            LEFT JOIN classes c ON u.class_id = c.id
+            WHERE u.username IN ({ph})""",
+        tuple(names),
+    )
+    for r in rows or []:
+        grade = str(r.get("grade_name") or "").strip()
+        cls = str(r.get("class_name") or "").strip()
+        if cls.isdigit():
+            cls = f"{grade}{cls}班" if grade else f"{cls}班"
+        if grade and cls.startswith(grade):
+            tag = cls
+        elif grade and cls:
+            tag = f"{grade}·{cls}"
+        else:
+            tag = grade or cls
+        out[str(r["username"])] = {
+            "name": str(r.get("name") or r["username"]),
+            "grade": grade, "class": cls, "tag": tag,
+        }
+    return out
+
+
+def attach_student_info(rows: list, key: str = "username", prefix: str = "",
+                        overwrite: bool = False) -> list:
+    """给响应里的每一行补 姓名/年级/班级, 供各管理面直接展示。
+
+    只增列不改语义; 已存在且非空的字段默认不覆盖(overwrite=True 时覆盖,
+    用于把 class_name 这类"数字班级"纠正成规范名)。
+    """
+    if not rows:
+        return rows
+    ident = get_student_identity([r.get(key) for r in rows if isinstance(r, dict)])
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        info = ident.get(str(r.get(key) or "")) or {}
+        for fld, val in (("name", info.get("name", "")), ("grade", info.get("grade", "")),
+                         ("class_name", info.get("class", ""))):
+            k = prefix + fld
+            if overwrite or not r.get(k):
+                r[k] = val
+    return rows
+
+
 def check_activity_visibility(
     student_username: str,
     student_grade: str,

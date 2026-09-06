@@ -887,7 +887,9 @@ const CodePracticePage: React.FC = () => {
               }}
               columns={[
                 { title: t('studentName'), dataIndex: 'student_name', width: 100 },
-                { title: t('studentClass'), dataIndex: 'student_class', width: 80 },
+                { title: t('studentId'), dataIndex: 'student_username', width: 100, ellipsis: true },
+                { title: t('studentGrade'), dataIndex: 'student_grade', width: 90, render: (v: string) => v || '-' },
+                { title: t('studentClass'), dataIndex: 'student_class', width: 100, render: (v: string) => v || '-' },
                 {
                   title: t('status'), dataIndex: 'status', width: 100,
                   render: (v: string) => {

@@ -2,6 +2,7 @@
  * QuickQuizResult — 抢答活动结果页
  * 排行榜、每题回顾、个人成绩
  */
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect } from 'react'
 import {
   Card, Button, Typography, Space, Row, Col, Tag, Table,
@@ -169,7 +170,7 @@ const QuickQuizResult: React.FC = () => {
                 </Text>
               ),
             },
-            { title: t('name'), dataIndex: 'student_name', key: 'name', width: 100 },
+            { title: t('name'), key: 'name', width: 190, render: (_: any, r: any) => studentLabel(r) },
             {
               title: t('totalScore'), dataIndex: 'total_score', key: 'score', width: 80,
               render: (s: number) => <Text strong style={{ color: '#faad14', fontSize: 16 }}>{s}</Text>,

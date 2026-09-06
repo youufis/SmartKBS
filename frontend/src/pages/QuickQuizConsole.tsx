@@ -2,6 +2,7 @@
  * QuickQuizConsole — 抢答活动教师控制台
  * 实时监控学生答题进度
  */
+import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useRef } from 'react'
 import {
   Card, Button, Typography, Space, Table, Tag, message, Spin,
@@ -533,7 +534,10 @@ const QuickQuizConsole: React.FC = () => {
         <Table
           dataSource={ranking.length > 0 ? ranking : players.map((p: any, i: number) => ({
             rank: i + 1,
+            student_username: p.student_username,
             student_name: p.student_name || p.student_username,
+            student_grade: p.student_grade,
+            student_class_name: p.student_class_name,
             total_score: p.total_score || 0,
             correct_count: p.correct_count || 0,
             wrong_count: p.wrong_count || 0,
@@ -550,7 +554,7 @@ const QuickQuizConsole: React.FC = () => {
                 </Text>
               ),
             },
-            { title: t('name'), dataIndex: 'student_name', key: 'name' },
+            { title: t('name'), key: 'name', render: (_: any, r: any) => studentLabel(r) },
             {
               title: t('totalScore'), dataIndex: 'total_score', key: 'score',
               render: (s: number) => <Text strong style={{ color: '#faad14' }}>{s}</Text>,
@@ -574,7 +578,7 @@ const QuickQuizConsole: React.FC = () => {
           {players.map((p: any, i: number) => (
             <Tag key={p.student_username} color={['#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#722ed1'][i % 5]}
               style={{ borderRadius: 12, padding: '2px 10px' }}>
-              {p.student_name || p.student_username}
+              {studentLabel(p)}
             </Tag>
           ))}
           {players.length === 0 && <Text type="secondary">{t('noPlayers')}</Text>}

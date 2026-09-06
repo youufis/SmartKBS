@@ -458,10 +458,11 @@ async def get_problem_submission_detail(problem_id: int, request: Request):
     subs = q_query(
         "SELECT cs.id,cs.student_username,cs.status,cs.score,cs.passed_cases,cs.total_cases,cs.execution_time,cs.source_code,cs.created_at FROM code_submissions cs WHERE cs.problem_id=? AND cs.is_best=1 ORDER BY cs.score DESC,cs.created_at DESC",
         (problem_id,))
+    # 统一用规范身份表补 姓名/年级/班级(数字班级纠正为"高一1班"这类可读名)
+    from backend.permission_service import attach_student_info
+    attach_student_info(subs, key="student_username", prefix="student_", overwrite=True)
     for s in subs:
-        ui = db_query_dict("SELECT name,class FROM users WHERE username=?", (s["student_username"],))
-        s["student_name"] = ui[0]["name"] if ui and ui[0]["name"] else s["student_username"]
-        s["student_class"] = ui[0]["class"] if ui else ""
+        s["student_class"] = s.get("student_class_name") or s.get("student_class") or ""
     return {"title": p["title"], "submissions": subs, "total": len(subs)}
 
 

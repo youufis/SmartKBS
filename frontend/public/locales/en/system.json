@@ -317,7 +317,7 @@
   "upgradeAutoRecover": "💡 If upgrade fails, the system will automatically restore to previous state",
   "confirmUpgradeOk": "Confirm",
   "rollbackStepsTitle": "Rollback will perform the following steps:",
-  "rollbackStep1": "Reset code to version before last upgrade (git reset --hard HEAD@{1})",
+  "rollbackStep1": "Reset code to version before last upgrade (git reset --hard HEAD@{{1}})",
   "rollbackStep2": "A rollback record will be added to upgrade history",
   "rollbackNoteTitle": "Please note:",
   "rollbackNote1": "Rollback only affects code files, database and user data are unaffected",
