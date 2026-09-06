@@ -395,7 +395,9 @@ async def submit_task(req: SubmitTaskRequest, request: Request):
 
     # 记录提交（已存在的更新提交时间，不静默忽略）
     execute_insert_update(
-        "INSERT OR REPLACE INTO task_submissions (task_id, student_username, submitted_at) VALUES (?, ?, datetime('now'))",
+        # A4: 与其余表一致用本地时间(首页最近动态直接展示该字段)
+        "INSERT OR REPLACE INTO task_submissions (task_id, student_username, submitted_at) "
+        "VALUES (?, ?, datetime('now', 'localtime'))",
         (task_info["id"], username),
     )
 
@@ -836,7 +838,7 @@ async def ai_grade_task(task_id: str, request: Request):
             """INSERT OR REPLACE INTO task_grades
                (task_id, student_username, ai_score, ai_comment, ai_feedback,
                 ai_strengths, ai_weaknesses, ai_graded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))""",
             (task_id, student, score, comment, feedback,
              json.dumps(strengths, ensure_ascii=False),
              json.dumps(weaknesses, ensure_ascii=False)),
@@ -853,7 +855,7 @@ async def ai_grade_task(task_id: str, request: Request):
     # 9. 保存全班总结到 tasks 表
     summary_json = json.dumps(class_summary, ensure_ascii=False)
     execute_insert_update(
-        "UPDATE tasks SET ai_summary=?, updated_at=datetime('now') WHERE id=?",
+        "UPDATE tasks SET ai_summary=?, updated_at=datetime('now', 'localtime') WHERE id=?",
         (summary_json, task_id),
     )
 

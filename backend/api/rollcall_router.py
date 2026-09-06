@@ -143,7 +143,7 @@ def _save_history(teacher, grade, cls, data):
                 )
             picked = json.dumps(data.get("picked_in_round", []), ensure_ascii=False)
             c.execute(
-                "INSERT OR REPLACE INTO rollcall_meta (teacher_username, grade, class_name, last_time, picked_in_round, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                "INSERT OR REPLACE INTO rollcall_meta (teacher_username, grade, class_name, last_time, picked_in_round, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))",
                 (teacher, grade, cls, data.get("last_time"), picked),
             )
             c.execute(

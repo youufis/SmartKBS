@@ -51,12 +51,16 @@ def save_teacher_scores(scores_data, teacher):
                 _, grade, cls, name = parts
                 if key in existing_keys:
                     c.execute(
-                        "UPDATE scores SET score=?, updated_at=datetime('now') WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=?",
+                        # A4: 必须用 localtime —— 读取方(portfolio 的"近 N 天"统计)拿
+                        # Python 本地时间做 >= 比较, 旧写法存 UTC 会整体偏移 8 小时
+                        "UPDATE scores SET score=?, updated_at=datetime('now', 'localtime') "
+                        "WHERE teacher_username=? AND grade=? AND class_name=? AND student_name=?",
                         (score, teacher, grade, cls, name),
                     )
                 else:
                     c.execute(
-                        "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                        "INSERT INTO scores (teacher_username, grade, class_name, student_name, score, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))",
                         (teacher, grade, cls, name, score),
                     )
 

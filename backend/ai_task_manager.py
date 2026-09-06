@@ -98,6 +98,9 @@ class AITaskManager:
 
     # 任务保留时间：完成/失败后保留 5 分钟后清理
     TASK_TTL = 300
+    # 默认并发上限: 挡"脚本刷/前端异常重试"把付费模型刷爆, 又高于任何正常的批量操作。
+    # 端点可传 max_concurrent=N 收紧(如 GET 分析类用 4), 或传 0 表示不设限。
+    DEFAULT_MAX_CONCURRENT = 10
 
     def __init__(self):
         self._tasks: dict[str, AITask] = {}
@@ -125,7 +128,7 @@ class AITaskManager:
                 真实模型调用 —— 用于挡住刷新、误点两下、前端重试造成的重复计费。
                 刻意不传时行为与旧版一致(不去重), 以免把不同参数的请求误并成一个。
             max_concurrent: 该归属者允许的进行中任务数上限, 超出抛 TooManyAITasks
-                (调用方翻译成 429)。不传则不设限(保持旧行为)。
+                (由 main.py 的统一异常处理器转成 429)。不传=用默认 10; 传 0=不设限。
         """
         owner = _resolve_owner(owner_username)
         key = (dedupe_key or "").strip()
@@ -143,12 +146,14 @@ class AITaskManager:
                         logger.info(f"AI 后台任务复用(完成 {int(now - t.completed_at)}s): "
                                     f"{t.task_id} - {description}")
                         return t.task_id
-            if max_concurrent:
+            # 未显式指定时用全局默认上限; 显式传 0 表示不设限
+            limit = self.DEFAULT_MAX_CONCURRENT if max_concurrent is None else int(max_concurrent)
+            if limit > 0:
                 active = sum(1 for x in self._tasks.values()
                              if x.owner == owner
                              and x.status in (TaskStatus.PENDING, TaskStatus.RUNNING))
-                if active >= int(max_concurrent):
-                    raise TooManyAITasks(owner, int(max_concurrent))
+                if active >= limit:
+                    raise TooManyAITasks(owner, limit)
 
             task_id = uuid.uuid4().hex[:12]
             task = AITask(task_id, description, owner, dedupe_key=key)
