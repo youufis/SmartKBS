@@ -66,8 +66,15 @@ def _call_ai(prompt: str) -> str:  # type: ignore[misc]
         return f"AI 分析出错：{str(e)}"
 
 
-async def _call_ai_task(description: str, prompt: str) -> str:
-    """提交 AI 分析后台任务，返回 task_id"""
+async def _call_ai_task(description: str, prompt: str, dedupe_key: str = "",
+                        max_concurrent: int | None = None) -> str:
+    """提交 AI 分析后台任务，返回 task_id
+
+    dedupe_key: 同一用户的同键任务在"进行中"或"刚完成 60s 内"直接复用既有 task_id,
+    避免刷新页面/连点两下/前端重试重复调用模型计费。
+    max_concurrent: 每用户进行中的任务上限, 超出抛 TooManyAITasks,
+    由 main.py 的异常处理器统一转成 429(无需各端点自己 try/except)。
+    """
     api_key = _get_dashscope_api_key()
     if not api_key:
         # 无 API Key 时直接返回错误信息（不创建任务）
@@ -91,7 +98,8 @@ async def _call_ai_task(description: str, prompt: str) -> str:
             return {"error": f"AI 分析出错：{str(e)}"}
 
     from backend.ai_task_manager import task_manager
-    return await task_manager.create_task(description=description, coro_factory=_do_analysis)
+    return await task_manager.create_task(description=description, coro_factory=_do_analysis,
+                                          dedupe_key=dedupe_key, max_concurrent=max_concurrent)
 
 
 def _safe_int(val) -> int:
@@ -280,7 +288,9 @@ async def class_overview(
         submitted_students=data_summary['submitted_students'],
     )
 
-    task_id = await _call_ai_task("班级学情分析", prompt)
+    task_id = await _call_ai_task("班级学情分析", prompt,
+                                  dedupe_key=f"co:{query_teacher}:{grade}:{cls}",
+                                  max_concurrent=4)
 
     return {
         "task_id": task_id,
@@ -384,7 +394,8 @@ async def student_analytics(target_username: str, request: Request):
 
 语气亲切、鼓励为主。"""
 
-    task_id = await _call_ai_task("学生个体学情分析", prompt)
+    task_id = await _call_ai_task("学生个体学情分析", prompt,
+                                  dedupe_key=f"sa:{target_username}", max_concurrent=4)
 
     return {
         "task_id": task_id,
@@ -488,7 +499,8 @@ async def exam_analytics(exam_id: int, request: Request):
 3. ⚠️ **薄弱知识点**
 4. 💡 **教学改进建议"""
 
-    task_id = await _call_ai_task("考试分析报告", prompt)
+    task_id = await _call_ai_task("考试分析报告", prompt,
+                                  dedupe_key=f"ea:{exam_id}", max_concurrent=4)
 
     return {
         "task_id": task_id,
@@ -629,7 +641,9 @@ async def teaching_suggestions(
         task_rate=round(submitted / max(total_students, 1) * 100, 1),
     )
 
-    task_id = await _call_ai_task("AI 教学建议", prompt)
+    task_id = await _call_ai_task("AI 教学建议", prompt,
+                                  dedupe_key=f"ts:{query_teacher}:{grade}:{cls_display}",
+                                  max_concurrent=4)
 
     data_summary = {
         "total_students": total_students,

@@ -2377,7 +2377,9 @@ async def ai_lesson_plan(
             logger.error(f"AI 备课助手生成失败: {e}")
             return {"error": f"教案生成失败: {str(e)}"}
 
-    task_id = await task_manager.create_task(description="AI 备课", coro_factory=_do_plan)
+    task_id = await task_manager.create_task(description="AI 备课", coro_factory=_do_plan,
+                                          dedupe_key=f"lesson-plan:{knowledge_point_id}",
+                                          max_concurrent=4)
     return {"task_id": task_id, "message": "AI 备课已提交，请稍后查询结果"}
 
 

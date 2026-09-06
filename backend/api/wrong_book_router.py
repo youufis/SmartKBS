@@ -611,7 +611,8 @@ async def get_review_plan(request: Request):
             return {"error": f"生成复习计划失败: {str(e)}"}
 
     task_id = await task_manager.create_task(
-        description=f"错题复习计划({target_username})", coro_factory=_do_plan
+        description=f"错题复习计划({target_username})", coro_factory=_do_plan,
+        dedupe_key=f"review-plan:{target_username}", max_concurrent=4
     )
 
     return {

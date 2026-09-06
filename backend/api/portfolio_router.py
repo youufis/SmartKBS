@@ -621,7 +621,8 @@ async def get_learning_report(username: str, request: Request):
             logger.error(f"AI 学习报告生成失败: {e}")
             return {"error": f"生成学习报告失败: {str(e)}"}
 
-    task_id = await task_manager.create_task(description="AI 学习报告", coro_factory=_do_report)
+    task_id = await task_manager.create_task(description="AI 学习报告", coro_factory=_do_report,
+                                          dedupe_key=f"portfolio:{username}", max_concurrent=4)
     return {"task_id": task_id, "message": "AI 学习报告已提交，请稍后查询结果"}
 
 

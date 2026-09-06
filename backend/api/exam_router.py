@@ -2133,7 +2133,8 @@ async def get_wrong_answer_explanation(exam_id: int, request: Request):
             "total_wrong": len(explanations),
         }
 
-    task_id = await task_manager.create_task(description="AI 错题讲解", coro_factory=_do_explain)
+    task_id = await task_manager.create_task(description="AI 错题讲解", coro_factory=_do_explain,
+                                          dedupe_key=f"explain-wrong:{exam_id}", max_concurrent=4)
     return {"task_id": task_id, "message": "AI 讲解已提交，请稍后查询结果"}
 
 

@@ -43,11 +43,23 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class TooManyAITasks(RuntimeError):
+    """同一用户进行中的 AI 后台任务超过并发上限(仅对显式设置上限的端点生效)"""
+
+    def __init__(self, owner: str, limit: int):
+        self.owner = owner
+        self.limit = limit
+        super().__init__(f"进行中的 AI 任务已达上限 {limit} 个")
+
+
 class AITask:
     """单个 AI 任务"""
-    def __init__(self, task_id: str, description: str, owner_username: str = ""):
+    def __init__(self, task_id: str, description: str, owner_username: str = "",
+                 dedupe_key: str = ""):
         self.task_id = task_id
         self.description = description
+        # 去重键: 同一用户的同键任务不重复调模型(见 create_task)
+        self.dedupe_key = dedupe_key or ""
         # S5: 任务归属者(创建时自动取自请求上下文), 查询接口据此鉴权
         self.owner = owner_username or ""
         self.status = TaskStatus.PENDING
@@ -91,21 +103,55 @@ class AITaskManager:
         self._tasks: dict[str, AITask] = {}
         self._lock = asyncio.Lock()
 
+    # 刚完成的任务在该时间窗内命中同键请求时直接复用结果, 不再重复调模型
+    REUSE_DONE_WINDOW = 60
+
     async def create_task(
         self,
         description: str,
         coro_factory: Callable[[], Coroutine[Any, Any, Any]],
         owner_username: str | None = None,
+        dedupe_key: str | None = None,
+        max_concurrent: int | None = None,
     ) -> str:
         """创建后台任务，返回 task_id
 
         Args:
             description: 任务描述
             coro_factory: 返回协程的可调用对象（延迟创建，避免事件循环问题）
+            owner_username: 任务归属者, 缺省取当前请求上下文
+            dedupe_key: 去重键。同一归属者的同键任务若仍在排队/执行, 或已在
+                REUSE_DONE_WINDOW 内完成, 则直接复用既有 task_id 而不再发起一次
+                真实模型调用 —— 用于挡住刷新、误点两下、前端重试造成的重复计费。
+                刻意不传时行为与旧版一致(不去重), 以免把不同参数的请求误并成一个。
+            max_concurrent: 该归属者允许的进行中任务数上限, 超出抛 TooManyAITasks
+                (调用方翻译成 429)。不传则不设限(保持旧行为)。
         """
-        task_id = uuid.uuid4().hex[:12]
-        task = AITask(task_id, description, _resolve_owner(owner_username))
+        owner = _resolve_owner(owner_username)
+        key = (dedupe_key or "").strip()
         async with self._lock:
+            now = time.time()
+            if key:
+                for t in self._tasks.values():
+                    if t.owner != owner or t.dedupe_key != key:
+                        continue
+                    if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                        logger.info(f"AI 后台任务复用(进行中): {t.task_id} - {description}")
+                        return t.task_id
+                    if (t.status == TaskStatus.COMPLETED and t.completed_at
+                            and now - t.completed_at < self.REUSE_DONE_WINDOW):
+                        logger.info(f"AI 后台任务复用(完成 {int(now - t.completed_at)}s): "
+                                    f"{t.task_id} - {description}")
+                        return t.task_id
+            if max_concurrent:
+                active = sum(1 for x in self._tasks.values()
+                             if x.owner == owner
+                             and x.status in (TaskStatus.PENDING, TaskStatus.RUNNING))
+                if active >= int(max_concurrent):
+                    raise TooManyAITasks(owner, int(max_concurrent))
+
+            task_id = uuid.uuid4().hex[:12]
+            task = AITask(task_id, description, owner, dedupe_key=key)
             self._tasks[task_id] = task
 
         # 启动后台执行

@@ -2386,6 +2386,7 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
     task_id = await task_manager.create_task(
         description=f"测验 #{quiz_id} AI 答题分析",
         coro_factory=_do_analysis,
+        dedupe_key=f"quiz-ai:{quiz_id}", max_concurrent=4,
     )
     return {"task_id": task_id, "message": "AI 分析已提交，请稍后查询结果"}
 
@@ -2565,6 +2566,8 @@ async def ai_class_summary(
     task_id = await task_manager.create_task(
         description="AI 课堂总结",
         coro_factory=_do_summary,
+        dedupe_key=f"class-summary:{query_teacher}:{grade}:{cls}:{subject}:{time_range}",
+        max_concurrent=4,
     )
     return {"task_id": task_id, "message": "课堂总结已提交，请稍后查询结果"}
 

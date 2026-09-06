@@ -116,6 +116,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# AI 后台任务并发上限: 统一转 429, 避免在每个端点各写一遍 try/except
+from backend.ai_task_manager import TooManyAITasks
+
+
+@app.exception_handler(TooManyAITasks)
+async def _handle_too_many_ai_tasks(request, exc: TooManyAITasks):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=429,
+                        content={"detail": f"您已有 {exc.limit} 个 AI 分析在进行中，请等待当前结果后再试"})
+
+
 # CORS 配置（开发环境允许前端 dev server 跨域）
 app.add_middleware(
     CORSMiddleware,
