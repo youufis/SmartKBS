@@ -538,20 +538,21 @@ const TeacherView: React.FC = () => {
         loadingSessions ? <Spin style={{ display: 'block', margin: '40px auto' }} />
         : sessions.length === 0 ? <Result icon={<FileTextOutlined />} title={t('publishedRecords')} />
         : <Table dataSource={sessions} rowKey="id"
+            scroll={{ x: 980 }}
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }), pageSizeOptions: ['5', '10', '20', '50'] }}
             columns={[
               { title: t('title_'), dataIndex: 'title', ellipsis: true },
-              { title: t('publisher'), dataIndex: 'creator_name', width: 100 },
-              { title: t('gradeClass'), render: (_, r) => 
+              { title: t('publisher'), dataIndex: 'creator_name', width: 90 },
+              { title: t('gradeClass'), width: 130, render: (_, r) => 
                 r.target_students?.length > 0 
                   ? <Tag color="green">{t('targeted')} {r.target_students.length} {t('people')}</Tag>
                   : <>{`${r.target_grade || t('all')} ${r.target_class ? classText(r.target_class) : t('all')}`}
                     {r.source === 'wrong_book' && <Tag color="purple" style={{ marginLeft: 6 }}>{t('sourceWrongBook')}</Tag>}</>
               },
-              { title: t('questionCount'), dataIndex: 'question_count', width: 60 },
-              { title: t('status'), render: (_, r) => r.status === 'active' ? <Tag color="processing">{t('inProgress')}</Tag> : <Tag>{t('endedSuccess')}</Tag>, width: 80 },
-              { title: t('submitted'), render: (_, r) => `${r.submitted_count}/${r.student_count}`, width: 80 },
-              { title: t('actions'), render: (_, r) => <Space wrap>
+              { title: t('questionCount'), dataIndex: 'question_count', width: 56 },
+              { title: t('status'), render: (_, r) => r.status === 'active' ? <Tag color="processing">{t('inProgress')}</Tag> : <Tag>{t('endedSuccess')}</Tag>, width: 76 },
+              { title: t('submitted'), render: (_, r) => `${r.submitted_count}/${r.student_count}`, width: 76 },
+              { title: t('actions'), key: 'actions', width: 336, render: (_, r) => <Space size={4} wrap={false} style={{ whiteSpace: 'nowrap' }}>
                 <Button size="small" onClick={() => viewSessionDetail(r.id)}>{t('detail')}</Button>
                 {r.status === 'active' && (
                   <Popconfirm title={t('endConfirm')} onConfirm={() => endSession(r.id)}>
