@@ -40,7 +40,10 @@ export interface ResourceGroup {
   id: number;
   group_name: string;
   sort_order: number;
+  /** 已统一路径格式并剔除失效引用后的资源列表（与 file_count 口径一致） */
   files: string[];
+  /** 后端返回的资源个数 = files.length */
+  file_count?: number;
 }
 
 export async function listGroups(): Promise<{ groups: ResourceGroup[] }> {
@@ -53,7 +56,7 @@ export async function createGroup(group_name: string): Promise<{ message: string
   return data;
 }
 
-export async function renameGroup(group_id: number, group_name: string): Promise<{ message: string }> {
+export async function renameGroup(group_id: number, group_name: string): Promise<{ message: string; group_name: string }> {
   const { data } = await apiClient.put(`/api/resources/groups/${group_id}`, { group_name });
   return data;
 }

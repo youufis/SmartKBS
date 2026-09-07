@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import urllib.parse
 from typing import Any
 
@@ -16,7 +17,7 @@ from starlette.datastructures import UploadFile
 
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files, is_admin, is_teacher
-from backend.config import ROOT_DIR, DEFAULT_LOGGED_IN_NAME
+from backend.config import ROOT_DIR, DEFAULT_LOGGED_IN_NAME, BASE_DIR
 from backend.prompts.html_generator import build_html_prompt
 from backend.utils import (
     normalize_rel_path,
@@ -264,16 +265,10 @@ async def delete_resource(request: Request, path: str = Query(...)):
         # 统一将路径分隔符转为正斜杠（数据库中用正斜杠）
         db_path = rel_path.replace("\\", "/")
         try:
-            from backend.database import execute_insert_update
-            execute_insert_update(
-                "DELETE FROM resource_group_items WHERE file_path=?",
-                (db_path,),
-            )
-            # 也尝试清理绝对路径格式的引用
-            execute_insert_update(
-                "DELETE FROM resource_group_items WHERE file_path=?",
-                (target_path.replace("\\", "/"),),
-            )
+            # 按统一后的规范路径匹配（含目录删除时的子树），避免旧格式匹配不到而残留引用
+            purged = _purge_group_items_for_path(username, target_path)
+            if purged:
+                logger.info(f"已同步清理 {purged} 条资源分组引用: {db_path}")
         except Exception as cleanup_err:
             logger.warning(f"清理资源分组引用失败: {cleanup_err}")
 
@@ -439,20 +434,8 @@ async def rename_resource(request: Request):
                     )
                 synced_shares += 1
 
-            grp_rows = execute_query_dict(
-                """SELECT id, file_path FROM resource_group_items
-                   WHERE file_path=? OR file_path=? OR file_path LIKE ? OR file_path LIKE ?""",
-                (old_rel, old_bn, f"{old_rel}/%", f"%/{old_bn}%"),
-            )
-            for row in grp_rows:
-                fp = (row["file_path"] or "").replace("\\", "/")
-                swapped = _swap(fp)
-                if swapped != fp:
-                    execute_insert_update(
-                        "UPDATE resource_group_items SET file_path=? WHERE id=?",
-                        (swapped, row["id"]),
-                    )
-                    synced_groups += 1
+            # 资源分组引用：按统一后的规范路径重写（含目录改名下的子资源）
+            synced_groups = _remap_group_items_after_rename(username, old_path, new_path)
 
             execute_insert_update(
                 "UPDATE resource_meta SET file_path=?, file_name=?, updated_at=? WHERE file_path=? OR file_path=?",
@@ -627,17 +610,190 @@ h2{{font-size:1.05em;color:#555;margin:18px 0 10px}}
 <div class="footer"><p>此页面由系统自动生成并随文件变化更新 · SmartKB</p></div>
 </body>
 </html>"""
+
+
 # ═══════════════════════════════════════════════
 # 资源分组管理 API
 # ═══════════════════════════════════════════════
 
 import time
-from backend.database import execute_query, execute_insert_update, execute_batch, get_connection
+from backend.database import (
+    execute_query, execute_insert_update, execute_batch, get_connection, get_transaction,
+)
+
+
+# ── 分组内资源路径统一（收敛为 url_path 格式）+ 残留清理 ──
+#
+# 分组条目 file_path 历史上并存过 4 种写法：相对项目根(前端 url_path, 正确格式)、
+# 相对 html 目录(资源管理树节点 key)、纯文件名、服务器绝对路径。
+# 混用导致两类问题：① 删除/重命名后按单一格式匹配不到 -> 引用残留；
+# ② 侧栏分组计数(数据库行数) 与右侧真实可见资源数不一致。
+# 下面统一收敛为「相对项目根的 POSIX 路径」，与前端 url_path 完全一致。
+
+def _html_root_rel(username: str) -> str:
+    """当前用户 html 根目录相对项目根的 POSIX 路径, 如 root/html、stu/张三/html"""
+    html_dir = os.path.abspath(get_account_html_dir(username))
+    return os.path.relpath(html_dir, str(BASE_DIR)).replace("\\", "/")
+
+
+def _resolve_group_path(raw: str, root_rel: str) -> tuple[str, bool, bool]:
+    """把任意写法的路径统一为「相对项目根的 POSIX 路径」。
+
+    返回 (规范路径, 目标是否存在, 是否能落在项目根内)。
+    第三个返回值为 False 表示无法判定(项目根之外/URL 等), 调用方不得据此删除数据。
+    """
+    fp = (raw or "").strip().replace("\\", "/")
+    if not fp:
+        return "", False, False
+    if "://" in fp:  # 外链等异常存量数据, 原样保留
+        return fp, False, False
+    base = str(BASE_DIR)
+    if os.path.isabs(fp) or re.match(r"^[A-Za-z]:[/\\]", fp):
+        abs_p = os.path.normpath(fp)
+    else:
+        rel = fp.lstrip("/")
+        parts = rel.split("/")
+        inside_root = bool(root_rel) and (rel == root_rel or rel.startswith(root_rel + "/"))
+        if not inside_root and "/" in rel and os.path.exists(os.path.join(base, *parts)):
+            inside_root = True  # 已是相对项目根的写法(可能指向其他账号目录/共享资源)
+        if inside_root:
+            abs_p = os.path.normpath(os.path.join(base, *parts))
+        else:
+            # 相对 html 目录或纯文件名 -> 补全本用户 html 根前缀
+            joined = f"{root_rel}/{rel}" if root_rel else rel
+            abs_p = os.path.normpath(os.path.join(base, *joined.split("/")))
+    try:
+        rel_out = os.path.relpath(abs_p, base).replace("\\", "/")
+    except ValueError:  # 跨盘符等, 无法相对化
+        return fp, os.path.exists(abs_p), False
+    if rel_out.startswith(".."):
+        return fp, os.path.exists(abs_p), False
+    return rel_out, os.path.exists(abs_p), True
+
+
+def _group_item_rows(username: str) -> list[tuple[int, int, str]]:
+    """一次取出该用户全部分组条目 (group_id, item_id, file_path), 避免 N+1 查询"""
+    return execute_query(
+        """SELECT i.group_id, i.id, i.file_path
+           FROM resource_group_items i
+           JOIN resource_groups g ON g.id = i.group_id
+           WHERE g.username=?
+           ORDER BY i.group_id, i.sort_order, i.id""",
+        (username,),
+    )
+
+
+def _group_existing_paths(username: str) -> dict[int, list[str]]:
+    """分组 ID -> 规范化且真实存在的资源路径列表。
+
+    顺带自愈存量脏数据：删除指向已不存在资源的残留引用、合并同一资源的重复
+    不同写法引用, 并把保留下来的路径统一成规范格式, 使「个数」与「列表」一致。
+    """
+    html_dir = os.path.abspath(get_account_html_dir(username))
+    root_rel = _html_root_rel(username)
+    # html 目录缺失或为空时不做删除, 避免挂载/同步/新部署异常时误清用户的分组数据
+    try:
+        can_purge = os.path.isdir(html_dir) and bool(os.listdir(html_dir))
+    except OSError:
+        can_purge = False
+
+    paths_by_group: dict[int, list[str]] = {}
+    del_ids: list[int] = []
+    norm_ops: list[tuple[str, tuple]] = []
+    for gid, iid, raw in _group_item_rows(username):
+        raw_norm = (raw or "").strip().replace("\\", "/")
+        canon, exists, resolved = _resolve_group_path(raw_norm, root_rel)
+        if can_purge and resolved and not exists:
+            del_ids.append(iid)  # 残留: 资源已被删除/改名, 引用失效
+            continue
+        seen = paths_by_group.setdefault(gid, [])
+        key = canon or raw_norm
+        if key and key in seen:
+            del_ids.append(iid)  # 残留: 同一资源被多种写法重复引用
+            continue
+        seen.append(key)
+        if resolved and canon and canon != raw_norm:
+            norm_ops.append(("UPDATE resource_group_items SET file_path=? WHERE id=?", (canon, iid)))
+
+    if del_ids or norm_ops:
+        try:
+            execute_batch(
+                [("DELETE FROM resource_group_items WHERE id=?", (iid,)) for iid in del_ids] + norm_ops
+            )
+            logger.info(f"资源分组引用自愈: user={username} 清理残留={len(del_ids)} 路径统一={len(norm_ops)}")
+        except Exception as e:
+            logger.warning(f"资源分组引用自愈失败: {e}")
+    return paths_by_group
+
+
+def _purge_group_items_for_path(username: str, target_abs: str) -> int:
+    """删除指向 target_abs（文件或目录, 含其子树）的分组引用, 返回删除条数"""
+    root_rel = _html_root_rel(username)
+    tgt = os.path.normpath(target_abs)
+    base = str(BASE_DIR)
+    hit_ids: list[int] = []
+    for _gid, iid, raw in _group_item_rows(username):
+        canon, _exists, resolved = _resolve_group_path((raw or "").strip(), root_rel)
+        if not resolved or not canon:
+            continue
+        abs_p = os.path.normpath(os.path.join(base, *canon.split("/")))
+        if abs_p == tgt or abs_p.startswith(tgt + os.sep):
+            hit_ids.append(iid)
+    if hit_ids:
+        execute_batch([("DELETE FROM resource_group_items WHERE id=?", (iid,)) for iid in hit_ids])
+    return len(hit_ids)
+
+
+def _remap_group_items_after_rename(username: str, old_abs: str, new_abs: str) -> int:
+    """资源/目录改名后同步分组内引用路径, 避免旧名称残留"""
+    base = str(BASE_DIR)
+    try:
+        old_canon = os.path.relpath(os.path.normpath(old_abs), base).replace("\\", "/")
+        new_canon = os.path.relpath(os.path.normpath(new_abs), base).replace("\\", "/")
+    except ValueError:
+        return 0
+    if old_canon == new_canon:
+        return 0
+    root_rel = _html_root_rel(username)
+    ops: list[tuple[int, str]] = []
+    for _gid, iid, raw in _group_item_rows(username):
+        canon, _exists, resolved = _resolve_group_path((raw or "").strip(), root_rel)
+        if not resolved or not canon:
+            continue
+        if canon == old_canon:
+            ops.append((iid, new_canon))
+        elif canon.startswith(old_canon + "/"):
+            ops.append((iid, new_canon + canon[len(old_canon):]))
+    if not ops:
+        return 0
+    synced = 0
+    with get_transaction() as conn:
+        cur = conn.cursor()
+        for item_id, new_path in ops:
+            try:
+                cur.execute("UPDATE resource_group_items SET file_path=? WHERE id=?", (new_path, item_id))
+            except sqlite3.IntegrityError:
+                # 改名后与分组内已有条目重复(UNIQUE(group_id, file_path)) -> 合并为一条
+                cur.execute("DELETE FROM resource_group_items WHERE id=?", (item_id,))
+            synced += 1
+    return synced
+
+
+def _find_group_name_conflict(username: str, group_name: str, exclude_id: int | None = None):
+    """同名分组检查（大小写不敏感, 与用户认知一致）, 返回冲突分组 (id, name) 或 None"""
+    rows = execute_query(
+        "SELECT id, group_name FROM resource_groups WHERE username=? AND LOWER(group_name)=LOWER(?)",
+        (username, group_name),
+    )
+    for gid, gname in rows:
+        if exclude_id is None or gid != exclude_id:
+            return (gid, gname)
+    return None
 
 
 @router.get("/groups")
 async def list_groups(request: Request):
-    """获取当前用户的所有资源分组及包含的文件"""
+    """获取当前用户的所有资源分组及包含的文件（已统一路径格式并剔除失效引用）"""
     user = get_current_user(request)
     username = user["username"]
 
@@ -645,17 +801,16 @@ async def list_groups(request: Request):
         "SELECT id, group_name, sort_order FROM resource_groups WHERE username=? ORDER BY sort_order, id",
         (username,),
     )
+    paths_by_group = _group_existing_paths(username)
     result = []
     for gid, gname, sort in groups:
-        items = execute_query(
-            "SELECT file_path FROM resource_group_items WHERE group_id=? ORDER BY sort_order, id",
-            (gid,),
-        )
+        files = paths_by_group.get(gid, [])
         result.append({
             "id": gid,
             "group_name": gname,
             "sort_order": sort,
-            "files": [row[0] for row in items],
+            "files": files,
+            "file_count": len(files),
         })
     return {"groups": result}
 
@@ -666,24 +821,24 @@ async def create_group(request: Request):
     user = get_current_user(request)
     username = user["username"]
     body = await request.json()
-    group_name = body.get("group_name", "").strip()
+    group_name = (body.get("group_name") or "").strip()
     if not group_name:
         raise HTTPException(status_code=400, detail="分组名称不能为空")
 
-    existing = execute_query(
-        "SELECT id FROM resource_groups WHERE username=? AND group_name=?",
-        (username, group_name),
-    )
-    if existing:
-        raise HTTPException(status_code=400, detail=f"分组 '{group_name}' 已存在")
+    if _find_group_name_conflict(username, group_name):
+        raise HTTPException(status_code=409, detail=f"分组 '{group_name}' 已存在，请换一个名称")
 
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    gid = execute_insert_update(
-        "INSERT INTO resource_groups (username, group_name, sort_order, created_at) VALUES (?, ?, ?, ?)",
-        (username, group_name, 0, now),
-    )
+    try:
+        gid = execute_insert_update(
+            "INSERT INTO resource_groups (username, group_name, sort_order, created_at) VALUES (?, ?, ?, ?)",
+            (username, group_name, 0, now),
+        )
+    except sqlite3.IntegrityError:
+        # 并发创建的兜底(UNIQUE(username, group_name)), 统一转成业务错误而不是 500
+        raise HTTPException(status_code=409, detail=f"分组 '{group_name}' 已存在，请换一个名称")
     logger.info(f"资源分组创建: {username}/{group_name}")
-    return {"message": f"分组 '{group_name}' 已创建", "id": gid}
+    return {"message": f"分组 '{group_name}' 已创建", "id": gid, "group_name": group_name}
 
 
 @router.put("/groups/reorder")
@@ -713,24 +868,36 @@ async def rename_group(group_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
     body = await request.json()
-    new_name = body.get("group_name", "").strip()
+    new_name = (body.get("group_name") or "").strip()
     if not new_name:
         raise HTTPException(status_code=400, detail="分组名称不能为空")
 
     # 验证分组属于当前用户
     rows = execute_query(
-        "SELECT id FROM resource_groups WHERE id=? AND username=?",
+        "SELECT group_name FROM resource_groups WHERE id=? AND username=?",
         (group_id, username),
     )
     if not rows:
         raise HTTPException(status_code=404, detail="分组不存在")
+    old_name = rows[0][0]
+    if old_name == new_name:
+        # 幂等：同名提交(未做任何修改)直接返回成功, 不再触发唯一约束
+        return {"message": f"分组名称未变更", "group_name": new_name, "id": group_id}
 
-    execute_insert_update(
-        "UPDATE resource_groups SET group_name=? WHERE id=?",
-        (new_name, group_id),
-    )
-    logger.info(f"资源分组重命名: {username}/{group_id} -> {new_name}")
-    return {"message": f"已重命名为 '{new_name}'"}
+    # 同名检测（大小写不敏感）：提前给出友好提示, 避免撞上 UNIQUE(username, group_name)
+    if _find_group_name_conflict(username, new_name, exclude_id=group_id):
+        raise HTTPException(status_code=409, detail=f"分组 '{new_name}' 已存在，请换一个名称")
+
+    try:
+        execute_insert_update(
+            "UPDATE resource_groups SET group_name=? WHERE id=? AND username=?",
+            (new_name, group_id, username),
+        )
+    except sqlite3.IntegrityError:
+        # 并发改名的兜底: 转成业务错误, 不再抛 sqlite3.IntegrityError -> 500
+        raise HTTPException(status_code=409, detail=f"分组 '{new_name}' 已存在，请换一个名称")
+    logger.info(f"资源分组重命名: {username}/{group_id} {old_name} -> {new_name}")
+    return {"message": f"已重命名为 '{new_name}'", "group_name": new_name, "id": group_id}
 
 
 @router.delete("/groups/{group_id}")
@@ -769,18 +936,28 @@ async def add_to_group(group_id: int, request: Request):
         raise HTTPException(status_code=404, detail="分组不存在")
 
     body = await request.json()
-    file_path = body.get("file_path", "").strip()
-    if not file_path:
+    raw_path = (body.get("file_path") or "").strip()
+    if not raw_path:
         raise HTTPException(status_code=400, detail="file_path 不能为空")
+
+    # 入库前统一路径格式, 同一资源不再因写法不同产生重复引用
+    root_rel = _html_root_rel(username)
+    canon, exists, resolved = _resolve_group_path(raw_path, root_rel)
+    if not resolved or not exists:
+        raise HTTPException(status_code=400, detail="资源不存在，请刷新后重试")
+    # 只能分组自己 html 目录内的资源, 避免 ../ 等越界路径入库
+    abs_target = os.path.join(str(BASE_DIR), *canon.split("/"))
+    if not path_within(os.path.abspath(get_account_html_dir(username)), abs_target):
+        raise HTTPException(status_code=400, detail="只能将本人资源目录内的资源加入分组")
 
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         execute_insert_update(
             "INSERT OR IGNORE INTO resource_group_items (group_id, file_path, sort_order, created_at) VALUES (?, ?, ?, ?)",
-            (group_id, file_path, 0, now),
+            (group_id, canon, 0, now),
         )
-        logger.info(f"资源加入分组: {username}/group={group_id}, file={file_path}")
-        return {"message": "已添加到分组"}
+        logger.info(f"资源加入分组: {username}/group={group_id}, file={canon}")
+        return {"message": "已添加到分组", "file_path": canon}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"添加失败: {str(e)}")
 
@@ -799,16 +976,25 @@ async def remove_from_group(group_id: int, request: Request):
         raise HTTPException(status_code=404, detail="分组不存在")
 
     body = await request.json()
-    file_path = body.get("file_path", "").strip()
-    if not file_path:
+    raw_path = (body.get("file_path") or "").strip()
+    if not raw_path:
         raise HTTPException(status_code=400, detail="file_path 不能为空")
 
-    execute_insert_update(
-        "DELETE FROM resource_group_items WHERE group_id=? AND file_path=?",
-        (group_id, file_path),
+    # 按统一后的路径匹配, 兼容存量旧格式引用, 避免"点了移除但记录还在"导致计数不变
+    root_rel = _html_root_rel(username)
+    target = _resolve_group_path(raw_path, root_rel)[0] or raw_path.replace("\\", "/")
+    item_rows = execute_query(
+        "SELECT id, file_path FROM resource_group_items WHERE group_id=?", (group_id,)
     )
-    logger.info(f"资源移出分组: {username}/group={group_id}, file={file_path}")
-    return {"message": "已从分组移除"}
+    hit_ids = [
+        iid for iid, fp in item_rows
+        if (fp or "").strip().replace("\\", "/") == raw_path.replace("\\", "/")
+        or (_resolve_group_path((fp or "").strip(), root_rel)[0] or (fp or "")) == target
+    ]
+    if hit_ids:
+        execute_batch([("DELETE FROM resource_group_items WHERE id=?", (iid,)) for iid in hit_ids])
+    logger.info(f"资源移出分组: {username}/group={group_id}, file={target}, removed={len(hit_ids)}")
+    return {"message": "已从分组移除", "removed": len(hit_ids)}
 
 
 # ═══════════════════════════════════════════════

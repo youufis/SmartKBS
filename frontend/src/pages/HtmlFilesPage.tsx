@@ -27,6 +27,8 @@ const HtmlFilesPage: React.FC = () => {
   const PAGE_SIZE = 24
   const [groupPages, setGroupPages] = useState<Record<string, number>>({})
   const [sharedPage, setSharedPage] = useState(1)
+  // 每页条数受分页器控制，切片与分页必须用同一个值，否则「共 N 条」与实际卡片数对不上
+  const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
   const getGroupPage = (groupId: number | null) => {
     const key = groupId === null ? '__ungrouped__' : `g${groupId}`
@@ -114,26 +116,31 @@ const HtmlFilesPage: React.FC = () => {
     setShareDialogOpen(true)
   }
 
-  // ── 获取所有已分组的文件路径集合 ──
+  // ── 分组路径集合（后端已统一为「相对项目根」的路径，与 files.url_path 同格式） ──
+  const fileKeyOf = (f: ResourceFile) => f.url_path || f.name
+
   const getAllGroupedPaths = useCallback((): Set<string> => {
     const paths = new Set<string>()
     groups.forEach(g => g.files.forEach(fp => paths.add(fp)))
     return paths
   }, [groups])
 
-  // ── 获取某个分组的文件路径集合 ──
   const getGroupFilePaths = useCallback((groupId: number): Set<string> => {
     const g = groups.find(gr => gr.id === groupId)
     return new Set(g?.files || [])
   }, [groups])
 
-  // ── 根据当前分组过滤文件 ──
-  const groupedPaths = getAllGroupedPaths()
+  // ── 统一口径：侧栏「个数」与右侧卡片走同一套过滤条件，数字永远等于能看到的内容 ──
   const kw = searchText.trim().toLowerCase()
-  const filteredFiles = (activeGroup === null
-    ? files.filter(f => !groupedPaths.has(f.url_path || f.name))  // 全部 = 未分组的
-    : files.filter(f => getGroupFilePaths(activeGroup).has(f.url_path || f.name))
-  ).filter(f => !kw || (f.display_name || f.name).toLowerCase().includes(kw))
+  const matchesSearch = (f: ResourceFile) => !kw || (f.display_name || f.name).toLowerCase().includes(kw)
+  const filesInSet = (pathSet: Set<string>) => files.filter(f => pathSet.has(fileKeyOf(f)) && matchesSearch(f))
+  const groupedPaths = getAllGroupedPaths()
+  const ungroupedFiles = files.filter(f => !groupedPaths.has(fileKeyOf(f)) && matchesSearch(f))
+  const filteredFiles = activeGroup === null
+    ? ungroupedFiles                                            // 全部 = 未分组的
+    : filesInSet(getGroupFilePaths(activeGroup))
+  // 分组个数只统计「仍然存在且当前可见」的资源（后端已剔除失效引用，避免虚高）
+  const visibleGroupCount = (g: resourcesApi.ResourceGroup) => filesInSet(new Set(g.files)).length
 
   // ── 分组管理 ──
   const openCreateGroup = () => {
@@ -381,12 +388,22 @@ const HtmlFilesPage: React.FC = () => {
                         onClick={() => setActiveGroup(null)}
                         onDragOver={(e) => { e.preventDefault(); setDragOverGroup(-1); }}
                         onDragLeave={handleDragLeave}
-                        onDrop={(e) => {
-                          e.preventDefault(); setDragOverGroup(null);
-                          // 分组拖拽到未分组，忽略
+                        onDrop={async (e) => {
+                          e.preventDefault(); setDragOverGroup(null)
+                          // 分组排序拖拽到未分组：忽略
                           if (dragGroupIndexRef.current !== null) { dragGroupIndexRef.current = null; return }
-                          const fp = e.dataTransfer.getData('text/plain') || draggedFile;
-                          if (fp) { message.success(t('addedToUngrouped')); setDraggedFile(null); }
+                          const fp = e.dataTransfer.getData('text/plain') || draggedFile
+                          setDraggedFile(null)
+                          if (!fp || activeGroup === null) return
+                          // 资源卡片拖到「未分组」= 从当前分组移出，否则分组个数与列表会对不上
+                          try {
+                            await resourcesApi.removeFromGroup(activeGroup, fp)
+                            await loadData()
+                            message.success(t('addedToUngrouped'))
+                          } catch (err: unknown) {
+                            const e2 = err as { response?: { data?: { detail?: string } }; message?: string }
+                            message.error(e2?.response?.data?.detail || e2?.message || t('removeFailed'))
+                          }
                         }}
                         style={{
                           padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
@@ -396,7 +413,7 @@ const HtmlFilesPage: React.FC = () => {
                           transition: 'all 0.2s',
                         }}
                       >
-                          <InboxOutlined style={{ marginRight: 6 }} />{t('ungrouped')} ({files.filter(f => !getAllGroupedPaths().has(f.url_path || f.name)).length})
+                          <InboxOutlined style={{ marginRight: 6 }} />{t('ungrouped')} ({ungroupedFiles.length})
                       </div>
                       {groups.map((g, idx) => (
                         <div
@@ -441,7 +458,7 @@ const HtmlFilesPage: React.FC = () => {
                           }}
                         >
                           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                            <FolderOutlined style={{ marginRight: 6 }} />{g.group_name} ({g.files.length})
+                            <FolderOutlined style={{ marginRight: 6 }} />{g.group_name} ({visibleGroupCount(g)})
                           </span>
                           <span onClick={(e) => e.stopPropagation()} className="resource-group-actions" style={{ flexShrink: 0, display: 'flex', gap: 2, opacity: 0, transition: 'opacity 0.2s' }}>
                             <Tooltip title={t('rename')}>
@@ -468,7 +485,7 @@ const HtmlFilesPage: React.FC = () => {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
                       {(() => {
                         const currentPage = getGroupPage(activeGroup)
-                        return filteredFiles.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((f) =>
+                        return filteredFiles.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((f) =>
                           renderFileCard(f.display_name, f.url_path || f.name, false, undefined, true, true)
                         )
                       })()}
@@ -485,11 +502,14 @@ const HtmlFilesPage: React.FC = () => {
                           <Pagination
                             current={currentPage}
                             total={filteredFiles.length}
-                            pageSize={PAGE_SIZE}
-                            onChange={(p) => setGroupPage(activeGroup, p)}
-                            showSizeChanger
-                            showTotal={(num) => t('totalResources', { count: num })}
+                            pageSize={pageSize}
                             pageSizeOptions={['10', '20', '50']}
+                            showSizeChanger
+                            onChange={(p, ps) => {
+                              if (ps && ps !== pageSize) { setPageSize(ps); setGroupPages({}) }
+                              else { setGroupPage(activeGroup, p) }
+                            }}
+                            showTotal={(num) => t('totalResources', { count: num })}
                           />
                         </div>
                       )
@@ -526,19 +546,19 @@ const HtmlFilesPage: React.FC = () => {
         ) : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-              {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id))}
+              {sharedItems.slice((sharedPage - 1) * pageSize, sharedPage * pageSize).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id))}
               {sharedItems.length === 0 && <Typography.Text type="secondary">{t('noSharedResources')}</Typography.Text>}
             </div>
-            {sharedItems.length > PAGE_SIZE && (
+            {sharedItems.length > pageSize && (
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
                 <Pagination
                   current={sharedPage}
                   total={sharedItems.length}
-                  pageSize={PAGE_SIZE}
-                  showSizeChanger
-                  showTotal={(num) => t('totalResources', { count: num })}
+                  pageSize={pageSize}
                   pageSizeOptions={['10', '20', '50']}
-                  onChange={(p) => setSharedPage(p)}
+                  showSizeChanger
+                  onChange={(p, ps) => { if (ps && ps !== pageSize) { setPageSize(ps); setSharedPage(1) } else { setSharedPage(p) } }}
+                  showTotal={(num) => t('totalResources', { count: num })}
                 />
               </div>
             )}
