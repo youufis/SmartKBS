@@ -18,6 +18,7 @@ import type {
 } from '../api/activityMonitor';
 import { useAuthStore } from '../stores/authStore';
 import ResourceViewStatsPage from './ResourceViewStatsPage';
+import ResetActivityButton from '../components/ResetActivityButton';
 
 const { Title, Text } = Typography;
 
@@ -275,16 +276,25 @@ const ActivityMonitorPage: React.FC = () => {
     {
       title: t('activityMonitor.columns.action'),
       key: 'action',
-      width: 120,
+      width: 230,
       render: (_: any, record: ActivityItem) => (
-        <Button
-          type="primary"
-          size="small"
-          icon={<BarChartOutlined />}
-          onClick={() => handleViewStatus(record)}
-        >
-          {t('activityMonitor.viewCompletion')}
-        </Button>
+        <Space size={4}>
+          <Button
+            type="primary"
+            size="small"
+            icon={<BarChartOutlined />}
+            onClick={() => handleViewStatus(record)}
+          >
+            {t('activityMonitor.viewCompletion')}
+          </Button>
+          {/* 重置：清空该活动的参与数据但保留活动内容；管理员可重置全部，教师仅本人 */}
+          <ResetActivityButton
+            activityType={record.activity_type}
+            activityId={record.id}
+            activityTitle={record.title}
+            onSuccess={handleRefresh}
+          />
+        </Space>
       ),
     },
   ];

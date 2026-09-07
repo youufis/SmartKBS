@@ -21,6 +21,7 @@ import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import ResetActivityButton from '../components/ResetActivityButton'
 const { Title, Text } = Typography
 
 const InteractionPage: React.FC = () => {
@@ -271,6 +272,8 @@ const InteractionPage: React.FC = () => {
                               onClick={() => window.open(`/api/export/quiz/${quiz.id}`, '_blank')}>{t('ipExport')}</Button>
                             <Button size="small" icon={<EditOutlined />}
                               onClick={() => { editQuizForm.setFieldsValue(quiz); setEditQuizModal(quiz) }}>{t('ipEdit')}</Button>
+                            <ResetActivityButton activityType="quiz" activityId={quiz.id}
+                                iconOnly stopPropagation onSuccess={loadQuizzes} />
                             <Popconfirm title={t('confirmDeleteQuiz')} onConfirm={() => handleDeleteQuiz(quiz.id)}>
                               <Button size="small" danger icon={<DeleteOutlined />} />
                             </Popconfirm>

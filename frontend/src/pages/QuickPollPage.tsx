@@ -18,6 +18,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -267,6 +268,8 @@ const QuickPollPage: React.FC = () => {
                                 })
                                 setEditPollModal(poll)
                               }} />
+                            <ResetActivityButton activityType="poll" activityId={poll.id}
+                                iconOnly stopPropagation onSuccess={loadPolls} />
                             <Popconfirm title={t('confirmDeletePoll')} onConfirm={() => handleDeletePoll(poll.id)}>
                               <Button size="small" type="text" danger icon={<DeleteOutlined />} />
                             </Popconfirm>

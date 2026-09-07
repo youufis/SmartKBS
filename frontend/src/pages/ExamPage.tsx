@@ -26,6 +26,7 @@ import MediaDisplay from '../components/MediaDisplay'
 import { TYPE_OPTIONS } from '../constants/questionTypes'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -691,6 +692,11 @@ const ExamPage: React.FC = () => {
                   </Tooltip>
                 </Popconfirm>
               </>
+            )}
+            {/* 重置数据：与活动状态无关（草稿/已发布/已结束都可），属主与角色由服务端校验 */}
+            {canEdit && (
+              <ResetActivityButton activityType="exam" activityId={record.id}
+                iconOnly stopPropagation onSuccess={loadExams} />
             )}
           </Space>
         )

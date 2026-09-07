@@ -20,6 +20,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import CodeEditor from '../components/CodeEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -829,6 +830,8 @@ const CodePracticePage: React.FC = () => {
                       <Button type="link" size="small" icon={<EditOutlined />}
                         onClick={(e) => { e.stopPropagation(); handleEditProblem(record.problem_id) }}
                       />
+                      <ResetActivityButton activityType="code" activityId={record.problem_id}
+                        iconOnly stopPropagation onSuccess={loadProblems} />
                       <Button type="link" size="small" danger icon={<DeleteOutlined />}
                         onClick={(e) => { e.stopPropagation(); handleDeleteProblem(record.problem_id) }}
                       />

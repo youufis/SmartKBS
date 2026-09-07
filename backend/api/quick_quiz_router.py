@@ -731,9 +731,16 @@ async def delete_room(room_id: int, request: Request):
     execute_insert_update("DELETE FROM quick_quiz_answers WHERE room_id=?", (room_id,))
     execute_insert_update("DELETE FROM quick_quiz_questions WHERE room_id=?", (room_id,))
     execute_insert_update("DELETE FROM quick_quiz_players WHERE room_id=?", (room_id,))
-    execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='quick_quiz' AND activity_id=?", (str(room_id),))
+    # 同时兼容修复前带前缀的历史流水, 避免老库残留
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("quick_quiz", room_id), ("quick_quiz", f"quick_quiz_{room_id}")])
+    execute_insert_update(
+        "DELETE FROM activity_rewards WHERE activity_type='quick_quiz' AND activity_id IN (?, ?)",
+        (str(room_id), f"quick_quiz_{room_id}"),
+    )
     execute_insert_update("DELETE FROM notifications WHERE source_type='quick_quiz' AND source_id=?", (str(room_id),))
     execute_insert_update("DELETE FROM quick_quiz_rooms WHERE id=?", (room_id,))
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
 
     game_manager.remove_room(room_id)
 
@@ -1799,7 +1806,10 @@ async def _do_end_game(room_id: int):
 
 async def _award_rewards(room_id: int, room: dict[str, Any], ranking: list[dict[str, Any]]):
     """发放抢答活动积分奖励"""
-    activity_id = f"quick_quiz_{room_id}"
+    # R-B: 统一为 str(room_id)。历史写成 "quick_quiz_{room_id}", 而删除房间等清理侧
+    #      一律按 str(room_id) 匹配, 两边永不相交 -> 流水从不清理, 排行榜长期虚高。
+    #      存量脏数据由 backend/reward_hygiene.py 在启动期幂等去前缀
+    activity_id = str(room_id)
     title = room.get("title", "知识抢答")
 
     for i, player in enumerate(ranking):

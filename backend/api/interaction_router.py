@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
 from backend.api.dependencies import get_current_user
+from backend.text_utils import clip
 from backend.database import execute_query, execute_insert_update, execute_batch, execute_query_dict
 from backend.logger import logger
 from backend.prompts import apply_skills, build_ai_role
@@ -589,6 +590,8 @@ async def create_quiz(req: QuizCreate, request: Request):
                 target_grade=req.target_grade,
                 target_class=req.target_class,
                 target_users=req.target_users,
+                source_type="quiz",
+                source_id=str(quiz_id),
             )
         except Exception as e:
             logger.warning(f"发送随堂测验通知失败: {e}")
@@ -653,9 +656,12 @@ async def delete_quiz(quiz_id: int, request: Request):
         raise HTTPException(status_code=403, detail="无权删除此测验")
 
     execute_insert_update("DELETE FROM interaction_quiz_answers WHERE quiz_id = ?", (quiz_id,))
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("quiz", quiz_id)])
     execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='quiz' AND activity_id=?", (str(quiz_id),))
     execute_insert_update("DELETE FROM notifications WHERE source_type='quiz' AND source_id=?", (str(quiz_id),))
     execute_insert_update("DELETE FROM interaction_quizzes WHERE id = ?", (quiz_id,))
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
     return {"message": "测验已删除"}
 
 
@@ -761,9 +767,12 @@ async def delete_poll(poll_id: int, request: Request):
         raise HTTPException(status_code=403, detail="无权删除")
 
     execute_insert_update("DELETE FROM interaction_poll_votes WHERE poll_id = ?", (poll_id,))
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("poll", poll_id)])
     execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='poll' AND activity_id=?", (str(poll_id),))
     execute_insert_update("DELETE FROM notifications WHERE source_type='poll' AND source_id=?", (str(poll_id),))
     execute_insert_update("DELETE FROM interaction_polls WHERE id = ?", (poll_id,))
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
     return {"message": "投票已删除"}
 
 
@@ -1320,6 +1329,8 @@ async def create_poll(req: PollCreate, request: Request):
                 target_grade=req.target_grade,
                 target_class=req.target_class,
                 target_users=req.target_users,
+                source_type="poll",
+                source_id=str(poll_id),
             )
         except Exception as e:
             logger.warning(f"发送投票通知失败: {e}")
@@ -1737,7 +1748,7 @@ async def ask_question(req: QuestionCreate, request: Request):
     # ── 积分奖励 ──
     try:
         from backend.reward_engine import award_participation
-        award_participation(user["username"], "question", str(qid), req.content[:30])
+        award_participation(user["username"], "question", str(qid), clip(req.content, 30))
     except Exception:
         pass
 
@@ -1776,8 +1787,10 @@ async def ask_question(req: QuestionCreate, request: Request):
                     notify_users(
                         teacher_usernames, "info",
                         f"新课堂提问",
-                        f"学生提出了新问题：{req.content[:50]}{'...' if len(req.content) > 50 else ''}",
+                        f"学生提出了新问题：{clip(req.content)}",
                         "/interaction",
+                        source_type="question",
+                        source_id=str(qid),
                     )
         except Exception as e:
             logger.warning(f"发送提问通知失败: {e}")
@@ -2033,7 +2046,7 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         try:
             from backend.reward_engine import award_participation
             award_participation(username, "question", str(question_id),
-                                f"回答：{question_content[:30]}...")
+                                f"回答：{clip(question_content, 30)}")
         except Exception:
             pass
 
@@ -2042,8 +2055,10 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
             from backend.api.notification_router import create_notification
             create_notification(asker_username, "info",
                 "你的提问收到同学回答（待教师审批）",
-                f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
-                "/interaction")
+                f"问题：{clip(question_content)}",
+                "/interaction",
+                source_type="question",
+                source_id=str(question_id))
         except Exception as e:
             logger.warning(f"发送回答通知失败: {e}")
 
@@ -2055,8 +2070,10 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
             if teachers:
                 notify_users(teachers, "info",
                     "有学生回答了提问，需要审批",
-                    f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
-                    "/interaction")
+                    f"问题：{clip(question_content)}",
+                    "/interaction",
+                    source_type="question",
+                    source_id=str(question_id))
         except Exception as e:
             logger.warning(f"发送审批通知失败: {e}")
 
@@ -2078,8 +2095,10 @@ async def answer_question(question_id: int, req: QuestionAnswer, request: Reques
         from backend.api.notification_router import create_notification
         create_notification(asker_username, "info",
             "你的提问已被教师回答",
-            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
-            "/interaction")
+            f"问题：{clip(question_content)}",
+            "/interaction",
+                source_type="question",
+                source_id=str(question_id))
     except Exception as e:
         logger.warning(f"发送回答通知失败: {e}")
 
@@ -2189,7 +2208,7 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
         # 用 question_id + answer_id 作为唯一标识，确保不被重复发放
         award_participation(answer_username, "question",
             f"{question_id}_{answer_id}",
-            f"回答被审批通过：{question_content[:30]}...",
+            f"回答被审批通过：{clip(question_content, 30)}",
             teacher_username=user["username"])
     except Exception:
         pass
@@ -2199,8 +2218,10 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
         from backend.api.notification_router import create_notification
         create_notification(answer_username, "info",
             "你的回答已通过教师审批",
-            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
-            "/interaction")
+            f"问题：{clip(question_content)}",
+            "/interaction",
+                source_type="question",
+                source_id=str(question_id))
     except Exception as e:
         logger.warning(f"发送审批通过通知失败: {e}")
 
@@ -2209,8 +2230,10 @@ async def approve_student_answer(question_id: int, answer_id: int, request: Requ
         from backend.api.notification_router import create_notification
         create_notification(asker_username, "info",
             "你的提问已有回答（已通过教师审批）",
-            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
-            "/interaction")
+            f"问题：{clip(question_content)}",
+            "/interaction",
+                source_type="question",
+                source_id=str(question_id))
     except Exception as e:
         logger.warning(f"发送审批通知失败: {e}")
 
@@ -2255,8 +2278,10 @@ async def reject_student_answer(question_id: int, answer_id: int, request: Reque
         from backend.api.notification_router import create_notification
         create_notification(answer_username, "info",
             "你的回答未通过教师审批，可重新回答",
-            f"问题：{question_content[:50]}{'...' if len(question_content) > 50 else ''}",
-            "/interaction")
+            f"问题：{clip(question_content)}",
+            "/interaction",
+                source_type="question",
+                source_id=str(question_id))
     except Exception as e:
         logger.warning(f"发送拒绝通知失败: {e}")
 

@@ -14,7 +14,7 @@
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-8.0.0-blue)
+![Version](https://img.shields.io/badge/Version-8.1.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -697,6 +697,22 @@ Teachers view completion status of various teaching activities:
 
 > **Available to Teacher and Admin**
 
+#### 🔄 Activity Data Reset (clear participation, keep content)
+
+All nine activity types (Exam, Smart Practice, Quick Quiz, Online Task, Class Quiz, Code Practice, Group Discussion, Quick Poll, Course Exercise) provide a "Reset" action:
+
+- **🧹 What is cleared**: data produced by student participation (answers, submissions, votes, messages, group rosters and reports, AI grading results, resource views and learning progress) plus derived data (point ledger rows, activity notifications, wrong-question entries)
+- **📦 What is kept**: the activity content itself — questions and options, paper structure and marks, code statements and test cases, discussion settings, room codes, task IDs. Deleted participation records cannot be recovered
+- **🔎 Preview before delete**: a dry-run preview lists every data item and its row count; toggling an option recalculates immediately, so the numbers shown are exactly what will be deleted (same rules as execution)
+- **🔁 Status rollback**: optionally return the activity to a re-joinable state (e.g. Exam Ended → Published, Quick Quiz Playing → Waiting) without touching content
+- **⌨️ Second confirmation**: the activity name must be typed; the phrase is validated on the server, so calling the API directly cannot bypass it
+- **📩 Student notice**: an acknowledgement can be pushed to affected students and is rendered in the reader's UI language (no leftover Chinese in English mode)
+- **🧮 Points**: after revoking the activity's ledger rows, affected students' totals are recomputed immediately using the same rules as the daily reconciliation (no title upgrades)
+- **🛡️ Permissions**: administrators can reset everything (resetting another user's activity is flagged as an override in the audit log); teachers may only reset activities they created — for course exercises this requires being both the resource owner and a teacher of that grade; students see no entry point and every endpoint rejects them
+- **📝 Audit trail**: each reset is recorded in `activity_reset_logs` (operator and role, activity id/type/title, options, deleted rows per table, points revoked, students affected, students notified, timestamp)
+
+> Single entry point: `/api/activity-reset/{scopes,preview,reset,logs}`; supporting a new activity type only means adding one entry to the registry in `backend/activity_reset.py`.
+
 ---
 
 ### 👁️ Resource View Tracking
@@ -957,6 +973,18 @@ Git-based online incremental upgrade system:
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
 ## 📦 Changelog
+
+### v8.1.0 (2026-09-07)
+
+- 🔄 **Activity data reset**: nine activity types gain a "clear participation, keep content" action — dry-run preview with per-item counts, live recalculation on option change, activity name must be typed as a second confirmation, optional status rollback, optional student notification, full audit trail; admins reset everything, teachers only their own activities, students are always rejected
+- 🧮 **Point immediacy**: deleting or resetting an activity now recomputes affected students' totals at once (previously they stayed inflated until the nightly reconciliation); AI grading races no longer write orphan grade rows
+- 🌐 **i18n hardening**: activity type names, data items, options, statuses, warnings and error messages in the reset flow are now served as `code + params` and looked up in the bilingual dictionary, so no backend Chinese leaks into the English UI; fixed antd built-in labels falling back to Chinese after refresh for English users
+- 🧱 **Rules moved to the server**: whether force confirmation or a typed name is required, whether anything is left to delete, and the dictionary key of each activity type are all delivered by the API (`policy` / `i18n_key`); the confirmation phrase is validated server-side so scripted calls cannot bypass the UI guard
+- 📩 **Localizable notifications**: nullable `payload` column added to `notifications`; reset acknowledgements store data only (activity name, teacher name) while the sentence comes from the front-end dictionary, with legacy renderers falling back to the stored text
+- 🧹 **Text leak hardening**: new `backend/text_utils.py` strips markdown and braces before any length clipping (order matters), replacing nine unsafe `[:N]` slices in question notifications and point reasons; reusable audit scripts verify it
+- ⚠️ **Breaking changes**: none (new endpoints and optional fields only; existing behaviour unchanged)
+
+---
 
 ### v8.0.0 (2026-09-05)
 
@@ -1235,6 +1263,7 @@ SmartKBS/
 | AI Self-Portrait | ✅ | ✅ | ✅ |
 | Collaborative Whiteboard | ✅ Participate | ✅ Create | ✅ Create |
 | Activity Monitoring | ❌ | ✅ | ✅ |
+| Activity Data Reset | ❌ | ✅ (own activities only) | ✅ (all activities) |
 | Resource View Tracking | ❌ | ✅ | ✅ |
 | AI Resource Recommendations | ❌ | ✅ | ✅ |
 | AI-Generated HTML Resources | ❌ | ✅ | ✅ |

@@ -74,6 +74,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] 点名脏状态清理失败: {e}", file=sys.stderr)
     try:
+        # 启动期数据口径治理(均幂等, 单项失败互不影响):
+        #   - 积分流水分桶/去前缀: 保证"按活动清理积分"能精确定位(活动重置前置)
+        #   - 存量通知 source_type/source_id 回填: 保证"按活动清理通知"不再空转
+        from backend.notify_hygiene import backfill_notification_sources
+        from backend.reward_hygiene import normalize_reward_activity_keys
+        for _repair in (normalize_reward_activity_keys, backfill_notification_sources):
+            try:
+                _res = _repair()
+                if _res.get("changed"):
+                    logger.info(f"[启动自检] {_repair.__name__} 已修复数据口径: {_res}")
+                else:
+                    logger.debug(f"[启动自检] {_repair.__name__} 无需修复: {_res}")
+            except Exception as repair_err:
+                logger.warning(f"[启动自检] {_repair.__name__} 失败(不阻断启动): {repair_err}")
+    except Exception as e:
+        print(f"[main] 启动期数据治理加载失败: {e}", file=sys.stderr)
+    try:
         # 业务日志保留策略: 后台线程延迟清理, 防登录/浏览/通知等日志表无限增长
         from backend.log_retention import start as start_log_retention
         start_log_retention()
@@ -182,6 +199,7 @@ from backend.api.code_router import router as code_router
 from backend.api.quest_router import router as quest_router
 from backend.api.quick_quiz_router import router as quick_quiz_router
 from backend.api.activity_monitor_router import router as activity_monitor_router
+from backend.api.activity_reset_router import router as activity_reset_router
 from backend.api.companion_router import router as companion_router
 from backend.api.skill_router import router as skill_router
 from backend.api.whiteboard_router import router as whiteboard_router
@@ -195,6 +213,7 @@ from backend.api.showcase_router import router as showcase_router
 app.include_router(quest_router, prefix="/api", tags=["知识闯关"])
 app.include_router(quick_quiz_router, prefix="/api", tags=["知识抢答"])
 app.include_router(activity_monitor_router, prefix="/api", tags=["活动监控"])
+app.include_router(activity_reset_router, prefix="/api", tags=["活动重置"])
 app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 app.include_router(users_router, prefix="/api/users", tags=["用户管理"])
 app.include_router(chat_router, prefix="/api/chat", tags=["对话"])

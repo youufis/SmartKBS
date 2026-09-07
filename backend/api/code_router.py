@@ -402,8 +402,11 @@ async def delete_code_problem(problem_id: int, request: Request):
     q_update("DELETE FROM code_runs WHERE problem_id=?", (problem_id,))
     # activity_rewards 和 notifications 在 smartkb.db（使用主数据库连接）
     from backend.database import execute_insert_update as db_update
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("code", problem_id)])
     db_update("DELETE FROM activity_rewards WHERE activity_type='code' AND activity_id=?", (str(problem_id),))
     db_update("DELETE FROM notifications WHERE source_type='code' AND source_id=?", (str(problem_id),))
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
     # 硬删主记录
     q_update("DELETE FROM code_problems WHERE id=?", (problem_id,))
     return {"status": "ok"}

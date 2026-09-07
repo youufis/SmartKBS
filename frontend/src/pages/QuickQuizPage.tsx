@@ -21,6 +21,7 @@ import useSubjectOptions from '../hooks/useSubjectOptions'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -240,6 +241,9 @@ const QuickQuizPage: React.FC = () => {
               {t('edit')}
             </Button>
           )}
+          {/* 重置：清参与数据、留房间配置；进行中也能重置（弹窗里会要求强制确认） */}
+          <ResetActivityButton activityType="quick_quiz" activityId={record.id}
+            onSuccess={() => { void loadRooms(); void loadHistory(); }} />
           {record.status !== 'playing' && (
             <Popconfirm title={t('confirmDeleteActivity')}
               description={t('deleteActivityHint')}

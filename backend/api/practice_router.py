@@ -559,11 +559,14 @@ async def delete_session(session_id: int, request: Request):
     execute_update("DELETE FROM practice_attempts WHERE session_id=?", (session_id,))
     execute_update("DELETE FROM practice_session_questions WHERE session_id=?", (session_id,))
     # 清理关联的积分奖励(P14: 原来用只读 helper 执行 DELETE, 事务不提交被静默回滚, 奖励记录永久残留)
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("practice", session_id)])
     db_execute_update(
         "DELETE FROM activity_rewards WHERE activity_type='practice' AND activity_id=?",
         (str(session_id),),
     )
     execute_update("DELETE FROM practice_sessions WHERE id=?", (session_id,))
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
     return {"message": "已删除"}
 
 

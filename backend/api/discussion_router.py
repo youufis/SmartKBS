@@ -852,9 +852,12 @@ async def delete_discussion(disc_id: int, request: Request):
         execute_insert_update("DELETE FROM discussion_members WHERE group_id=?", (g[0],))
     execute_insert_update("DELETE FROM discussion_groups WHERE discussion_id=?", (disc_id,))
     execute_insert_update("DELETE FROM discussion_reports WHERE discussion_id=?", (disc_id,))
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("discussion", disc_id)])
     execute_insert_update("DELETE FROM activity_rewards WHERE activity_type='discussion' AND activity_id=?", (str(disc_id),))
     execute_insert_update("DELETE FROM notifications WHERE source_type='discussion' AND source_id=?", (str(disc_id),))
     execute_insert_update("DELETE FROM discussions WHERE id=?", (disc_id,))
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
 
     logger.info(f"教师 {user['username']} 删除了讨论 #{disc_id}")
     return {"status": "ok", "message": "讨论已删除"}

@@ -184,25 +184,51 @@ def _is_notification_type_enabled(type_: str) -> bool:
     return type_ in enabled
 
 
+# 活动类通知必须携带 source_type/source_id，否则"删除/重置活动"无法清理对应通知。
+# 历史上全部调用方都没传（存量 notifications 行的 source_type 几乎全为空串），
+# 导致各活动路由里按 source_type 清理通知的语句一直在空转。
+# 新增调用点漏传时用下面的告警把问题暴露在日志里（每个类型只提示一次，避免刷屏）。
+_ACTIVITY_NOTIFY_TYPES = {
+    "exam", "quiz", "poll", "question", "task", "practice", "course_practice",
+    "code", "discussion", "quick_quiz", "quest",
+}
+_MISSING_SOURCE_WARNED: set[str] = set()
+
+
+def _warn_missing_source(func: str, type_: str, source_type: str, title: str) -> None:
+    """活动类通知未带来源时告警（仅首次，不阻断发送）"""
+    if source_type or type_ not in _ACTIVITY_NOTIFY_TYPES:
+        return
+    if type_ in _MISSING_SOURCE_WARNED:
+        return
+    _MISSING_SOURCE_WARNED.add(type_)
+    logger.warning(
+        f"[通知] {func}(type={type_}) 未传 source_type/source_id, 该通知无法随活动删除/重置被清理 "
+        f"(样例: {title[:40]})"
+    )
+
+
 def create_notification(recipient: str, type_: str, title: str, content: str = "", related_link: str = "",
-                        source_type: str = "", source_id: str = ""):
+                        source_type: str = "", source_id: str = "", payload: str = ""):
     """创建一条通知（内部调用，会检查类型是否启用）"""
+    _warn_missing_source("create_notification", type_, source_type, title)
     if not _is_notification_type_enabled(type_):
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         execute_insert_update(
-            """INSERT INTO notifications (recipient_username, type, title, content, related_link, is_read, created_at, source_type, source_id)
-               VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)""",
-            (recipient, type_, title, content, related_link, now, source_type, source_id),
+            """INSERT INTO notifications (recipient_username, type, title, content, related_link, is_read, created_at, source_type, source_id, payload)
+               VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)""",
+            (recipient, type_, title, content, related_link, now, source_type, source_id, payload),
         )
     except Exception as e:
         logger.error(f"创建通知失败: {e}")
 
 
 def notify_users(usernames: list[str], type_: str, title: str, content: str = "", related_link: str = "",
-                 source_type: str = "", source_id: str = ""):
+                 source_type: str = "", source_id: str = "", payload: str = ""):
     """批量通知多个用户（使用批量插入优化性能，会检查类型是否启用）"""
+    _warn_missing_source("notify_users", type_, source_type, title)
     if not usernames:
         return
     if not _is_notification_type_enabled(type_):
@@ -212,10 +238,11 @@ def notify_users(usernames: list[str], type_: str, title: str, content: str = ""
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     sql = """INSERT INTO notifications
-             (recipient_username, type, title, content, related_link, is_read, created_at, source_type, source_id)
-             VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)"""
+             (recipient_username, type, title, content, related_link, is_read, created_at, source_type, source_id, payload)
+             VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)"""
     try:
-        ops = [(sql, (r, type_, title, content, related_link, now, source_type, source_id)) for r in usernames]
+        ops = [(sql, (r, type_, title, content, related_link, now, source_type, source_id, payload))
+               for r in usernames]
         execute_batch(ops)
     except Exception as e:
         logger.error(f"批量创建通知失败: {e}")
@@ -238,6 +265,7 @@ def notify_users_by_scope(
     根据目标范围参数向对应的学生发送通知
     复用 permission_service.get_students_by_scope 获取目标学生列表
     """
+    _warn_missing_source("notify_users_by_scope", type_, source_type, title)
     students = get_students_by_scope(
         creator_username,
         target_scope=target_scope,
@@ -283,7 +311,8 @@ async def list_notifications(
     # 列表
     offset = (page - 1) * page_size
     rows = execute_query(
-        f"""SELECT id, type, title, content, related_link, is_read, created_at
+        f"""SELECT id, type, title, content, related_link, is_read, created_at,
+                   COALESCE(payload, '') AS payload
             FROM notifications WHERE {where}
             ORDER BY created_at DESC LIMIT ? OFFSET ?""",
         tuple(params + [page_size, offset]),
@@ -299,6 +328,8 @@ async def list_notifications(
             "related_link": r[4],
             "is_read": bool(r[5]),
             "created_at": r[6],
+            # payload: 可选的结构化文案标识，前端按当前语言渲染；空表示直接用 title/content
+            "payload": r[7] or "",
         })
 
     return {

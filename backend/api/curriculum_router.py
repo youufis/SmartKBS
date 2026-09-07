@@ -4132,9 +4132,12 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     total_reward = 0
     try:
         # G10: 第 5/7 个位置参数是 teacher_username, 不应填学生自己
-        total_reward += award_participation(username, "practice", str(kp_id), kp_title)
+        # R-A: 活动类型必须是 course_practice。历史上这里写 practice, 与智能练习
+        #      (practice_sessions.id) 共用 activity_id 域 -> 幂等检查互相误判(第二次参与
+        #      不加分), 且按活动清理积分流水时会互相误伤。历史流水由 reward_hygiene 归位
+        total_reward += award_participation(username, "course_practice", str(kp_id), kp_title)
         total_reward += award_grade(
-            username, "practice", str(kp_id), score, total_score, kp_title,
+            username, "course_practice", str(kp_id), score, total_score, kp_title,
         )
     except Exception as e:
         logger.warning(f"积分发放失败 (kp_id={kp_id}): {e}")

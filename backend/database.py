@@ -443,6 +443,10 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
             try:
+                c.execute("ALTER TABLE notifications ADD COLUMN payload TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
                 c.execute("CREATE INDEX IF NOT EXISTS idx_notif_source ON notifications(source_type, source_id)")
             except sqlite3.OperationalError:
                 pass
@@ -1797,6 +1801,33 @@ def init_db():
                 username TEXT NOT NULL,
                 viewed_at TEXT NOT NULL,
                 UNIQUE(showcase_id, username)
+            )""")
+
+            # ── 活动重置审计日志（破坏性且不可撤销，必须留痕）──
+            c.execute("""CREATE TABLE IF NOT EXISTS activity_reset_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                operator_username TEXT NOT NULL,
+                operator_role INTEGER DEFAULT 2,
+                activity_type TEXT NOT NULL,
+                activity_id TEXT NOT NULL,
+                activity_title TEXT DEFAULT '',
+                options_json TEXT DEFAULT '{}',
+                deleted_json TEXT DEFAULT '[]',
+                deleted_total INTEGER DEFAULT 0,
+                points_revoked INTEGER DEFAULT 0,
+                students_affected INTEGER DEFAULT 0,
+                admin_override INTEGER DEFAULT 0,
+                notified_students INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_arl_operator ON activity_reset_logs(operator_username, created_at)")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_arl_activity ON activity_reset_logs(activity_type, activity_id)")
+
+            # ── 通用系统状态表（一次性数据修复 / 后台任务的完成标记）──
+            c.execute("""CREATE TABLE IF NOT EXISTS system_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
             )""")
 
             conn.commit()

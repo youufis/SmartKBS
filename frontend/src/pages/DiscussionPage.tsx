@@ -20,6 +20,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -474,6 +475,8 @@ const DiscussionPage: React.FC = () => {
                       </Tooltip>
                       {isTeacherOrAdmin ? (
                         <>
+                          <ResetActivityButton activityType="discussion" activityId={disc.id}
+                            iconOnly stopPropagation onSuccess={loadDiscussions} />
                           {disc.status === 'pending' && (
                             <Button type="link" size="small" icon={<PlayCircleOutlined />}
                               onClick={() => handleStart(disc.id)} style={{ color: '#52c41a' }}>{t('start')}</Button>

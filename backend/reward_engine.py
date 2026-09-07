@@ -369,6 +369,38 @@ def _cache_put(student_username: str, total: int) -> None:
     _student_total_cache[student_username] = (time.time(), total)
 
 
+def activity_reward_students(pairs) -> list[str]:
+    """删除某活动的积分流水**之前**，先记下会受影响的学生名单。
+
+    pairs: [(activity_type, activity_id), ...]。`activity_rewards.activity_id` 是 TEXT，
+    统一转字符串比较，与各删除端点保持同一口径（否则 SQLite 不做隐式转换会静默漏删/漏算）。
+    """
+    norm = [(str(t), str(i)) for t, i in pairs if i is not None and str(i) != ""]
+    if not norm:
+        return []
+    where = " OR ".join(["(activity_type=? AND activity_id=?)"] * len(norm))
+    args = [v for pair in norm for v in pair]
+    rows = execute_query(
+        f"SELECT DISTINCT student_username FROM activity_rewards WHERE {where}", tuple(args)) or []
+    return [r[0] for r in rows if r[0]]
+
+
+def recompute_students(students) -> int:
+    """按名单重算总积分。
+
+    `check_upgrade=False`：删除/重置这类回收动作不应反向触发称号与徽章变化
+    （荣誉只升不降），与活动重置 service 同一口径；纯增量发放仍走 update_student_total 默认值。
+    """
+    done = 0
+    for stu in students or []:
+        try:
+            update_student_total(stu, check_upgrade=False)
+            done += 1
+        except Exception as e:
+            logger.warning(f"[积分重算] {stu} 失败: {e}")
+    return done
+
+
 def reconcile_student_totals(auto_fix: bool = True) -> dict[str, Any]:
     """R6: 对账 student_total_points 与 activity_rewards 真实合计。
 

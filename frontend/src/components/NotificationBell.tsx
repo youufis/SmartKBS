@@ -13,6 +13,7 @@ import * as companionApi from '../api/companion'
 import { useCompanionStore } from '../stores/companionStore'
 import type { NotificationItem } from '../api/notifications'
 import type { PushMessage } from '../api/companion'
+import { useNoticeText } from '../utils/notificationText'
 
 const { Text } = Typography
 
@@ -35,6 +36,7 @@ const PUSH_TYPE_CONFIG: Record<string, { color: string; icon: string }> = {
 
 const NotificationBell: React.FC = () => {
   const { t } = useTranslation('common')
+  const noticeText = useNoticeText()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isStudent = user?.role === 'student'
@@ -183,6 +185,7 @@ const NotificationBell: React.FC = () => {
               dataSource={notifications}
               renderItem={(item) => {
                 const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.info
+                        const nt = noticeText(item)
                 return (
                   <List.Item
                     style={{
@@ -215,13 +218,13 @@ const NotificationBell: React.FC = () => {
                       }
                       title={
                         <Space size={4}>
-                          <Text strong={!item.is_read} style={{ fontSize: 13 }}>{item.title}</Text>
+                          <Text strong={!item.is_read} style={{ fontSize: 13 }}>{nt.title}</Text>
                           {!item.is_read && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('nbNew')}</Tag>}
                         </Space>
                       }
                       description={
                         <div>
-                          {item.content && <Text type="secondary" style={{ fontSize: 12 }}>{item.content}</Text>}
+                          {item.content && <Text type="secondary" style={{ fontSize: 12 }}>{nt.content}</Text>}
                           <br />
                           <Text type="secondary" style={{ fontSize: 11 }}>
                             {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}

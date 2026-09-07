@@ -427,6 +427,8 @@ async def update_exam(exam_id: int, req: ExamUpdate, request: Request):
                         target_grade=exam.get("target_grade", ""),
                         target_class=exam.get("target_class", ""),
                         target_users=exam.get("target_users", ""),
+                        source_type="exam",
+                        source_id=str(exam_id),
                     )
                 except Exception as notify_err:
                     logger.warning(f"发送考试更新通知失败: {notify_err}")
@@ -465,6 +467,8 @@ async def delete_exam(exam_id: int, request: Request):
                         f"考试「{exam['title']}」已取消",
                         f"教师已删除该考试",
                         "/exam",
+                        source_type="exam",
+                        source_id=str(exam_id),
                     )
             except Exception as notify_err:
                 logger.warning(f"发送考试取消通知失败: {notify_err}")
@@ -474,9 +478,12 @@ async def delete_exam(exam_id: int, request: Request):
     execute_update("DELETE FROM exam_questions WHERE exam_id = ?", (exam_id,))
     execute_update("DELETE FROM exam_attempts WHERE exam_id = ?", (exam_id,))
     # activity_rewards 和 notifications 在 smartkb.db（使用主数据库连接）
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("exam", exam_id)])
     db_update("DELETE FROM activity_rewards WHERE activity_type='exam' AND activity_id=?", (str(exam_id),))
     db_update("DELETE FROM notifications WHERE source_type='exam' AND source_id=?", (str(exam_id),))
     execute_update("DELETE FROM exams WHERE id = ?", (exam_id,))
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
 
     logger.info(f"用户 {username} 删除考试: {exam['title']} (id={exam_id})")
     return {"message": "已删除"}
@@ -527,6 +534,8 @@ async def publish_exam(exam_id: int, request: Request):
                 target_grade=exam.get("target_grade", ""),
                 target_class=exam.get("target_class", ""),
                 target_users=exam.get("target_users", ""),
+                source_type="exam",
+                source_id=str(exam_id),
             )
         except Exception as notify_err:
             logger.warning(f"发送考试通知失败: {notify_err}")
@@ -569,6 +578,8 @@ async def end_exam(exam_id: int, request: Request):
                     f"考试「{exam['title']}」已提前结束",
                     f"教师已结束考试，请查看成绩",
                     "/exam",
+                    source_type="exam",
+                    source_id=str(exam_id),
                 )
         except Exception as notify_err:
             logger.warning(f"发送考试结束通知失败: {notify_err}")
@@ -1424,6 +1435,8 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
             f"考试「{exam['title']}」成绩已出",
             f"得分 {earned_score}/{total_score}（{passed_str}）",
             "/exam",
+            source_type="exam",
+            source_id=str(exam_id),
         )
     except Exception as notify_err:
         logger.warning(f"发送考试结果通知失败: {notify_err}")
@@ -1440,6 +1453,8 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
                 f"学生提交答卷: {student_display}",
                 f"已提交考试「{exam['title']}」，得分 {earned_score}/{total_score}",
                 f"/exam/{exam_id}/results",
+                source_type="exam",
+                source_id=str(exam_id),
             )
     except Exception as notify_err:
         logger.warning(f"发送教师通知失败: {notify_err}")

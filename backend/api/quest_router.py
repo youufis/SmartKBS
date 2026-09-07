@@ -1300,12 +1300,15 @@ async def delete_quest_record(quest_id: int, request: Request):
         "DELETE FROM quest_question_records WHERE quest_id=?", (quest_id,)
     )
     # 清理关联数据
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("quest", quest_id)])
     execute_insert_update(
         "DELETE FROM activity_rewards WHERE activity_type='quest' AND activity_id=?", (str(quest_id),)
     )
     execute_insert_update(
         "DELETE FROM notifications WHERE source_type='quest' AND source_id=?", (str(quest_id),)
     )
+    recompute_students(_affected)          # 缺陷A：删流水必须就地重算总分
     # 删除闯关记录
     execute_insert_update(
         "DELETE FROM quest_records WHERE id=?", (quest_id,)

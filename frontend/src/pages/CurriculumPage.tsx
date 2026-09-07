@@ -25,6 +25,7 @@ import { useAuthStore } from '../stores/authStore'
 import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -1576,6 +1577,17 @@ const CurriculumPage: React.FC = () => {
                                     <Tag color={r.viewed ? 'success' : 'default'} style={{ fontSize: 11 }}>
                                       {r.viewed ? t('viewed') : t('notViewed')}
                                     </Tag>
+                                  )}
+                                  {/* 课程练习重置：只清该绑定的作答/浏览/进度数据，练习页面本体保留 */}
+                                  {isTeacherOrAdmin && !!r.binding_id && (
+                                    <ResetActivityButton activityType="course" activityId={r.binding_id}
+                                      iconOnly stopPropagation
+                                      onSuccess={() => {
+                                        if (!selectedKp) return
+                                        curriculumApi.getKpResources(selectedKp.id)
+                                          .then((res) => setKpResources(res.resources))
+                                          .catch(() => {})
+                                      }} />
                                   )}
                                 </Space>
                               </Card>

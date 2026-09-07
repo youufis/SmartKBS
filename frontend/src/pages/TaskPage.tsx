@@ -18,6 +18,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useChatStore, setTaskFilename } from '../stores/chatStore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const TaskPage: React.FC = () => {
   const { t } = useTranslation('system')
@@ -360,6 +361,10 @@ const TaskPage: React.FC = () => {
                 <Button size="small" icon={<CheckCircleOutlined />} />
               </Tooltip>
             </Popconfirm>
+          )}
+          {isAdminOrTeacher && (
+            <ResetActivityButton activityType="task" activityId={record.id}
+              iconOnly stopPropagation onSuccess={loadTasks} />
           )}
           {isAdminOrTeacher && (
             <Popconfirm

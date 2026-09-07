@@ -23,8 +23,13 @@ interface LocaleState {
   setLocale: (locale: LocaleKey) => void
 }
 
+const normalize = (lng?: string): LocaleKey =>
+  (lng && lng.toLowerCase().startsWith('en') ? 'en' : 'zh-CN')
+
 export const useLocaleStore = create<LocaleState>()((set) => ({
-  current: 'zh-CN' as LocaleKey,
+  // 必须与 i18n 已检测到的语言一致：写死 'zh-CN' 会让英文用户一刷新，
+  // 所有 antd 内置文案（Modal 取消/确认、表格空态、分页、日期选择…）退回中文
+  current: normalize(i18n.language),
   ready: i18n.isInitialized,
 
   setLocale: (locale: LocaleKey) => {
@@ -33,7 +38,12 @@ export const useLocaleStore = create<LocaleState>()((set) => ({
   },
 }))
 
-// i18n 初始化完成后更新 ready 状态
+// i18n 是语言的唯一事实源：持久化恢复或外部 changeLanguage 时同步回 store
+i18n.on('languageChanged', (lng) => {
+  useLocaleStore.setState({ current: normalize(lng) })
+})
+
+// i18n 初始化完成后更新 ready 与语言
 i18n.on('initialized', () => {
-  useLocaleStore.setState({ ready: true })
+  useLocaleStore.setState({ ready: true, current: normalize(i18n.language) })
 })

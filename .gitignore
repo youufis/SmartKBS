@@ -78,3 +78,7 @@ desktop/
 youufis/
 Temp/
 question_media/
+
+# ── 开发期验证产物（活动重置功能调试用） ──
+.playwright-mcp/
+backend/logs/

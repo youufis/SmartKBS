@@ -265,5 +265,13 @@
   "sdUserPh": "搜索并选择用户",
   "sdAdminTag": "管理员",
   "sdSelectedVisible": "选中的用户将可以看到此共享资源",
-  "rmGeneratingPhase": "🚀 AI 生成中（第一阶段：AI 构思内容...）"
+  "rmGeneratingPhase": "🚀 AI 生成中（第一阶段：AI 构思内容...）",
+  "notifications": {
+    "i18n": {
+      "activityReset": {
+        "title": "「{{activity}}」已被教师重置",
+        "body": "{{operator}} 已清空该活动的全部参与记录，你可以重新参与"
+      }
+    }
+  }
 }

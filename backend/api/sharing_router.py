@@ -611,12 +611,15 @@ async def unshare_resource(request: Request, id: int = Query(...)):
         except Exception as e3:
             logger.warning(f"清理资源查看日志失败: {e3}")
         try:
+            from backend.reward_engine import activity_reward_students, recompute_students
+            _affected = activity_reward_students([("share", id)])
             execute_insert_update(
                 "DELETE FROM activity_rewards WHERE activity_type='share' AND activity_id=?",
                 (str(id),),
             )
             execute_insert_update(
                 "DELETE FROM notifications WHERE source_type='share' AND source_id=?",
+            recompute_students(_affected)      # 缺陷A：删流水必须就地重算总分
                 (str(id),),
             )
         except Exception:

@@ -15,6 +15,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import { classText } from '../utils/studentLabel'
 import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTypes'
+import ResetActivityButton from '../components/ResetActivityButton'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -557,6 +558,7 @@ const TeacherView: React.FC = () => {
                     <Button size="small" icon={<StopOutlined />}>{t('endedSuccess')}</Button>
                   </Popconfirm>
                 )}
+                <ResetActivityButton activityType="practice" activityId={r.id} onSuccess={loadSessions} />
                 <Popconfirm title={t('deleteConfirm')} onConfirm={() => deleteSession(r.id)}>
                   <Button size="small" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
                 </Popconfirm>

@@ -485,6 +485,8 @@ async def delete_task(request: Request):
         raise HTTPException(status_code=404, detail="任务未找到或无权限删除")
 
     # 从数据库删除
+    from backend.reward_engine import activity_reward_students, recompute_students
+    _affected = activity_reward_students([("task", task_id)])   # 事务内取不到名单，删前先记
     with get_connection() as conn:
         c = conn.cursor()
         c.execute("DELETE FROM task_submissions WHERE task_id=?", (task_id,))
@@ -494,6 +496,7 @@ async def delete_task(request: Request):
         c.execute("DELETE FROM tasks WHERE id=?", (task_id,))
         conn.commit()
 
+    recompute_students(_affected)   # 缺陷A：必须在 commit 之后，否则与事务写锁互撞
     # K9: 汇总文件一并清理, 不再残留给同名新任务
     purged = _purge_summary_files(task_info["creator"], task_info["name"], task_id)
     logger.info(f"任务已删除: {task_id}, by={username}, 清理汇总文件 {purged} 个")
@@ -823,7 +826,10 @@ async def ai_grade_task(task_id: str, request: Request):
         raise HTTPException(status_code=502, detail=f"AI 返回格式异常: {str(e)}")
 
     # 8. 写入 task_grades 表
+    # 缺陷B：上面的 AI 调用最长 180s，这期间任务可能已被删除或被"重置数据"清空提交，
+    # 直接回写就会留下没有提交、没有归属的孤儿成绩（列表与统计都会读到）。
     saved = []
+    skipped_gone: list[str] = []
     for g in grades_list:
         student = g.get("student", "")
         # AI 可能从 "## 学生 xxx" 中提取出 "学生 xxx"，需要清洗前缀
@@ -837,14 +843,25 @@ async def ai_grade_task(task_id: str, request: Request):
         if not student or score is None:
             continue
 
+        if not execute_query(
+            "SELECT 1 FROM task_submissions WHERE task_id=? AND student_username=?",
+            (task_id, student),
+        ):
+            skipped_gone.append(student)
+            continue
         execute_insert_update(
+            # SELECT ... WHERE EXISTS 由数据库保证"提交还在才写"，
+            # 覆盖上面检查与写入之间的竞态窗口（VALUES 写法做不到这一点）
             """INSERT OR REPLACE INTO task_grades
                (task_id, student_username, ai_score, ai_comment, ai_feedback,
                 ai_strengths, ai_weaknesses, ai_graded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))""",
+               SELECT ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime')
+               WHERE EXISTS (SELECT 1 FROM task_submissions
+                             WHERE task_id=? AND student_username=?)""",
             (task_id, student, score, comment, feedback,
              json.dumps(strengths, ensure_ascii=False),
-             json.dumps(weaknesses, ensure_ascii=False)),
+             json.dumps(weaknesses, ensure_ascii=False),
+             task_id, student),
         )
         saved.append({
             "student": student,
@@ -862,12 +879,19 @@ async def ai_grade_task(task_id: str, request: Request):
         (summary_json, task_id),
     )
 
+    if skipped_gone:
+        logger.warning(
+            f"AI 批改回写被跳过 {len(skipped_gone)} 人（提交在批改期间已被删除或重置）: "
+            f"task={task_id} {skipped_gone[:5]}"
+        )
     logger.info(f"AI 批改完成: task={task_name}, 批改人数={len(saved)}, by={username}")
     return {
         "summary": class_summary,
         "grades": saved,
         "graded_count": len(saved),
-        "message": f"AI 批改完成，共批改 {len(saved)} 位学生",
+        "skipped_count": len(skipped_gone),
+        "message": (f"AI 批改完成，共批改 {len(saved)} 位学生"
+                    + (f"；{len(skipped_gone)} 人的提交已不存在，未写入成绩" if skipped_gone else "")),
     }
 
 

@@ -265,5 +265,13 @@
   "sdUserPh": "Search and select users",
   "sdAdminTag": "admin",
   "sdSelectedVisible": "Selected users will see this shared resource",
-  "rmGeneratingPhase": "🚀 AI generating (phase 1: drafting content...)"
+  "rmGeneratingPhase": "🚀 AI generating (phase 1: drafting content...)",
+  "notifications": {
+    "i18n": {
+      "activityReset": {
+        "title": "\"{{activity}}\" has been reset by your teacher",
+        "body": "{{operator}} has cleared all participation records for this activity, so you can take part again"
+      }
+    }
+  }
 }

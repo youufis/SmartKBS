@@ -9,6 +9,8 @@ export interface NotificationItem {
   related_link: string
   is_read: boolean
   created_at: string
+  /** 可选的结构化文案标识，见 utils/notificationText */
+  payload?: string
 }
 
 export interface NotificationListResponse {
