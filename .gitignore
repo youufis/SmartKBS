@@ -82,3 +82,5 @@ question_media/
 # ── 开发期验证产物（活动重置功能调试用） ──
 .playwright-mcp/
 backend/logs/
+# 实施决策日志只留本地，不随仓库分发
+docs/
