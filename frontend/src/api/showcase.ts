@@ -67,6 +67,10 @@ export interface ShowcaseCard {
   batch_id: string;
   generated_at: string;
   updated_at: string;
+  /** 建卡那一刻定格的积分(points_mode=snapshot 时不下发这两个字段) */
+  snapshot_points?: number;
+  /** student_total_points 里的实时总积分, 默认口径下卡片显示的就是它 */
+  live_points?: number;
 }
 
 export interface ShowcaseListResponse {
@@ -104,6 +108,8 @@ export async function getShowcaseList(params: {
   sort_by?: string;
   page?: number;
   page_size?: number;
+  /** live=积分按实时汇总显示与排序(默认), snapshot=按建卡时的定格快照 */
+  points_mode?: 'live' | 'snapshot';
 }): Promise<ShowcaseListResponse> {
   const { data } = await apiClient.get('/api/showcase/list', { params });
   return data;

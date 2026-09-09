@@ -116,6 +116,31 @@ def _build_snapshot(student_username: str) -> dict[str, Any]:
     }
 
 
+def _overlay_live_points(card: dict[str, Any], live_points: int) -> None:
+    """把建卡时冻结的积分/称号/进度换成实时值(让页面上的"刷新"真的能看到积分变化)。
+
+    - 只在实时值与快照不一致时才重算称号与进度: get_main_title* 每次都要解析一遍
+      system_config.json, 一屏 20 张卡多数是相等的, 不必做 40 次无谓解析。
+    - 徽章、学科称号仍取快照: 它们需要逐生查询, 且属于"这次上榜的定格荣誉"。
+    - 快照原值另存 snapshot_points, 前端/排障需要对比时可取用。
+    """
+    snap = card.get("snapshot_data")
+    if not isinstance(snap, dict):
+        return
+    try:
+        old = int(snap.get("total_points") or 0)
+        live = int(live_points or 0)
+    except (TypeError, ValueError):
+        return
+    card["snapshot_points"] = old
+    card["live_points"] = live
+    if old == live:
+        return
+    snap["total_points"] = live
+    snap["main_title"] = get_main_title(live)
+    snap["progress"] = get_main_title_progress(live)
+
+
 def _format_showcase_row(row: tuple) -> dict[str, Any]:
     """将数据库行转为响应字典"""
     snapshot = json.loads(row[3]) if isinstance(row[3], str) else {}
@@ -353,8 +378,14 @@ async def list_showcase(
     sort_by: str = Query("points", description="排序: points/likes/newest"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    points_mode: str = Query("live", description="live=积分按实时汇总显示与排序(默认); snapshot=按建卡时的定格快照"),
 ):
-    """获取荣誉展示卡列表，支持筛选、搜索、排序和分页"""
+    """获取荣誉展示卡列表，支持筛选、搜索、排序和分页
+
+    积分口径: 卡片存在 snapshot_data(建卡那一刻的定格), 默认用 points_mode=live 把
+    积分/称号/进度换成 student_total_points 的实时值, 因此页面上的"刷新"能立即看到
+    积分变化; 教师若想看历史定格, 传 points_mode=snapshot。
+    """
     user = get_current_user(request)
     current_username = user["username"]
 
@@ -374,9 +405,13 @@ async def list_showcase(
 
     where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-    # 排序
+    # 排序(默认按实时积分, 否则积分变了名次却不动)
+    points_order = (
+        "COALESCE(stp.total_points, 0) DESC" if points_mode != "snapshot"
+        else "COALESCE(json_extract(sc.snapshot_data, '$.total_points'), 0) DESC"
+    )
     order_map = {
-        "points": "COALESCE(json_extract(sc.snapshot_data, '$.total_points'), 0) DESC",
+        "points": points_order,
         "likes": "sc.like_count DESC",
         "newest": "sc.generated_at DESC",
     }
@@ -396,9 +431,11 @@ async def list_showcase(
     data_sql = f"""
         SELECT sc.id, sc.student_username, sc.generated_by,
                sc.snapshot_data, sc.theme_style, sc.like_count, sc.view_count,
-               sc.is_active, sc.sort_order, sc.batch_id, sc.generated_at, sc.updated_at
+               sc.is_active, sc.sort_order, sc.batch_id, sc.generated_at, sc.updated_at,
+               COALESCE(stp.total_points, 0)
         FROM student_showcase sc
         JOIN users u ON sc.student_username = u.username
+        LEFT JOIN student_total_points stp ON stp.student_username = sc.student_username
         WHERE {where_clause}
         ORDER BY {order_by}, sc.sort_order ASC
         LIMIT ? OFFSET ?
@@ -419,6 +456,8 @@ async def list_showcase(
     for row in rows:
         card = _format_showcase_row(row)
         card["liked"] = card["id"] in liked_ids
+        if points_mode != "snapshot":
+            _overlay_live_points(card, row[12])
         cards.append(card)
 
     return {
@@ -430,8 +469,12 @@ async def list_showcase(
 
 
 @router.get("/showcase/{showcase_id}", summary="获取单张展示卡详情")
-async def get_showcase_detail(showcase_id: int, request: Request):
-    """获取单张展示卡详情，并记录浏览"""
+async def get_showcase_detail(
+    showcase_id: int,
+    request: Request,
+    points_mode: str = Query("live", description="live=积分按实时汇总(默认); snapshot=按建卡快照"),
+):
+    """获取单张展示卡详情，并记录浏览(积分口径与列表一致)"""
     user = get_current_user(request)
     current_username = user["username"]
 
@@ -446,6 +489,12 @@ async def get_showcase_detail(showcase_id: int, request: Request):
         raise HTTPException(status_code=404, detail="展示卡不存在")
 
     card = _format_showcase_row(rows[0])
+    if points_mode != "snapshot":
+        live = execute_query(
+            "SELECT COALESCE(total_points, 0) FROM student_total_points WHERE student_username=?",
+            (rows[0][1],),
+        )
+        _overlay_live_points(card, int(live[0][0]) if live else 0)
 
     if not card["is_active"]:
         raise HTTPException(status_code=404, detail="展示卡已下架")
