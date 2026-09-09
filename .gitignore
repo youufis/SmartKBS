@@ -26,6 +26,8 @@ node_modules/
 # ── 运行时 ──
 LogFiles/
 temp_uploads/
+# 数据自愈一次性清理的整行留底(含成绩原文, 不入库)
+db_backups/
 -w
 
 # ── 数据库 ──

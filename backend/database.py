@@ -3,13 +3,15 @@
 替代 AgentSmartKBXS.py 中裸 sqlite3.connect() 调用
 提供上下文管理器，自动管理连接生命周期
 """
+import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from typing import Any
 
-from backend.config import ROOT_DIR, STU_DIR
+from backend.config import DATA_DIR, ROOT_DIR, STU_DIR
 from backend.logger import logger
 
 # 数据库文件路径（backend 目录下）
@@ -1939,26 +1941,128 @@ def execute_batch(operations: list[tuple[str, tuple[Any, ...]]]):
 
 # ── 自动回填 grade_id/class_id ──
 
-def _backfill_grade_class_ids(c):
-    """回填存量数据的 grade_id/class_id（幂等，仅在缺失时执行）"""
+# 课堂数据表: 以 grade / class_name 文本列定位, grade_id / class_id 为冗余 FK 列
+_BACKFILL_TABLES = ('scores', 'rollcall_weights', 'rollcall_meta', 'rollcall_history')
+
+# 存量脏数据清理规则版本: 判据收紧/放宽时 +1, 让所有环境带着新规则重扫一次
+_PRUNE_RULE_VERSION = 1
+# 删除前整行留底目录(不静默销毁数据)
+_PRUNE_BACKUP_DIR = DATA_DIR / "db_backups"
+
+
+def _state_get(c, key: str):
+    """读 system_state 标记; 表缺失/异常时按"未标记"处理, 绝不因此中断启动"""
     try:
-        # 1. 学生 users
-        c.execute("SELECT COUNT(*) FROM users WHERE grade_id IS NULL AND grade IS NOT NULL AND grade!=''")
-        if c.fetchone()[0]:
+        row = c.execute("SELECT value FROM system_state WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _state_set(c, key: str, value: str):
+    try:
+        c.execute(
+            """INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)
+               ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+            (key, value, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        )
+    except Exception:
+        pass
+
+
+def _prune_unlocatable_rows(c):
+    """一次性清理"回填后仍无法唯一定位到班级"的存量行(年级与班级名互相矛盾的脏数据)。
+
+    这类行按 class_id 过滤的统计永远为 0, 留着只会让每次启动都重复告警, 因此直接删除:
+    - 删前整行导出 JSON 到 db_backups/, 需要时可人工回插;
+    - 只在规则版本变化后执行一次(system_state 打标记), 之后启动不再删。
+      否则将来"班级尚未建档的新导入数据"会被静默销毁, 那种行保持 class_id NULL 即可。
+    """
+    key = f"classid_prune_v{_PRUNE_RULE_VERSION}"
+    if _state_get(c, key) is not None:
+        return
+
+    deleted: dict[str, int] = {}
+    dumped: dict[str, list[dict]] = {}
+    for table in _BACKFILL_TABLES:
+        try:
+            reader = c.connection.cursor()
+            reader.row_factory = sqlite3.Row
+            rows = [dict(r) for r in reader.execute(
+                f"SELECT * FROM {table} WHERE class_id IS NULL"
+            ).fetchall()]
+        except sqlite3.Error:
+            continue
+        if not rows:
+            continue
+        deleted[table] = len(rows)
+        dumped[table] = rows
+        c.execute(f"DELETE FROM {table} WHERE class_id IS NULL")
+
+    if not deleted:
+        _state_set(c, key, "clean")
+        return
+
+    backup = ""
+    try:
+        _PRUNE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        path = _PRUNE_BACKUP_DIR / ("classid_prune_v%d_%s.json" % (
+            _PRUNE_RULE_VERSION, datetime.now().strftime("%Y%m%d-%H%M%S")))
+        path.write_text(json.dumps(
+            {"reason": "回填后仍无法唯一定位到班级(class_id IS NULL)", "tables": dumped},
+            ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        backup = str(path)
+    except Exception as e:
+        logger.warning(f"[db-selfcheck] 清理脏数据写留底失败(已删除, 无备份): {e}")
+
+    _state_set(c, key, json.dumps({"deleted": deleted, "backup": backup}, ensure_ascii=False))
+    detail = ", ".join(f"{t} {n} 行" for t, n in deleted.items())
+    logger.warning(
+        f"[db-selfcheck] 已清理无法唯一定位到班级的存量行: {detail}"
+        + (f"; 整行留底 {backup}" if backup else "")
+    )
+
+
+def _backfill_grade_class_ids(c):
+    """回填存量数据的 grade_id/class_id（幂等，仅在缺失时执行）
+
+    日志策略: 合并成一条, 且只在真的改到数据时提示; 无变更走 DEBUG, 不再每次启动刷屏。
+    """
+    try:
+        changes: list[str] = []
+
+        # 1. 学生 users（role=2 才有年级/班级；教师的 grade 是 "高一|高二" 多年级串，
+        #    按设计不落 grade_id/class_id，一起扫只会每轮空转并重复打日志）
+        if c.execute("SELECT COUNT(*) FROM users WHERE role=2 AND grade_id IS NULL "
+                     "AND grade IS NOT NULL AND grade!=''").fetchone()[0]:
             c.execute("UPDATE users SET grade_id=(SELECT id FROM grades WHERE name=users.grade) "
-                      "WHERE grade_id IS NULL AND grade IS NOT NULL AND grade!=''")
+                      "WHERE role=2 AND grade_id IS NULL AND grade IS NOT NULL AND grade!='' "
+                      "  AND EXISTS(SELECT 1 FROM grades g2 WHERE g2.name=users.grade)")
+            _n = c.rowcount
+            if _n:
+                changes.append(f"users 回填 grade_id {_n} 行")
+        if c.execute("SELECT COUNT(*) FROM users WHERE role=2 AND class_id IS NULL "
+                     "AND class IS NOT NULL AND class!=''").fetchone()[0]:
             c.execute("UPDATE users SET class_id=(SELECT c2.id FROM classes c2 JOIN grades g ON c2.grade_id=g.id "
                       "WHERE g.name=users.grade AND (c2.name=users.class||'班' OR c2.name=users.class)) "
-                      "WHERE class_id IS NULL AND class IS NOT NULL AND class!=''")
-            pass
+                      "WHERE role=2 AND class_id IS NULL AND class IS NOT NULL AND class!='' "
+                      "  AND EXISTS(SELECT 1 FROM classes c3 JOIN grades g3 ON c3.grade_id=g3.id "
+                      "              WHERE g3.name=users.grade AND (c3.name=users.class||'班' OR c3.name=users.class))")
+            _n = c.rowcount
+            if _n:
+                changes.append(f"users 回填 class_id {_n} 行")
 
         # 2. scores / rollcall 系列表
-        for table in ['scores', 'rollcall_weights', 'rollcall_meta', 'rollcall_history']:
-            c.execute(f"SELECT COUNT(*) FROM {table} WHERE grade_id IS NULL")
-            if c.fetchone()[0]:
-                c.execute(f"UPDATE {table} SET grade_id=(SELECT id FROM grades WHERE name={table}.grade) "
-                          f"WHERE grade_id IS NULL")
-                logger.info(f"已自动回填 {table} 表 grade_id")
+        for table in _BACKFILL_TABLES:
+            if c.execute(f"SELECT COUNT(*) FROM {table} WHERE grade_id IS NULL").fetchone()[0]:
+                # EXISTS 前置条件: 年级名在 grades 表里查不到的行不要反复"更新成 NULL"。
+                # 少了这个条件, UPDATE 每次都命中同一批行(值仍是 NULL), 启动日志就会天天误报"已回填"。
+                c.execute(f"""UPDATE {table} SET grade_id=(SELECT id FROM grades WHERE name={table}.grade)
+                              WHERE grade_id IS NULL
+                                AND EXISTS(SELECT 1 FROM grades g2 WHERE g2.name = {table}.grade)""")
+                _n = c.rowcount          # 必须在下一次 execute 之前取, SELECT 会把 rowcount 重置为 -1
+                if _n:
+                    changes.append(f"{table} 回填 grade_id {_n} 行")
             # R8: 旧迁移只回填了 grade_id, class_id 永远是 NULL, 任何按 class_id 过滤的
             # 统计都会恒为 0。这里做一次幂等回填(仅填 NULL)。class_name 在不同表里有
             # "高一1班"/"1班"/"1" 三种写法, 按精确形态逐一匹配; 匹配不上就保持 NULL,
@@ -1978,12 +2082,29 @@ def _backfill_grade_class_ids(c):
                     WHERE class_id IS NULL
                       AND class_name IS NOT NULL AND class_name != ''
                       AND grade IS NOT NULL AND grade != ''
+                      AND EXISTS(SELECT 1 FROM classes cl2 JOIN grades g2 ON cl2.grade_id = g2.id
+                                 WHERE g2.name = {table}.grade
+                                   AND (cl2.display_name = {table}.class_name
+                                        OR cl2.name = {table}.class_name
+                                        OR cl2.display_name = {table}.grade || {table}.class_name
+                                        OR cl2.display_name = {table}.grade || {table}.class_name || '班')
+                      )
                 """)
-                _left = c.execute(f"SELECT COUNT(*) FROM {table} WHERE class_id IS NULL").fetchone()[0]
-                logger.info(f"已尝试回填 {table} 表 class_id, 仍有 {_left} 行未能唯一定位到班级")
+                _n = c.rowcount          # 同上: 先存下再跑后续 SELECT
+                if _n:
+                    _left = c.execute(f"SELECT COUNT(*) FROM {table} WHERE class_id IS NULL").fetchone()[0]
+                    changes.append(f"{table} 回填 class_id {_n} 行(仍有 {_left} 行定位不到)")
+
+        # 3. 剩余的"定位不到班级"存量脏数据: 一次性清理(带留底), 之后启动静默
+        _prune_unlocatable_rows(c)
 
         conn = c.connection
         conn.commit()
+
+        if changes:
+            logger.info("[db-selfcheck] " + "; ".join(changes))
+        else:
+            logger.debug("[db-selfcheck] grade_id/class_id 无需回填")
     except Exception as e:
         logger.warning(f"自动回填 grade_id/class_id 失败: {e}")
 

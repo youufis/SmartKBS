@@ -14,6 +14,43 @@ from datetime import datetime, timedelta
 from backend.database import get_connection
 from backend.logger import logger
 
+
+def _state_get(key: str):
+    """读 system_state 里上次报告过的结果签名(表缺失/异常时按"从未报告"处理)"""
+    try:
+        with get_connection() as conn:
+            row = conn.execute("SELECT value FROM system_state WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _state_set(key: str, value: str) -> None:
+    try:
+        with get_connection() as conn:
+            conn.execute(
+                """INSERT INTO system_state (key, value, updated_at) VALUES (?, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""",
+                (key, value, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def _log_if_changed(key: str, signature: str, message: str) -> None:
+    """例行维护日志: 结果与上次不同时才 INFO 提示, 重复出现只写文件(DEBUG)。
+
+    后台任务每 24h 跑一次, 数值长期不变(例如某个学生有一条无流水的积分汇总)时,
+    每次都往控制台刷一条同内容的日志没有意义。
+    """
+    if _state_get(key) == signature:
+        logger.debug(message + " (与上次一致, 已在文件日志降级)")
+        return
+    _state_set(key, signature)
+    logger.info(message)
+
+
 _ITEMS = [
     # B1: 原候选列名(synced_at/created_at/timestamp/log_time)在该表里一个都不存在,
     # _pick_col 返回 None -> 该条目被静默跳过, 30 天保留从不执行。真实列为
@@ -206,9 +243,11 @@ def _reconcile_points_and_badges() -> None:
         from backend.reward_engine import reconcile_student_totals
         res = reconcile_student_totals(auto_fix=True)
         if res.get("mismatch") or res.get("orphan"):
-            logger.info(
+            _log_if_changed(
+                "log_retention:points_reconcile",
+                f"mismatch={res['mismatch']},orphan={res['orphan']}",
                 f"[log_retention] 积分对账: 校正 {res['mismatch']} 人, 清理无流水汇总 {res['orphan']} 人 "
-                f"(共检查 {res['checked']}), 样例={res['samples'][:3]}"
+                f"(共检查 {res['checked']}), 样例={res['samples'][:3]}",
             )
     except Exception as e:
         logger.warning(f"[log_retention] 积分对账失败: {e}")
@@ -228,8 +267,11 @@ def _reconcile_points_and_badges() -> None:
                     unlocked += 1
             except Exception:
                 continue
-        if students:
-            logger.info(f"[log_retention] 徽章兜底检测完成: {len(students)} 人, 新解锁 {unlocked} 人")
+        # 解锁数为 0 属正常巡检结果, 只写文件日志; 真的新解锁了才提示
+        if unlocked:
+            logger.info(f"[log_retention] 徽章兜底检测: 检查 {len(students)} 人, 新解锁 {unlocked} 人")
+        elif students:
+            logger.debug(f"[log_retention] 徽章兜底检测完成: {len(students)} 人, 无新解锁")
     except Exception as e:
         logger.warning(f"[log_retention] 徽章兜底检测失败: {e}")
 
