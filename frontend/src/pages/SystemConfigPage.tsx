@@ -3,7 +3,7 @@ import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
-  Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select,
+  Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip,
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
@@ -821,7 +821,7 @@ const UpgradePanel: React.FC = () => {
             { title: t('sourceIP'), dataIndex: 'client_ip', key: 'client_ip', width: 130,
               render: (ip: string) => ip ? <Tag>{ip}</Tag> : '-' },
             { title: t('status'), dataIndex: 'status', key: 'status', width: 120,
-              render: (s: string) => {
+              render: (s: string, r: any) => {
                 const map: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
                   success: { color: 'green', icon: <CheckCircleOutlined />, label: t('statusSuccess') },
                   failed: { color: 'red', icon: <CloseCircleOutlined />, label: t('statusFailed') },
@@ -833,7 +833,9 @@ const UpgradePanel: React.FC = () => {
                   interrupted: { color: 'volcano', icon: <WarningOutlined />, label: t('statusInterrupted') },
                 }
                 const item = map[s] || { color: 'default', icon: null, label: s }
-                return <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
+                const tag = <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
+                // 被对账收口的记录要能解释"凭什么判成成功/中断"（note 由后端给出）
+                return r?.note ? <Tooltip title={r.note}>{tag}</Tooltip> : tag
               },
             },
             {
@@ -857,6 +859,15 @@ const UpgradePanel: React.FC = () => {
                               <p style={{ color: '#888', marginBottom: 12 }}>
                                 {t('commitsCount', { count: r.commits })}
                               </p>
+                            )}
+                            {r.note && (
+                              <div style={{
+                                background: '#e6f4ff', border: '1px solid #91caff',
+                                borderRadius: 6, padding: '10px 14px', marginBottom: 12,
+                                fontSize: 13, color: '#0958d9', whiteSpace: 'pre-wrap',
+                              }}>
+                                {r.note}
+                              </div>
                             )}
                             {isError && (
                               <div style={{

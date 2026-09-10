@@ -9,6 +9,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -318,30 +319,60 @@ def _load_state() -> dict[str, Any]:
     return data
 
 
+#: 状态文件的读-改-写互斥：升级流水线、自动版本检测线程、自动同步都会写同一份文件
+_STATE_LOCK = threading.RLock()
+
+
 def _save_state(s: dict[str, Any]):
-    STATE_FILE.write_text(
-        json.dumps(s, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    """原子落盘（临时文件 + os.replace）。
+
+    直接 write_text 时，进程若在写到一半处被 --reload / 应用池回收杀掉，就会留下半截
+    JSON，下次 _load_state 解析失败只能当"没有历史"，整份升级记录凭空消失。
+    """
+    payload = json.dumps(s, ensure_ascii=False, indent=2)
+    tmp = STATE_FILE.with_name(STATE_FILE.name + ".tmp")
+    with _STATE_LOCK:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, STATE_FILE)
+
+
+def _mutate_state(mutator) -> dict[str, Any]:
+    """在锁内完成 读->改->写，避免两个写入方互相覆盖对方的键（丢更新）。"""
+    with _STATE_LOCK:
+        s = _load_state()
+        mutator(s)
+        _save_state(s)
+        return s
 
 
 def _append_history(entry: dict[str, Any]) -> None:
-    s = _load_state()
-    s["history"].append(entry)
-    _save_state(s)
+    def _m(st: dict[str, Any]) -> None:
+        st["history"].append(entry)
+    _mutate_state(_m)
 
 
 def _finalize_history(task_id: str, entry: dict[str, Any]) -> None:
     """把升级开始时占位的 in_progress 记录改写成最终状态；没有占位就补一条。"""
-    s = _load_state()
-    hist = s["history"]
-    for i, h in enumerate(hist):
-        if isinstance(h, dict) and h.get("task_id") == task_id:
-            hist[i] = {**h, **entry}
-            break
-    else:
+    def _m(st: dict[str, Any]) -> None:
+        hist = st["history"]
+        for i, h in enumerate(hist):
+            if isinstance(h, dict) and h.get("task_id") == task_id:
+                hist[i] = {**h, **entry}
+                return
         hist.append(entry)
-    _save_state(s)
+    _mutate_state(_m)
+
+
+def _history_entry(task_id: str) -> dict[str, Any] | None:
+    with _STATE_LOCK:
+        st = _load_state()
+    for h in st.get("history", []):
+        if isinstance(h, dict) and h.get("task_id") == task_id:
+            return h
+    return None
 
 
 def _read_disk_version() -> str:
@@ -381,37 +412,174 @@ def _pid_alive(pid: int) -> bool:
         return True
 
 
+def _sync_git_out(args: list[str], timeout: int = 20) -> str:
+    """同步跑一条只读 git 命令；失败/超时一律返回空串（对账路径绝不允许抛异常）"""
+    try:
+        return _run_subprocess(["git", *args], cwd=str(BASE_DIR), timeout=timeout,
+                               capture_output=True, env=_make_git_env()).strip()
+    except Exception:
+        return ""
+
+
+def _code_sync_completed(to_version: str) -> tuple[bool, str]:
+    """判断代码是否已经到位 —— 用来区分"被重启打断但其实成功了"和"真没升上去"。
+
+    两条独立判据，任一成立即算完成：
+      1) 工作区 version.json 的 latest_version == 本次升级的目标版本；
+      2) git HEAD 已与本地 origin/master 一致（或不再落后）。
+    """
+    disk = _read_disk_version()
+    target = str(to_version or "").strip()
+    if target and target != "unknown" and disk == target:
+        return True, f"工作区 version.json 已是目标版本 {disk}"
+    if target and target != "unknown" and disk and target != disk:
+        # 目标版本与工作区版本号直接对不上：不能只凭 git 一致就宣布成功，
+        # 否则"远端后来又前进过"的老遗留记录会被误判成升到目标版本了。
+        return False, f"version.json={disk} 与本次目标版本 {target} 不一致"
+
+    # 到这里说明目标版本无从比对（老记录缺 to_version 之类），退回 git 判据
+    head = _sync_git_out(["rev-parse", "HEAD"])
+    origin = _sync_git_out(["rev-parse", "origin/master"])
+    if head and origin:
+        if head == origin:
+            return True, f"HEAD 已与 origin/master 一致（{head[:8]}）"
+        behind = _sync_git_out(["rev-list", "--count", "HEAD..origin/master"])
+        if behind == "0":
+            return True, "HEAD 已不再落后 origin/master"
+        return False, (f"version.json={disk or '未知'}，HEAD 仍落后 origin/master "
+                       f"{behind or '?'} 个提交")
+    return False, f"version.json={disk or '未知'}，且无法用 git 佐证"
+
+
+def _live_lock_owner() -> int | None:
+    """仍存活且持有升级锁的其它进程 PID；无锁文件 / 持有者已死 / 锁内容损坏 -> None。"""
+    if not LOCK_FILE.exists():
+        return None
+    try:
+        pid = int((json.loads(LOCK_FILE.read_text(encoding="utf-8")) or {}).get("pid") or 0)
+    except Exception:
+        return None
+    if pid and pid != os.getpid() and _pid_alive(pid):
+        return pid
+    return None
+
+
+def finalize_orphan_upgrades(where: str = "startup") -> dict[str, Any]:
+    """收口"没人认领"的 in_progress 升级记录，并尽量判定它的真实结果。
+
+    现场成因（部署机最常踩）：Step 2 的 `git reset --hard` 会改写 backend/**.py，
+    uvicorn --reload / IIS 应用池回收恰好在那一瞬间重启进程，Step 6 的成功记账永远写不下去
+    —— 表现就是"版本明明升上去了，升级历史却一直显示升级中"。
+
+    安全前提：本进程没在跑升级、且没有存活进程持有升级锁，否则一律不动
+    （多 worker 部署时另一个进程可能真在升级）。
+    判不出成败、且距今未超过 LOCK_TIMEOUT_SECONDS 的记录也先留着，等下一轮再看。
+    """
+    out: dict[str, Any] = {"finalized": 0, "interrupted": 0, "left_running": 0}
+    if _state.get("running"):
+        return out
+    holder = _live_lock_owner()
+    if holder:
+        logger.debug(f"[upgrade] {where} 对账跳过：PID={holder} 仍持有升级锁")
+        return out
+
+    now = datetime.now()
+    done_list: list[str] = []
+    lost_list: list[str] = []
+
+    # 1) 先在锁内读出候选（很快），把 git 判定放到锁外做 —— 不让对账把并发的记账卡住
+    with _STATE_LOCK:
+        probes = [
+            (h.get("task_id"), str(h.get("to_version") or ""), str(h.get("timestamp") or ""))
+            for h in _load_state().get("history", [])
+            if isinstance(h, dict) and h.get("status") == "in_progress"
+        ]
+    if not probes:
+        return out
+
+    # 2) 锁外判定每条的真实结局
+    verdicts: dict[Any, tuple[str, str]] = {}      # task_id -> ("success"|"interrupted"|"keep", 理由)
+    for task_id, target, ts in probes:
+        try:
+            age = (now - datetime.fromisoformat(ts)).total_seconds()
+        except ValueError:
+            age = LOCK_TIMEOUT_SECONDS + 1
+        completed, why = _code_sync_completed(target)
+        if completed:
+            verdicts[task_id] = ("success", why)
+        elif age > LOCK_TIMEOUT_SECONDS:
+            verdicts[task_id] = ("interrupted", why)
+        else:
+            verdicts[task_id] = ("keep", why)
+            out["left_running"] += 1
+
+    # 3) 再进锁写回（重新读一遍，套用最新内容）
+    with _STATE_LOCK:
+        st = _load_state()
+        changed = False
+        for h in st.get("history", []):
+            if not isinstance(h, dict) or h.get("status") != "in_progress":
+                continue
+            verdict, why = verdicts.get(h.get("task_id"), ("keep", ""))
+            if verdict == "success":
+                h["status"] = "success"
+                h["reconciled_from"] = "in_progress"
+                h["reconciled_by"] = where
+                h["reconciled_at"] = now.isoformat()
+                h["note"] = (
+                    "升级流水线在改动代码后被服务重启打断、未能自行收尾；"
+                    f"{why}，按对账判定为升级成功。请确认数据库迁移与新依赖已随版本生效。"
+                )
+                out["finalized"] += 1
+                done_list.append(f"{h.get('from_version')}->{h.get('to_version')}")
+                # /status 重启后也要有据可读：只有这条更新时才覆盖既有结果
+                last = st.get("_last_upgrade_result") or {}
+                if str(last.get("completed_at") or "") < str(h.get("timestamp") or ""):
+                    st["_last_upgrade_result"] = {
+                        "status": "success",
+                        "from_version": h.get("from_version"),
+                        "to_version": h.get("to_version"),
+                        "commits": h.get("commits", 0),
+                        "admin": h.get("admin", ""),
+                        "client_ip": h.get("client_ip", ""),
+                        "completed_at": h.get("timestamp"),
+                        "reconciled_by": where,
+                    }
+                changed = True
+            elif verdict == "interrupted":
+                h["status"] = "interrupted"
+                h["interrupted_at"] = now.isoformat()
+                h["reconciled_by"] = where
+                h["note"] = f"升级未走完，且代码未升到目标版本：{why}"
+                out["interrupted"] += 1
+                lost_list.append(f"{h.get('from_version')}->{h.get('to_version')}")
+                changed = True
+
+        if changed:
+            _save_state(st)
+
+    if out["finalized"]:
+        logger.warning(
+            f"[upgrade] {where} 对账: {out['finalized']} 条卡在『升级中』的记录已按版本核对收口为成功"
+            f"（{'; '.join(done_list[:3])}）"
+        )
+    if out["interrupted"]:
+        logger.warning(
+            f"[upgrade] {where} 对账: {out['interrupted']} 条升级记录未走完且代码未到位，已标记为中断"
+            f"（{'; '.join(lost_list[:3])}）；请核对当前版本与数据库迁移是否完整"
+        )
+    return out
+
+
 def reconcile_upgrade_state_on_startup() -> dict[str, Any]:
-    """启动对账：收口上一次"没走完"的升级，并释放上一代进程遗留的升级锁。
+    """启动对账：释放上一代进程遗留的升级锁，并收口上一次"没走完"的升级记录。
 
     流水线在 git reset 之后被 --reload / 应用池回收打断时，老进程来不及写结尾，
     现场只剩一条 in_progress 记录 + 一个没人认领的锁文件，运维侧的表现就是
-    "版本明明变了、历史里查不到、再点升级又说有任务在跑"。
+    "版本明明变了、历史里却一直显示升级中，再点升级又说有任务在跑"。
     """
-    out: dict[str, Any] = {"interrupted": 0, "lock_released": False}
-    now = datetime.now()
-    try:
-        s = _load_state()
-        for h in s["history"]:
-            if not isinstance(h, dict) or h.get("status") != "in_progress":
-                continue
-            try:
-                age = (now - datetime.fromisoformat(str(h.get("timestamp") or ""))).total_seconds()
-            except ValueError:
-                age = LOCK_TIMEOUT_SECONDS + 1
-            if age <= LOCK_TIMEOUT_SECONDS:
-                continue                    # 可能真是另一个 worker 在跑，先不动
-            h["status"] = "interrupted"
-            h["interrupted_at"] = now.isoformat()
-            out["interrupted"] += 1
-        if out["interrupted"]:
-            _save_state(s)
-            logger.warning(
-                f"[upgrade] 启动对账: {out['interrupted']} 条升级记录未走完，已标记为中断；"
-                "请核对当前版本与数据库迁移是否完整"
-            )
-    except Exception as e:
-        logger.warning(f"[upgrade] 启动对账失败: {e}")
+    out: dict[str, Any] = {"finalized": 0, "interrupted": 0, "left_running": 0, "lock_released": False}
+    # 顺序不能反：先确认锁没有存活持有者，才谈得上判断那条 in_progress 是"孤儿"
     try:
         if LOCK_FILE.exists():
             data = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
@@ -422,6 +590,11 @@ def reconcile_upgrade_state_on_startup() -> dict[str, Any]:
                 logger.warning(f"[upgrade] 启动对账: 已释放上一代进程(PID={pid})遗留的升级锁")
     except Exception as e:
         logger.debug(f"[upgrade] 启动解锁检查未生效: {e}")
+
+    try:
+        out.update(finalize_orphan_upgrades(where="startup"))
+    except Exception as e:
+        logger.warning(f"[upgrade] 启动对账失败: {e}")
     return out
 
 
@@ -944,21 +1117,29 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
 
         # ── Step 6: 把占位记录改写为成功 ──
         # 记账本身出错不能把一次已经成功的升级拖进 except 分支(那里会回滚代码)
+        success_entry = {
+            "task_id": task_id,
+            "from_version": APP_VERSION,
+            "to_version": to_version,
+            "timestamp": datetime.now().isoformat(),
+            "admin": admin,
+            "client_ip": client_ip,  # 记录来源 IP
+            "status": "success",
+            "commits": behind,
+            "changed_files": changed_files,
+            "migrations": applied,
+            "changelog": remote.get("changelog", []),
+        }
         try:
-            _finalize_history(task_id, {
-                "task_id": task_id,
-                "from_version": APP_VERSION,
-                "to_version": to_version,
-                "timestamp": datetime.now().isoformat(),
-                "admin": admin,
-                "client_ip": client_ip,  # 记录来源 IP
-                "status": "success",
-                "commits": behind,
-                "changed_files": changed_files,
-                "migrations": applied,
-                "changelog": remote.get("changelog", []),
-            })
-            logger.info(f"[upgrade] Step 6/7: 历史已记录")
+            _finalize_history(task_id, success_entry)
+            # 回读校验：没落稳就重写一次。不补这一手，记账被并发覆盖时
+            # 该记录会一直停在 Step 1c 的 in_progress（前端表现就是"一直升级中"）。
+            landed = _history_entry(task_id)
+            if landed and landed.get("status") == "success":
+                logger.info(f"[upgrade] Step 6/7: 历史已记录")
+            else:
+                logger.warning(f"[upgrade] Step 6/7: 历史记录未落稳，重写一次 task={task_id}")
+                _finalize_history(task_id, success_entry)
 
             # ── Step 6b: 重启前持久化完成状态（新进程启动后可读取）──
             s = _load_state()
@@ -1016,7 +1197,6 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         else:
             logger.info("升级在改动代码之前就失败了，无需回滚")
 
-        s = _load_state()
         fail_entry = {
             "task_id": task_id,
             "from_version": APP_VERSION,
@@ -1028,15 +1208,10 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             "error": str(e),
             "rolled_back": rolled_back,
         }
-        hist = s["history"]
-        for idx, h in enumerate(hist):
-            if isinstance(h, dict) and h.get("task_id") == task_id:
-                hist[idx] = {**h, **fail_entry}
-                break
-        else:
-            hist.append(fail_entry)
+        _finalize_history(task_id, fail_entry)
+
         # 持久化失败状态，重启后仍可看到错误消息
-        s["_last_upgrade_result"] = {
+        last_result = {
             "status": "failed",
             "from_version": APP_VERSION,
             "to_version": to_version,
@@ -1044,7 +1219,10 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             "rolled_back": rolled_back,
             "completed_at": datetime.now().isoformat(),
         }
-        _save_state(s)
+
+        def _m_last(st: dict[str, Any]) -> None:
+            st["_last_upgrade_result"] = last_result
+        _mutate_state(_m_last)
     finally:
         _release_lock()
 
@@ -1205,11 +1383,16 @@ async def get_upgrade_history(
     """⑥ 升级历史记录（支持分页）"""
     user = get_current_user(request)
     require_admin(user)
+    # 顺手自愈：卡在"升级中"的孤儿记录，不用等下一次服务重启也能纠正过来
+    try:
+        finalize_orphan_upgrades(where="history")
+    except Exception as e:
+        logger.debug(f"[upgrade] 历史对账未生效: {e}")
     s = _load_state()
     all_history = s.get("history", [])
     total = len(all_history)
-    # 倒序排列（最新的在前）
-    all_history.reverse()
+    # 倒序排列（最新的在前）；用切片而不是 .reverse()，避免就地改动读出来的列表
+    all_history = list(reversed(all_history))
     start = (page - 1) * page_size
     end = start + page_size
     items = all_history[start:end]
