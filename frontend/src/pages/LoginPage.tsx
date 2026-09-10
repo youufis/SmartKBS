@@ -12,6 +12,7 @@ import ThemeSwitcher from '../components/ThemeSwitcher'
 import LanguageSwitcher from '../components/LanguageSwitcher'
 import ForgotPasswordModal from '../components/ForgotPasswordModal'
 import { getRandomQuote } from '../constants/loginQuotes'
+import { startPoller, stopPoller } from '../utils/poller'
 
 const { Text, Title, Paragraph } = Typography
 
@@ -43,9 +44,10 @@ const LoginPage: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    getOnlineCount().then(setOnlineCount).catch(() => {})
-    const timer = setInterval(() => getOnlineCount().then(setOnlineCount).catch(() => {}), 15000)
-    return () => clearInterval(timer)
+    const poll = () => { getOnlineCount().then(setOnlineCount).catch(() => {}) }
+    // 登录页本身没有登录态，requireAuth=false；标签页切到后台时自动停轮询
+    startPoller('login-online-count', poll, 15000, { requireAuth: false })
+    return () => stopPoller('login-online-count')
   }, [])
 
   const handleLogin = async (values: { username: string; password: string }) => {

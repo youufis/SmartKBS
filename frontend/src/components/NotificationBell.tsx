@@ -14,6 +14,7 @@ import { useCompanionStore } from '../stores/companionStore'
 import type { NotificationItem } from '../api/notifications'
 import type { PushMessage } from '../api/companion'
 import { useNoticeText } from '../utils/notificationText'
+import { startPoller, stopPoller } from '../utils/poller'
 
 const { Text } = Typography
 
@@ -78,12 +79,12 @@ const NotificationBell: React.FC = () => {
   }, [isStudent])
 
   useEffect(() => {
-    fetchAllUnreadCounts()
-    const timer = setInterval(fetchAllUnreadCounts, 30000)
+    // 交给全站轮询管理器：未登录不发、标签页在后台不发、401 时可一键全停
+    startPoller('notification-unread', fetchAllUnreadCounts, 30000)
     const handleUnreadChange = () => fetchAllUnreadCounts()
     window.addEventListener('notification:unread-changed', handleUnreadChange)
     return () => {
-      clearInterval(timer)
+      stopPoller('notification-unread')
       window.removeEventListener('notification:unread-changed', handleUnreadChange)
     }
   }, [fetchAllUnreadCounts])

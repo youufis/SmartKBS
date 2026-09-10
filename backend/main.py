@@ -34,9 +34,6 @@ def _get_app_version() -> str:
 
 APP_VERSION = _get_app_version()
 
-# ── 过滤 uvicorn 访问日志中的同步上报请求 ──
-
-
 # ── 应用生命周期 ──
 
 @asynccontextmanager
@@ -142,6 +139,7 @@ app = FastAPI(
 
 # AI 后台任务并发上限: 统一转 429, 避免在每个端点各写一遍 try/except
 from backend.ai_task_manager import TooManyAITasks
+from backend.auth_errors import AuthError, auth_error_body, log_auth_reject
 
 
 @app.exception_handler(TooManyAITasks)
@@ -151,6 +149,18 @@ async def _handle_too_many_ai_tasks(request, exc: TooManyAITasks):
                         content={"detail": f"您已有 {exc.limit} 个 AI 分析在进行中，请等待当前结果后再试"})
 
 
+# 未登录: 401 里带上原因码(expired / invalid / stale / missing)，前端好区分处理、日志好排查
+@app.exception_handler(AuthError)
+async def _handle_auth_error(request, exc: AuthError):
+    from fastapi.responses import JSONResponse
+    log_auth_reject(request, exc.code, where="dependency")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=auth_error_body(exc.code, exc.message),
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 # CORS 配置（开发环境允许前端 dev server 跨域）
 app.add_middleware(
     CORSMiddleware,
@@ -158,6 +168,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # 滑动续期的新令牌放在自定义头里，跨域时浏览器默认读不到，必须显式 expose
+    expose_headers=["X-Renew-Token"],
 )
 
 # Gzip 压缩（所有大于 100KB 的响应自动压缩；SSE 流式响应自动跳过压缩）

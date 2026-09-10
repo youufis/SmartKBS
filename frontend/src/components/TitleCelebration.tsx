@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { startPoller, stopPoller } from '../utils/poller'
 
 const { Title, Text } = Typography
 
@@ -111,18 +112,18 @@ const TitleCelebration: React.FC = () => {
     }
   }, [isStudent])
 
-  // 定期轮询（每 30 秒）
+  // 定期轮询（每 30 秒，交给全站轮询管理器统一节流）
   useEffect(() => {
     if (!isStudent) return
-    // 首次延迟 5 秒后再检查，给页面加载时间
+    // 首次延迟 5 秒后再检查，给页面加载时间；之后就由 poller 接管
     const initialTimer = setTimeout(() => {
       checkNotifications()
+      startPoller('title-celebration', checkNotifications, 30000, { immediate: false })
     }, 5000)
 
-    const interval = setInterval(checkNotifications, 30000)
     return () => {
       clearTimeout(initialTimer)
-      clearInterval(interval)
+      stopPoller('title-celebration')
     }
   }, [isStudent, checkNotifications])
 

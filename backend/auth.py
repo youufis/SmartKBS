@@ -13,6 +13,13 @@ from backend.config import (
     JWT_SECRET_KEY,
     JWT_ALGORITHM,
 )
+from backend.auth_errors import (
+    AUTH_EXPIRED,
+    AUTH_INVALID,
+    AUTH_MISSING,
+    AUTH_NO_ACCOUNT,
+    AUTH_STALE,
+)
 from backend.api.config_router import get_config_value
 from backend.database import execute_query, execute_insert_update, get_connection
 
@@ -89,30 +96,51 @@ def get_user_credential(username: str) -> tuple[int, int] | None:
     return int(role_val), int(version_val)
 
 
-def authenticate_payload(token: str) -> dict[str, Any] | None:
-    """校验令牌: 签名有效 + 账号存在 + 版本号一致, 并把角色改写为数据库真值。
+def verify_token(token: str) -> tuple[Optional[dict[str, Any]], str]:
+    """校验令牌，返回 (payload, code)。
 
-    A2: 版本号必须 >=1 —— 只有登录流程会签发令牌, 而登录前必然先递增 token_version,
-    因此 version=0 的令牌只可能是用仓库里的默认 JWT 密钥伪造出来的(针对从未登录过的
-    账号或不存在的用户名)。未配置 JWT_SECRET_KEY 环境变量时, 这条是最后一道闸。
+    payload 为 None 时 code 说明失败原因（见 backend/auth_errors.py）：
+      - auth_missing    压根没带 token
+      - token_expired   签名对但已过期
+      - token_invalid   签名/格式不对，或 A2 兜底（token_version<1 的伪造令牌）
+      - token_stale     签名有效但版本号不符 —— 被同账号顶下线 / 已登出
+      - account_missing token 里的账号已不存在
+    成功时 code 为空字符串，且 role 一律改写为数据库真值（防旧令牌角色残留与伪造提权）。
     """
     if not token:
-        return None
-    payload = decode_jwt_token(token)
-    if not payload:
-        return None
+        return None, AUTH_MISSING
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        return None, AUTH_EXPIRED
+    except jwt.InvalidTokenError:
+        return None, AUTH_INVALID
+
     username = payload.get("username", "")
     if not username:
-        return None
+        return None, AUTH_INVALID
     cred = get_user_credential(username)
-    if cred is None or cred[1] < 1:
-        return None
+    if cred is None:
+        return None, AUTH_NO_ACCOUNT
+    if cred[1] < 1:
+        # A2: 只有登录流程会签发令牌, 而登录前必然先递增 token_version,
+        # 因此 version=0 的令牌只可能是用仓库里的默认 JWT 密钥伪造出来的
+        return None, AUTH_INVALID
     if int(payload.get("token_version", 0) or 0) != cred[1]:
-        return None
+        return None, AUTH_STALE
     fixed = dict(payload)
     fixed["role"] = cred[0]
     fixed["username"] = username
-    return fixed
+    return fixed, ""
+
+
+def authenticate_payload(token: str) -> dict[str, Any] | None:
+    """校验令牌: 签名有效 + 账号存在 + 版本号一致, 并把角色改写为数据库真值。
+
+    需要区分失败原因（打日志 / 给前端 code）时用 verify_token()。
+    """
+    payload, _code = verify_token(token)
+    return payload
 
 
 def increment_token_version(username: str) -> int:
@@ -126,18 +154,34 @@ def increment_token_version(username: str) -> int:
     return get_token_version(username)
 
 
-def create_jwt_token(username: str, role: int, name: str = "") -> str:
-    """创建 JWT token（携带 token_version，用于单点登录校验）"""
-    version = get_token_version(username)
+def get_token_ttl_hours() -> int:
+    """当前生效的令牌有效期（小时）"""
+    try:
+        return int(get_config_value("JWT_EXPIRATION_HOURS", 24) or 24)
+    except (TypeError, ValueError):
+        return 24
+
+
+def _encode_token(username: str, role: int, name: str, version: int,
+                  ttl_hours: Optional[int] = None) -> str:
+    """按给定字段签发令牌（不查库，滑动续期走这条，避免每请求一次一次 SELECT）"""
+    hours = get_token_ttl_hours() if ttl_hours is None else ttl_hours
+    now = datetime.now(timezone.utc)
     payload = {
         "username": username,
         "role": role,
         "name": name,
         "token_version": version,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=get_config_value("JWT_EXPIRATION_HOURS", 24)),
-        "iat": datetime.now(timezone.utc),
+        "exp": now + timedelta(hours=hours),
+        "iat": now,
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+def create_jwt_token(username: str, role: int, name: str = "") -> str:
+    """创建 JWT token（携带 token_version，用于单点登录校验）"""
+    version = get_token_version(username)
+    return _encode_token(username, role, name, version)
 
 
 def decode_jwt_token(token: str) -> dict[str, Any] | None:
@@ -157,6 +201,70 @@ def verify_token_version(payload: dict[str, Any]) -> bool:
     token_version = payload.get("token_version", 0)
     db_version = get_token_version(username)
     return token_version == db_version
+
+
+# ── 滑动续期（治"页面开着开着就 401"）──
+
+_RENEW_MIN_INTERVAL_SECONDS = 60      # 同一用户最快 1 分钟签一次，避免每个请求都新签一个 token
+_renew_ts: dict[str, float] = {}      # username -> 上次续期的 monotonic 时间
+_renew_prune_at: float = 0.0
+
+
+def get_renew_threshold_seconds() -> int:
+    """剩余有效期低于该秒数时下发新 token。
+
+    配置项 JWT_RENEW_THRESHOLD_MINUTES（0 或留空 = 自动）：
+    自动值取"有效期的一半"与 6 小时的较小者，例如 24 小时有效期 -> 剩 6 小时就续。
+    """
+    try:
+        minutes = int(get_config_value("JWT_RENEW_THRESHOLD_MINUTES", 0) or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+    if minutes > 0:
+        return minutes * 60
+    ttl_seconds = get_token_ttl_hours() * 3600
+    return max(60, min(ttl_seconds // 2, 6 * 3600))
+
+
+def renew_token_if_needed(payload: Optional[dict[str, Any]]) -> Optional[str]:
+    """令牌快到期时按原身份签一个新 token，返回 None 表示不用续/被节流。
+
+    只延长有效期，不动 token_version，所以不会把用户从其它页面上顶下去；
+    旧 token 在自己的 exp 之前仍然可用（无状态 JWT 的固有行为，登出/改密仍会立刻作废）。
+    """
+    global _renew_prune_at
+
+    if not payload:
+        return None
+    username = payload.get("username") or ""
+    if not username:
+        return None
+    exp = payload.get("exp")
+    if not isinstance(exp, (int, float)):
+        return None
+    if exp - time.time() > get_renew_threshold_seconds():
+        return None
+
+    now = time.monotonic()
+    if now - _renew_ts.get(username, 0.0) < _RENEW_MIN_INTERVAL_SECONDS:
+        return None
+    if now >= _renew_prune_at:
+        # 定期清理（原地改，别重新绑定），防止长期运行后字典里堆满历史用户名
+        for stale_user in [u for u, ts in _renew_ts.items() if now - ts >= 3600]:
+            _renew_ts.pop(stale_user, None)
+        _renew_prune_at = now + 3600
+    _renew_ts[username] = now
+
+    try:
+        version = int(payload.get("token_version", 0) or 0)
+    except (TypeError, ValueError):
+        version = 0
+    return _encode_token(
+        username,
+        int(payload.get("role", ROLE_STUDENT) or ROLE_STUDENT),
+        payload.get("name", "") or "",
+        version,
+    )
 
 
 # ── 角色常量（统一入口，禁止硬编码数字） ──

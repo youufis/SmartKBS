@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse
 
+from backend.api.auth_guard import unauthorized
 from backend.api.dependencies import get_current_user
 from backend.utils import path_within
 from backend.auth import is_admin
@@ -175,7 +176,7 @@ async def serve_static_file(path: str, request: Request):
     # T7: 试题配图也要登录(旧实现只要 URL 含 /question_media/ 即匿名放行,
     #     凭 uuid 文件名即可批量拖走全部教学配图)
     if user is None:
-        raise HTTPException(status_code=401, detail="需要登录才能访问资源文件")
+        raise unauthorized(message="需要登录才能访问资源文件")
     
     username = user.get("username", "")
     role = user.get("role", 2)  # 默认学生

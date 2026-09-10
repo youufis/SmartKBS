@@ -19,13 +19,21 @@ export async function getMe(): Promise<User> {
   return data;
 }
 
-/** 带超时的 session 验证（用于页面初始化时快速检测 token 有效性） */
-export async function getMeWithTimeout(timeoutMs = 3000): Promise<User> {
+/**
+ * 带超时的 session 验证（用于页面初始化时快速检测 token 有效性）
+ * @param options.skipAuthHandler 默认 true：冷启动校验失败属于"本来就没登录"，
+ *        不该触发全局"登录已过期"提示，由 restoreSession 静默清理即可。
+ */
+export async function getMeWithTimeout(
+  timeoutMs = 3000,
+  options: { skipAuthHandler?: boolean } = {},
+): Promise<User> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const { data } = await apiClient.get('/api/auth/me', {
       signal: controller.signal,
+      skipAuthHandler: options.skipAuthHandler ?? true,
     });
     return data;
   } finally {

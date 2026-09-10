@@ -50,6 +50,14 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'ONLINE_USER_TIMEOUT_SECONDS', labelKey: 'field_ONLINE_USER_TIMEOUT_SECONDS', type: 'number', group: 'limit' },
   { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', type: 'boolean', group: 'limit' },
   { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', type: 'number', group: 'limit' },
+  // 令牌滑动续期 + 来源 IP 防护（backend/security_guard.py）
+  { key: 'JWT_RENEW_THRESHOLD_MINUTES', labelKey: 'field_JWT_RENEW_THRESHOLD_MINUTES', descKey: 'field_JWT_RENEW_THRESHOLD_MINUTES_desc', type: 'number', group: 'limit' },
+  { key: 'ENABLE_IP_GUARD', labelKey: 'field_ENABLE_IP_GUARD', descKey: 'field_ENABLE_IP_GUARD_desc', type: 'boolean', group: 'limit' },
+  { key: 'AUTH_FAIL_LIMIT', labelKey: 'field_AUTH_FAIL_LIMIT', descKey: 'field_AUTH_FAIL_LIMIT_desc', type: 'number', group: 'limit' },
+  { key: 'AUTH_FAIL_BAN_SECONDS', labelKey: 'field_AUTH_FAIL_BAN_SECONDS', descKey: 'field_AUTH_FAIL_BAN_SECONDS_desc', type: 'number', group: 'limit' },
+  { key: 'LOGIN_FAIL_LIMIT', labelKey: 'field_LOGIN_FAIL_LIMIT', descKey: 'field_LOGIN_FAIL_LIMIT_desc', type: 'number', group: 'limit' },
+  { key: 'TRUST_PROXY_HEADERS', labelKey: 'field_TRUST_PROXY_HEADERS', descKey: 'field_TRUST_PROXY_HEADERS_desc', type: 'boolean', group: 'limit' },
+  { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'limit' },
   { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'limit' },
   // 课程设置
   { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'subjects' },

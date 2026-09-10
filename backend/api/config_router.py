@@ -52,8 +52,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "MAX_IMAGE_SIZE_MB": 5,
     # JWT
     "JWT_EXPIRATION_HOURS": 24,
+    # 令牌滑动续期阈值（分钟）：剩余有效期低于该值时，随响应头 X-Renew-Token 下发新令牌。
+    # 0 = 自动（有效期的一半，最多 6 小时）。治"页面开着不动，几小时后全线 401"。
+    "JWT_RENEW_THRESHOLD_MINUTES": 0,
     # 在线用户超时
     "ONLINE_USER_TIMEOUT_SECONDS": 1800,
+    # ── 来源 IP 防护（backend/security_guard.py，内存态，重启即清）──
+    "ENABLE_IP_GUARD": True,                # 连续鉴权失败/登录失败的 IP 临时封禁
+    "TRUST_PROXY_HEADERS": False,           # 只有确实套了反代(Nginx/IIS)且它会覆写 XFF 时才开
+    "AUTH_FAIL_WINDOW_SECONDS": 60,         # 鉴权失败统计窗口
+    "AUTH_FAIL_LIMIT": 30,                  # 窗口内达到这个次数就封（挂机页面的 3 连发/30 秒 ≈ 6 次/分钟，不会误伤）
+    "AUTH_FAIL_BAN_SECONDS": 600,           # 临时封禁时长，0 = 只记日志不封
+    "LOGIN_FAIL_WINDOW_SECONDS": 600,       # 登录失败统计窗口（猜密码场景）
+    "LOGIN_FAIL_LIMIT": 10,                 # 窗口内登录失败次数上限
+    "IP_DENYLIST": [],                      # 永久拒绝的来源：精确 IP / 前缀(14.112.) / 网段(14.112.131.0/24)
     # AI 对话权限（可多选角色：1=教师, 2=学生；管理员始终可用）
     "ENABLE_AI_CHAT_FOR_ROLES": [1, 2],
     # 请求限制
@@ -233,7 +245,13 @@ def _mask_config(config: dict[str, Any]) -> dict[str, Any]:
 
 _NUM_RANGES: dict[str, tuple[float, float]] = {
     "JWT_EXPIRATION_HOURS": (1, 720),
+    "JWT_RENEW_THRESHOLD_MINUTES": (0, 43200),
     "ONLINE_USER_TIMEOUT_SECONDS": (60, 86400),
+    "AUTH_FAIL_WINDOW_SECONDS": (5, 3600),
+    "AUTH_FAIL_LIMIT": (1, 100000),
+    "AUTH_FAIL_BAN_SECONDS": (0, 86400),
+    "LOGIN_FAIL_WINDOW_SECONDS": (30, 86400),
+    "LOGIN_FAIL_LIMIT": (1, 100000),
     "MAX_DOC_SIZE_MB": (1, 200),
     "MAX_IMAGE_SIZE_MB": (1, 200),
     "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
@@ -242,6 +260,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
 }
 _BOOL_KEYS = {
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
+    "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled",
 }
@@ -252,7 +271,7 @@ _STR_LIMITS: dict[str, int] = {
     "dashscope_api_key": 200, "APPID": 128,
 }
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
-                 "SUBJECTS": 40, "enabled_notification_types": 40}
+                 "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64}
 _TITLE_LIST_KEYS = {"TITLE_CONFIG", "SUBJECT_TITLE_CONFIG", "BADGE_CONFIG"}
 _EXT_RE = None
 

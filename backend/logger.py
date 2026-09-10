@@ -9,6 +9,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +30,15 @@ _ACCESS_NOISE = (
     "GET / ",
 )
 
+# 前端定时轮询的接口(未读通知/学伴推送/进行中任务/在线人数) —— 这些路径上的 401
+# 属于"挂机页面 token 失效"的已知噪音，由 _PollAuthNoiseFilter 限流汇总
+_POLL_401_NOISE = (
+    "/api/notifications",
+    "/api/companion/push",
+    "/api/tasks/active",
+    "/api/auth/online-count",
+)
+
 
 class _SmartLogger(logging.Logger):
     """error 级日志在异常处理上下文中自动附加堆栈"""
@@ -46,6 +56,49 @@ class _AccessNoiseFilter(logging.Filter):
         except Exception:
             return True
         return not any(n in msg for n in _ACCESS_NOISE)
+
+
+class _PollAuthNoiseFilter(logging.Filter):
+    """压掉"前端轮询接口 + 401"这类已知访问日志噪音，改为限流汇总告警。
+
+    背景：通知未读 / 学伴推送未读 / 进行中任务这类轮询每 30s 一轮，页面挂机 +
+    token 失效时会把 access log 刷成 401 海。真问题时这些行反而淹没有用信息，
+    所以：单条丢弃，但每 60 秒输出一条"抑制了 N 条 + 样例"的 WARN，不丢线索。
+    只针对 401；轮询接口的 200/5xx、其它接口的 401 全部照常输出。
+    """
+
+    SUMMARY_INTERVAL = 60.0
+
+    def __init__(self, name: str = ""):
+        super().__init__(name)
+        self._suppressed = 0
+        self._sample = ""
+        self._last_report = 0.0
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        if not (" 401 " in msg and any(path in msg for path in _POLL_401_NOISE)):
+            return True
+
+        self._suppressed += 1
+        if not self._sample:
+            self._sample = msg.strip()
+        now = time.monotonic()
+        if now - self._last_report >= self.SUMMARY_INTERVAL:
+            self._last_report = now
+            count, sample = self._suppressed, self._sample
+            self._suppressed, self._sample = 0, ""
+            try:
+                logging.getLogger("smartkb").warning(
+                    f"[access] 近 60 秒内抑制 {count} 条轮询接口 401 访问日志，"
+                    f"样例: {sample}"
+                )
+            except Exception:
+                pass
+        return False
 
 
 class SizeRotatingHandler(logging.FileHandler):
@@ -148,3 +201,5 @@ uvicorn_access = logging.getLogger("uvicorn.access")
 uvicorn_access.setLevel(logging.INFO)
 if not any(isinstance(f, _AccessNoiseFilter) for f in uvicorn_access.filters):
     uvicorn_access.addFilter(_AccessNoiseFilter())
+if not any(isinstance(f, _PollAuthNoiseFilter) for f in uvicorn_access.filters):
+    uvicorn_access.addFilter(_PollAuthNoiseFilter())

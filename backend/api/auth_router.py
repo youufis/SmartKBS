@@ -25,7 +25,9 @@ from backend.auth import (
     reset_failed_attempts,
     SECURITY_QUESTIONS,
 )
+from backend.api.auth_guard import unauthorized
 from backend.api.config_router import get_config_value
+from backend.security_guard import record_login_failure
 from backend.logger import logger
 
 router = APIRouter()
@@ -65,12 +67,15 @@ async def login(req: LoginRequest, fastapi_request: Request):
         rows = name_rows
 
     if not rows:
+        # 以前"用户名不存在"完全不留痕，被猜账号时无从发现
+        record_login_failure(fastapi_request, username_or_name)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     username, hashed_password, class_val, name_val, gender_val, role_val, grade_val = rows[0]
 
     # 验证密码
     if not check_password(password, hashed_password):
+        record_login_failure(fastapi_request, username)
         raise HTTPException(status_code=401, detail="密码错误")
 
     # 登录前递增 token_version，使旧 token 失效（强制单点登录）
@@ -204,7 +209,7 @@ async def get_current_user(request: Request):
     """获取当前登录用户信息"""
     user = request.state.user
     if not user:
-        raise HTTPException(status_code=401, detail="未登录")
+        raise unauthorized()
 
     username = user["username"]
     rows = execute_query(
@@ -312,7 +317,7 @@ async def security_status(request: Request):
     """检查当前登录用户是否已设置双密保问题"""
     user = request.state.user
     if not user:
-        raise HTTPException(status_code=401, detail="未登录")
+        raise unauthorized()
     username = user.get("username", "")
     q1, q2 = get_security_questions(username)
     configured = bool(q1 and q2)
@@ -324,7 +329,7 @@ async def set_security(req: SetSecurityRequest, request: Request):
     """设置或修改双密保问题（需登录，需选2个不同的问题）"""
     user = request.state.user
     if not user:
-        raise HTTPException(status_code=401, detail="未登录")
+        raise unauthorized()
     username = user.get("username", "")
 
     if not req.question1 or not req.answer1 or not req.question2 or not req.answer2:

@@ -5,12 +5,18 @@ FastAPI 依赖注入工具
 from typing import Any
 from fastapi import Request, HTTPException
 
+from backend.api.auth_guard import unauthorized
+
 
 def get_current_user(request: Request) -> dict[str, Any]:
-    """从 request.state 获取当前登录用户信息"""
-    user = request.state.user
+    """从 request.state 获取当前登录用户信息。
+
+    未登录抛 AuthError（带 code=auth_missing），前端据此停轮询并跳登录，
+    后端日志也能区分"没带凭证"和"凭证过期/无效"。
+    """
+    user = getattr(request.state, "user", None)
     if user is None:
-        raise HTTPException(status_code=401, detail="未登录")
+        raise unauthorized()
     return user
 
 

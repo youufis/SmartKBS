@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, File, Form, Query
 from fastapi.responses import HTMLResponse
 from starlette.datastructures import UploadFile
 
+from backend.api.auth_guard import unauthorized
 from backend.api.dependencies import get_current_user
 from backend.auth import can_manage_html_files, is_admin, is_teacher
 from backend.config import ROOT_DIR, DEFAULT_LOGGED_IN_NAME, BASE_DIR
@@ -331,7 +332,7 @@ async def delete_resource(request: Request, path: str = Query(...)):
         logger.error(f"删除资源失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
 
-    raise HTTPException(status_code=401, detail="未登录")
+    raise unauthorized()
 
 
 # ── 重命名 ──

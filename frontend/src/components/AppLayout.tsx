@@ -38,6 +38,7 @@ import TitleCelebration from './TitleCelebration'
 import ThemeSwitcher from './ThemeSwitcher'
 import LanguageSwitcher from './LanguageSwitcher'
 import SecuritySetupModal from './SecuritySetupModal'
+import { startPoller, stopPoller } from '../utils/poller'
 
 const { Header, Sider, Content } = Layout
 
@@ -276,9 +277,9 @@ const AppLayout: React.FC = () => {
   const avatarBg = isAdmin ? '#f5222d' : isTeacher ? '#722ed1' : userTitleColor
 
   React.useEffect(() => {
-    fetchOnlineCount()
-    const timer = setInterval(fetchOnlineCount, 30000)
-    return () => clearInterval(timer)
+    // 在线人数是免鉴权接口，但仍收进全站轮询管理器：后台标签页不打扰服务器
+    startPoller('online-count', fetchOnlineCount, 30000, { requireAuth: false })
+    return () => stopPoller('online-count')
   }, [fetchOnlineCount])
 
   const [securitySetupOpen, setSecuritySetupOpen] = useState(false)

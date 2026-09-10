@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { Spin, message } from 'antd'
 import { useAuthStore } from './stores/authStore'
+import { AUTH_UNAUTHORIZED_EVENT, type UnauthorizedDetail } from './api/client'
 import LoginPage from './pages/LoginPage'
 
 import AppLayout from './components/AppLayout'
@@ -73,16 +74,23 @@ function App() {
   // W10: 错题巩固练习的阈值检查改在"进入错题本页"时后台触发(见 WrongBookPage),
   // 不再在每次应用启动时都做一次重活
 
-  // 监听异地登录踢出事件
+  // 会话失效统一收口：token 过期/无效/被同账号顶下线 -> 停掉全部轮询 + 清凭证 + 回登录页
+  // （没有这段，挂机页面的轮询会每 30 秒把 401 刷满后端日志，且界面看起来"卡死"）
   useEffect(() => {
     const handler = (e: Event) => {
-      const customEvent = e as CustomEvent
-      forceLogout(customEvent.detail)
-      message.warning(customEvent.detail)
+      const detail = ((e as CustomEvent<UnauthorizedDetail>).detail || {}) as UnauthorizedDetail
+      const msg = detail.message || '登录已过期，请重新登录'
+      forceLogout(msg)
+      message.warning(msg)
       navigate('/login', { replace: true })
     }
+    window.addEventListener(AUTH_UNAUTHORIZED_EVENT, handler)
+    // 兼容历史事件名（桌面端等仍可能派发 auth:kickout）
     window.addEventListener('auth:kickout', handler)
-    return () => window.removeEventListener('auth:kickout', handler)
+    return () => {
+      window.removeEventListener(AUTH_UNAUTHORIZED_EVENT, handler)
+      window.removeEventListener('auth:kickout', handler)
+    }
   }, [navigate, forceLogout])
 
   return (
