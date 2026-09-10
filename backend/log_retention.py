@@ -103,6 +103,49 @@ def _dedupe_view_logs() -> None:
         logger.warning(f"[log_retention] 浏览日志去重失败: {e}")
 
 
+def _repair_view_logs_provenance() -> None:
+    """资源浏览记录的归属修复（幂等，只动"任何资源级统计都够不着"的数据）：
+
+    1) binding_id 指向已删除的 curriculum_bindings -> 置回 NULL。
+       这类行是按 binding_id 维度排查时的黑洞；置空后它与"后端兜底/共享页埋点"写出的
+       记录同构，由资源级口径统一处理。
+    2) resource_id > 0 但对应 shared_resources 行已不存在 -> 删除整行。
+       这是删除资源时按类型过滤漏删留下的悬空记录，教师端任何页面都看不到它，
+       却仍计入学生画像的浏览次数。resource_id<=0 的行不在此列（学生打开自己目录下
+       未登记成共享的文件，仍是有意义的浏览事件，保留）。
+    """
+    try:
+        with get_connection() as conn:
+            cur = conn.execute(
+                """UPDATE resource_view_logs SET binding_id = NULL
+                   WHERE binding_id IS NOT NULL
+                     AND NOT EXISTS (SELECT 1 FROM curriculum_bindings cb
+                                     WHERE cb.id = resource_view_logs.binding_id)"""
+            )
+            unstuck = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            dangling = conn.execute(
+                """SELECT COUNT(*) FROM resource_view_logs v
+                   WHERE v.resource_id > 0
+                     AND NOT EXISTS (SELECT 1 FROM shared_resources s
+                                     WHERE s.id = v.resource_id)"""
+            ).fetchone()[0]
+            if dangling:
+                conn.execute(
+                    """DELETE FROM resource_view_logs
+                       WHERE resource_id > 0
+                         AND NOT EXISTS (SELECT 1 FROM shared_resources s
+                                         WHERE s.id = resource_view_logs.resource_id)""")
+            conn.commit()
+        if unstuck or dangling:
+            _log_if_changed(
+                "view_logs_provenance", f"{unstuck}/{dangling}",
+                f"[log_retention] 浏览记录归属修复: 失效 binding 置空 {unstuck} 条, "
+                f"清理悬空(资源已删)记录 {dangling} 条",
+            )
+    except Exception as e:
+        logger.warning(f"[log_retention] 浏览记录归属修复失败: {e}")
+
+
 def _maintain_exam_attempts() -> None:
     """考试尝试维护(X1/X4):
     - 超 24h 未完结的 in_progress/grading → expired
@@ -278,6 +321,7 @@ def _reconcile_points_and_badges() -> None:
 
 def purge_once() -> None:
     _dedupe_view_logs()
+    _repair_view_logs_provenance()
     _maintain_exam_attempts()
     _maintain_question_media()
     _check_question_references()

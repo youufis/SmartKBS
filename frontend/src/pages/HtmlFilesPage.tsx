@@ -265,12 +265,14 @@ const HtmlFilesPage: React.FC = () => {
 
   const isStudent = user?.role === 'student'
 
-  const handleOpenResource = (urlPath: string, name: string, owner?: string, resourceId?: number) => {
+  const handleOpenResource = (urlPath: string, name: string, owner?: string, resourceId?: number, resourceType?: string) => {
     // 学生查看时记录追踪事件
     if (isStudent) {
       import('../api/tracking').then(mod => {
         mod.logResourceView({
-          resource_type: name.endsWith('.html') || name.endsWith('.htm') ? 'html' : 'download',
+          // file_name 入库时不带扩展名，按后缀猜类型会把 HTML 全部误标成 download，
+          // 导致这些浏览记录既进不了课程页统计也进不了资源中心统计，必须用真实类型
+          resource_type: resourceType || 'html',
           resource_id: resourceId || 0,
           source: 'sharing',
           file_path: urlPath,
@@ -281,7 +283,7 @@ const HtmlFilesPage: React.FC = () => {
     window.open(`/api/files/${urlPath}`, '_blank');
   }
 
-  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false, showGroupActions = false, resourceId?: number) => (
+  const renderFileCard = (name: string, urlPath: string, isShared: boolean, owner?: string, showShareBtn = false, showGroupActions = false, resourceId?: number, resourceType?: string) => (
     <Card
       key={urlPath}
       size="small"
@@ -292,7 +294,7 @@ const HtmlFilesPage: React.FC = () => {
       className="resource-file-card"
       onClick={() => {
         if (isShared) {
-          handleOpenResource(urlPath, name, owner, resourceId)
+          handleOpenResource(urlPath, name, owner, resourceId, resourceType)
         } else {
           window.open(`/api/files/${urlPath}`, '_blank')
         }
@@ -340,6 +342,7 @@ const HtmlFilesPage: React.FC = () => {
       name: s.file_name,
       urlPath: s.url_path || s.file_path,
       owner: s.owner_username,
+      resourceType: s.resource_type,
     }))
 
   return (
@@ -524,7 +527,7 @@ const HtmlFilesPage: React.FC = () => {
               children: (
                 <>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                      {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id))}
+                      {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id, item.resourceType))}
                     {sharedItems.length === 0 && <Typography.Text type="secondary">暂无共享资源</Typography.Text>}
                   </div>
                   {sharedItems.length > PAGE_SIZE && (
@@ -546,7 +549,7 @@ const HtmlFilesPage: React.FC = () => {
         ) : (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-              {sharedItems.slice((sharedPage - 1) * pageSize, sharedPage * pageSize).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id))}
+              {sharedItems.slice((sharedPage - 1) * pageSize, sharedPage * pageSize).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id, item.resourceType))}
               {sharedItems.length === 0 && <Typography.Text type="secondary">{t('noSharedResources')}</Typography.Text>}
             </div>
             {sharedItems.length > pageSize && (

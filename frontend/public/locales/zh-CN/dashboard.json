@@ -277,7 +277,7 @@
         "interaction_poll_votes": "投票记录",
         "ai_practice_results": "课程练习成绩与作答",
         "learning_progress": "知识点学习进度",
-        "resource_view_logs": "练习资源浏览记录",
+        "resource_view_logs": "练习资源浏览记录（按资源口径，与课程页显示次数一致）",
         "ai_practice_keys": "题卷密钥（清空后重新抽题）",
         "activity_rewards": "积分流水",
         "notifications": "活动通知",
@@ -303,7 +303,8 @@
       },
       "warn": {
         "task_ai_queue": "该任务的 AI 批改可能仍在后台排队，极少数情况下会在重置后补回个别批改记录，届时再执行一次重置即可",
-        "in_progress": "检测到{{label}} {{n}} 条：重置会打断进行中的参与，需勾选强制确认"
+        "in_progress": "检测到{{label}} {{n}} 条：重置会打断进行中的参与，需勾选强制确认",
+        "view_logs_shared_resource": "该资源还绑定在另外 {{bindings}} 个知识点上，按资源口径会一并清理 {{views}} 条浏览记录（与课程页显示的次数同口径）"
       },
       "inProgressLabel": {
         "exam_answering": "正在答题的答卷",

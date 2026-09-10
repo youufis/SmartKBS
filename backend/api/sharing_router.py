@@ -158,9 +158,11 @@ def _drop_share_row(rid: int, resource_type: str):
             from backend.question_db import execute_insert as q_del
             for (kpid,) in kp_rows:
                 q_del("DELETE FROM ai_practice_results WHERE kp_id=?", (kpid,))
+        # 按资源口径删：resource_id 即 shared_resources.id(跨类型唯一)，
+        # 顺带收掉历史上被误标成另一种 resource_type 的浏览行
         execute_insert_update(
-            "DELETE FROM resource_view_logs WHERE resource_type=? AND resource_id=?",
-            (resource_type, rid),
+            "DELETE FROM resource_view_logs WHERE resource_id=?",
+            (rid,),
         )
         execute_insert_update("DELETE FROM shared_resources WHERE id=?", (rid,))
         shared_assets.invalidate_cache()
@@ -611,11 +613,12 @@ async def unshare_resource(request: Request, id: int = Query(...)):
 
         # 清理查看日志 + 积分 + 通知
         try:
+            # 同上：不按 resource_type 过滤，避免误标行漏删
             execute_insert_update(
-                "DELETE FROM resource_view_logs WHERE resource_type=? AND resource_id=?",
-                (resource_type, id),
+                "DELETE FROM resource_view_logs WHERE resource_id=?",
+                (id,),
             )
-            logger.info(f"已清理 resource_view_logs: type={resource_type}, id={id}")
+            logger.info(f"已清理 resource_view_logs: id={id}")
         except Exception as e3:
             logger.warning(f"清理资源查看日志失败: {e3}")
         try:

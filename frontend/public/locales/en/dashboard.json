@@ -277,7 +277,7 @@
         "interaction_poll_votes": "Poll votes",
         "ai_practice_results": "Course practice results",
         "learning_progress": "Knowledge-point progress",
-        "resource_view_logs": "Resource view logs",
+        "resource_view_logs": "Resource view logs (per resource, same basis as the count shown in the course page)",
         "ai_practice_keys": "Practice paper keys (re-draw on clear)",
         "activity_rewards": "Point ledger",
         "notifications": "Activity notifications",
@@ -303,7 +303,8 @@
       },
       "warn": {
         "task_ai_queue": "AI grading for this task may still be queued in the background. In rare cases a grading record is written back after the reset - just reset again if that happens.",
-        "in_progress": "Found {{n}} {{label}}: resetting will interrupt ongoing participation, so force reset must be confirmed"
+        "in_progress": "Found {{n}} {{label}}: resetting will interrupt ongoing participation, so force reset must be confirmed",
+        "view_logs_shared_resource": "This resource is also bound to {{bindings}} other knowledge point(s); the resource-wide basis will clear all {{views}} view logs (same basis as the count shown in the course page)"
       },
       "inProgressLabel": {
         "exam_answering": "answers in progress",

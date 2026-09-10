@@ -269,7 +269,19 @@ RESET_SCOPES: dict[str, dict[str, Any]] = {
                    student_col="student_username"),
             Target("learning_progress", "knowledge_point_id = :kp", "知识点学习进度",
                    student_col="student_username", option=OPT_CLEAR_PROGRESS),
-            Target("resource_view_logs", "binding_id = :aid", "练习资源浏览记录",
+            # 口径必须与显示端一致：课程页与资源中心的浏览次数都按资源统计，而浏览记录有
+            # 三个写入来源 —— 前端课程埋点带 binding_id，后端兜底(source=direct) 与共享页
+            # 埋点(source=sharing) 的 binding_id 为空 —— 只按 binding_id 删会留下大半永远
+            # 清不掉的记录。
+            # 这里按 resource_id 匹配而不再限定 resource_type：resource_id 就是
+            # shared_resources.id(跨类型唯一)，顺带能收掉共享页埋点把 HTML 误标成 download
+            # 的历史行；:is_file_res 守卫则防止"绑定指向 question/exam"时，其 resource_id
+            # 与某个 shared_resources.id 撞号而误删别的资源的浏览记录。
+            # :res_id > 0 用于排除 resource_id=0(未登记成共享的资源)被整片误删。
+            Target("resource_view_logs",
+                   "(binding_id = :aid OR (:res_id > 0 AND :is_file_res = 1"
+                   " AND resource_id = :res_id))",
+                   "练习资源浏览记录（按资源口径，与课程页显示次数一致）",
                    student_col="student_username", option=OPT_CLEAR_VIEW_LOGS),
             Target("ai_practice_keys", "kp_id = :kp", "题卷密钥（清空后学生端重新抽题）", DB_QDB,
                    option=OPT_CLEAR_KEYS),
@@ -291,7 +303,8 @@ def _resolve_course(aid: Any) -> dict[str, Any]:
                             COALESCE(NULLIF(sr.file_name, ''), kp.name) AS raw_title,
                             kp.name AS kp_name, c.name AS course_name,
                             COALESCE(sr.owner_username, '') AS owner,
-                            COALESCE(c.grade, '') AS course_grade
+                            COALESCE(c.grade, '') AS course_grade,
+                            cb.resource_type AS res_type, cb.resource_id AS res_id
                      FROM curriculum_bindings cb
                      JOIN knowledge_points kp ON kp.id = cb.knowledge_point_id
                      JOIN chapters ch ON ch.id = kp.chapter_id
@@ -310,6 +323,13 @@ def _resolve_course(aid: Any) -> dict[str, Any]:
         "title": name or f"{r.get('course_name', '')} - {r.get('kp_name', '')}",
         "owner": r.get("owner") or "",
         "grade": (r.get("course_grade") or "").strip(),
+        # 浏览记录要按"资源"口径清理(与课程页/资源中心的浏览次数口径一致)，
+        # 因此把绑定指向的资源也带进上下文；资源已删时 res_type 为空、匹配不到任何行
+        "res_type": r.get("res_type") or "",
+        "res_id": int(r["res_id"]) if r.get("res_id") is not None else 0,
+        # 只有文件类资源(html/download)的浏览记录存在这张表里，
+        # 题目/考试类绑定的 resource_id 会与 shared_resources.id 撞号，必须单独挡住
+        "is_file_res": 1 if (r.get("res_type") or "") in ("html", "download") else 0,
     }
 
 
@@ -567,6 +587,24 @@ def preview_reset(activity_type: str, activity_id: Any,
             warnings.append({"code": "in_progress",
                              "params": {"count": cnt, "label": label, "label_code": ip_code},
                              "text": f"检测到{label} {cnt} 条：重置会打断进行中的参与，需强制确认"})
+
+    # 按资源口径清理浏览记录时，若该资源还绑在别的知识点上，重置其一会带走其它绑定的
+    # 浏览记录(与页面显示同口径，但属跨绑定副作用) —— 必须在预览里如实提醒
+    if sc["key"] == "course" and eff[OPT_CLEAR_VIEW_LOGS] and int(ctx.get("res_id") or 0) > 0:
+        vstat = next((x for x in targets if x["table"] == "resource_view_logs"), None)
+        if vstat and vstat["count"]:
+            n_other = int((_one(DB_MAIN,
+                                """SELECT COUNT(*) AS cnt FROM curriculum_bindings
+                                   WHERE resource_type = :rt AND resource_id = :rid AND id <> :aid""",
+                                {"rt": ctx.get("res_type"), "rid": ctx["res_id"],
+                                 "aid": ctx["aid"]}) or {}).get("cnt") or 0)
+            if n_other:
+                warnings.append({
+                    "code": "view_logs_shared_resource",
+                    "params": {"bindings": n_other, "views": vstat["count"]},
+                    "text": (f"该资源还绑定在另外 {n_other} 个知识点上，"
+                             f"按资源口径将一并清理 {vstat['count']} 条浏览记录"),
+                })
 
     plan = _status_plan(sc, master, eff)
     # "当前状态不在可回滚范围"属于纯展示信息，交前端按语言渲染（见 statusKeep 文案）

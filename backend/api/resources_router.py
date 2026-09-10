@@ -298,14 +298,16 @@ async def delete_resource(request: Request, path: str = Query(...)):
                     "DELETE FROM curriculum_bindings WHERE resource_type='html' AND resource_id=?",
                     (sid,),
                 )
-                # 清理资源查看日志
+                # 清理资源查看日志：resource_id 就是 shared_resources.id(跨类型唯一)，不能再按
+                # resource_type='html' 过滤 —— 共享页埋点历史上把 HTML 误标成 download 写过记录，
+                # 按类型过滤会漏删，留下任何资源级统计都够不着的悬空行
                 try:
                     execute_insert_update(
-                        "DELETE FROM resource_view_logs WHERE resource_id=? AND resource_type='html'",
+                        "DELETE FROM resource_view_logs WHERE resource_id=?",
                         (sid,),
                     )
-                except Exception:
-                    pass
+                except Exception as vl_err:
+                    logger.warning(f"清理资源浏览记录失败 (share id={sid}): {vl_err}")
                 # 清理共享记录
                 execute_insert_update(
                     "DELETE FROM shared_resources WHERE id=?",
