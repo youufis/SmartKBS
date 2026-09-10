@@ -66,6 +66,8 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'text', group: 'imagegen' },
   // 闯关挑战
   { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'boolean', group: 'quest' },
+  // 版本与升级
+  { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade' },
 ]
 
 const GROUP_LABELS: Record<string, string> = {
@@ -79,6 +81,7 @@ const GROUP_LABELS: Record<string, string> = {
   filetype: 'group_filetype',
   imagegen: 'group_imagegen',
   quest: 'group_quest',
+  upgrade: 'group_upgrade',
 }
 
 // ═══════════════════════════════════════════════
@@ -812,6 +815,11 @@ const UpgradePanel: React.FC = () => {
                   success: { color: 'green', icon: <CheckCircleOutlined />, label: t('statusSuccess') },
                   failed: { color: 'red', icon: <CloseCircleOutlined />, label: t('statusFailed') },
                   rolled_back: { color: 'orange', icon: <RollbackOutlined />, label: t('statusRolledBack') },
+                  // 自动同步同样会真的改变运行版本，历史里必须看得见；
+                  // in_progress/interrupted 用于识别「升级被进程重启打断」这种半截现场
+                  auto_synced: { color: 'blue', icon: <SyncOutlined />, label: t('statusAutoSynced') },
+                  in_progress: { color: 'processing', icon: <SyncOutlined spin />, label: t('statusInProgress') },
+                  interrupted: { color: 'volcano', icon: <WarningOutlined />, label: t('statusInterrupted') },
                 }
                 const item = map[s] || { color: 'default', icon: null, label: s }
                 return <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
@@ -1012,6 +1020,11 @@ const SystemConfigPage: React.FC = () => {
         if (!formValues['enabled_notification_types']) {
           formValues['enabled_notification_types'] = ['exam', 'system']
         }
+        // 与后端 _auto_pull_enabled() 的默认值保持一致：配置里从没写过就等于开启，
+        // 否则老部署一保存表单就会把开关“顺手”关掉
+        if (typeof formValues['auto_pull_enabled'] !== 'boolean') {
+          formValues['auto_pull_enabled'] = true
+        }
         form.setFieldsValue(formValues)
         loadApikeyStatus()
       } catch {
@@ -1206,7 +1219,7 @@ const SystemConfigPage: React.FC = () => {
                 initialValues={config}
                 style={{ maxWidth: 900 }}
               >
-                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen', 'quest'].map(renderGroup)}
+                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen', 'quest', 'upgrade'].map(renderGroup)}
 
                 <Divider />
                 <Space>

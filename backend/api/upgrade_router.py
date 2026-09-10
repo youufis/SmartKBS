@@ -298,12 +298,24 @@ async def _run_cmd(cmd: list[str], cwd: str, timeout: int = 120, capture_output:
 
 
 def _load_state() -> dict[str, Any]:
+    """读升级状态文件，并保证 history 一定是列表。
+
+    这里必须兜底：三处 `s["history"].append(...)` 一旦因为文件缺键/半截写入而抛
+    KeyError，异常会落进升级流水线的 except 分支 —— 而那个分支会顺手
+    `git reset --hard HEAD@{1}`，等于"记录写失败"把一次已经成功的升级回滚掉，
+    最后既没有历史也说不清代码处于哪个版本。
+    """
+    data: Any = None
     if STATE_FILE.exists():
         try:
-            return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
-            pass
-    return {"history": [], "current_backup": None}
+            data = None
+    if not isinstance(data, dict):
+        data = {"history": [], "current_backup": None}
+    if not isinstance(data.get("history"), list):
+        data["history"] = []
+    return data
 
 
 def _save_state(s: dict[str, Any]):
@@ -311,6 +323,106 @@ def _save_state(s: dict[str, Any]):
         json.dumps(s, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _append_history(entry: dict[str, Any]) -> None:
+    s = _load_state()
+    s["history"].append(entry)
+    _save_state(s)
+
+
+def _finalize_history(task_id: str, entry: dict[str, Any]) -> None:
+    """把升级开始时占位的 in_progress 记录改写成最终状态；没有占位就补一条。"""
+    s = _load_state()
+    hist = s["history"]
+    for i, h in enumerate(hist):
+        if isinstance(h, dict) and h.get("task_id") == task_id:
+            hist[i] = {**h, **entry}
+            break
+    else:
+        hist.append(entry)
+    _save_state(s)
+
+
+def _read_disk_version() -> str:
+    """读工作区 version.json 的 latest_version（代码同步后它就是新版本号）"""
+    try:
+        data = json.loads((BASE_DIR / "version.json").read_text(encoding="utf-8"))
+        return str(data.get("latest_version") or "")
+    except Exception:
+        return ""
+
+
+def _pid_alive(pid: int) -> bool:
+    """进程是否还活着。判断不了就返回 True(交给锁超时兜底)，绝不冒误判后并发升级的险。
+
+    Windows 上不能用 os.kill(pid, 0) —— CPython 在非 CTRL_* 信号分支会 OpenProcess +
+    TerminateProcess，那是真的去杀进程。这里用只读的 PROCESS_QUERY_LIMITED_INFORMATION。
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32          # type: ignore[attr-defined]
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return kernel32.GetLastError() != 87        # 87 = ERROR_INVALID_PARAMETER(无此进程)
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+
+
+def reconcile_upgrade_state_on_startup() -> dict[str, Any]:
+    """启动对账：收口上一次"没走完"的升级，并释放上一代进程遗留的升级锁。
+
+    流水线在 git reset 之后被 --reload / 应用池回收打断时，老进程来不及写结尾，
+    现场只剩一条 in_progress 记录 + 一个没人认领的锁文件，运维侧的表现就是
+    "版本明明变了、历史里查不到、再点升级又说有任务在跑"。
+    """
+    out: dict[str, Any] = {"interrupted": 0, "lock_released": False}
+    now = datetime.now()
+    try:
+        s = _load_state()
+        for h in s["history"]:
+            if not isinstance(h, dict) or h.get("status") != "in_progress":
+                continue
+            try:
+                age = (now - datetime.fromisoformat(str(h.get("timestamp") or ""))).total_seconds()
+            except ValueError:
+                age = LOCK_TIMEOUT_SECONDS + 1
+            if age <= LOCK_TIMEOUT_SECONDS:
+                continue                    # 可能真是另一个 worker 在跑，先不动
+            h["status"] = "interrupted"
+            h["interrupted_at"] = now.isoformat()
+            out["interrupted"] += 1
+        if out["interrupted"]:
+            _save_state(s)
+            logger.warning(
+                f"[upgrade] 启动对账: {out['interrupted']} 条升级记录未走完，已标记为中断；"
+                "请核对当前版本与数据库迁移是否完整"
+            )
+    except Exception as e:
+        logger.warning(f"[upgrade] 启动对账失败: {e}")
+    try:
+        if LOCK_FILE.exists():
+            data = json.loads(LOCK_FILE.read_text(encoding="utf-8"))
+            pid = int(data.get("pid") or 0)
+            if pid and pid != os.getpid() and not _pid_alive(pid):
+                LOCK_FILE.unlink()
+                out["lock_released"] = True
+                logger.warning(f"[upgrade] 启动对账: 已释放上一代进程(PID={pid})遗留的升级锁")
+    except Exception as e:
+        logger.debug(f"[upgrade] 启动解锁检查未生效: {e}")
+    return out
 
 
 def _set_progress(step: str, message: str, progress: int):
@@ -375,8 +487,12 @@ def _acquire_lock() -> bool:
                     if elapsed > LOCK_TIMEOUT_SECONDS:
                         logger.warning(f"[lock] 发现过期锁文件（{elapsed:.0f}秒前，PID={lock_pid}），已清理")
                         LOCK_FILE.unlink()
+                    elif not _pid_alive(int(lock_pid or 0)):
+                        # 时间没超但进程已经没了：上一次升级被 --reload / 应用池回收打断
+                        logger.warning(f"[lock] 锁记录 PID={lock_pid} 已不存在(上次升级被中断)，清理后继续")
+                        LOCK_FILE.unlink()
                     else:
-                        return False  # 锁未过期，已被占用
+                        return False  # 锁未过期且进程仍在，视为确有升级任务在跑
                 else:
                     return False
             except (json.JSONDecodeError, ValueError, OSError):
@@ -727,6 +843,7 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         behind: 预先计算的落后 commit 数（由 start_upgrade 传入，避免二次 fetch）
     """
     to_version = remote.get("latest_version", "unknown")
+    reset_done = False        # 是否已经真的动过工作区(Step 2)，决定失败时要不要回滚
     try:
         # ── Step 1: git fetch 增量拉取（如果已预缓存则跳过网络传输）──
         s_check = _load_state()
@@ -752,10 +869,27 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             ))
         logger.info(f"[upgrade] 落后 {behind} 个提交")
 
+        # ── Step 1c: 动代码之前先落一条「进行中」记录 ──
+        # 必须在 git reset 之前：Step 2 会改写 backend/**.py，uvicorn --reload(或 IIS
+        # 应用池回收)很可能立刻重启进程，Step 3~6 全部来不及执行 —— 表现就是
+        # 「版本确实升上去了，升级历史里却一条记录都没有」。先占位，收尾时就地更新。
+        _finalize_history(task_id, {
+            "task_id": task_id,
+            "from_version": APP_VERSION,
+            "to_version": to_version,
+            "timestamp": datetime.now().isoformat(),
+            "admin": admin,
+            "client_ip": client_ip,
+            "status": "in_progress",
+            "commits": behind,
+        })
+        logger.info(f"[upgrade] Step 1c: 已写入进行中占位记录 task={task_id}")
+
         # ── Step 2: git reset 快速同步 ──
         _set_progress("sync", f"正在同步 {behind} 个提交的变更到本地...", 30)
         logger.info(f"[upgrade] Step 2/7: git reset --hard origin/master")
         await _run_git(["reset", "--hard", "origin/master"], timeout=60)
+        reset_done = True
         logger.info(f"[upgrade] Step 2/7: reset 完成")
 
         # Step 2b: 获取变更文件列表
@@ -808,36 +942,39 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             pass
         logger.info(f"[upgrade] Step 5/7: 版本号已更新")
 
-        # ── Step 6: 记录历史 ──
-        s = _load_state()
-        s["history"].append({
-            "task_id": task_id,
-            "from_version": APP_VERSION,
-            "to_version": to_version,
-            "timestamp": datetime.now().isoformat(),
-            "admin": admin,
-            "client_ip": client_ip,  # 记录来源 IP
-            "status": "success",
-            "commits": behind,
-            "changed_files": changed_files,
-            "changelog": remote.get("changelog", []),
-        })
-        _save_state(s)
-        logger.info(f"[upgrade] Step 6/7: 历史已记录")
+        # ── Step 6: 把占位记录改写为成功 ──
+        # 记账本身出错不能把一次已经成功的升级拖进 except 分支(那里会回滚代码)
+        try:
+            _finalize_history(task_id, {
+                "task_id": task_id,
+                "from_version": APP_VERSION,
+                "to_version": to_version,
+                "timestamp": datetime.now().isoformat(),
+                "admin": admin,
+                "client_ip": client_ip,  # 记录来源 IP
+                "status": "success",
+                "commits": behind,
+                "changed_files": changed_files,
+                "migrations": applied,
+                "changelog": remote.get("changelog", []),
+            })
+            logger.info(f"[upgrade] Step 6/7: 历史已记录")
 
-        # ── Step 6b: 重启前持久化完成状态 ──
-        # 将升级完成标记写入状态文件，新进程启动后可读取
-        s["_last_upgrade_result"] = {
-            "status": "success",
-            "from_version": APP_VERSION,
-            "to_version": to_version,
-            "commits": behind,
-            "admin": admin,
-            "client_ip": client_ip,
-            "completed_at": datetime.now().isoformat(),
-        }
-        _save_state(s)
-        logger.info(f"[upgrade] Step 6b/7: 完成状态已持久化")
+            # ── Step 6b: 重启前持久化完成状态（新进程启动后可读取）──
+            s = _load_state()
+            s["_last_upgrade_result"] = {
+                "status": "success",
+                "from_version": APP_VERSION,
+                "to_version": to_version,
+                "commits": behind,
+                "admin": admin,
+                "client_ip": client_ip,
+                "completed_at": datetime.now().isoformat(),
+            }
+            _save_state(s)
+            logger.info(f"[upgrade] Step 6b/7: 完成状态已持久化")
+        except Exception as rec_err:
+            logger.error(f"[upgrade] Step 6/7: 历史记录写入失败(不影响已完成的升级): {rec_err}")
 
         # ── Step 7: 完成 ──
         logger.info(f"[upgrade] Step 7/7: 升级流程完成")
@@ -861,19 +998,26 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
         _state["running"] = False
         _set_progress("failed", f"❌ 升级失败: {e}", -1)
 
-        # 自动回滚：利用 git reflog 回到升级前的 HEAD
-        _set_progress("rollback", "升级失败，正在自动回滚...", -1)
-        logger.warning("升级失败，自动执行 git reflog 回滚...")
-        try:
-            await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=60)
-            logger.info("git reflog 回滚成功")
-            _set_progress("rolled_back", "已自动回滚到升级前状态", -2)
-        except Exception as rb_e:
-            logger.error(f"自动回滚失败: {rb_e}")
-            _set_progress("rollback_failed", f"回滚也失败，请手动处理: {rb_e}", -3)
+        # 自动回滚：只有 Step 2 真的动过工作区才需要，也才安全。
+        # 早退失败(fetch/迁移之前)时 HEAD 没动过，此时 reset --hard HEAD@{1} 会把
+        # 代码退到上一次无关的位置，等于用一个报错制造第二次破坏。
+        rolled_back = False
+        if reset_done:
+            _set_progress("rollback", "升级失败，正在自动回滚...", -1)
+            logger.warning("升级失败，自动执行 git reflog 回滚...")
+            try:
+                await _run_git(["reset", "--hard", "HEAD@{1}"], timeout=60)
+                logger.info("git reflog 回滚成功")
+                rolled_back = True
+                _set_progress("rolled_back", "已自动回滚到升级前状态", -2)
+            except Exception as rb_e:
+                logger.error(f"自动回滚失败: {rb_e}")
+                _set_progress("rollback_failed", f"回滚也失败，请手动处理: {rb_e}", -3)
+        else:
+            logger.info("升级在改动代码之前就失败了，无需回滚")
 
         s = _load_state()
-        s["history"].append({
+        fail_entry = {
             "task_id": task_id,
             "from_version": APP_VERSION,
             "to_version": to_version,
@@ -882,13 +1026,22 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             "client_ip": client_ip,  # 记录来源 IP
             "status": "failed",
             "error": str(e),
-        })
+            "rolled_back": rolled_back,
+        }
+        hist = s["history"]
+        for idx, h in enumerate(hist):
+            if isinstance(h, dict) and h.get("task_id") == task_id:
+                hist[idx] = {**h, **fail_entry}
+                break
+        else:
+            hist.append(fail_entry)
         # 持久化失败状态，重启后仍可看到错误消息
         s["_last_upgrade_result"] = {
             "status": "failed",
             "from_version": APP_VERSION,
             "to_version": to_version,
             "error": str(e),
+            "rolled_back": rolled_back,
             "completed_at": datetime.now().isoformat(),
         }
         _save_state(s)
@@ -1113,13 +1266,35 @@ def _auto_pull_enabled() -> bool:
         return True
 
 
-async def _try_auto_ff_sync() -> str | None:
-    """安全自动同步: 工作区干净 + 仅快进才拉取运行目录; 成功返回新短哈希, 失败返回 None 回退人工通知"""
+async def _try_auto_ff_sync(current: str = "", latest: str = "",
+                            remote: dict[str, Any] | None = None) -> str | None:
+    """安全自动同步: 工作区干净 + 仅快进 + 不涉及迁移/依赖变更，才拉取运行目录。
+
+    成功返回新短哈希并写一条 auto_synced 历史; 任一条件不满足都返回 None, 回退到
+    「📥 新版本可用」的人工升级通知。
+
+    这里补掉了两个洞：
+    1) 以前同步成功后什么都不记，而这条路径同样会把运行代码升到新版本 —— 部署机
+       「升级成功了，但看不到升级历史」就是这么来的。
+    2) 以前不看待同步内容直接快进；后台任务不会跑数据库迁移、也不会装依赖，
+       新版本一旦带 backend/migrations 或改了 requirements.txt，就会留下
+       「代码新、库结构旧」的危险状态。现在这类变更一律退回人工升级。
+    """
     try:
         st = await _run_git(["status", "--porcelain"], timeout=30)
         if (st or "").strip():
             logger.debug(f"[auto-upgrade] 工作区存在 {len(st.splitlines())} 处本地改动, 跳过自动同步(转人工确认)")
             return None
+
+        # 待同步范围里只要有迁移脚本或依赖清单，就不能在后台顺手快进
+        changed = [ln.strip().replace("\\", "/") for ln in (await _run_git(
+            ["diff", "--name-only", "HEAD", "origin/master"], timeout=30) or "").splitlines() if ln.strip()]
+        risky = [f for f in changed
+                 if f == "requirements.txt" or f.startswith("backend/migrations/")]
+        if risky:
+            logger.info(f"[auto-upgrade] 待同步内容含迁移/依赖变更({', '.join(risky[:3])}), 转人工升级")
+            return None
+
         await _run_git(["merge", "--ff-only", "origin/master"], timeout=180)
         # 不依赖命令输出判断成败: 复查剩余落后数
         left_s = (await _run_git(["rev-list", "--count", "HEAD..origin/master"], timeout=30) or "").strip()
@@ -1131,6 +1306,30 @@ async def _try_auto_ff_sync() -> str | None:
             logger.warning(f"[auto-upgrade] 快进未生效(仍落后 {left} 个提交, 可能已分叉), 转人工升级")
             return None
         sha = (await _run_git(["rev-parse", "--short", "HEAD"], timeout=30) or "").strip()
+        # 合并后工作区里的 version.json 已经是新版本号，优先用它记账
+        to_version = _read_disk_version() or latest or "unknown"
+        try:
+            n_commits = int((await _run_git(["rev-list", "--count", "HEAD@{1}..HEAD"], timeout=30) or "0").strip() or 0)
+        except Exception:
+            n_commits = 0
+        try:
+            _append_history({
+                "task_id": f"autosync_{uuid.uuid4().hex[:8]}",
+                "action": "auto_sync",
+                "from_version": current or APP_VERSION,
+                "to_version": to_version,
+                "timestamp": datetime.now().isoformat(),
+                "admin": "system",
+                "client_ip": "",
+                "status": "auto_synced",
+                "commits": n_commits,
+                "head": sha,
+                "changed_files": changed,
+                "changelog": (remote or {}).get("changelog", []),
+            })
+            logger.info(f"[auto-upgrade] 自动同步已写入升级历史: {current or APP_VERSION} -> {to_version}")
+        except Exception as h_err:
+            logger.warning(f"[auto-upgrade] 自动同步历史写入失败: {h_err}")
         try:
             stt = _load_state()
             stt[_AUTO_CHECK_STATE_KEY] = ""  # 清通知去重位, 后续真正版本更新仍可提醒
@@ -1207,7 +1406,7 @@ async def _perform_version_check():
 
     # ── 自动同步(默认开启; auto_pull_enabled=false 可关): 干净工作区+可快进时直接拉取运行目录 ──
     if behind > 0 and _auto_pull_enabled():
-        synced = await _try_auto_ff_sync()
+        synced = await _try_auto_ff_sync(current, latest, remote)
         if synced:
             logger.info(f"[auto-upgrade] 已自动快进同步至 {synced}, 无需人工升级")
             return

@@ -114,6 +114,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] 配置文件健康检查失败: {e}", file=sys.stderr)
     try:
+        # 先对账上一次没走完的升级(被 --reload / 应用池回收打断的现场)，再启动后台版本检测
+        from backend.api.upgrade_router import reconcile_upgrade_state_on_startup
+        reconcile_upgrade_state_on_startup()
+    except Exception as e:
+        import sys
+        print(f"[main] 升级状态对账失败: {e}", file=sys.stderr)
+    try:
         from backend.api.upgrade_router import start_auto_version_check
         start_auto_version_check()
     except Exception as e:

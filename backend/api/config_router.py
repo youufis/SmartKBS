@@ -93,6 +93,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ENABLE_SUBJECT_TITLES": True,
     # 闯关挑战出题模式：false=AI 出题（默认）, true=从题库出题
     "QUEST_USE_BANK": False,
+    # 版本管理：后台检测到新提交时，是否自动快进同步运行代码。
+    # 涉及数据库迁移或 requirements.txt 变更时不会自动同步，仍走人工升级。
+    "auto_pull_enabled": True,
     # AI 请求超时设置（秒）— 白板 AI 生成图示/板书等操作的超时时间
     "AI_REQUEST_TIMEOUT": 300,
 }
@@ -240,6 +243,7 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
 _BOOL_KEYS = {
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
+    "auto_pull_enabled",
 }
 _STR_LIMITS: dict[str, int] = {
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
