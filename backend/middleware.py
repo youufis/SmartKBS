@@ -101,38 +101,63 @@ def register_middleware(app: FastAPI):
     app.add_middleware(AuthMiddleware)
 
 
-class SSEAwareGZipResponder(GZipResponder):
-    """GZip 响应包装器：对 SSE（text/event-stream）响应直接透传，不做压缩。
+# 这些响应类型本身就是压缩格式或二进制，gzip 压不动，直发更快。
+# 实测：root/html/puzzle/ruffle 下 13.9MB 的 core.ruffle *.wasm 压缩一次约 14s，
+# 不压缩只要 1.4s —— 全班同时打开互动课件时，CPU 会被 gzip 完全吃掉。
+_NO_GZIP_CONTENT_TYPES = {
+    "application/wasm",
+    "application/x-shockwave-flash",
+    "application/octet-stream",
+    "application/zip",
+    "application/pdf",
+    "application/msword",
+}
+_NO_GZIP_PREFIXES = ("image/", "video/", "audio/", "font/", "application/vnd.")
 
-    gzip.GzipFile 会缓存输入，直到缓冲区攒满或流结束时才输出压缩数据，
-    导致 SSE 的小块增量数据被积压到响应结束才一次性发给客户端，
-    表现就是“看起来没有流式输出”。SSE 必须跳过压缩才能逐块实时下发。
+
+def _gzip_is_waste(content_type: str) -> bool:
+    """该响应的 content-type 是否不值得压缩。"""
+    ct = content_type.split(";", 1)[0].strip().lower()
+    if not ct:
+        return False
+    if ct == "image/svg+xml":      # svg 是文本，压缩收益明显，不跳过
+        return False
+    return ct in _NO_GZIP_CONTENT_TYPES or ct.startswith(_NO_GZIP_PREFIXES)
+
+
+class SSEAwareGZipResponder(GZipResponder):
+    """GZip 响应包装器：在 Starlette 的基础上，再跳过"压不动"的响应。
+
+    1) SSE(text/event-stream)：gzip.GzipFile 会把输入攒到流结束才吐数据，
+       逐块下发的实时输出会被憋没。新版 Starlette 已用
+       DEFAULT_EXCLUDED_CONTENT_TYPES 内建排除，这里不再重复处理，只保留说明。
+    2) 二进制/已压缩响应(wasm/swf/图片/音视频/zip/office)：压缩率几乎为零，
+       纯烧 CPU 并推迟首字节。Starlette 在 send_with_compression 里只有当
+       apply_compression() 的返回值与入参不同才会写 Content-Encoding，
+       所以让它原样返回就等于"这条响应按 identity 直发"。
+
+    注：Starlette 1.x 把钩子从 send_with_gzip 改名为 send_with_compression，
+    老版本上本类退化为原生行为(只是不跳过二进制)，不会报错。
     """
 
     def __init__(self, app, minimum_size: int, compresslevel: int = 9):
         super().__init__(app, minimum_size, compresslevel)
-        self._is_event_stream = False
+        self._skip_gzip = False
 
-    async def send_with_gzip(self, message: Message) -> None:
-        if self._is_event_stream:
-            # SSE 响应：原样透传，不做任何缓冲/压缩
-            await self.send(message)
-            return
+    async def send_with_compression(self, message: Message) -> None:
+        if message["type"] == "http.response.start" and not self.started:
+            content_type = Headers(raw=message["headers"]).get("content-type", "")
+            self._skip_gzip = _gzip_is_waste(content_type)
+        await super().send_with_compression(message)
 
-        if message["type"] == "http.response.start":
-            self.initial_message = message
-            headers = Headers(raw=message["headers"])
-            content_type = headers.get("content-type", "")
-            self._is_event_stream = content_type.startswith("text/event-stream")
-            if self._is_event_stream:
-                await self.send(message)
-                return
-
-        await super().send_with_gzip(message)
+    def apply_compression(self, body: bytes, *, more_body: bool) -> bytes:
+        if self._skip_gzip:
+            return body
+        return super().apply_compression(body, more_body=more_body)
 
 
 class SSEAwareGZipMiddleware(GZipMiddleware):
-    """GZip 中间件：普通响应保持压缩，SSE 响应跳过压缩以保证实时流式输出。"""
+    """GZip 中间件：普通文本响应压缩，SSE 与二进制/已压缩响应直发。"""
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":

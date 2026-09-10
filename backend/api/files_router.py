@@ -17,6 +17,7 @@ from backend.config import BASE_DIR
 from backend.api.config_router import get_config_value
 from backend.config import ROOT_DIR, STU_DIR
 from backend.api.sharing_router import is_file_shared_with_user
+from backend import shared_assets
 from backend.database import execute_insert_update
 from backend.logger import logger
 
@@ -222,8 +223,16 @@ async def serve_static_file(path: str, request: Request):
             elif is_file_shared_with_user(rel_path, res_type, owner, username):
                 allowed = True
     
+        # 依赖文件跟随：共享页面自己引用的 ruffle.js / *.wasm / *.swf / 图片等素材
+        # 在 shared_resources 里没有独立记录，若不放行，学生打开互动课件就会白屏(403)
+        if not allowed and owner:
+            allowed = shared_assets.is_asset_of_shared_page(rel_path, owner, username)
+    
     if not allowed:
-        raise HTTPException(status_code=403, detail="无权访问该资源")
+        raise HTTPException(
+            status_code=403,
+            detail="无权访问该资源（该文件本身未共享，也不是已共享页面引用的依赖文件）",
+        )
     
     # ── 学生访问 HTML/下载文件时记录查看日志 ──
     if role == 2 and (path_parts[-1].endswith('.html') or path_parts[-1].endswith('.htm') or "downloads" in path_parts):

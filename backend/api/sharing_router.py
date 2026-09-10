@@ -17,6 +17,7 @@ from backend.logger import logger
 from backend.api.config_router import get_config_value
 from backend.config import STU_DIR, ROOT_DIR, DATA_DIR
 from backend.permission_service import check_share_visibility
+from backend import shared_assets
 
 router = APIRouter()
 
@@ -116,6 +117,7 @@ def cleanup_empty_dir_shares(owner_username: str | None = None):
                 logger.info(f"自动清理空目录共享: id={rid}, owner={owner}, path={file_path}")
         if removed:
             logger.info(f"共清理 {removed} 条空目录共享记录")
+            shared_assets.invalidate_cache()   # 共享清单变了，依赖放行判定需立即重算
     except Exception as e:
         logger.warning(f"清理空目录共享时出错: {e}")
 
@@ -161,6 +163,7 @@ def _drop_share_row(rid: int, resource_type: str):
             (resource_type, rid),
         )
         execute_insert_update("DELETE FROM shared_resources WHERE id=?", (rid,))
+        shared_assets.invalidate_cache()
     except Exception as e:
         logger.warning(f"删除共享行 {rid} 失败: {e}")
 
@@ -185,6 +188,7 @@ def _merge_share_row(old_id: int, keep_id: int, resource_type: str):
             (keep_id, resource_type, old_id),
         )
         execute_insert_update("DELETE FROM shared_resources WHERE id=?", (old_id,))
+        shared_assets.invalidate_cache()
         logger.info(f"合并重复共享行: {old_id} -> {keep_id} ({resource_type})")
     except Exception as e:
         logger.warning(f"合并重复共享行 {old_id}->{keep_id} 失败: {e}")
@@ -355,6 +359,9 @@ async def share_resource(request: Request, body: ShareRequest):
                  actual_scope, target_users_csv, target_grades_csv, target_classes_csv, now, now),
             )
             logger.info(f"共享创建成功: {username} -> {body.file_path} (scope={actual_scope})")
+
+        # 共享范围变化会改变"哪些页面可以把依赖素材带出来"，清掉判定缓存使其即时生效
+        shared_assets.invalidate_cache()
 
         # 共享后清理空目录共享记录（如果共享的是空目录，会自动删除）
         cleanup_empty_dir_shares(username)
@@ -578,6 +585,7 @@ async def unshare_resource(request: Request, id: int = Query(...)):
             (id,),
         )
         logger.info(f"共享已取消: id={id}, by={username}")
+        shared_assets.invalidate_cache()
 
         # 清理关联的课程绑定
         try:
@@ -612,6 +620,7 @@ async def unshare_resource(request: Request, id: int = Query(...)):
             logger.warning(f"清理资源查看日志失败: {e3}")
         try:
             from backend.reward_engine import activity_reward_students, recompute_students
+            # 受影响名单必须在删除流水之前取，重算必须在这之后
             _affected = activity_reward_students([("share", id)])
             execute_insert_update(
                 "DELETE FROM activity_rewards WHERE activity_type='share' AND activity_id=?",
@@ -619,11 +628,14 @@ async def unshare_resource(request: Request, id: int = Query(...)):
             )
             execute_insert_update(
                 "DELETE FROM notifications WHERE source_type='share' AND source_id=?",
-            recompute_students(_affected)      # 缺陷A：删流水必须就地重算总分
                 (str(id),),
             )
-        except Exception:
-            pass
+            recompute_students(_affected)      # 缺陷A：删流水必须就地重算总分
+        except Exception as e4:
+            # 原来这里是 except Exception: pass —— 有一次把 recompute_students 误写进
+            # execute_insert_update 的参数列表里，TypeError 被静默吞掉，导致取消共享
+            # 既不清通知也不重算总分，长期无人察觉。回收失败必须留痕。
+            logger.warning(f"取消共享时清理积分/通知失败 (share id={id}): {e4}")
 
         # 取消共享后清理空目录共享
         cleanup_empty_dir_shares(owner)
