@@ -5,6 +5,7 @@
 """
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -58,7 +59,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 在线用户超时
     "ONLINE_USER_TIMEOUT_SECONDS": 1800,
     # ── 来源 IP 防护（backend/security_guard.py，内存态，重启即清）──
-    "ENABLE_IP_GUARD": True,                # 连续鉴权失败/登录失败的 IP 临时封禁
+    # 默认关闭：套了花生壳/NAT 穿透时，所有远程访客共用中继出口 IP，
+    # 按 IP 封禁会"封一个连一片"。关掉只影响"封不封"，不影响失败审计（日志与快照照记）。
+    "ENABLE_IP_GUARD": False,
     "TRUST_PROXY_HEADERS": False,           # 只有确实套了反代(Nginx/IIS)且它会覆写 XFF 时才开
     "AUTH_FAIL_WINDOW_SECONDS": 60,         # 鉴权失败统计窗口
     "AUTH_FAIL_LIMIT": 30,                  # 窗口内达到这个次数就封（挂机页面的 3 连发/30 秒 ≈ 6 次/分钟，不会误伤）
@@ -348,6 +351,10 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"{key} 最长 {_STR_LIMITS[key]} 字")
             out[key] = value.strip() if key in ("dashscope_api_key", "APPID") else value
         elif key in _STRLIST_KEYS:
+            if isinstance(value, str):
+                # 容错：标签输入框有时会把整串原样送来（旧前端 / 直接调 API），
+                # 这里按逗号/分号/顿号/换行拆开；空串 -> 空列表 = 允许清空（黑名单可为空）
+                value = [x.strip() for x in re.split(r"[,，、;；\n]", value) if x.strip()]
             if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
                 raise HTTPException(status_code=400, detail=f"{key} 必须是非空字符串列表")
             if len(value) > _STRLIST_KEYS[key]:

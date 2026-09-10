@@ -52,12 +52,12 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', type: 'number', group: 'limit' },
   // 令牌滑动续期 + 来源 IP 防护（backend/security_guard.py）
   { key: 'JWT_RENEW_THRESHOLD_MINUTES', labelKey: 'field_JWT_RENEW_THRESHOLD_MINUTES', descKey: 'field_JWT_RENEW_THRESHOLD_MINUTES_desc', type: 'number', group: 'limit' },
-  { key: 'ENABLE_IP_GUARD', labelKey: 'field_ENABLE_IP_GUARD', descKey: 'field_ENABLE_IP_GUARD_desc', type: 'boolean', group: 'limit' },
+  { key: 'ENABLE_IP_GUARD', labelKey: 'field_ENABLE_IP_GUARD', descKey: 'field_ENABLE_IP_GUARD_desc', type: 'boolean', group: 'limit', required: false },
   { key: 'AUTH_FAIL_LIMIT', labelKey: 'field_AUTH_FAIL_LIMIT', descKey: 'field_AUTH_FAIL_LIMIT_desc', type: 'number', group: 'limit' },
   { key: 'AUTH_FAIL_BAN_SECONDS', labelKey: 'field_AUTH_FAIL_BAN_SECONDS', descKey: 'field_AUTH_FAIL_BAN_SECONDS_desc', type: 'number', group: 'limit' },
   { key: 'LOGIN_FAIL_LIMIT', labelKey: 'field_LOGIN_FAIL_LIMIT', descKey: 'field_LOGIN_FAIL_LIMIT_desc', type: 'number', group: 'limit' },
   { key: 'TRUST_PROXY_HEADERS', labelKey: 'field_TRUST_PROXY_HEADERS', descKey: 'field_TRUST_PROXY_HEADERS_desc', type: 'boolean', group: 'limit' },
-  { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'limit' },
+  { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'limit', required: false, placeholderKey: 'placeholder_ipDenylist' },
   { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'limit' },
   // 课程设置
   { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'subjects' },
@@ -77,6 +77,9 @@ const GLOBAL_CONFIG_FIELDS = [
   // 版本与升级
   { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade' },
 ]
+
+// tags 类字段的键：保存时统一把逗号分隔字符串转回数组（留空 -> []，允许清空）
+const TAG_FIELD_KEYS = GLOBAL_CONFIG_FIELDS.filter((f) => f.type === 'tags').map((f) => f.key)
 
 const GROUP_LABELS: Record<string, string> = {
   brand: 'group_brand',
@@ -949,7 +952,7 @@ const SystemConfigPage: React.FC = () => {
       setConfig(data)
       // 将数组字段转为逗号分隔字符串供 Tags 输入框展示
       const formValues = { ...data }
-      for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS']) {
+      for (const key of TAG_FIELD_KEYS) {
         if (Array.isArray(formValues[key])) {
           formValues[key] = formValues[key].join(',')
         }
@@ -977,10 +980,12 @@ const SystemConfigPage: React.FC = () => {
       setSaving(true)
       // 使用 getFieldsValue 确保所有字段（包括空值）都被提交
       const allValues = form.getFieldsValue()
-      // 将 Tags 输入框的逗号分隔字符串转回数组（支持中英文逗号）
-      for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS', 'SUBJECTS']) {
+      // 将 Tags 输入框的逗号分隔字符串转回数组（支持中英文逗号；名单类留空即清空）
+      for (const key of TAG_FIELD_KEYS) {
         if (typeof allValues[key] === 'string') {
-          allValues[key] = allValues[key].replace(/，/g, ',').split(',').map((s: string) => s.trim()).filter(Boolean)
+          // 分隔符与后端 _STRLIST_KEYS 的容错保持一致（中/英逗号、顿号、分号）；
+          // 不按空格拆，避免把「AI 基础」这类含空格的科目名切断
+          allValues[key] = allValues[key].split(/[,，、;；]+/).map((s: string) => s.trim()).filter(Boolean)
         }
       }
       // 题型多行文本 key:label → [{key,label}]
@@ -1015,7 +1020,7 @@ const SystemConfigPage: React.FC = () => {
         const { data } = await apiClient.get('/api/config')
         setConfig(data)
         const formValues = { ...data }
-        for (const key of ['IMAGE_EXTENSIONS', 'DOCUMENT_EXTENSIONS', 'SUBJECTS']) {
+        for (const key of TAG_FIELD_KEYS) {
           if (Array.isArray(formValues[key])) {
             formValues[key] = formValues[key].join(',')
           }
@@ -1111,11 +1116,12 @@ const SystemConfigPage: React.FC = () => {
                 <Form.Item
                   name={field.key}
                   label={getLabel(field)}
-                  rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
+                  // 必填与否交给字段声明（IP 黑名单要能留空 = 不拦任何人），别再硬编码 required
+                  rules={getRule(field)}
                   extra={getDesc(field)}
                   getValueFromEvent={(e) => e.target.value}
                 >
-                  <Input placeholder={t('placeholder_extensions')} />
+                  <Input placeholder={field.placeholderKey ? t(field.placeholderKey) : t('placeholder_extensions')} />
                 </Form.Item>
               ) : field.type === 'question_types' ? (
                 <Form.Item

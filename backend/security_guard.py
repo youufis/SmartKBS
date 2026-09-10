@@ -138,8 +138,15 @@ def _note_offender(ip: str, request: Request, kind: str, code: str = "") -> None
 
 
 def record_auth_failure(request: Request, code: str) -> None:
-    """鉴权失败计数（中间件/依赖给出的 401），超阈值则临时封禁该 IP"""
-    if not _bool("ENABLE_IP_GUARD", True):
+    """鉴权失败计数（中间件/依赖给出的 401），超阈值则临时封禁该 IP。
+
+    ENABLE_IP_GUARD 关掉时仍然记录来源画像（UA/Referer/次数），只是不再计数封禁 ——
+    排查"谁在撞"与"要不要封"是两件事，别把观测能力一起关掉。
+    """
+    if not _bool("ENABLE_IP_GUARD", False):
+        ip = client_ip(request)
+        with _LOCK:
+            _note_offender(ip, request, "auth", code)
         return
     ip = client_ip(request)
     window_seconds = _num("AUTH_FAIL_WINDOW_SECONDS", 60)
@@ -176,7 +183,9 @@ def record_login_failure(request: Request, username: str) -> None:
     logger.warning(
         f"[安全] 登录失败 username={username!r} ip={ip} UA={user_agent(request)}"
     )
-    if not _bool("ENABLE_IP_GUARD", True):
+    if not _bool("ENABLE_IP_GUARD", False):
+        with _LOCK:
+            _note_offender(ip, request, "login")
         return
     with _LOCK:
         _note_offender(ip, request, "login")
@@ -204,7 +213,7 @@ def block_response(request: Request) -> Optional[JSONResponse]:
             content={"detail": "访问被拒绝：来源地址在黑名单中", "code": "ip_denied"},
         )
 
-    if not _bool("ENABLE_IP_GUARD", True):
+    if not _bool("ENABLE_IP_GUARD", False):
         return None
     now = time.monotonic()
     with _LOCK:
@@ -249,7 +258,7 @@ def snapshot() -> dict[str, Any]:
             reverse=True,
         )[:30]
     return {
-        "enabled": _bool("ENABLE_IP_GUARD", True),
+        "enabled": _bool("ENABLE_IP_GUARD", False),
         "trust_proxy_headers": _bool("TRUST_PROXY_HEADERS", False),
         "limits": {
             "auth_fail_window_seconds": _num("AUTH_FAIL_WINDOW_SECONDS", 60),
