@@ -126,8 +126,14 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
     return _call_model_sync(prompt, api_key, model, api_base)
 
 
-def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> str:
-    """直接调用大模型（同步，OpenAI 兼容接口）"""
+def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
+                     enable_thinking: Optional[bool] = None) -> str:
+    """直接调用大模型（同步，OpenAI 兼容接口）
+
+    enable_thinking=None 保持现状（由模型默认决定）；传 False 关闭思考链。
+    实测（qwen3.7-flash，2026-09-12）：摘要/简报这类无需推理的任务，默认思考会产出
+    2257/2388 的隐藏 reasoning tokens，单次调用 24.3s；关掉后 2.6s，正文质量无明显差异。
+    """
     import requests as sync_requests
     # 构建消息内容（兼容 content 字符串和数组两种格式）
     content = prompt if prompt else ""
@@ -144,6 +150,8 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> st
                 "messages": messages,
                 "stream": False,
             }
+            if enable_thinking is not None:
+                payload["enable_thinking"] = bool(enable_thinking)
             resp = sync_requests.post(
                 f"{api_base}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -168,8 +176,12 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str) -> st
     raise Exception(f"AI 调用失败: {last_error}")
 
 
-def call_ai_sync_direct(prompt: str, api_key: str) -> str:
-    """强制直接调用大模型（绕过智能体），用于知识闯关等不需要 APPID 的场景"""
+def call_ai_sync_direct(prompt: str, api_key: str,
+                        enable_thinking: Optional[bool] = None) -> str:
+    """强制直接调用大模型（绕过智能体），用于知识闯关等不需要 APPID 的场景
+
+    enable_thinking=False 可关闭思考链 —— 摘要、简报、改写这类无需推理的任务能省 10 倍等待。
+    """
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
@@ -177,8 +189,10 @@ def call_ai_sync_direct(prompt: str, api_key: str) -> str:
     model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
     api_base = get_config_value("QWEN_OPENAI_API_BASE",
                                  "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    logger.info(f"call_ai_sync_direct: model={model}, prompt_len={len(prompt)}, prompt_head={prompt[:200]}")
-    return _call_model_sync(prompt, api_key, model, api_base)
+    logger.info(f"call_ai_sync_direct: model={model}, prompt_len={len(prompt)}, "
+                f"thinking={'默认' if enable_thinking is None else enable_thinking}, "
+                f"prompt_head={prompt[:120]}")
+    return _call_model_sync(prompt, api_key, model, api_base, enable_thinking=enable_thinking)
 
 
 # ── 流式调用（返回事件生成器） ──

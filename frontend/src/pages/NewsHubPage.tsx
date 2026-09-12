@@ -1,15 +1,18 @@
 /** 热点新闻 - 独立页面 */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Card, List, Tag, Button, Space, Typography, Progress,
-  message, Spin, Modal, Drawer, Tabs, Empty, Tooltip,
+  message, Spin, Modal, Drawer, Tabs, Empty, Tooltip, Result,
 } from 'antd';
 import {
   GlobalOutlined, ReloadOutlined, HeartOutlined, HeartFilled,
   EyeOutlined, ArrowLeftOutlined, BookOutlined, RightOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useNewsStore } from '../stores/newsStore';
+import { apiErrorDetail, getDailyBriefing } from '../api/news';
+import type { NewsBriefing } from '../api/news';
 import { useAuthStore } from '../stores/authStore';
 import { useTranslation } from 'react-i18next'
 
@@ -29,14 +32,19 @@ const NewsHubPage: React.FC = () => {
   const {
     articles, categories, loading, stats,
     loadList, loadCategories, getDetail, toggleFavorite, loadStats,
+    refreshing, lastFetch, refreshNow,
   } = useNewsStore();
 
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [detailModal, setDetailModal] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [briefing, setBriefing] = useState<any>(null);
+  const [briefing, setBriefing] = useState<NewsBriefing | null>(null);
   const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingGenerating, setBriefingGenerating] = useState(false);
+  const [briefingError, setBriefingError] = useState('');
+  const briefingTimer = useRef<number | null>(null);
   const tabsItems = [
     { key: 'feed', label: t('newsList') },
     { key: 'briefing', label: t('dailyBriefing') },
@@ -56,6 +64,17 @@ const NewsHubPage: React.FC = () => {
   useEffect(() => {
     loadList(activeCategory, page);
   }, [activeCategory, page]);
+
+  // NW16: 冷启动兜底 —— 首屏（全部分类第 1 页）拿到空列表时自动强制抓一次。
+  // 旧行为要先点一次刷新才可能有数据，而"抓取在后台 + 本次响应仍是旧数据"让学生以为功能坏了。
+  // 每个会话只兜底一次；并发与成本由后端抓取锁 + 每人 60s 刷新节流兜住。
+  const coldStartFilled = useRef(false);
+  useEffect(() => {
+    if (coldStartFilled.current) return;
+    if (loading || activeCategory !== '' || page !== 1 || articles.length > 0) return;
+    coldStartFilled.current = true;
+    void refreshNow().then(() => loadList('', 1)).catch(() => undefined);
+  }, [loading, articles.length, activeCategory, page]);
 
   const handleCategoryChange = (cat: string) => {
     setActiveCategory(cat);
@@ -80,24 +99,103 @@ const NewsHubPage: React.FC = () => {
     loadList(activeCategory, page);
   };
 
-  const handleRefresh = () => {
-    message.success(t('refreshed'));
-    loadList(activeCategory, 1);
-    loadStats();
-  };
+  /**
+   * NW11: 刷新 = 真的向后端要一次强制抓取，抓完再重读列表。
+   * 旧实现是先无条件弹"已刷新"再读旧列表，后端抓取既被 2h 缓存/10min 节流拦住、
+   * 又是后台异步，所以点了永远没反应。
+   */
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    const res = await refreshNow();
 
-  const handleOpenBriefing = async () => {
-    setBriefingOpen(true);
-    if (!briefing) {
-      try {
-        const { getDailyBriefing } = await import('../api/news');
-        const data = await getDailyBriefing();
-        setBriefing(data);
-      } catch {
-        message.error(t('loadFailed'));
-      }
+    const reload = async () => {
+      if (page !== 1) setPage(1); // useEffect 会按第 1 页重新拉
+      else await loadList(activeCategory, 1);
+      await loadStats();
+    };
+
+    if (!res) {
+      message.error(t('networkError'));
+      await reload();
+      return;
+    }
+    await reload();
+
+    if (res.status === 'busy') {
+      message.info(t('refreshBusy'));
+      window.setTimeout(() => loadList(activeCategory, 1), 5000);
+      return;
+    }
+    if (res.status === 'failed') {
+      message.error(t('refreshFailed'));
+      return;
+    }
+    if (res.status === 'empty') {
+      message.warning(t('refreshEmpty'));
+      return;
+    }
+    if ((res.inserted ?? 0) > 0) {
+      message.success(t('refreshOk', { added: res.inserted, renewed: res.renewed ?? 0 }));
+    } else {
+      message.success(t('refreshNoNew', { total: res.stored_total ?? 0 }));
     }
   };
+
+  /** 最近一次抓取状态（顶栏"更新于 HH:MM" + 源健康度 tooltip） */
+  const sourceHealth = lastFetch?.detail?.sources ?? [];
+  const fetchStateText = !lastFetch?.fetched_at
+    ? t('newsNeverFetched')
+    : t('newsUpdatedAt', { time: lastFetch.fetched_at.slice(11, 16) })
+      + (lastFetch.status === 'failed' ? ` · ${t('newsFetchFailed')}`
+        : lastFetch.status === 'partial' || lastFetch.status === 'empty'
+          ? ` · ${t('newsFetchPartial')}` : '');
+
+  const stopBriefingPoll = () => {
+    if (briefingTimer.current) {
+      window.clearTimeout(briefingTimer.current);
+      briefingTimer.current = null;
+    }
+  };
+
+  /**
+   * NW21: 简报改为「后端有界等待 + 前端轮询」。
+   * 旧实现：后端同步跑完整次 AI（实测 57s）才返回，而 axios 全局超时 30s
+   * → 必然报"加载失败"且抽屉空白；可服务器仍在后台把简报写进了缓存，
+   * 于是"关掉再点开就有了"。现在 generating 就明确显示"正在生成"并继续轮询。
+   */
+  const loadBriefing = async (attempt = 0) => {
+    setBriefingLoading(true);
+    setBriefingError('');
+    try {
+      const data = await getDailyBriefing();
+      if (data.status === 'generating') {
+        setBriefing(null);
+        setBriefingGenerating(true);
+        if (attempt < 30) {
+          briefingTimer.current = window.setTimeout(() => loadBriefing(attempt + 1), 3000);
+        } else {
+          setBriefingGenerating(false);
+          setBriefingError(t('briefingTimeout'));
+        }
+        return;
+      }
+      setBriefingGenerating(false);
+      setBriefing(data);
+    } catch (e) {
+      setBriefingGenerating(false);
+      setBriefingError(apiErrorDetail(e) || t('networkError'));
+      message.error(t('loadFailed'));
+    } finally {
+      setBriefingLoading(false);
+    }
+  };
+
+  const handleOpenBriefing = () => {
+    setBriefingOpen(true);
+    if (!briefing) void loadBriefing();
+  };
+
+  useEffect(() => stopBriefingPoll, []);
 
   const progressPercent = Math.round(
     (stats.todayPoints / stats.pointsMax) * 100
@@ -123,9 +221,31 @@ const NewsHubPage: React.FC = () => {
                 {t('dailyBriefingBtn')}
               </Button>
             )}
+            <Tooltip
+              title={
+                sourceHealth.length
+                  ? (
+                    <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+                      <div>{t('newsSourceHealth')}</div>
+                      {sourceHealth.map((item) => (
+                        <div key={item.source}>
+                          {item.ok ? '✅' : '⚠️'} {item.source}
+                          {item.ok ? ` (${item.kept}/${item.entries})` : ` — ${item.error || `HTTP ${item.http}`}`}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                  : undefined
+              }
+            >
+              <Text type="secondary" style={{ fontSize: 12, cursor: 'default' }}>
+                {fetchStateText}
+              </Text>
+            </Tooltip>
             <Button
               size="small"
               icon={<ReloadOutlined />}
+              loading={refreshing}
               onClick={handleRefresh}
             >
               {t('refresh')}
@@ -183,7 +303,25 @@ const NewsHubPage: React.FC = () => {
         styles={{ body: { padding: 0 } }}
       >
         {articles.length === 0 && !loading ? (
-          <Empty description={t('noNews')} style={{ padding: 40 }} />
+          <Empty
+            style={{ padding: 40 }}
+            description={
+              <Space direction="vertical" size={2}>
+                <Text>
+                  {lastFetch?.status === 'failed'
+                    ? t('newsSourceUnreachable')
+                    : t('noNews')}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('noNewsRefreshHint')}
+                </Text>
+              </Space>
+            }
+          >
+            <Button icon={<ReloadOutlined />} loading={refreshing} onClick={handleRefresh}>
+              {t('refresh')}
+            </Button>
+          </Empty>
         ) : (
           <List
             dataSource={articles}
@@ -363,7 +501,7 @@ const NewsHubPage: React.FC = () => {
         placement="right"
         width={500}
         open={briefingOpen}
-        onClose={() => setBriefingOpen(false)}
+        onClose={() => { setBriefingOpen(false); stopBriefingPoll(); }}
       >
         {briefing ? (
           <div>
@@ -376,8 +514,23 @@ const NewsHubPage: React.FC = () => {
               </Text>
             </div>
           </div>
+        ) : briefingGenerating ? (
+          <Result
+            icon={<SyncOutlined spin style={{ color: '#1677ff' }} />}
+            title={t('briefingGeneratingTitle')}
+            subTitle={t('briefingGeneratingDesc')}
+          />
+        ) : briefingError ? (
+          <Result
+            status="warning"
+            title={t('loadFailed')}
+            subTitle={briefingError}
+            extra={<Button onClick={() => loadBriefing()}>{t('retry')}</Button>}
+          />
         ) : (
-          <Spin />
+          <Spin tip={briefingLoading ? t('briefingGeneratingTitle') : undefined}>
+            <div style={{ minHeight: 120 }} />
+          </Spin>
         )}
       </Drawer>
     </Card>

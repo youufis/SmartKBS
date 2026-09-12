@@ -21,6 +21,47 @@ export interface NewsListResponse {
   page: number;
   page_size: number;
   cache_fresh: boolean;
+  /** NW11: 最近一次抓取的健康度（更新于时间 / 状态 / 逐源结果） */
+  last_fetch?: NewsFetchHealth | null;
+}
+
+/** 单个新闻源的抓取健康度 */
+export interface NewsSourceHealth {
+  source: string;
+  ok: boolean;
+  http?: number;
+  entries?: number;
+  kept?: number;
+  error?: string;
+}
+
+/** 最近一次抓取结果 */
+export interface NewsFetchHealth {
+  fetched_at: string;
+  article_count: number;
+  status: "" | "success" | "partial" | "empty" | "failed" | "busy" | string;
+  detail?: {
+    sources?: NewsSourceHealth[];
+    took_ms?: number;
+    inserted?: number;
+    renewed?: number;
+    stored_total?: number;
+  };
+}
+
+/** POST /api/news/refresh 的返回 */
+export interface NewsRefreshResult {
+  status: "success" | "partial" | "empty" | "failed" | "busy" | string;
+  batch_id?: string;
+  fetched: number;
+  inserted: number;
+  renewed: number;
+  stored_total?: number;
+  took_ms?: number;
+  sources?: NewsSourceHealth[];
+  error?: string;
+  categories?: string[];
+  last_fetch?: NewsFetchHealth;
 }
 
 export interface NewsDetail {
@@ -44,6 +85,10 @@ export interface NewsBriefing {
   brief_content: string;
   article_count: number;
   generated_at: string;
+  /** NW21: ready = 有内容；generating = 后台正在生成，前端应轮询而不是报"加载失败" */
+  status?: 'ready' | 'generating' | string;
+  estimated_seconds?: number;
+  message?: string;
 }
 
 export interface NewsStats {
@@ -87,9 +132,9 @@ export async function getFavorites(): Promise<{ articles: NewsArticle[] }> {
   return data;
 }
 
-/** 获取今日简报 */
+/** 获取今日简报（冷启动后端只同步等 10s，其余走轮询，所以这里给 25s 足够） */
 export async function getDailyBriefing(): Promise<NewsBriefing> {
-  const { data } = await apiClient.get('/api/news/briefing/today');
+  const { data } = await apiClient.get('/api/news/briefing/today', { timeout: 25000 });
   return data;
 }
 
@@ -97,4 +142,27 @@ export async function getDailyBriefing(): Promise<NewsBriefing> {
 export async function getStats(): Promise<NewsStats> {
   const { data } = await apiClient.get('/api/news/stats');
   return data;
+}
+
+/** NW11: 强制抓取一次热点新闻（后端同步抓完再返回真实结果） */
+export async function refreshNews(): Promise<NewsRefreshResult> {
+  const { data } = await apiClient.post('/api/news/refresh');
+  return data;
+}
+
+/** NW11: 抓取健康度（"更新于 / 上次失败原因"） */
+export async function getFetchStatus(): Promise<{
+  last_fetch: NewsFetchHealth;
+  cache_fresh: boolean;
+  stored_total: number;
+}> {
+  const { data } = await apiClient.get('/api/news/fetch-status');
+  return data;
+}
+
+/** 从 axios 错误里取后端 detail（429 刷新过频等场景） */
+export function apiErrorDetail(e: unknown): string {
+  const err = e as { response?: { data?: { detail?: unknown } } };
+  const detail = err?.response?.data?.detail;
+  return typeof detail === 'string' ? detail : '';
 }

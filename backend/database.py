@@ -1749,6 +1749,13 @@ def init_db():
                 message TEXT DEFAULT ''
             )""")
 
+            # 5b. NW9: 跨进程抓取锁（IIS httpPlatformHandler 与本地开发实例共用同一个库时，
+            #     内存锁互不可见，实测出现过相隔 5 秒的两批并发抓取）
+            c.execute("""CREATE TABLE IF NOT EXISTS news_fetch_lock (
+                lock_key TEXT PRIMARY KEY,
+                acquired_at TEXT NOT NULL
+            )""")
+
             # 6. 每日简报缓存
             c.execute("""CREATE TABLE IF NOT EXISTS news_daily_briefing (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
