@@ -4,6 +4,7 @@ backend/system_config.json.bak
 backend/system_config.json.tmp
 .env
 **/.env
+ssl/
 
 # ── VS Code（每台机器独立，不共享）──
 .vscode/
