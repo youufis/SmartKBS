@@ -36,6 +36,8 @@ backend/smartkb.db
 # ── 在线升级运行时文件 ──
 .upgrade_lock
 .upgrade_state.json
+.upgrade_state.json.tmp*
+.upgrade_state.json.*.tmp
 .upgrade_backups/
 backend/smartkb.db-shm
 backend/smartkb.db-wal

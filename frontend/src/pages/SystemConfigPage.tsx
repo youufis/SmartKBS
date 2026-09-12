@@ -20,7 +20,7 @@ import {
 import {
   checkVersion, startUpgrade, getUpgradeStatus,
   rollback as apiRollback, getHistory, deleteHistory,
-  cancelUpgrade, createBackup,
+  cancelUpgrade, createBackup, ackMigrations,
   type VersionInfo, type UpgradeProgress,
 } from '../api/upgrade'
 
@@ -484,6 +484,7 @@ const UpgradePanel: React.FC = () => {
   const [histPageSize, setHistPageSize] = useState(10)
   const pollRef = useRef<number | undefined>(undefined)
   const [restarting, setRestarting] = useState(false)  // 服务重启中标记
+  const [acking, setAcking] = useState('')             // 正在确认迁移的记录 task_id
 
   const loadVersion = useCallback(async () => {
     setVerLoading(true)
@@ -667,6 +668,24 @@ const UpgradePanel: React.FC = () => {
     })
   }
 
+  const handleAckMigrations = async (task_id: string) => {
+    setAcking(task_id)
+    try {
+      await ackMigrations(task_id)
+      message.success(t('ackMigrationsSuccess'))
+      loadHistory(histPage, histPageSize)
+    } catch (e: any) {
+      message.error(t('ackMigrationsFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    } finally {
+      setAcking('')
+    }
+  }
+
+  // 对账收口成成功、但数据库迁移没确认跑完的记录：确认之前一直挂在页面上
+  const pendingMigrationChecks = histList.filter(
+    (r: any) => r?.migrations_unverified && !r?.migrations_ack,
+  )
+
   return (
     <Spin spinning={verLoading}>
       {/* Git 环境问题警告 */}
@@ -807,6 +826,38 @@ const UpgradePanel: React.FC = () => {
         </Card>
       )}
 
+      {/* 升级被打断、按版本收口的记录：数据库迁移核实之前一直提醒 */}
+      {pendingMigrationChecks.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          icon={<ExclamationCircleOutlined />}
+          message={t('migrationsUnverifiedTitle')}
+          description={
+            <div>
+              <p style={{ marginBottom: 8 }}>{t('migrationsUnverifiedDesc')}</p>
+              {pendingMigrationChecks.map((r: any) => (
+                <div key={r.task_id} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  gap: 12, marginBottom: 6,
+                }}>
+                  <span style={{ fontSize: 13 }}>
+                    {r.timestamp} ｜ {r.from_version} → {r.to_version}
+                    {r.stage_reached ? ` ｜ ${t('stageReached')}: ${r.stage_reached}` : ''}
+                  </span>
+                  <Button size="small" loading={acking === r.task_id}
+                    onClick={() => handleAckMigrations(r.task_id)}
+                  >
+                    {t('ackMigrations')}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       {/* 升级历史 */}
       <Card title={t('upgradeHistory')}>
         <Table
@@ -833,7 +884,11 @@ const UpgradePanel: React.FC = () => {
                   interrupted: { color: 'volcano', icon: <WarningOutlined />, label: t('statusInterrupted') },
                 }
                 const item = map[s] || { color: 'default', icon: null, label: s }
-                const tag = <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
+                // 代码到位但数据库迁移未确认的记录，不能算干净的绿色成功
+                const unverified = s === 'success' && r?.migrations_unverified && !r?.migrations_ack
+                const tag = unverified
+                  ? <Tag color="gold" icon={<ExclamationCircleOutlined />}>{t('statusSuccessUnverified')}</Tag>
+                  : <Tag color={item.color} icon={item.icon}>{item.label}</Tag>
                 // 被对账收口的记录要能解释"凭什么判成成功/中断"（note 由后端给出）
                 return r?.note ? <Tooltip title={r.note}>{tag}</Tooltip> : tag
               },
@@ -868,6 +923,11 @@ const UpgradePanel: React.FC = () => {
                               }}>
                                 {r.note}
                               </div>
+                            )}
+                            {r.reconciled_from && (!fileList || fileList.length === 0) && (
+                              <p style={{ color: '#888', fontSize: 12, marginBottom: 12 }}>
+                                {t('reconciledDetailMissing')}
+                              </p>
                             )}
                             {isError && (
                               <div style={{

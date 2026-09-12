@@ -34,9 +34,23 @@ export interface UpgradeHistoryItem {
   to_version?: string
   timestamp: string
   admin: string
+  client_ip?: string
   status: string
   error?: string
+  commits?: number
+  changed_files?: string[]
   changelog?: string[]
+  /** 被重启打断后由系统对账收口的记录才会带这几个字段 */
+  note?: string
+  reconciled_from?: string
+  reconciled_by?: string
+  reconciled_at?: string
+  /** 流水线最后走到的阶段（preparing/synced/migrated/deps_ok/unknown） */
+  stage_reached?: string
+  /** 代码已到位，但数据库迁移/依赖安装未能确认完成 */
+  migrations_unverified?: boolean
+  /** 管理员是否已人工核对该记录的迁移 */
+  migrations_ack?: boolean
 }
 
 /** 检测最新版本 */
@@ -91,4 +105,10 @@ export async function getHistory(page = 1, pageSize = 10): Promise<{
 /** 删除单条升级历史 */
 export async function deleteHistory(task_id: string): Promise<void> {
   await apiClient.delete(`/api/system/upgrade/history/${task_id}`)
+}
+
+/** 确认「对账收口的成功记录」已人工核对过数据库迁移 */
+export async function ackMigrations(task_id: string): Promise<{ status: string; message: string }> {
+  const { data } = await apiClient.post(`/api/system/upgrade/history/${task_id}/ack-migrations`)
+  return data
 }
