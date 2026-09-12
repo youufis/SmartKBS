@@ -43,6 +43,14 @@ async def lifespan(app: FastAPI):
     init_db()
     init_question_db()
     try:
+        # 压缩中间件自检：gzip 会把 SSE 攒到整条流结束才吐，症状只是“对话没有流式输出”。
+        # 它依赖 Starlette 的私有压缩钩子，钩子改过名、也就静默失效过一次，
+        # 所以启动时用一条真实的 text/event-stream 响应实测一遍；不通过就整体不压缩。
+        from backend.middleware import check_gzip_middleware
+        await check_gzip_middleware()
+    except Exception as e:
+        print(f"[main] GZip/SSE 自检失败: {e}", file=sys.stderr)
+    try:
         # U-SEC: 未设置 JWT_SECRET_KEY 环境变量时沿用仓库内默认密钥, 存在令牌伪造面,
         # 已在中间件里加"账号必须存在且 token_version>=1"的兜底, 这里仍提示运维改配置
         from backend.config import JWT_SECRET_IS_DEFAULT
