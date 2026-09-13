@@ -469,6 +469,7 @@ class QuickQuizGameManager:
             "answered_in_round": {},
             "time_limit": time_limit,
             "timer_task": None,
+            "auto_reveal_task": None,
             "connections": old_connections,
             "player_connections": old_player_connections,
         }
@@ -1379,11 +1380,19 @@ async def submit_answer(room_id: int, request: Request):
         }
     })
 
-    # 所有人已答完，前端收到 all_answered 后会主动调 reveal
+    # 全员答完：S2 收口后学生已无权调用 /reveal（旧版"前端主动调 reveal"的
+    # 契约随之失效），而计时器又被取消 → 房间永久卡在最后一人提交的题面，
+    # 表现为"答完/答错后不自动下一题"。改为服务端兜底：短暂延迟（让学生
+    # 看到对错反馈）后自动公布答案并推送下一题；以题号做守卫，防止与
+    # 教师手动 reveal/超时 reveal 竞态时把"下一题"提前公布。
     if all_answered:
         if state["timer_task"]:
             state["timer_task"].cancel()
             state["timer_task"] = None
+        if not state.get("auto_reveal_task"):
+            state["auto_reveal_task"] = asyncio.create_task(
+                _auto_reveal_after(room_id, 2.5, current_q)
+            )
 
     return {
         "is_correct": bool(is_correct),
@@ -1689,6 +1698,24 @@ async def _push_question(room_id: int, question_index: int, skip_cancel: bool = 
     state["timer_task"] = asyncio.create_task(
         game_manager.start_timer(room_id, _get_room_coro())
     )
+
+
+async def _auto_reveal_after(room_id: int, delay: float, for_question: int):
+    """全员答完后的服务端自动公布（延迟 delay 秒），仅当仍是同一题且未公布"""
+    try:
+        await asyncio.sleep(delay)
+        state = game_manager.get_room(room_id)
+        if not state or state["phase"] != "question" or state["current_question"] != for_question:
+            return
+        await _do_reveal(room_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.error(f"自动公布答案失败 (room={room_id}): {e}")
+    finally:
+        st = game_manager.get_room(room_id)
+        if st:
+            st["auto_reveal_task"] = None
 
 
 async def _do_reveal(room_id: int, push_next: bool = True) -> dict[str, Any] | None:
