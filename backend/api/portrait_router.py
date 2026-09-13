@@ -18,6 +18,7 @@ from backend.api.ai_service import call_ai_sync_with_timeout
 from backend.api.image_gen_service import generate_and_save_image
 from backend.companion_memory import get_student_profile
 from backend.database import execute_query, execute_insert_update
+from backend.question_db import execute_query as q_execute_query
 from backend.config import BASE_DIR
 from backend.utils import get_user_base_dir
 from backend.logger import logger
@@ -181,6 +182,36 @@ def _check_liked(portrait_id: int, username: str) -> bool:
     return bool(rows)
 
 
+def _safe_count(
+    sql: str,
+    params: tuple[Any, ...] = (),
+    *,
+    use_question_db: bool = False,
+) -> int:
+    """执行一个 COUNT 统计并返回整数。
+
+    画像里的角色统计属于"锦上添花"，单个口径查失败不该让整段统计消失，
+    所以这里吞掉异常只记 warning。
+    use_question_db=True 时查试题库（exams / exam_attempts / question_bank 等在 questions.db，
+    主库里的同名表是历史遗留空表，直接查会永远得到 0）。
+    """
+    try:
+        if use_question_db:
+            rows = q_execute_query(sql, params)
+            if not rows:
+                return 0
+            value = next(iter(rows[0].values()))
+        else:
+            rows = execute_query(sql, params)
+            if not rows or not rows[0]:
+                return 0
+            value = rows[0][0]
+        return int(value or 0)
+    except Exception as e:
+        logger.warning(f"画像统计查询失败: {e} | {' '.join(sql.split())[:140]}")
+        return 0
+
+
 def _enrich_role_data(profile: dict[str, Any]) -> None:
     """根据角色补充累计动态数据"""
     role = profile.get("role", 2)
@@ -190,12 +221,12 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
         if role == 2:  # 学生累计数据
             week_start, week_end = _get_week_range()
 
-            # 累计考试数
-            q_rows = execute_query(
+            # 累计考试数（考试数据在试题库 questions.db，主库同名表是历史遗留空壳）
+            total_exams = _safe_count(
                 "SELECT COUNT(*) FROM exam_attempts WHERE student_username=? AND status IN ('submitted','graded')",
                 (username,),
+                use_question_db=True,
             )
-            total_exams = q_rows[0][0] if q_rows else 0
 
             # 本周新增积分
             pt_rows = execute_query(
@@ -290,50 +321,61 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
 
         elif role == 1:  # 教师累计数据
             week_start, week_end = _get_week_range()
-            # 任教班级数
-            class_rows = execute_query(
-                "SELECT COUNT(DISTINCT grade||class) FROM users WHERE username=?",
+
+            # 任教班级数：以任教关系表为准（users.grade/class 只是注册时留下的文本快照）
+            class_total = _safe_count(
+                """SELECT COUNT(DISTINCT grade_id || '-' || COALESCE(class_id, 'ALL'))
+                   FROM teacher_assignments WHERE teacher_username=?""",
                 (username,),
             )
+            if not class_total:
+                # 兜底：早期教师没有任教记录时，退回按用户年级班级字符串统计
+                class_total = _safe_count(
+                    "SELECT COUNT(DISTINCT grade||class) FROM users WHERE username=?",
+                    (username,),
+                )
+
             # 累计创建的活动数量
-            quiz_count = execute_query(
+            quiz_count = _safe_count(
                 "SELECT COUNT(*) FROM interaction_quizzes WHERE creator_username=?",
                 (username,),
             )
-            exam_count = execute_query(
+            # 考试数据存放在试题库 questions.db
+            exam_count = _safe_count(
                 "SELECT COUNT(*) FROM exams WHERE creator_username=?",
                 (username,),
+                use_question_db=True,
             )
             # 本周新创建活动
-            week_quiz = execute_query(
+            week_quiz = _safe_count(
                 "SELECT COUNT(*) FROM interaction_quizzes WHERE creator_username=? AND created_at >= ?",
                 (username, week_start),
             )
-            week_exam = execute_query(
+            week_exam = _safe_count(
                 "SELECT COUNT(*) FROM exams WHERE creator_username=? AND created_at >= ?",
                 (username, week_start),
+                use_question_db=True,
             )
-            # 批阅任务数
-            try:
-                task_count = execute_query(
-                    "SELECT COUNT(*) FROM task_grades WHERE teacher_username=?",
-                    (username,),
-                )
-                if task_count and task_count[0][0] > 0:
-                    profile["teach_stats"] += f"，批阅{task_count[0][0]}份任务"
-            except Exception:
-                pass
+            # 批阅任务数：task_grades 只有 task_id + 学生，教师归属要顺着 tasks.creator_username 找
+            graded_count = _safe_count(
+                """SELECT COUNT(*) FROM task_grades tg
+                   JOIN tasks t ON t.id = tg.task_id
+                   WHERE t.creator_username=?""",
+                (username,),
+            )
 
             profile["teach_stats"] = (
-                f"任教{class_rows[0][0] if class_rows else 0}个班级，"
-                f"累计创建{quiz_count[0][0] if quiz_count else 0}个测验、"
-                f"{exam_count[0][0] if exam_count else 0}场考试"
+                f"任教{class_total}个班级，"
+                f"累计创建{quiz_count}个测验、"
+                f"{exam_count}场考试"
             )
+            if graded_count > 0:
+                profile["teach_stats"] += f"，批阅{graded_count}份任务"
             week_extra = []
-            if week_quiz[0][0] > 0:
-                week_extra.append(f"本周新增{week_quiz[0][0]}个测验")
-            if week_exam[0][0] > 0:
-                week_extra.append(f"本周新增{week_exam[0][0]}场考试")
+            if week_quiz > 0:
+                week_extra.append(f"本周新增{week_quiz}个测验")
+            if week_exam > 0:
+                week_extra.append(f"本周新增{week_exam}场考试")
             if week_extra:
                 profile["teach_stats"] += "，" + "、".join(week_extra)
 
@@ -352,12 +394,12 @@ def _enrich_role_data(profile: dict[str, Any]) -> None:
                 "SELECT COUNT(*) FROM student_portraits WHERE status='active'",
                 (),
             )
-            total_exams = execute_query("SELECT COUNT(*) FROM exams", ())
+            total_exams = _safe_count("SELECT COUNT(*) FROM exams", (), use_question_db=True)
 
             profile["admin_stats"] = (
                 f"平台共{total_users[0][0] if total_users else 0}名用户，"
                 f"近7日{active_users[0][0] if active_users else 0}人活跃，"
-                f"累计{total_exams[0][0] if total_exams else 0}场考试、"
+                f"累计{total_exams}场考试、"
                 f"{total_portraits[0][0] if total_portraits else 0}幅画像"
             )
     except Exception as e:
