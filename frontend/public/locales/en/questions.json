@@ -298,6 +298,7 @@
     "aiMode": "🤖 AI Questions",
     "startBtn": "🎯 Start",
     "startingBtn": "Generating...",
+    "startFailed": "Failed to start the quest, please try again later",
     "rulesBtn": "Rules",
     "totalQuests": "Total Quests",
     "times": "",

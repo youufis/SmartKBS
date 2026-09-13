@@ -1560,7 +1560,30 @@ async def get_poll_results(poll_id: int, request: Request):
         raise HTTPException(status_code=404, detail="投票不存在")
 
     poll_row = poll_rows[0]
-    if not _can_view_activity_results(user["username"], user.get("role", 2), poll_row):
+    role = user.get("role", 2)
+    allowed = _can_view_activity_results(user["username"], role, poll_row)
+    if not allowed and role == 2:
+        # R: 学生投票后点击“投票”按钮会拉取汇总结果（前端一直有此交互，
+        # S8 收口后被误伤成 403“加载结果失败”）。仅返回去标识的汇总票数，
+        # 且必须已投过票并落在该投票可见范围内才放行。
+        voted_row = execute_query(
+            "SELECT COUNT(*) FROM interaction_poll_votes WHERE poll_id = ? AND student_username = ?",
+            (poll_id, user["username"]),
+        )
+        has_voted = (voted_row[0][0] if voted_row else 0) > 0
+        if has_voted:
+            s_grade, s_class = get_user_grade_class(user["username"])
+            allowed = check_activity_visibility(
+                student_username=user["username"],
+                student_grade=s_grade,
+                student_class=s_class,
+                creator_username=poll_row["creator_username"],
+                target_scope=poll_row.get("target_scope", "") or "teacher_classes",
+                target_grade=poll_row.get("target_grade", "") or "",
+                target_class=poll_row.get("target_class", "") or "",
+                target_users=poll_row.get("target_users", "") or "",
+            )
+    if not allowed:
         raise HTTPException(status_code=403, detail="无权查看该投票结果")
     options = json.loads(poll_row["options"]) if isinstance(poll_row["options"], str) else poll_row["options"]
     # S8: 一次 GROUP BY 统计(旧实现每个选项一次查询)

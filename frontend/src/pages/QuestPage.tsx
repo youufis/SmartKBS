@@ -94,10 +94,11 @@ const QuestPage: React.FC = () => {
     }
     setStarting(true)
     try {
-      const { data } = await apiClient.post('/api/quest/start')
+      // AI 出题即使已大幅提速，首题 + 弱网仍可能超过全局 30s，给足超时
+      const { data } = await apiClient.post('/api/quest/start', null, { timeout: 90000 })
       navigate(`/quest/battle/${data.quest_id}`, { state: { initialData: data } })
     } catch (e: any) {
-      const detail = e?.response?.data?.detail || t('quest.submitFailed')
+      const detail = e?.response?.data?.detail || t('quest.startFailed')
       message.error(detail)
     } finally {
       setStarting(false)

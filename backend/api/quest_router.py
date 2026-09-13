@@ -32,6 +32,18 @@ from backend.prompts import apply_skills
 
 router = APIRouter()
 
+# 后台补题任务引用（防止 asyncio.create_task 裸协程被 GC 中途回收）
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _schedule_bg(coro) -> asyncio.Task:
+    """调度后台任务并持有引用，完成后自动释放"""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
+
+
 # ── 常量 ──
 MAX_QUEST_QUESTIONS = 15
 LIFELINE_TYPES = {"remove_one", "phone_friend", "audience_vote"}
@@ -76,6 +88,15 @@ def _calc_question_score(question_index: int, lifelines: list[str]) -> int:
     return max(1, round(base * discount))
 
 
+def _lenient_json_loads(text: str) -> dict[str, Any]:
+    """宽容解析模型 JSON：把 LaTeX 单反斜杠非法转义（$\frac{1}{2}$ 等）修复为双反斜杠"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        _bs = chr(92)
+        _pat = _bs + _bs + '(?![' + _bs + _bs + '"/bfnru])'
+        return json.loads(re.sub(_pat, lambda m: _bs + _bs, text))
+
 def _call_ai_generate_question(api_key: str, used_categories: list[str],
                                  question_index: int) -> dict[str, Any]:
     """调用 AI 生成一道题目，支持公式($...$)和SVG配图(svg_content)"""
@@ -86,11 +107,12 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
     )
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
-        import concurrent.futures
-        from backend.api.ai_service import _ai_thread_pool, call_ai_sync
+        from backend.api.ai_service import _ai_thread_pool, call_ai_sync_direct
+        # 直连大模型并关闭思考链：出题只要严格 JSON，无需推理链。
+        # （实测思考链会把单次调用拖到 20-30s，3 题串行直接打爆前端 30s 超时）
         # 在共享线程池中运行同步调用，避免阻塞事件循环
-        future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
-        text = future.result(timeout=60)
+        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False)
+        text = future.result(timeout=45)
         # 清理可能的 markdown 代码块
         text = text.strip()
         if text.startswith("```"):
@@ -98,7 +120,7 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
             end = text.rfind("}")
             if start >= 0 and end > start:
                 text = text[start:end + 1]
-        result = json.loads(text)
+        result = _lenient_json_loads(text)
         for key in ("category", "question", "options", "answer", "explanation"):
             if key not in result:
                 raise ValueError(f"AI 返回缺少字段: {key}")
@@ -304,8 +326,8 @@ def _call_ai_phone_friend(api_key: str, question: str, options: dict[str, Any]) 
     )
     prompt = apply_skills(prompt, "quest")
     try:
-        from backend.api.ai_service import _ai_thread_pool, call_ai_sync
-        future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
+        from backend.api.ai_service import _ai_thread_pool, call_ai_sync_direct
+        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False)
         text = future.result(timeout=30)
         return text.strip().strip('"').strip("'")
     except Exception as e:
@@ -324,8 +346,8 @@ def _call_ai_audience_vote(api_key: str, question: str, options: dict[str, Any])
     )
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
-        from backend.api.ai_service import _ai_thread_pool, call_ai_sync
-        future = _ai_thread_pool.submit(call_ai_sync, prompt, api_key)
+        from backend.api.ai_service import _ai_thread_pool, call_ai_sync_direct
+        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False)
         text = future.result(timeout=30)
         text = text.strip()
         if text.startswith("```"):
@@ -333,7 +355,7 @@ def _call_ai_audience_vote(api_key: str, question: str, options: dict[str, Any])
             end = text.rfind("}")
             if start >= 0 and end > start:
                 text = text[start:end + 1]
-        result = json.loads(text)
+        result = _lenient_json_loads(text)
         votes = result.get("votes", {})
         # 确保四个选项都有值且总和为 100
         for k in ("A", "B", "C", "D"):
@@ -504,15 +526,15 @@ async def start_quest(request: Request):
         (username, MAX_QUEST_QUESTIONS, now, use_bank),
     )
 
-    # 批量生成首批 BATCH_SIZE 道题（并行 AI + 题库混合）
-    batch_count = min(BATCH_SIZE, MAX_QUEST_QUESTIONS)
-    questions_batch = await _batch_generate(
-        api_key, batch_count, [], 1, use_bank
-    )
-
-    if not questions_batch:
+    # 只同步生成第 1 题即返回。旧实现要在一个请求里串行生成 3 题，
+    # AI 稍慢就超过前端 30s axios 超时 —— 学生盯着“AI 出题中”久等后报
+    # “提交答案失败”，且从未进入答题页。其余缓冲题交给后台任务补货，
+    # 答对推进时命中缓冲零等待。
+    first = await _generate_question_async(api_key, [], 1, use_bank)
+    if not first or not first.get("question"):
         raise HTTPException(status_code=500, detail="出题失败，请重试")
 
+    questions_batch = [first]
     used_cats = []
     for i, q_data in enumerate(questions_batch):
         cat = q_data.get("category", "综合")
@@ -535,7 +557,11 @@ async def start_quest(request: Request):
         (json.dumps(used_cats, ensure_ascii=False), quest_id),
     )
 
-    first = questions_batch[0]
+    # 后台补齐第 2..BATCH_SIZE+1 题（INSERT OR IGNORE 幂等，与答题推进互不冲突）
+    _schedule_bg(_async_refill_buffer(
+        quest_id, api_key, list(used_cats), 2, use_bank
+    ))
+
     return {
         "quest_id": quest_id,
         "use_bank": bool(use_bank),
@@ -582,7 +608,34 @@ async def get_current_question(quest_id: int, request: Request):
         (quest_id, current_idx),
     )
     if not question:
-        raise HTTPException(status_code=404, detail="题目不存在")
+        # 缓冲未命中（页面刷新时后台补题尚未写入该题）：按需生成后重取
+        api_key, _ = get_api_keys(username)
+        if api_key and 1 <= current_idx <= MAX_QUEST_QUESTIONS:
+            use_bank = quest.get("use_bank", 0) or 0
+            used_cats = json.loads(quest.get("used_categories") or "[]")
+            q_data = await _generate_question_async(api_key, used_cats, current_idx, use_bank)
+            options_json = json.dumps(q_data["options"], ensure_ascii=False)
+            execute_insert_update(
+                """INSERT OR IGNORE INTO quest_question_records
+                   (quest_id, sort_order, category, question_text, options, correct_answer,
+                    student_answer, is_correct, lifeline_used, time_spent, score, explanation,
+                    svg_content, has_svg, media_files, media_placeholders)
+                   VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?)""",
+                (quest_id, current_idx, q_data.get("category", "综合"), q_data["question"],
+                 options_json, q_data["answer"], q_data.get("explanation", ""),
+                 q_data.get("svg_content", ""), q_data.get("has_svg", 0),
+                 q_data.get("media_files", ""), q_data.get("media_placeholders", "")),
+            )
+            question = execute_query_one(
+                """SELECT id, sort_order, category, question_text, options, correct_answer,
+                          explanation, lifeline_used,
+                          svg_content, has_svg, media_files, media_placeholders
+                   FROM quest_question_records
+                   WHERE quest_id=? AND sort_order=?""",
+                (quest_id, current_idx),
+            )
+        if not question:
+            raise HTTPException(status_code=404, detail="题目不存在")
 
     # 如果该题已使用锦囊，返回锦囊效果信息
     lifeline_used = question["lifeline_used"] or ""
@@ -685,7 +738,8 @@ async def submit_answer(quest_id: int, request: Request):
             # 检查是否已有预生成的下一题
             buffered = execute_query_one(
                 """SELECT id, sort_order, category, question_text, options,
-                          correct_answer, explanation
+                          correct_answer, explanation,
+                          svg_content, has_svg, media_files, media_placeholders
                    FROM quest_question_records
                    WHERE quest_id=? AND sort_order=? AND is_correct=-1""",
                 (quest_id, next_idx),
@@ -711,7 +765,7 @@ async def submit_answer(quest_id: int, request: Request):
                     (quest_id, next_idx),
                 )
                 if remaining and remaining["cnt"] <= 1 and next_idx < MAX_QUEST_QUESTIONS:
-                    asyncio.create_task(_async_refill_buffer(
+                    _schedule_bg(_async_refill_buffer(
                         quest_id, api_key, used_categories, next_idx + 1, use_bank
                     ))
 
@@ -725,22 +779,50 @@ async def submit_answer(quest_id: int, request: Request):
                         "question_text": buffered["question_text"],
                         "options": json.loads(buffered["options"]),
                         "explanation": buffered["explanation"],
+                        "svg_content": buffered.get("svg_content", "") or "",
+                        "has_svg": buffered.get("has_svg", 0) or 0,
+                        "media_files": buffered.get("media_files", "") or "",
+                        "media_placeholders": buffered.get("media_placeholders", "") or "",
                     },
                 }
             else:
-                # ❌ 缓存未命中（极少发生），同步生成
-                question_data = _generate_question(api_key, used_categories, next_idx, use_bank)
+                # ❌ 缓存未命中（极少发生），按需生成（放线程池，避免阻塞事件循环）
+                question_data = await _generate_question_async(
+                    api_key, used_categories, next_idx, use_bank
+                )
                 new_category = question_data.get("category", "综合")
                 used_categories.append(new_category)
                 options_json = json.dumps(question_data["options"], ensure_ascii=False)
                 execute_insert_update(
-                    """INSERT INTO quest_question_records
+                    """INSERT OR IGNORE INTO quest_question_records
                        (quest_id, sort_order, category, question_text, options, correct_answer,
-                        student_answer, is_correct, lifeline_used, time_spent, score, explanation)
-                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?)""",
+                        student_answer, is_correct, lifeline_used, time_spent, score, explanation,
+                        svg_content, has_svg, media_files, media_placeholders)
+                       VALUES (?, ?, ?, ?, ?, ?, '', -1, '', 0, 0, ?, ?, ?, ?, ?)""",
                     (quest_id, next_idx, new_category, question_data["question"],
-                     options_json, question_data["answer"], question_data.get("explanation", "")),
+                     options_json, question_data["answer"], question_data.get("explanation", ""),
+                     question_data.get("svg_content", ""), question_data.get("has_svg", 0),
+                     question_data.get("media_files", ""), question_data.get("media_placeholders", "")),
                 )
+                # 与后台补货竞态时 OR IGNORE 可能未插入，取已存在的行兜底
+                exist = execute_query_one(
+                    """SELECT sort_order, category, question_text, options, explanation,
+                              svg_content, has_svg
+                       FROM quest_question_records
+                       WHERE quest_id=? AND sort_order=?""",
+                    (quest_id, next_idx),
+                )
+                if exist:
+                    question_data = {
+                        "category": exist["category"],
+                        "question": exist["question_text"],
+                        "options": json.loads(exist["options"]),
+                        "answer": "",
+                        "explanation": exist["explanation"],
+                        "svg_content": exist["svg_content"] or "",
+                        "has_svg": exist["has_svg"] or 0,
+                        "media_files": "", "media_placeholders": "",
+                    }
 
                 execute_insert_update(
                     """UPDATE quest_records
@@ -761,6 +843,10 @@ async def submit_answer(quest_id: int, request: Request):
                         "question_text": question_data["question"],
                         "options": question_data["options"],
                         "explanation": question_data.get("explanation", ""),
+                        "svg_content": question_data.get("svg_content", ""),
+                        "has_svg": question_data.get("has_svg", 0),
+                        "media_files": question_data.get("media_files", ""),
+                        "media_placeholders": question_data.get("media_placeholders", ""),
                     },
                 }
     else:

@@ -170,7 +170,7 @@ const QuickPollPage: React.FC = () => {
     try {
       const { data } = await apiClient.get(`/api/interaction/polls/${pollId}/results`)
       setPollResult(data)
-    } catch { message.error(t('loadResultsFailed')) }
+    } catch (err: any) { message.error(err?.response?.data?.detail || t('loadResultsFailed')) }
   }
 
   const handleStartPoll = (poll: any) => {
@@ -251,7 +251,7 @@ const QuickPollPage: React.FC = () => {
                         )}
                         {isStudent && hasVoted && (
                           <Button size="small" icon={<BarChartOutlined />}
-                            onClick={() => handleViewPollResults(poll.id)}>{t('vote')}</Button>
+                            onClick={() => handleViewPollResults(poll.id)}>{t('results')}</Button>
                         )}
                         {isTeacherOrAdmin && (
                           <>

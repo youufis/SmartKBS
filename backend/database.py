@@ -1153,6 +1153,30 @@ def init_db():
                 except sqlite3.OperationalError:
                     pass  # 字段已存在
 
+            # ── 闯关题目 (quest_id, sort_order) 幂等约束 ──
+            # 后台补题/按需生成都依赖 INSERT OR IGNORE 去重，必须先有唯一索引；
+            # 旧表可能已有历史重复行（并发补货竞态遗留），先清理再建索引。
+            try:
+                c.execute("""
+                    DELETE FROM quest_question_records
+                    WHERE id NOT IN (
+                        SELECT CASE
+                                 WHEN MAX(CASE WHEN is_correct >= 0 THEN id END) IS NOT NULL
+                                 THEN MAX(CASE WHEN is_correct >= 0 THEN id END)
+                                 ELSE MIN(id)
+                               END
+                        FROM quest_question_records
+                        GROUP BY quest_id, sort_order
+                    )
+                """)
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uq_qqr_quest_sort
+                             ON quest_question_records(quest_id, sort_order)""")
+            except sqlite3.OperationalError:
+                pass
+
             # ═══════════════════════════════════════════════
             # 知识抢答活动模块
             # ═══════════════════════════════════════════════

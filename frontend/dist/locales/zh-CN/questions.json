@@ -306,6 +306,7 @@
     "aiMode": "🤖 AI 出题",
     "startBtn": "🎯 开始闯关",
     "startingBtn": "生成题目中...",
+    "startFailed": "闯关启动失败，请稍后重试",
     "rulesBtn": "规则",
     "totalQuests": "累计闯关",
     "times": "次",

@@ -143,7 +143,7 @@ const QuestBattlePage: React.FC = () => {
   const loadQuestion = useCallback(async () => {
     setLoading(true)
     try {
-      const { data } = await apiClient.get(`/api/quest/${questId}/question`)
+      const { data } = await apiClient.get(`/api/quest/${questId}/question`, { timeout: 60000 })
       setQuestion(data)
       setTimer(TIMER_SECONDS)
       setSelectedAnswer(null)
@@ -168,7 +168,7 @@ const QuestBattlePage: React.FC = () => {
       const { data } = await apiClient.post(`/api/quest/${questId}/answer`, {
         answer,
         time_spent: TIMER_SECONDS - timer,
-      })
+      }, { timeout: 90000 })
 
       setIsCorrect(data.is_correct)
       setShowResult(true)
@@ -218,7 +218,7 @@ const QuestBattlePage: React.FC = () => {
     }
     setAnswering(true)
     try {
-      const { data } = await apiClient.post(`/api/quest/${questId}/lifeline`, { type })
+      const { data } = await apiClient.post(`/api/quest/${questId}/lifeline`, { type }, { timeout: 60000 })
       setUsedLifelines((prev) => [...prev, type])
       if (type === 'remove_one') {
         setRemovedOption(data.removed_option)
