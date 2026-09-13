@@ -43,6 +43,8 @@ backend/smartkb.db
 backend/smartkb.db-shm
 backend/smartkb.db-wal
 backend/questions.db
+backend/questions.db-shm
+backend/questions.db-wal
 *.db
 
 # ── 测试（不提交/同步） ──
