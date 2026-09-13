@@ -258,15 +258,9 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-            # ── question_bank 多媒体字段迁移 ──
-            for col in ['svg_content', 'has_svg', 'media_placeholders', 'media_files']:
-                try:
-                    if col == 'has_svg':
-                        c.execute(f"ALTER TABLE question_bank ADD COLUMN {col} INTEGER DEFAULT 0")
-                    else:
-                        c.execute(f"ALTER TABLE question_bank ADD COLUMN {col} TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass  # 字段已存在
+            # ── question_bank 多媒体字段迁移已随题库拆分迁走 ──
+            # 真实题表在 questions.db（见 backend/question_db.py），主库里的同名表只是空壳，
+            # 由 _drop_legacy_question_shell_tables() 统一清理，这里不再 ALTER。
 
             # ── 课堂积分表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS scores (
@@ -895,67 +889,9 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
-            # ── 智能练习：练习任务表 ──
-            c.execute("""CREATE TABLE IF NOT EXISTS practice_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                knowledge_points TEXT NOT NULL,
-                creator_username TEXT NOT NULL,
-                subject TEXT DEFAULT '信息科技',
-                question_count INTEGER DEFAULT 0,
-                total_score INTEGER DEFAULT 0,
-                target_grade TEXT DEFAULT '',
-                target_class TEXT DEFAULT '',
-                target_students TEXT DEFAULT '',
-                source TEXT DEFAULT 'teacher',
-                status TEXT DEFAULT 'active',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )""")
-            try:
-                c.execute("ALTER TABLE practice_sessions ADD COLUMN target_students TEXT DEFAULT ''")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                c.execute("ALTER TABLE practice_sessions ADD COLUMN source TEXT DEFAULT 'teacher'")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                c.execute("CREATE INDEX IF NOT EXISTS idx_ps_creator ON practice_sessions(creator_username)")
-                c.execute("CREATE INDEX IF NOT EXISTS idx_ps_target ON practice_sessions(target_grade, target_class)")
-            except sqlite3.OperationalError:
-                pass
-
-            # ── 智能练习：练习题目关联表 ──
-            c.execute("""CREATE TABLE IF NOT EXISTS practice_session_questions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL REFERENCES practice_sessions(id),
-                question_id INTEGER NOT NULL,
-                sort_order INTEGER DEFAULT 0,
-                score INTEGER DEFAULT 10
-            )""")
-            try:
-                c.execute("CREATE INDEX IF NOT EXISTS idx_psq_session ON practice_session_questions(session_id)")
-            except sqlite3.OperationalError:
-                pass
-
-            # ── 智能练习：学生答题记录表 ──
-            c.execute("""CREATE TABLE IF NOT EXISTS practice_attempts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id INTEGER NOT NULL REFERENCES practice_sessions(id),
-                student_username TEXT NOT NULL,
-                answers TEXT NOT NULL,
-                score INTEGER DEFAULT 0,
-                total_score INTEGER DEFAULT 0,
-                status TEXT DEFAULT 'submitted',
-                submitted_at TEXT NOT NULL,
-                UNIQUE(session_id, student_username)
-            )""")
-            try:
-                c.execute("CREATE INDEX IF NOT EXISTS idx_pa_student ON practice_attempts(student_username)")
-                c.execute("CREATE INDEX IF NOT EXISTS idx_pa_session ON practice_attempts(session_id)")
-            except sqlite3.OperationalError:
-                pass
+            # ── 智能练习相关表（practice_sessions / practice_session_questions /
+            #     practice_attempts）住在 questions.db，由 question_db.init_question_db()
+            #     负责建表建索引；主库不再创建同名表，免得"查错库还静默返回空"。
 
             # ═══════════════════════════════════════════════
             # 积分奖励模块（v4.1）
@@ -1845,6 +1781,14 @@ def init_db():
             # ── 自动回填存量数据的 grade_id/class_id ──
             _backfill_grade_class_ids(c)
 
+            # ── 清理主库里与试题库重名的空壳表（只删 0 行的表，失败不阻断启动）──
+            try:
+                _drop_legacy_question_shell_tables(c)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"[db-cleanup] 空壳表清理未完成，下次启动会重试: {e}")
+
             # 确保存在默认管理员账号
             _ensure_default_admin()
     except Exception as e:
@@ -2028,6 +1972,52 @@ def _prune_unlocatable_rows(c):
         f"[db-selfcheck] 已清理无法唯一定位到班级的存量行: {detail}"
         + (f"; 整行留底 {backup}" if backup else "")
     )
+
+
+# ── 历史遗留：主库中与试题库重名的空壳表 ──
+# 考试 / 题库 / 智能练习相关表早已迁到 questions.db（见 backend/question_db.py），
+# 但早期版本在 smartkb.db 里建的同名表还留在库中，且恒为 0 行。
+# 它们的危害不是占地方，而是"静默骗人"：任何误用主库连接的查询都不报错，
+# 只是永远返回空/0（实测曾让每周画像显示"累计考试 0 场"、学科称号答题数偏低）。
+# 删掉之后，这类查错库会当场抛 no such table，而不是悄悄给出一个看似合理的假数据。
+# 安全阀：只有"表存在且 0 行"才删；某套部署若尚未完成迁移（表里还有数据）则原样保留并告警。
+LEGACY_QUESTION_SHELL_TABLES = (
+    "exam_questions",             # 子表在前，先删引用者再删被引用者
+    "exam_attempts",
+    "exams",
+    "practice_session_questions",
+    "practice_attempts",
+    "practice_sessions",
+    "question_bank",
+)
+
+
+def _drop_legacy_question_shell_tables(c) -> list[str]:
+    """删除主库里与试题库重名的空壳表，返回实际删除的表名列表。"""
+    dropped: list[str] = []
+    for table in LEGACY_QUESTION_SHELL_TABLES:
+        exists = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not exists:
+            continue
+        # 表名取自上面的模块级白名单常量，不含外部输入
+        row_count = c.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        if row_count:
+            logger.warning(
+                f"[db-cleanup] 主库 {table} 仍有 {row_count} 行数据，判定为未完成迁移，保留不删"
+            )
+            continue
+        c.execute(f'DROP TABLE "{table}"')
+        dropped.append(table)
+    if dropped:
+        logger.info(
+            "[db-cleanup] 已删除主库中与试题库重名的空壳表（真实数据在 questions.db）: "
+            + "、".join(dropped)
+        )
+    return dropped
+
 
 
 def _backfill_grade_class_ids(c):
