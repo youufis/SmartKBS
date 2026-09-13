@@ -329,9 +329,48 @@ def _parse_json_field(val: Any) -> Any:
 
 
 def _prepare_questions_for_room(room_id: int, room: dict[str, Any]) -> list[dict[str, Any]]:
-    """为房间准备题目（从题库加载）"""
+    """为房间准备题目（从题库加载）。
+
+    幂等：重置活动数据默认"清空参与数据、保留活动内容"，本场题目会保留在
+    quick_quiz_questions 里；若教师再次点"开始"，旧实现盲目重插 1..N 行会
+    直接撞 UNIQUE(room_id, sort_order) 抛 500"启动失败"。这里优先复用已
+    保留的题目，数量不足（教师改大了题量等）才清空重建。
+    """
     count = room["question_count"]
     source = room["question_source"]
+
+    existing = execute_query_dict(
+        """SELECT id, sort_order, question_text, options, correct_answer, explanation,
+                  source, svg_content, has_svg, media_files, media_placeholders
+           FROM quick_quiz_questions WHERE room_id=? ORDER BY sort_order""",
+        (room_id,),
+    )
+    if existing and len(existing) >= count:
+        # 复用保留题，裁掉超出当前题量的残留行，保持 DB 与 count 一致
+        keep = existing[:count]
+        extra_ids = [r["id"] for r in existing[count:]]
+        for eid in extra_ids:
+            execute_insert_update("DELETE FROM quick_quiz_questions WHERE id=?", (eid,))
+        reused = []
+        for r in keep:
+            try:
+                opts = json.loads(r["options"]) if isinstance(r["options"], str) else (r["options"] or {})
+            except (json.JSONDecodeError, TypeError):
+                opts = {}
+            reused.append({
+                "question_text": r["question_text"],
+                "options": opts,
+                "correct_answer": (r["correct_answer"] or "").strip().upper(),
+                "explanation": r.get("explanation") or "",
+                "svg_content": r.get("svg_content") or "",
+                "has_svg": r.get("has_svg") or 0,
+                "media_files": _parse_json_field(r.get("media_files")),
+                "media_placeholders": _parse_json_field(r.get("media_placeholders")),
+            })
+        return reused
+
+    # 需要重建：先清掉历史残留行，避免与 (room_id, sort_order) 唯一索引冲突
+    execute_insert_update("DELETE FROM quick_quiz_questions WHERE room_id=?", (room_id,))
     questions = []
 
     # ── 学科题库 ──
@@ -829,30 +868,41 @@ async def start_quiz(room_id: int, request: Request):
     if not player_count or player_count["cnt"] < 1:
         raise HTTPException(status_code=400, detail=f"至少需要1名玩家才能开始")
 
+    # 先准备题目（幂等，可能耗时/抛错），成功后才把房间置为 playing；
+    # 旧实现先置 playing 再备题，备题一抛 500 房间就卡在 playing，
+    # 教师看到"启动失败"，学生端永远"等待教师出题"且无法重试。
+    questions = _prepare_questions_for_room(room_id, room)
+
     now = _now()
     execute_insert_update(
         "UPDATE quick_quiz_rooms SET status='playing', started_at=? WHERE id=?",
         (now, room_id),
     )
 
-    # 准备题目
-    questions = _prepare_questions_for_room(room_id, room)
+    try:
+        # 重置内存状态
+        game_manager.create_room_state(room_id, room["time_limit"])
 
-    # 重置内存状态
-    game_manager.create_room_state(room_id, room["time_limit"])
+        # 广播游戏开始
+        await game_manager.broadcast(room_id, {
+            "type": "game_start",
+            "data": {
+                "total_questions": len(questions),
+                "time_limit": room["time_limit"],
+                "scoring_mode": room["scoring_mode"],
+            }
+        })
 
-    # 广播游戏开始
-    await game_manager.broadcast(room_id, {
-        "type": "game_start",
-        "data": {
-            "total_questions": len(questions),
-            "time_limit": room["time_limit"],
-            "scoring_mode": room["scoring_mode"],
-        }
-    })
-
-    # 推送第一题
-    await _push_question(room_id, 1)
+        # 推送第一题
+        await _push_question(room_id, 1)
+    except Exception:
+        # 启动半途失败：回滚房间状态，教师可以再次点击开始
+        execute_insert_update(
+            "UPDATE quick_quiz_rooms SET status='waiting', started_at=NULL WHERE id=?",
+            (room_id,),
+        )
+        game_manager.remove_room(room_id)
+        raise
 
     return {"message": "活动已开始", "total_questions": len(questions)}
 
