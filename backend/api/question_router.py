@@ -99,6 +99,16 @@ TYPE_DESC = {
     "subjective": "主观题",
 }
 
+# 编程题的模板代码与测试用例由「代码练习」模块（backend/api/code_router.py）独占管理：
+# code_problems 已改版为独立表，与 question_bank 之间没有任何关联字段，
+# 题库里的 code 题只能存题干与解析，既不能运行也不参与判分。
+# 与其照旧往一张已经没有 question_id 列的表里 INSERT（必然失败、又被 except 吞掉），
+# 不如在入口处就把话说清楚。
+CODE_BANK_NOTE = (
+    "题库中的「编程题」只保留题干与解析，不能运行、不参与判分；"
+    "需要可运行的代码题（含模板代码与测试用例）请在「代码练习」中创建。"
+)
+
 
 # ── 导入题目到题库（用于随堂测验题目复用） ──
 
@@ -288,6 +298,10 @@ async def generate_questions(req: GenerateRequest, request: Request):
     if req.count < 1 or req.count > 50:
         raise HTTPException(status_code=400, detail="生成数量范围为 1-50")
 
+    if req.question_type == "code":
+        # 编程题的模板代码/测试用例只有「代码练习」能落库与判分，题库侧没有这条链路
+        raise HTTPException(status_code=400, detail=CODE_BANK_NOTE)
+
     # 获取 API Key
     api_key, _ = get_api_keys(username)
     if not api_key:
@@ -320,6 +334,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
     # 入库
     saved_questions = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    code_note = ""
     for q_data in questions[:req.count]:
         q_type = q_data.get("type", req.question_type)
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
@@ -351,10 +366,9 @@ async def generate_questions(req: GenerateRequest, request: Request):
             ),
         )
 
-        # 如果是代码题，额外创建 code_problems + code_test_cases
-        if q_type == 'code':
-            assert qid is not None
-            _save_code_problem(qid, q_data, username, now)
+        # AI 自己返回了 code 题型：题库存不下模板代码与测试用例，见 CODE_BANK_NOTE
+        if q_type == "code":
+            code_note = CODE_BANK_NOTE
 
         saved_questions.append({
             "id": qid,
@@ -372,6 +386,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
         "message": f"成功生成 {len(saved_questions)} 道{TYPE_DESC.get(req.question_type, '')}",
         "questions": saved_questions,
         "total": len(saved_questions),
+        "note": code_note,
     }
 
 
@@ -386,6 +401,10 @@ async def generate_questions_async(req: GenerateRequest, request: Request):
         raise HTTPException(status_code=400, detail="请输入知识点")
     if req.count < 1 or req.count > 50:
         raise HTTPException(status_code=400, detail="生成数量范围为 1-50")
+
+    if req.question_type == "code":
+        # 丢进后台任务后再抛 HTTPException 只会变成"任务失败"，这里先给出明确指引
+        raise HTTPException(status_code=400, detail=CODE_BANK_NOTE)
 
     task_id = await _submit_ai_task(
         lambda: generate_questions(req, _InternalRequest(user)),
@@ -461,41 +480,6 @@ def _parse_ai_response(text: str) -> list[dict[str, Any]]:
             return []
 
     return []
-
-
-def _save_code_problem(question_id: int, q_data: dict[str, Any], username: str, now: str):
-    """保存代码题的 code_problems 和 code_test_cases 记录"""
-    try:
-        language = q_data.get("language", "python")
-        template_code = q_data.get("template_code", "")
-        starter_code = q_data.get("starter_code", "")
-        test_cases = q_data.get("test_cases", []) or []
-
-        pid = execute_insert(
-            """INSERT INTO code_problems
-               (question_id, template_code, starter_code, language, time_limit, created_at, updated_at)
-               VALUES (?, ?, ?, ?, 5, ?, ?)""",
-            (question_id, template_code, starter_code, language, now, now),
-        )
-
-        for i, tc in enumerate(test_cases):
-            execute_insert(
-                """INSERT INTO code_test_cases
-                   (problem_id, input, expected_output, is_sample, score, sort_order, description, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (pid,
-                 tc.get("input", ""),
-                 tc.get("expected_output", ""),
-                 1 if tc.get("is_sample") else 0,
-                 tc.get("score", 1),
-                 i,
-                 tc.get("description", ""),
-                 now),
-            )
-
-        logger.info(f"代码题已保存: question_id={question_id}, problem_id={pid}, test_cases={len(test_cases)}")
-    except Exception as e:
-        logger.error(f"保存代码题失败 (question_id={question_id}): {e}")
 
 
 # ── 题库 CRUD ──
@@ -1435,6 +1419,10 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     if req.count < 1 or req.count > 50:
         raise HTTPException(status_code=400, detail="生成数量范围为 1-50")
 
+    if req.question_type == "code":
+        # 编程题的模板代码/测试用例只有「代码练习」能落库与判分，题库侧没有这条链路
+        raise HTTPException(status_code=400, detail=CODE_BANK_NOTE)
+
     api_key, _ = get_api_keys(username)
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key，请先在系统配置中设置")
@@ -1443,8 +1431,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     from backend.prompts.chat import QUESTION_GENERATE_WITH_MEDIA_PROMPT
     type_desc = {"single": "单选题（4个选项）", "multiple": "多选题（4-5个选项）",
                  "true_false": "判断题", "short": "简答题", "fill": "填空题",
-                 "essay": "作文", "subjective": "主观题",
-                 "code": "编程题（Python 代码+测试用例）"}.get(req.question_type, "单选题")
+                 "essay": "作文", "subjective": "主观题"}.get(req.question_type, "单选题")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     prompt = QUESTION_GENERATE_WITH_MEDIA_PROMPT.format(
         subject=req.subject,
@@ -1474,6 +1461,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     from backend.config import BASE_DIR
     saved_questions = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    code_note = ""
     for q_data in questions[:req.count]:
         q_type = q_data.get("type", req.question_type)
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
@@ -1507,10 +1495,9 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
             ),
         )
 
-        # ── 代码题额外保存 code_problems 和测试用例 ──
-        if q_type == 'code':
-            assert qid is not None
-            _save_code_problem(qid, q_data, username, now)
+        # AI 自己返回了 code 题型：题库存不下模板代码与测试用例，见 CODE_BANK_NOTE
+        if q_type == "code":
+            code_note = CODE_BANK_NOTE
 
         # ── 自动配图（通义万相） ──
         placeholders = q_data.get("media_placeholders") or []
@@ -1574,6 +1561,7 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
         "message": f"成功生成 {len(saved_questions)} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
+        "note": code_note,
     }
 
 
@@ -1593,6 +1581,10 @@ async def generate_questions_with_media_async(req: GenerateWithMediaRequest, req
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
     if not req.knowledge_points.strip():
         raise HTTPException(status_code=400, detail="请输入知识点")
+
+    if req.question_type == "code":
+        # 丢进后台任务后再抛 HTTPException 只会变成"任务失败"，这里先给出明确指引
+        raise HTTPException(status_code=400, detail=CODE_BANK_NOTE)
 
     task_id = await _submit_ai_task(
         lambda: generate_questions_with_media(req, _InternalRequest(user)),
