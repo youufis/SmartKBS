@@ -795,9 +795,11 @@ def _count_questions_per_subject(student_username: str) -> dict[str, int]:
 
     try:
         # 2. 从 practice_attempts 统计各科练习数量
-        # practice_sessions 有 subject 字段
-        # practice_session_questions 记录每场练习的题目
-        practice_rows = execute_query(
+        #    practice_sessions / practice_session_questions / practice_attempts 的真实数据
+        #    在试题库 questions.db，主库里的同名表是历史遗留空壳，用主库查会静默返回 0 行。
+        from backend.question_db import execute_query as q_execute
+
+        practice_rows = q_execute(
             """SELECT ps.subject, COUNT(psq.id) as q_count
                FROM practice_attempts pa
                JOIN practice_sessions ps ON pa.session_id = ps.id
@@ -807,21 +809,32 @@ def _count_questions_per_subject(student_username: str) -> dict[str, int]:
             (student_username,),
         )
         for row in practice_rows:
-            subject = row[0]
-            q_count = row[1] if row[1] else 0
+            subject = row["subject"]
+            q_count = row["q_count"] if row["q_count"] else 0
             if subject in counts:
                 counts[subject] += q_count
     except Exception as e:
         logger.warning(f"统计 practice_attempts 题目数失败: {e}")
 
     # 3. 从 interaction_quiz_answers 统计互动测验
+    #    随堂测验没有"学科"字段（题目以 JSON 快照存库），因此按创建教师唯一的任教学科归属；
+    #    任教多门学科、或没有任教记录（如管理员）的测验不强行计入任何学科。
     try:
         quiz_rows = execute_query(
-            """SELECT iq.subject, COUNT(iqa.id) as q_count
+            """SELECT ta.subject,
+                      SUM(CASE WHEN json_valid(iqa.answers)
+                               THEN json_array_length(iqa.answers) ELSE 0 END) AS q_count
                FROM interaction_quiz_answers iqa
                JOIN interaction_quizzes iq ON iqa.quiz_id = iq.id
+               JOIN (
+                   SELECT teacher_username, MIN(subject) AS subject
+                   FROM teacher_assignments
+                   WHERE subject IS NOT NULL AND subject <> ''
+                   GROUP BY teacher_username
+                   HAVING COUNT(DISTINCT subject) = 1
+               ) ta ON ta.teacher_username = iq.creator_username
                WHERE iqa.student_username=?
-               GROUP BY iq.subject""",
+               GROUP BY ta.subject""",
             (student_username,),
         )
         for row in quiz_rows:
