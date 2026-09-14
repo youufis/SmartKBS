@@ -14,7 +14,7 @@
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-8.1.0-blue)
+![Version](https://img.shields.io/badge/Version-8.2.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,12 +30,12 @@
 
 ---
 
-> 📌 **V8.0.0 Highlights**:
-> 🔒 **Site-wide authorization hardening**: 16 rounds of feature-by-feature audit, anonymous reads and cross-teacher writes closed
-> 🎯 **Roll call & class interaction**: ownership pinned to the login identity, publish scope limited to assigned classes, class analytics fixed
-> ⚙️ **System config & skills**: atomic writes with backup fallback, value validation, masked secret echo
-> 📝 **i18n completion**: untranslated keys in security setup, question bank, paper composer, announcements, interaction and whiteboard filled (zh/en)
-> 🧹 **Resource center**: stale bindings auto-purged on rename, per-type file icons, cleaner share statistics
+> 📌 **V8.2.0 Highlights**:
+> ⏱️ **Blocking AI calls removed**: exam submission no longer reports failure when the grade was in fact saved
+> 🎯 **Quiz & Quest**: rooms no longer freeze on the last question, restart-after-reset works, quest start no longer times out
+> 📰 **Self-healing news feeds**: dead RSS sources replaced and validated per feed, circuit breaker + reserve pool; brief 57.2s -> 6.6s
+> 🔄 **Trustworthy auto-upgrade**: nothing stays stuck in “upgrading”, no false “success”, unverified migrations flagged
+> 📈 **Correct statistics**: subject titles and weekly portraits stop under-counting (legacy shell tables cleaned with a safety valve)
 
 ---
 
@@ -973,6 +973,23 @@ Git-based online incremental upgrade system:
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
 ## 📦 Changelog
+
+### v8.2.0 (2026-09-14)
+
+- ⏱️ **Blocking AI calls eliminated**: exam submission no longer reports “failed” when the grade was in fact stored - AI grading moved out of the request, `submit` gained an idempotent receipt (an already-graded paper returns the existing result, and in-progress grading says so explicitly), every long-running AI endpoint got its own 300-320s timeout, and two `async` endpoints that called AI synchronously (interaction AI suggestions, quest SVG generation) were threaded so they no longer stall the whole site (verified: the site stayed responsive during a 33s call)
+- 🎯 **Knowledge quiz**: a room no longer freezes on the last question once everyone has answered, wrong answers included - the server now reveals and advances after a short delay, race-safe against manual and timeout reveals; “restart after reset” no longer throws 500 on the unique index because question preparation is now idempotent, and corrected start ordering plus rollback mean students never sit in “waiting for the teacher” again
+- 🗺️ **Knowledge quest**: starting a quest now returns as soon as question 1 exists while the remaining questions are filled in the background (previously three serial AI calls blew past the 30s frontend timeout and students saw “failed to submit the answer”), generation and lifelines use thinking-disabled calls (~3s per question), duplicate question rows are cleaned and guarded by a unique index, and students who already voted may read the de-identified poll summary
+- 🧩 **Code problems consolidated**: the 100%-failing dead write path in the question bank was deleted (it inserted into a column that no longer exists, so generated templates and test cases never landed while only an ERROR log remained); code questions are now managed in Code Practice, and the four AI authoring endpoints answer 400 with a pointer instead of silently discarding them
+- 📈 **Statistics corrected**: subject-title answer counts and the weekly portrait stop quietly under-counting. Root cause: 7 legacy shell tables in the main database shared names with question-bank tables and always held 0 rows, so a query on the wrong connection returned empty without erroring. Startup cleanup now deletes them only when the table exists and is empty, otherwise it keeps them and warns; quizzes never had a subject column, so they attribute to the creator’s single assigned subject and count real answers instead of submissions
+- 📰 **News feeds self-heal**: 4 of the 5 sources were already dead (HTTP 404 or anti-scrape HTML) while the old code validated nothing, so it had been failing silently for months with not a single error line in the log. Sources are replaced and checked per feed (http / entries / kept) with failure reasons stored; added a per-feed circuit breaker, a reserve pool, `system_config.json` overrides (change feeds without a release or restart), graded fetch results (an empty table is never “fresh”), URL renewal instead of discard, a real refresh endpoint and teacher-side feed diagnostics
+- 📋 **Daily brief sped up**: cold start 57.2s -> 6.6s (98% of the output tokens were hidden reasoning) and 30.5s -> 2.5s per summary; it now serves from cache, single-flights generation in the background and lets the client poll, always writing a fallback draft so polling is guaranteed to converge - and the irrelevant teaching-skill injection was dropped (prompt 2561 -> 710 characters)
+- 🌊 **Streaming hardened**: the SSE compression bypass now hooks into both Starlette generations (production was shadowed by a leftover `pip install --user` 0.41.3, so the new hook name was dead code and chat simply stopped streaming), plus a startup self-check that replays a real `text/event-stream` response; if the check fails, response compression is disabled outright with an ERROR log - slower, but never silently un-streamed. Binary responses are now genuinely excluded on older versions too (wasm 14s -> 1.4s)
+- 🔄 **Auto-upgrade you can trust**: upgrades no longer stay stuck in “upgrading” forever (orphan records are reconciled against the workspace version / git HEAD, and opening the history page self-heals without a restart); reconciliation no longer marks a failed sync as success (new `head_before` evidence plus `synced/migrated/deps_ok` stage markers, with unverified migrations getting a gold “success - migrations unverified” label, an admin notification and per-record acknowledgement); history stops losing entries; the state file is written atomically under a single lock, verified with 120 concurrent writers
+- 🔒 **Session and IP handling**: the 401 flood on idle pages is gone (one shared poller: silent when logged out, silent in background tabs, one catch-up round on return; renewed tokens are applied immediately); the IP denylist can now be saved empty with separators aligned across the frontend and backend, and IP guarding defaults to off - behind NAT or a relay every visitor shares one egress IP, so blocking by IP would ban a whole building - while failed attempts still log IP, UA and referer
+- 🧹 **Smaller fixes**: curriculum exercise reset finally clears view counts with one consistent attribution rule; shared courseware dependencies no longer 403 and un-sharing no longer silently skips point and notification cleanup; the Hall of Glory now refreshes against live points (snapshots still freeze for replay); startup and maintenance logs are quieter, plus a one-off pass for rows whose class could not be resolved
+- ⚠️ **Breaking changes**: none. Question-bank AI authoring now rejects code questions explicitly (removing a write path that always failed), and the legacy shell-table cleanup only deletes tables that exist and hold zero rows
+
+---
 
 ### v8.1.0 (2026-09-07)
 
