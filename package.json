@@ -1,8 +1,0 @@
-{
-  "name": "smartkbs-root",
-  "version": "8.2.0",
-  "private": true,
-  "dependencies": {
-    "acorn": "^8.16.0"
-  }
-}
