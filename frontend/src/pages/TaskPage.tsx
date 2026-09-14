@@ -525,48 +525,48 @@ const TaskPage: React.FC = () => {
                   const list = submissionsData.submissions.map(s => {
                     const g = gradesMap[s.username]
                     const level = g ? getGradeLevel(g.score) : null
-                    return { ...s, grade: g, level, key: s.username }
+                    return { ...s, gradeInfo: g, level, key: s.username }  // grade 保留后端年级字符串, 勿覆盖(否则 studentLabel 渲染 [object Object])
                   })
                   return list.sort((a, b) => {
-                    if (a.grade && b.grade) return b.grade.score - a.grade.score
-                    if (a.grade) return -1
-                    if (b.grade) return 1
+                    if (a.gradeInfo && b.gradeInfo) return b.gradeInfo.score - a.gradeInfo.score
+                    if (a.gradeInfo) return -1
+                    if (b.gradeInfo) return 1
                     return 0
                   })
                 })()}
                 expandable={{
                   expandedRowRender: (r: any) => {
-                    if (!r.grade) return <Typography.Text type="secondary">{t('noGradeData')}</Typography.Text>
+                    if (!r.gradeInfo) return <Typography.Text type="secondary">{t('noGradeData')}</Typography.Text>
                     return (
                       <div style={{ padding: '8px 0 4px 0' }}>
                         <Typography.Paragraph style={{ fontSize: 13, margin: '0 0 8px 0', color: '#595959' }}>
-                          💬 {r.grade.comment}
+                          💬 {r.gradeInfo.comment}
                         </Typography.Paragraph>
-                        {r.grade.strengths?.length > 0 && (
+                        {r.gradeInfo.strengths?.length > 0 && (
                           <div style={{ marginBottom: 6 }}>
                             <Typography.Text style={{ fontSize: 12, color: '#52c41a' }}>
-                              {t('strengths')}{r.grade.strengths.join('、')}
+                              {t('strengths')}{r.gradeInfo.strengths.join('、')}
                             </Typography.Text>
                           </div>
                         )}
-                        {r.grade.weaknesses?.length > 0 && (
+                        {r.gradeInfo.weaknesses?.length > 0 && (
                           <div style={{ marginBottom: 6 }}>
                             <Typography.Text style={{ fontSize: 12, color: '#ff4d4f' }}>
-                              {t('weaknesses')}{r.grade.weaknesses.join('、')}
+                              {t('weaknesses')}{r.gradeInfo.weaknesses.join('、')}
                             </Typography.Text>
                           </div>
                         )}
-                        {r.grade.feedback && (
+                        {r.gradeInfo.feedback && (
                           <div style={{ padding: '6px 8px', background: '#f0f5ff', borderRadius: 4, marginTop: 4 }}>
                             <Typography.Text style={{ fontSize: 12, color: '#1d39c4' }}>
-                              {t('suggestions')}{r.grade.feedback}
+                              {t('suggestions')}{r.gradeInfo.feedback}
                             </Typography.Text>
                           </div>
                         )}
                       </div>
                     )
                   },
-                  rowExpandable: (r: any) => !!r.grade,
+                  rowExpandable: (r: any) => !!r.gradeInfo,
                 }}
                 columns={[
                   {
@@ -581,10 +581,10 @@ const TaskPage: React.FC = () => {
                   },
                   {
                     title: t('scoreGrade'), key: 'score', width: 110,
-                    render: (_: any, r: any) => r.grade ? (
+                    render: (_: any, r: any) => r.gradeInfo ? (
                       <Space align="center" size={2}>
                         <Typography.Text strong style={{ fontSize: 14, color: '#52c41a', minWidth: 24 }}>
-                          {r.grade.score}
+                          {r.gradeInfo.score}
                         </Typography.Text>
                         <Tag color={r.level.color} style={{ margin: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}>{r.level.label}</Tag>
                       </Space>

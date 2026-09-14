@@ -571,7 +571,7 @@ async def get_task_submissions(task_id: str, request: Request):
     student = request.query_params.get("student", "")
     content = ""
     if student:
-        content = _read_student_submission(creator, task_info["name"], student)
+        content = _read_student_submission(creator, task_info["name"], student, task_info["id"])
 
     # 提交名单补年级班级(此前只有学号+姓名)
     from backend.permission_service import attach_student_info
@@ -585,59 +585,64 @@ async def get_task_submissions(task_id: str, request: Request):
     }
 
 
-def _read_student_submission(creator: str, task_name: str, student: str) -> str:
-    """从汇总文件中读取指定学生的提交内容"""
-    admin_chat_dir = get_admin_chat_history_dir()
+def _read_student_submission(creator: str, task_name: str, student: str, task_id: str = "") -> str:
+    """从汇总文件中读取指定学生的提交内容。
 
-    # 汇总文件路径（与 _save_to_summary 一致）
-    summary_path = os.path.join(
-        admin_chat_dir,
-        SUMMARY_DIR_NAME, TEACHERS_SUMMARY_DIR, creator,
-        f"summary_{task_name}.md",
-    )
-    if not os.path.isfile(summary_path):
-        return ""
-
-    try:
-        with open(summary_path, "r", encoding="utf-8") as f:
-            content = f.read()
-    except Exception:
-        return ""
-
-    # 提取该学生的所有提交内容（可能有多次提交记录）
+    修复: 旧实现用未净化的"summary_{任务名}.md"拼读路径, 而提交流程写的是
+    "summary_{任务名}_{任务指纹}.md"(K3 净化 + 指纹命名), 读写路径不一致,
+    教师点"查看提交内容"永远为空(数据其实在盘上)。现与写入端统一走
+    _summary_paths(带指纹) + _summary_paths_legacy(历史兼容) 逐个探测。
+    """
     marker = f"## 学生 {student}"
-    if marker not in content:
-        return ""
-
     next_marker = "\n## 学生 "
-    all_chunks = []
-    for part in content.split(marker):
-        if not part.strip():
+    # 同一提交会写到多个候选位置(teachers/个人/admin), 互为副本:
+    # 找到第一个包含该学生标记的文件即返回, 避免跨文件重复拼接
+    paths = _summary_paths(creator, task_name, task_id) + _summary_paths_legacy(creator, task_name)
+    for summary_path in paths:
+        if not os.path.isfile(summary_path):
             continue
-        # 取到下一个学生标记或文件末尾
-        if next_marker in part:
-            student_chunk = part.split(next_marker, 1)[0]
-        else:
-            student_chunk = part
+        try:
+            with open(summary_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception:
+            continue
+        content = content.replace("\r\n", "\n")
+        if marker not in content:
+            continue
 
-        # 解析提交内容 — 取 "内容:" 之后到结束的全部内容
-        lines = student_chunk.strip().split("\n")
-        content_started = False
-        result_lines = []
-        for line in lines:
-            if line.startswith("内容:"):
-                content_started = True
-                rest = line[len("内容:"):].strip()
-                if rest:
-                    result_lines.append(rest)
+        all_chunks = []
+        for part in content.split(marker):
+            if not part.strip():
                 continue
-            if content_started:
-                result_lines.append(line)
-        chunk_text = "\n".join(result_lines).strip()
-        if chunk_text:
-            all_chunks.append(chunk_text)
+            if next_marker in part:
+                student_chunk = part.split(next_marker, 1)[0]
+            else:
+                student_chunk = part
 
-    return "\n\n---\n\n".join(all_chunks) if all_chunks else ""
+            lines = student_chunk.strip().split("\n")
+            content_started = False
+            result_lines = []
+            for line in lines:
+                if line.startswith("内容:"):
+                    content_started = True
+                    rest = line[len("内容:"):].strip()
+                    if rest:
+                        result_lines.append(rest)
+                    continue
+                if content_started:
+                    result_lines.append(line)
+            chunk_text = "\n".join(result_lines).strip()
+            # 去掉块尾部的分隔线残留
+            while chunk_text.endswith("---"):
+                chunk_text = chunk_text[:-3].rstrip()
+            if chunk_text:
+                all_chunks.append(chunk_text)
+
+        if all_chunks:
+            return "\n\n---\n\n".join(all_chunks)
+    return ""
+
+
 @router.post("/revert-submission")
 async def revert_submission(request: Request):
     """回退学生的提交（管理员/教师）"""
