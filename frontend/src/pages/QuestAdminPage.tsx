@@ -480,7 +480,7 @@ const QuestBankTab: React.FC = () => {
     if (!mediaQuestion) return
     setSvgLoading(true)
     try {
-      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-svg`)
+      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-svg`, null, { timeout: 180000 })
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
@@ -521,7 +521,7 @@ const QuestBankTab: React.FC = () => {
   const handleGenerateMedia = async (key: string) => {
     if (!mediaQuestion) return
     try {
-      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-media/${key}`)
+      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-media/${key}`, null, { timeout: 320000 })
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)
@@ -647,7 +647,7 @@ const QuestBankTab: React.FC = () => {
   const handleAiGenerate = async () => {
     setAiGenerating(true)
     try {
-      const { data } = await apiClient.post('/api/quest/admin/bank/ai-generate', { count: aiCount })
+      const { data } = await apiClient.post('/api/quest/admin/bank/ai-generate', { count: aiCount }, { timeout: 300000 })
       message.success(t('aiGenerateSuccess', { saved: data.saved, total: data.total }))
       loadQuestions()
     } catch (e: any) {

@@ -262,7 +262,7 @@ const DiscussionRoomPage: React.FC = () => {
     if (!groupId) return
     setAiLoading(true)
     try {
-      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-suggest`)
+      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-suggest`, null, { timeout: 180000 })
       if (data.status === 'ok' && data.content) {
         // 不本地追加，由 WebSocket/轮询带回消息（避免重复）
         message.success(t('aiTutorReplied'))

@@ -41,7 +41,7 @@ export async function getFeed(): Promise<DiscoveryResponse> {
 
 /** 手动刷新 */
 export async function refreshFeed(): Promise<DiscoveryResponse> {
-  const { data } = await apiClient.post('/api/discovery/refresh');
+  const { data } = await apiClient.post('/api/discovery/refresh', null, { timeout: 180000 });
   return data;
 }
 

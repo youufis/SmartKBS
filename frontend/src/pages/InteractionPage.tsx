@@ -96,7 +96,7 @@ const InteractionPage: React.FC = () => {
     setAiQuizResult(null)
     try {
       console.log('生成测验参数:', values)
-      const { data } = await apiClient.post('/api/interaction/quizzes/ai-generate', values)
+      const { data } = await apiClient.post('/api/interaction/quizzes/ai-generate', values, { timeout: 300000 })
       setAiQuizResult(data)
       if (data.questions?.length > 0) {
         message.success(t('aiGeneratedQuestions', { count: data.questions.length }))
@@ -198,7 +198,7 @@ const InteractionPage: React.FC = () => {
     setQuizAiAnalysisLoading(true)
     setQuizAiAnalysis(null)
     try {
-      const { data } = await apiClient.get(`/api/interaction/quizzes/${quizId}/ai-analysis`)
+      const { data } = await apiClient.get(`/api/interaction/quizzes/${quizId}/ai-analysis`, { timeout: 180000 })
       if (data.task_id) {
         // 异步任务，轮询结果
         const result = await pollAiTask(data.task_id)

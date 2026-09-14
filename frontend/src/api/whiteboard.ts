@@ -301,7 +301,7 @@ export async function aiGenerateDiagram(
   width?: number
   height?: number
 }> {
-  const res = await apiClient.post('/api/whiteboard/ai/generate-diagram', { description, subject })
+  const res = await apiClient.post('/api/whiteboard/ai/generate-diagram', { description, subject }, { timeout: 320000 })
   return res.data
 }
 
@@ -317,7 +317,7 @@ export async function aiGenerateBoard(
     kp_name: kpName,
     subject: subject || '',
     grade: grade || '',
-  })
+  }, { timeout: 320000 })
   return res.data
 }
 
@@ -331,7 +331,7 @@ export async function aiBeautifyBoard(
   const res = await apiClient.post('/api/whiteboard/ai/beautify-board', {
     room_id: roomId,
     subject: subject || '',
-  })
+  }, { timeout: 320000 })
   return res.data
 }
 
@@ -350,7 +350,7 @@ export async function aiGenerateQuiz(
     room_id: roomId,
     subject: subject || '',
     kp_name: kpName || '',
-  })
+  }, { timeout: 320000 })
   return res.data
 }
 
@@ -366,7 +366,7 @@ export async function aiSmartAnnotation(
   const res = await apiClient.post('/api/whiteboard/ai/smart-annotation', {
     selection_desc: selectionDesc,
     mode: mode || 'demo',
-  })
+  }, { timeout: 320000 })
   return res.data
 }
 
@@ -380,7 +380,7 @@ export async function aiGenerateMindmap(
   const res = await apiClient.post('/api/whiteboard/ai/generate-mindmap', {
     room_id: roomId,
     subject: subject || '',
-  })
+  }, { timeout: 320000 })
   return res.data
 }
 
@@ -394,13 +394,13 @@ export async function aiGenerateBilingual(
   const res = await apiClient.post('/api/whiteboard/ai/generate-bilingual', {
     room_id: roomId,
     subject: subject || '',
-  })
+  }, { timeout: 320000 })
   return res.data
 }
 
 export async function aiSuggest(content: string, kpName?: string): Promise<{
   suggestion: string
 }> {
-  const res = await apiClient.post('/api/whiteboard/ai/suggest', { content, kp_name: kpName })
+  const res = await apiClient.post('/api/whiteboard/ai/suggest', { content, kp_name: kpName }, { timeout: 320000 })
   return res.data
 }

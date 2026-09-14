@@ -115,7 +115,7 @@ export async function autoSelectQuestions(
     exclude_existing?: boolean;
   }
 ): Promise<{ message: string; added: number; questions: any[] }> {
-  const { data } = await apiClient.post(`/api/exams/${examId}/auto-select-questions`, params);
+  const { data } = await apiClient.post(`/api/exams/${examId}/auto-select-questions`, params, { timeout: 300000 });
   return data;
 }
 
@@ -141,7 +141,9 @@ export async function submitExam(
   passed: boolean;
   details?: Record<string, any>;
 }> {
-  const { data } = await apiClient.post(`/api/exams/${examId}/submit`, { answers });
+  // 主观题 AI 批改在一个请求内完成, 可能远超全局 30s 超时;
+  // 超时后即使服务端批改成功前端也会误报"提交失败"。给足 5 分钟。
+  const { data } = await apiClient.post(`/api/exams/${examId}/submit`, { answers }, { timeout: 300000 });
   return data;
 }
 

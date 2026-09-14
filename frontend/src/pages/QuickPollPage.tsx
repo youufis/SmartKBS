@@ -81,7 +81,7 @@ const QuickPollPage: React.FC = () => {
     setAiPollLoading(true)
     setAiPollResult(null)
     try {
-      const { data } = await apiClient.post('/api/interaction/polls/ai-generate', values)
+      const { data } = await apiClient.post('/api/interaction/polls/ai-generate', values, { timeout: 120000 })
       setAiPollResult(data)
       if (data.poll) {
         message.success(t('aiPollGenerated'))

@@ -238,7 +238,7 @@ const QuestionBankPage: React.FC = () => {
     if (!mediaQuestion) return
     setSvgLoading(true)
     try {
-      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-svg`)
+      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-svg`, null, { timeout: 180000 })
       message.success(t('svgRegenerated'))
       await loadQuestions()
       // 更新弹窗中的 mediaQuestion
@@ -284,7 +284,7 @@ const QuestionBankPage: React.FC = () => {
     if (!mediaQuestion) return
     // PlaceholderManager 内部管理 per-key loading，父组件仅调用接口
     try {
-      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-media/${key}`)
+      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-media/${key}`, null, { timeout: 320000 })
       message.success(t('imageGenerated'))
       await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)

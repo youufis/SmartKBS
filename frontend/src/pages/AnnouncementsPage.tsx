@@ -80,7 +80,7 @@ const AnnouncementsPage: React.FC = () => {
     try {
       const values = await aiForm.validateFields()
       setAiLoading(true)
-      const { data } = await apiClient.post('/api/notifications/announcements/ai-generate', values)
+      const { data } = await apiClient.post('/api/notifications/announcements/ai-generate', values, { timeout: 180000 })
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
         if (result && result.status === 'ok' && result.data) {

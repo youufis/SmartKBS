@@ -1226,6 +1226,35 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
     }
 
 
+def _submitted_receipt(attempt_row: dict, exam: dict) -> dict:
+    """X5: 重复提交时幂等返回既有批改结果。
+
+    AI 批改(简答/作文)可能超过前端超时, 学生端显示"提交失败"但服务端仍在
+    正常完成; 学生再次点击提交时旧实现一律 400("没有进行中的答题记录"/
+    "该考试已提交"), 造成"明明有成绩却提示失败"的错觉。这里直接返回已存的
+    得分与结果, 让第二次点击变成"看到成绩"而不是报错。
+    """
+    graded: dict = {}
+    raw = attempt_row.get("answers")
+    try:
+        if isinstance(raw, str) and raw:
+            graded = json.loads(raw)
+        elif isinstance(raw, dict):
+            graded = raw
+    except (json.JSONDecodeError, TypeError):
+        graded = {}
+    earned = attempt_row.get("score") or 0.0
+    pass_score = exam.get("pass_score") or 0
+    return {
+        "message": "已提交，请勿重复提交",
+        "attempt_id": attempt_row["id"],
+        "score": earned,
+        "total_score": exam["total_score"],
+        "passed": earned >= pass_score,
+        "details": graded if exam.get("show_result_immediately") else None,
+    }
+
+
 @router.post("/{exam_id}/submit")
 async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
     """学生提交答案并自动批改（支持简答题 AI 语义批改 + 主观题/作文 AI 多维评分）"""
@@ -1248,6 +1277,18 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         (exam_id, username),
     )
     if not attempt:
+        # X5: 可能首单已提交成功(前端超时误报失败)或仍在 AI 批改中
+        last = execute_query_one(
+            """SELECT id, status, score, answers FROM exam_attempts
+               WHERE exam_id = ? AND student_username = ?
+               ORDER BY id DESC LIMIT 1""",
+            (exam_id, username),
+        )
+        if last and last["status"] == "submitted":
+            return _submitted_receipt(last, exam)
+        if last and last["status"] == "grading":
+            raise HTTPException(status_code=400,
+                                detail="答卷已收到，AI 正在批改中，请勿重复提交，稍后刷新即可查看成绩")
         raise HTTPException(status_code=400, detail="没有进行中的答题记录")
 
     attempt_id = attempt["id"]
@@ -1258,9 +1299,13 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         (attempt_id,),
     )
     if claimed == 0:
-        _st = execute_query_one("SELECT status FROM exam_attempts WHERE id=?", (attempt_id,))
+        _st = execute_query_one("SELECT id, status, score, answers FROM exam_attempts WHERE id=?", (attempt_id,))
         if _st and _st["status"] == "submitted":
-            raise HTTPException(status_code=400, detail="该考试已提交，请勿重复提交")
+            # X5: 并发重复提交 → 幂等返回既有结果, 不再误报失败
+            return _submitted_receipt(_st, exam)
+        if _st and _st["status"] == "grading":
+            raise HTTPException(status_code=400,
+                                detail="答卷已收到，AI 正在批改中，请勿重复提交，稍后刷新即可查看成绩")
         raise HTTPException(status_code=400, detail="答题记录状态已变化(批改中或已过期), 请刷新后查看结果")
 
     # X1: 个人时长校验(开始时间+时长+宽限)

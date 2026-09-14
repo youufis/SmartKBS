@@ -1718,7 +1718,8 @@ async def quest_bank_generate_svg(question_id: int, request: Request):
     )
     prompt = apply_skills(prompt, "quest")
     try:
-        text = call_ai_sync_direct(prompt, api_key)
+        # 同步 AI 调用放线程里跑, 避免阻塞事件循环（同闯关出题口径）
+        text = await asyncio.to_thread(call_ai_sync_direct, prompt, api_key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成 SVG 失败: {str(e)}")
 

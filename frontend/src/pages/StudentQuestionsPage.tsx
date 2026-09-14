@@ -315,7 +315,7 @@ const StudentQuestionsPage: React.FC = () => {
   // ── AI 建议回答 ──
   const handleAiSuggestAnswer = async (qId: number) => {
     try {
-      const { data } = await apiClient.post(`/api/interaction/questions/${qId}/ai-suggest`)
+      const { data } = await apiClient.post(`/api/interaction/questions/${qId}/ai-suggest`, null, { timeout: 180000 })
       if (data.suggested_answer) {
         setAnswerText(data.suggested_answer)
         message.success(t('aiSuggestedAnswer'))

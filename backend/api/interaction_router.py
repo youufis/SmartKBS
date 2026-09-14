@@ -469,7 +469,8 @@ async def ai_suggest_answer(question_id: int, request: Request):
         '请用中文回答，语气亲切，条理清晰。'
     )
 
-    answer = _call_ai(prompt)
+    # AI 建议是几十秒级同步调用, 直接在 async 端点里跑会卡死整个事件循环
+    answer = await asyncio.to_thread(_call_ai, prompt)
     return {"suggested_answer": answer, "question": content}
 
 
