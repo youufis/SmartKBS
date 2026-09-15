@@ -425,6 +425,21 @@ def _loads_json_repair(candidate: str):
     return None
 
 
+def distribute_scores(n: int, total: int = 100, minimum: int = 1) -> list[int]:
+    """把总分 total 均摊到 n 道题(整数分), 余数从前若干题每题 +1,
+    列表和恒等于 total。题目过多(n*minimum > total)时每题保底 minimum 分。
+
+    用于同步练习/错题巩固: 教师未指定逐题分值时按题量折算,
+    保证总分级始终是熟悉的百分制(旧实现固定每题 10 分, 5 题=50 分)。
+    """
+    if n <= 0:
+        return []
+    if n * minimum > total:
+        return [minimum] * n
+    base, rem = divmod(total, n)
+    return [base + (1 if i < rem else 0) for i in range(n)]
+
+
 def extract_json_from_text(text: str) -> dict | list | None:
     """从 AI 返回文本中鲁棒地提取 JSON 对象或数组
 

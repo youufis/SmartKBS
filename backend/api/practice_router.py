@@ -363,15 +363,22 @@ async def create_session(req: PracticeCreateSession, request: Request):
     if missing:
         raise HTTPException(status_code=400, detail=f"部分题目不存在或已被删除: {missing}")
 
-    # 分值归一(缺省 10 分, 限制 1-100), 避免 0/负分把得分率算成无穷大
-    scores: list[int] = []
-    for i in range(len(req.question_ids)):
-        raw = req.scores[i] if req.scores and i < len(req.scores) else 10
-        try:
-            val = int(raw)
-        except (TypeError, ValueError):
-            val = 10
-        scores.append(min(max(val, 1), 100))
+    # 分值归一, 避免 0/负分把得分率算成无穷大:
+    # - 教师显式给了逐题分值 → 照用(缺的部分按 10 补, 与旧行为一致)
+    # - 未指定分值 → 按题量折算, 总分恒为 100(旧实现固定每题 10 分,
+    #   5 道题只有 50 分, 与考试/测验的百分制口径对不上)
+    from backend.utils import distribute_scores
+    if req.scores:
+        scores: list[int] = []
+        for i in range(len(req.question_ids)):
+            raw = req.scores[i] if i < len(req.scores) else 10
+            try:
+                val = int(raw)
+            except (TypeError, ValueError):
+                val = 10
+            scores.append(min(max(val, 1), 100))
+    else:
+        scores = distribute_scores(len(req.question_ids), 100)
     total = sum(scores)
 
     # 统一范围闸(与随堂测验/投票/公告共用): 教师发布范围必须落在本人任教内

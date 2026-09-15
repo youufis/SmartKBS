@@ -1004,13 +1004,16 @@ def check_and_auto_generate_wrong_practice(student_username: str, threshold: int
            VALUES (?,?,?,?,?,?,?,?,?,'wrong_book','active',?,?)""",
         (title, "错题巩固", "system", "", len(selected), 0, "", "", target_students_str, now, now),
     )
+    # 按题量折算百分制(与手动布置同步练习同一口径, 5 题=每题 20 分)
+    from backend.utils import distribute_scores
+    per_scores = distribute_scores(len(selected), 100)
     total_score = 0
     for i, qid in enumerate(selected):
         q_ins(
             "INSERT INTO practice_session_questions (session_id, question_id, sort_order, score) VALUES (?,?,?,?)",
-            (session_id, int(qid), i, 10),
+            (session_id, int(qid), i, per_scores[i]),
         )
-        total_score += 10
+        total_score += per_scores[i]
     q_upd("UPDATE practice_sessions SET total_score=? WHERE id=?", (total_score, session_id))
     logger.info(
         f"自动生成错题巩固练习 session={session_id} 学生={student_username} "
