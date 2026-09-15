@@ -106,7 +106,19 @@ export async function dedupQuestions(confirm = false): Promise<DedupResult> {
   return data;
 }
 
-export async function extractQuestions(formData: FormData): Promise<QuestionGenerateResponse> {
+/** 提取响应: 短内容同步返回; 长文档转后台任务(mode=task)需轮询 task_id */
+export interface ExtractResponse {
+  mode?: 'task';
+  task_id?: string;
+  batches?: number;
+  estimated?: number;
+  message?: string;
+  note?: string;
+  total?: number;
+  questions?: QuestionInfo[];
+}
+
+export async function extractQuestions(formData: FormData): Promise<ExtractResponse> {
   const { data } = await apiClient.post('/api/questions/extract', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 600000,

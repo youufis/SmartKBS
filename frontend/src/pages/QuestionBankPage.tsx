@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
+import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 import { useTranslation } from 'react-i18next'
@@ -174,9 +175,18 @@ const QuestionBankPage: React.FC = () => {
       } else {
         formData.append('text', extractText)
       }
-      const res = await questionsApi.extractQuestions(formData)
-      setExtractedQuestions(res.questions)
-      message.success(res.message)
+      let res = await questionsApi.extractQuestions(formData)
+      if (res.mode === 'task' && res.task_id) {
+        // 长文档分批提取转后台: 轮询任务(计时器继续走, 界面显示已用时)
+        message.info(res.message)
+        const polled = await pollAiTask(res.task_id, 900000)
+        if (!polled) throw new Error(t('extractFail'))
+        if (polled.error) throw new Error(String(polled.error))
+        res = polled as typeof res
+      }
+      setExtractedQuestions(res.questions || [])
+      message.success(res.message || t('extractedCount', { count: res.total || 0 }))
+      if (res.note) message.info(res.note)
       loadQuestions()
     } catch (err: any) {
       const errMsg = err?.response?.data?.detail || err?.message || t('extractFail')

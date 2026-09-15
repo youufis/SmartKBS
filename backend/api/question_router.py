@@ -903,6 +903,103 @@ async def list_question_types():
 
 # ── 从粘贴文本或 Word 文档提取试题 ──
 
+def _persist_extracted_questions(questions: list[dict[str, Any]], subject: str,
+                                 difficulty: str, username: str,
+                                 source_label: str) -> list[dict[str, Any]]:
+    """提取结果统一入库(同步/后台任务共用), 返回带 id 的题目列表"""
+    from backend.database import execute_query as user_query
+    user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
+    creator_name = user_row[0][0] if user_row and user_row[0][0] else username
+    saved: list[dict[str, Any]] = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for q_data in questions:
+        q_type = q_data.get("type", "single")
+        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
+        svg_code = q_data.get("svg_code") or ""
+        has_svg = 1 if svg_code.strip() else 0
+        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
+        qid = execute_insert(
+            """INSERT INTO question_bank
+               (type, question_text, options, correct_answer, explanation,
+                knowledge_points, subject, difficulty, creator_username, creator_name,
+                source, status, created_at, updated_at,
+                svg_content, has_svg, media_placeholders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?,
+                       ?, ?, ?)""",
+            (
+                q_type,
+                q_data.get("question", ""),
+                options_str,
+                q_data.get("answer", ""),
+                q_data.get("explanation", ""),
+                q_data.get("knowledge_point", ""),
+                subject,
+                q_data.get("difficulty", difficulty),
+                username,
+                creator_name,
+                source_label,
+                now,
+                now,
+                svg_code, has_svg, media_placeholders,
+            ),
+        )
+        saved.append({
+            "id": qid,
+            "type": q_type,
+            "question_text": q_data.get("question", ""),
+            "options": q_data.get("options", {}),
+            "correct_answer": q_data.get("answer", ""),
+            "explanation": q_data.get("explanation", ""),
+            "knowledge_points": q_data.get("knowledge_point", ""),
+            "difficulty": q_data.get("difficulty", difficulty),
+            "has_svg": has_svg,
+            "svg_content": svg_code if has_svg else None,
+            "media_placeholders": q_data.get("media_placeholders") or [],
+            "media_files": [],
+        })
+    return saved
+
+
+def _build_batch_extract_prompt(subject: str, difficulty: str, chunk: str,
+                               part: int, total: int) -> str:
+    """分批提取 prompt: 声明"这是长文档的第 i/N 部分", 只提取真实存在的题, 防编造"""
+    from backend.prompts import build_ai_role
+    difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
+    ai_role = build_ai_role(subject=subject)
+    return f"""下面是一份长文档的第 {part}/{total} 部分，其中包含若干试题（部分题目可能被截断不完整）。
+
+=== 文本数据 ===
+{chunk}
+=== 数据结束 ===
+
+{ai_role}
+你的任务是从上面的文本中提取其中**真实存在**的全部试题。
+请严格按照 JSON 数组格式输出，只输出 JSON，不得有任何其他文字。
+
+科目：{subject}
+难度：{difficulty_desc}
+
+要求：
+1. 只提取文本中明确出现的题目，**禁止编造、禁止凭常识补全**不存在的题目
+2. 被截断而不完整（缺题干或缺答案与选项）的题目直接跳过
+3. 每个试题必须包含：题目、正确答案、题型（single/multiple/true_false/short/fill）
+4. 选择题必须有选项（A/B/C/D），判断题选项为 {{"对":"对","错":"错"}}
+5. 本段没有题目时输出 []
+
+JSON 格式：
+[
+  {{
+    "type": "single/multiple/true_false/short/fill",
+    "question": "题目",
+    "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
+    "answer": "正确答案",
+    "explanation": "解析",
+    "knowledge_point": "知识点",
+    "difficulty": "easy/medium/hard"
+  }}
+]"""
+
+
 @router.post("/extract")
 async def extract_questions_from_text(
     request: Request,
@@ -942,117 +1039,99 @@ async def extract_questions_from_text(
     if len(content) < 10:
         raise HTTPException(status_code=400, detail="文本内容太少，无法提取试题")
 
-    # ── JSON 文件直接解析（不调用 AI） ──
+    # ── 结构化直通: JSON 类内容(上传文件或粘贴)先"语法修复→解析"，
+    #    再在任意嵌套结构(按课/章分组、题库导出等)里深挖题目字典。
+    #    成功即全量入库：0 token、不受"喂模型长度上限/输出截断"影响 ──
     questions = None
-    json_bytes: bytes | None = None
-    if file and file.filename and source_label == "json":
-        json_bytes = content.encode("utf-8")
-    if json_bytes:
+    extract_note = ""
+    if source_label == "json" or content.lstrip()[:1] in ("[", "{"):
         try:
-            parsed = json.loads(json_bytes.decode("utf-8", errors="replace"))
-            if isinstance(parsed, list):
-                raw_questions = parsed
-            elif isinstance(parsed, dict) and "questions" in parsed:
-                raw_questions = parsed["questions"]
-            else:
-                raw_questions = []
-            # 智能识别并规范化字段名
-            if raw_questions and all(isinstance(q, dict) for q in raw_questions):
-                normalized = []
-                for q in raw_questions:
+            from backend.json_repair import try_parse_repaired
+            from backend.question_extract import collect_question_dicts
+            parsed = try_parse_repaired(content)
+            if parsed is not None:
+                normalized: list[dict[str, Any]] = []
+                for q in collect_question_dicts(parsed):
                     nq = _normalize_question_json(q)
                     if nq.get("question"):
                         normalized.append(nq)
                 if normalized:
                     questions = normalized
                     source_label = "json_import"
-                    logger.info(f"JSON 文件直接解析成功（{len(raw_questions)} 项，归一化后 {len(questions)} 道有效试题），跳过 AI 提取")
+                    extract_note = f"结构化直通：解析出 {len(normalized)} 道题（未调用 AI）"
+                    logger.info(f"结构化试题直通解析成功: {len(normalized)} 道 (source={source_label})")
         except Exception as e:
-            logger.info(f"JSON 直接解析失败，回退到 AI 提取: {e}")
+            logger.info(f"结构化直通解析失败，转 AI 提取: {e}")
 
-    # ── 非 JSON 或 JSON 回退：走 AI 提取 ──
+    # ── AI 提取兜底: 规则分题目块 → 单批同步 / 多批后台任务 ──
     if questions is None:
-        # 截取过长内容（JSON 直接解析不截断）
-        MAX_CHARS = 50000
-        if len(content) > MAX_CHARS:
-            logger.info(f"文本内容过长 ({len(content)} 字符)，已截取前 {MAX_CHARS} 字符")
-            content = content[:MAX_CHARS]
-
-        # 获取 API Key
         api_key, _ = get_api_keys(username)
         if not api_key:
             raise HTTPException(status_code=400, detail="未配置 API Key，请先在系统配置中设置")
 
-        # 构造提取 Prompt（不注入技能，避免结构化输出指令与纯 JSON 要求冲突）
-        prompt = _build_extract_prompt(subject, difficulty, content)
-        logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
+        # 超长输入护栏(约60万字, 正常文档远小于此): 防误传超大文件烧钱
+        content = content[:600000]
+        from backend.question_extract import merge_questions, pack_batches, split_question_blocks
+        blocks, est = split_question_blocks(content)
+        batches = pack_batches(blocks)
 
-        # 调用 AI
-        try:
-            result_text = await _call_dashscope_agent(prompt, api_key)
-        except Exception as e:
-            logger.error(f"AI 提取试题失败: {e}")
-            raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
+        if len(batches) <= 1:
+            prompt = _build_extract_prompt(subject, difficulty, batches[0] if batches else content)
+            logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
+            try:
+                result_text = await _call_dashscope_agent(prompt, api_key)
+            except Exception as e:
+                logger.error(f"AI 提取试题失败: {e}")
+                raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
+            questions = _parse_ai_response(result_text)
+            if not questions:
+                logger.error(f"AI 返回无法解析: {result_text[:500]}")
+                raise HTTPException(status_code=502, detail="AI 返回格式异常，未能提取出试题，请重试")
+        else:
+            # 长文档一次性"转抄"必然被输出 token 腰斩 → 分批提取后台任务
+            from backend.ai_task_manager import task_manager
+            _subject, _difficulty, _source_label = subject, difficulty, source_label
 
-        # 解析 JSON
-        questions = _parse_ai_response(result_text)
-        if not questions:
-            logger.error(f"AI 返回无法解析: {result_text[:500]}")
-            raise HTTPException(status_code=502, detail="AI 返回格式异常，未能提取出试题，请重试")
+            async def _run_batches() -> dict[str, Any]:
+                import asyncio as _aio
+                sem = _aio.Semaphore(2)  # 限并发, 不冲击其他在线用户
 
-    # 获取创建者姓名
-    from backend.database import execute_query as user_query
-    user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
-    creator_name = user_row[0][0] if user_row and user_row[0][0] else username
+                async def _one(idx: int, chunk: str):
+                    p = _build_batch_extract_prompt(_subject, _difficulty, chunk, idx + 1, len(batches))
+                    last_err = "返回无法解析"
+                    for _attempt in (1, 2):
+                        try:
+                            rt = await _call_dashscope_agent(p, api_key)
+                            qs = _parse_ai_response(rt)
+                            if qs:
+                                return qs, None
+                        except Exception as e:
+                            last_err = str(e)[:120]
+                    return None, f"第{idx + 1}批失败({last_err})"
 
-    # 入库
-    saved_questions = []
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for q_data in questions:
-        q_type = q_data.get("type", "single")
-        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code = q_data.get("svg_code") or ""
-        has_svg = 1 if svg_code.strip() else 0
-        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
-        qid = execute_insert(
-            """INSERT INTO question_bank
-               (type, question_text, options, correct_answer, explanation,
-                knowledge_points, subject, difficulty, creator_username, creator_name,
-                source, status, created_at, updated_at,
-                svg_content, has_svg, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?,
-                       ?, ?, ?)""",
-            (
-                q_type,
-                q_data.get("question", ""),
-                options_str,
-                q_data.get("answer", ""),
-                q_data.get("explanation", ""),
-                q_data.get("knowledge_point", ""),
-                subject,
-                q_data.get("difficulty", difficulty),
-                username,
-                creator_name,
-                source_label,
-                now,
-                now,
-                svg_code, has_svg, media_placeholders,
-            ),
-        )
-        saved_questions.append({
-            "id": qid,
-            "type": q_type,
-            "question_text": q_data.get("question", ""),
-            "options": q_data.get("options", {}),
-            "correct_answer": q_data.get("answer", ""),
-            "explanation": q_data.get("explanation", ""),
-            "knowledge_points": q_data.get("knowledge_point", ""),
-            "difficulty": q_data.get("difficulty", difficulty),
-            "has_svg": has_svg,
-            "svg_content": svg_code if has_svg else None,
-            "media_placeholders": q_data.get("media_placeholders") or [],
-            "media_files": [],
-        })
+                results = await _aio.gather(*[_one(i, c) for i, c in enumerate(batches)])
+                ok_batches = [r[0] for r in results if r[0]]
+                failed = [r[1] for r in results if r[0] is None]
+                merged = merge_questions(ok_batches)
+                if not merged:
+                    raise ValueError("分批提取均失败: " + "; ".join(failed[:3]))
+                saved = _persist_extracted_questions(merged, _subject, _difficulty, username, _source_label)
+                note = f"分 {len(batches)} 批提取，成功 {len(batches) - len(failed)} 批，入库 {len(saved)} 道题"
+                if failed:
+                    note += "；未成功：" + "；".join(failed[:3])
+                logger.info(f"用户 {username} 分批智能提取完成: {note}")
+                return {"questions": saved, "total": len(saved), "note": note,
+                        "message": f"成功提取 {len(saved)} 道试题"}
+
+            task_id = await task_manager.create_task(
+                description=f"教师 {username} 智能提取（约{est or '?'}题/{len(batches)}批）",
+                coro_factory=_run_batches,
+            )
+            return {"mode": "task", "task_id": task_id, "batches": len(batches),
+                    "estimated": est,
+                    "message": f"文档较长（约识别 {est} 道题，分 {len(batches)} 批提取），已转后台处理，请稍候…"}
+
+    saved_questions = _persist_extracted_questions(questions, subject, difficulty, username, source_label)
 
     source_display = {"docx": "Word文档", "txt": "文本文件", "md": "Markdown文件", "pdf": "PDF文件", "json": "JSON文件", "json_import": "JSON文件", "paste": "粘贴文本"}
     logger.info(f"用户 {username} 从{source_display.get(source_label, '文件')}提取并入库 {len(saved_questions)} 道试题")
@@ -1060,6 +1139,7 @@ async def extract_questions_from_text(
         "message": f"成功提取 {len(saved_questions)} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
+        "note": extract_note,
     }
 
 
@@ -1324,6 +1404,12 @@ def _extract_text_from_file(file_bytes: bytes, ext: str) -> str:
         from docx import Document
         doc = Document(io.BytesIO(file_bytes))
         paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        # 试卷题常排进表格, 只读段落会整批漏题 → 表格行一并提取
+        for tb in doc.tables:
+            for row in tb.rows:
+                cells = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+                if cells:
+                    paragraphs.append("  ".join(cells))
         return "\n".join(paragraphs)
     elif ext == ".pdf":
         try:
@@ -1354,10 +1440,8 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
     from backend.prompts import build_ai_role
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     ai_role = build_ai_role(subject=subject)
-    MAX_EXTRACT_LEN = 3000
+    MAX_EXTRACT_LEN = 7000
     trimmed = content[:MAX_EXTRACT_LEN]
-    if len(content) > MAX_EXTRACT_LEN:
-        trimmed += "\n\n[后续内容已截断]"
     prompt = f"""下面是一段需要处理的文本数据，请根据数据后面的要求进行操作。
 
 === 文本数据 ===
@@ -1372,7 +1456,7 @@ def _build_extract_prompt(subject: str, difficulty: str, content: str) -> str:
 难度：{difficulty_desc}
 
 要求：
-1. 如果文本中有明确的试题（含题干、选项、答案），直接提取出来
+1. 如果文本中有明确的试题（含题干、选项、答案），直接提取出来；只提取文本中真实存在的题目，禁止编造
 2. 如果文本是知识点讲解，则针对每个核心知识点生成一道试题
 3. 每个试题必须包含：题目、正确答案、题型（single/multiple/true_false/short/fill）
 4. 选择题必须有选项（A/B/C/D），判断题选项为 {{"对":"对","错":"错"}}
