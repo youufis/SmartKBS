@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
   Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination, Checkbox,
+  Switch, Tooltip,
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
@@ -306,6 +307,8 @@ const TeacherView: React.FC = () => {
   const [difficulty, setDifficulty] = useState('medium')
   const [qType, setQType] = useState('mixed')
   const [count, setCount] = useState(5)
+  // 题库优先(与随堂测验同口径): 先复用题库匹配题, 不足才 AI 新生成
+  const [preferBank, setPreferBank] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [questions, setQuestions] = useState<any[]>([])
   const [title, setTitle] = useState('')
@@ -336,6 +339,7 @@ const TeacherView: React.FC = () => {
     try {
       const { data } = await apiClient.post('/api/practice/generate-async', {
         knowledge_points: kpInput.trim(), subject, question_type: qType, count, difficulty,
+        prefer_bank: preferBank,
       })
       message.info(t('aiGeneratingWait'))
       const result = await pollAiTask(data.task_id, 120000)
@@ -345,6 +349,7 @@ const TeacherView: React.FC = () => {
         setQuestions(result.questions || [])
         setTitle(`${kpInput.trim()}${t('practiceSuffix')}`)
         message.success(t('generatedCount', { count: result.total || result.questions?.length || 0 }))
+        if (result.note) message.info(result.note)
       } else {
         message.error(t('aiTimeout'))
       }
@@ -468,6 +473,12 @@ const TeacherView: React.FC = () => {
                 </Select>
                 <InputNumber min={1} max={20} value={count} onChange={v => setCount(v || 5)}
                   style={{ width: 80 }} /> {t('questionCount')}
+                <Tooltip title={t('preferBankTip')}>
+                  <Space size={4}>
+                    <Switch size="small" checked={preferBank} onChange={setPreferBank} />
+                    <Text style={{ fontSize: 12 }}>{t('preferBank')}</Text>
+                  </Space>
+                </Tooltip>
                 <Button type="primary" icon={<RobotOutlined />} loading={generating} onClick={generateQuestions}>
                   {t('aiGenerate')}
                 </Button>

@@ -120,44 +120,18 @@ def _search_questions_from_bank(
     question_type: str,
     count: int,
 ) -> list[dict[str, Any]]:
-    """从学科题库（question_bank）搜索匹配的题目，返回与 AI 出题一致的格式"""
-    conditions = ["status='active'", "type IN ('single','true_false')"]
-    params: list[Any] = []
+    """从学科题库（question_bank）搜索匹配的题目，返回与 AI 出题一致的格式。
 
-    if subject:
-        conditions.append("subject=?")
-        params.append(subject)
+    查询逻辑已上移到 backend.question_search（同步练习共用），
+    这里只做展示层转换：options dict -> "A. 文本" 数组、判断题固定选项等。
+    """
+    from backend.question_search import query_bank_questions
 
-    if topic:
-        conditions.append("(knowledge_points LIKE ? OR question_text LIKE ?)")
-        kw = f"%{topic}%"
-        params.extend([kw, kw])
-
-    if question_type != "mixed":
-        conditions.append("type=?")
-        params.append(question_type)
-
-    where = " AND ".join(conditions)
-
-    rows = qb_execute_query(
-        f"""SELECT id, type, question_text, options, correct_answer, explanation,
-                   svg_content, has_svg, media_files, media_placeholders
-            FROM question_bank
-            WHERE {where}
-            ORDER BY RANDOM()
-            LIMIT ?""",
-        tuple(params + [count]),
-    )
+    rows = query_bank_questions(topic, subject, question_type, count)
 
     questions = []
     for r in rows:
-        opts = {}
-        opt_raw = r.get("options")
-        if opt_raw:
-            try:
-                opts = json.loads(opt_raw) if isinstance(opt_raw, str) else opt_raw
-            except (json.JSONDecodeError, TypeError):
-                opts = {}
+        opts = r.get("options") or {}
 
         # 将选项对象 {"A": "文本"} 转为数组格式 ["A. 文本"]
         opt_array: list[str] = []
@@ -177,18 +151,6 @@ def _search_questions_from_bank(
         if r.get("type") == "true_false":
             opt_array = ["对", "错"]
 
-        # 解析 JSON 字段
-        media_files_raw = r.get("media_files") or ""
-        try:
-            media_files = json.loads(media_files_raw) if isinstance(media_files_raw, str) else media_files_raw
-        except (json.JSONDecodeError, TypeError):
-            media_files = ""
-        media_placeholders_raw = r.get("media_placeholders") or ""
-        try:
-            media_placeholders = json.loads(media_placeholders_raw) if isinstance(media_placeholders_raw, str) else media_placeholders_raw
-        except (json.JSONDecodeError, TypeError):
-            media_placeholders = ""
-
         questions.append({
             "id": r.get("id"),
             "type": r.get("type", "single"),
@@ -200,8 +162,8 @@ def _search_questions_from_bank(
             "svg_code": r.get("svg_content") or "",
             "svg_content": r.get("svg_content") or "",
             "has_svg": r.get("has_svg") or 0,
-            "media_files": media_files,
-            "media_placeholders": media_placeholders,
+            "media_files": r.get("media_files") or "",
+            "media_placeholders": r.get("media_placeholders") or "",
             "_source": "bank",
         })
 

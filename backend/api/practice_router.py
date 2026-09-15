@@ -48,6 +48,9 @@ class PracticeGenerateRequest(BaseModel):
     question_type: str = "mixed"
     count: int = 5
     difficulty: str = "medium"
+    # 题库优先(与随堂测验同口径): 先抽题库匹配题, 不足再 AI 补;
+    # False = 全部 AI 新生成(旧行为)
+    prefer_bank: bool = True
 
 
 class PracticeCreateSession(BaseModel):
@@ -208,15 +211,120 @@ def _validate_generate(req: PracticeGenerateRequest, user: dict) -> tuple[str, s
     return username, api_key
 
 
-def _build_generate_prompt(req: PracticeGenerateRequest) -> str:
+def _norm_q_text(s: str) -> str:
+    """题干归一化: 去空白/全角空格/末尾标点, 用于跨来源防重复比对"""
+    import re as _re
+    t = str(s or "").replace("\u3000", "")
+    t = _re.sub(r"\s+", "", t)
+    return t.rstrip("。．.！!？?；;，,")
+
+
+def _build_generate_prompt(req: PracticeGenerateRequest, avoid_texts: list[str] | None = None) -> str:
     from backend.prompts.practice import PRACTICE_GENERATE_PROMPT
     type_desc = TYPE_DESC_MAP.get(req.question_type, "混合出题")
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(req.difficulty, "中等")
     # 注意：不注入技能 —— 技能的结构化输出指令与 JSON 格式要求冲突
-    return f"{build_ai_role(subject=req.subject)}\n" + PRACTICE_GENERATE_PROMPT.format(
+    prompt = f"{build_ai_role(subject=req.subject)}\n" + PRACTICE_GENERATE_PROMPT.format(
         subject=req.subject, knowledge_points=req.knowledge_points,
         type_desc=type_desc, count=req.count, difficulty_desc=difficulty_desc,
     )
+    if avoid_texts:
+        lines = "\n".join(f"{i+1}. {str(t)[:40]}" for i, t in enumerate(avoid_texts[:10]))
+        prompt += ("\n\n## 禁止重复的已有题目\n"
+                   "以下题干已在题库中，**不要**输出与其相同或高度相似的题目"
+                   "（换个角度、材料或考点侧重重新设计）：\n" + lines)
+    return prompt
+
+
+# 题库优先复用时的候选题型: mixed 只复用客观题+填空/简答,
+# 作文/主观大题依赖上下文语境, 不做跨次随机复用
+_BANK_REUSE_TYPES_MIXED = ("single", "multiple", "true_false", "short", "fill")
+
+
+def _format_bank_row(r: dict) -> dict:
+    """题库原始行 → 同步练习题目格式(与 AI 出题/persist 后的结构一致)"""
+    qtype = r.get("type") or "single"
+    answer = str(r.get("correct_answer") or "")
+    if qtype in ("single", "multiple", "true_false"):
+        answer = answer.strip().upper()
+    opts = r.get("options") or {}
+    if qtype == "true_false" and not isinstance(opts, dict):
+        opts = {"A": "对", "B": "错"}
+    return {
+        "id": r.get("id"),
+        "type": qtype,
+        "question": r.get("question_text") or "",
+        "options": opts if isinstance(opts, dict) else {},
+        "answer": answer,
+        "explanation": r.get("explanation") or "",
+        "knowledge_point": r.get("knowledge_points") or "",
+        "difficulty": r.get("difficulty") or "medium",
+        "svg_content": r.get("svg_content") or "",
+        "has_svg": r.get("has_svg") or 0,
+        "media_files": r.get("media_files") or [],
+        "media_placeholders": r.get("media_placeholders") or [],
+        "_source": "bank",
+    }
+
+
+async def _compose_practice_questions(req: PracticeGenerateRequest,
+                                      username: str, api_key: str) -> tuple[list[dict], str]:
+    """题库优先 + AI 补足 的统一出题流程(同步/异步端点共用)。
+
+    返回 (questions, note)。AI 题走 _persist_generated_questions 入库;
+    题库题原样引用不再入库。AI 失败/无 Key 但已有题库命中 → 降级返回部分题。
+    """
+    from backend.question_search import query_bank_questions
+
+    bank_qs: list[dict] = []
+    if req.prefer_bank:
+        types = _BANK_REUSE_TYPES_MIXED
+        if req.question_type and req.question_type != "mixed":
+            types = (req.question_type,) if req.question_type in _BANK_REUSE_TYPES_MIXED else ()
+        if types:
+            rows = query_bank_questions(
+                topic=req.knowledge_points, subject=req.subject,
+                question_type=req.question_type, count=req.count, types=types,
+            )
+            bank_qs = [_format_bank_row(r) for r in rows][: req.count]
+
+    notes = []
+    if bank_qs:
+        notes.append(f"题库命中 {len(bank_qs)} 道")
+    remaining = req.count - len(bank_qs)
+
+    ai_qs: list[dict] = []
+    if remaining > 0:
+        if not api_key:
+            if bank_qs:
+                return bank_qs, "；".join(notes + ["未配置 API Key，仅返回题库匹配题"])
+            raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
+        prompt = _build_generate_prompt(req, avoid_texts=[q["question"] for q in bank_qs])
+        try:
+            result_text = await call_ai_async(prompt, api_key)
+        except Exception as e:
+            if bank_qs:
+                return bank_qs, "；".join(notes + [f"AI 补足失败({e})，仅返回题库题"])
+            raise HTTPException(status_code=502, detail=f"AI 出题失败: {str(e)}")
+        ai_qs = _parse_ai_result(result_text)
+        # 与已抽题库题防重: prompt 已声明禁止, 但模型可能不遵守, 出口再拦一道
+        seen = {_norm_q_text(q["question"]) for q in bank_qs}
+        dedup: list[dict] = []
+        for q in ai_qs:
+            key = _norm_q_text(q.get("question") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            dedup.append(q)
+        ai_qs = dedup[: remaining]
+        if ai_qs:
+            await _persist_generated_questions(ai_qs, req, username)
+        if len(ai_qs) < remaining:
+            notes.append(f"AI 新生成 {len(ai_qs)} 道(要求 {remaining} 道, 已尽力补足)")
+        else:
+            notes.append(f"AI 新生成 {len(ai_qs)} 道")
+
+    return bank_qs + ai_qs, "；".join(notes)
 
 
 async def _persist_generated_questions(questions: list[dict], req: PracticeGenerateRequest,
@@ -257,7 +365,9 @@ async def _persist_generated_questions(questions: list[dict], req: PracticeGener
                VALUES (?,?,?,?,?,?,?,?,?,'ai','active',?,?,?,?,?)""",
             (q.get("type", "single"), q_text, opts,
              q.get("answer", ""), q.get("explanation", ""),
-             q.get("knowledge_point", req.knowledge_points), req.subject,
+             # 知识点列以教师输入为准(与随堂测验入库口径一致), 否则按
+             # req.knowledge_points LIKE 检索永远命中不了自己生成的题
+             req.knowledge_points or q.get("knowledge_point", ""), req.subject,
              q.get("difficulty", req.difficulty), username, now, now,
              svg_code, has_svg, media_placeholders),
         )
@@ -300,19 +410,13 @@ async def generate_practice(req: PracticeGenerateRequest, request: Request):
     """[教师] AI 出题（同步版，仅预览不布置；建议用 /generate-async 避免长请求）"""
     user = get_current_user(request)
     username, api_key = _validate_generate(req, user)
-    prompt = _build_generate_prompt(req)
 
-    try:
-        result_text = await call_ai_async(prompt, api_key)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"AI 出题失败: {str(e)}")
-
-    questions = _parse_ai_result(result_text)[: req.count]
+    questions, note = await _compose_practice_questions(req, username, api_key)
     if not questions:
         raise HTTPException(status_code=502, detail="AI 返回格式异常，未能解析出题目")
-    await _persist_generated_questions(questions, req, username)
 
-    return {"questions": questions, "total": len(questions), "message": f"已生成 {len(questions)} 道题"}
+    return {"questions": questions, "total": len(questions), "note": note,
+            "message": f"已生成 {len(questions)} 道题"}
 
 
 @router.post("/generate-async")
@@ -320,17 +424,14 @@ async def generate_practice_async(req: PracticeGenerateRequest, request: Request
     """[教师] AI 异步出题（后台任务，不阻塞）"""
     user = get_current_user(request)
     username, api_key = _validate_generate(req, user)
-    prompt = _build_generate_prompt(req)
 
     from backend.ai_task_manager import task_manager
 
     async def _generate_and_save() -> dict[str, Any]:
-        result_text = await call_ai_async(prompt, api_key)
-        questions = _parse_ai_result(result_text)[: req.count]
+        questions, note = await _compose_practice_questions(req, username, api_key)
         if not questions:
             raise ValueError("AI 返回格式异常，未能解析出题目")
-        await _persist_generated_questions(questions, req, username)
-        return {"questions": questions, "total": len(questions)}
+        return {"questions": questions, "total": len(questions), "note": note}
 
     task_id = await task_manager.create_task(
         description=f"教师 {username} 出题：{req.knowledge_points}",

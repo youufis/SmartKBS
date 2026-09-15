@@ -53,6 +53,8 @@
   "difficultyLabel": "难度：{{level}}",
   "timeLabel": "用时：{{time}}",
   "scoreLabel": "得分：{{score}}/{{total}}",
+  "preferBank": "题库优先",
+  "preferBankTip": "开启后先从题库随机抽取匹配旧题复用，数量不足时才由 AI 生成新题（省 AI 额度、题目风格稳定）；关闭则全部 AI 全新出题",
   "aiGenerate": "AI 生成",
   "publishedPractices": "已发布练习",
   "kpPlaceholder": "输入知识点，如：算法与程序设计、数据结构...",
