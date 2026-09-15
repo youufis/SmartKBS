@@ -297,13 +297,25 @@ def _get_streak_days(username: str) -> int:
             return 0
 
         dates = [str(r[0]) for r in rows]
-        streak = 0
         today = datetime.now().date()
 
-        for i, d_str in enumerate(dates):
-            d = datetime.strptime(d_str, "%Y-%m-%d").date()
-            expected = today - timedelta(days=i)
-            if d == expected:
+        parsed = []
+        for d_str in dates:
+            try:
+                parsed.append(datetime.strptime(d_str[:10], "%Y-%m-%d").date())
+            except ValueError:
+                continue
+        if not parsed:
+            return 0
+
+        # 连续串可以止于今天，也可以止于昨天：登录态未过期时再次进入平台不会再写
+        # login_logs，只认"今天必须有记录"会把连续使用的人算成 0 天。
+        if parsed[0] not in (today, today - timedelta(days=1)):
+            return 0
+
+        streak = 1
+        for prev, cur in zip(parsed, parsed[1:]):
+            if (prev - cur).days == 1:
                 streak += 1
             else:
                 break

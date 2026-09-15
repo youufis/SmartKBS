@@ -142,7 +142,10 @@ def build_portrait_image_prompt(
     if strength:
         strong_str = ", ".join([s.get("kp", "") for s in strength[:2]])
 
-    # 选择风格
+    # 选择风格：style=random 时先在服务端落成一个具体风格。
+    # 生图 prompt 里并不存在"上面的风格列表"，这句指令对万相是无效信息。
+    if style == "random":
+        style, _style_name = get_random_style()
     style_info = PORTRAIT_STYLES.get(style, PORTRAIT_STYLES["random"])
     style_desc = style_info["desc_en"]
 
