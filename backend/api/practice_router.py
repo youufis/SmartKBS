@@ -980,10 +980,32 @@ async def _get_practice_result(session_id: int, username: str) -> dict[str, Any]
 # ── 共享工具 ──
 
 def _parse_ai_result(text: str) -> list[dict[str, Any]]:
-    """解析 AI 返回的 JSON 题目列表"""
+    """解析 AI 返回的 JSON 题目列表（含条目校验 + 失败诊断日志）"""
     data = extract_json_from_text(text)
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict) and "questions" in data:
-        return data["questions"]
-    return []
+    if isinstance(data, dict):
+        # 兼容 {"questions": [...]} 包装; 单个题目对象直接包成列表
+        inner = data.get("questions")
+        if isinstance(inner, list):
+            data = inner
+        elif "question" in data:
+            data = [data]
+        else:
+            data = None
+    if not isinstance(data, list):
+        data = []
+    valid: list[dict[str, Any]] = []
+    for q in data:
+        if not isinstance(q, dict):
+            continue
+        if not str(q.get("question") or "").strip():
+            continue
+        # 截断挽救出来的半道题可能缺 answer/options —— 缺了会判不了分, 丢弃
+        if not str(q.get("answer") or "").strip():
+            continue
+        if q.get("type") in ("single", "multiple", "true_false") and not q.get("options"):
+            continue
+        valid.append(q)
+    if not valid:
+        head = (text or "")[:400].replace("\n", "⏎")
+        logger.warning(f"[同步练习] AI 出题解析失败, 原始返回({len(text or '')}字符)头部: {head}")
+    return valid

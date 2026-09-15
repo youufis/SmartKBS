@@ -316,6 +316,115 @@ def check_user_daily_requests(username: str, role: int) -> tuple[bool, int | flo
 
 # ── AI 返回 JSON 解析（多策略鲁棒解析）──
 
+def _fix_json_escapes(s: str) -> str:
+    """把 JSON 字符串里的非法转义（常见于 LaTeX: \partial, \Delta, \alpha...）
+    修复为合法的双反斜杠。仅处理不在合法转义集里的反斜杠。"""
+    return re.sub(r"\\(?![\"\/bfnrutu])", r"\\\\", s)
+
+
+def _strip_ctrl_chars(s: str) -> str:
+    """去掉字符串里的裸控制字符（\x00-\x1f 中除 \t \n \r 之外），
+    模型偶尔在 JSON 字符串值里输出裸换行/制表符导致解析失败"""
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", s)
+
+
+def _close_truncated_json_array(s: str) -> str:
+    """截断的 JSON 数组修复：扫描到最后一个完整的顶层数组元素，
+    截到那里并补 ']'（模型输出被 max_tokens 腰斩时挽救已生成部分）"""
+    depth = 0
+    in_str = False
+    esc = False
+    last_complete = -1
+    for i, ch in enumerate(s):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+            if depth == 1 and ch == "}":
+                last_complete = i + 1
+        if depth <= 0 and s[0] != "[":
+            break
+    if last_complete > 0:
+        return s[:last_complete].rstrip().rstrip(",") + "]"
+    return s
+
+
+def _auto_close_json(s: str) -> str:
+    """对截断的 JSON 做结构补全: 关闭未结束的字符串, 删掉悬空的
+    "key": / 尾逗号, 按括号栈补全 }/]。用于挽救 max_tokens 腰斩的输出。"""
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    for ch in s:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    t = s
+    if in_str:
+        t += '"'
+    t = t.rstrip()
+    # 去掉悬空的 "key": 或结尾逗号
+    t = re.sub(r'"[^"]*"\s*:\s*$', "", t).rstrip()
+    t = re.sub(r"[,:]\s*$", "", t).rstrip()
+    closers = "".join("}" if c == "{" else "]" for c in reversed(stack))
+    return t + closers
+
+
+def _loads_json_repair(candidate: str):
+    """json.loads 一组递进式修复；全部失败返回 None"""
+    if not candidate:
+        return None
+    variants = []
+    base = candidate.strip()
+    variants.append(base)
+    variants.append(_strip_ctrl_chars(base))
+    variants.append(_fix_json_escapes(base))
+    variants.append(_fix_json_escapes(_strip_ctrl_chars(base)))
+    # 裸换行常被模型塞进字符串值里 → 换成空格再试
+    variants.append(base.replace("\n", " ").replace("\r", " "))
+    if base[:1] in ("[", "{"):
+        t = _close_truncated_json_array(base) if base.startswith("[") else base
+        variants.append(t)
+        variants.append(_fix_json_escapes(_strip_ctrl_chars(t)))
+        # 通用结构补全(对象/数组/字符串/键值对任意位置截断)
+        ac = _auto_close_json(_fix_json_escapes(_strip_ctrl_chars(base)))
+        variants.append(ac)
+        variants.append(_fix_json_escapes(base))
+    for v in variants:
+        if not v:
+            continue
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError:
+            try:
+                return json.loads(re.sub(r",\s*([}\]])", r"\1", v))
+            except json.JSONDecodeError:
+                continue
+    return None
+
+
 def extract_json_from_text(text: str) -> dict | list | None:
     """从 AI 返回文本中鲁棒地提取 JSON 对象或数组
 
@@ -336,19 +445,29 @@ def extract_json_from_text(text: str) -> dict | list | None:
 
     text = text.strip()
 
-    # ── 策略1: 直接解析 ──
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    # ── 策略1: 直接解析（含非法转义/控制字符/截断数组的递进修复）──
+    parsed = _loads_json_repair(text)
+    if parsed is not None:
+        return parsed
 
-    # ── 策略2: 从 ```json ``` / ``` ``` 代码块提取 ──
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
+    # ── 策略2: 从 ```json ``` / ``` ``` 代码块提取（逐块尝试修复解析）──
+    blocks = re.findall(r'```(?:json|JSON)?\s*\n?(.*?)\n?```', text, re.DOTALL)
+    if not blocks:
+        # 未闭合的代码围栏（输出被截断时开头有 ```json 但没有结尾）
+        m_open = re.search(r'```(?:json|JSON)?\s*\n?([\s\S]*)$', text)
+        if m_open:
+            blocks = [m_open.group(1)]
+    for block in blocks:
+        parsed = _loads_json_repair(block)
+        if parsed is not None:
+            return parsed
+
+    # ── 策略2.5: 无围栏时, 从第一个 [ 到文本末尾抢救被截断的数组 ──
+    arr_head = text.find("[")
+    if arr_head != -1 and (text.find("{") == -1 or arr_head < text.find("{")):
+        parsed = _loads_json_repair(text[arr_head:])
+        if parsed is not None:
+            return parsed
 
     # ── 策略3: 从最外层 JSON 对象或数组截取 ──
     # 先尝试找 {…} 对象
@@ -358,15 +477,9 @@ def extract_json_from_text(text: str) -> dict | list | None:
         json_str = text[start:end + 1]
         # 清理残留的 markdown 标记
         json_str = json_str.replace("```json", "").replace("```", "").strip()
-        # 尝试修复常见问题：尾部逗号
-        try:
-            return json.loads(json_str)
-        except json.JSONDecodeError:
-            try:
-                fixed = re.sub(r",\s*([}\]])", r"\1", json_str)
-                return json.loads(fixed)
-            except json.JSONDecodeError:
-                pass
+        parsed = _loads_json_repair(json_str)
+        if parsed is not None:
+            return parsed
 
     # 再尝试找 […] 数组
     start = text.find('[')
@@ -374,13 +487,8 @@ def extract_json_from_text(text: str) -> dict | list | None:
     if start != -1 and end != -1 and end > start:
         json_str = text[start:end + 1]
         json_str = json_str.replace("```json", "").replace("```", "").strip()
-        try:
-            return json.loads(json_str)
-        except json.JSONDecodeError:
-            try:
-                fixed = re.sub(r",\s*([}\]])", r"\1", json_str)
-                return json.loads(fixed)
-            except json.JSONDecodeError:
-                pass
+        parsed = _loads_json_repair(json_str)
+        if parsed is not None:
+            return parsed
 
     return None
