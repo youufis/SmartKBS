@@ -60,6 +60,9 @@ class PracticeCreateSession(BaseModel):
     target_class: str = ""
     target_students: list[str] = []
     subject: str = ""
+    # 统一活动范围体系(与随堂测验/投票/公告一致): teacher_classes|all|grade|class|individual
+    target_scope: str = ""
+    target_users: str = ""
 
 
 class PracticeSubmitRequest(BaseModel):
@@ -117,10 +120,25 @@ def _student_scope(username: str) -> tuple[str, str]:
 
 
 def _session_visible_to_student(sess: dict, username: str, grade: str, cls: str) -> bool:
-    """P2/P9: 练习是否对该学生开放 —— 定向名单优先, 否则按年级+班级范围"""
+    """P2/P9: 练习是否对该学生开放 —— 定向名单优先; 有统一 target_scope 时
+    走共用可见性判断(支持 任教班级/全体/年级/班级/指定学生);
+    老数据无 scope 时按年级+班级范围回退, 行为不变"""
     targets = _parse_target_students(sess.get("target_students"))
     if targets:
         return username in targets
+    scope = (sess.get("target_scope") or "").strip()
+    if scope:
+        from backend.permission_service import check_activity_visibility
+        return check_activity_visibility(
+            student_username=username,
+            student_grade=grade,
+            student_class=cls,
+            creator_username=sess.get("creator_username", "") or "",
+            target_scope=scope,
+            target_grade=sess.get("target_grade", "") or "",
+            target_class=sess.get("target_class", "") or "",
+            target_users=sess.get("target_users", "") or "",
+        )
     sg = (sess.get("target_grade") or "").strip()
     if sg and sg != grade:
         return False
@@ -356,16 +374,29 @@ async def create_session(req: PracticeCreateSession, request: Request):
         scores.append(min(max(val, 1), 100))
     total = sum(scores)
 
+    # 统一范围闸(与随堂测验/投票/公告共用): 教师发布范围必须落在本人任教内
+    from backend.api.notification_router import validate_activity_scope
+    validate_activity_scope(user, req.target_scope, req.target_grade, req.target_class,
+                            req.target_users, what="同步练习")
+    # 错题巩固等定向推送走 target_students 老通道, 同样校验任教范围
+    if req.target_students and role != 0:
+        from backend.permission_service import is_student_in_teacher_scope
+        for stu in req.target_students:
+            if not is_student_in_teacher_scope(stu, username):
+                raise HTTPException(status_code=403, detail=f"学生 {stu} 不在您的任教范围内")
+
     target_students_str = json.dumps(req.target_students, ensure_ascii=False) if req.target_students else ""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     session_id = execute_insert(
         """INSERT INTO practice_sessions
            (title, knowledge_points, creator_username, subject, question_count,
-            total_score, target_grade, target_class, target_students, status, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,'active',?,?)""",
+            total_score, target_grade, target_class, target_students, status, created_at, updated_at,
+            target_scope, target_users)
+           VALUES (?,?,?,?,?,?,?,?,?,'active',?,?,?,?)""",
         (req.title.strip(), req.knowledge_points, username, req.subject,
          len(req.question_ids), total, req.target_grade, req.target_class,
-         target_students_str, now, now),
+         target_students_str, now, now,
+         (req.target_scope or "").strip(), (req.target_users or "").strip()),
     )
 
     for i, qid in enumerate(req.question_ids):
@@ -624,10 +655,15 @@ async def list_my_practices(request: Request):
                (COALESCE(ps.target_students, '') <> '' AND ps.target_students LIKE ?)
                OR
                (COALESCE(ps.target_students, '') = ''
-                 AND (COALESCE(ps.target_grade, '') = '' OR ps.target_grade = ?))
+                 AND (
+                   COALESCE(ps.target_scope, '') <> ''
+                   OR COALESCE(ps.target_grade, '') = ''
+                   OR ps.target_grade = ?
+                   OR ps.target_grade LIKE ?
+                 ))
              )
            ORDER BY ps.created_at DESC""",
-        (username, f'%"{username}"%', grade),
+        (username, f'%"{username}"%', grade, f"%{grade}%"),
     )
     # 精确判定(班级归一化 + 定向名单成员), SQL 只做粗筛
     visible = [r for r in rows if _session_visible_to_student(r, username, grade, cls)]

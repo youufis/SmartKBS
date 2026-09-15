@@ -173,6 +173,14 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
             try:
+                c.execute("ALTER TABLE practice_sessions ADD COLUMN target_scope TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                c.execute("ALTER TABLE practice_sessions ADD COLUMN target_users TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            try:
                 c.execute("ALTER TABLE practice_sessions ADD COLUMN source TEXT DEFAULT 'teacher'")
             except sqlite3.OperationalError:
                 pass

@@ -16,6 +16,8 @@ import { useAuthStore } from '../stores/authStore'
 import { classText } from '../utils/studentLabel'
 import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTypes'
 import ResetActivityButton from '../components/ResetActivityButton'
+import ActivityScopeSelector from '../components/ActivityScopeSelector'
+import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -307,23 +309,17 @@ const TeacherView: React.FC = () => {
   const [generating, setGenerating] = useState(false)
   const [questions, setQuestions] = useState<any[]>([])
   const [title, setTitle] = useState('')
-  const [targetGrade, setTargetGrade] = useState('')
-  const [targetClass, setTargetClass] = useState('')
-  const [gradeOptions, setGradeOptions] = useState<string[]>([])
-  const [classOptions, setClassOptions] = useState<string[]>([])
+  // 统一活动范围选择器(与随堂测验/投票/抢答一致): 任教班级/年级/班级/指定学生
+  const [publishScope, setPublishScope] = useState<ActivityScopeValue>({
+    target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '',
+  })
   const [publishing, setPublishing] = useState(false)
   const [sessions, setSessions] = useState<any[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
   const user = useAuthStore(s => s.user)
   const isAdmin = user?.role === 'admin'
 
-  // 加载教师的年级列表
   useEffect(() => {
-    apiClient.get('/api/scores/my-grades').then(({ data }) => {
-      const grades = Array.isArray(data) ? data : []
-      setGradeOptions(grades)
-      if (grades.length > 0) setTargetGrade(grades[0])
-    }).catch(() => {})
     // 加载学科列表
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) {
@@ -332,19 +328,6 @@ const TeacherView: React.FC = () => {
       }
     }).catch(() => {})
   }, [])
-
-  // 选择年级时加载对应班级
-  useEffect(() => {
-    if (targetGrade) {
-      apiClient.get('/api/scores/classes', { params: { grade: targetGrade } })
-        .then(({ data }) => {
-          const classes = Array.isArray(data) ? data : []
-          // 从班级名提取数字，如 "高一1班" → "1"
-          const nums = classes.map((c: string) => c.replace(/^.*?(\d+).*$/, '$1')).filter((n: string) => n)
-          setClassOptions(nums)
-        }).catch(() => {})
-    }
-  }, [targetGrade])
 
   const generateQuestions = async () => {
     if (!kpInput.trim()) { message.warning(t('inputKp')); return }
@@ -377,8 +360,10 @@ const TeacherView: React.FC = () => {
         title: title.trim(),
         knowledge_points: kpInput.trim(),
         question_ids: questions.map((q: any) => q.id),
-        target_grade: targetGrade,
-        target_class: targetClass,
+        target_scope: publishScope.target_scope,
+        target_grade: publishScope.target_grade,
+        target_class: publishScope.target_class,
+        target_users: publishScope.target_users,
         subject,
       })
       message.success(data.message)
@@ -511,23 +496,10 @@ const TeacherView: React.FC = () => {
             <Card size="small" style={{ marginTop: 16 }}>
               <Space orientation="vertical" style={{ width: '100%' }}>
                 <Input placeholder={t('title')} value={title} onChange={e => setTitle(e.target.value)} />
-                <Space>
-                  <Select value={targetGrade} onChange={setTargetGrade} placeholder={t('targetGrade')} style={{ width: 150 }}>
-                    {gradeOptions.map(g => (
-                      <Select.Option key={g} value={g}>{g}</Select.Option>
-                    ))}
-                    {isAdmin && <Select.Option value="">{t('allGrades')}</Select.Option>}
-                  </Select>
-                  <Select value={targetClass} onChange={setTargetClass} placeholder={t('targetClass')} style={{ width: 150 }} allowClear>
-                    {classOptions.map(n => (
-                      <Select.Option key={n} value={n}>{classText(n)}</Select.Option>
-                    ))}
-                    <Select.Option value="">{t('allClasses')}</Select.Option>
-                  </Select>
-                  <Button type="primary" loading={publishing} onClick={publishSession}>
-                    {t('publishPractice')}
-                  </Button>
-                </Space>
+                <ActivityScopeSelector value={publishScope} onChange={setPublishScope} showAllOption={isAdmin} />
+                <Button type="primary" loading={publishing} onClick={publishSession}>
+                  {t('publishPractice')}
+                </Button>
               </Space>
             </Card>
           )}
