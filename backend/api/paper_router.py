@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from backend.api.dependencies import get_current_user
 from backend.auth import is_admin
 from backend.logger import logger
-from backend.prompts import apply_skills
+from backend.prompts import apply_skills, build_ai_role
 from backend.question_db import (
     execute_query,
     execute_query_one,

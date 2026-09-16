@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from backend.database import get_connection, execute_query, execute_query_dict
+from backend.logger import logger
 from backend.score_utils import teacher_score_key, load_teacher_scores, save_teacher_scores, load_students
 from backend.permission_service import (
     get_teacher_grades,

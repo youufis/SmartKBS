@@ -480,8 +480,8 @@ MEDIA_PLAN_PROMPT = """你是教育多媒体设计师。请分析以下 HTML 教
 **输出格式**（纯 JSON 数组，不要 markdown 标记）：
 ```json
 [
-  {"type":"svg","purpose":"冒泡排序流程图","description":"冒泡排序的完整流程图，包含比较和交换步骤","keywords":["排序","流程","算法"]},
-  {"type":"image","purpose":"排序对比示意图","description":"展示不同排序算法速度对比的示意图","keywords":["排序","对比","性能"]}
+  {{"type":"svg","purpose":"冒泡排序流程图","description":"冒泡排序的完整流程图，包含比较和交换步骤","keywords":["排序","流程","算法"]}},
+  {{"type":"image","purpose":"排序对比示意图","description":"展示不同排序算法速度对比的示意图","keywords":["排序","对比","性能"]}}
 ]
 ```
 如果没有需要补充的视觉素材，返回空数组 []。
@@ -534,11 +534,11 @@ async def plan_and_generate_media(
         if plan_result:
             # 提取 JSON
             import re as _re
-            json_match = _re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', plan_result, re.DOTALL)
+            json_match = _re.search(r'```(?:json)?\s*(\[[\s\S]*?\])\s*```', plan_result, _re.DOTALL)
             if json_match:
                 media_plan_json = json_match.group(1)
             else:
-                json_match = _re.search(r'(\[[\s\S]*?\])', plan_result, re.DOTALL)
+                json_match = _re.search(r'(\[[\s\S]*?\])', plan_result, _re.DOTALL)
                 if json_match:
                     media_plan_json = json_match.group(1)
 

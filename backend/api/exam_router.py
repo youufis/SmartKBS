@@ -23,7 +23,7 @@ from backend.auth import is_admin
 from backend.database import execute_query as user_query, execute_insert_update as db_update
 from backend.logger import logger
 from backend.api.ai_service import call_ai_async
-from backend.prompts import apply_skills
+from backend.prompts import apply_skills, build_ai_role
 from backend.async_utils import spawn_bg
 from backend.utils import extract_json_from_text
 from backend.permission_service import check_activity_visibility

@@ -719,25 +719,26 @@ async def spotlight_student(room_id: int, request: Request):
 # AI 辅助功能
 # ═══════════════════════════════════════════════════════════
 
+def _extract_text(props: dict) -> str:
+    """从形状 props 中提取文字（兼容 richText 和 text）"""
+    rt = props.get("richText")
+    if rt and isinstance(rt, dict):
+        try:
+            texts = []
+            for node in rt.get("content", []):
+                for child in node.get("content", []):
+                    t = child.get("text", "")
+                    if t:
+                        texts.append(t)
+            return "".join(texts)
+        except Exception:
+            pass
+    t = props.get("text", "")
+    return t if t else ""
+
+
 def _get_snapshot_text(room_id: int) -> str:
     """从内存或数据库获取白板当前内容的文字和图形描述"""
-
-    def _extract_text(props: dict) -> str:
-        """从形状 props 中提取文字（兼容 richText 和 text）"""
-        rt = props.get("richText")
-        if rt and isinstance(rt, dict):
-            try:
-                texts = []
-                for node in rt.get("content", []):
-                    for child in node.get("content", []):
-                        t = child.get("text", "")
-                        if t:
-                            texts.append(t)
-                return "".join(texts)
-            except Exception:
-                pass
-        t = props.get("text", "")
-        return t if t else ""
 
     snap = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot", "")
     if not snap or snap == "{}":
