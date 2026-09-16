@@ -344,13 +344,47 @@ def purge_once() -> None:
             logger.warning(f"[log_retention] {table} 清理失败: {e}")
 
 
+def _prune_chat_memory() -> None:
+    """直连对话记忆的分钟级兜底清理(五道清除里的第④道)
+
+    活跃会话由「写入即裁剪 + 读取即过期」自管，这里只负责回收
+    「用户再也不回来」的死会话，保证表中数据最长存活 = TTL + 一个节拍。
+    """
+    try:
+        from backend import chat_memory
+        removed = chat_memory.prune_expired()
+        if removed:
+            ttl = chat_memory._cfg("CHAT_MEMORY_TTL_MINUTES")
+            logger.info(f"[log_retention] chat_turns 清理 {removed} 条过期对话记忆(保留 {ttl} 分钟)")
+    except Exception as e:
+        logger.warning(f"[log_retention] 对话记忆清理失败: {e}")
+
+
 def start() -> None:
-    """启动后台守护线程(不阻塞服务启动)"""
+    """启动后台守护线程(不阻塞服务启动)
+
+    同一线程跑两种节拍: 业务日志表每 24h 一次, 对话记忆每几分钟一次。
+    """
     def _loop():
         _time.sleep(60)
         purge_once()
+        _prune_chat_memory()
+        next_purge = _time.time() + 24 * 3600
         while True:
-            _time.sleep(24 * 3600)
-            purge_once()
+            _time.sleep(60)
+            now = _time.time()
+            if now >= next_purge:
+                purge_once()
+                next_purge = now + 24 * 3600
+            try:
+                from backend import chat_memory
+                step = max(1, int(chat_memory._cfg("CHAT_MEMORY_PRUNE_INTERVAL_MINUTES"))) * 60
+            except Exception:
+                step = 5 * 60
+            if not hasattr(_loop, "_next_mem"):
+                _loop._next_mem = now + step
+            if now >= _loop._next_mem:
+                _prune_chat_memory()
+                _loop._next_mem = now + step
 
     threading.Thread(target=_loop, daemon=True, name="log-retention").start()

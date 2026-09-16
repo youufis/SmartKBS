@@ -414,6 +414,25 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 直连模式多轮记忆：会话轮次表（治理见 backend/chat_memory.py）──
+            c.execute("""CREATE TABLE IF NOT EXISTS chat_turns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_key TEXT NOT NULL,
+                username TEXT NOT NULL,
+                scene TEXT NOT NULL DEFAULT 'chat',
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tokens INTEGER DEFAULT 0,
+                partial INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_session ON chat_turns(session_key, id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_created ON chat_turns(created_at)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_chat_turns_user ON chat_turns(username)")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 通知消息表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

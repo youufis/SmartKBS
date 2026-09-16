@@ -151,6 +151,8 @@ async def companion_chat(req: CompanionChatRequest, request: Request):
             dashscope_api_key=dashscope_api_key,
             context_enhance=req.context_enhance,
             use_agent=req.use_agent,
+            memory_prompt=req.prompt,
+            scene="companion",
         ),
         media_type="text/event-stream",
     )

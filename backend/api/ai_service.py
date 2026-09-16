@@ -37,6 +37,24 @@ def get_ai_config(use_agent: bool = True):
     }
 
 
+def _hist_messages(history: Optional[list], prompt: str) -> list[dict]:
+    """把 [{role, content}] 历史 + 当前提问 归一成 OpenAI messages 数组
+
+    只接受 user/assistant 两种角色（丢弃客户端伪造的 system），空内容跳过，
+    最后一条固定是本次提问，保证与模型 API 的角色交替要求一致。
+    """
+    msgs: list[dict] = []
+    for item in (history or []):
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "")
+        content = str(item.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            msgs.append({"role": role, "content": content})
+    msgs.append({"role": "user", "content": prompt or ""})
+    return msgs
+
+
 def is_appid_configured() -> bool:
     """检查是否配置了 APPID（智能体应用 ID）"""
     from backend.api.config_router import get_config_value
@@ -46,8 +64,8 @@ def is_appid_configured() -> bool:
 
 # ── 非流式调用（同步，返回完整文本） ──
 
-def call_ai_sync(prompt: str, api_key: str) -> str:
-    """同步调用 AI，返回完整响应文本"""
+def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None) -> str:
+    """同步调用 AI，返回完整响应文本（history 仅在直连分支生效）"""
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
@@ -57,16 +75,17 @@ def call_ai_sync(prompt: str, api_key: str) -> str:
     if cfg["mode"] == "agent":
         return _call_agent_sync(prompt, api_key, cfg["app_id"])
     else:
-        return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"])
+        return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"], history=history)
 
 
-async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120) -> str:
+async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120,
+                                    history: Optional[list] = None) -> str:
     """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
     import asyncio
     loop = asyncio.get_running_loop()
     try:
         result = await asyncio.wait_for(
-            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key),
+            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history),
             timeout=timeout,
         )
         return result
@@ -127,7 +146,8 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
 
 
 def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
-                     enable_thinking: Optional[bool] = None) -> str:
+                     enable_thinking: Optional[bool] = None,
+                     history: Optional[list] = None) -> str:
     """直接调用大模型（同步，OpenAI 兼容接口）
 
     enable_thinking=None 保持现状（由模型默认决定）；传 False 关闭思考链。
@@ -137,10 +157,11 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
     import requests as sync_requests
     # 构建消息内容（兼容 content 字符串和数组两种格式）
     content = prompt if prompt else ""
-    # 先尝试字符串格式
-    messages = [{"role": "user", "content": content}]
+    # 带历史时直接走多轮 messages（一次请求，不做 str/array 双格式轮询）
+    messages = _hist_messages(history, content) if history else [{"role": "user", "content": content}]
+    fmts = ["hist"] if history else ["str", "array"]
     last_error = None
-    for fmt in ["str", "array"]:
+    for fmt in fmts:
         if fmt == "array":
             # 部分 DashScope 模型要求 content 为数组格式
             messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
@@ -161,7 +182,11 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
             if resp.status_code == 200:
                 data = resp.json()
                 content_out = data["choices"][0]["message"]["content"]
-                logger.info(f"_call_model_sync response: model={model}, len={len(content_out)}, head={content_out[:200]}")
+                _u = data.get("usage") or {}
+                logger.info(f"_call_model_sync response: model={model}, len={len(content_out)}, "
+                            f"prompt_tokens={_u.get('prompt_tokens', '-')}, "
+                            f"completion_tokens={_u.get('completion_tokens', '-')}, "
+                            f"turns={len(messages)}, head={content_out[:200]}")
                 return content_out
             # 400 错误可能是格式问题，尝试下一种格式
             if resp.status_code == 400:
@@ -198,7 +223,7 @@ def call_ai_sync_direct(prompt: str, api_key: str,
 # ── 流式调用（返回事件生成器） ──
 
 def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
-                   use_agent: bool = True):
+                   use_agent: bool = True, history: Optional[list] = None):
     """流式调用 AI，返回 (text_generator, get_session_id)
 
     Args:
@@ -210,7 +235,7 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
     if cfg["mode"] == "agent":
         return _call_agent_stream(prompt, api_key, cfg["app_id"], session_id)
     else:
-        return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"])
+        return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"], history=history)
 
 
 def _call_agent_stream(prompt: str, api_key: str, app_id: str,
@@ -263,13 +288,17 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
             yield chunk
 
 
-def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
+def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
+                       history: Optional[list] = None):
     """直接调用大模型（流式，OpenAI 兼容接口），yield {"text": str, "session_id": None}"""
     import requests as sync_requests
     content = prompt if prompt else ""
-    # 先尝试字符串格式，失败则降级到数组格式
-    for fmt in ["str", "array"]:
-        if fmt == "str":
+    # 带历史时直接走多轮 messages；否则先试字符串格式，失败再降级数组格式
+    fmts = ["hist"] if history else ["str", "array"]
+    for fmt in fmts:
+        if fmt == "hist":
+            messages = _hist_messages(history, content)
+        elif fmt == "str":
             messages = [{"role": "user", "content": content}]
         else:
             messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]
@@ -320,7 +349,7 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str):
 
 # ── 异步调用（非流式，使用 httpx） ──
 
-async def call_ai_async(prompt: str, api_key: str) -> str:
+async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = None) -> str:
     """异步调用 AI，返回完整响应文本（不阻塞工作线程）"""
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
@@ -330,7 +359,7 @@ async def call_ai_async(prompt: str, api_key: str) -> str:
     if cfg["mode"] == "agent":
         return await _call_agent_async(prompt, api_key, cfg["app_id"])
     else:
-        return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"])
+        return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"], history=history)
 
 
 async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
@@ -355,14 +384,18 @@ async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
         executor.shutdown(wait=False)
 
 
-async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str) -> str:
+async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str,
+                            history: Optional[list] = None) -> str:
     """异步直接调用大模型（OpenAI 兼容接口）"""
     import httpx
 
     content = prompt if prompt else ""
+    fmts = ["hist"] if history else ["str", "array"]
     last_error = None
-    for fmt in ["str", "array"]:
-        if fmt == "str":
+    for fmt in fmts:
+        if fmt == "hist":
+            messages = _hist_messages(history, content)
+        elif fmt == "str":
             messages = [{"role": "user", "content": content}]
         else:
             messages = [{"role": "user", "content": [{"type": "text", "text": content}]}]

@@ -34,6 +34,7 @@ from backend.utils import (
 from backend.logger import logger
 from backend.database import execute_query
 from backend.prompts import apply_skills
+from backend import chat_memory
 
 router = APIRouter()
 
@@ -373,6 +374,7 @@ async def chat_stream(req: ChatRequest, request: Request):
             context_enhance=req.context_enhance,
             use_agent=req.use_agent,
             rag_enabled=req.rag_enabled,
+            memory_prompt=req.prompt,
         ),
         media_type="text/event-stream",
     )
@@ -384,8 +386,14 @@ def _chat_event_generator(
     dashscope_api_key: str, context_enhance: bool,
     use_agent: bool = True,
     rag_enabled: bool = False,
+    memory_prompt: Optional[str] = None,
+    scene: str = "chat",
 ):
-    """SSE 事件生成器（同步）"""
+    """SSE 事件生成器（同步）
+
+    memory_prompt: 写进会话记忆的"用户原句"。学伴/助手会把人设与画像拼进 prompt，
+    用它传入原始提问，避免把这些前缀反复带进后续轮次上下文。
+    """
     try:
         enhanced_prompt = enhance_prompt_with_user_context(prompt, user_payload)
         valid_file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
@@ -428,6 +436,25 @@ def _chat_event_generator(
 
         # ── 技能注入 ──
         enhanced_prompt = apply_skills(enhanced_prompt, "chat")
+
+        # ── 直连模式多轮记忆 ──
+        # APPID 留空（或本次强制直连）时，百炼侧没有 session 记忆，这里由平台自己
+        # 带上最近若干轮问答；智能体分支不受影响，仍使用百炼返回的 session_id。
+        # mem_active 必须同时管住"读"和"写"：管理员关掉开关后，前端可能仍持有
+        # 上一阶段拿到的 d_ 会话号，若只按前缀判断就会继续往表里写。
+        mem_key, mem_history, mem_active = session_id, None, False
+        try:
+            from backend.api.ai_service import get_ai_config
+            if chat_memory.enabled() and get_ai_config(use_agent=use_agent)["mode"] == "direct":
+                mem_key = chat_memory.ensure_session(username, session_id)
+                mem_active = True
+                hist = chat_memory.get_history(mem_key, username)
+                if hist:
+                    mem_history = hist
+                    logger.info(f"[对话记忆] scene={scene} user={username} 带上 {len(hist)} 条历史")
+        except Exception as e:
+            mem_active = False
+            logger.warning(f"[对话记忆] 上下文加载失败，按单轮继续: {e}")
 
         if multimodal_enabled and image_files:
             model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
@@ -480,14 +507,25 @@ def _chat_event_generator(
 
         if not valid_file_paths:
             _prev = ""
-            for chunk in _agent_chat_stream(enhanced_prompt, session_id, dashscope_api_key, username, use_agent=use_agent):
-                _full = chunk["text"]
-                # 增量推送：仅发送相对上一帧的新增片段（回退切换等场景下前缀不匹配时整段补发）
-                inc = _full[len(_prev):] if _full.startswith(_prev) else _full
-                _prev = _full
-                if inc:
-                    yield f"data: {json.dumps({'type': 'delta', 'content': inc}, ensure_ascii=False)}\n\n"
-                session_id = chunk.get("session_id") or session_id
+            _final_text = ""
+            _finish_status = "ok"
+            try:
+                for chunk in _agent_chat_stream(enhanced_prompt, mem_key, dashscope_api_key, username,
+                                                use_agent=use_agent, history=mem_history):
+                    _full = chunk["text"]
+                    # 增量推送：仅发送相对上一帧的新增片段（回退切换等场景下前缀不匹配时整段补发）
+                    inc = _full[len(_prev):] if _full.startswith(_prev) else _full
+                    _prev = _full
+                    _final_text = _full
+                    if inc:
+                        yield f"data: {json.dumps({'type': 'delta', 'content': inc}, ensure_ascii=False)}\n\n"
+                    session_id = chunk.get("session_id") or (mem_key if mem_active else session_id)
+            except GeneratorExit:
+                _finish_status = "aborted"
+                raise
+            finally:
+                _remember_turn(mem_key if mem_active else None, username,
+                               memory_prompt or prompt, _final_text, scene, _finish_status)
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
             return
 
@@ -531,13 +569,38 @@ def _chat_event_generator(
         yield f"data: {json.dumps({'type': 'error', 'content': f'对话生成失败：{str(e)}'})}\n\n"
 
 
+# 直连失败时 _call_model_stream 会把错误文案当正文吐出来，这类内容不进记忆
+_AI_ERROR_PREFIXES = ("AI 调用失败", "网络连接错误", "图像处理失败", "对话生成失败", "❌")
+
+
+def _remember_turn(session_id: Optional[str], username: str, user_text: str,
+                   ai_text: str, scene: str = "chat", status: str = "ok") -> None:
+    """把本轮问答写入会话记忆；报错文本/空内容/非本模块会话一律跳过"""
+    if not chat_memory.is_direct_session(session_id):
+        return
+    try:
+        user_text = str(user_text or "").strip()
+        ai_text = str(ai_text or "").strip()
+        if not user_text or not ai_text:
+            return
+        if any(ai_text.startswith(p) for p in _AI_ERROR_PREFIXES):
+            return
+        partial = status == "aborted"
+        if partial and len(ai_text) < 40:
+            return  # 太短的半截没有引用价值
+        chat_memory.append_turn(str(session_id), username, "user", user_text, scene)
+        chat_memory.append_turn(str(session_id), username, "assistant", ai_text, scene, partial=partial)
+    except Exception as e:
+        logger.warning(f"[对话记忆] 落库失败(不影响本次回答): {e}")
+
+
 def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = "",
-                        use_agent: bool = True):
-    """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式"""
+                        use_agent: bool = True, history: Optional[list] = None):
+    """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式（history 仅直连生效）"""
     from backend.api.ai_service import call_ai_stream
 
     try:
-        for chunk in call_ai_stream(prompt, api_key, session_id, use_agent=use_agent):
+        for chunk in call_ai_stream(prompt, api_key, session_id, use_agent=use_agent, history=history):
             yield chunk
     except Exception as e:
         logger.error(f"AI chat error: {e}")
@@ -665,6 +728,21 @@ async def _error_stream(message: str):
 
 
 @router.post("/new-topic")
-async def new_topic():
-    """新话题（清空当前会话）"""
-    return {"message": "新话题已创建", "session_id": None}
+async def new_topic(request: Request):
+    """新话题（清空当前会话）
+
+    前端带 session_id 时顺手把该会话的直连记忆立即删掉（不带也不影响：
+    记忆最长由 TTL + 后台 prune 兜底清除）。
+    """
+    sid, username = "", ""
+    try:
+        body = await request.json()
+        sid = str((body or {}).get("session_id") or "")
+    except Exception:
+        sid = ""
+    try:
+        username = get_current_user(request)["username"]
+    except Exception:
+        username = ""
+    cleared = chat_memory.reset_session(sid, username) if (sid and username) else 0
+    return {"message": "新话题已创建", "session_id": None, "cleared_turns": cleared}

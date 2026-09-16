@@ -113,6 +113,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "auto_pull_enabled": True,
     # AI 请求超时设置（秒）— 白板 AI 生成图示/板书等操作的超时时间
     "AI_REQUEST_TIMEOUT": 300,
+    # ── 直连模式多轮记忆（backend/chat_memory.py；仅在 APPID 留空/本次强制直连时生效）──
+    # 默认开启；关闭后代码行为与"加记忆之前"逐字一致（读与写都不发生）。
+    "CHAT_MEMORY_ENABLED": True,
+    "CHAT_MEMORY_MAX_TURNS": 8,               # 带上最近几轮问答（一问一答=1 轮）
+    "CHAT_MEMORY_TTL_MINUTES": 30,            # 闲置多久即失效（惰性删除 + 后台 prune）
+    "CHAT_MEMORY_MAX_CHARS": 6000,            # 历史合计字符预算，超出从最旧一轮丢弃
+    "CHAT_MEMORY_MAX_ROWS": 20000,            # 全表行数硬上限，超出全局淘汰最旧
+    "CHAT_MEMORY_CONTENT_MAX_CHARS": 4000,    # 单条回答落库前的截断长度
+    "CHAT_MEMORY_PRUNE_INTERVAL_MINUTES": 5,  # 后台兜底清理节拍
 }
 
 
@@ -260,12 +269,18 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "TEACHER_DOWNLOAD_QUOTA_GB": (1, 100),
     "MAX_ALLOWED_REQUESTS": (1, 10000),
     "AI_REQUEST_TIMEOUT": (5, 900),
+    "CHAT_MEMORY_MAX_TURNS": (1, 30),
+    "CHAT_MEMORY_TTL_MINUTES": (1, 1440),
+    "CHAT_MEMORY_MAX_CHARS": (500, 30000),
+    "CHAT_MEMORY_MAX_ROWS": (500, 500000),
+    "CHAT_MEMORY_CONTENT_MAX_CHARS": (200, 20000),
+    "CHAT_MEMORY_PRUNE_INTERVAL_MINUTES": (1, 120),
 }
 _BOOL_KEYS = {
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
-    "auto_pull_enabled",
+    "auto_pull_enabled", "CHAT_MEMORY_ENABLED",
 }
 _STR_LIMITS: dict[str, int] = {
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
@@ -396,6 +411,29 @@ async def get_config_health(request: Request):
     user = get_current_user(request)
     require_admin(user)
     return config_health()
+
+
+@router.get("/chat-memory", summary="直连对话记忆占用与治理参数（管理员）")
+async def get_chat_memory_stats(request: Request):
+    """会话轮次表的行数/字节数/最老记录 + 当前生效的治理参数"""
+    user = get_current_user(request)
+    require_admin(user)
+    from backend import chat_memory
+    return chat_memory.stats()
+
+
+@router.post("/chat-memory/clear", summary="立即清空直连对话记忆（管理员）")
+async def clear_chat_memory(request: Request):
+    """清空会话记忆表：按 username 参数只清一人，不带参数清全部（隐私应急用）"""
+    user = get_current_user(request)
+    require_admin(user)
+    from backend import chat_memory
+    target = (request.query_params.get("username") or "").strip()
+    if target:
+        removed = chat_memory.purge_user(target)
+    else:
+        removed = chat_memory.prune_expired(ttl_minutes=0)
+    return {"message": "已清空对话记忆", "username": target or "*", "removed": removed}
 
 
 class ConfigUpdate(BaseModel):

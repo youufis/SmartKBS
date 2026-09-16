@@ -42,7 +42,14 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'text', group: 'model' },
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'model' },
   // AI 对话权限
-  { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'ai' },
+  { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'ai' },  // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
+  { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', type: 'boolean', group: 'ai' },
+  { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'ai', required: false },
+  { key: 'CHAT_MEMORY_TTL_MINUTES', labelKey: 'field_CHAT_MEMORY_TTL_MINUTES', descKey: 'field_CHAT_MEMORY_TTL_MINUTES_desc', type: 'number', group: 'ai', required: false },
+  { key: 'CHAT_MEMORY_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_MAX_CHARS', descKey: 'field_CHAT_MEMORY_MAX_CHARS_desc', type: 'number', group: 'ai', required: false },
+  { key: 'CHAT_MEMORY_CONTENT_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS', descKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS_desc', type: 'number', group: 'ai', required: false },
+  { key: 'CHAT_MEMORY_MAX_ROWS', labelKey: 'field_CHAT_MEMORY_MAX_ROWS', descKey: 'field_CHAT_MEMORY_MAX_ROWS_desc', type: 'number', group: 'ai', required: false },
+  { key: 'CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', labelKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', descKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES_desc', type: 'number', group: 'ai', required: false },
   // 系统限制
   { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', type: 'number', group: 'limit' },
   { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', type: 'number', group: 'limit' },
