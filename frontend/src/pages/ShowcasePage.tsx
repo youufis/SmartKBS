@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { Card, Typography, Button, Spin, Empty, Pagination } from 'antd'
+import { Card, Typography, Button, Spin, Empty, Pagination, message } from 'antd'
 import { CrownOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -14,6 +14,8 @@ import '../styles/showcase.css'
 const { Title, Text } = Typography
 
 const PAGE_SIZE = 20
+/** 刷新按钮冷却（秒）；后端会在响应里回传真实间隔并覆盖这个兜底值 */
+const REFRESH_COOLDOWN_SEC = 5
 
 const ShowcasePage: React.FC = () => {
   const user = useAuthStore((s) => s.user)
@@ -47,8 +49,33 @@ const ShowcasePage: React.FC = () => {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstMount = useRef(true)
 
+  // 刷新冷却与并发闸门（防止连点刷接口）
+  const [cooldown, setCooldown] = useState(0)
+  const cooldownSecRef = useRef(REFRESH_COOLDOWN_SEC)
+  const inflightRef = useRef(false)
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const startCooldown = useCallback((sec: number) => {
+    cooldownSecRef.current = sec
+    setCooldown(sec)
+    if (tickRef.current) clearInterval(tickRef.current)
+    tickRef.current = setInterval(() => {
+      setCooldown((v) => {
+        if (v <= 1) {
+          if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null }
+          return 0
+        }
+        return v - 1
+      })
+    }, 1000)
+  }, [])
+
+  useEffect(() => () => { if (tickRef.current) clearInterval(tickRef.current) }, [])
+
   // ── 统一加载函数 ──
-  const fetchData = useCallback(async (p: number, f: typeof filters) => {
+  const fetchData = useCallback(async (p: number, f: typeof filters, manual = false) => {
+    if (inflightRef.current) return          // 同一时刻只允许一个列表请求
+    inflightRef.current = true
     setLoading(true)
     try {
       const res = await getShowcaseList({
@@ -58,17 +85,28 @@ const ShowcasePage: React.FC = () => {
         sort_by: f.sortBy,
         page: p,
         page_size: PAGE_SIZE,
+        manual: manual || undefined,
       })
       setCards(res.cards)
       setTotal(res.total)
       setPage(p)
-    } catch {
-      setCards([])
-      setTotal(0)
+      if (typeof res.refresh_interval === 'number' && res.refresh_interval > 0) {
+        cooldownSecRef.current = res.refresh_interval
+      }
+    } catch (e: any) {
+      // 关键修复：请求失败不再把整面墙清空，保留上一次结果再提示
+      const status = e?.response?.status
+      if (status === 429) {
+        startCooldown(cooldownSecRef.current)
+        message.warning(t('refreshCooldown', { sec: cooldownSecRef.current }))
+      } else {
+        message.error(e?.response?.data?.detail || t('refreshFailed'))
+      }
     } finally {
       setLoading(false)
+      inflightRef.current = false
     }
-  }, [])
+  }, [startCooldown, t])
 
   // ── 筛选变化 → 防抖 → 第1页重新加载（跳过首次渲染）──
   useEffect(() => {
@@ -92,8 +130,14 @@ const ShowcasePage: React.FC = () => {
 
   // ── 初次加载 + 手动刷新 ──
   const doRefresh = useCallback(() => {
-    fetchData(1, filters)
-  }, [fetchData, filters])
+    if (cooldown > 0) {
+      message.info(t('refreshCooldown', { sec: cooldown }))
+      return
+    }
+    if (inflightRef.current) return
+    fetchData(page, filters, true)            // 刷新停在当前页，不再跳回第 1 页
+    startCooldown(cooldownSecRef.current)
+  }, [cooldown, fetchData, filters, page, startCooldown, t])
 
   // ── 加载年级列表 ──
   useEffect(() => {
@@ -172,8 +216,13 @@ const ShowcasePage: React.FC = () => {
           <Text type="secondary">{t('showcaseSubtitle')}</Text>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button icon={<ReloadOutlined />} onClick={doRefresh} loading={loading}>
-            {t('refresh')}
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={doRefresh}
+            loading={loading}
+            disabled={cooldown > 0}
+          >
+            {cooldown > 0 ? t('refreshCountdown', { sec: cooldown }) : t('refresh')}
           </Button>
           {isTeacherOrAdmin && (
             <Button type="primary" icon={<CrownOutlined />} onClick={() => setGenOpen(true)}>

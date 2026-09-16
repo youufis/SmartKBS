@@ -3,6 +3,8 @@
 教师生成荣誉卡片，全校师生浏览、搜索、点赞
 """
 import json
+import threading
+import time
 from datetime import datetime
 from typing import Any
 
@@ -116,13 +118,84 @@ def _build_snapshot(student_username: str) -> dict[str, Any]:
     }
 
 
-def _overlay_live_points(card: dict[str, Any], live_points: int) -> None:
-    """把建卡时冻结的积分/称号/进度换成实时值(让页面上的"刷新"真的能看到积分变化)。
+# ── 手动刷新频控（与新闻手动抓取同一套路，防止刷接口）──
 
-    - 只在实时值与快照不一致时才重算称号与进度: get_main_title* 每次都要解析一遍
-      system_config.json, 一屏 20 张卡多数是相等的, 不必做 40 次无谓解析。
-    - 徽章、学科称号仍取快照: 它们需要逐生查询, 且属于"这次上榜的定格荣誉"。
-    - 快照原值另存 snapshot_points, 前端/排障需要对比时可取用。
+MANUAL_REFRESH_MIN_INTERVAL = 5      # 秒：同一用户点「刷新」的最小间隔
+_manual_gate: dict[str, float] = {}
+_manual_gate_lock = threading.Lock()
+
+
+def _throttle_manual_refresh(username: str) -> None:
+    """只约束"刷新按钮"（manual=1）；翻页/筛选等常规浏览不受影响"""
+    now = time.time()
+    with _manual_gate_lock:
+        last = _manual_gate.get(username, 0)
+        if now - last < MANUAL_REFRESH_MIN_INTERVAL:
+            wait_s = int(MANUAL_REFRESH_MIN_INTERVAL - (now - last)) + 1
+            raise HTTPException(429, f"刷新过于频繁，请 {wait_s} 秒后再试")
+        _manual_gate[username] = now
+        if len(_manual_gate) > 500:      # 兜底清理，避免字典长期驻留
+            cutoff = now - MANUAL_REFRESH_MIN_INTERVAL * 5
+            for k in [k for k, v in _manual_gate.items() if v < cutoff]:
+                _manual_gate.pop(k, None)
+
+
+# ── 实时荣誉块（积分/称号/进度/学科称号/徽章）+ 60 秒缓存 ──
+
+_HONOR_TTL_SECONDS = 60
+_honor_cache: dict[str, tuple[float, int, dict[str, Any]]] = {}
+_honor_lock = threading.Lock()
+
+
+def _live_honor_block(username: str, live_points: int) -> dict[str, Any]:
+    """算一名学生的实时荣誉数据；同一学生 60 秒内（且积分未变）直接命中缓存。
+
+    徽章与学科称号原本取建卡定格，点刷新看不到新解锁的徽章 —— 这里改成实时，
+    并用缓存把成本压住：命中后每生 0 次查询，未命中每生 2 次带索引查询。
+    """
+    now = time.time()
+    with _honor_lock:
+        hit = _honor_cache.get(username)
+        if hit and (now - hit[0]) < _HONOR_TTL_SECONDS and hit[1] == live_points:
+            return hit[2]
+    # 逐项独立计算：任何一项拿不到就不写进块里（宁可保留定格，也不能把
+    # 卡片上的徽章/学科称号数组刷成空 —— 前端 badges.filter(...) 是直接用到的）
+    block: dict[str, Any] = {
+        "total_points": live_points,
+        "main_title": get_main_title(live_points),
+        "progress": get_main_title_progress(live_points),
+    }
+    try:
+        subject_titles = get_student_subject_titles(username)
+        if subject_titles:
+            block["subject_titles"] = subject_titles
+    except Exception as e:
+        logger.debug(f"学科称号实时化跳过({username}): {e}")
+    try:
+        badges = get_student_badges(username)
+        badge_total = len(get_badge_config())
+        if badges and badge_total:
+            block["badges"] = badges
+            block["unlocked_badge_count"] = sum(1 for b in badges if b.get("unlocked"))
+            block["total_badge_count"] = badge_total
+    except Exception as e:
+        logger.debug(f"徽章实时化跳过({username}): {e}")
+    with _honor_lock:
+        _honor_cache[username] = (now, live_points, block)
+        if len(_honor_cache) > 800:
+            cutoff = now - _HONOR_TTL_SECONDS * 4
+            for k in [k for k, v in _honor_cache.items() if v[0] < cutoff]:
+                _honor_cache.pop(k, None)
+    return block
+
+
+def _overlay_live_points(card: dict[str, Any], live_points: int) -> None:
+    """把建卡时冻结的积分/称号/进度/学科称号/徽章换成实时值。
+
+    - 快照原值另存 snapshot_points，前端/排障需要对比时可取用。
+    - 实时口径与建卡口径的唯一差异是"这 60 秒内发生的变化"，
+      所以徽章/学科称号新解锁后点刷新即可见，无需重新建卡。
+    - 任一环节异常都退回原快照，绝不因为装饰性数据把列表接口打挂。
     """
     snap = card.get("snapshot_data")
     if not isinstance(snap, dict):
@@ -134,11 +207,40 @@ def _overlay_live_points(card: dict[str, Any], live_points: int) -> None:
         return
     card["snapshot_points"] = old
     card["live_points"] = live
-    if old == live:
+    stu = str(card.get("student_username") or "")
+    if not stu:
         return
-    snap["total_points"] = live
-    snap["main_title"] = get_main_title(live)
-    snap["progress"] = get_main_title_progress(live)
+    try:
+        block = _live_honor_block(stu, live)
+    except Exception as e:
+        # 装饰性数据失败不影响列表：最多退回建卡定格
+        logger.warning(f"荣耀殿堂实时化失败(退回快照): {e}")
+        block = {"total_points": live}
+    for k, v in block.items():
+        if k == "theme_style":
+            continue
+        snap[k] = v
+
+
+def _assemble_cards(rows: list[Any], current_username: str, points_mode: str) -> list[dict[str, Any]]:
+    """组装列表：点赞状态一次查（SH4 防 N+1）+ 逐卡实时化（放线程池里跑）"""
+    liked_ids: set[int] = set()
+    card_ids = [r[0] for r in rows]
+    if card_ids:
+        lph = ",".join("?" * len(card_ids))
+        liked_ids = {r[0] for r in execute_query(
+            f"SELECT showcase_id FROM showcase_likes WHERE username=? AND showcase_id IN ({lph})",
+            tuple([current_username] + card_ids),
+        )}
+
+    cards = []
+    for row in rows:
+        card = _format_showcase_row(row)
+        card["liked"] = card["id"] in liked_ids
+        if points_mode != "snapshot":
+            _overlay_live_points(card, row[12])
+        cards.append(card)
+    return cards
 
 
 def _format_showcase_row(row: tuple) -> dict[str, Any]:
@@ -379,15 +481,19 @@ async def list_showcase(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     points_mode: str = Query("live", description="live=积分按实时汇总显示与排序(默认); snapshot=按建卡时的定格快照"),
+    manual: bool = Query(False, description="true=页面「刷新」按钮触发的强制刷新, 受每用户最小间隔限流"),
 ):
     """获取荣誉展示卡列表，支持筛选、搜索、排序和分页
 
     积分口径: 卡片存在 snapshot_data(建卡那一刻的定格), 默认用 points_mode=live 把
-    积分/称号/进度换成 student_total_points 的实时值, 因此页面上的"刷新"能立即看到
-    积分变化; 教师若想看历史定格, 传 points_mode=snapshot。
+    积分/称号/进度/学科称号/徽章换成实时值, 因此页面上的"刷新"能立即看到变化;
+    教师若想看历史定格, 传 points_mode=snapshot。
+    manual=1 走每用户最小间隔限流(默认 5 秒), 翻页与筛选不受限。
     """
     user = get_current_user(request)
     current_username = user["username"]
+    if manual:
+        _throttle_manual_refresh(current_username)
 
     conditions = ["sc.is_active=1"]
     params: list[Any] = []
@@ -442,29 +548,15 @@ async def list_showcase(
     """
     rows = execute_query(data_sql, tuple(params) + (page_size, offset))
 
-    # SH4: 一次查出"我点过赞的卡", 取代逐行 _check_liked 的 N+1
-    liked_ids: set[int] = set()
-    card_ids = [r[0] for r in rows]
-    if card_ids:
-        lph = ",".join("?" * len(card_ids))
-        liked_ids = {r[0] for r in execute_query(
-            f"SELECT showcase_id FROM showcase_likes WHERE username=? AND showcase_id IN ({lph})",
-            tuple([current_username] + card_ids),
-        )}
-
-    cards = []
-    for row in rows:
-        card = _format_showcase_row(row)
-        card["liked"] = card["id"] in liked_ids
-        if points_mode != "snapshot":
-            _overlay_live_points(card, row[12])
-        cards.append(card)
+    # 组装 + 实时化整段放线程池执行，避免几十次小查询堵住事件循环
+    cards = await run_in_threadpool(_assemble_cards, rows, current_username, points_mode)
 
     return {
         "cards": cards,
         "total": total,
         "page": page,
         "page_size": page_size,
+        "refresh_interval": MANUAL_REFRESH_MIN_INTERVAL,
     }
 
 

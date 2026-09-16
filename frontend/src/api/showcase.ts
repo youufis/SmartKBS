@@ -78,6 +78,8 @@ export interface ShowcaseListResponse {
   total: number;
   page: number;
   page_size: number;
+  /** 后端「刷新」最小间隔（秒），前端据此对齐按钮冷却 */
+  refresh_interval?: number;
 }
 
 export interface GenerateRequest {
@@ -110,6 +112,8 @@ export async function getShowcaseList(params: {
   page_size?: number;
   /** live=积分按实时汇总显示与排序(默认), snapshot=按建卡时的定格快照 */
   points_mode?: 'live' | 'snapshot';
+  /** true=点「刷新」按钮触发的强制刷新，受后端每用户最小间隔限流 */
+  manual?: boolean;
 }): Promise<ShowcaseListResponse> {
   const { data } = await apiClient.get('/api/showcase/list', { params });
   return data;

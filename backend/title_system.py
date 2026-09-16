@@ -90,14 +90,30 @@ def get_subject_list() -> list[str]:
     return ["人工智能"]
 
 
+# 称号/徽章/学科称号配置在每次渲染里都会被读多次（荣耀殿堂一屏 20 张卡 × 每科一次），
+# 而 config_router 的 load_config 在 api 层、这里直接读盘会形成循环依赖，
+# 因此本地做一份 (mtime_ns, size) 缓存：改文件即失效，无额外依赖。
+_CFG_CACHE: dict[str, Any] = {"key": None, "data": {}}
+
+
 def _load_system_config() -> dict[str, Any]:
-    """从 system_config.json 加载配置，不存在则返回空 dict"""
+    """从 system_config.json 加载配置（带 (mtime_ns,size) 缓存），不存在则返回空 dict"""
     try:
-        if _CONFIG_FILE.exists():
-            return json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+        if not _CONFIG_FILE.exists():
+            return {}
+        st = _CONFIG_FILE.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        if _CFG_CACHE["key"] == key and isinstance(_CFG_CACHE["data"], dict):
+            return _CFG_CACHE["data"]
+        data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        _CFG_CACHE["key"] = key
+        _CFG_CACHE["data"] = data
+        return data
     except Exception as e:
         logger.warning(f"读取 system_config.json 失败: {e}")
-    return {}
+        return {}
 
 
 def _load_title_config() -> list[dict[str, Any]]:
@@ -105,8 +121,8 @@ def _load_title_config() -> list[dict[str, Any]]:
     cfg = _load_system_config()
     custom = cfg.get("TITLE_CONFIG")
     if custom and isinstance(custom, list) and len(custom) == len(DEFAULT_TITLE_CONFIG):
-        return custom
-    return DEFAULT_TITLE_CONFIG
+        return list(custom)
+    return list(DEFAULT_TITLE_CONFIG)
 
 
 def _load_subject_title_config() -> list[dict[str, Any]]:
@@ -117,8 +133,8 @@ def _load_subject_title_config() -> list[dict[str, Any]]:
         return []
     custom = cfg.get("SUBJECT_TITLE_CONFIG")
     if custom and isinstance(custom, list) and len(custom) == len(DEFAULT_SUBJECT_TITLE_CONFIG):
-        return custom
-    return DEFAULT_SUBJECT_TITLE_CONFIG
+        return list(custom)
+    return list(DEFAULT_SUBJECT_TITLE_CONFIG)
 
 
 def _load_badge_config() -> list[dict[str, Any]]:
@@ -126,7 +142,7 @@ def _load_badge_config() -> list[dict[str, Any]]:
     cfg = _load_system_config()
     custom = cfg.get("BADGE_CONFIG")
     if custom and isinstance(custom, list):
-        return custom
+        return list(custom)
     enabled = cfg.get("ENABLE_BADGES", True)
     if not enabled:
         return []
