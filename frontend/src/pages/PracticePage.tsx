@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
   Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination, Checkbox,
-  Switch, Tooltip,
+  Switch, Tooltip, Drawer,
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
@@ -16,6 +16,9 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import { classText } from '../utils/studentLabel'
 import { TYPE_LABELS as typeLabel, TYPE_OPTIONS } from '../constants/questionTypes'
+
+/** 详情/答卷里显示题型名(与做题页同一份映射) */
+const TYPE_LABELS_LOCAL: Record<string, string> = typeLabel as Record<string, string>
 import ResetActivityButton from '../components/ResetActivityButton'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
@@ -23,13 +26,41 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 const { Title, Text } = Typography
 const { TextArea } = Input
 
+/** S-GRADE: 每题判分来源, 让学生和教师一眼看出这个分数是谁给的 */
+const GRADED_BY_KEYS: Record<string, string> = {
+  ai: "gradedByAi", keyword: "gradedByKeyword", exact: "gradedByExact",
+  none: "gradedByNone", teacher: "gradedByTeacher",
+}
+const gradedByKey = (v: unknown) => GRADED_BY_KEYS[String(v ?? "")] || "gradedByUnknown"
+
+/** 得分率(无满分字段时退回对错) */
+const scoreRatio = (r: any) => {
+  const mx = Number(r?.max_score ?? 0)
+  if (!mx) return r?.is_correct ? 1 : 0
+  return Number(r?.score ?? 0) / mx
+}
+const scoreColor = (ratio: number) => (ratio >= 0.999 ? "green" : ratio > 0 ? "orange" : "red")
+/** 主观题题型(后端 AI_GRADED_TYPES + 填空题) */
+const SUBJ_TYPES = ["short", "fill", "essay", "subjective"]
+
 // ════════════════════════════════════════
 // 练习提交名册 — 已交/未交 + 班级 + 按学生查询
 // ════════════════════════════════════════
-const SessionRoster: React.FC<{ attempts: any[]; students: any[] }> = ({ attempts, students }) => {
+const SessionRoster: React.FC<{
+  attempts: any[]
+  students: any[]
+  /** S-GRADE: 点开某个学生的答卷(含主观题作答与批改, 可逐题改分) */
+  onShowSheet?: (attempt: any) => void
+}> = ({ attempts, students, onShowSheet }) => {
   const { t } = useTranslation('practice')
   const [kw, setKw] = useState('')
   const [filter, setFilter] = useState<'all' | 'done' | 'undone'>('all')
+
+  const attMap = useMemo(() => {
+    const m = new Map<string, any>()
+    ;(attempts || []).forEach((a: any) => m.set(a.student_username, a))
+    return m
+  }, [attempts])
 
   const rows = useMemo(() => {
     const map = new Map<string, any>()
@@ -39,6 +70,7 @@ const SessionRoster: React.FC<{ attempts: any[]; students: any[] }> = ({ attempt
         map.set(a.student_username, {
           username: a.student_username,
           name: a.student_name || a.student_username,
+          grade: a.student_grade || '',
           class: a.student_class || '',
           submitted: true, score: a.score, total_score: a.total_score, submitted_at: a.submitted_at,
         })
@@ -49,29 +81,39 @@ const SessionRoster: React.FC<{ attempts: any[]; students: any[] }> = ({ attempt
       if (filter === 'done' && !r.submitted) return false
       if (filter === 'undone' && r.submitted) return false
       if (!k) return true
-      return [r.name, r.username, String(r.class || '')].some(v => String(v).toLowerCase().includes(k))
+      // 学号/姓名/年级/班级都可搜(学号即登录用户名)
+      return [r.name, r.username, String(r.class || ''), String(r.grade || '')]
+        .some(v => String(v).toLowerCase().includes(k))
     })
   }, [students, attempts, kw, filter])
+
+  const pendingCount = (attempts || []).reduce((n: number, a: any) => n + (a.pending_review || 0), 0)
+  const reviewedCount = (attempts || []).filter((a: any) => a.teacher_reviewed).length
 
   return (
     <div>
       <Space style={{ marginBottom: 8 }} wrap>
-        <Input allowClear style={{ width: 200 }} value={kw} onChange={e => setKw(e.target.value)}
-          placeholder={`${t('studentName')} / ${t('student')}`} />
+        <Input allowClear style={{ width: 220 }} value={kw} onChange={e => setKw(e.target.value)}
+          placeholder={`${t('studentId')} / ${t('studentName')} / ${t('grade')}`} />
         <Radio.Group value={filter} onChange={e => setFilter(e.target.value)}>
           <Radio.Button value="all">{t('all')}</Radio.Button>
           <Radio.Button value="done">{t('submitted')}</Radio.Button>
           <Radio.Button value="undone">{t('notStarted')}</Radio.Button>
         </Radio.Group>
         <Text type="secondary">{t('totalItems', { count: rows.length })}</Text>
+        {reviewedCount > 0 && <Tag color="green">{t('reviewedStudents', { count: reviewedCount })}</Tag>}
+        {pendingCount > 0 && <Tag color="orange">{t('pendingReviewTotal', { count: pendingCount })}</Tag>}
       </Space>
       <Table size="small" rowKey="username" dataSource={rows}
         locale={{ emptyText: t('noStudentSubmissions') }}
+        scroll={{ x: 900 }}
         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total: number) => t('totalItems', { count: total }) }}
         columns={[
-          { title: t('studentName'), dataIndex: 'name', width: 120, ellipsis: true },
+          { title: t('studentId'), dataIndex: 'username', width: 100, ellipsis: true },
+          { title: t('studentName'), dataIndex: 'name', width: 110, ellipsis: true },
+          { title: t('grade'), dataIndex: 'grade', width: 80, render: (v: string) => v || '-' },
           {
-            title: t('studentClass'), dataIndex: 'class', width: 70,
+            title: t('studentClass'), dataIndex: 'class', width: 80,
             render: (v: string) => classText(v) || '-',
           },
           {
@@ -79,11 +121,30 @@ const SessionRoster: React.FC<{ attempts: any[]; students: any[] }> = ({ attempt
             render: (v: boolean) => (v ? <Tag color="success">{t('submitted')}</Tag> : <Tag>{t('notStarted')}</Tag>),
           },
           {
-            title: t('score'), key: 'score', width: 100,
+            title: t('score'), key: 'score', width: 96,
             render: (_: any, r: any) => (r.submitted ? `${r.score ?? 0}/${r.total_score ?? 0}` : '-'),
           },
-          { title: t('submitTime'), dataIndex: 'submitted_at', ellipsis: true, render: (v: string) => v || '-' },
-          { title: t('actions'), key: 'user', width: 110, ellipsis: true, render: (_: any, r: any) => r.username },
+          {
+            // S-GRADE: 谁判的分、还剩几题待批改, 教师一眼可见
+            title: t('gradingState'), key: 'grading', width: 130,
+            render: (_: any, r: any) => {
+              const a = attMap.get(r.username)
+              if (!a) return '-'
+              if (a.teacher_reviewed) return <Tag color="green">{t('gradedByTeacher')}</Tag>
+              if (a.pending_review) return <Tag color="orange">{t('pendingReviewN', { count: a.pending_review })}</Tag>
+              return <Tag>{t('gradedByAi')}</Tag>
+            },
+          },
+          { title: t('submitTime'), dataIndex: 'submitted_at', width: 150, ellipsis: true, render: (v: string) => v || '-' },
+          {
+            title: t('actions'), key: 'op', width: 100, fixed: 'right' as const,
+            render: (_: any, r: any) => {
+              const a = attMap.get(r.username)
+              return a && onShowSheet
+                ? <Button size="small" onClick={() => onShowSheet(a)}>{t('viewSheet')}</Button>
+                : <Text type="secondary">-</Text>
+            },
+          },
         ] as any}
       />
     </div>
@@ -140,9 +201,11 @@ const StudentView: React.FC = () => {
   const submitAnswers = async () => {
     setSubmitting(true)
     try {
+      // S-GRADE: 含主观题时后端要逐题调 AI 批改, 默认 30s 超时会让「提交失败」误报
       const { data } = await apiClient.post(
         `/api/practice/my-sessions/${activeSession.id}/submit`,
         { answers },
+        { timeout: 120000 },
       )
       setResult(data)
     } catch (e: any) {
@@ -168,14 +231,36 @@ const StudentView: React.FC = () => {
         {submittedView.results?.map((r: any, i: number) => (
           <Card key={i} size="small" style={{ marginBottom: 8 }}
             title={t('questionN', { n: i+1 })}
-            extra={r.is_correct ? <Tag color="success">{t('correct')}</Tag> : <Tag color="error">{t('incorrect')}</Tag>}
+            extra={
+              <Space size={4} wrap>
+                {/* S-GRADE: 每题得分必须显示 —— 以前只给「正确/错误」, 简答题被扣几分学生看不到 */}
+                <Tag color={scoreColor(scoreRatio(r))}>{t('questionScore')} {Number(r.score ?? 0)}/{Number(r.max_score ?? 0)}</Tag>
+                {r.needs_review
+                  ? <Tag color="orange">{t('pendingReview')}</Tag>
+                  : (r.is_correct ? <Tag color="success">{t('correct')}</Tag> : <Tag color="error">{t('incorrect')}</Tag>)}
+                <Tag>{t(gradedByKey(r.graded_by))}</Tag>
+              </Space>
+            }
           >
             <FormulaRenderer content={r.question_text} />
             <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={(r as any).media_files} />
             <div style={{ marginTop: 8 }}>
               <Text>{t('yourAnswer')}：<Text type={r.is_correct ? 'success' : 'danger'}>{r.student_answer || t('noHistory')}</Text></Text>
-              {!r.is_correct && <div><Text type="secondary">{t('correctAnswer')}：{r.correct_answer}</Text></div>}
-              {!!r.feedback && <div style={{ marginTop: 4 }}><Text type="secondary">{r.feedback}</Text></div>}
+              {/* 参考答案常显: 主观题即使判对也值得对照, 不再只在判错时才给看 */}
+              <div><Text type="secondary">{t('correctAnswer')}：{r.correct_answer || '-'}</Text></div>
+              {!!r.feedback && (
+                <div style={{ marginTop: 4 }}>
+                  <Text type="secondary">{t('aiComment')}：<FormulaRenderer content={r.feedback} inline /></Text>
+                </div>
+              )}
+              {!!r.teacher_comment && (
+                <div style={{ marginTop: 4 }}>
+                  <Text style={{ color: '#389e0d' }}>{t('teacherComment')}：{r.teacher_comment}</Text>
+                </div>
+              )}
+              {!!r.needs_review && (
+                <div style={{ marginTop: 4 }}><Text type="warning">{t('needsReviewHint')}</Text></div>
+              )}
             </div>
             {r.explanation && (
               <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
@@ -241,6 +326,11 @@ const StudentView: React.FC = () => {
           </Button>
           <Button style={{ marginLeft: 12 }} onClick={() => { setActiveSession(null); loadSessions() }}>{t('practiceHistory')}</Button>
         </div>
+        {questions.some(q => SUBJ_TYPES.includes(q.type)) && (
+          <div style={{ textAlign: 'center', marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('aiGradingWait')}</Text>
+          </div>
+        )}
         {result && (
           <Card style={{ marginTop: 16, textAlign: 'center' }}>
             <Title level={4}>{t('submit')}</Title>
@@ -321,6 +411,14 @@ const TeacherView: React.FC = () => {
   const [loadingSessions, setLoadingSessions] = useState(false)
   const user = useAuthStore(s => s.user)
   const isAdmin = user?.role === 'admin'
+  // S-GRADE: 练习详情改用抽屉(原 Modal.info 塞不下二级交互), 并支持逐题查看答卷/改分
+  const [detail, setDetail] = useState<any>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailSid, setDetailSid] = useState<number | null>(null)
+  const [sheetAttempt, setSheetAttempt] = useState<any>(null)
+  const [draft, setDraft] = useState<Record<string, { score: number; comment: string }>>({})
+  const [savingReview, setSavingReview] = useState(false)
 
   useEffect(() => {
     // 加载学科列表
@@ -390,40 +488,59 @@ const TeacherView: React.FC = () => {
 
   useEffect(() => { if (tab === 'sessions') loadSessions() }, [tab, loadSessions])
 
-  const viewSessionDetail = async (sid: number) => {
+  const viewSessionDetail = async (id: number) => {
+    setDetailSid(id)
+    setDetailOpen(true)
+    setDetailLoading(true)
     try {
-      const { data } = await apiClient.get(`/api/practice/sessions/${sid}`)
-      Modal.info({
-        title: data.session?.title,
-        width: 800,
-        content: (
-          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
-            <p>{t('knowledgePoints')}：{data.session?.knowledge_points}</p>
-            <p>{t('questionCountTitle')}：{data.session?.question_count} · {t('totalScoreTitle')}：{data.session?.total_score}</p>
-            <Divider />
-            <Text strong>{t('questionListTitle')}</Text>
-            {data.questions?.map((q: any, i: number) => (
-              <Card key={q.id || i} size="small" style={{ marginBottom: 8, marginTop: 8 }}
-                title={t('questionN', { n: i + 1 })}>
-                <FormulaRenderer content={q.question_text} />
-                <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="normal" />
-                {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
-                  <div key={k} style={{ margin: '2px 0' }}>
-                    <Text>{k}. <FormulaRenderer content={v as string} inline /></Text>
-                  </div>
-                ))}
-                <div style={{ marginTop: 4 }}>
-                  <Tag color="blue">{t('answerColon')}{q.correct_answer}</Tag>
-                </div>
-              </Card>
-            ))}
-            <Divider />
-            <Text strong>{t('submissionStatus', { count: data.attempts?.length || 0 })}</Text>
-            <SessionRoster attempts={data.attempts || []} students={data.students || []} />
-          </div>
-        ),
-      })
+      const { data } = await apiClient.get(`/api/practice/sessions/${id}`)
+      setDetail(data)
     } catch { message.error(t('loadDetailFailed')) }
+    finally { setDetailLoading(false) }
+  }
+
+  /** 打开某个学生的答卷：草稿初值取当前逐题得分与已有教师评语 */
+  const openSheet = (a: any) => {
+    const g: Record<string, any> = a?.graded || {}
+    const d: Record<string, { score: number; comment: string }> = {}
+    Object.keys(g).forEach((qid: string) => {
+      d[qid] = { score: Number(g[qid]?.score ?? 0), comment: String(g[qid]?.teacher_comment ?? '') }
+    })
+    setDraft(d)
+    setSheetAttempt(a)
+  }
+
+  const saveReview = async () => {
+    if (!sheetAttempt) return
+    // 只提交真正改过的题: 未动过的题保持原判分来源(否则 AI/系统判的题会被误标成「教师批改」)
+    const stored: Record<string, any> = sheetAttempt.graded || {}
+    const scores: Record<string, number> = {}
+    const comments: Record<string, string> = {}
+    Object.entries(draft).forEach(([qid, v]) => {
+      const old = stored[qid]
+      if (!old) return
+      if (Number(v.score) !== Number(old.score ?? 0)) scores[qid] = v.score
+      const oldComment = String(old.teacher_comment ?? '')
+      if (v.comment.trim() !== oldComment.trim()) comments[qid] = v.comment
+    })
+    if (Object.keys(scores).length === 0 && Object.keys(comments).length === 0) {
+      message.info(t('noChangeToSave'))
+      return
+    }
+    setSavingReview(true)
+    try {
+      await apiClient.post('/api/practice/review', {
+        attempt_id: sheetAttempt.id,
+        question_scores: scores,
+        question_comments: comments,
+      })
+      message.success(t('reviewSaved'))
+      setSheetAttempt(null)
+      if (detailSid) await viewSessionDetail(detailSid)
+      loadSessions()
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || t('reviewSaveFailed'))
+    } finally { setSavingReview(false) }
   }
 
   const endSession = async (sid: number) => {
@@ -550,6 +667,124 @@ const TeacherView: React.FC = () => {
             ]}
           />
       )}
+      {/* ── S-GRADE: 练习详情抽屉(题目 + 名册 + 逐个看答卷批改) ── */}
+      <Drawer
+        title={detail?.session?.title || t('detail')}
+        placement="right"
+        width={900}
+        open={detailOpen}
+        onClose={() => { setDetailOpen(false); setSheetAttempt(null) }}
+      >
+        {detailLoading && <Spin style={{ display: 'block', margin: '60px auto' }} />}
+        {!detailLoading && detail && (
+          <>
+            <p>{t('knowledgePoints')}：{detail.session?.knowledge_points}</p>
+            <p>{t('questionCountTitle')}：{detail.session?.question_count} · {t('totalScoreTitle')}：{detail.session?.total_score}</p>
+            <Divider />
+            <Text strong>{t('questionListTitle')}</Text>
+            {detail.questions?.map((q: any, i: number) => (
+              <Card key={q.question_id || i} size="small" style={{ marginBottom: 8, marginTop: 8 }}
+                title={t('questionN', { n: i + 1 })}
+                extra={<Space size={4}><Tag>{TYPE_LABELS_LOCAL[q.type] || q.type}</Tag><Tag color="blue">{t('fullScore')} {q.score}</Tag></Space>}
+              >
+                <FormulaRenderer content={q.question_text} />
+                <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={q.media_files} size="normal" />
+                {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
+                  <div key={k} style={{ margin: '2px 0' }}>
+                    <Text>{k}. <FormulaRenderer content={v as string} inline /></Text>
+                  </div>
+                ))}
+                <div style={{ marginTop: 4 }}>
+                  <Tag color="blue">{t('answerColon')}{q.correct_answer}</Tag>
+                </div>
+              </Card>
+            ))}
+            <Divider />
+            <Text strong>{t('submissionStatus', { count: detail.attempts?.length || 0 })}</Text>
+            <div style={{ marginTop: 8 }}>
+              <SessionRoster attempts={detail.attempts || []} students={detail.students || []} onShowSheet={openSheet} />
+            </div>
+          </>
+        )}
+      </Drawer>
+
+      {/* ── 学生答卷: 逐题作答/批改明细, 主观题可直接改分写评语 ── */}
+      <Modal
+        title={sheetAttempt
+          ? `${sheetAttempt.student_name || sheetAttempt.student_username} · ${t('viewSheet')}`
+          : t('viewSheet')}
+        open={!!sheetAttempt}
+        onCancel={() => setSheetAttempt(null)}
+        onOk={saveReview}
+        okText={t('saveReview')}
+        cancelText={t('cancel')}
+        okButtonProps={{ loading: savingReview }}
+        width={880}
+      >
+        {sheetAttempt && (
+          <div>
+            <Space wrap style={{ marginBottom: 8 }}>
+              <Tag>{t('studentId')}：{sheetAttempt.student_username}</Tag>
+              <Tag>{t('grade')}：{sheetAttempt.student_grade || '-'}</Tag>
+              <Tag>{t('studentClass')}：{classText(sheetAttempt.student_class) || '-'}</Tag>
+              <Tag color="blue">{t('totalScoreLabel')}：{sheetAttempt.score}/{sheetAttempt.total_score}</Tag>
+              {!!sheetAttempt.teacher_reviewed && <Tag color="green">{t('gradedByTeacher')}</Tag>}
+            </Space>
+            <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
+              {(detail?.questions || []).map((q: any, i: number) => {
+                const qid = String(q.question_id ?? q.id)
+                const g = (sheetAttempt.graded || {})[qid] || {}
+                const d = draft[qid] || { score: Number(g.score ?? 0), comment: '' }
+                const mx = Number(g.max_score ?? q.score ?? 0)
+                return (
+                  <Card key={qid} size="small" style={{ marginBottom: 8 }}
+                    title={t('questionN', { n: i + 1 })}
+                    extra={
+                      <Space size={4} wrap>
+                        <Tag>{TYPE_LABELS_LOCAL[q.type] || q.type}</Tag>
+                        <Tag color="blue">{t('fullScore')} {mx}</Tag>
+                        {!!g.needs_review && <Tag color="orange">{t('pendingReview')}</Tag>}
+                        <Tag>{t(gradedByKey(g.graded_by))}</Tag>
+                      </Space>
+                    }
+                  >
+                    <FormulaRenderer content={q.question_text} />
+                    {q.options && Object.entries(q.options).map(([k, v]: [string, any]) => (
+                      <div key={k}><Text type="secondary">{k}. <FormulaRenderer content={v as string} inline /></Text></div>
+                    ))}
+                    <div style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
+                      <Text>{t('yourAnswer')}：</Text>
+                      <Text type={g.is_correct ? 'success' : 'danger'}>{g.student_answer || t('noHistory')}</Text>
+                    </div>
+                    <div><Text type="secondary">{t('correctAnswer')}：{g.correct_answer ?? q.correct_answer ?? '-'}</Text></div>
+                    {!!g.feedback && (
+                      <div style={{ marginTop: 4 }}>
+                        <Text type="secondary">{t('aiComment')}：{g.feedback}</Text>
+                      </div>
+                    )}
+                    {!!q.explanation && (
+                      <div style={{ marginTop: 4 }}><Text type="secondary">{t('explanationColon')}<FormulaRenderer content={q.explanation} inline /></Text></div>
+                    )}
+                    <Space align="baseline" style={{ marginTop: 8 }} wrap>
+                      <Text>{t('questionScore')}</Text>
+                      <InputNumber min={0} max={mx || undefined} step={0.5} value={d.score}
+                        style={{ width: 90 }}
+                        onChange={(v: any) => setDraft(prev => ({ ...prev, [qid]: { ...d, score: Number(v ?? 0) } }))} />
+                      <Text type="secondary">/ {mx}</Text>
+                    </Space>
+                    <div style={{ marginTop: 6 }}>
+                      <Text>{t('teacherComment')}</Text>
+                      <TextArea rows={2} value={d.comment} placeholder={t('teacherCommentPlaceholder')}
+                        onChange={e => setDraft(prev => ({ ...prev, [qid]: { ...d, comment: e.target.value } }))} />
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('reviewNote')}</Text>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

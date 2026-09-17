@@ -22,7 +22,8 @@ from backend.api.ai_service import call_ai_async
 from backend.utils import extract_json_from_text
 from backend.api.config_router import get_config_value
 from backend.logger import logger
-from backend.prompts import apply_skills, build_ai_role
+# S-GRADING: 评分/出题 prompt 一律不注入技能(与 _build_generate_prompt 内注释同结论), 故不再 import apply_skills
+from backend.prompts import build_ai_role
 from backend.async_utils import spawn_bg as _spawn_bg
 
 router = APIRouter()
@@ -73,6 +74,17 @@ class PracticeSubmitRequest(BaseModel):
     answers: dict[str, str]
 
 
+class PracticeReviewRequest(BaseModel):
+    """教师：复核/修改练习批改结果"""
+    attempt_id: int
+    # 逐题覆盖得分/评语(key = 题库题目 id), 越界会被夹到该题满分
+    question_scores: Optional[dict[str, float]] = None
+    question_comments: Optional[dict[str, str]] = None
+    # 直接指定总分(留空则按逐题分自动重算)与整卷评语
+    teacher_score: Optional[float] = None
+    teacher_comment: Optional[str] = None
+
+
 # ════════════════════════════════════════════
 # 教师端
 # ════════════════════════════════════════════
@@ -82,9 +94,96 @@ class PracticeSubmitRequest(BaseModel):
 # ════════════════════════════════════════════
 
 # 走 AI 语义批改的题型(P5: 主观题必须有人批改, 不允许静默丢题)
-AI_GRADED_TYPES = ("short", "fill", "essay", "subjective")
+# S-FILL: 填空题不再默认走 AI —— 先按「逐空精确比对」规则判分, 只有规则不可靠时才降级 AI
+AI_GRADED_TYPES = ("short", "essay", "subjective")
+FILL_TYPES = ("fill",)
 
 _ANS_SEP_RE = re.compile(r"[,，;；、/\s|]+")
+
+# ── S-GRADING: 判分工具（要点切分 / 归一化 / 命中比例给分）──
+# 参考答案里的要点分隔符: 中英文标点、空白、以及 ①②③ /(1)/ 1. 这类标号
+_POINT_SEP_RE = re.compile(
+    r"[,，;；、。①②③④⑤⑥⑦⑧⑨⑩\s|｜/]+"
+    r"|[（(]\s*\d+\s*[)）]"
+    r"|(?<![\d.])\.(?![\d.])"
+)
+# 只在「确实是题号标号」时剥前缀: 括号编号 / 圈号 / 数字+.、且后面不是数字
+# (后者若不限定, 小数答案 "0.5" 会被剥成 "5")
+_LEAD_NUM_RE = re.compile(r"^\s*(?:[①②③④⑤⑥⑦⑧⑨⑩]|[（(]\s*\d+\s*[)）]|\d+\s*[\.、](?!\d))\s*")
+_PUNCT_RE = re.compile("""[\s\u3000，。、；：“”‘’'"()（）《》【】\[\]！!？?～~\u2014\-_,./\\|]+""")
+# 兜底/规则判分可用的要点最长长度: 超过说明是整段描述文字, 关键词命中没有意义
+MAX_POINT_LEN = 12
+
+
+def _norm_text(v: Any) -> str:
+    """归一化: 去空白与标点 + 转小写, 用于跨格式比对"""
+    return _PUNCT_RE.sub("", str(v if v is not None else "")).lower()
+
+
+def _num_tokens(v: Any) -> set[str]:
+    """抽出文本里的数字并归一('02'→'2', '2.0'→'2'), 供数字要点精确比对"""
+    out: set[str] = set()
+    for m in re.findall(r"[-+]?\d+(?:\.\d+)?", str(v if v is not None else "")):
+        out.add(m)
+        try:
+            f = float(m)
+            out.add(str(int(f)) if f == int(f) else str(f))
+        except ValueError:
+            pass
+    return out
+
+
+def _split_points(raw: Any) -> list[str]:
+    """参考答案 → 要点列表(去标号、去空项、去重)"""
+    pts: list[str] = []
+    for part in _POINT_SEP_RE.split(str(raw or "")):
+        raw_pt = str(part or "").strip(" \t\r\n：:，。、；")
+        pt = _LEAD_NUM_RE.sub("", raw_pt).strip(" \t\r\n：:，。、；")
+        if not pt:
+            pt = raw_pt  # 整段本身就是一个数字答案(如填空 "2"), 不能被当标号剥掉
+        # 单字符要点只保留有意义的答案(数字/字母选项/对错), 其余噪声片段丢弃
+        if (len(pt) >= 2 or re.fullmatch(r"[-+]?\d+(?:\.\d+)?|[A-Za-z对错√×±]", pt)) and pt not in pts:
+            pts.append(pt)
+    return pts
+
+
+def _point_hit(point: str, student_norm: str, student_nums: set[str]) -> bool:
+    """单个要点是否命中。
+    纯数字要点必须整词命中(否则参考答案 '2' 会被学生答案 '12' 蒙对), 其余按归一化包含判断。"""
+    pt = point.strip()
+    if re.fullmatch(r"[A-Za-z]", pt):
+        return student_norm == pt.lower()
+    if re.fullmatch(r"[-+]?\d+(?:\.\d+)?", pt):
+        return _num_tokens(pt) & student_nums != set() or pt in student_nums
+    return bool(pt) and _norm_text(pt) in student_norm
+
+
+def _ratio_score(q_score: float, hits: int, total: int) -> float:
+    """按要点命中比例给分(保留 1 位小数)"""
+    if total <= 0:
+        return 0.0
+    return round(q_score * min(hits / total, 1.0), 1)
+
+
+def _grade_fill_by_rule(q: dict, student_ans: str) -> dict[str, Any] | None:
+    """[S-FILL] 填空题规则判分: 逐空比对参考答案, 按命中空数比例给分。
+
+    返回 None 表示规则不可靠(参考答案为空 / 空位里是长段描述), 调用方再降级 AI。
+    is_correct 要求全部空命中(部分正确只给部分分, 仍算错题进错题本)。
+    """
+    correct = str(q.get("correct_answer") or "").strip()
+    blanks = _split_points(correct)
+    if not blanks or any(len(b) > MAX_POINT_LEN for b in blanks):
+        return None
+    q_score = float(q.get("score") or 10)
+    norm = _norm_text(student_ans)
+    nums = _num_tokens(student_ans)
+    hits = sum(1 for b in blanks if _point_hit(b, norm, nums))
+    return {
+        "student_answer": student_ans, "correct_answer": correct,
+        "score": _ratio_score(q_score, hits, len(blanks)), "max_score": q_score,
+        "is_correct": hits == len(blanks), "graded_by": "exact",
+    }
 
 def _num_class(v: Any) -> str:
     """班级归一化: '高一1班' / '1班' / '01' / 1 -> '1'"""
@@ -654,11 +753,24 @@ async def get_session_detail(session_id: int, request: Request):
         a["student_name"] = meta.get("name") or a["student_username"]
         a["student_class"] = meta.get("class") or ""
         a["student_grade"] = meta.get("grade") or ""
+        # S-GRADE: 把批改明细解析成结构化对象下发, 教师端才能直接渲染答卷与逐题改分
+        raw = a.get("answers")
+        try:
+            graded = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except (json.JSONDecodeError, TypeError):
+            graded = {}
+        if not isinstance(graded, dict):
+            graded = {}
+        a["graded"] = graded
+        a["pending_review"] = sum(
+            1 for v in graded.values() if isinstance(v, dict) and v.get("needs_review")
+        )
 
     att_map = {a["student_username"]: a for a in attempts}
     students = [{
         "username": r[0],
         "name": r[1] or r[0],
+        "grade": info.get(r[0], {}).get("grade", ""),   # S-GRADE: 教师端名册补年级
         "class": str(r[2] or ""),
         "submitted": r[0] in att_map,
         "score": att_map[r[0]]["score"] if r[0] in att_map else None,
@@ -727,6 +839,103 @@ async def end_session(session_id: int, request: Request):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     execute_update("UPDATE practice_sessions SET status='ended', updated_at=? WHERE id=?", (now, session_id))
     return {"message": "已结束"}
+
+
+@router.post("/review")
+async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
+    """[教师] 复核练习批改结果：逐题改分/补评语，或直接改总分(S-GRADE)
+
+    练习此前「AI 判完即定稿」，误判无人可纠；本接口对齐考试模块的复核链路
+    (exam_router: POST /review)。改分后逐题 score 覆盖、graded_by 记为 teacher、
+    该题撤销 needs_review，attempt.score 按新逐题分重算；学生端刷新即见最终分。
+
+    注意：积分奖励与错题本按提交当时的判定生成，复核改分不自动回滚(与考试模块一致)。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可复核批改")
+
+    attempt = execute_query_one("SELECT * FROM practice_attempts WHERE id=?", (req.attempt_id,))
+    if not attempt:
+        raise HTTPException(status_code=404, detail="答题记录不存在")
+    sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (attempt["session_id"],))
+    if not sess:
+        raise HTTPException(status_code=404, detail="练习不存在")
+    if role != 0 and sess["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="只能复核自己布置的练习")
+
+    answers = attempt.get("answers")
+    if isinstance(answers, str):
+        try:
+            answers = json.loads(answers)
+        except (json.JSONDecodeError, TypeError):
+            answers = {}
+    if not isinstance(answers, dict):
+        answers = {}
+
+    touched = False
+    for qid, new_score in (req.question_scores or {}).items():
+        one = answers.get(str(qid))
+        if not isinstance(one, dict):
+            continue
+        try:
+            val = max(0.0, float(new_score))
+        except (TypeError, ValueError):
+            continue
+        mx = float(one.get("max_score") or 0)
+        if mx:
+            val = min(val, mx)                      # 逐题改分不得越过该题满分
+        one["score"] = round(val, 1)
+        one["is_correct"] = one["score"] >= mx * 0.6
+        one["teacher_adjusted"] = True
+        one["graded_by"] = "teacher"
+        one.pop("needs_review", None)
+        touched = True
+
+    for qid, comment in (req.question_comments or {}).items():
+        one = answers.get(str(qid))
+        if isinstance(one, dict):
+            one["teacher_comment"] = str(comment or "").strip()[:1000]
+            touched = True
+
+    if not touched and req.teacher_score is None and not (req.teacher_comment or "").strip():
+        raise HTTPException(status_code=400, detail="没有需要保存的修改")
+
+    final_score = attempt.get("score") or 0
+    if touched:
+        final_score = round(sum(
+            float(v.get("score") or 0) for v in answers.values() if isinstance(v, dict)
+        ), 1)
+    if req.teacher_score is not None:
+        final_score = round(max(float(req.teacher_score), 0), 1)
+
+    # status 保持 submitted 不动：活动监测/仪表盘的参与人数按 status='submitted' 统计
+    updates = ["teacher_reviewed = 1", "graded_by = ?"]
+    params: list[Any] = [username]
+    if req.teacher_score is not None:
+        updates.append("teacher_score = ?")
+        params.append(final_score)
+    if req.teacher_comment is not None:
+        updates.append("teacher_comment = ?")
+        params.append(req.teacher_comment.strip()[:2000])
+    if touched or req.teacher_score is not None:
+        updates += ["score = ?", "answers = ?"]
+        params += [final_score, json.dumps(answers, ensure_ascii=False)]
+    params.append(attempt["id"])
+    execute_update(f"UPDATE practice_attempts SET {', '.join(updates)} WHERE id=?", tuple(params))
+
+    logger.info(f"教师 {username} 复核练习成绩 attempt={req.attempt_id}: "
+                f"{attempt.get('score')} → {final_score}")
+    return {
+        "message": "已保存批改",
+        "attempt_id": attempt["id"],
+        "score": final_score,
+        "total_score": attempt.get("total_score") or 0,
+        "teacher_reviewed": 1,
+        "results": answers,
+    }
 
 
 # ════════════════════════════════════════════
@@ -905,20 +1114,36 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         v = student_answers.get(str(qid), "")
         return "" if v is None else str(v)
 
-    # P5: 主观题(含 essay/subjective)一律进 AI 批改, 不再被两个列表同时漏掉
-    ai_questions = [q for q in questions if q["type"] in AI_GRADED_TYPES]
-    obj_questions = [q for q in questions if q["type"] not in AI_GRADED_TYPES]
+    # P5: 主观题一律要有人批改; S-FILL: 填空题先走「逐空精确比对」, 判不准才降级 AI
+    subj_questions = [q for q in questions if q["type"] in AI_GRADED_TYPES]
+    fill_questions = [q for q in questions if q["type"] in FILL_TYPES]
+    obj_questions = [q for q in questions
+                     if q["type"] not in AI_GRADED_TYPES and q["type"] not in FILL_TYPES]
 
     def _keyword_fallback(q: dict, student_ans: str) -> dict:
-        """无 AI / AI 失败时: 按逗号分隔关键词命中给分"""
-        correct = q["correct_answer"] or ""
-        q_score = q["score"] or 10
-        keywords = [k.strip().lower() for k in re.split(r"[,，;；、\n]+", correct) if k.strip()]
-        hit = bool(keywords) and any(kw in student_ans.lower() for kw in keywords)
-        return {
-            "student_answer": student_ans, "correct_answer": correct,
-            "score": q_score if hit else 0, "max_score": q_score, "is_correct": hit,
-        }
+        """[S-GRADING] AI 不可用 / 调用失败时的兜底判分。
+
+        旧实现是「参考答案按逗号切词 + 任一命中即给满分」, 实测题库 56 道主观题里 42 道
+        切出来的是 15~69 字的整段文本(必然命中不了) → 答对也给 0 分; 而填空答案 "2" 会被
+        学生答案 "12" 子串命中 → 答错反而给满分。现改为按要点命中比例给分, 且切不出可比对
+        要点时不猜分, 标 needs_review 交给教师批改(而不是把 0 分伪装成「已判错」)。
+        """
+        correct = str(q["correct_answer"] or "")
+        q_score = float(q["score"] or 10)
+        base = {"student_answer": student_ans, "correct_answer": correct, "max_score": q_score}
+        points = [pt for pt in _split_points(correct) if len(pt) <= MAX_POINT_LEN]
+        if not points:
+            return {**base, "score": 0, "is_correct": False, "graded_by": "none",
+                    "needs_review": True,
+                    "feedback": "参考答案为主观描述，系统无法自动判分，已标记待教师批改。"}
+        norm, nums = _norm_text(student_ans), _num_tokens(student_ans)
+        hits = sum(1 for pt in points if _point_hit(pt, norm, nums))
+        return {**base,
+                "score": _ratio_score(q_score, hits, len(points)),
+                "is_correct": hits == len(points),
+                "graded_by": "keyword",
+                "needs_review": True,
+                "feedback": f"系统按要点批改（命中 {hits}/{len(points)}），建议教师复核。"}
 
     # 客观题：归一化后精确匹配(P7: 多选 AC 与 CA 等价)
     for q in obj_questions:
@@ -932,8 +1157,19 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         graded[qid] = {
             "student_answer": student_ans, "correct_answer": correct,
             "score": q_score if is_correct else 0, "max_score": q_score,
-            "is_correct": is_correct,
+            "is_correct": is_correct, "graded_by": "exact",
         }
+
+    # 填空题：规则判分优先, 判不准的并入 AI 批改队列
+    ai_questions = list(subj_questions)
+    for q in fill_questions:
+        one = _grade_fill_by_rule(q, _ans_of(q["id"]))
+        if one is None:
+            ai_questions.append(q)
+            continue
+        graded[str(q["id"])] = one
+        earned += one["score"]
+        total += one["max_score"]
 
     # 主观题：AI 语义批改（并发）
     if ai_questions:
@@ -958,18 +1194,27 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
                             half_minus=str(q_score * 0.4),
                             student_answer=student_ans.replace('{', '{{').replace('}', '}}'),
                         )
-                        prompt = apply_skills(prompt, "practice")
+                        # S-GRADING: 评分 prompt 不再注入技能 —— 技能段实测多塞 1900 字
+                        # (含「禁止直接给出最终答案、要展示推导过程」等教学指令), 与「只输出 JSON」
+                        # 冲突, 会让返回变成散文 → extract_json 失败 → 静默降级兜底判 0 分。
+                        # 与 _build_generate_prompt 里的既有结论保持一致。
                         ai_resp = await call_ai_async(prompt, api_key)
                         result = extract_json_from_text(ai_resp)
                         if result:
                             ai_score = max(0, min(float(result.get("score", 0)), q_score))
+                            # 模型常把批语写在 comment 而不是 feedback, 两个都要收下(旧实现只取
+                            # feedback, 导致学生端「AI 评语」经常是空的)
+                            fb = str(result.get("feedback") or "").strip()
+                            cm = str(result.get("comment") or result.get("reason") or "").strip()
+                            note = ("\n".join(x for x in (cm, fb) if x))[:600]
                             return qid, {
                                 "student_answer": student_ans,
                                 "correct_answer": correct,
                                 "score": ai_score,
                                 "max_score": q_score,
                                 "is_correct": ai_score >= q_score * 0.6,
-                                "feedback": str(result.get("feedback", ""))[:500],
+                                "feedback": note,
+                                "graded_by": "ai",
                             }
                     except Exception as ai_err:
                         logger.warning(f"练习主观题批改失败(qid={qid}): {ai_err}")

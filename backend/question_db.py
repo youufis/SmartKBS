@@ -221,6 +221,19 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 字段迁移：practice_attempts 教师复核字段(S-GRADE, 对齐 exam_attempts) ──
+            # 练习此前「AI 判完即定稿」, 误判无人可纠; 这四列支撑教师端逐题改分与评语
+            for col_def in [
+                ("graded_by", "TEXT DEFAULT ''"),
+                ("teacher_reviewed", "INTEGER DEFAULT 0"),
+                ("teacher_score", "REAL DEFAULT -1"),
+                ("teacher_comment", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE practice_attempts ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+
             # ── AI 练习独立成绩表（不依赖 practice_sessions）──
             c.execute("""CREATE TABLE IF NOT EXISTS ai_practice_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
