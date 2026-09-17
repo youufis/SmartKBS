@@ -220,7 +220,6 @@ def init_question_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_pa_session ON practice_attempts(session_id)")
             except sqlite3.OperationalError:
                 pass
-
             # ── 字段迁移：practice_attempts 教师复核字段(S-GRADE, 对齐 exam_attempts) ──
             # 练习此前「AI 判完即定稿」, 误判无人可纠; 这四列支撑教师端逐题改分与评语
             for col_def in [
@@ -228,11 +227,22 @@ def init_question_db():
                 ("teacher_reviewed", "INTEGER DEFAULT 0"),
                 ("teacher_score", "REAL DEFAULT -1"),
                 ("teacher_comment", "TEXT DEFAULT ''"),
+                # S-GRADING: 主观题转入后台批量批改的标记（不占用 status, 避免影响
+                # 活动监测/仪表盘按 status='submitted' 做的参与人数统计）
+                ("ai_pending", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE practice_attempts ADD COLUMN {col_def[0]} {col_def[1]}")
                 except sqlite3.OperationalError:
                     pass  # 字段已存在
+
+            # S-GRADING: 后台批改器按 ai_pending 标记扫描, 部分索引避免全表扫
+            # (建在上面的字段迁移之后, 保证「刚加完列的那一次启动」就能建上)
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_pa_ai_pending "
+                          "ON practice_attempts(submitted_at) WHERE ai_pending=1")
+            except sqlite3.OperationalError:
+                pass
 
             # ── AI 练习独立成绩表（不依赖 practice_sessions）──
             c.execute("""CREATE TABLE IF NOT EXISTS ai_practice_results (

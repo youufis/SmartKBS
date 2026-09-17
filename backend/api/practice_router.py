@@ -25,6 +25,9 @@ from backend.logger import logger
 # S-GRADING: 评分/出题 prompt 一律不注入技能(与 _build_generate_prompt 内注释同结论), 故不再 import apply_skills
 from backend.prompts import build_ai_role
 from backend.async_utils import spawn_bg as _spawn_bg
+# S-GRADING: 主观题后台批量批改引擎
+from backend.ai_grading import GradingJob, SourceAdapter, register_source
+from backend.question_db import get_connection
 
 router = APIRouter()
 
@@ -765,6 +768,7 @@ async def get_session_detail(session_id: int, request: Request):
         a["pending_review"] = sum(
             1 for v in graded.values() if isinstance(v, dict) and v.get("needs_review")
         )
+        a["pending_ai"] = len(_pending_keys(graded))
 
     att_map = {a["student_username"]: a for a in attempts}
     students = [{
@@ -787,6 +791,9 @@ async def get_session_detail(session_id: int, request: Request):
         "questions": questions,
         "attempts": attempts,
         "students": students,
+        # S-GRADING: 整场练习还有多少题在后台批改 / 待人工批改
+        "pending_ai_total": sum(a.get("pending_ai") or 0 for a in attempts),
+        "pending_review_total": sum(a.get("pending_review") or 0 for a in attempts),
     }
 
 
@@ -841,6 +848,42 @@ async def end_session(session_id: int, request: Request):
     return {"message": "已结束"}
 
 
+@router.post("/sessions/{session_id}/grade-now")
+async def grade_practice_now(session_id: int, request: Request):
+    """[教师] 立刻批改该练习的主观题，不等后台轮次(S-GRADING)
+
+    走 ai_task_manager，前端用 pollAiTask 看进度；dedupe_key 保证连点/刷新不会重复评。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可发起批改")
+    sess = execute_query_one("SELECT * FROM practice_sessions WHERE id=?", (session_id,))
+    if not sess:
+        raise HTTPException(status_code=404, detail="练习不存在")
+    if role != 0 and sess["creator_username"] != username:
+        raise HTTPException(status_code=403, detail="只能批改自己布置的练习")
+
+    pend = execute_query(
+        "SELECT COUNT(*) c FROM practice_attempts WHERE session_id=? AND ai_pending=1",
+        (session_id,),
+    )
+    if not pend or not pend[0]["c"]:
+        return {"task_id": "", "message": "没有待批改的主观题", "pending_sessions": 0}
+
+    from backend.ai_grading import drain_async
+    from backend.ai_task_manager import task_manager
+
+    task_id = await task_manager.create_task(
+        description=f"同步练习 #{session_id} 主观题批改",
+        coro_factory=lambda: drain_async(only_source="practice", only_activity=str(session_id)),
+        owner_username=username,
+        dedupe_key=f"practice-grade:{session_id}",
+    )
+    return {"task_id": task_id, "message": "批改已开始", "pending_sessions": pend[0]["c"]}
+
+
 @router.post("/review")
 async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
     """[教师] 复核练习批改结果：逐题改分/补评语，或直接改总分(S-GRADE)
@@ -891,6 +934,7 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
         one["is_correct"] = one["score"] >= mx * 0.6
         one["teacher_adjusted"] = True
         one["graded_by"] = "teacher"
+        one["grading"] = "graded"          # 教师已定分, 不再进后台批改队列
         one.pop("needs_review", None)
         touched = True
 
@@ -911,9 +955,12 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
     if req.teacher_score is not None:
         final_score = round(max(float(req.teacher_score), 0), 1)
 
+    # S-GRADING: 本次复核前该答卷是否还有题在后台队列里(决定要不要补结算)
+    was_pending = bool(attempt.get("ai_pending"))
+
     # status 保持 submitted 不动：活动监测/仪表盘的参与人数按 status='submitted' 统计
-    updates = ["teacher_reviewed = 1", "graded_by = ?"]
-    params: list[Any] = [username]
+    updates = ["teacher_reviewed = 1", "graded_by = ?", "ai_pending = ?"]
+    params: list[Any] = [username, 1 if _pending_keys(answers) else 0]
     if req.teacher_score is not None:
         updates.append("teacher_score = ?")
         params.append(final_score)
@@ -925,6 +972,16 @@ async def review_practice_attempt(req: PracticeReviewRequest, request: Request):
         params += [final_score, json.dumps(answers, ensure_ascii=False)]
     params.append(attempt["id"])
     execute_update(f"UPDATE practice_attempts SET {', '.join(updates)} WHERE id=?", tuple(params))
+
+    # 教师把最后一题定分时, 补做积分与错题本结算(与后台批改器同一入口)。
+    # 只在「原本挂在后台待批改」时补一次; 平时改分不再重复结算, 免得错题次数与积分重复累加。
+    if was_pending and not _pending_keys(answers):
+        try:
+            again = execute_query_one("SELECT * FROM practice_attempts WHERE id=?", (attempt["id"],))
+            if again:
+                _settle_practice_attempt(again)
+        except Exception as settle_err:
+            logger.warning(f"练习结算失败 attempt={req.attempt_id}: {settle_err}")
 
     logger.info(f"教师 {username} 复核练习成绩 attempt={req.attempt_id}: "
                 f"{attempt.get('score')} → {final_score}")
@@ -1012,14 +1069,16 @@ def _existing_attempt_payload(existing: dict) -> dict:
     if not isinstance(graded, dict):
         graded = {}
     tot = max(existing.get("total_score") or 0, 1)
+    pending = _pending_keys(graded)
     return {
         "score": existing.get("score") or 0,
         "total_score": existing.get("total_score") or 0,
         "accuracy": round((existing.get("score") or 0) / tot * 100, 1),
         "results": graded,
         "submitted_at": existing.get("submitted_at"),
+        "pending_ai": len(pending),
         "note": "你已提交过此练习，以下是已有成绩",
-        "reward_note": "积分奖励已发放",
+        "reward_note": ("主观题批改中，成绩与积分稍后更新" if pending else "积分奖励已发放"),
     }
 
 
@@ -1171,67 +1230,28 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         earned += one["score"]
         total += one["max_score"]
 
-    # 主观题：AI 语义批改（并发）
+    # 主观题：S-GRADING —— 不在提交请求里等 AI，改由后台批改器按题合并批量评分
+    pending_ai = 0
     if ai_questions:
         api_key, _ = get_api_keys(username)
-        if api_key:
-            sem = asyncio.Semaphore(3)
-
-            async def _grade_ai(q):
+        if (api_key or "").strip():
+            for q in ai_questions:
                 qid = str(q["id"])
-                student_ans = _ans_of(q["id"])
-                correct = q["correct_answer"] or ""
-                q_score = q["score"] or 10
-                async with sem:
-                    try:
-                        from backend.prompts.teaching import SHORT_ANSWER_GRADING_PROMPT
-                        prompt = SHORT_ANSWER_GRADING_PROMPT.format(
-                            question_text=str(q.get("question_text", "")).replace('{', '{{').replace('}', '}}'),
-                            correct_answer=correct.replace('{', '{{').replace('}', '}}'),
-                            max_score=str(q_score),
-                            half_score=str(q_score * 0.5),
-                            near_full=str(q_score * 0.8),
-                            half_minus=str(q_score * 0.4),
-                            student_answer=student_ans.replace('{', '{{').replace('}', '}}'),
-                        )
-                        # S-GRADING: 评分 prompt 不再注入技能 —— 技能段实测多塞 1900 字
-                        # (含「禁止直接给出最终答案、要展示推导过程」等教学指令), 与「只输出 JSON」
-                        # 冲突, 会让返回变成散文 → extract_json 失败 → 静默降级兜底判 0 分。
-                        # 与 _build_generate_prompt 里的既有结论保持一致。
-                        ai_resp = await call_ai_async(prompt, api_key)
-                        result = extract_json_from_text(ai_resp)
-                        if result:
-                            ai_score = max(0, min(float(result.get("score", 0)), q_score))
-                            # 模型常把批语写在 comment 而不是 feedback, 两个都要收下(旧实现只取
-                            # feedback, 导致学生端「AI 评语」经常是空的)
-                            fb = str(result.get("feedback") or "").strip()
-                            cm = str(result.get("comment") or result.get("reason") or "").strip()
-                            note = ("\n".join(x for x in (cm, fb) if x))[:600]
-                            return qid, {
-                                "student_answer": student_ans,
-                                "correct_answer": correct,
-                                "score": ai_score,
-                                "max_score": q_score,
-                                "is_correct": ai_score >= q_score * 0.6,
-                                "feedback": note,
-                                "graded_by": "ai",
-                            }
-                    except Exception as ai_err:
-                        logger.warning(f"练习主观题批改失败(qid={qid}): {ai_err}")
-                return qid, _keyword_fallback(q, student_ans)
-
-            results = await asyncio.gather(
-                *[_grade_ai(q) for q in ai_questions], return_exceptions=True
-            )
-            for q, res in zip(ai_questions, results):
-                if isinstance(res, Exception):
-                    logger.warning(f"练习主观题批改异常(qid={q['id']}): {res}")
-                    res = (str(q["id"]), _keyword_fallback(q, _ans_of(q["id"])))
-                qid, one = res
-                graded[qid] = one
-                earned += one["score"]
-                total += one["max_score"]
+                q_max = float(q["score"] or 10)
+                graded[qid] = {
+                    "student_answer": _ans_of(q["id"]),
+                    "correct_answer": q["correct_answer"] or "",
+                    "score": 0,
+                    "max_score": q_max,
+                    "is_correct": False,
+                    "grading": "pending",       # 待后台批改
+                    "graded_by": "queued",
+                    "feedback": "",
+                }
+                total += q_max                  # 满分照常计入, 得分率才有意义
+            pending_ai = len(ai_questions)
         else:
+            # 没配 AI Key: 当场按要点兜底并标「待教师批改」, 不占用后台队列
             for q in ai_questions:
                 qid = str(q["id"])
                 one = _keyword_fallback(q, _ans_of(q["id"]))
@@ -1243,9 +1263,11 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         execute_insert(
-            """INSERT INTO practice_attempts (session_id, student_username, answers, score, total_score, status, submitted_at)
-               VALUES (?,?,?,?,?,'submitted',?)""",
-            (session_id, username, json.dumps(graded, ensure_ascii=False), earned, total, now),
+            """INSERT INTO practice_attempts (session_id, student_username, answers, score, total_score,
+                       status, submitted_at, ai_pending)
+               VALUES (?,?,?,?,?,'submitted',?,?)""",
+            (session_id, username, json.dumps(graded, ensure_ascii=False), earned, total, now,
+             1 if pending_ai else 0),
         )
     except sqlite3.IntegrityError:
         # P6: 并发重复提交撞上唯一约束 → 返回既有成绩, 不再 500 丢学生答案
@@ -1258,41 +1280,33 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
             return _existing_attempt_payload(again)
         raise
 
-    # ── 错题本联动: 答对的标掌握, 答错的入库(W7: 练习错题从此不再漏记) ──
-    try:
-        from backend.api.wrong_book_router import (
-            mark_wrong_mastered,
-            record_wrong_answers,
-            check_and_auto_generate_wrong_practice,
-        )
-        correct_graded = {k: v for k, v in graded.items() if isinstance(v, dict) and v.get("is_correct", False)}
-        if correct_graded:
-            mark_wrong_mastered(username, correct_graded)
-        wrong_graded = {k: v for k, v in graded.items() if isinstance(v, dict) and not v.get("is_correct", False)}
-        if wrong_graded:
-            record_wrong_answers(username, session_id, wrong_graded, source="practice")
-        # P8: 错题巩固练习重建要解析该生全部考试记录, 放后台执行
-        _spawn_bg(check_and_auto_generate_wrong_practice, username)
-    except Exception as wb_err:
-        logger.warning(f"标记错题掌握状态失败 (user={username}, session={session_id}): {wb_err}")
-        logger.warning(traceback.format_exc())
+    # ── 结算：参与分与成绩无关, 当场发; 错题本与等级积分等判分完整再结算 ──
+    if not pending_ai:
+        # W7: 练习错题不再漏记（含主观题的答卷由后台批改器调用同一套结算）
+        try:
+            _settle_practice_attempt({
+                "session_id": session_id, "student_username": username,
+                "answers": json.dumps(graded, ensure_ascii=False),
+                "score": earned, "total_score": total,
+            })
+        except Exception as wb_err:
+            logger.warning(f"练习结算失败 (user={username}, session={session_id}): {wb_err}")
+            logger.warning(traceback.format_exc())
 
-    # ── 积分奖励 ──
     try:
-        from backend.reward_engine import award_participation, award_grade
+        from backend.reward_engine import award_participation
         sess_title = sess.get("title", "") or f"练习#{session_id}"
         award_participation(username, "practice", str(session_id), sess_title)
-        award_grade(username, "practice", str(session_id), earned, total, sess_title)
     except Exception as rw_err:
-        logger.warning(f"练习积分发放失败 (user={username}, session_id={session_id}): {rw_err}")
-        logger.warning(traceback.format_exc())
+        logger.warning(f"练习参与积分发放失败 (user={username}, session_id={session_id}): {rw_err}")
 
     logger.info(f"学生 {username} 提交练习 {session_id}: {earned}/{total}")
     return {
         "score": earned, "total_score": total,
         "accuracy": round(earned / max(total, 1) * 100, 1),
         "results": graded,
-        "reward_note": "积分奖励已发放",
+        "pending_ai": pending_ai,          # >0 表示还有主观题在后台批改
+        "reward_note": ("主观题批改中，成绩与积分稍后更新" if pending_ai else "积分奖励已发放"),
     }
 
 
@@ -1361,6 +1375,9 @@ async def _get_practice_result(session_id: int, username: str) -> dict[str, Any]
             "total_score": attempt["total_score"],
             "accuracy": round((attempt["score"] or 0) / max(attempt["total_score"] or 0, 1) * 100, 1),
             "submitted_at": attempt["submitted_at"],
+            # S-GRADING: 还有几题在后台批改(前端据此显示「AI 批改中」并自动刷新)
+            "pending_ai": len(_pending_keys(answers_data)),
+            "teacher_reviewed": attempt.get("teacher_reviewed") or 0,
         },
         "results": results,
     }
@@ -1398,3 +1415,200 @@ def _parse_ai_result(text: str) -> list[dict[str, Any]]:
         head = (text or "")[:400].replace("\n", "⏎")
         logger.warning(f"[同步练习] AI 出题解析失败, 原始返回({len(text or '')}字符)头部: {head}")
     return valid
+
+
+# ════════════════════════════════════════════════════════════
+# S-GRADING: 主观题「后台批量批改」适配（引擎见 backend/ai_grading.py）
+#   提交时: 客观题当场判, 主观题写 grading='pending' + ai_pending=1
+#   引擎按题合并多份答案一次 AI 调用, 判完写回并补做积分/错题本结算
+# ════════════════════════════════════════════════════════════
+
+def _pending_keys(graded: dict[str, Any]) -> list[str]:
+    """仍待后台批改的题号"""
+    return [k for k, v in (graded or {}).items()
+            if isinstance(v, dict) and v.get("grading") == "pending"]
+
+
+def _settle_practice_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
+    """一份练习答卷判分完毕后的结算：等级积分 + 错题本（幂等，可重复调用）
+
+    有主观题待批改时不在提交请求里结算，否则会出现"按 0 分进错题本、少发一档积分，
+    几十秒后又变了"的脏账。参与分(award_participation)与成绩无关，仍在提交当场发。
+    """
+    sid = attempt["session_id"]
+    username = attempt["student_username"]
+    try:
+        graded = json.loads(attempt.get("answers") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        graded = {}
+    if not isinstance(graded, dict):
+        graded = {}
+    earned = float(attempt.get("score") or 0)
+    total = float(attempt.get("total_score") or 0)
+    sess = execute_query_one("SELECT title FROM practice_sessions WHERE id=?", (sid,))
+    title = (sess or {}).get("title") or f"练习#{sid}"
+
+    try:
+        from backend.api.wrong_book_router import (
+            mark_wrong_mastered, record_wrong_answers, check_and_auto_generate_wrong_practice,
+        )
+        correct = {k: v for k, v in graded.items() if isinstance(v, dict) and v.get("is_correct")}
+        wrong = {k: v for k, v in graded.items() if isinstance(v, dict) and not v.get("is_correct")}
+        if correct:
+            mark_wrong_mastered(username, correct)
+        if wrong:
+            record_wrong_answers(username, sid, wrong, source="practice")
+        _spawn_bg(check_and_auto_generate_wrong_practice, username)
+    except Exception as wb_err:
+        logger.warning(f"练习错题本结算失败 (user={username}, session={sid}): {wb_err}")
+
+    try:
+        from backend.reward_engine import award_grade
+        award_grade(username, "practice", str(sid), earned, total, title)
+    except Exception as rw_err:
+        logger.warning(f"练习等级积分结算失败 (user={username}, session={sid}): {rw_err}")
+    return {"settled": True, "score": earned, "total": total}
+
+
+def _practice_fetch_jobs(limit: int) -> list[GradingJob]:
+    """取待批改的主观题作业（含题面/参考答案/满分，供批量评分拼 prompt）"""
+    rows = execute_query(
+        """SELECT id, session_id, student_username, answers
+           FROM practice_attempts WHERE ai_pending=1 ORDER BY submitted_at LIMIT ?""",
+        (limit,),
+    )
+    jobs: list[GradingJob] = []
+    qcache: dict[int, dict[str, dict[str, Any]]] = {}
+    for r in rows or []:
+        aid, sid, stu, raw = r["id"], r["session_id"], r["student_username"], r["answers"]
+        try:
+            graded = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except (json.JSONDecodeError, TypeError):
+            graded = {}
+        if not isinstance(graded, dict):
+            graded = {}
+        pend = _pending_keys(graded)
+        if not pend:
+            execute_update("UPDATE practice_attempts SET ai_pending=0 WHERE id=?", (aid,))
+            continue
+        if sid not in qcache:
+            qcache[sid] = {
+                str(q["id"]): q for q in execute_query(
+                    """SELECT qb.id, qb.type, qb.question_text, qb.correct_answer, psq.score
+                       FROM practice_session_questions psq
+                       JOIN question_bank qb ON qb.id = psq.question_id
+                       WHERE psq.session_id=?""",
+                    (sid,),
+                )
+            }
+        for key in pend:
+            q = qcache[sid].get(str(key))
+            if not q:      # 题目已被删, 直接转人工, 别在队列里空转
+                _force_review_keys(aid, [key], "题目已从练习中移除，无法自动批改。")
+                continue
+            jobs.append(GradingJob(
+                source="practice", attempt_id=aid, entry_key=str(key), student_username=stu,
+                activity_id=str(sid),
+                question_text=str(q.get("question_text") or ""),
+                ref_answer=str(q.get("correct_answer") or ""),
+                max_score=float(q.get("score") or 10),
+                answer_text=str((graded.get(key) or {}).get("student_answer") or ""),
+                mode="essay" if q.get("type") in ("essay", "subjective") else "short",
+            ))
+        if len(jobs) >= limit:
+            break
+    return jobs
+
+
+def _force_review_keys(attempt_id: int, keys: list[str], reason: str) -> None:
+    """判不了的题直接标记待教师批改（并清掉 pending，避免队列死循环）"""
+    with get_connection() as conn:
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT answers FROM practice_attempts WHERE id=?", (attempt_id,)).fetchone()
+        if not row:
+            conn.execute("COMMIT")
+            return
+        try:
+            graded = json.loads(row["answers"]) if isinstance(row["answers"], str) else (row["answers"] or {})
+        except (json.JSONDecodeError, TypeError):
+            graded = {}
+        if not isinstance(graded, dict):
+            graded = {}
+        for k in keys:
+            one = graded.get(k)
+            if isinstance(one, dict):
+                one["grading"] = "review"
+                one["needs_review"] = True
+                one["graded_by"] = "none"
+                one["feedback"] = reason
+        still = _pending_keys(graded)
+        conn.execute("UPDATE practice_attempts SET answers=?, ai_pending=? WHERE id=?",
+                     (json.dumps(graded, ensure_ascii=False), 1 if still else 0, attempt_id))
+        conn.execute("COMMIT")
+
+
+def _practice_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str, Any]]]) -> None:
+    """读-改-写一份答卷（BEGIN IMMEDIATE 与教师复核互斥；题态已变的条目不覆盖）"""
+    with get_connection() as conn:
+        conn.isolation_level = None
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT answers, total_score FROM practice_attempts WHERE id=?", (attempt_id,)
+        ).fetchone()
+        if not row:
+            conn.execute("COMMIT")
+            return
+        try:
+            graded = json.loads(row["answers"]) if isinstance(row["answers"], str) else (row["answers"] or {})
+        except (json.JSONDecodeError, TypeError):
+            graded = {}
+        if not isinstance(graded, dict):
+            graded = {}
+        for job, res in items:
+            one = graded.get(job.entry_key)
+            if not isinstance(one, dict) or one.get("grading") != "pending":
+                continue            # 教师已改/已被别的轮次写回 → 不覆盖
+            review = bool(res.get("needs_review"))
+            one["grading"] = "review" if review else "graded"
+            one["score"] = float(res.get("score") or 0)
+            one["max_score"] = job.max_score
+            one["is_correct"] = bool(res.get("is_correct"))
+            one["graded_by"] = str(res.get("graded_by") or "ai")
+            note = str(res.get("feedback") or res.get("comment") or "")[:600]
+            if note:
+                one["feedback"] = note
+            if res.get("comment"):
+                one["comment"] = str(res["comment"])[:600]
+            for extra in ("dimensions", "overall_comment", "improvement_suggestions",
+                          "key_points_hit", "key_points_missed"):
+                if res.get(extra):
+                    one[extra] = res[extra]
+            if review:
+                one["needs_review"] = True
+            else:
+                one.pop("needs_review", None)
+        earned = round(sum(float(v.get("score") or 0) for v in graded.values() if isinstance(v, dict)), 1)
+        still = _pending_keys(graded)
+        conn.execute(
+            "UPDATE practice_attempts SET answers=?, score=?, ai_pending=? WHERE id=?",
+            (json.dumps(graded, ensure_ascii=False), earned, 1 if still else 0, attempt_id),
+        )
+        conn.execute("COMMIT")
+
+
+def _practice_finalize_if_done(attempt_id: int) -> None:
+    """该份答卷全部判完 → 补做积分与错题本结算"""
+    attempt = execute_query_one("SELECT * FROM practice_attempts WHERE id=?", (attempt_id,))
+    if not attempt or attempt.get("ai_pending"):
+        return
+    _settle_practice_attempt(attempt)
+
+
+register_source(SourceAdapter(
+    source="practice",
+    label="同步练习",
+    fetch_jobs=_practice_fetch_jobs,
+    save_batch=_practice_save_batch,
+    finalize_if_done=_practice_finalize_if_done,
+))

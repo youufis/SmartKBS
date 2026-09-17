@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
@@ -8,6 +8,7 @@ import {
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
   FormOutlined, FileTextOutlined, StopOutlined, DeleteOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -29,7 +30,7 @@ const { TextArea } = Input
 /** S-GRADE: 每题判分来源, 让学生和教师一眼看出这个分数是谁给的 */
 const GRADED_BY_KEYS: Record<string, string> = {
   ai: "gradedByAi", keyword: "gradedByKeyword", exact: "gradedByExact",
-  none: "gradedByNone", teacher: "gradedByTeacher",
+  none: "gradedByNone", teacher: "gradedByTeacher", queued: "gradedByQueued",
 }
 const gradedByKey = (v: unknown) => GRADED_BY_KEYS[String(v ?? "")] || "gradedByUnknown"
 
@@ -42,6 +43,8 @@ const scoreRatio = (r: any) => {
 const scoreColor = (ratio: number) => (ratio >= 0.999 ? "green" : ratio > 0 ? "orange" : "red")
 /** 主观题题型(后端 AI_GRADED_TYPES + 填空题) */
 const SUBJ_TYPES = ["short", "fill", "essay", "subjective"]
+/** S-GRADING: 主观题已转后台批改队列 —— 分数未定, 先不显示得分与对错 */
+const isGradingPending = (r: any) => r?.grading === "pending" || r?.graded_by === "queued"
 
 // ════════════════════════════════════════
 // 练习提交名册 — 已交/未交 + 班级 + 按学生查询
@@ -88,6 +91,8 @@ const SessionRoster: React.FC<{
   }, [students, attempts, kw, filter])
 
   const pendingCount = (attempts || []).reduce((n: number, a: any) => n + (a.pending_review || 0), 0)
+  // S-GRADING: 还在后台批改的题数, 教师据此决定要不要「立即批改」
+  const aiPending = (attempts || []).reduce((n: number, a: any) => n + (a.pending_ai || 0), 0)
   const reviewedCount = (attempts || []).filter((a: any) => a.teacher_reviewed).length
 
   return (
@@ -102,6 +107,7 @@ const SessionRoster: React.FC<{
         </Radio.Group>
         <Text type="secondary">{t('totalItems', { count: rows.length })}</Text>
         {reviewedCount > 0 && <Tag color="green">{t('reviewedStudents', { count: reviewedCount })}</Tag>}
+        {aiPending > 0 && <Tag color="processing">{t('pendingAiN', { count: aiPending })}</Tag>}
         {pendingCount > 0 && <Tag color="orange">{t('pendingReviewTotal', { count: pendingCount })}</Tag>}
       </Space>
       <Table size="small" rowKey="username" dataSource={rows}
@@ -131,6 +137,7 @@ const SessionRoster: React.FC<{
               const a = attMap.get(r.username)
               if (!a) return '-'
               if (a.teacher_reviewed) return <Tag color="green">{t('gradedByTeacher')}</Tag>
+              if (a.pending_ai) return <Tag color="processing">{t('pendingAiN', { count: a.pending_ai })}</Tag>
               if (a.pending_review) return <Tag color="orange">{t('pendingReviewN', { count: a.pending_review })}</Tag>
               return <Tag>{t('gradedByAi')}</Tag>
             },
@@ -164,6 +171,8 @@ const StudentView: React.FC = () => {
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [submittedView, setSubmittedView] = useState<any>(null)
+  // S-GRADING: 自动刷新次数上限, 避免后台一直判不完时前端无限轮询
+  const refreshTries = useRef(0)
   const [stuPage, setStuPage] = useState(1)
   const [stuPageSize, setStuPageSize] = useState(10)
 
@@ -208,10 +217,27 @@ const StudentView: React.FC = () => {
         { timeout: 120000 },
       )
       setResult(data)
+      // S-GRADING: 主观题不再卡在提交里, 明确告知成绩稍后自动更新
+      if (Number(data?.pending_ai || 0) > 0) message.info(t('gradingQueuedToast', { count: data.pending_ai }))
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('submitFailed'))
     } finally { setSubmitting(false) }
   }
+
+  // S-GRADING: 仍有题在后台批改 → 8 秒后静默重取一次, 判完自动显示真实得分
+  useEffect(() => {
+    const sid = submittedView?.session?.id
+    const left = Number(submittedView?.attempt?.pending_ai || 0)
+    if (!sid || left <= 0) { refreshTries.current = 0; return }
+    if (refreshTries.current >= 12) return          // 最多再刷 12 次(约 96 秒)
+    const timer = setTimeout(() => {
+      refreshTries.current += 1
+      apiClient.get(`/api/practice/my-sessions/${sid}`)
+        .then(({ data }) => { if (data?.attempt) setSubmittedView(data) })
+        .catch(() => { /* 本轮没判完, 下次进入页面再看 */ })
+    }, 8000)
+    return () => clearTimeout(timer)
+  }, [submittedView])
 
   const allAnswered = questions.length > 0 && questions.every(q => answers[String(q.id)]?.trim())
 
@@ -227,6 +253,16 @@ const StudentView: React.FC = () => {
           <div style={{ marginTop: 8 }}>
             <Text>{t('scoreLabel', { score: submittedView.attempt?.score, total: submittedView.attempt?.total_score })}</Text>
           </div>
+          {Number(submittedView.attempt?.pending_ai || 0) > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <Space size={6} wrap>
+                <Tag color="processing">{t('gradingPending')}</Tag>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {t('pendingAiHint', { count: submittedView.attempt.pending_ai })}
+                </Text>
+              </Space>
+            </div>
+          )}
         </Card>
         {submittedView.results?.map((r: any, i: number) => (
           <Card key={i} size="small" style={{ marginBottom: 8 }}
@@ -234,8 +270,12 @@ const StudentView: React.FC = () => {
             extra={
               <Space size={4} wrap>
                 {/* S-GRADE: 每题得分必须显示 —— 以前只给「正确/错误」, 简答题被扣几分学生看不到 */}
-                <Tag color={scoreColor(scoreRatio(r))}>{t('questionScore')} {Number(r.score ?? 0)}/{Number(r.max_score ?? 0)}</Tag>
-                {r.needs_review
+                {!isGradingPending(r) && (
+                  <Tag color={scoreColor(scoreRatio(r))}>{t('questionScore')} {Number(r.score ?? 0)}/{Number(r.max_score ?? 0)}</Tag>
+                )}
+                {isGradingPending(r)
+                  ? <Tag color="processing">{t('gradingPending')}</Tag>
+                  : r.needs_review
                   ? <Tag color="orange">{t('pendingReview')}</Tag>
                   : (r.is_correct ? <Tag color="success">{t('correct')}</Tag> : <Tag color="error">{t('incorrect')}</Tag>)}
                 <Tag>{t(gradedByKey(r.graded_by))}</Tag>
@@ -245,7 +285,7 @@ const StudentView: React.FC = () => {
             <FormulaRenderer content={r.question_text} />
             <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={(r as any).media_files} />
             <div style={{ marginTop: 8 }}>
-              <Text>{t('yourAnswer')}：<Text type={r.is_correct ? 'success' : 'danger'}>{r.student_answer || t('noHistory')}</Text></Text>
+              <Text>{t('yourAnswer')}：<Text type={isGradingPending(r) ? undefined : (r.is_correct ? 'success' : 'danger')}>{r.student_answer || t('noHistory')}</Text></Text>
               {/* 参考答案常显: 主观题即使判对也值得对照, 不再只在判错时才给看 */}
               <div><Text type="secondary">{t('correctAnswer')}：{r.correct_answer || '-'}</Text></div>
               {!!r.feedback && (
@@ -338,6 +378,11 @@ const StudentView: React.FC = () => {
               format={p => `${p}%`}
               strokeColor={result.accuracy >= 80 ? '#52c41a' : result.accuracy >= 60 ? '#faad14' : '#ff4d4f'} />
             <div style={{ marginTop: 8 }}><Text>{t('score')}：{result.score}/{result.total_score}</Text></div>
+            {Number(result.pending_ai || 0) > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('pendingAiHint', { count: result.pending_ai })}</Text>
+              </div>
+            )}
             <Space style={{ marginTop: 12 }}>
               <Button type="primary" icon={<CheckCircleOutlined />}
                 onClick={() => startPractice(activeSession.id)}>{t('detail')}</Button>
@@ -419,6 +464,8 @@ const TeacherView: React.FC = () => {
   const [sheetAttempt, setSheetAttempt] = useState<any>(null)
   const [draft, setDraft] = useState<Record<string, { score: number; comment: string }>>({})
   const [savingReview, setSavingReview] = useState(false)
+  // S-GRADING: 手动触发该练习的主观题批改(不等后台节拍)
+  const [gradingNow, setGradingNow] = useState(false)
 
   useEffect(() => {
     // 加载学科列表
@@ -497,6 +544,29 @@ const TeacherView: React.FC = () => {
       setDetail(data)
     } catch { message.error(t('loadDetailFailed')) }
     finally { setDetailLoading(false) }
+  }
+
+  /** S-GRADING: 立刻批改该练习待判的主观题，进度走 AI 任务轮询 */
+  const gradeNow = async () => {
+    if (!detailSid) return
+    setGradingNow(true)
+    try {
+      const { data } = await apiClient.post(`/api/practice/sessions/${detailSid}/grade-now`)
+      if (!data?.task_id) { message.info(data?.message || t('noPendingToGrade')); await viewSessionDetail(detailSid); return }
+      message.info(t('gradingStarted', { count: data.pending_sessions || 0 }))
+      const res = await pollAiTask(data.task_id, 240000)
+      if (res?.error) message.error(res.error)
+      else if (res) {
+        message.success(t('gradingDone', { graded: res.graded ?? 0, review: res.to_review ?? 0 }))
+        await viewSessionDetail(detailSid)
+        loadSessions()
+      } else {
+        message.warning(t('gradingTimeoutRefresh'))
+        await viewSessionDetail(detailSid)
+      }
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || t('gradingFailed'))
+    } finally { setGradingNow(false) }
   }
 
   /** 打开某个学生的答卷：草稿初值取当前逐题得分与已有教师评语 */
@@ -674,6 +744,11 @@ const TeacherView: React.FC = () => {
         width={900}
         open={detailOpen}
         onClose={() => { setDetailOpen(false); setSheetAttempt(null) }}
+        extra={Number(detail?.pending_ai_total || 0) > 0 && !detailLoading ? (
+          <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />} loading={gradingNow} onClick={gradeNow}>
+            {t('gradeNow')}
+          </Button>
+        ) : null}
       >
         {detailLoading && <Spin style={{ display: 'block', margin: '60px auto' }} />}
         {!detailLoading && detail && (
@@ -743,7 +818,9 @@ const TeacherView: React.FC = () => {
                       <Space size={4} wrap>
                         <Tag>{TYPE_LABELS_LOCAL[q.type] || q.type}</Tag>
                         <Tag color="blue">{t('fullScore')} {mx}</Tag>
-                        {!!g.needs_review && <Tag color="orange">{t('pendingReview')}</Tag>}
+                        {isGradingPending(g)
+                          ? <Tag color="processing">{t('gradingPending')}</Tag>
+                          : (!!g.needs_review && <Tag color="orange">{t('pendingReview')}</Tag>)}
                         <Tag>{t(gradedByKey(g.graded_by))}</Tag>
                       </Space>
                     }

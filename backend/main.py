@@ -102,6 +102,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] 日志保留任务启动失败: {e}", file=sys.stderr)
     try:
+        # S-GRADING: 主观题后台批量批改引擎(练习/考试/测验共用一个守护线程)
+        from backend.ai_grading import start as start_ai_grading
+        start_ai_grading()
+    except Exception as e:
+        print(f"[main] 主观题后台批改任务启动失败: {e}", file=sys.stderr)
+    try:
         from backend.config_sync import try_sync_remote_config
         import asyncio
         asyncio.ensure_future(try_sync_remote_config())
