@@ -41,6 +41,7 @@ from backend.companion_push import (
     get_unread_push_count,
     get_push_list,
     delete_push,
+    batch_delete_push,
     push_morning_greeting,
 )
 from backend.logger import logger
@@ -390,6 +391,21 @@ async def delete_push_message(push_id: int, request: Request):
 
     delete_push(push_id, username)
     return {"success": True}
+
+
+@router.post("/companion/push/batch-delete", summary="批量删除推送消息")
+async def batch_delete_pushes(request: Request):
+    """批量删除当前用户的学伴推送消息"""
+    body = await request.json()
+    raw_ids = body.get("ids", []) if isinstance(body, dict) else []
+    push_ids = [int(x) for x in raw_ids if str(x).lstrip("-").isdigit()]
+    user = get_current_user(request)
+    username = user["username"]
+    if not push_ids:
+        return {"success": True, "deleted": 0}
+    batch_delete_push(push_ids, username)
+    logger.info(f"批量删除推送: user={username}, count={len(push_ids)}")
+    return {"success": True, "deleted": len(push_ids)}
 
 
 @router.post("/companion/push/check-morning", summary="检查并发送早安推送")

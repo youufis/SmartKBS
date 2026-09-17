@@ -816,5 +816,10 @@
   "anExtraTeacher": "Teacher announcements go to students in your classes; admins always see them",
   "anExtraAdmin": "Admin announcements go to everyone by default",
   "anGradeRange": "Grade / class scope",
-  "anEveryone": "Everyone"
+  "anEveryone": "Everyone",
+  "batchDeleteSuccess": "Successfully deleted {{count}} messages",
+  "confirmBatchDelete": "Are you sure you want to delete {{count}} selected items? This cannot be undone.",
+  "deleteSelected": "Delete({{count}})",
+  "clearSelection": "Clear selection",
+  "selectAllCurrentPage": "Select all on this page"
 }

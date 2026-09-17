@@ -816,5 +816,10 @@
   "anExtraTeacher": "教师公告默认发送给所教班级学生，管理员始终可见",
   "anExtraAdmin": "管理员公告默认发送给所有人",
   "anGradeRange": "年级/班级范围",
-  "anEveryone": "所有人"
+  "anEveryone": "所有人",
+  "batchDeleteSuccess": "成功删除 {{count}} 条消息",
+  "confirmBatchDelete": "确定要删除选中的 {{count}} 条消息吗？此操作不可撤销。",
+  "deleteSelected": "删除({{count}})",
+  "clearSelection": "取消选择",
+  "selectAllCurrentPage": "全选当前页"
 }

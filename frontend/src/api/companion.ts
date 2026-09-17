@@ -120,6 +120,12 @@ export async function deletePush(pushId: number): Promise<{ success: boolean }> 
   return data;
 }
 
+
+/** 批量删除推送消息 */
+export async function batchDeletePushes(ids: number[]): Promise<{ success: boolean; deleted: number }> {
+  const { data } = await apiClient.post('/api/companion/push/batch-delete', { ids });
+  return data;
+}
 /**
  * 学伴 SSE 流式对话
  */

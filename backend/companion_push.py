@@ -122,6 +122,17 @@ def delete_push(push_id: int, student_username: str) -> bool:
     )
     return True
 
+def batch_delete_push(push_ids: list[int], student_username: str) -> bool:
+    """批量删除推送消息"""
+    if not push_ids:
+        return False
+    placeholders = ",".join("?" for _ in push_ids)
+    execute_insert_update(
+        f"DELETE FROM ai_companion_push_log WHERE id IN ({placeholders}) AND student_username=?",
+        tuple(push_ids) + (student_username,),
+    )
+    return True
+
 
 # ═══════════════════════════════════════════════
 # 推送触发

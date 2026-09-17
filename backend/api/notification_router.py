@@ -60,6 +60,11 @@ class AiGenerateAnnouncement(BaseModel):
     target_grade: str = ""
     target_class: str = ""
 
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求体"""
+    ids: list[int]
+
 # ── 辅助函数 ──
 
 _ROLE_ANN_TITLE_MAX = 200
@@ -401,6 +406,23 @@ async def delete_notification(notification_id: int, request: Request):
         (notification_id, username),
     )
     return {"message": "通知已删除"}
+
+
+@router.post("/batch-delete", summary="批量删除通知")
+async def batch_delete_notifications(req: BatchDeleteRequest, request: Request):
+    """批量删除当前用户的通知"""
+    user = get_current_user(request)
+    username = user["username"]
+    ids = req.ids
+    if not ids:
+        return {"deleted": 0}
+    # Build safe parameterized DELETE with IN clause
+    placeholders = ",".join("?" for _ in ids)
+    sql = f"DELETE FROM notifications WHERE id IN ({placeholders}) AND recipient_username = ?"
+    params = tuple(ids) + (username,)
+    execute_insert_update(sql, params)
+    logger.info(f"批量删除通知: user={username}, count={len(ids)}")
+    return {"deleted": len(ids)}
 
 
 # ── 公告 API（管理员/教师）──

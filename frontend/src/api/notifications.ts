@@ -66,6 +66,13 @@ export async function deleteNotification(id: number): Promise<void> {
 }
 
 /** 获取公告列表 */
+
+/** 批量删除通知 */
+export async function batchDeleteNotifications(ids: number[]): Promise<void> {
+  await apiClient.post('/api/notifications/batch-delete', { ids })
+}
+
+
 export async function getAnnouncements(page = 1, pageSize = 20): Promise<{ announcements: AnnouncementItem[]; total: number }> {
   const { data } = await apiClient.get('/api/notifications/announcements', {
     params: { page, page_size: pageSize },

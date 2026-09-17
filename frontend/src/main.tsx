@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useMemo } from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { ConfigProvider, Spin } from 'antd'
+import { ConfigProvider } from 'antd'
 import zhCN, { Locale } from 'antd/locale/zh_CN'
 import enUS from 'antd/locale/en_US'
 import App from './App'
@@ -29,14 +29,6 @@ const antdLocaleMap: Record<string, Locale> = {
 function ThemedApp() {
   const currentTheme = useThemeStore((s) => s.current)
   const currentLocale = useLocaleStore((s) => s.current)
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    // 每次主题或语言切换时重新渲染 ConfigProvider
-    setReady(false)
-    const timer = requestAnimationFrame(() => setReady(true))
-    return () => cancelAnimationFrame(timer)
-  }, [currentTheme, currentLocale])
 
   const themeConfig = useMemo(() => themeMap[currentTheme].antdConfig, [currentTheme])
   const locale = useMemo(() => antdLocaleMap[currentLocale] || zhCN, [currentLocale])
@@ -47,7 +39,7 @@ function ThemedApp() {
       theme={themeConfig}
     >
       <BrowserRouter>
-        {ready ? <App /> : <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}><Spin size="large" /></div>}
+        <App />
       </BrowserRouter>
     </ConfigProvider>
   )

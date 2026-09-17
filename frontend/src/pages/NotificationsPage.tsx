@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, List, Tag, Typography, Button, Space, Empty, Spin,
-  message, Popconfirm, Segmented, Tabs,
+  message, Popconfirm, Segmented, Tabs, Checkbox,
 } from 'antd'
 import {
   CheckOutlined, DeleteOutlined, ReloadOutlined,
@@ -25,7 +25,7 @@ const NotificationsPage: React.FC = () => {
   const { t } = useTranslation('system')
   const noticeText = useNoticeText()
 
-  const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+  const TYPE_CONFIG = {
     exam: { color: '#1677ff', icon: <FileAddOutlined />, label: t('notifExam') },
     score: { color: '#52c41a', icon: <TrophyOutlined />, label: t('notifScore') },
     task: { color: '#faad14', icon: <CheckCircleOutlined />, label: t('notifTask') },
@@ -34,139 +34,178 @@ const NotificationsPage: React.FC = () => {
     info: { color: '#999', icon: <InfoCircleOutlined />, label: t('notifInfo') },
   }
 
-  const PUSH_TYPE_CONFIG: Record<string, { color: string; icon: string; label: string }> = {
-    morning: { color: '#fa8c16', icon: '☀️', label: t('pushMorning') },
-    achievement: { color: '#52c41a', icon: '🏆', label: t('pushAchievement') },
-    encourage: { color: '#1677ff', icon: '💪', label: t('pushEncourage') },
-    reminder: { color: '#ff4d4f', icon: '📌', label: t('pushReminder') },
-    milestone: { color: '#722ed1', icon: '⭐', label: t('pushMilestone') },
+  const PUSH_TYPE_CONFIG = {
+    morning: { color: '#fa8c16', icon: '\u2600\uFE0F', label: t('pushMorning') },
+    achievement: { color: '#52c41a', icon: '\uD83C\uDFC6', label: t('pushAchievement') },
+    encourage: { color: '#1677ff', icon: '\uD83D\uDCAA', label: t('pushEncourage') },
+    reminder: { color: '#ff4d4f', icon: '\uD83D\uDCC4', label: t('pushReminder') },
+    milestone: { color: '#722ed1', icon: '\u2B50', label: t('pushMilestone') },
   }
+
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isStudent = user?.role === 'student'
   const [activeTab, setActiveTab] = useState('system')
 
-  // ── 系统通知 ──
+  // system notification state
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
   const [loading, setLoading] = useState(false)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [filter, setFilter] = useState<string>('all')
+  const [filter, setFilter] = useState('all')
+  const [selectedNotifIds, setSelectedNotifIds] = useState<Set<number>>(new Set())
 
-  // ── 学伴消息 ──
+  // companion push state
   const [pushes, setPushes] = useState<PushMessage[]>([])
   const [pushLoading, setPushLoading] = useState(false)
   const [pushTotal, setPushTotal] = useState(0)
   const [pushPage, setPushPage] = useState(1)
-  const [pushFilter, setPushFilter] = useState<string>('all')
+  const [pushFilter, setPushFilter] = useState('all')
+  const [selectedPushIds, setSelectedPushIds] = useState<Set<number>>(new Set())
 
-  // ── 系统通知 ──
   const fetchNotifications = async () => {
     setLoading(true)
     try {
       const data = await notificationsApi.getNotifications(filter === 'unread', page, 20)
       setNotifications(data.notifications)
       setTotal(data.total)
-    } catch {
-      message.error(t('loadFailed'))
-    }
+      setSelectedNotifIds(new Set())
+    } catch { message.error(t('loadFailed')) }
     setLoading(false)
   }
 
-  useEffect(() => {
-    if (activeTab === 'system') fetchNotifications()
-  }, [page, filter, activeTab])
+  useEffect(() => { if (activeTab === 'system') fetchNotifications() }, [page, filter, activeTab])
 
-  const refreshUnreadCount = () => {
-    window.dispatchEvent(new CustomEvent('notification:unread-changed'))
-  }
+  const refreshUnreadCount = () => window.dispatchEvent(new CustomEvent('notification:unread-changed'))
 
-  const handleMarkRead = async (id: number) => {
-    try {
-      await notificationsApi.markAsRead(id)
-      fetchNotifications()
-      refreshUnreadCount()
-    } catch {
-      message.error(t('markReadFailed'))
-    }
+  const handleMarkRead = async (id) => {
+    try { await notificationsApi.markAsRead(id); fetchNotifications(); refreshUnreadCount() }
+    catch { message.error(t('markReadFailed')) }
   }
 
   const handleMarkAllRead = async () => {
-    try {
-      await notificationsApi.markAllAsRead()
-      message.success(t('markAllReadSuccess'))
-      fetchNotifications()
-      refreshUnreadCount()
-    } catch {
-      message.error(t('markReadFailed'))
-    }
+    try { await notificationsApi.markAllAsRead(); message.success(t('markAllReadSuccess')); fetchNotifications(); refreshUnreadCount() }
+    catch { message.error(t('markReadFailed')) }
   }
 
-  const handleDelete = async (id: number) => {
-    try {
-      await notificationsApi.deleteNotification(id)
-      message.success(t('notificationDeleted'))
-      fetchNotifications()
-      refreshUnreadCount()
-    } catch {
-      message.error(t('deleteFailed'))
-    }
+  const handleDelete = async (id) => {
+    try { await notificationsApi.deleteNotification(id); message.success(t('notificationDeleted')); fetchNotifications(); refreshUnreadCount() }
+    catch { message.error(t('deleteFailed')) }
   }
 
-  // ── 学伴消息 ──
+  const toggleNotifSelect = (id, checked) => {
+    setSelectedNotifIds(prev => { const n = new Set(prev); checked ? n.add(id) : n.delete(id); return n })
+  }
+
+  const selectAllCurrentPageNotifs = (checked) => {
+    setSelectedNotifIds(checked ? new Set(notifications.map(n => n.id)) : new Set())
+  }
+
+  const handleBatchDeleteNotifs = async () => {
+    if (selectedNotifIds.size === 0) return
+    try {
+      await notificationsApi.batchDeleteNotifications(Array.from(selectedNotifIds))
+      message.success(t('batchDeleteSuccess', { count: selectedNotifIds.size }))
+      fetchNotifications(); refreshUnreadCount()
+    } catch { message.error(t('deleteFailed')) }
+  }
+
   const fetchPushes = async () => {
     setPushLoading(true)
     try {
       const data = await companionApi.getPushList(pushPage, 20, pushFilter === 'unread')
       setPushes(Array.isArray(data.pushes) ? data.pushes : [])
       setPushTotal(typeof data.total === 'number' ? data.total : 0)
-    } catch {
-      setPushes([])
-      setPushTotal(0)
-    }
+      setSelectedPushIds(new Set())
+    } catch { setPushes([]); setPushTotal(0) }
     setPushLoading(false)
   }
 
-  useEffect(() => {
-    if (activeTab === 'companion') fetchPushes()
-  }, [pushPage, pushFilter, activeTab])
+  useEffect(() => { if (activeTab === 'companion') fetchPushes() }, [pushPage, pushFilter, activeTab])
 
   const handlePushMarkAllRead = async () => {
-    try {
-      await useCompanionStore.getState().markAllPushesRead()
-      message.success(t('markAllReadSuccess'))
-      fetchPushes()
-    } catch {
-      message.error(t('markReadFailed'))
-    }
+    try { await useCompanionStore.getState().markAllPushesRead(); message.success(t('markAllReadSuccess')); fetchPushes() }
+    catch { message.error(t('markReadFailed')) }
   }
 
-  const handlePushDelete = async (id: number) => {
+  const handlePushDelete = async (id) => {
+    try { await companionApi.deletePush(id); message.success(t('messageDeleted')); fetchPushes() }
+    catch { message.error(t('deleteFailedRetry')) }
+  }
+
+  const togglePushSelect = (id, checked) => {
+    setSelectedPushIds(prev => { const n = new Set(prev); checked ? n.add(id) : n.delete(id); return n })
+  }
+
+  const selectAllCurrentPagePushes = (checked) => {
+    setSelectedPushIds(checked ? new Set(pushes.map(p => p.id)) : new Set())
+  }
+
+  const handleBatchDeletePushes = async () => {
+    if (selectedPushIds.size === 0) return
     try {
-      await companionApi.deletePush(id)
-      message.success(t('messageDeleted'))
+      const result = await companionApi.batchDeletePushes(Array.from(selectedPushIds))
+      message.success(t('batchDeleteSuccess', { count: result.deleted || selectedPushIds.size }))
       fetchPushes()
-    } catch {
-      message.error(t('deleteFailedRetry'))
-    }
+    } catch { message.error(t('deleteFailed')) }
+  }
+
+  const renderNotifItem = (item) => {
+    const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.info
+    const nt = noticeText(item)
+    const isSelected = selectedNotifIds.has(item.id)
+    return (
+      <List.Item key={item.id} style={{ background: item.is_read ? 'transparent' : '#f6f8ff', padding: '12px 16px', borderRadius: 8, marginBottom: 4 }} actions={[
+        !item.is_read && <Button key="read" type="text" icon={<CheckOutlined />} onClick={() => handleMarkRead(item.id)}>{t('markAsRead')}</Button>,
+        <Popconfirm key="del" title={t('confirmDelete')} onConfirm={() => handleDelete(item.id)}><Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button></Popconfirm>,
+      ].filter(Boolean)}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1 }}>
+          <Checkbox checked={isSelected} onChange={(e) => toggleNotifSelect(item.id, e.target.checked)} style={{ marginTop: 4 }} />
+          <List.Item.Meta avatar={<span style={{ fontSize: 20, color: cfg.color }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{nt.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div>{item.content && <Text type="secondary">{nt.content}</Text>}<br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text>{item.related_link && <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>{t('viewDetails')}</Button>}</div>} />
+        </div>
+      </List.Item>
+    )
+  }
+
+  const renderPushItem = (item) => {
+    const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: '#999', icon: '\uD83D\uDCEC', label: item.push_type_label }
+    const isSelected = selectedPushIds.has(item.id)
+    return (
+      <List.Item key={item.id} style={{ background: item.is_read ? 'transparent' : '#f6f8ff', padding: '12px 16px', borderRadius: 8, marginBottom: 4 }} actions={[
+        !item.is_read && <Button key="read" type="text" icon={<CheckOutlined />} onClick={async () => { await useCompanionStore.getState().markPushRead(item.id); fetchPushes() }}>{t('markAsRead')}</Button>,
+        <Popconfirm key="del" title={t('confirmDelete')} onConfirm={() => handlePushDelete(item.id)}><Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button></Popconfirm>,
+      ].filter(Boolean)}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1 }}>
+          <Checkbox checked={isSelected} onChange={(e) => togglePushSelect(item.id, e.target.checked)} style={{ marginTop: 4 }} />
+          <List.Item.Meta avatar={<span style={{ fontSize: 20 }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{item.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div><Text type="secondary">{item.content}</Text><br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text></div>} />
+        </div>
+      </List.Item>
+    )
   }
 
   return (
     <Card
-      title={
-        <Space>
-          <InfoCircleOutlined />
-          {t('notifications')}
-        </Space>
-      }
+      title={<Space><InfoCircleOutlined />{t('notifications')}</Space>}
       extra={
         activeTab === 'system' ? (
           <Space>
+            {selectedNotifIds.size > 0 && <>
+              <Popconfirm title={t('confirmBatchDelete', { count: selectedNotifIds.size })} onConfirm={handleBatchDeleteNotifs}>
+                <Button type="primary" danger icon={<DeleteOutlined />}>{t('deleteSelected', { count: selectedNotifIds.size })}</Button>
+              </Popconfirm>
+              <Button onClick={() => setSelectedNotifIds(new Set())}>{t('clearSelection')}</Button>
+            </>}
             <Button icon={<CheckOutlined />} onClick={handleMarkAllRead}>{t('markAllAsRead')}</Button>
             <Button icon={<ReloadOutlined />} onClick={fetchNotifications}>{t('refresh')}</Button>
           </Space>
         ) : (
           <Space>
+            {selectedPushIds.size > 0 && <>
+              <Popconfirm title={t('confirmBatchDelete', { count: selectedPushIds.size })} onConfirm={handleBatchDeletePushes}>
+                <Button type="primary" danger icon={<DeleteOutlined />}>{t('deleteSelected', { count: selectedPushIds.size })}</Button>
+              </Popconfirm>
+              <Button onClick={() => setSelectedPushIds(new Set())}>{t('clearSelection')}</Button>
+            </>}
             <Button icon={<CheckOutlined />} onClick={handlePushMarkAllRead}>{t('markAllAsRead')}</Button>
             <Button icon={<ReloadOutlined />} onClick={fetchPushes}>{t('refresh')}</Button>
           </Space>
@@ -183,77 +222,18 @@ const NotificationsPage: React.FC = () => {
             children: (
               <>
                 <div style={{ marginBottom: 16 }}>
-                  <Segmented
-                    options={[
-                      { label: t('allCount', { count: total }), value: 'all' },
-                      { label: t('unread'), value: 'unread' },
-                    ]}
-                    value={filter}
-                    onChange={(val) => { setFilter(val as string); setPage(1) }}
-                  />
+                  <Segmented options={[{ label: t('allCount', { count: total }), value: 'all' }, { label: t('unread'), value: 'unread' }]} value={filter} onChange={(val) => { setFilter(val); setPage(1) }} />
                 </div>
                 <Spin spinning={loading}>
-                  {notifications.length === 0 ? (
-                    <Empty description={t('noNotifications')} />
-                  ) : (
-                    <List
-                      dataSource={notifications}
-                      renderItem={(item) => {
-                        const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.info
-                        const nt = noticeText(item)
-                        return (
-                          <List.Item
-                            style={{
-                              background: item.is_read ? 'transparent' : '#f6f8ff',
-                              padding: '12px 16px',
-                              borderRadius: 8,
-                              marginBottom: 4,
-                            }}
-                            actions={[
-                              !item.is_read && (
-                                <Button key="read" type="text" icon={<CheckOutlined />} onClick={() => handleMarkRead(item.id)}>{t('markAsRead')}</Button>
-                              ),
-                              <Popconfirm key="delete" title={t('confirmDelete')} onConfirm={() => handleDelete(item.id)}>
-                                <Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
-                              </Popconfirm>,
-                            ].filter(Boolean)}
-                          >
-                            <List.Item.Meta
-                              avatar={<span style={{ fontSize: 20, color: cfg.color }}>{cfg.icon}</span>}
-                              title={
-                                <Space>
-                                  <Text strong={!item.is_read}>{nt.title}</Text>
-                                  <Tag color={cfg.color}>{cfg.label}</Tag>
-                                  {!item.is_read && <Tag color="blue">{t('unread')}</Tag>}
-                                </Space>
-                              }
-                              description={
-                                <div>
-                                  {item.content && <Text type="secondary">{nt.content}</Text>}
-                                  <br />
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
-                                  </Text>
-                                  {item.related_link && (
-                                    <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>{t('viewDetails')}</Button>
-                                  )}
-                                </div>
-                              }
-                            />
-                          </List.Item>
-                        )
-                      }}
-                      pagination={{
-                        current: page,
-                        pageSize: 20,
-                        total,
-                        showSizeChanger: true,
-                        showTotal: (total) => t('totalNotifications', { count: total }),
-                        pageSizeOptions: ['10', '20', '50'],
-                        onChange: (p) => setPage(p),
-                      }}
-                    />
-                  )}
+                  {notifications.length === 0 ? <Empty description={t('noNotifications')} /> : <>
+                    {selectedNotifIds.size > 0 && <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fff7e6', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <Text strong>已选择 {selectedNotifIds.size} 项</Text>
+                      <Button size="small" onClick={() => selectAllCurrentPageNotifs(true)}>{t('selectAllCurrentPage')}</Button>
+                      <Button size="small" danger onClick={handleBatchDeleteNotifs}>{t('deleteSelected', { count: selectedNotifIds.size })}</Button>
+                      <Button size="small" onClick={() => setSelectedNotifIds(new Set())}>{t('clearSelection')}</Button>
+                    </div>}
+                    <List dataSource={notifications} renderItem={renderNotifItem} pagination={{ current: page, pageSize: 20, total, showSizeChanger: true, showTotal: (tot) => t('totalNotifications', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p) => setPage(p) }} />
+                  </>}
                 </Spin>
               </>
             ),
@@ -264,78 +244,18 @@ const NotificationsPage: React.FC = () => {
             children: (
               <>
                 <div style={{ marginBottom: 16 }}>
-                  <Segmented
-                    options={[
-                      { label: t('allCount', { count: pushTotal }), value: 'all' },
-                      { label: t('unread'), value: 'unread' },
-                    ]}
-                    value={pushFilter}
-                    onChange={(val) => { setPushFilter(val as string); setPushPage(1) }}
-                  />
+                  <Segmented options={[{ label: t('allCount', { count: pushTotal }), value: 'all' }, { label: t('unread'), value: 'unread' }]} value={pushFilter} onChange={(val) => { setPushFilter(val); setPushPage(1) }} />
                 </div>
                 <Spin spinning={pushLoading}>
-                  {pushes.length === 0 ? (
-                    <Empty description={t('noNotifications')} />
-                  ) : (
-                    <List
-                      dataSource={pushes}
-                      renderItem={(item) => {
-                        const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: '#999', icon: '💌', label: item.push_type_label }
-                        return (
-                          <List.Item
-                            style={{
-                              background: item.is_read ? 'transparent' : '#f6f8ff',
-                              padding: '12px 16px',
-                              borderRadius: 8,
-                              marginBottom: 4,
-                            }}
-                            actions={[
-                              !item.is_read && (
-                                <Button key="read" type="text" icon={<CheckOutlined />}
-                                  onClick={async () => {
-                                    await useCompanionStore.getState().markPushRead(item.id)
-                                    fetchPushes()
-                                  }}
-                                >{t('markAsRead')}</Button>
-                              ),
-                              <Popconfirm key="delete" title={t('confirmDelete')} onConfirm={() => handlePushDelete(item.id)}>
-                                <Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button>
-                              </Popconfirm>,
-                            ].filter(Boolean)}
-                          >
-                            <List.Item.Meta
-                              avatar={<span style={{ fontSize: 20 }}>{cfg.icon}</span>}
-                              title={
-                                <Space>
-                                  <Text strong={!item.is_read}>{item.title}</Text>
-                                  <Tag color={cfg.color}>{cfg.label}</Tag>
-                                  {!item.is_read && <Tag color="blue">{t('unread')}</Tag>}
-                                </Space>
-                              }
-                              description={
-                                <div>
-                                  <Text type="secondary">{item.content}</Text>
-                                  <br />
-                                  <Text type="secondary" style={{ fontSize: 12 }}>
-                                    {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
-                                  </Text>
-                                </div>
-                              }
-                            />
-                          </List.Item>
-                        )
-                      }}
-                      pagination={{
-                        current: pushPage,
-                        pageSize: 20,
-                        total: pushTotal,
-                        showSizeChanger: true,
-                        showTotal: (total) => t('totalMessages', { count: total }),
-                        pageSizeOptions: ['10', '20', '50'],
-                        onChange: (p) => setPushPage(p),
-                      }}
-                    />
-                  )}
+                  {pushes.length === 0 ? <Empty description={t('noNotifications')} /> : <>
+                    {selectedPushIds.size > 0 && <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fff7e6', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <Text strong>已选择 {selectedPushIds.size} 项</Text>
+                      <Button size="small" onClick={() => selectAllCurrentPagePushes(true)}>{t('selectAllCurrentPage')}</Button>
+                      <Button size="small" danger onClick={handleBatchDeletePushes}>{t('deleteSelected', { count: selectedPushIds.size })}</Button>
+                      <Button size="small" onClick={() => setSelectedPushIds(new Set())}>{t('clearSelection')}</Button>
+                    </div>}
+                    <List dataSource={pushes} renderItem={renderPushItem} pagination={{ current: pushPage, pageSize: 20, total: pushTotal, showSizeChanger: true, showTotal: (tot) => t('totalMessages', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p) => setPushPage(p) }} />
+                  </>}
                 </Spin>
               </>
             ),
