@@ -140,6 +140,8 @@ export async function submitExam(
   total_score: number;
   passed: boolean;
   details?: Record<string, any>;
+  /** S-GRADING(P2): >0 表示还有主观题在后台批改，成绩稍后自动更新 */
+  pending_ai?: number;
 }> {
   // 主观题 AI 批改在一个请求内完成, 可能远超全局 30s 超时;
   // 超时后即使服务端批改成功前端也会误报"提交失败"。给足 5 分钟。
@@ -148,6 +150,33 @@ export async function submitExam(
 }
 
 /** 获取考试成绩统计 */
+/** S-GRADING(P2): 主观题后台批改进度（轻量接口，不下发题面与参考答案） */
+export async function getAttemptGradingStatus(attemptId: number): Promise<{
+  attempt_id: number;
+  score: number;
+  total_score: number;
+  passed: boolean;
+  pending_ai: number;
+  pending_review: number;
+  teacher_reviewed: number;
+  graded_by: string;
+  show_details: boolean;
+  items: Record<string, any>;
+}> {
+  const { data } = await apiClient.get(`/api/exams/attempt/${attemptId}/grading-status`);
+  return data;
+}
+
+/** S-GRADING(P2): 教师立即批改该考试待判的主观题（不等后台节拍），进度走 AI 任务轮询 */
+export async function gradeExamNow(examId: number): Promise<{
+  task_id: string;
+  message: string;
+  pending_attempts: number;
+}> {
+  const { data } = await apiClient.post(`/api/exams/${examId}/grade-now`);
+  return data;
+}
+
 export async function getExamResults(examId: number): Promise<ExamResultResponse> {
   const { data } = await apiClient.get(`/api/exams/${examId}/results`);
   return data;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Layout, Card, Button, message, Radio, Checkbox, Input,
   Typography, Space, Tag, Spin, Result, Progress, Row, Col, Divider,
@@ -47,6 +47,8 @@ const ExamTakePage: React.FC = () => {
     total_score: number;
     passed: boolean;
     details?: Record<string, any>;
+    /** S-GRADING(P2): 还有几道主观题在后台批改 */
+    pending_ai?: number;
   } | null>(null)
 
   // ── 计时器 ──
@@ -158,14 +160,54 @@ const ExamTakePage: React.FC = () => {
         total_score: res.total_score,
         passed: res.passed,
         details: res.details || undefined,
+        pending_ai: Number(res.pending_ai || 0),
       })
-      message.success(t('submitSuccess'))
+      // S-GRADING(P2): 主观题不再卡在本请求里, 提交即刻返回, 成绩判完自动刷新
+      if (Number(res.pending_ai || 0) > 0) message.info(t('exSubmitQueued', { count: res.pending_ai }))
+      else message.success(t('submitSuccess'))
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('submitFailed'))
     } finally {
       setSubmitting(false)
     }
   }
+
+  // ── S-GRADING(P2): 主观题在后台批改时轮询成绩(8 秒一次, 最多 12 次≈96 秒) ──
+  const pollRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!submitted || !attemptId || !result?.pending_ai) return
+    let n = 0
+    const id = window.setInterval(async () => {
+      if (++n > 12) { window.clearInterval(id); return }
+      try {
+        const st = await examsApi.getAttemptGradingStatus(attemptId)
+        setResult(prev => {
+          if (!prev) return prev
+          let details = prev.details
+          if (st.show_details && details && st.items) {
+            details = { ...details }
+            Object.entries(st.items).forEach(([qid, patch]) => {
+              if (details && details[qid]) details[qid] = { ...details[qid], ...(patch as object) }
+            })
+          }
+          return {
+            ...prev, score: st.score, total_score: st.total_score || prev.total_score,
+            passed: st.passed, pending_ai: st.pending_ai, details,
+          }
+        })
+        if (!st.pending_ai) {
+          window.clearInterval(id)
+          message.success(t('exGradingFinished'))
+        }
+      } catch { /* 本轮没判完, 下一轮再看 */ }
+    }, 8000)
+    pollRef.current = id
+    return () => { if (pollRef.current) window.clearInterval(pollRef.current) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, attemptId])
+
+  /** S-GRADING(P2): 一道题当前是否还在批改中(分数未定, 不显示得分与对错) */
+  const isPendingItem = (d: any) => d?.grading === 'pending' || d?.graded_by === 'queued'
 
   // ── 返回 ──
   const handleBack = () => {
@@ -245,24 +287,31 @@ const ExamTakePage: React.FC = () => {
 
   // ── 渲染结果 ──
   if (submitted && result) {
-    const correctCount = result.details
-      ? Object.values(result.details).filter((d: any) => d.is_correct).length
-      : 0
+    // S-GRADING(P2): 还在批改中的题不计对错, 否则学生看到的就是"简答题全错"
+    const allDetails = Object.values(result.details || {}) as any[]
+    const pendingCount = Number(result.pending_ai || 0)
+    const gradedDetails = allDetails.filter((d: any) => !isPendingItem(d))
+    const correctCount = gradedDetails.filter((d: any) => d.is_correct).length
     return (
       <Layout style={{ minHeight: '100vh', background: '#f5f5f5', padding: 24 }}>
         <Card style={{ maxWidth: 700, margin: '40px auto' }}>
           <Result
-            status={result.passed ? 'success' : 'error'}
-            title={result.passed ? t('passExam') : t('failExam')}
+            status={pendingCount > 0 ? 'info' : (result.passed ? 'success' : 'error')}
+            title={pendingCount > 0 ? t('exGradingPendingTitle') : (result.passed ? t('passExam') : t('failExam'))}
             subTitle={
               <Space orientation="vertical" size={8}>
                 <Typography.Title level={2}
-                  style={{ color: result.passed ? '#52c41a' : '#ff4d4f', margin: 0 }}>
+                  style={{ color: pendingCount > 0 ? '#1677ff' : (result.passed ? '#52c41a' : '#ff4d4f'), margin: 0 }}>
                   {result.score} {t('points')}
                 </Typography.Title>
                 <Typography.Text type="secondary">
                   {t('fullScore')} {result.total_score} {t('points')}
                 </Typography.Text>
+                {pendingCount > 0 && (
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                    {t('exGradingPendingHint', { count: pendingCount })}
+                  </Typography.Text>
+                )}
               </Space>
             }
             extra={[
@@ -277,26 +326,35 @@ const ExamTakePage: React.FC = () => {
                 <Typography.Title level={5}>{t('answerDetail')}</Typography.Title>
                 <Progress
                   percent={Math.round((result.score / result.total_score) * 100)}
-                  status={result.passed ? 'success' : 'exception'}
-                  format={() => `${correctCount}/${Object.keys(result.details || {}).length} ${t('questionsCorrect')}`}
+                  status={pendingCount > 0 ? 'active' : (result.passed ? 'success' : 'exception')}
+                  format={() => (pendingCount > 0
+                    ? t('exGradingCountFormat', { graded: gradedDetails.length, total: allDetails.length })
+                    : `${correctCount}/${allDetails.length} ${t('questionsCorrect')}`)}
                 />
                 {Object.entries(result.details).map(([qId, detail]: [string, any]) => {
-                  const isEssay = detail.grading_type === 'essay' || detail.dimensions?.content
+                  const pendingItem = isPendingItem(detail)
+                  const dims = detail.dimensions || {}
+                  const isEssay = !pendingItem
+                    && (detail.grading_type === 'essay' || !!(dims.content || dims.structure || dims.language))
                   return (
                     <Card key={qId} size="small"
-                      style={{ marginTop: 8, background: detail.is_correct ? '#f6ffed' : '#fff2f0' }}>
+                      style={{ marginTop: 8, background: pendingItem ? '#e6f4ff' : (detail.is_correct ? '#f6ffed' : '#fff2f0') }}>
                       <Space orientation="vertical" style={{ width: '100%' }}>
-                        <Space>
-                          {detail.is_correct
+                        <Space wrap>
+                          {pendingItem
+                            ? <ClockCircleOutlined style={{ color: '#1677ff', fontSize: 18 }} />
+                            : detail.is_correct
                             ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />
                             : <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />}
                           <span>{t('yourAnsColon')}{detail.student_answer || t('unanswered')}</span>
-                          {!detail.is_correct && (
+                          {!detail.is_correct && !pendingItem && (
                             <span style={{ color: '#888' }}>{t('correctAnsColon')}{detail.correct_answer}</span>
                           )}
-                          <Tag color={detail.is_correct ? 'green' : 'red'}>
-                            {detail.score}/{detail.max_score} {t('fenUnit')}
-                          </Tag>
+                          {pendingItem
+                            ? <Tag color="blue">{t('exGradingPending')}</Tag>
+                            : <Tag color={detail.is_correct ? 'green' : 'red'}>
+                              {detail.score}/{detail.max_score} {t('fenUnit')}
+                            </Tag>}
                         </Space>
 
                         {/* AI 简答题评语 */}

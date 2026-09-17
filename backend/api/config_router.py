@@ -122,6 +122,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "CHAT_MEMORY_MAX_ROWS": 20000,            # 全表行数硬上限，超出全局淘汰最旧
     "CHAT_MEMORY_CONTENT_MAX_CHARS": 4000,    # 单条回答落库前的截断长度
     "CHAT_MEMORY_PRUNE_INTERVAL_MINUTES": 5,  # 后台兜底清理节拍
+    # ── 主观题后台批量批改（backend/ai_grading.py；同步练习/学习考试/随堂测验共用）──
+    # 学生提交时只判客观题，主观题进队列，由后台把「同一道题的多份答案」合并成一次
+    # AI 调用评分（40 人 × 5 题：200 次调用 → 最多 25 次），判完再补成绩通知/错题本/积分。
+    # 改完下一轮生效（无需重启），间隔越小出分越快、越大越省调用。
+    "AI_GRADING_INTERVAL_SEC": 25,            # 后台扫描节拍（秒）
+    "AI_GRADING_BATCH_SIZE": 8,               # 一次 AI 调用合并评几份答案
+    "AI_GRADING_CONCURRENCY": 2,              # 同时进行中的批改调用数（避免挤占对话/出题）
+    "AI_GRADING_MAX_ITEMS_PER_ROUND": 60,     # 单轮最多批多少题（防一次跑太久）
 }
 
 

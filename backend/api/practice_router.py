@@ -26,7 +26,7 @@ from backend.logger import logger
 from backend.prompts import build_ai_role
 from backend.async_utils import spawn_bg as _spawn_bg
 # S-GRADING: 主观题后台批量批改引擎
-from backend.ai_grading import GradingJob, SourceAdapter, register_source
+from backend.ai_grading import GradingJob, SourceAdapter, register_source, pending_keys
 from backend.question_db import get_connection
 
 router = APIRouter()
@@ -1423,10 +1423,8 @@ def _parse_ai_result(text: str) -> list[dict[str, Any]]:
 #   引擎按题合并多份答案一次 AI 调用, 判完写回并补做积分/错题本结算
 # ════════════════════════════════════════════════════════════
 
-def _pending_keys(graded: dict[str, Any]) -> list[str]:
-    """仍待后台批改的题号"""
-    return [k for k, v in (graded or {}).items()
-            if isinstance(v, dict) and v.get("grading") == "pending"]
+# _pending_keys 直接复用引擎里的 pending_keys(判据只有一份)
+_pending_keys = pending_keys
 
 
 def _settle_practice_attempt(attempt: dict[str, Any]) -> dict[str, Any]:

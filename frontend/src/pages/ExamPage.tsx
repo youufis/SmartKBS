@@ -10,7 +10,7 @@ import {
   CheckCircleOutlined, BarChartOutlined,
   OrderedListOutlined, FileAddOutlined, SaveOutlined,
   DownloadOutlined, BulbOutlined, FileOutlined, RobotOutlined,
-  FileTextOutlined,
+  FileTextOutlined, ThunderboltOutlined,
 } from '@ant-design/icons'
 import * as examsApi from '../api/exams'
 import * as questionsApi from '../api/questions'
@@ -130,6 +130,8 @@ const ExamPage: React.FC = () => {
   const [resultData, setResultData] = useState<any>(null)
   const [resultSearch, setResultSearch] = useState('')
   const [resultLoading, setResultLoading] = useState(false)
+  // S-GRADING(P2): 教师手动触发该考试的主观题批改
+  const [gradingNow, setGradingNow] = useState(false)
 
   // ── 学生：我的成绩 ──
   const [myResults, setMyResults] = useState<ExamAttempt[]>([])
@@ -543,6 +545,32 @@ const ExamPage: React.FC = () => {
     }
   }
 
+  // ── S-GRADING(P2): 立即批改待判的主观题(进度走 AI 任务轮询) ──
+  const handleGradeNow = async () => {
+    if (!resultExam) return
+    setGradingNow(true)
+    try {
+      const res = await examsApi.gradeExamNow(resultExam.id)
+      if (!res.task_id) {
+        message.info(res.message || t('exNoPendingGrading'))
+        await handleViewResults(resultExam)
+        return
+      }
+      message.info(t('exGradeNowStarted', { count: res.pending_attempts || 0 }))
+      const out: any = await pollAiTask(res.task_id, 240000)
+      if (out?.error) message.error(out.error)
+      else if (out) {
+        message.success(t('exGradeNowDone', { graded: out.graded ?? 0, review: out.to_review ?? 0 }))
+        await handleViewResults(resultExam)
+      } else {
+        message.warning(t('exGradeNowTimeout'))
+        await handleViewResults(resultExam)
+      }
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('exGradeNowFailed'))
+    } finally { setGradingNow(false) }
+  }
+
   // ── 参加考试 ──
   const handleTakeExam = async (examId: number) => {
     navigate(`/exam-take/${examId}`)
@@ -908,14 +936,18 @@ const ExamPage: React.FC = () => {
                       render: (name: string) => <Tag color="blue">{name || '-'}</Tag> },
                     {
                       title: t('score'), key: 'score', width: 100,
-                      render: (_: any, r: ExamAttempt) => {
+                      render: (_: any, r: any) => {
+                        // S-GRADING(P2): 主观题还在后台批改时, 分数是临时值, 不下通过/未通过结论
+                        const pend = Number(r.ai_pending || 0)
                         const passed = r.score >= (r.pass_score || 60)
                         return (
                           <Space>
-                            <Typography.Text strong style={{ color: passed ? '#52c41a' : '#ff4d4f' }}>
+                            <Typography.Text strong style={{ color: pend ? '#1677ff' : (passed ? '#52c41a' : '#ff4d4f') }}>
                               {r.score} / {r.total_score}
                             </Typography.Text>
-                            {passed ? <Tag color="green">{t('pass')}</Tag> : <Tag color="red">{t('fail')}</Tag>}
+                            {pend
+                              ? <Tag color="blue">{t('exGradingPending')}</Tag>
+                              : (passed ? <Tag color="green">{t('pass')}</Tag> : <Tag color="red">{t('fail')}</Tag>)}
                           </Space>
                         )
                       },
@@ -1391,8 +1423,21 @@ const ExamPage: React.FC = () => {
                   </Card>
                 </Col>
               </Row>
-              <Input allowClear size="small" style={{ width: 260, marginBottom: 8 }}
-                placeholder={t('exSearchStudent')} value={resultSearch} onChange={(e) => setResultSearch(e.target.value)} />
+              <Space style={{ marginBottom: 8 }} wrap>
+                <Input allowClear size="small" style={{ width: 260 }}
+                  placeholder={t('exSearchStudent')} value={resultSearch} onChange={(e) => setResultSearch(e.target.value)} />
+                {/* S-GRADING(P2): 还有主观题没判完时, 教师可以立刻催批, 不必等后台节拍 */}
+                {Number(resultData.statistics?.pending_ai_total || 0) > 0 && (
+                  <>
+                    <Tag color="blue">{t('exGradingPendingN', { count: resultData.statistics.pending_ai_total })}</Tag>
+                    {Number(resultData.statistics?.pending_review_total || 0) > 0 && (
+                      <Tag color="orange">{t('exPendingReviewN', { count: resultData.statistics.pending_review_total })}</Tag>
+                    )}
+                    <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />}
+                      loading={gradingNow} onClick={handleGradeNow}>{t('exGradeNow')}</Button>
+                  </>
+                )}
+              </Space>
               <Table
                 dataSource={(resultData.attempts || []).filter((r: any) => {
                   const kw = resultSearch.trim().toLowerCase()
@@ -1413,8 +1458,17 @@ const ExamPage: React.FC = () => {
                       return <span style={{ color: passed ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>{r.score} / {r.total_score}</span>
                     },
                   },
+                  // S-GRADING(P2): 一眼看出谁的卷子还在批改中 / 谁需要人工批改
+                  { title: t('exGradingState'), key: 'grading_state', width: 110,
+                    render: (_: any, r: any) => {
+                      if (r.teacher_reviewed) return <Tag color="green">{t('recheckDone')}</Tag>
+                      if (r.pending_ai) return <Tag color="blue">{t('exGradingPendingN', { count: r.pending_ai })}</Tag>
+                      if (r.pending_review) return <Tag color="orange">{t('exPendingReviewN', { count: r.pending_review })}</Tag>
+                      return <Tag>{t('aiGraded')}</Tag>
+                    },
+                  },
                   { title: t('submittedAt'), dataIndex: 'submitted_at', key: 'submitted_at', width: 150,
-                    render: (t: string) => t ? t.slice(0, 16) : '-' },
+                    render: (v: string) => v ? v.slice(0, 16) : '-' },
                 ]}
                 expandable={{
                   expandedRowRender: (record: any) => <StudentExamDetail
@@ -1482,9 +1536,12 @@ const ExamPage: React.FC = () => {
               {detailData.attempt ? (
                 <>
               <Card size="small" style={{ marginBottom: 16 }}>
-                <Space>
+                <Space wrap>
                   <Statistic title={t('score')} value={detailData.attempt.score} suffix={`/ ${detailData.attempt.total_score}`}
                     styles={{ content: { color: detailData.attempt.score >= (detailData.attempt.total_score || 100) * 0.6 ? '#52c41a' : '#ff4d4f' } }} />
+                  {Number(detailData.attempt?.pending_ai || 0) > 0 && (
+                    <Tag color="blue">{t('exGradingPendingN', { count: detailData.attempt.pending_ai })}</Tag>
+                  )}
                 </Space>
               </Card>
               {(!detailData.questions || detailData.questions.length === 0) ? (
@@ -1492,8 +1549,11 @@ const ExamPage: React.FC = () => {
               ) : detailData.questions.map((q: any, idx: number) => {
                 const answers = detailData.attempt.answers || {}
                 const ans = answers[String(q.id)] || {}
+                // S-GRADING(P2): 还在后台批改的题不显示对错与得分
+                const pendingItem = ans.grading === 'pending' || ans.graded_by === 'queued'
                 const isCorrect = ans.is_correct
-                const isEssay = q.type === 'essay' || q.type === 'subjective' || ans.grading_type === 'essay'
+                const isEssay = !pendingItem
+                  && (q.type === 'essay' || q.type === 'subjective' || ans.grading_type === 'essay')
                 const options = q.options || {}
                 const optionLabels = Object.keys(options)
                 const TYPE_MAP2: Record<string, string> = {
@@ -1502,7 +1562,9 @@ const ExamPage: React.FC = () => {
                 }
                 return (
                   <Card key={q.id} size="small" style={{ marginBottom: 8 }}
-                    title={<Space><Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? t('xCorrect') : t('xWrong')}</Tag>
+                    title={<Space>{pendingItem
+                        ? <Tag color="blue">{t('exGradingPending')}</Tag>
+                        : <Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? t('xCorrect') : t('xWrong')}</Tag>}
                       {TYPE_MAP2[q.type] || q.type} | {t('qLabelIdx', { no: idx + 1 })}</Space>}>
                     <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8 }}><FormulaRenderer content={q.question_text} /></Typography.Paragraph>
                     <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
@@ -1532,7 +1594,9 @@ const ExamPage: React.FC = () => {
                       <Typography.Text><strong>{t('yourAnsColon')}</strong>{ans.student_answer || t('unanswered')}</Typography.Text>
                       <Typography.Text><strong>{t('correctAnsColon')}</strong>{q.correct_answer}</Typography.Text>
                       <Typography.Text><strong>{t('scoreColon')}</strong>
-                        <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
+                        <span style={{ color: pendingItem ? '#1677ff' : (isCorrect ? '#52c41a' : '#ff4d4f') }}>
+                          {pendingItem ? t('exGradingPending') : `${ans.score || 0} / ${ans.max_score || q.question_score || 0}`}
+                        </span>
                       </Typography.Text>
                       {q.explanation && (
                         <Typography.Text><strong>{t('explanationColon')}</strong><FormulaRenderer content={q.explanation} /></Typography.Text>
@@ -1672,6 +1736,9 @@ const StudentExamDetail: React.FC<{
           <Typography.Text strong>{studentName}</Typography.Text>
           <Tag>{detail.attempt.score} / {detail.attempt.total_score} {t('fenUnit')}</Tag>
           {isReviewed ? <Tag color="blue">{t('recheckDone')}</Tag> : <Tag color="orange">{t('aiGraded')}</Tag>}
+          {Number(detail.attempt?.pending_ai || 0) > 0 && (
+            <Tag color="blue">{t('exGradingPendingN', { count: detail.attempt.pending_ai })}</Tag>
+          )}
         </Space>
         {isTeacherOrAdmin && showReview && (
           <Button size="small" icon={<EditOutlined />} onClick={() => setReviewModal(true)}>
@@ -1684,15 +1751,19 @@ const StudentExamDetail: React.FC<{
         <Typography.Text type="secondary">{t('noQData')}</Typography.Text>
       ) : questions.map((q: any, idx: number) => {
         const ans = answers[String(q.id)] || {}
+        // S-GRADING(P2): 后台还没判完的题不显示对错
+        const pendingItem = ans.grading === 'pending' || ans.graded_by === 'queued'
         const isCorrect = ans.is_correct
-        const isEssay = q.type === 'essay' || q.type === 'subjective'
+        const isEssay = !pendingItem && (q.type === 'essay' || q.type === 'subjective')
         const options = q.options || {}
         const optionLabels = Object.keys(options)
 
         return (
           <Card key={q.id} size="small" style={{ marginBottom: 6 }}
             title={<Space>
-              <Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? t('xCorrect') : t('xWrong')}</Tag>
+              {pendingItem
+                ? <Tag color="blue">{t('exGradingPending')}</Tag>
+                : <Tag color={isCorrect ? 'green' : 'red'}>{isCorrect ? t('xCorrect') : t('xWrong')}</Tag>}
               {TYPE_MAP[q.type] || q.type} | {t('qLabelIdx', { no: idx + 1 })}
               {ans.teacher_adjusted && <Tag color="purple">{t('adjusted')}</Tag>}
             </Space>}>
@@ -1729,7 +1800,9 @@ const StudentExamDetail: React.FC<{
               <Typography.Text style={{ fontSize: 13 }}><strong>{t('studentAnsColon')}</strong>{ans.student_answer || t('unanswered')}</Typography.Text>
               <Typography.Text style={{ fontSize: 13 }}><strong>{t('correctAnsColon')}</strong>{q.correct_answer}</Typography.Text>
               <Typography.Text style={{ fontSize: 13 }}><strong>{t('scoreColon')}</strong>
-                <span style={{ color: isCorrect ? '#52c41a' : '#ff4d4f' }}>{ans.score || 0} / {ans.max_score || q.question_score || 0}</span>
+                <span style={{ color: pendingItem ? '#1677ff' : (isCorrect ? '#52c41a' : '#ff4d4f') }}>
+                  {pendingItem ? t('exGradingPending') : `${ans.score || 0} / ${ans.max_score || q.question_score || 0}`}
+                </span>
               </Typography.Text>
 
               {/* AI 简答评语 */}

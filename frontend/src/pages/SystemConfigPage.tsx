@@ -50,6 +50,11 @@ const GLOBAL_CONFIG_FIELDS = [
   { key: 'CHAT_MEMORY_CONTENT_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS', descKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS_desc', type: 'number', group: 'ai', required: false },
   { key: 'CHAT_MEMORY_MAX_ROWS', labelKey: 'field_CHAT_MEMORY_MAX_ROWS', descKey: 'field_CHAT_MEMORY_MAX_ROWS_desc', type: 'number', group: 'ai', required: false },
   { key: 'CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', labelKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', descKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES_desc', type: 'number', group: 'ai', required: false },
+  // 主观题后台批量批改（练习/考试/随堂测验共用同一套参数）
+  { key: 'AI_GRADING_INTERVAL_SEC', labelKey: 'field_AI_GRADING_INTERVAL_SEC', descKey: 'field_AI_GRADING_INTERVAL_SEC_desc', type: 'number', group: 'ai', required: false },
+  { key: 'AI_GRADING_BATCH_SIZE', labelKey: 'field_AI_GRADING_BATCH_SIZE', descKey: 'field_AI_GRADING_BATCH_SIZE_desc', type: 'number', group: 'ai', required: false },
+  { key: 'AI_GRADING_CONCURRENCY', labelKey: 'field_AI_GRADING_CONCURRENCY', descKey: 'field_AI_GRADING_CONCURRENCY_desc', type: 'number', group: 'ai', required: false },
+  { key: 'AI_GRADING_MAX_ITEMS_PER_ROUND', labelKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND', descKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND_desc', type: 'number', group: 'ai', required: false },
   // 系统限制
   { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', type: 'number', group: 'limit' },
   { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', type: 'number', group: 'limit' },

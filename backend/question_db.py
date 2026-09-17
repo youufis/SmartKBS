@@ -129,11 +129,20 @@ def init_question_db():
                 ("teacher_reviewed", "INTEGER DEFAULT 0"),
                 ("teacher_score", "REAL DEFAULT -1"),
                 ("teacher_comment", "TEXT DEFAULT ''"),
+                # S-GRADING(P2): 主观题转入后台批量批改的标记(status 仍为 submitted,
+                # 不影响「按 status 统计已交人数/未交名单」的一堆查询)
+                ("ai_pending", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE exam_attempts ADD COLUMN {col_def[0]} {col_def[1]}")
                 except sqlite3.OperationalError:
                     pass  # 字段已存在
+            # S-GRADING: 后台批改器扫描待判答卷, 用部分索引避免全表扫
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_ea_ai_pending "
+                          "ON exam_attempts(submitted_at) WHERE ai_pending=1")
+            except sqlite3.OperationalError:
+                pass
 
             # ── 字段迁移：exams 新增目标范围字段 ──
             for col_def in [

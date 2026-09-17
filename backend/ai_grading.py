@@ -14,7 +14,7 @@ import asyncio
 import json
 import threading
 import time as _time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from backend.logger import logger
@@ -50,6 +50,7 @@ class GradingJob:
     max_score: float
     answer_text: str
     mode: str = "short"     # short=可合并批量; essay=多维评分(逐条调用)
+    meta: dict[str, Any] = field(default_factory=dict)   # 源侧附加信息(学科/题型等)
     # 说明: 不做跨轮重试计数 —— 一轮里「批量→逐条→仍失败即转教师批改」，
     # 判不出的题当场就出队(grading=review)，不存在反复回炉的题目。
 
@@ -62,6 +63,9 @@ class SourceAdapter:
     fetch_jobs: Callable[[int], list[GradingJob]]
     save_batch: Callable[[int, list[tuple[GradingJob, dict[str, Any]]]], None]
     finalize_if_done: Callable[[int], None]
+    # 可选: 源侧自定义「单条批改」(返回结果结构需与本模块一致)。
+    # 考试要沿用它自己的简答/作文多维评分 prompt, 故必须走这个口子; 不传则用内置默认。
+    grade_single: Optional[Callable[[GradingJob, str], Any]] = None
 
 
 _ADAPTERS: dict[str, SourceAdapter] = {}
@@ -76,6 +80,12 @@ def register_source(adapter: SourceAdapter) -> None:
 
 def registered_sources() -> list[str]:
     return sorted(_ADAPTERS)
+
+
+def pending_keys(graded: dict[str, Any]) -> list[str]:
+    """仍待后台批改的题号（各业务共用判据：题态 grading=='pending'）"""
+    return [k for k, v in (graded or {}).items()
+            if isinstance(v, dict) and v.get("grading") == "pending"]
 
 
 def pending_summary() -> dict[str, int]:
@@ -102,6 +112,11 @@ def _clamp(score: Any, max_score: float) -> Optional[float]:
     if v != v:                      # NaN
         return None
     return round(max(0.0, min(v, max_score)), 1)
+
+
+def review_result(reason: str) -> dict[str, Any]:
+    """对外别名：业务侧自定义批改失败时复用的「转教师批改」结果"""
+    return _review_result(reason)
 
 
 def _review_result(reason: str) -> dict[str, Any]:
@@ -151,6 +166,23 @@ def _parse_batch_result(text: str, count: int) -> dict[int, dict[str, Any]]:
             "feedback": str(one.get("feedback") or one.get("建议") or "")[:600],
         }
     return out
+
+
+async def _grade_one(job: GradingJob, api_key: str,
+                     single: Optional[Callable[[GradingJob, str], Any]] = None) -> dict[str, Any]:
+    """单条批改：源侧自定义优先，否则用内置 prompt；异常一律转「待教师批改」，不猜分"""
+    if single is None:
+        return await _grade_single_fallback(job, api_key)
+    try:
+        res = single(job, api_key)
+        if asyncio.iscoroutine(res):
+            res = await res
+    except Exception as e:
+        logger.warning(f"[ai_grading] 源侧单条批改失败(attempt={job.attempt_id} key={job.entry_key}): {e}")
+        return _review_result("AI 批改未成功，已转教师批改。")
+    if isinstance(res, dict) and isinstance(res.get("score"), (int, float)):
+        return res
+    return _review_result("AI 批改未成功，已转教师批改。")
 
 
 async def _grade_single_fallback(job: GradingJob, api_key: str) -> dict[str, Any]:
@@ -209,7 +241,8 @@ def _essay_prompt(job: GradingJob) -> str:
     )
 
 
-async def _grade_group(jobs: list[GradingJob], api_key: str, sem: asyncio.Semaphore) -> dict[int, dict[str, Any]]:
+async def _grade_group(jobs: list[GradingJob], api_key: str, sem: asyncio.Semaphore,
+                       single: Optional[Callable[[GradingJob, str], Any]] = None) -> dict[int, dict[str, Any]]:
     """一道题的一组作业（可能来自多个学生）→ {id(job): result}
 
     先在组内按答案文本去重（同答案只评一次），再按 batch 上限分批送 AI。
@@ -230,9 +263,9 @@ async def _grade_group(jobs: list[GradingJob], api_key: str, sem: asyncio.Semaph
         # mode=essay 必须逐条（多维评分输出结构不同），其余可批量
         singles = [c for c in chunk if c.mode == "essay"]
         batchable = [c for c in chunk if c.mode != "essay"]
-        tasks: list[Any] = [_grade_single_fallback(c, api_key) for c in singles]
+        tasks: list[Any] = [_grade_one(c, api_key, single) for c in singles]
         if batchable:
-            tasks.append(_grade_batch_call(batchable, api_key, sem))
+            tasks.append(_grade_batch_call(batchable, api_key, sem, single))
         got = await asyncio.gather(*tasks) if tasks else []
         gi = 0
         for c in singles:
@@ -253,7 +286,8 @@ async def _grade_group(jobs: list[GradingJob], api_key: str, sem: asyncio.Semaph
     return results
 
 
-async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.Semaphore) -> dict[int, dict[str, Any]]:
+async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.Semaphore,
+                            single: Optional[Callable[[GradingJob, str], Any]] = None) -> dict[int, dict[str, Any]]:
     """同题多份答案 → 1 次 AI 调用；解析不出的条目自动逐条重试"""
     from backend.api.ai_service import call_ai_async
 
@@ -284,7 +318,7 @@ async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.S
         }
     if missing:
         logger.info(f"[ai_grading] 批量返回缺 {len(missing)} 份，逐条重试")
-        retry = await asyncio.gather(*[_grade_single_fallback(j, api_key) for j in missing])
+        retry = await asyncio.gather(*[_grade_one(j, api_key, single) for j in missing])
         for j, r in zip(missing, retry):
             out[id(j)] = r
     return out
@@ -347,8 +381,13 @@ async def drain_async(only_source: str = "", only_activity: str = "") -> dict[st
         for j in jobs:
             groups.setdefault((j.source, j.entry_key, j.mode, j.max_score), []).append(j)
         sem = asyncio.Semaphore(max(1, _cfg("AI_GRADING_CONCURRENCY")))
+        def _single_of(g: list[GradingJob]):
+            ad = _ADAPTERS.get(g[0].source)
+            return getattr(ad, "grade_single", None) if ad else None
+
         outcomes = await asyncio.gather(
-            *[_grade_group(g, api_key, sem) for g in groups.values()], return_exceptions=True
+            *[_grade_group(g, api_key, sem, _single_of(g)) for g in groups.values()],
+            return_exceptions=True
         )
         results: dict[int, dict[str, Any]] = {}
         for oc in outcomes:
