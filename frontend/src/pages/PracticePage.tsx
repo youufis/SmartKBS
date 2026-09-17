@@ -466,6 +466,9 @@ const TeacherView: React.FC = () => {
   const [savingReview, setSavingReview] = useState(false)
   // S-GRADING: 手动触发该练习的主观题批改(不等后台节拍)
   const [gradingNow, setGradingNow] = useState(false)
+  // 抽屉是否还开着：批改是异步的，闭包里的 detailOpen 会过期，只能靠 ref 判断
+  const detailOpenRef = useRef(false)
+  detailOpenRef.current = detailOpen
 
   useEffect(() => {
     // 加载学科列表
@@ -552,17 +555,22 @@ const TeacherView: React.FC = () => {
     setGradingNow(true)
     try {
       const { data } = await apiClient.post(`/api/practice/sessions/${detailSid}/grade-now`)
-      if (!data?.task_id) { message.info(data?.message || t('noPendingToGrade')); await viewSessionDetail(detailSid); return }
+      if (!data?.task_id) {
+        message.info(data?.message || t('noPendingToGrade'))
+        if (detailOpenRef.current) await viewSessionDetail(detailSid)
+        return
+      }
       message.info(t('gradingStarted', { count: data.pending_sessions || 0 }))
       const res = await pollAiTask(data.task_id, 240000)
       if (res?.error) message.error(res.error)
       else if (res) {
         message.success(t('gradingDone', { graded: res.graded ?? 0, review: res.to_review ?? 0 }))
-        await viewSessionDetail(detailSid)
+        // 教师可能已经把抽屉关掉了, 别再把抽屉强行打开
+        if (detailOpenRef.current) await viewSessionDetail(detailSid)
         loadSessions()
       } else {
         message.warning(t('gradingTimeoutRefresh'))
-        await viewSessionDetail(detailSid)
+        if (detailOpenRef.current) await viewSessionDetail(detailSid)
       }
     } catch (e: any) {
       message.error(e.response?.data?.detail || t('gradingFailed'))

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import {
@@ -47,6 +47,13 @@ const InteractionPage: React.FC = () => {
   const [quizResultsView, setQuizResultsView] = useState<any>(null)
   // S-GRADING(P3): 结果弹窗对应的测验 id(自动刷新/催批要用) + 催批中状态
   const [quizResultsId, setQuizResultsId] = useState<number | null>(null)
+  // 该结果里还剩几题在后台批改：为 0 就完全不需要轮询
+  const [quizResultsPending, setQuizResultsPending] = useState(0)
+  // 弹窗是否还开着：供延时回调判断。闭包里的 state 是点击当时的旧值, 不能拿来判断
+  const quizResultsOpenRef = useRef(false)
+  quizResultsOpenRef.current = !!quizResultsView
+  const quizPollTries = useRef(0)
+  const quizSubmitTries = useRef(0)
   const [quizGradingNow, setQuizGradingNow] = useState(false)
   const [quizStuSearch, setQuizStuSearch] = useState('')
   const [quizAiAnalysis, setQuizAiAnalysis] = useState<string | null>(null)
@@ -202,27 +209,49 @@ const InteractionPage: React.FC = () => {
       const { data } = await apiClient.get(url)
       setQuizResultsView(data)
       setQuizResultsId(quizId)
+      setQuizResultsPending(Number(data?.pending_ai ?? data?.pending_ai_total ?? 0))
       setQuizAiAnalysis(null)
     } catch { message.error(t('loadResultFailed')) }
   }
 
-  // S-GRADING(P3): 弹窗打开期间若还有题在后台批改, 每 8 秒自动刷新(最多 12 次)
+  // S-GRADING(P3): 弹窗打开期间若还有题在后台批改, 每 8 秒自动刷新(累计最多 12 次)
+  // 没有待批改题就不建轮询 —— 旧实现关掉弹窗 8 秒后会被第一次回调"复活"再弹一次
   useEffect(() => {
-    if (!quizResultsId) return
-    let n = 0
+    if (!quizResultsId || !(quizResultsPending > 0)) { quizPollTries.current = 0; return }
+    const url = isStudent
+      ? `/api/interaction/quizzes/${quizResultsId}/my-result`
+      : `/api/interaction/quizzes/${quizResultsId}/results`
     const id = window.setInterval(async () => {
-      if (++n > 12) { window.clearInterval(id); return }
-      const url = isStudent
-        ? `/api/interaction/quizzes/${quizResultsId}/my-result`
-        : `/api/interaction/quizzes/${quizResultsId}/results`
+      if (++quizPollTries.current > 12) { window.clearInterval(id); return }
       try {
         const { data } = await apiClient.get(url)
-        setQuizResultsView(data)
-        if (!(Number(data?.pending_ai ?? data?.pending_ai_total ?? 0) > 0)) window.clearInterval(id)
+        // 关键: quizResultsView 同时是「弹窗是否打开」的判据, 弹窗已关就不能再写它,
+        // 否则已关闭的结果弹窗会自己再弹出来。
+        setQuizResultsView((prev: any) => (prev ? data : prev))
+        setQuizResultsPending(Number(data?.pending_ai ?? data?.pending_ai_total ?? 0))
       } catch { /* 本轮没判完, 下一轮再看 */ }
     }, 8000)
     return () => window.clearInterval(id)
-  }, [quizResultsId, isStudent])
+  }, [quizResultsId, quizResultsPending, isStudent])
+
+  // S-GRADING(P3): 提交后的结果框在批改期间同步刷新成绩。
+  // 只在弹窗还开着(prev 非空)时写 state —— 关掉后绝不能写, 否则弹窗会被自己"复活"。
+  useEffect(() => {
+    const qid = takingQuiz?.id
+    const pend = Number(quizResult?.pending_ai || 0)
+    if (!qid || !(pend > 0)) { quizSubmitTries.current = 0; return }
+    const id = window.setInterval(async () => {
+      if (++quizSubmitTries.current > 12) { window.clearInterval(id); return }
+      try {
+        const { data } = await apiClient.get(`/api/interaction/quizzes/${qid}/my-result`)
+        setQuizResult((prev: any) => (prev ? {
+          ...prev, score: data.score, total_score: data.total_score,
+          percentage: data.percentage, pending_ai: data.pending_ai,
+        } : prev))
+      } catch { /* 本轮没判完, 下一轮再看 */ }
+    }, 8000)
+    return () => window.clearInterval(id)
+  }, [takingQuiz?.id, quizResult?.pending_ai])
 
   /** S-GRADING(P3): 教师催批待判的主观题; retryReview=true 时把「转人工」的题也重新排队再试 */
   const handleQuizGradeNow = async (retryReview = false) => {
@@ -233,7 +262,7 @@ const InteractionPage: React.FC = () => {
         `/api/interaction/quizzes/${quizResultsId}/grade-now`, { retry_review: retryReview })
       if (!data?.task_id) {
         message.info(data?.message || t('ipNoPendingGrading'))
-        await handleViewQuizResults(quizResultsId)
+        if (quizResultsOpenRef.current) await handleViewQuizResults(quizResultsId)
         return
       }
       message.info(t('ipGradingStarted', { count: data.pending_attempts || 0 }))
@@ -241,7 +270,7 @@ const InteractionPage: React.FC = () => {
       if (out?.error) message.error(out.error)
       else if (out) message.success(t('ipGradingDone', { graded: out.graded ?? 0, review: out.to_review ?? 0 }))
       else message.warning(t('ipGradingTimeout'))
-      await handleViewQuizResults(quizResultsId)
+      if (quizResultsOpenRef.current) await handleViewQuizResults(quizResultsId)
     } catch (err: any) {
       message.error(err?.response?.data?.detail || t('ipGradingFailed'))
     } finally { setQuizGradingNow(false) }
@@ -424,7 +453,8 @@ const InteractionPage: React.FC = () => {
       </Modal>
 
       {/* ── 答题结果 ── */}
-      <Modal title={t('result')} open={!!quizResult} onCancel={() => { setQuizResult(null); setTakingQuiz(null) }}
+      <Modal title={t('result')} open={!!quizResult}
+        onCancel={() => { setQuizResult(null); setTakingQuiz(null) }}
         footer={<Button onClick={() => { setQuizResult(null); setTakingQuiz(null) }}>{t('close')}</Button>}>
         {quizResult && (
           <Result
@@ -440,7 +470,12 @@ const InteractionPage: React.FC = () => {
 
       {/* ── 测验结果统计弹窗 ── */}
       <Modal title={quizResultsView?.quiz_title ? t('ipMyScore', { title: quizResultsView.quiz_title }) : t('ipQuizResult')}
-        open={!!quizResultsView} onCancel={() => setQuizResultsView(null)}
+        open={!!quizResultsView}
+        onCancel={() => {
+          setQuizResultsView(null)
+          setQuizResultsId(null)          // 关掉就停轮询
+          setQuizResultsPending(0)
+        }}
         footer={null} width={900}>
         {quizResultsView && (
           <>
