@@ -397,6 +397,8 @@
   "fenUnit": "分",
   "recheckDone": "已复核",
   "aiGraded": "AI 批改",
+  "exGradedDone": "已批改",
+  "exGradedByTeacher": "教师已批改",
   "exGradingPending": "AI 批改中",
   "exGradingPendingN": "{{count}} 题批改中",
   "exGradingPendingTitle": "成绩批改中",

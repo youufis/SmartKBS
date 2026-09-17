@@ -498,7 +498,7 @@
   "ipGradingFailed": "Failed to start grading, please retry",
   "ipNoPendingGrading": "No subjective questions are pending grading",
   "ipNeedsReview": "Pending teacher review",
-  "ipNeedsReviewN": "{{count}} pending teacher review",
+  "ipNeedsReviewN": "{{count}} to review",
   "ipNeedsReviewHint": "This answer could not be graded automatically and has been sent to your teacher. The final score follows the teacher's judgement.",
   "ipQuestionScore": "Score",
   "ipAiComment": "AI comment: ",

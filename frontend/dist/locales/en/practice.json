@@ -170,6 +170,7 @@
   "gradedByNone": "Not auto graded",
   "gradedByTeacher": "Teacher reviewed",
   "gradedByUnknown": "Graded",
+  "gradedDone": "Graded",
   "gradedByQueued": "Queued",
   "gradingPending": "AI grading",
   "pendingAiN": "{{count}} grading",

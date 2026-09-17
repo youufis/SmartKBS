@@ -139,7 +139,9 @@ const SessionRoster: React.FC<{
               if (a.teacher_reviewed) return <Tag color="green">{t('gradedByTeacher')}</Tag>
               if (a.pending_ai) return <Tag color="processing">{t('pendingAiN', { count: a.pending_ai })}</Tag>
               if (a.pending_review) return <Tag color="orange">{t('pendingReviewN', { count: a.pending_review })}</Tag>
-              return <Tag>{t('gradedByAi')}</Tag>
+              // 判分来源(AI/系统/要点)已经在逐题标签里显示, 这一列只说「判完没判完」,
+              // 三处(练习/考试/测验)口径统一用「已批改」
+              return <Tag color="green">{t('gradedDone')}</Tag>
             },
           },
           { title: t('submitTime'), dataIndex: 'submitted_at', width: 150, ellipsis: true, render: (v: string) => v || '-' },

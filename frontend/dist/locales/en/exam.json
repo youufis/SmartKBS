@@ -397,6 +397,8 @@
   "fenUnit": "pts",
   "recheckDone": "Rechecked",
   "aiGraded": "AI graded",
+  "exGradedDone": "Graded",
+  "exGradedByTeacher": "Teacher reviewed",
   "exGradingPending": "AI grading",
   "exGradingPendingN": "{{count}} grading",
   "exGradingPendingTitle": "Score still being graded",

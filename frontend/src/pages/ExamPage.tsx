@@ -1461,10 +1461,10 @@ const ExamPage: React.FC = () => {
                   // S-GRADING(P2): 一眼看出谁的卷子还在批改中 / 谁需要人工批改
                   { title: t('exGradingState'), key: 'grading_state', width: 110,
                     render: (_: any, r: any) => {
-                      if (r.teacher_reviewed) return <Tag color="green">{t('recheckDone')}</Tag>
+                      if (r.teacher_reviewed) return <Tag color="green">{t('exGradedByTeacher')}</Tag>
                       if (r.pending_ai) return <Tag color="blue">{t('exGradingPendingN', { count: r.pending_ai })}</Tag>
                       if (r.pending_review) return <Tag color="orange">{t('exPendingReviewN', { count: r.pending_review })}</Tag>
-                      return <Tag>{t('aiGraded')}</Tag>
+                      return <Tag color="green">{t('exGradedDone')}</Tag>
                     },
                   },
                   { title: t('submittedAt'), dataIndex: 'submitted_at', key: 'submitted_at', width: 150,
