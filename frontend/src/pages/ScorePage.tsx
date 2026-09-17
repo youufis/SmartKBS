@@ -15,17 +15,22 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { registerUser, extractApiErrorDetail } from '../api/users'
 
 const { Text } = Typography
 
+/** 新建学生账号的初始密码，与用户管理批量导入模板保持一致 */
+const DEFAULT_STUDENT_PASSWORD = '123456'
+
 interface Student {
+  /** 学号 = 登录用户名（全站统一以 username 作为学号展示） */
+  username?: string
   class: string
   name: string
   gender: string
-  language: string
-  subjects: string
-  major: string
   score?: number
+  reward_points?: number
+  total_points?: number
 }
 
 interface Stats {
@@ -84,6 +89,7 @@ const ScorePage: React.FC = () => {
   // 学生管理
   const [editModal, setEditModal] = useState(false)
   const [editStudent, setEditStudent] = useState<Student | null>(null)
+  const [editUsername, setEditUsername] = useState('')
   const [editName, setEditName] = useState('')
   const [editClass, setEditClass] = useState('')
   const [editGender, setEditGender] = useState('')
@@ -253,6 +259,7 @@ const ScorePage: React.FC = () => {
   // ── 添加/编辑学生 ──
   const openAddStudent = () => {
     setEditStudent(null)
+    setEditUsername('')
     setEditName('')
     setEditClass(cls)
     setEditGender('男')
@@ -261,30 +268,63 @@ const ScorePage: React.FC = () => {
 
   const openEditStudent = (s: Student) => {
     setEditStudent(s)
+    setEditUsername(s.username || '')
     setEditName(s.name)
     setEditClass(s.class)
     setEditGender(s.gender || '男')
     setEditModal(true)
   }
 
+  // 班级显示名「高一1班」→ 建号接口要的班级序号「1」(与用户管理/导入模板同一约定)
+  const toClassNo = (v: string) => {
+    const t2 = v.trim().replace(/班/g, '').replace(grade, '').trim()
+    return t2 || v.trim()
+  }
+
   const handleSaveStudent = async () => {
-    if (!editName.trim() || !editClass.trim()) {
+    const newName = editName.trim()
+    const newClass = editClass.trim()
+    const studentNo = editUsername.trim()
+    if (!newName || !newClass) {
       message.warning(t('requiredFields'))
       return
     }
+    // 新增：学号必填，因为要拿它当登录账号建号（名单来自 users 表，不建号就不会出现该学生）
+    if (!editStudent && !studentNo) {
+      message.warning(t('studentIdRequired'))
+      return
+    }
     try {
+      if (!editStudent) {
+        try {
+          await registerUser({
+            username: studentNo,
+            password: DEFAULT_STUDENT_PASSWORD,
+            name: newName,
+            gender: editGender === '男' ? 1 : 0,
+            role: 2,
+            grade,
+            class_val: toClassNo(newClass),
+          })
+        } catch (err: any) {
+          // 学号重复/超出任教范围等，直接把后端原因抛给老师
+          message.error(extractApiErrorDetail(err?.response?.data) || t('createAccountFailed'))
+          return
+        }
+      }
       const body: Record<string, string> = {
-        grade, name: editName.trim(), class: editClass.trim(),
-        gender: editGender, language: '', subjects: '', major: '',
+        grade, name: newName, class: newClass, gender: editGender,
       }
       if (editStudent) {
         body.originalName = editStudent.name
         body.originalClass = editStudent.class
       }
       await apiClient.post('/api/scores/student', { ...body, teacher: currentTeacher })
-      message.success(editStudent ? t('saveSuccess') : t('addSuccess'))
+      message.success(editStudent ? t('saveSuccess') : t('addStudentSuccess', { no: studentNo }))
       setEditModal(false)
       loadStudents()
+      loadStats()
+      loadRanking()
     } catch {
       message.error(t('saveFail'))
     }
@@ -385,6 +425,8 @@ const ScorePage: React.FC = () => {
 
   // ── 表格列（统一显示手动积分 + 奖励积分 + 综合积分）──
   const scoreColumns = [
+    { title: t('studentId'), dataIndex: 'username', key: 'username', width: 100,
+      render: (v: string) => v || '-' },
     { title: t('name'), dataIndex: 'name', key: 'name', width: 80 },
     {
       title: t('manualScore'), dataIndex: 'score', key: 'score', width: 80,
@@ -425,6 +467,8 @@ const ScorePage: React.FC = () => {
         return <span style={{ fontSize: 16 }}>{medals[idx] || `#${idx + 1}`}</span>
       },
     },
+    { title: t('studentId'), dataIndex: 'username', key: 'username', width: 100,
+      render: (v: string) => v || '-' },
     { title: t('name'), dataIndex: 'name', key: 'name', width: 100 },
     ...(!cls ? [{ title: t('className'), dataIndex: 'class', key: 'class', width: 100 }] : []),
     {
@@ -679,7 +723,7 @@ const ScorePage: React.FC = () => {
               <Table
                 dataSource={students}
                 columns={scoreColumns}
-                rowKey={(r) => r.name}
+                rowKey={(r) => r.username || r.name}
                 pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudents', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
                 size="small"
                 locale={{ emptyText: <Empty description={t('noStudentData')} /> }}
@@ -697,7 +741,7 @@ const ScorePage: React.FC = () => {
               <Table
                 dataSource={ranking}
                 columns={rankingColumns}
-                rowKey={(r) => r.name}
+                rowKey={(r) => r.username || r.name}
                 pagination={{ pageSize: 50, hideOnSinglePage: true }}
                 size="small"
                 rowClassName={(record) =>
@@ -720,12 +764,11 @@ const ScorePage: React.FC = () => {
             <Table
               dataSource={students}
               columns={[
+                { title: t('studentId'), dataIndex: 'username', key: 'username', width: 110,
+                  render: (v: string) => v || '-' },
                 { title: t('name'), dataIndex: 'name', key: 'name', width: 100 },
                 { title: t('gender'), dataIndex: 'gender', key: 'gender', width: 60 },
                 { title: t('className'), dataIndex: 'class', key: 'class', width: 120 },
-                { title: t('language'), dataIndex: 'language', key: 'language', width: 80 },
-                { title: t('subjects'), dataIndex: 'subjects', key: 'subjects', width: 120 },
-                { title: t('major'), dataIndex: 'major', key: 'major', width: 100 },
                 {
                   title: t('actions'), key: 'action', width: 140,
                   render: (_: any, record: Student) => (
@@ -744,7 +787,7 @@ const ScorePage: React.FC = () => {
                   ),
                 },
               ]}
-              rowKey={(r) => r.name}
+              rowKey={(r) => r.username || r.name}
                 pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalStudents', { count: total }), pageSizeOptions: ['10', '20', '50'] }}
               size="small"
             />
@@ -764,11 +807,23 @@ const ScorePage: React.FC = () => {
       >
         <Space orientation="vertical" style={{ width: '100%' }}>
           <div>
-            <Text>{t('name')}</Text>
+            <Text>{t('studentId')} <Text type="danger">*</Text></Text>
+            <Input
+              value={editStudent ? (editStudent.username || '') : editUsername}
+              onChange={(e) => setEditUsername(e.target.value)}
+              placeholder={t('studentIdPlaceholder')}
+              disabled={!!editStudent}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {editStudent ? t('studentIdLockedHint') : t('studentIdCreateHint', { password: DEFAULT_STUDENT_PASSWORD })}
+            </Text>
+          </div>
+          <div>
+            <Text>{t('name')} <Text type="danger">*</Text></Text>
             <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t('studentName')} />
           </div>
           <div>
-            <Text>{t('className')}</Text>
+            <Text>{t('className')} <Text type="danger">*</Text></Text>
             <Input value={editClass} onChange={(e) => setEditClass(e.target.value)} placeholder={t('className')} />
           </div>
           <div>

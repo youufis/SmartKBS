@@ -179,6 +179,17 @@ def export_scores(
     if not rows:
         raise HTTPException(status_code=404, detail="没有找到积分数据")
 
+    # S-NO: scores 表只存姓名, 学号(=users.username)按「年级+姓名」反查补齐
+    no_map = {}
+    for g, n, unames in execute_query(
+        """SELECT grade, name, GROUP_CONCAT(username, '、')
+           FROM users
+           WHERE role=2 AND name IS NOT NULL AND name != ''
+           GROUP BY grade, name"""
+    ):
+        if n:
+            no_map[(g or "", n)] = unames or ""
+
     # 计算排名
     ranked = []
     seen_classes = set()
@@ -191,6 +202,7 @@ def export_scores(
         ranked.append({
             "grade": r[0],
             "class": r[1],
+            "student_no": no_map.get((r[0] or "", r[2] or ""), ""),
             "name": r[2],
             "score": r[3],
             "updated_at": r[4] or "",
@@ -210,10 +222,10 @@ def export_scores(
         title += f" - {grade}"
     if cls:
         title += f" - {cls}班"
-    ws.merge_cells("A1:E1")
+    ws.merge_cells("A1:G1")
     ws.cell(1, 1, title).font = TITLE_FONT
 
-    headers = ["年级", "班级", "学生姓名", "积分", "排名", "最后更新"]
+    headers = ["年级", "班级", "学号", "学生姓名", "积分", "排名", "最后更新"]
     for i, h in enumerate(headers, 1):
         ws.cell(3, i, h)
     _style_header(ws, 3, len(headers))
@@ -222,10 +234,11 @@ def export_scores(
         row = idx + 4
         ws.cell(row, 1, r["grade"])
         ws.cell(row, 2, r["class"])
-        ws.cell(row, 3, r["name"])
-        ws.cell(row, 4, r["score"])
-        ws.cell(row, 5, r["rank"])
-        ws.cell(row, 6, r["updated_at"])
+        ws.cell(row, 3, r["student_no"])
+        ws.cell(row, 4, r["name"])
+        ws.cell(row, 5, r["score"])
+        ws.cell(row, 6, r["rank"])
+        ws.cell(row, 7, r["updated_at"])
 
     _style_cells(ws, 4, len(ranked) + 3, len(headers))
     _auto_width(ws, len(headers))

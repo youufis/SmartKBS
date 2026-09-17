@@ -130,16 +130,23 @@ def _enrich_with_reward_points(students: list[dict[str, Any]], grade: str) -> li
         return students
     # 批量查询该年级所有学生的积分，一次 DB 调用
     reward_rows = execute_query(
-        """SELECT u.name, COALESCE(stp.total_points, 0)
+        """SELECT u.username, u.name, COALESCE(stp.total_points, 0)
            FROM users u
            LEFT JOIN student_total_points stp ON u.username = stp.student_username
            WHERE u.role=2 AND u.grade=?""",
         (grade,),
     )
-    name_to_reward = {row[0]: row[1] for row in reward_rows if row[0]}
-    for s in students:
-        s["reward_points"] = name_to_reward.get(s["name"], 0)
-        s["total_points"] = (s.get("score") or 0) + s["reward_points"]
+    # S-NO: 学号(username)唯一, 优先按学号精确关联 —— 同年级同名学生不再互相串分
+    by_username = {row[0]: row[2] for row in reward_rows if row[0]}
+    # 兜底: 老数据缺学号时退回按姓名匹配(与旧行为一致)
+    by_name = {row[1]: row[2] for row in reward_rows if row[1]}
+    for st in students:
+        uname = (st.get("username") or "").strip()
+        pts = by_username.get(uname) if uname else None
+        if pts is None:
+            pts = by_name.get(st["name"])
+        st["reward_points"] = pts or 0
+        st["total_points"] = (st.get("score") or 0) + st["reward_points"]
     return students
 
 

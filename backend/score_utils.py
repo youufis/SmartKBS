@@ -86,7 +86,7 @@ def load_students(grade=""):
             c = conn.cursor()
             if grade_id:
                 c.execute(
-                    """SELECT u.name, COALESCE(c.display_name, u.class) as cls_display, u.gender
+                    """SELECT u.username, u.name, COALESCE(c.display_name, u.class) as cls_display, u.gender
                        FROM users u
                        LEFT JOIN classes c ON u.class_id = c.id
                        WHERE u.role=2 AND u.grade_id=? AND u.name IS NOT NULL AND u.name!=''""",
@@ -96,15 +96,16 @@ def load_students(grade=""):
                 return []
 
             seen, class_map = set(), {}
-            for name, cls_display, gender_val in c.fetchall():
+            for username, name, cls_display, gender_val in c.fetchall():
                 if name in seen:
                     continue
                 seen.add(name)
                 cls_display = cls_display or ""
                 class_map.setdefault(cls_display, []).append({
+                    # 学号即登录用户名, 供积分管理/排行榜/学生管理统一展示
+                    "username": username or "",
                     "class": cls_display, "name": name,
                     "gender": "男" if gender_val in (1, "1", "男") else "女" if gender_val in (2, "0", "女", 0) else "",
-                    "language": "", "subjects": "", "major": "",
                 })
             for cls_name in sorted(class_map.keys()):
                 students.extend(class_map[cls_name])
