@@ -2559,6 +2559,7 @@ async def grade_exam_now(exam_id: int, request: Request):
         coro_factory=lambda: drain_async(only_source="exam", only_activity=str(exam_id)),
         owner_username=username,
         dedupe_key=f"exam-grade:{exam_id}",
+        reuse_completed=False,   # 再点一次就得真再批一轮
     )
     return {"task_id": task_id, "message": "批改已开始", "pending_attempts": cnt}
 

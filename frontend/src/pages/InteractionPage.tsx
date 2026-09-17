@@ -24,6 +24,13 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 const { Title, Text } = Typography
 
+/** S-GRADING(P3): 这道题的分是谁给的 */
+const GRADED_BY_KEYS: Record<string, string> = {
+  ai: 'ipGradedByAi', keyword: 'ipGradedByKeyword', exact: 'ipGradedByExact',
+  none: 'ipGradedByNone', teacher: 'ipGradedByTeacher', queued: 'ipGradedByQueued',
+}
+const isQuizPending = (r: any) => r?.grading === 'pending' || r?.graded_by === 'queued'
+
 const InteractionPage: React.FC = () => {
   const { t } = useTranslation('interaction')
   const user = useAuthStore((s) => s.user)
@@ -38,6 +45,9 @@ const InteractionPage: React.FC = () => {
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({})
   const [quizResult, setQuizResult] = useState<any>(null)
   const [quizResultsView, setQuizResultsView] = useState<any>(null)
+  // S-GRADING(P3): 结果弹窗对应的测验 id(自动刷新/催批要用) + 催批中状态
+  const [quizResultsId, setQuizResultsId] = useState<number | null>(null)
+  const [quizGradingNow, setQuizGradingNow] = useState(false)
   const [quizStuSearch, setQuizStuSearch] = useState('')
   const [quizAiAnalysis, setQuizAiAnalysis] = useState<string | null>(null)
   const [quizAiAnalysisLoading, setQuizAiAnalysisLoading] = useState(false)
@@ -177,6 +187,8 @@ const InteractionPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/interaction/quizzes/${takingQuiz.id}/answer`, { answers: JSON.stringify(answers) })
       setQuizResult(data)
+      // S-GRADING(P3): 主观题改由后台批量批改, 提交即刻返回, 成绩稍后自动更新
+      if (Number(data?.pending_ai || 0) > 0) message.info(t('ipGradingQueued', { count: data.pending_ai }))
     } catch (err: any) {
       message.error(err.response?.data?.detail || t('submitFailed'))
     }
@@ -189,8 +201,50 @@ const InteractionPage: React.FC = () => {
         : `/api/interaction/quizzes/${quizId}/results`
       const { data } = await apiClient.get(url)
       setQuizResultsView(data)
+      setQuizResultsId(quizId)
       setQuizAiAnalysis(null)
     } catch { message.error(t('loadResultFailed')) }
+  }
+
+  // S-GRADING(P3): 弹窗打开期间若还有题在后台批改, 每 8 秒自动刷新(最多 12 次)
+  useEffect(() => {
+    if (!quizResultsId) return
+    let n = 0
+    const id = window.setInterval(async () => {
+      if (++n > 12) { window.clearInterval(id); return }
+      const url = isStudent
+        ? `/api/interaction/quizzes/${quizResultsId}/my-result`
+        : `/api/interaction/quizzes/${quizResultsId}/results`
+      try {
+        const { data } = await apiClient.get(url)
+        setQuizResultsView(data)
+        if (!(Number(data?.pending_ai ?? data?.pending_ai_total ?? 0) > 0)) window.clearInterval(id)
+      } catch { /* 本轮没判完, 下一轮再看 */ }
+    }, 8000)
+    return () => window.clearInterval(id)
+  }, [quizResultsId, isStudent])
+
+  /** S-GRADING(P3): 教师催批待判的主观题; retryReview=true 时把「转人工」的题也重新排队再试 */
+  const handleQuizGradeNow = async (retryReview = false) => {
+    if (!quizResultsId) return
+    setQuizGradingNow(true)
+    try {
+      const { data } = await apiClient.post(
+        `/api/interaction/quizzes/${quizResultsId}/grade-now`, { retry_review: retryReview })
+      if (!data?.task_id) {
+        message.info(data?.message || t('ipNoPendingGrading'))
+        await handleViewQuizResults(quizResultsId)
+        return
+      }
+      message.info(t('ipGradingStarted', { count: data.pending_attempts || 0 }))
+      const out: any = await pollAiTask(data.task_id, 240000)
+      if (out?.error) message.error(out.error)
+      else if (out) message.success(t('ipGradingDone', { graded: out.graded ?? 0, review: out.to_review ?? 0 }))
+      else message.warning(t('ipGradingTimeout'))
+      await handleViewQuizResults(quizResultsId)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('ipGradingFailed'))
+    } finally { setQuizGradingNow(false) }
   }
 
   const handleQuizAiAnalysis = async (quizId: number) => {
@@ -374,9 +428,12 @@ const InteractionPage: React.FC = () => {
         footer={<Button onClick={() => { setQuizResult(null); setTakingQuiz(null) }}>{t('close')}</Button>}>
         {quizResult && (
           <Result
-            status={quizResult.percentage >= 60 ? 'success' : 'warning'}
+            status={Number(quizResult.pending_ai || 0) > 0 ? 'info'
+              : (quizResult.percentage >= 60 ? 'success' : 'warning')}
             title={t('ipScoreOf', { score: quizResult.score, total: quizResult.total_score })}
-            subTitle={t('accuracyRate', { percent: quizResult.percentage })}
+            subTitle={Number(quizResult.pending_ai || 0) > 0
+              ? t('ipGradingPendingHint', { count: quizResult.pending_ai })
+              : t('accuracyRate', { percent: quizResult.percentage })}
           />
         )}
       </Modal>
@@ -401,7 +458,11 @@ const InteractionPage: React.FC = () => {
                 {quizResultsView.details?.map((r: any, i: number) => (
                   <Card key={i} size="small" style={{ marginBottom: 8 }}
                     title={t('ipQNo', { no: i + 1 })}
-                    extra={r.is_correct ? <Tag color="success">{t('ipCorrect')}</Tag> : <Tag color="error">{t('ipWrong')}</Tag>}>
+                    extra={isQuizPending(r)
+                      ? <Tag color="blue">{t('ipGradingPending')}</Tag>
+                      : r.needs_review
+                      ? <Tag color="orange">{t('ipNeedsReview')}</Tag>
+                      : (r.is_correct ? <Tag color="success">{t('ipCorrect')}</Tag> : <Tag color="error">{t('ipWrong')}</Tag>)}>
                     <FormulaRenderer content={r.question} />
                     <MediaDisplay svgContent={r.svg_content} hasSvg={r.has_svg} mediaFiles={r.media_files} size="compact" />
                     {r.options && typeof r.options === 'object' && !Array.isArray(r.options) && (
@@ -423,8 +484,26 @@ const InteractionPage: React.FC = () => {
                       </div>
                     )}
                     <div style={{ marginTop: 8 }}>
-                      <Text>{t('ipYourAnswer')}<Text type={r.is_correct ? 'success' : 'danger'}>{r.user_answer || t('ipUnanswered')}</Text></Text>
-                      {!r.is_correct && <div><Text type="secondary">{t('ipCorrectAnswer')}{r.correct_answer}</Text></div>}
+                      <Text>{t('ipYourAnswer')}<Text type={isQuizPending(r) ? undefined : (r.is_correct ? 'success' : 'danger')}>{r.user_answer || t('ipUnanswered')}</Text></Text>
+                      {!r.is_correct && !isQuizPending(r) && !r.needs_review && (
+                        <div><Text type="secondary">{t('ipCorrectAnswer')}{r.correct_answer}</Text></div>
+                      )}
+                      {/* S-GRADING(P3): 逐题得分与判分来源(以前简答题只给"对/错", 扣了几分完全看不出) */}
+                      {!isQuizPending(r) && (
+                        <div style={{ marginTop: 4 }}>
+                          <Text type="secondary">{t('ipQuestionScore')} {r.score ?? 0}/{r.max_score ?? 0}</Text>
+                          {!!r.graded_by && <Tag style={{ marginLeft: 6 }}>{t(GRADED_BY_KEYS[String(r.graded_by)] || 'ipGradedByNone')}</Tag>}
+                        </div>
+                      )}
+                      {!!r.comment && (
+                        <div style={{ marginTop: 4 }}><Text type="secondary">{t('ipAiComment')}{r.comment}</Text></div>
+                      )}
+                      {!!r.feedback && (
+                        <div style={{ marginTop: 4 }}><Text type="secondary">{t('ipAiFeedback')}{r.feedback}</Text></div>
+                      )}
+                      {!!r.needs_review && (
+                        <div style={{ marginTop: 4 }}><Text type="warning">{t('ipNeedsReviewHint')}</Text></div>
+                      )}
                     </div>
                     {r.explanation && (
                       <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
@@ -470,11 +549,42 @@ const InteractionPage: React.FC = () => {
                           ),
                         },
                         { title: t('ipScoreCol'), dataIndex: 'score', width: 64 },
+                        // S-GRADING(P3): 谁的卷子还没判完
+                        { title: t('ipGradingState'), key: 'gs', width: 104,
+                          render: (_: any, r: any) => (
+                            r.pending_ai ? <Tag color="blue">{t('ipGradingPendingN', { count: r.pending_ai })}</Tag>
+                              : r.pending_review ? <Tag color="orange">{t('ipNeedsReviewN', { count: r.pending_review })}</Tag>
+                              : <Tag color="green">{t('ipGraded')}</Tag>
+                          ),
+                        },
                         { title: t('ipSubmitted'), dataIndex: 'submitted_at', width: 150 },
                       ]} />
                   </Card>
                 )}
                 <div style={{ textAlign: 'right', marginBottom: 8 }}>
+                  {/* S-GRADING(P3): 后台还没判完 / 有题判不准时, 教师可以立刻催批 */}
+                  {(Number(quizResultsView.pending_ai_total || 0) > 0
+                    || Number(quizResultsView.pending_review_total || 0) > 0) && (
+                    <Space size={6} wrap style={{ marginRight: 8 }}>
+                      {quizResultsView.pending_ai_total > 0 && (
+                        <Tag color="blue">{t('ipGradingPendingN', { count: quizResultsView.pending_ai_total })}</Tag>
+                      )}
+                      {quizResultsView.pending_review_total > 0 && (
+                        <Tag color="orange">{t('ipNeedsReviewN', { count: quizResultsView.pending_review_total })}</Tag>
+                      )}
+                      <Popconfirm title={t('ipGradeNowConfirm')} onConfirm={() => handleQuizGradeNow(false)}>
+                        <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />}
+                          loading={quizGradingNow} disabled={!(quizResultsView.pending_ai_total > 0)}>
+                          {t('ipGradeNow')}
+                        </Button>
+                      </Popconfirm>
+                      {quizResultsView.pending_review_total > 0 && (
+                        <Popconfirm title={t('ipRetryReviewConfirm')} onConfirm={() => handleQuizGradeNow(true)}>
+                          <Button size="small" loading={quizGradingNow}>{t('ipRetryReview')}</Button>
+                        </Popconfirm>
+                      )}
+                    </Space>
+                  )}
                   <Button icon={<RobotOutlined />} size="small"
                     loading={quizAiAnalysisLoading}
                     onClick={() => handleQuizAiAnalysis(quizResultsView.quiz?.id)}>

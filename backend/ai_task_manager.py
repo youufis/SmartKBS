@@ -116,6 +116,7 @@ class AITaskManager:
         owner_username: str | None = None,
         dedupe_key: str | None = None,
         max_concurrent: int | None = None,
+        reuse_completed: bool = True,
     ) -> str:
         """创建后台任务，返回 task_id
 
@@ -125,6 +126,9 @@ class AITaskManager:
             owner_username: 任务归属者, 缺省取当前请求上下文
             dedupe_key: 去重键。同一归属者的同键任务若仍在排队/执行, 或已在
                 REUSE_DONE_WINDOW 内完成, 则直接复用既有 task_id 而不再发起一次
+                reuse_completed: 已完成的同键任务是否复用。手动「催批/再批一次」必须
+                    传 False —— 否则第二次点击会拿到上一轮的完成回执, 看起来批过了、
+                    实际新一轮压根没跑
                 真实模型调用 —— 用于挡住刷新、误点两下、前端重试造成的重复计费。
                 刻意不传时行为与旧版一致(不去重), 以免把不同参数的请求误并成一个。
             max_concurrent: 该归属者允许的进行中任务数上限, 超出抛 TooManyAITasks
@@ -141,7 +145,8 @@ class AITaskManager:
                     if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
                         logger.info(f"AI 后台任务复用(进行中): {t.task_id} - {description}")
                         return t.task_id
-                    if (t.status == TaskStatus.COMPLETED and t.completed_at
+                    if (reuse_completed
+                            and t.status == TaskStatus.COMPLETED and t.completed_at
                             and now - t.completed_at < self.REUSE_DONE_WINDOW):
                         logger.info(f"AI 后台任务复用(完成 {int(now - t.completed_at)}s): "
                                     f"{t.task_id} - {description}")

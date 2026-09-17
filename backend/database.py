@@ -554,6 +554,23 @@ def init_db():
                 UNIQUE(quiz_id, student_username)
             )""")
 
+            # ── 字段迁移：interaction_quiz_answers 逐题批改结果 + 待批改标记(S-GRADING P3) ──
+            # 旧表只有一个总分, 简答题判了多少分、谁判的、还剩几题没判 全都无处可查,
+            # 前端只能"再精确匹配一遍"猜 → 简答题永远显示答错。
+            for col_def in [
+                ("graded", "TEXT DEFAULT ''"),
+                ("ai_pending", "INTEGER DEFAULT 0"),
+            ]:
+                try:
+                    c.execute(f"ALTER TABLE interaction_quiz_answers ADD COLUMN {col_def[0]} {col_def[1]}")
+                except sqlite3.OperationalError:
+                    pass  # 字段已存在
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_iqa_ai_pending "
+                          "ON interaction_quiz_answers(submitted_at) WHERE ai_pending=1")
+            except sqlite3.OperationalError:
+                pass
+
             # ── 课堂互动：快速投票表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS interaction_polls (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
