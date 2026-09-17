@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
   Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination, Checkbox,
-  Switch, Tooltip, Drawer,
+  Switch, Tooltip,
 } from 'antd'
 import {
   RobotOutlined, ReloadOutlined, CheckCircleOutlined,
@@ -745,18 +745,24 @@ const TeacherView: React.FC = () => {
             ]}
           />
       )}
-      {/* ── S-GRADE: 练习详情抽屉(题目 + 名册 + 逐个看答卷批改) ── */}
-      <Drawer
+      {/* ── S-GRADE: 练习详情(题目 + 名册 + 逐个看答卷批改) —— 居中弹窗，与随堂测验结果一致 ── */}
+      <Modal
         title={detail?.session?.title || t('detail')}
-        placement="right"
-        width={900}
         open={detailOpen}
-        onClose={() => { setDetailOpen(false); setSheetAttempt(null) }}
-        extra={Number(detail?.pending_ai_total || 0) > 0 && !detailLoading ? (
-          <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />} loading={gradingNow} onClick={gradeNow}>
-            {t('gradeNow')}
-          </Button>
-        ) : null}
+        onCancel={() => { setDetailOpen(false); setSheetAttempt(null) }}
+        width={900}
+        styles={{ body: { maxHeight: '68vh', overflowY: 'auto', paddingRight: 6 } }}
+        footer={
+          <Space wrap>
+            {/* 还有主观题在后台批改时, 教师可以立刻催批 */}
+            {Number(detail?.pending_ai_total || 0) > 0 && !detailLoading && (
+              <Button type="primary" ghost icon={<ThunderboltOutlined />} loading={gradingNow} onClick={gradeNow}>
+                {t('gradeNow')}
+              </Button>
+            )}
+            <Button onClick={() => { setDetailOpen(false); setSheetAttempt(null) }}>{t('close')}</Button>
+          </Space>
+        }
       >
         {detailLoading && <Spin style={{ display: 'block', margin: '60px auto' }} />}
         {!detailLoading && detail && (
@@ -789,7 +795,7 @@ const TeacherView: React.FC = () => {
             </div>
           </>
         )}
-      </Drawer>
+      </Modal>
 
       {/* ── 学生答卷: 逐题作答/批改明细, 主观题可直接改分写评语 ── */}
       <Modal
