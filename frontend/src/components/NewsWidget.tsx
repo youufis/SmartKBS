@@ -1,5 +1,6 @@
 /** 热点新闻 - 首页Widget */
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, Tag, Button, Space, Typography, List, Spin, Progress } from 'antd';
 import { GlobalOutlined, RightOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -14,6 +15,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const NewsWidget: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation('dashboard');
   const { articles, loading, stats, loadList, loadStats } = useNewsStore();
 
   useEffect(() => {
@@ -26,13 +28,13 @@ const NewsWidget: React.FC = () => {
       title={
         <Space>
           <GlobalOutlined style={{ color: '#1677ff' }} />
-          <span>热点快讯</span>
+          <span>{t('wn.title')}</span>
         </Space>
       }
       size="small"
       extra={
         <Button type="link" size="small" onClick={() => navigate('/news-hub')}>
-          查看全部 <RightOutlined />
+          {t('viewAll')} <RightOutlined />
         </Button>
       }
     >
@@ -71,7 +73,7 @@ const NewsWidget: React.FC = () => {
                     </Text>
                     {item.is_viewed && (
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        <EyeOutlined /> 已读
+                        <EyeOutlined /> {t('wn.viewed')}
                       </Text>
                     )}
                   </Space>
@@ -87,7 +89,7 @@ const NewsWidget: React.FC = () => {
         <div style={{ marginTop: 8 }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Text type="secondary" style={{ fontSize: 11 }}>
-              今日已获 {stats.todayPoints}/{stats.pointsMax} 积分
+              {t('wn.points', { p: stats.todayPoints, m: stats.pointsMax })}
             </Text>
           </Space>
           <Progress

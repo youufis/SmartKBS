@@ -15,7 +15,11 @@
     "taskList": "Task List",
     "aiCompanion": "AI Companion",
     "teaching": "Teaching: ",
-    "greeting": "{{time}}, {{name}}{{role}}! 👋"
+    "greeting": "{{time}}, {{name}}{{role}}! 👋",
+    "streak": "{{n}}-day streak",
+    "daysToExam": "Nearest exam ends in {{n}} days",
+    "dueToday": "Due today, {{h}}h left",
+    "overdueDays": "{{n}} days overdue"
   },
   "stats": {
     "exam": "Exams",
@@ -501,5 +505,149 @@
   "scNeedPointsUp": "{{count}} pts to level up",
   "scMoreBadges": "{{count}} more badges",
   "activityLoadFailed": "Failed to load activity, please retry",
-  "retry": "Retry"
+  "retry": "Retry",
+  "banner": {
+    "portraitHint": "View this week's AI learning portrait"
+  },
+  "todoCard": {
+    "title": "Today's Focus",
+    "count": "{{n}} open",
+    "viewAll": "Full list",
+    "empty": "Nothing pressing today. Enjoy your day 🎉",
+    "go": "Go",
+    "streak": "{{n}}-day study streak"
+  },
+  "statsS": {
+    "todoExams": "Pending Exams",
+    "todoExamsSuffix": "{{done}} completed",
+    "pendingTodo": "Open Tasks",
+    "pendingTodoSuffix": "{{overdue}} overdue · {{urgent}} urgent",
+    "wrongPending": "Review Mistakes",
+    "wrongSuffix": "{{total}} total · {{mastered}} mastered",
+    "myScore": "My Points",
+    "myScoreSuffix": "Rank {{rank}}"
+  },
+  "statsT": {
+    "examManage": "Published Exams",
+    "examSuffix": "{{draft}} drafts · {{ended}} ended",
+    "pending": "To Grade",
+    "pendingSuffix": "{{papers}} exams · {{tasks}} tasks",
+    "ongoing": "Ongoing Activities",
+    "ongoingSuffix": "{{quiz}} quizzes · {{quick}} quick quiz",
+    "students": "My Students",
+    "studentsSuffix": "{{active}} active today"
+  },
+  "trend": {
+    "title": "7-Day Learning Trend",
+    "weekPoints": "Points this week +{{n}}",
+    "points": "Points",
+    "chats": "Chats",
+    "empty": "No activity in the last 7 days. Go finish a task!"
+  },
+  "radar": {
+    "title": "Ability Profile",
+    "hint": "Based on real accuracy/completion across exams, course practice, smart practice and mistake mastery",
+    "exam": "Exam avg",
+    "coursePractice": "Course",
+    "practice": "Practice",
+    "wrongBook": "Mastery",
+    "noData": "Complete some activities to reveal your ability profile"
+  },
+  "scores": {
+    "avgRate": "Avg rate {{v}}%",
+    "total": "Total",
+    "mine": "Score"
+  },
+  "growth": {
+    "title": "Growth Portfolio",
+    "nextTitle": "Next: {{name}}",
+    "maxTitle": "Top title reached",
+    "badges": "Badges",
+    "badgeWall": "Badge wall",
+    "subjectTitles": "Subject titles",
+    "wrongCta": "{{n}} mistakes to review",
+    "wrongClear": "All mistakes mastered",
+    "wrongMastered": "{{n}} mastered",
+    "review": "Review"
+  },
+  "companion": {
+    "title": "AI Companion",
+    "chat": "Chat",
+    "empty": "No companion messages today"
+  },
+  "teacherTodo": {
+    "title": "Today's Queue",
+    "grading": "Exams to grade",
+    "taskGrades": "Tasks to grade",
+    "questions": "Questions to handle",
+    "answers": "Answers to review",
+    "quizzes": "Quizzes",
+    "quickQuiz": "Quick quiz",
+    "discussions": "Discussions",
+    "polls": "Polls",
+    "tasks": "Tasks",
+    "exams": "Live exams",
+    "clear": "All caught up. Great job today 🎉",
+    "activeToday": "{{n}} students active today",
+    "nextExam": "\"{{title}}\" is in progress",
+    "go": "View",
+    "pendingHint": "Needs your action",
+    "ongoingHint": "In progress"
+  },
+  "stars": {
+    "title": "Stars of the Week",
+    "sub": "Top 5 points in 7 days",
+    "empty": "No points recorded this week",
+    "pointsUnit": "pts",
+    "todayChat": "Chats today",
+    "activeToday": "Active"
+  },
+  "quick": {
+    "taskTodo": "To-do List",
+    "wrongBook": "Mistakes",
+    "quest": "Quests",
+    "quickQuiz": "Quick Quiz",
+    "discovery": "Discovery",
+    "news": "News",
+    "showcase": "Showcase",
+    "portrait": "My Portrait",
+    "practice": "Practice",
+    "quizManage": "Quizzes",
+    "questionBank": "Question Bank",
+    "tasks": "Tasks",
+    "analytics": "Analytics",
+    "classSummary": "Class Recap",
+    "activityMonitor": "Monitor",
+    "sharedCenter": "Shared Files",
+    "userMgmt": "Users",
+    "systemConfig": "Settings"
+  },
+  "wn": {
+    "title": "News Brief",
+    "viewed": "Read",
+    "points": "{{p}}/{{m}} points earned today"
+  },
+  "wd": {
+    "title": "Daily Discovery",
+    "pool": "Pool: {{n}} cards",
+    "swap": "Swap",
+    "used": "used up",
+    "empty": "No cards yet. Click \"Swap\" to generate",
+    "refreshed": "Fresh knowledge loaded ✨",
+    "refreshLimit": "No refresh left today",
+    "refreshFailed": "Refresh failed. Try again later",
+    "detail": "View detail",
+    "detailBtn": "Detail",
+    "fav": "Favorite",
+    "unfav": "Unfavorite",
+    "faved": "Favorited",
+    "points": "{{p}}/{{m}} points earned today",
+    "viewed": "{{n}} viewed",
+    "source": "Source: ",
+    "funLevel": "Fun level"
+  },
+  "quote": {
+    "title": "Quote of the Day",
+    "swap": "Shuffle"
+  }
 }

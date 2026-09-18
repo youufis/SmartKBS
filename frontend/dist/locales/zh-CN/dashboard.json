@@ -15,7 +15,11 @@
     "taskList": "任务清单",
     "aiCompanion": "AI学伴",
     "teaching": "任教：",
-    "greeting": "{{time}}，{{name}}{{role}}！👋"
+    "greeting": "{{time}}，{{name}}{{role}}！👋",
+    "streak": "连学{{n}}天",
+    "daysToExam": "距最近考试截止 {{n}} 天",
+    "dueToday": "今天截止，剩 {{h}} 小时",
+    "overdueDays": "已逾期 {{n}} 天"
   },
   "stats": {
     "exam": "学习考试",
@@ -501,5 +505,149 @@
   "scNeedPointsUp": "还需 {{count}} 分升级",
   "scMoreBadges": "还有 {{count}} 枚徽章",
   "activityLoadFailed": "动态加载失败，请重试",
-  "retry": "重试"
+  "retry": "重试",
+  "banner": {
+    "portraitHint": "查看本周学习画像"
+  },
+  "todoCard": {
+    "title": "今日要事",
+    "count": "{{n}} 项",
+    "viewAll": "完整清单",
+    "empty": "暂无紧急待办，先随处逛逛吧 🎉",
+    "go": "去处理",
+    "streak": "连续学习 {{n}} 天"
+  },
+  "statsS": {
+    "todoExams": "待完成考试",
+    "todoExamsSuffix": "已完成 {{done}}",
+    "pendingTodo": "待办任务",
+    "pendingTodoSuffix": "逾期{{overdue}} · 紧急{{urgent}}",
+    "wrongPending": "待复习错题",
+    "wrongSuffix": "共{{total}} · 已掌握{{mastered}}",
+    "myScore": "我的积分",
+    "myScoreSuffix": "排名 {{rank}}"
+  },
+  "statsT": {
+    "examManage": "已发布考试",
+    "examSuffix": "草稿{{draft}} · 已结束{{ended}}",
+    "pending": "待处理批阅",
+    "pendingSuffix": "答卷{{papers}} · 任务{{tasks}}",
+    "ongoing": "进行中的活动",
+    "ongoingSuffix": "测验{{quiz}} · 抢答{{quick}}",
+    "students": "任教学生",
+    "studentsSuffix": "今日活跃 {{active}} 人"
+  },
+  "trend": {
+    "title": "近7天学习动态",
+    "weekPoints": "本周积分 +{{n}}",
+    "points": "积分",
+    "chats": "对话",
+    "empty": "近 7 天还没有动态数据，去完成一项任务吧"
+  },
+  "radar": {
+    "title": "能力画像",
+    "hint": "基于考试、课程练习、智能练习、错题掌握的真实正确率/完成率计算",
+    "exam": "考试均分",
+    "coursePractice": "课程练习",
+    "practice": "智能练习",
+    "wrongBook": "错题掌握",
+    "noData": "完成一些活动后，这里会显示你的能力维度"
+  },
+  "scores": {
+    "avgRate": "均分率 {{v}}%",
+    "total": "总分",
+    "mine": "得分"
+  },
+  "growth": {
+    "title": "成长档案",
+    "nextTitle": "下一称号：{{name}}",
+    "maxTitle": "已是最高称号",
+    "badges": "徽章",
+    "badgeWall": "徽章墙",
+    "subjectTitles": "学科称号",
+    "wrongCta": "有 {{n}} 道错题待巩固",
+    "wrongClear": "错题已全部掌握",
+    "wrongMastered": "已掌握 {{n}} 题",
+    "review": "去复习"
+  },
+  "companion": {
+    "title": "AI 学伴",
+    "chat": "和学伴聊聊",
+    "empty": "今天还没有学伴留言"
+  },
+  "teacherTodo": {
+    "title": "今日待办",
+    "grading": "待批改答卷",
+    "taskGrades": "待批改任务",
+    "questions": "待处理提问",
+    "answers": "待审核回答",
+    "quizzes": "随堂测验",
+    "quickQuiz": "知识抢答",
+    "discussions": "分组讨论",
+    "polls": "投票",
+    "tasks": "在线任务",
+    "exams": "进行中考试",
+    "clear": "全部处理完毕，今天辛苦了 🎉",
+    "activeToday": "今日活跃学生 {{n}} 人",
+    "nextExam": "「{{title}}」正在进行中",
+    "go": "查看",
+    "pendingHint": "需要处理",
+    "ongoingHint": "正在进行中"
+  },
+  "stars": {
+    "title": "一周之星",
+    "sub": "近7天积分 TOP5",
+    "empty": "本周还没有积分记录",
+    "pointsUnit": "分",
+    "todayChat": "今日对话",
+    "activeToday": "活跃学生"
+  },
+  "quick": {
+    "taskTodo": "任务清单",
+    "wrongBook": "错题本",
+    "quest": "知识闯关",
+    "quickQuiz": "知识抢答",
+    "discovery": "每日精选",
+    "news": "热点速递",
+    "showcase": "荣誉展墙",
+    "portrait": "我的画像",
+    "practice": "同步练习",
+    "quizManage": "随堂测验",
+    "questionBank": "题库管理",
+    "tasks": "任务管理",
+    "analytics": "学情分析",
+    "classSummary": "课堂小结",
+    "activityMonitor": "完成监控",
+    "sharedCenter": "资源共享",
+    "userMgmt": "用户管理",
+    "systemConfig": "系统配置"
+  },
+  "wn": {
+    "title": "热点快讯",
+    "viewed": "已读",
+    "points": "今日已获 {{p}}/{{m}} 积分"
+  },
+  "wd": {
+    "title": "每日精选",
+    "pool": "知识池 {{n}} 条",
+    "swap": "换一批",
+    "used": "已用完",
+    "empty": "暂无精选内容，点击「换一批」生成",
+    "refreshed": "已为你刷新一批新知识 ✨",
+    "refreshLimit": "今日刷新次数已用完",
+    "refreshFailed": "刷新失败，请稍后重试",
+    "detail": "查看详情",
+    "detailBtn": "详情",
+    "fav": "收藏",
+    "unfav": "取消收藏",
+    "faved": "已收藏",
+    "points": "今日已获 {{p}}/{{m}} 积分",
+    "viewed": "已看 {{n}} 条",
+    "source": "来源：",
+    "funLevel": "趣味等级"
+  },
+  "quote": {
+    "title": "每日一句",
+    "swap": "换一句"
+  }
 }

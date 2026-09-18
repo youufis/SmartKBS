@@ -1,13 +1,14 @@
 /** 每日精选 - 首页Widget */
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, Tag, Button, Space, Typography, Progress, Modal, message, Spin, Tooltip } from 'antd';
 import {
   ReloadOutlined, HeartOutlined, HeartFilled,
-  EyeOutlined, ZoomInOutlined, StarOutlined,
+  EyeOutlined, StarOutlined,
 } from '@ant-design/icons';
 import { useDiscoveryStore } from '../stores/discoveryStore';
 
-const { Text, Paragraph, Title } = Typography;
+const { Text, Paragraph } = Typography;
 
 const CATEGORY_COLORS: Record<string, string> = {
   '天文': 'purple', '科技': 'blue', '生物': 'green',
@@ -16,6 +17,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const DailyDiscoveryWidget: React.FC = () => {
+  const { t } = useTranslation('dashboard');
   const {
     cards, loading, stats, poolSize,
     loadFeed, refreshCards, toggleFavorite, recordView,
@@ -30,15 +32,15 @@ const DailyDiscoveryWidget: React.FC = () => {
 
   const handleRefresh = async () => {
     if (stats.refreshRemaining <= 0) {
-      message.warning('今日刷新次数已用完');
+      message.warning(t('wd.refreshLimit'));
       return;
     }
     setRefreshing(true);
     try {
       await refreshCards();
-      message.success('已为你刷新一批新知识 ✨');
+      message.success(t('wd.refreshed'));
     } catch {
-      message.error('刷新失败，请稍后重试');
+      message.error(t('wd.refreshFailed'));
     } finally {
       setRefreshing(false);
     }
@@ -62,9 +64,9 @@ const DailyDiscoveryWidget: React.FC = () => {
       title={
         <Space>
           <StarOutlined style={{ color: '#faad14' }} />
-          <span>每日精选</span>
+          <span>{t('wd.title')}</span>
           <Tag color="default" style={{ fontSize: 11 }}>
-            知识池 {poolSize} 条
+            {t('wd.pool', { n: poolSize })}
           </Tag>
         </Space>
       }
@@ -77,7 +79,7 @@ const DailyDiscoveryWidget: React.FC = () => {
           onClick={handleRefresh}
           disabled={refreshing || stats.refreshRemaining <= 0}
         >
-          换一批{stats.refreshRemaining > 0 ? `(${stats.refreshRemaining})` : '(已用完)'}
+          {t('wd.swap')}{stats.refreshRemaining > 0 ? `(${stats.refreshRemaining})` : `(${t('wd.used')})`}
         </Button>
       }
     >
@@ -86,8 +88,8 @@ const DailyDiscoveryWidget: React.FC = () => {
           <Spin />
         </div>
       ) : cards.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '20px 0', color: '#999' }}>
-          暂无精选内容，点击"换一批"生成
+        <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-secondary)' }}>
+          {t('wd.empty')}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -115,20 +117,20 @@ const DailyDiscoveryWidget: React.FC = () => {
                   <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{card.title}</div>
                   <Paragraph
                     ellipsis={{ rows: 2 }}
-                    style={{ fontSize: 12, color: '#666', margin: 0 }}
+                    style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0 }}
                   >
                     {card.summary}
                   </Paragraph>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <Tooltip title="查看详情">
+                <Tooltip title={t('wd.detail')}>
                   <Button type="text" size="small" icon={<EyeOutlined />}
                     onClick={() => handleView(card)}>
-                    详情
+                    {t('wd.detailBtn')}
                   </Button>
                 </Tooltip>
-                <Tooltip title={card.is_favorited ? '取消收藏' : '收藏'}>
+                <Tooltip title={card.is_favorited ? t('wd.unfav') : t('wd.fav')}>
                   <Button
                     type="text"
                     size="small"
@@ -146,10 +148,10 @@ const DailyDiscoveryWidget: React.FC = () => {
       <div style={{ marginTop: 10 }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }}>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            今日已获 {stats.pointsEarned}/{stats.pointsMax} 积分
+            {t('wd.points', { p: stats.pointsEarned, m: stats.pointsMax })}
           </Text>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            已看 {stats.viewCount} 条
+            {t('wd.viewed', { n: stats.viewCount })}
           </Text>
         </Space>
         <Progress
@@ -185,12 +187,12 @@ const DailyDiscoveryWidget: React.FC = () => {
             <Space style={{ marginTop: 12 }}>
               {detailCard.source && (
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  来源：{detailCard.source}
+                  {t('wd.source')}{detailCard.source}
                 </Text>
               )}
               {' · '}
               <Text type="secondary" style={{ fontSize: 12 }}>
-                趣味等级：{'⭐'.repeat(detailCard.fun_level || 1)}
+                {t('wd.funLevel')}：{'⭐'.repeat(detailCard.fun_level || 1)}
               </Text>
             </Space>
             {detailCard.tags?.length > 0 && (
@@ -208,7 +210,7 @@ const DailyDiscoveryWidget: React.FC = () => {
                   setDetailCard({ ...detailCard, is_favorited: !detailCard.is_favorited });
                 }}
               >
-                {detailCard.is_favorited ? '已收藏' : '收藏'}
+                {detailCard.is_favorited ? t('wd.faved') : t('wd.fav')}
               </Button>
             </div>
           </div>

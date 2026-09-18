@@ -17,6 +17,22 @@ export const midnightTheme: ThemeConfig = {
     colorTextSecondary: '#a6a8b0',
     colorBorder: '#2e3038',
     colorBorderSecondary: '#3a3c44',
+    // 派生文字/填充令牌：antd 的 Typography type="secondary"、Statistic 标题、
+    // Timeline 次要信息等用的是 colorTextDescription/Tertiary 等派生令牌，
+    // 未启用 darkAlgorithm 时它们仍是浅色的 rgba(0,0,0,.45)，在深色底上几乎不可见
+    colorTextDescription: 'rgba(255, 255, 255, 0.6)',
+    colorTextTertiary: 'rgba(255, 255, 255, 0.6)',
+    colorTextQuaternary: 'rgba(255, 255, 255, 0.38)',
+    colorTextPlaceholder: 'rgba(255, 255, 255, 0.35)',
+    colorTextDisabled: 'rgba(255, 255, 255, 0.3)',
+    colorIcon: 'rgba(255, 255, 255, 0.55)',
+    colorIconHover: 'rgba(255, 255, 255, 0.85)',
+    colorSplit: 'rgba(255, 255, 255, 0.12)',
+    colorFill: 'rgba(255, 255, 255, 0.14)',
+    colorFillSecondary: 'rgba(255, 255, 255, 0.1)',
+    colorFillTertiary: 'rgba(255, 255, 255, 0.07)',
+    colorFillQuaternary: 'rgba(255, 255, 255, 0.04)',
+    colorBgMask: 'rgba(0, 0, 0, 0.65)',
   } as LooseToken,
   components: {
     Layout: {
@@ -44,6 +60,17 @@ export const midnightTheme: ThemeConfig = {
     Modal: {
       contentBg: '#1c1e26',
       headerBg: '#1c1e26',
+    },
+    // Alert 预设底色在未启用 darkAlgorithm 时仍是浅色，配浅色文字会看不清
+    Alert: {
+      colorInfoBg: 'rgba(79, 140, 255, 0.14)',
+      colorInfoBorder: 'rgba(79, 140, 255, 0.34)',
+      colorSuccessBg: 'rgba(73, 170, 25, 0.14)',
+      colorSuccessBorder: 'rgba(73, 170, 25, 0.34)',
+      colorWarningBg: 'rgba(216, 150, 20, 0.16)',
+      colorWarningBorder: 'rgba(216, 150, 20, 0.38)',
+      colorErrorBg: 'rgba(220, 68, 70, 0.16)',
+      colorErrorBorder: 'rgba(220, 68, 70, 0.38)',
     },
     Notification: {
       colorBgElevated: '#262830',

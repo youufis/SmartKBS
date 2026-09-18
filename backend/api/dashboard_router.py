@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from backend.api.dependencies import get_current_user
 from backend.database import execute_query
@@ -91,6 +91,30 @@ def _db_count(sql: str, params: tuple[Any, ...] = ()) -> int:
     """执行 database 的 COUNT 查询并返回数值（返回 tuple，按下标访问）"""
     rows = execute_query(sql, params)
     return rows[0][0] if rows else 0
+
+
+def _compute_streak_days(username: str) -> int:
+    """连续学习天数：按 login_logs 的去重登录日期从今天往前连数。
+    今天尚未登录时从昨天起算，避免白天打开首页断签。与任务清单口径一致。"""
+    rows = _act_q(
+        "SELECT DISTINCT DATE(login_time) AS d FROM login_logs WHERE username=? ORDER BY d DESC LIMIT 60",
+        (username,),
+    )
+    days = set()
+    for r in rows:
+        s = str(r[0])[:10] if r and r[0] else ""
+        if s and s != "None":
+            days.add(s)
+    if not days:
+        return 0
+    streak = 0
+    check = datetime.now().date()
+    if check.strftime("%Y-%m-%d") not in days:
+        check -= timedelta(days=1)
+    while check.strftime("%Y-%m-%d") in days:
+        streak += 1
+        check -= timedelta(days=1)
+    return streak
 
 
 @router.get("/summary", summary="获取仪表盘概览数据")
@@ -431,6 +455,35 @@ async def dashboard_summary(request: Request):
         result["next_title_name"] = _progress["next"]["name"] if _progress["next"] else None
         result["title_progress"] = _progress["progress_percent"]
 
+        # ── 成长/个性化数据（首页看板：错题掌握、真实均分率、徽章、连续学习）──
+        wrong_total = _db_count(
+            "SELECT COUNT(*) FROM wrong_book WHERE student_username=?", (username,),
+        )
+        wrong_mastered = _db_count(
+            "SELECT COUNT(*) FROM wrong_book WHERE student_username=? AND status='mastered'", (username,),
+        )
+        result["wrong_book_total"] = wrong_total
+        result["wrong_book_mastered"] = wrong_mastered
+        result["wrong_book_pending"] = max(wrong_total - wrong_mastered, 0)
+
+        avg_rows = q_execute_query(
+            """SELECT AVG(CASE WHEN total_score > 0 THEN 1.0 * score / total_score END) AS r
+               FROM exam_attempts
+               WHERE student_username=? AND status IN ('submitted','graded')""",
+            (username,),
+        )
+        _rate = avg_rows[0]["r"] if avg_rows and avg_rows[0].get("r") is not None else None
+        result["exam_avg_rate"] = round(float(_rate) * 100, 1) if _rate is not None else None
+
+        try:
+            _badges = get_student_badges(username)
+            result["badges_unlocked"] = sum(1 for b in _badges if b.get("unlocked"))
+            result["badges_total"] = len(_badges)
+        except Exception:
+            result["badges_unlocked"] = 0
+            result["badges_total"] = 0
+        result["streak_days"] = _compute_streak_days(username)
+
     else:  # ── 教师/管理员 ──
         exam_where = ""
         exam_params: list[Any] = []
@@ -727,6 +780,293 @@ async def dashboard_summary(request: Request):
             result["teacher_subjects"] = subjects
 
     # 写入缓存
+    _set_cache(cache_key, result)
+    return result
+
+
+@router.get("/learning-trend", summary="首页学习/活动按日趋势")
+async def learning_trend(request: Request, days: int = Query(7, ge=3, le=30)):
+    """真实按日聚合的学习趋势。
+    学生: 本人积分流水 + AI 对话次数; 教师/管理员: 任教范围内(管理员全站)学生行为。"""
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1, 2):
+        raise HTTPException(status_code=403, detail="无权访问")
+
+    cache_key = f"trend:{username}:{days}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    from datetime import date as _date
+    today = _date.today()
+    date_list = [(today - timedelta(days=n)).strftime("%Y-%m-%d") for n in range(days - 1, -1, -1)]
+    since = date_list[0]
+
+    # 学生口径过滤
+    scope_names: list[str] | None = None
+    if role == 2:
+        scope_names = [username]
+    elif role == 1:
+        from backend.permission_service import get_students_in_scope
+        try:
+            scope_names = [s["username"] for s in get_students_in_scope(username)]
+        except Exception:
+            scope_names = []
+    # role == 0: None → 全站
+
+    points_map: dict[str, int] = {}
+    actions_map: dict[str, int] = {}
+    chats_map: dict[str, int] = {}
+
+    def _in_cond(col: str):
+        if scope_names is None:
+            return "", ()
+        if not scope_names:
+            return f" AND {col} IN ('__none__')", ()
+        ph = ",".join("?" for _ in scope_names[:900])
+        return f" AND {col} IN ({ph})", tuple(scope_names[:900])
+
+    cond, params = _in_cond("student_username")
+    rows = _act_q(
+        f"""SELECT DATE(created_at) AS d, COALESCE(SUM(points), 0) AS p, COUNT(*) AS c
+            FROM activity_rewards
+            WHERE substr(created_at, 1, 10) >= ?{cond}
+            GROUP BY DATE(created_at)""",
+        (since, *params),
+    )
+    for r in rows:
+        d = str(r[0])[:10] if r[0] else ""
+        if d:
+            points_map[d] = int(r[1] or 0)
+            actions_map[d] = int(r[2] or 0)
+
+    if role == 2:
+        chat_rows = _act_q(
+            "SELECT date AS d, COUNT(*) AS c FROM conversations WHERE username=? AND date >= ? GROUP BY date",
+            (username, since),
+        )
+        for r in chat_rows:
+            d = str(r[0])[:10] if r[0] else ""
+            if d:
+                chats_map[d] = int(r[1] or 0)
+    else:
+        cond2, params2 = _in_cond("username")
+        chat_rows = _act_q(
+            f"""SELECT date AS d, COUNT(*) AS c FROM conversations
+                WHERE date >= ?{cond2} GROUP BY date""",
+            (since, *params2),
+        )
+        for r in chat_rows:
+            d = str(r[0])[:10] if r[0] else ""
+            if d:
+                chats_map[d] = int(r[1] or 0)
+
+    series = [
+        {
+            "date": d,
+            "label": d[5:],
+            "points": points_map.get(d, 0),
+            "actions": actions_map.get(d, 0),
+            "chats": chats_map.get(d, 0),
+        }
+        for d in date_list
+    ]
+    result = {
+        "series": series,
+        "scope": "self" if role == 2 else ("class" if role == 1 else "all"),
+        "total_points": sum(s["points"] for s in series),
+    }
+    _set_cache(cache_key, result)
+    return result
+
+
+@router.get("/teacher-todo", summary="教师/管理员行动项聚合与班级一周之星")
+async def teacher_todo(request: Request):
+    user = get_current_user(request)
+    username = user["username"]
+    role = user.get("role", 2)
+    if role not in (0, 1):
+        raise HTTPException(status_code=403, detail="仅教师和管理员可用")
+
+    cache_key = f"teacher-todo:{username}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    is_admin = role == 0
+    scope_names: list[str] | None = None
+    if not is_admin:
+        from backend.permission_service import get_students_in_scope
+        try:
+            scope_names = [s["username"] for s in get_students_in_scope(username)]
+        except Exception:
+            scope_names = []
+
+    def _in_sql(col: str):
+        """返回 (sql片段, params)。管理员→无限制; 空范围→恒假。"""
+        if is_admin or scope_names is None:
+            return "", ()
+        if not scope_names:
+            return f" AND {col} IN ('__none__')", ()
+        ph = ",".join("?" for _ in scope_names[:900])
+        return f" AND {col} IN ({ph})", tuple(scope_names[:900])
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # ── 考试: 待批改答卷 / 进行中的考试 ──
+    if is_admin:
+        pending_exam_grading = _q_count(
+            "SELECT COUNT(*) FROM exam_attempts WHERE status='submitted'",
+        )
+        in_progress_exams = q_execute_query(
+            """SELECT id, title, end_time FROM exams
+               WHERE status='published' AND (start_time IS NULL OR start_time <= ?)
+                 AND (end_time IS NULL OR end_time >= ?)
+               ORDER BY end_time NULLS LAST""",
+            (now_str, now_str),
+        ) or q_execute_query(
+            """SELECT id, title, end_time FROM exams
+               WHERE status='published' AND (start_time IS NULL OR start_time <= ?)
+                 AND (end_time IS NULL OR end_time >= ?)
+               ORDER BY CASE WHEN end_time IS NULL THEN 1 ELSE 0 END, end_time ASC""",
+            (now_str, now_str),
+        )
+    else:
+        in_cond, in_params = _in_sql("ea.student_username")
+        pending_exam_grading = _q_count(
+            f"""SELECT COUNT(*) FROM exam_attempts ea
+                JOIN exams e ON e.id = ea.exam_id
+                WHERE ea.status='submitted' AND e.creator_username=?{in_cond}""",
+            (username, *in_params),
+        )
+        in_progress_exams = q_execute_query(
+            """SELECT id, title, end_time FROM exams
+               WHERE status='published' AND creator_username=?
+                 AND (start_time IS NULL OR start_time <= ?)
+                 AND (end_time IS NULL OR end_time >= ?)
+               ORDER BY CASE WHEN end_time IS NULL THEN 1 ELSE 0 END, end_time ASC""",
+            (username, now_str, now_str),
+        )
+    next_exam = in_progress_exams[0] if in_progress_exams else None
+
+    # ── 课堂提问 / 待审核回答 ──
+    if is_admin:
+        pending_questions = _db_count(
+            "SELECT COUNT(*) FROM interaction_questions WHERE status='pending'",
+        )
+        pending_answer_reviews = _db_count(
+            "SELECT COUNT(*) FROM interaction_question_answers WHERE status='pending'",
+        )
+    elif scope_names:
+        q_cond, q_params = _in_sql("q.student_username")
+        pending_questions = _db_count(
+            f"""SELECT COUNT(*) FROM interaction_questions q
+                JOIN users u ON q.student_username = u.username AND u.role = 2
+                WHERE q.status='pending'{q_cond}""",
+            q_params,
+        )
+        a_cond, a_params = _in_sql("q2.student_username")
+        pending_answer_reviews = _db_count(
+            f"""SELECT COUNT(*) FROM interaction_question_answers a
+                JOIN interaction_questions q2 ON a.question_id = q2.id
+                WHERE a.status='pending'{a_cond}""",
+            a_params,
+        )
+    else:
+        pending_questions = 0
+        pending_answer_reviews = 0
+
+    # ── 进行中的课堂活动 ──
+    owner_cond = "" if is_admin else " AND creator_username=?"
+    owner_params = () if is_admin else (username,)
+    active_quizzes = _db_count(
+        f"SELECT COUNT(*) FROM interaction_quizzes WHERE status='active'{owner_cond}",
+        owner_params,
+    )
+    active_quick_quiz_rooms = _db_count(
+        f"SELECT COUNT(*) FROM quick_quiz_rooms WHERE status IN ('waiting','playing'){owner_cond}",
+        owner_params,
+    )
+    active_discussions = _db_count(
+        f"SELECT COUNT(*) FROM discussions WHERE status='active'{owner_cond}",
+        owner_params,
+    )
+    active_polls = _db_count(
+        f"SELECT COUNT(*) FROM interaction_polls WHERE status='active'{owner_cond}",
+        owner_params,
+    )
+    active_tasks = _db_count(
+        f"SELECT COUNT(*) FROM tasks WHERE status='active'{owner_cond}",
+        owner_params,
+    )
+
+    # ── 任务提交中尚无批改结果的 ──
+    if is_admin:
+        pending_task_grades = _db_count(
+            """SELECT COUNT(*) FROM task_submissions ts
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM task_grades tg
+                 WHERE tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+               )""",
+        )
+    else:
+        pending_task_grades = _db_count(
+            """SELECT COUNT(*) FROM task_submissions ts
+               JOIN tasks t ON t.id = ts.task_id
+               WHERE t.creator_username = ?
+                 AND NOT EXISTS (
+                   SELECT 1 FROM task_grades tg
+                   WHERE tg.task_id = ts.task_id AND tg.student_username = ts.student_username
+                 )""",
+            (username,),
+        )
+
+    # ── 今日活跃学生 / 一周积分之星 ──
+    p_cond, p_params = _in_sql("student_username")
+    active_students_today = _db_count(
+        f"""SELECT COUNT(DISTINCT student_username) FROM activity_rewards
+            WHERE substr(created_at, 1, 10) = ?{p_cond}""",
+        (today_str, *p_params),
+    )
+    week_ago = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
+    top_rows = _act_q(
+        f"""SELECT student_username, SUM(points) AS pts FROM activity_rewards
+            WHERE substr(created_at, 1, 10) >= ?{p_cond}
+            GROUP BY student_username ORDER BY pts DESC LIMIT 5""",
+        (week_ago, *p_params),
+    )
+    top_names = [r[0] for r in top_rows if r and r[0]]
+    labels = _student_labels(top_names) if top_names else {}
+    weekly_top_students = [
+        {
+            "username": r[0],
+            "name": (labels.get(r[0]) or {}).get("name") or r[0],
+            "points": int(r[1] or 0),
+        }
+        for r in top_rows if r and r[0]
+    ]
+
+    result = {
+        "pending_exam_grading": pending_exam_grading,
+        "pending_task_grades": pending_task_grades,
+        "pending_questions": pending_questions,
+        "pending_answer_reviews": pending_answer_reviews,
+        "in_progress_exam_count": len(in_progress_exams or []),
+        "next_exam": (
+            {"id": next_exam["id"], "title": next_exam["title"], "end_time": next_exam["end_time"]}
+            if next_exam else None
+        ),
+        "active_quizzes": active_quizzes,
+        "active_quick_quiz_rooms": active_quick_quiz_rooms,
+        "active_discussions": active_discussions,
+        "active_polls": active_polls,
+        "active_tasks": active_tasks,
+        "active_students_today": active_students_today,
+        "weekly_top_students": weekly_top_students,
+    }
     _set_cache(cache_key, result)
     return result
 
