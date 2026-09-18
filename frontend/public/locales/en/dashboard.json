@@ -463,7 +463,10 @@
       "overdue": "🔴 Overdue",
       "urgent": "⏰ Due Soon",
       "pending": "📝 Pending",
-      "inProgress": "🎯 In Progress"
+      "inProgress": "🎯 In Progress",
+      "live": "🎯 In class now",
+      "study": "📚 After-class tasks",
+      "suggest": "📎 Suggested reading"
     },
     "stats": {
       "title": "Learning Progress Overview",
@@ -474,6 +477,66 @@
       "streakDaysUnit": "days",
       "streakActive": "🔥 Keep going",
       "streakInactive": "Start learning today"
+    },
+    "tabs": {
+      "todo": "To do",
+      "done": "Completed"
+    },
+    "quick": {
+      "all": "All",
+      "urgent": "Due soon",
+      "live": "In class now",
+      "study": "After class",
+      "suggest": "Suggested"
+    },
+    "groupHint": {
+      "live": "Just launched by your teacher — join now",
+      "study": "Finish them in deadline order",
+      "suggest": "Not homework, take a look when free",
+      "overdue": "Past the deadline, catch up soon",
+      "urgent": "Due within 3 days, plan ahead"
+    },
+    "focus": {
+      "title": "⚡ Must do today",
+      "empty": "Nothing urgent today, keep going at your own pace 🎈"
+    },
+    "searchPh": "Search task title / subject",
+    "sortLabel": "Sort",
+    "sort": {
+      "deadline": "By deadline",
+      "priority": "By priority",
+      "type": "By type"
+    },
+    "noDeadline": "No deadline",
+    "expand": "Show all {{count}}",
+    "collapse": "Collapse",
+    "ofCount": "{{count}} items",
+    "autoRefreshed": "Re-checked when you come back",
+    "clearedFilter": "Clear filters",
+    "done": {
+      "empty": "No completions in the last 30 days — pick one and start",
+      "title": "{{count}} completed in the last 30 days",
+      "score": "{{score}}/{{total}}",
+      "scoreOnly": "{{score}} pts"
+    },
+    "action": {
+      "exam": "Start exam",
+      "task": "Submit",
+      "practice": "Practice",
+      "code": "Solve",
+      "course_practice": "Practice",
+      "quiz": "Answer",
+      "poll": "Vote",
+      "discussion": "Join",
+      "whiteboard": "Join board",
+      "quick_quiz": "Join",
+      "quest": "Continue",
+      "wrong_book": "Review",
+      "question_waiting": "View",
+      "question_can_answer": "Answer",
+      "shared_resource": "Open",
+      "notification": "View",
+      "default": "Go"
     }
   },
   "scGenFailed": "Generation failed",

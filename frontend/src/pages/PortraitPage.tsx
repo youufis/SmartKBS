@@ -16,6 +16,7 @@ import {
 import { useAuthStore } from '../stores/authStore'
 import { usePortraitStore } from '../stores/portraitStore'
 import type { PortraitData } from '../api/portrait'
+import { classText } from '../utils/studentLabel'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -727,7 +728,7 @@ const PortraitPage: React.FC = () => {
                     title={
                       <Space>
                         <Text strong>{portrait.student_name || portrait.username}</Text>
-                        {portrait.grade && <Tag>{portrait.grade}{portrait.class_name ? ' ' + t('ptClassSuffix', { cls: portrait.class_name }) : ''}</Tag>}
+                        {(portrait.grade || portrait.class_name) && <Tag>{[portrait.grade, classText(portrait.class_name)].filter(Boolean).join(' ')}</Tag>}
                       </Space>
                     }
                     description={

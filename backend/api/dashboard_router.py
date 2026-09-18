@@ -1044,6 +1044,7 @@ async def teacher_todo(request: Request):
         {
             "username": r[0],
             "name": (labels.get(r[0]) or {}).get("name") or r[0],
+            "tag": (labels.get(r[0]) or {}).get("tag") or "",
             "points": int(r[1] or 0),
         }
         for r in top_rows if r and r[0]
@@ -1657,6 +1658,155 @@ async def recent_activity(request: Request):
 # ══════════════════════════════════════════════════════════════════
 
 
+def _recent_done(username: str, days: int = 30, limit: int = 30) -> list[dict[str, Any]]:
+    """近 N 天（默认 30 天）已完成记录，供学生任务清单「已完成」页签做正反馈。
+
+    每个数据源单独容错（_act_q / _act_q_db 失败只丢该源），统一按时间倒序合并。
+    """
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    out: list[dict[str, Any]] = []
+
+    def _push(rows, build):
+        for r in rows or []:
+            try:
+                it = build(r)
+            except Exception as e:  # 单条脏数据不影响整体
+                logger.warning(f"[task-todo] 已完成条目解析失败: {e}")
+                continue
+            if it:
+                out.append(it)
+
+    # 1) 考试（questions.db）
+    _push(_act_q_db(
+        """SELECT ea.id AS aid, ea.submitted_at, ea.score, ea.total_score,
+                  e.title, e.subject
+           FROM exam_attempts ea JOIN exams e ON ea.exam_id = e.id
+           WHERE ea.student_username=? AND ea.status IN ('submitted','graded')
+             AND COALESCE(ea.submitted_at,'') >= ?
+           ORDER BY ea.submitted_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-exam-{r['aid']}", "type": "exam", "title": r["title"],
+                   "detail": r.get("subject") or "", "score": r.get("score"),
+                   "total": r.get("total_score"), "time": r.get("submitted_at"), "url": "/exam"})
+
+    # 2) 智能练习（questions.db）
+    _push(_act_q_db(
+        """SELECT pa.id AS aid, pa.submitted_at, pa.score, pa.total_score, ps.title
+           FROM practice_attempts pa JOIN practice_sessions ps ON pa.session_id = ps.id
+           WHERE pa.student_username=? AND pa.status='submitted'
+             AND COALESCE(pa.submitted_at,'') >= ?
+           ORDER BY pa.submitted_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-practice-{r['aid']}", "type": "practice", "title": r["title"],
+                   "detail": "", "score": r.get("score"), "total": r.get("total_score"),
+                   "time": r.get("submitted_at"), "url": "/practice"})
+
+    # 3) 课程练习（questions.db 成绩 + smartkb.db 知识点名）
+    _apr = _act_q_db(
+        """SELECT id, kp_id, submitted_at, score, total_score, accuracy
+           FROM ai_practice_results
+           WHERE student_username=? AND COALESCE(submitted_at,'') >= ?
+           ORDER BY submitted_at DESC LIMIT 10""",
+        (username, since))
+    _kp_ids = sorted({r["kp_id"] for r in (_apr or []) if r.get("kp_id") is not None})
+    _kp_names: dict[Any, str] = {}
+    if _kp_ids:
+        _ph = ",".join("?" for _ in _kp_ids)
+        for row in _act_q(f"SELECT id, name FROM knowledge_points WHERE id IN ({_ph})", tuple(_kp_ids)) or []:
+            _kp_names[row[0]] = str(row[1] or "")
+    _push(_apr,
+          lambda r: {"id": f"done-course-{r['id']}", "type": "course_practice",
+                     "title": _kp_names.get(r.get("kp_id")) or "课程练习",
+                     "detail": "" if r.get("accuracy") is None else f"正确率 {round(float(r['accuracy']) * (100 if float(r['accuracy']) <= 1 else 1), 1)}%",
+                     "score": r.get("score"), "total": r.get("total_score"),
+                     "time": r.get("submitted_at"), "url": "/curriculum"})
+
+    # 4) 代码练习（questions.db）
+    _push(_act_q_db(
+        """SELECT cs.id AS sid, cs.created_at, cp.title, cp.difficulty
+           FROM code_submissions cs JOIN code_problems cp ON cs.problem_id = cp.id
+           WHERE cs.student_username=? AND cs.status='accepted' AND cs.is_best=1
+             AND COALESCE(cs.created_at,'') >= ?
+           ORDER BY cs.created_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-code-{r['sid']}", "type": "code", "title": r["title"],
+                   "detail": r.get("difficulty") or "", "score": None, "total": None,
+                   "time": r.get("created_at"), "url": "/code-practice"})
+
+    # 5) 随堂测验（smartkb.db，tuple 行）
+    _push(_act_q(
+        """SELECT iqa.id, iqa.submitted_at, iqa.score, q.title
+           FROM interaction_quiz_answers iqa JOIN interaction_quizzes q ON iqa.quiz_id = q.id
+           WHERE iqa.student_username=? AND COALESCE(iqa.submitted_at,'') >= ?
+           ORDER BY iqa.submitted_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-quiz-{r[0]}", "type": "quiz", "title": str(r[3] or ""),
+                   "detail": "", "score": r[2], "total": None,
+                   "time": r[1], "url": "/interaction"})
+
+    # 6) 投票（smartkb.db）
+    _push(_act_q(
+        """SELECT v.id, v.created_at, p.question
+           FROM interaction_poll_votes v JOIN interaction_polls p ON v.poll_id = p.id
+           WHERE v.student_username=? AND COALESCE(v.created_at,'') >= ?
+           ORDER BY v.created_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-poll-{r[0]}", "type": "poll", "title": str(r[2] or ""),
+                   "detail": "", "score": None, "total": None,
+                   "time": r[1], "url": "/quick-poll"})
+
+    # 7) 任务提交（smartkb.db）
+    _push(_act_q(
+        """SELECT ts.id, ts.submitted_at, t.name
+           FROM task_submissions ts JOIN tasks t ON ts.task_id = t.id
+           WHERE ts.student_username=? AND COALESCE(ts.submitted_at,'') >= ?
+           ORDER BY ts.submitted_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-task-{r[0]}", "type": "task", "title": str(r[2] or ""),
+                   "detail": "", "score": None, "total": None,
+                   "time": r[1], "url": "/tasks"})
+
+    # 8) 知识闯关（smartkb.db）
+    _push(_act_q(
+        """SELECT id, completed_at, score, total_questions, correct_count
+           FROM quest_records
+           WHERE student_username=? AND COALESCE(completed, 0) <> 0 AND COALESCE(completed_at,'') >= ?
+           ORDER BY completed_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-quest-{r[0]}", "type": "quest", "title": "知识闯关",
+                   "detail": f"答对 {r[4]}/{r[3]} 题", "score": r[2], "total": None,
+                   "time": r[1], "url": "/quest"})
+
+    # 9) 知识抢答（smartkb.db）
+    _push(_act_q(
+        """SELECT qp.id, qp.joined_at, qp.total_score, qp.correct_count, r.title
+           FROM quick_quiz_players qp JOIN quick_quiz_rooms r ON qp.room_id = r.id
+           WHERE qp.student_username=? AND COALESCE(qp.joined_at,'') >= ?
+           ORDER BY qp.joined_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-qq-{r[0]}", "type": "quick_quiz", "title": str(r[4] or ""),
+                   "detail": f"答对 {r[3]} 题" if r[3] is not None else "", "score": r[2], "total": None,
+                   "time": r[1], "url": "/quick-quiz"})
+
+    # 10) 分组讨论发言（smartkb.db）
+    _push(_act_q(
+        """SELECT m.id, m.created_at, d.title
+           FROM discussion_messages m
+           JOIN discussion_groups g ON m.group_id = g.id
+           JOIN discussions d ON g.discussion_id = d.id
+           WHERE m.username=? AND COALESCE(m.created_at,'') >= ? AND m.msg_type!='system'
+           ORDER BY m.created_at DESC LIMIT 10""",
+        (username, since)),
+        lambda r: {"id": f"done-disc-{r[0]}", "type": "discussion", "title": str(r[2] or ""),
+                   "detail": "", "score": None, "total": None,
+                   "time": r[1], "url": "/discussion"})
+
+    out = [x for x in out if x.get("time")]
+    out.sort(key=lambda x: str(x["time"]), reverse=True)
+    return out[:limit]
+
+
+
 @router.get("/task-todo", summary="获取学生任务清单（待办聚合）")
 async def get_task_todo(request: Request):
     """聚合所有待办事项，按类型分组排序返回"""
@@ -1666,7 +1816,8 @@ async def get_task_todo(request: Request):
 
     if role != 2:
         # 目前仅对学生开放，教师/管理员返回空
-        return {"items": [], "counts": {}, "stats": {}}
+        return {"items": [], "counts": {}, "stats": {},
+                "live_count": 0, "suggest_count": 0, "recent_done": []}
 
     # 尝试缓存
     cache_key = f"todo:{username}"
@@ -1680,6 +1831,7 @@ async def get_task_todo(request: Request):
 
     # 获取学生年级班级信息
     grade, cls = get_user_grade_class(username)
+    from backend.permission_service import check_activity_visibility
     grade_row = execute_query("SELECT grade_id, class_id FROM users WHERE username=?", (username,))
     grade_id = grade_row[0][0] if grade_row else None
     class_id = grade_row[0][1] if grade_row and len(grade_row[0]) > 1 else None
@@ -1998,11 +2150,15 @@ async def get_task_todo(request: Request):
             )
         )
         active_discussions = execute_query(
-            """SELECT id, title, description FROM discussions
-               WHERE status='active' ORDER BY created_at DESC""",
+            """SELECT id, title, description, creator_username, target_scope, grade, classes
+               FROM discussions WHERE status='active' ORDER BY created_at DESC""",
         )
         for ad in active_discussions:
-            if ad[0] not in my_group_ids:
+            # 只推给范围内的学生：未加入 且 通过活动可见性判定
+            if ad[0] not in my_group_ids and check_activity_visibility(
+                username, grade, cls, str(ad[3] or ""), str(ad[4] or "teacher_classes"),
+                str(ad[5] or ""), str(ad[6] or ""),
+            ):
                 items.append({
                     "id": f"discussion-{ad[0]}",
                     "type": "discussion",
@@ -2028,12 +2184,17 @@ async def get_task_todo(request: Request):
             )
         )
         active_rooms = execute_query(
-            """SELECT id, title FROM quick_quiz_rooms
-               WHERE status IN ('waiting','active')
+            """SELECT id, title, creator_username, target_scope, target_grade, target_class
+               FROM quick_quiz_rooms
+               WHERE status IN ('waiting','playing','active')
                ORDER BY created_at DESC""",
         )
         for ar in active_rooms:
-            if ar[0] not in joined_rooms:
+            # 抢答室按布置时选的班级范围过滤，范围外的学生不再看到这条待办
+            if ar[0] not in joined_rooms and check_activity_visibility(
+                username, grade, cls, str(ar[2] or ""), str(ar[3] or "teacher_classes"),
+                str(ar[4] or ""), str(ar[5] or ""),
+            ):
                 items.append({
                     "id": f"quick_quiz-{ar[0]}",
                     "type": "quick_quiz",
@@ -2059,11 +2220,16 @@ async def get_task_todo(request: Request):
             )
         )
         active_whiteboards = execute_query(
-            """SELECT id, title FROM whiteboard_rooms
-               WHERE status='active' ORDER BY created_at DESC""",
+            """SELECT id, title, creator_username, grade, class_name
+               FROM whiteboard_rooms WHERE status='active' ORDER BY created_at DESC""",
         )
         for aw in active_whiteboards:
-            if aw[0] not in joined_whiteboards:
+            # 白板房间用 grade/class_name 表达范围；两者都为空则回落到创建者任教范围
+            _wb_g, _wb_c = str(aw[3] or "").strip(), str(aw[4] or "").strip()
+            if aw[0] not in joined_whiteboards and check_activity_visibility(
+                username, grade, cls, str(aw[2] or ""),
+                "class" if (_wb_g or _wb_c) else "teacher_classes", _wb_g, _wb_c,
+            ):
                 items.append({
                     "id": f"whiteboard-{aw[0]}",
                     "type": "whiteboard",
@@ -2263,6 +2429,24 @@ async def get_task_todo(request: Request):
     except Exception as e:
         logger.warning(f"[task-todo] 查询共享资源失败: {e}")
 
+    # ── 降噪：标记课堂即时活动 / 推荐看看，并与课程练习去重 ──
+    live_types = {"quiz", "poll", "discussion", "whiteboard", "quick_quiz", "quest"}
+    suggest_types = {"shared_resource", "question_can_answer"}
+    practice_urls = {str((it.get("meta") or {}).get("resource_url") or "")
+                     for it in items if it["type"] == "course_practice"}
+    practice_titles = {str(it.get("title") or "") for it in items if it["type"] == "course_practice"}
+    deduped: list[dict[str, Any]] = []
+    for it in items:
+        if it["type"] == "shared_resource":
+            url = str((it.get("meta") or {}).get("resource_url") or "")
+            # 同一个 _练习.html 已由 course_practice 覆盖，不再重复列一条
+            if (url and url in practice_urls) or (it.get("title") and it["title"] in practice_titles):
+                continue
+        it["live"] = it["type"] in live_types
+        it["suggest"] = it["type"] in suggest_types
+        deduped.append(it)
+    items = deduped
+
     # ── 排序：按优先级降序，同优先级按 deadline 升序 ──
     items.sort(key=lambda x: (
         -x["priority"],
@@ -2293,7 +2477,14 @@ async def get_task_todo(request: Request):
         "shared_resource": "challenge",
         "notification": "service",
     }
+    live_count = 0
+    suggest_count = 0
     for it in items:
+        if it.get("suggest"):
+            suggest_count += 1
+            continue  # 推荐看看不算待办，避免共享资源把分类数字撑大
+        if it.get("live"):
+            live_count += 1
         cat = type_category.get(it["type"], "other")
         counts[cat] = counts.get(cat, 0) + 1
 
@@ -2422,6 +2613,13 @@ async def get_task_todo(request: Request):
     except Exception as e:
         logger.warning(f"[task-todo] 查询学习统计失败: {e}")
 
-    result = {"items": items, "counts": counts, "stats": stats}
+    result = {
+        "items": items,
+        "counts": counts,
+        "stats": stats,
+        "live_count": live_count,
+        "suggest_count": suggest_count,
+        "recent_done": _recent_done(username),
+    }
     _set_cache(cache_key, result)
     return result

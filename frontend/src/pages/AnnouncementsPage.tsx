@@ -15,6 +15,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import { classText } from '../utils/studentLabel'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -230,7 +231,7 @@ const AnnouncementsPage: React.FC = () => {
             <Tag>{record.target_role === 'teacher' ? t('anRoleTeacher') : record.target_role === 'student' ? t('anRoleStudent') : record.target_role}</Tag>
           )}
           {record.target_grade && <Tag>{record.target_grade}</Tag>}
-          {record.target_class && <Tag>{t('anClassSuffix', { cls: record.target_class })}</Tag>}
+          {record.target_class && <Tag>{classText(record.target_class)}</Tag>}
         </Space>
       ),
     },
@@ -320,7 +321,7 @@ const AnnouncementsPage: React.FC = () => {
                 <Tag>{detailModal.target_role === 'teacher' ? t('anRoleTeacher') : detailModal.target_role === 'student' ? t('anRoleStudent') : detailModal.target_role}</Tag>
               )}
               {detailModal.target_grade && <Tag>{detailModal.target_grade}</Tag>}
-              {detailModal.target_class && <Tag>{t('anClassSuffix', { cls: detailModal.target_class })}</Tag>}
+              {detailModal.target_class && <Tag>{classText(detailModal.target_class)}</Tag>}
             </Space>
             <div style={{ color: '#999', fontSize: 12, marginBottom: 16 }}>
               {t('anPublisher')}{detailModal.creator_name || detailModal.creator_username}

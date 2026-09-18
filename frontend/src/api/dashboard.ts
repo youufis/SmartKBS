@@ -143,6 +143,8 @@ export async function getLearningTrend(days = 7): Promise<LearningTrend> {
 export interface WeeklyStar {
   username: string
   name: string
+  /** 年级·班级，如「高一2班」 */
+  tag?: string
   points: number
 }
 

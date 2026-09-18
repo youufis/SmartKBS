@@ -463,7 +463,10 @@
       "overdue": "🔴 已逾期",
       "urgent": "⏰ 即将截止",
       "pending": "📝 待完成",
-      "inProgress": "🎯 进行中"
+      "inProgress": "🎯 进行中",
+      "live": "🎯 课堂进行中",
+      "study": "📚 课后待办",
+      "suggest": "📎 推荐看看"
     },
     "stats": {
       "title": "学习进度概览",
@@ -474,6 +477,66 @@
       "streakDaysUnit": "天",
       "streakActive": "🔥 继续加油",
       "streakInactive": "今天开始学习吧"
+    },
+    "tabs": {
+      "todo": "待完成",
+      "done": "已完成"
+    },
+    "quick": {
+      "all": "全部",
+      "urgent": "即将截止",
+      "live": "课堂进行中",
+      "study": "课后待办",
+      "suggest": "推荐看看"
+    },
+    "groupHint": {
+      "live": "老师刚发起，现在就能参与",
+      "study": "按截止时间先后完成",
+      "suggest": "不是作业，有空看看就好",
+      "overdue": "已经错过截止时间，尽快补上",
+      "urgent": "3 天内截止，优先安排"
+    },
+    "focus": {
+      "title": " 今日必须完成",
+      "empty": "今天没有紧急任务，按计划推进就好 🎈"
+    },
+    "searchPh": "搜索任务名称 / 科目",
+    "sortLabel": "排序",
+    "sort": {
+      "deadline": "按截止时间",
+      "priority": "按重要程度",
+      "type": "按类型"
+    },
+    "noDeadline": "长期",
+    "expand": "展开全部 {{count}} 项",
+    "collapse": "收起",
+    "ofCount": "共 {{count}} 项",
+    "autoRefreshed": "返回页面已自动核对",
+    "clearedFilter": "清空筛选",
+    "done": {
+      "empty": "近 30 天还没有完成记录，先挑一项开始吧",
+      "title": "近 30 天已完成 {{count}} 项",
+      "score": "{{score}}/{{total}} 分",
+      "scoreOnly": "{{score}} 分"
+    },
+    "action": {
+      "exam": "开始考试",
+      "task": "去提交",
+      "practice": "开始练习",
+      "code": "去练习",
+      "course_practice": "去练习",
+      "quiz": "去作答",
+      "poll": "去投票",
+      "discussion": "加入讨论",
+      "whiteboard": "加入白板",
+      "quick_quiz": "去参与",
+      "quest": "继续闯关",
+      "wrong_book": "去巩固",
+      "question_waiting": "查看",
+      "question_can_answer": "去回答",
+      "shared_resource": "查看",
+      "notification": "查看",
+      "default": "去完成"
     }
   },
   "scGenFailed": "生成失败",

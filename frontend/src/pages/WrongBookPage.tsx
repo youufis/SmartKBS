@@ -7,6 +7,7 @@ import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { classText } from '../utils/studentLabel'
 
 const { Title, Text } = Typography
 
@@ -255,7 +256,7 @@ const WrongBookPage: React.FC = () => {
                 placeholder={t('selectClass')}
                 value={selectedClass || undefined}
                 onChange={handleClassChange}
-                options={classes.map(c => ({ label: t('classLabel', { class: c }), value: c }))}
+                options={classes.map(c => ({ label: classText(c), value: c }))}
               />
               <Select
                 style={{ width: 160 }}

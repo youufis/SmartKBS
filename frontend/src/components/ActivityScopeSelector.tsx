@@ -4,6 +4,7 @@ import { BookOutlined, GlobalOutlined, TeamOutlined, UserOutlined } from '@ant-d
 import { fetchGrades, fetchAllGradeClasses } from '../api/gradeClass'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { classText } from '../utils/studentLabel'
 
 const { Text } = Typography
 
@@ -171,7 +172,7 @@ const ActivityScopeSelector: React.FC<Props> = ({
                 onChange={handleClassChange}
                 placeholder={t('selectClass')}
                 style={{ width: '100%', marginTop: 4 }}
-                options={availableClasses.map((c) => ({ label: t('classUnit', { class: c }), value: c }))}
+                options={availableClasses.map((c) => ({ label: classText(c), value: c }))}
               />
             </div>
           )}
@@ -184,7 +185,7 @@ const ActivityScopeSelector: React.FC<Props> = ({
         {scope === 'all' && t('scopeDescAll')}
         {scope === 'grade' && selectedGrades.length > 0 && t('scopeDescGradeSelected', { grades: selectedGrades.join('、') })}
         {scope === 'grade' && selectedGrades.length === 0 && t('scopeDescGradeEmpty')}
-        {scope === 'class' && selectedClasses.length > 0 && t('scopeDescClassSelected', { classes: selectedClasses.map(c => t('classUnit', { class: c })).join('、') })}
+        {scope === 'class' && selectedClasses.length > 0 && t('scopeDescClassSelected', { classes: selectedClasses.map(classText).join('、') })}
         {scope === 'class' && selectedClasses.length === 0 && t('scopeDescClassEmpty')}
       </div>
     </div>
