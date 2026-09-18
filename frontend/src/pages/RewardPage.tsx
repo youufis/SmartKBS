@@ -10,13 +10,16 @@ import {
   FireOutlined, BookOutlined, MessageOutlined,
   RobotOutlined, AuditOutlined, CheckCircleFilled,
   LockFilled, ReloadOutlined, CrownOutlined, GiftOutlined,
+  LoginOutlined, CodeOutlined, ReadOutlined, FolderOpenOutlined, NotificationOutlined,
 } from '@ant-design/icons'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 
 const { Title, Text } = Typography
 
+// 与 backend/reward_engine.py 的 ACTIVITY_TYPE_NAMES 一一对应（18 类），名称走词典 reward.activityType.*
 const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   quiz: <ThunderboltOutlined style={{ color: '#1677ff' }} />,
   poll: <TeamOutlined style={{ color: '#722ed1' }} />,
@@ -28,6 +31,14 @@ const ACTIVITY_ICONS: Record<string, React.ReactNode> = {
   chat: <MessageOutlined style={{ color: '#1677ff' }} />,
   task: <FireOutlined style={{ color: '#ff4d4f' }} />,
   learning: <RiseOutlined style={{ color: '#52c41a' }} />,
+  login: <LoginOutlined style={{ color: '#faad14' }} />,
+  code: <CodeOutlined style={{ color: '#13c2c2' }} />,
+  quest: <CrownOutlined style={{ color: '#fa8c16' }} />,
+  quick_quiz: <ThunderboltOutlined style={{ color: '#ff4d4f' }} />,
+  course_practice: <ReadOutlined style={{ color: '#52c41a' }} />,
+  resource_view: <FolderOpenOutlined style={{ color: '#1677ff' }} />,
+  daily_discovery: <StarOutlined style={{ color: '#722ed1' }} />,
+  news_view: <NotificationOutlined style={{ color: '#eb2f96' }} />,
 }
 
 // 学科 emoji 映射（可扩展，不在列表中的科目按名称 hash 分配）
@@ -276,6 +287,7 @@ const pointsToTitle = (points: number, config: MainTitle[]): MainTitle => {
 // ── 教师个人积分面板（独立组件避免 IIFE 中调用 hooks） ──
 const TeacherMyPoints: React.FC = () => {
   const { t } = useTranslation('score')
+  const { actLabel, rewardTypeLabel } = useRewardLabels()
   const [tMyPoints, setTMyPoints] = useState(0)
   const [tMyHistory, setTMyHistory] = useState<any[]>([])
   useEffect(() => {
@@ -307,9 +319,15 @@ const TeacherMyPoints: React.FC = () => {
       <Table dataSource={tMyHistory} rowKey="id" size="small" pagination={{ pageSize: 15 }}
         columns={[
           { title: t('time'), dataIndex: 'created_at', render: (val: string) => val?.slice(0, 16) || '', width: 140 },
-          { title: t('activity'), dataIndex: 'activity_type_name', width: 80 },
+          { title: t('activity'), dataIndex: 'activity_type', width: 96,
+            render: (type: string, record: any) => (
+              <Tag icon={ACTIVITY_ICONS[type]}>{actLabel(type, record.activity_type_name)}</Tag>
+            ) },
           { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
-          { title: t('rewardType'), dataIndex: 'reward_type_name', width: 100 },
+          { title: t('rewardType'), dataIndex: 'reward_type', width: 100,
+            render: (type: string, record: any) => (
+              <Tag color={REWARD_TAG_COLORS[type] || 'default'}>{rewardTypeLabel(type, record.reward_type_name)}</Tag>
+            ) },
           { title: t('points'), dataIndex: 'points', width: 70, render: (p: number) => <Text strong style={{ color: '#52c41a' }}>+{p}</Text> },
           { title: t('description'), dataIndex: 'reason', ellipsis: true },
         ]}
@@ -320,6 +338,7 @@ const TeacherMyPoints: React.FC = () => {
 
 const RewardPage: React.FC = () => {
   const { t } = useTranslation('score')
+  const { actLabel, rewardTypeLabel } = useRewardLabels()
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
@@ -332,39 +351,43 @@ const RewardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('my')
   const [rulesOpen, setRulesOpen] = useState(false)
 
-  // ── 积分规则（与后端 reward_engine.py 保持一致） ──
-  const RULES = [
-    { activity: '📝 随堂测验', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '📊 快速投票', base: 2, grade: '—' },
-    { activity: '🙋 课堂提问', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '📖 考试', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '🤖 智能练习', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '💬 分组讨论', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '✅ 点名签到', base: 2, grade: '—' },
-    { activity: '💭 AI 对话', base: 2, grade: '—' },
-    { activity: '📋 任务', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '📈 学习进度', base: 2, grade: '—' },
-    { activity: '🔑 每日登录', base: 1, grade: '—' },
-    { activity: '💻 代码练习', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '🎮 知识闯关', base: 1, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '⚡ 知识抢答', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
-    { activity: '📚 课程练习', base: 2, grade: '优秀+15 / 良好+10 / 及格+5' },
+  // ── 积分规则（数值与 backend/reward_engine.py 的 REWARD_CONFIG 一致，改那边记得同步这里）──
+  // 活动名一律走词典 reward.activityType.*，emoji 只是装饰；graded=是否还有成绩等级奖励
+  const RULES: Array<{ type: string; emoji: string; base: number; graded: boolean }> = [
+    { type: 'quiz', emoji: '📝', base: 2, graded: true },
+    { type: 'poll', emoji: '📊', base: 2, graded: false },
+    { type: 'question', emoji: '🙋', base: 2, graded: false },
+    { type: 'exam', emoji: '📖', base: 2, graded: true },
+    { type: 'practice', emoji: '🤖', base: 2, graded: true },
+    { type: 'discussion', emoji: '💬', base: 2, graded: true },
+    { type: 'rollcall', emoji: '✅', base: 2, graded: false },
+    { type: 'chat', emoji: '💭', base: 2, graded: false },
+    { type: 'task', emoji: '📋', base: 2, graded: true },
+    { type: 'learning', emoji: '📈', base: 2, graded: false },
+    { type: 'login', emoji: '🔑', base: 1, graded: false },
+    { type: 'code', emoji: '💻', base: 2, graded: true },
+    { type: 'quest', emoji: '🎮', base: 1, graded: true },
+    { type: 'quick_quiz', emoji: '⚡', base: 2, graded: true },
+    { type: 'course_practice', emoji: '📚', base: 2, graded: true },
+    { type: 'resource_view', emoji: '🗂️', base: 1, graded: false },
+    { type: 'daily_discovery', emoji: '✨', base: 1, graded: false },
+    { type: 'news_view', emoji: '📰', base: 1, graded: false },
   ]
 
   // ── 等级头像成长进化表（与 PortfolioPage / AppLayout 保持一致） ──
   const LEVEL_AVATARS = [
-    { level: 'Lv.1', emoji: '🪴', range: '0~14 分 · 萌芽' },
-    { level: 'Lv.2', emoji: '🌱', range: '15~39 分 · 幼苗' },
-    { level: 'Lv.3', emoji: '🌿', range: '40~74 分 · 生长' },
-    { level: 'Lv.4', emoji: '🌳', range: '75~119 分 · 成才' },
-    { level: 'Lv.5', emoji: '🎯', range: '120~179 分 · 精准' },
-    { level: 'Lv.6', emoji: '🔮', range: '180~249 分 · 洞察' },
-    { level: 'Lv.7', emoji: '🚀', range: '250~329 分 · 突破' },
-    { level: 'Lv.8', emoji: '🌟', range: '330~419 分 · 闪耀' },
-    { level: 'Lv.9', emoji: '🌙', range: '420~519 分 · 卓越' },
-    { level: 'Lv.10', emoji: '☀️', range: '520~639 分 · 辉煌' },
-    { level: 'Lv.11', emoji: '👑', range: '640~799 分 · 至尊' },
-    { level: 'Lv.12', emoji: '💎', range: '800+ 分 · 巅峰' },
+    { level: 'Lv.1', emoji: '🪴' },
+    { level: 'Lv.2', emoji: '🌱' },
+    { level: 'Lv.3', emoji: '🌿' },
+    { level: 'Lv.4', emoji: '🌳' },
+    { level: 'Lv.5', emoji: '🎯' },
+    { level: 'Lv.6', emoji: '🔮' },
+    { level: 'Lv.7', emoji: '🚀' },
+    { level: 'Lv.8', emoji: '🌟' },
+    { level: 'Lv.9', emoji: '🌙' },
+    { level: 'Lv.10', emoji: '☀️' },
+    { level: 'Lv.11', emoji: '👑' },
+    { level: 'Lv.12', emoji: '💎' },
   ]
 
   // 教师端：班级排名
@@ -511,11 +534,17 @@ const RewardPage: React.FC = () => {
   // ── 积分规则弹窗 ──
   const renderRulesModal = () => (
     <Modal title={t('reward.rulesTitle')} open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={640}>
-      <Table dataSource={RULES} rowKey="activity" size="small" pagination={false}
+      <Table dataSource={RULES} rowKey="type" size="small" pagination={false}
         columns={[
-          { title: t('activity'), dataIndex: 'activity', width: 140 },
+          { title: t('activity'), dataIndex: 'type', width: 150,
+            render: (type: string, record: any) => (
+              <Space size={6}><span>{record.emoji}</span><span>{actLabel(type)}</span></Space>
+            ) },
           { title: t('reward.basePoints'), dataIndex: 'base', width: 100, render: (v: number) => <Tag color="blue">+{v}</Tag> },
-          { title: t('reward.gradeReward'), dataIndex: 'grade', render: (v: string) => v === '—' ? <Text type="secondary">{t('reward.none')}</Text> : <Text style={{ color: '#52c41a' }}>{v}</Text> },
+          { title: t('reward.gradeReward'), dataIndex: 'graded',
+            render: (v: boolean) => v
+              ? <Text style={{ color: '#52c41a' }}>{t('reward.gradeScale')}</Text>
+              : <Text type="secondary">{t('reward.none')}</Text> },
         ]} />
       <Divider />
       <Text strong style={{ fontSize: 14 }}>{t('reward.levelAvatarEvolution')}</Text>
@@ -523,7 +552,7 @@ const RewardPage: React.FC = () => {
         columns={[
           { title: t('levelLabel'), dataIndex: 'level', width: 60, render: (lvl: string) => <Tag>{lvl}</Tag> },
           { title: t('reward.avatar'), dataIndex: 'emoji', width: 60, render: (em: string) => <span style={{ fontSize: 22 }}>{em}</span> },
-          { title: t('reward.titleRange'), dataIndex: 'range', render: (_: string, record: any) => <Text style={{ fontSize: 13 }}>{t(`reward.levelRange${record.level.replace('Lv.', '')}`)}</Text> },
+          { title: t('reward.titleRange'), key: 'range', render: (_: unknown, record: any) => <Text style={{ fontSize: 13 }}>{t(`reward.levelRange${record.level.replace('Lv.', '')}`)}</Text> },
         ]} />
     </Modal>
   )
@@ -644,15 +673,16 @@ const RewardPage: React.FC = () => {
             pagination={{ pageSize: 15, showTotal: (total) => t('totalRecords', { count: total }) }}
             columns={[
               { title: t('time'), dataIndex: 'created_at', width: 140, render: (val: string) => val ? val.slice(0, 16) : '' },
-              { title: t('activity'), dataIndex: 'activity_type', width: 80,
-                render: (type: string) => <Tag icon={ACTIVITY_ICONS[type]}>{type ? (type.charAt(0).toUpperCase() + type.slice(1)) : ''}</Tag> },
+              // 活动名走词典：原来把 activity_type 首字母大写，中英文界面显示的都是裸键名
+              { title: t('activity'), dataIndex: 'activity_type', width: 96,
+                render: (type: string, record: any) => (
+                  <Tag icon={ACTIVITY_ICONS[type]}>{actLabel(type, record.activity_type_name)}</Tag>
+                ) },
               { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
-              { title: t('rewardType'), dataIndex: 'reward_type_name', width: 100,
-                render: (name: string, record: any) => {
-                  const colors: Record<string, string> = { participation: 'default', excellent: 'success', good: 'processing', pass: 'warning' }
-                  return <Tag color={colors[record.reward_type] || 'default'}>{name}</Tag>
-                },
-              },
+              { title: t('rewardType'), dataIndex: 'reward_type', width: 100,
+                render: (type: string, record: any) => (
+                  <Tag color={REWARD_TAG_COLORS[type] || 'default'}>{rewardTypeLabel(type, record.reward_type_name)}</Tag>
+                ) },
               { title: t('points'), dataIndex: 'points', width: 70,
                 render: (points: number) => <Text strong style={{ color: points > 2 ? '#52c41a' : '#1677ff', fontSize: 15 }}>+{points}</Text> },
               { title: t('description'), dataIndex: 'reason', ellipsis: true },
@@ -709,7 +739,7 @@ const RewardPage: React.FC = () => {
               <Space wrap>
                 {Object.entries(stats.activity_breakdown || {}).map(([type, info]: any) => (
                   <Tag key={type} icon={ACTIVITY_ICONS[type]} color="processing">
-                    {info.name}: {info.points}{t('score')}
+                    {actLabel(type, info.name)}: {info.points}{t('score')}
                   </Tag>
                 ))}
               </Space>

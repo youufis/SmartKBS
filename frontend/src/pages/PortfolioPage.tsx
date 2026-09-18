@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useReducer } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useRewardLabels } from '../utils/rewardLabels'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card, Row, Col, Statistic, Typography, Spin, Tag, Space,
@@ -61,8 +62,10 @@ interface PortfolioData {
   reward_points: number
   reward_history: Array<{
     activity_type: string
+    activity_type_name?: string
     activity_title: string
     reward_type: string
+    reward_type_name?: string
     points: number
     reason: string
     created_at: string
@@ -144,6 +147,7 @@ const initialState: PortfolioState = {
 
 const PortfolioPage: React.FC = () => {
   const { t } = useTranslation('score')
+  const { actLabel, rewardTypeLabel } = useRewardLabels()
   const { username: paramUsername } = useParams<{ username: string }>()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -482,9 +486,11 @@ const PortfolioPage: React.FC = () => {
                   size="small"
                   pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (total) => t('totalRecords', { count: total }), pageSizeOptions: ['5', '10', '20'] }}
                   columns={[
-                    { title: t('portfolio.activityType'), dataIndex: 'activity_type_name', width: 80 },
+                    { title: t('portfolio.activityType'), dataIndex: 'activity_type', width: 90,
+                      render: (v: string, r) => <Tag>{actLabel(v, r.activity_type_name)}</Tag> },
                     { title: t('activityName'), dataIndex: 'activity_title', ellipsis: true },
-                    { title: t('rewardType'), dataIndex: 'reward_type_name', width: 80 },
+                    { title: t('rewardType'), dataIndex: 'reward_type', width: 90,
+                      render: (v: string, r) => <Tag>{rewardTypeLabel(v, r.reward_type_name)}</Tag> },
                     { title: t('points'), dataIndex: 'points', width: 60 },
                     {
                       title: t('description'), dataIndex: 'reason', ellipsis: true,

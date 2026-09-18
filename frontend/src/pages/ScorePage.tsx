@@ -15,6 +15,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 import { registerUser, extractApiErrorDetail } from '../api/users'
 
 const { Text } = Typography
@@ -43,6 +44,7 @@ interface Stats {
 
 const ScorePage: React.FC = () => {
   const { t } = useTranslation('score')
+  const { actLabel, rewardTypeLabel } = useRewardLabels()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
@@ -639,13 +641,13 @@ const ScorePage: React.FC = () => {
                   columns={[
                     { title: t('time'), dataIndex: 'created_at', key: 'created_at', width: 130,
                       render: (v: string) => v?.slice(0, 16) || '' },
-                    { title: t('activity'), dataIndex: 'activity_type_name', key: 'activity_type', width: 70 },
+                    { title: t('activity'), dataIndex: 'activity_type', key: 'activity_type', width: 90,
+                      render: (type: string, rec: any) => <Tag>{actLabel(type, rec.activity_type_name)}</Tag> },
                     { title: t('activityName'), dataIndex: 'activity_title', key: 'activity_title', ellipsis: true },
-                    { title: t('rewardType'), dataIndex: 'reward_type_name', key: 'reward_type', width: 90,
-                      render: (name: string, rec: any) => {
-                        const colors: Record<string, string> = { participation: 'default', excellent: 'success', good: 'processing', pass: 'warning' }
-                        return <Tag color={colors[rec.reward_type] || 'default'}>{name}</Tag>
-                      },
+                    { title: t('rewardType'), dataIndex: 'reward_type', key: 'reward_type', width: 90,
+                      render: (type: string, rec: any) => (
+                        <Tag color={REWARD_TAG_COLORS[type] || 'default'}>{rewardTypeLabel(type, rec.reward_type_name)}</Tag>
+                      ),
                     },
                     { title: t('points'), dataIndex: 'points', key: 'points', width: 60,
                       render: (p: number) => <Text strong style={{ color: '#52c41a', fontSize: 15 }}>+{p}</Text>,
