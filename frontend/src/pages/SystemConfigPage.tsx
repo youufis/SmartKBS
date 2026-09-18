@@ -8,7 +8,7 @@ import {
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, EditOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, EditOutlined, DownOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
@@ -89,6 +89,23 @@ const SECTION_TITLES: Record<string, string> = {
 
 // 锚点导航与小节 DOM id 的前缀
 const SECTION_DOM_ID = 'cfg-sec-'
+
+// 生效方式 -> 徽标文案（未标注 scope 的项保存后立即生效，不加徽标）
+const SCOPE_TAG_KEYS: Record<NonNullable<ConfigField['scope']>, string> = {
+  nextRound: 'scopeNextRound',
+  nextLogin: 'scopeNextLogin',
+}
+
+// 后端下发的校验元数据（GET /api/config/meta），前端不再自己复制一份取值范围
+interface ConfigMeta {
+  num_ranges: Record<string, [number, number]>
+  bool_keys: string[]
+  str_limits: Record<string, number>
+  strlist_keys: Record<string, number>
+}
+
+// 有专属管理入口、不算「本表单漏收」的配置键
+const MANAGED_ELSEWHERE_KEYS = ['enabled_skills', 'TITLE_CONFIG', 'SUBJECT_TITLE_CONFIG', 'BADGE_CONFIG']
 
 const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // ══ ① 基础与内容 ══
@@ -184,6 +201,29 @@ const toFormValues = (raw: Record<string, unknown>): Record<string, unknown> => 
   }
   if (!v['enabled_notification_types']) v['enabled_notification_types'] = ['exam', 'system']
   if (typeof v['auto_pull_enabled'] !== 'boolean') v['auto_pull_enabled'] = true
+  return v
+}
+
+// 表单值 -> 后端提交值：tags 逗号串转数组、题型多行文本转 [{key,label}]
+const toApiValues = (raw: Record<string, unknown>): Record<string, unknown> => {
+  const v = { ...raw }
+  for (const key of TAG_FIELD_KEYS) {
+    if (typeof v[key] === 'string') {
+      // 分隔符与后端 _STRLIST_KEYS 的容错保持一致（中/英逗号、顿号、分号）；
+      // 不按空格拆，避免把「AI 基础」这类含空格的科目名切断
+      v[key] = (v[key] as string).split(/[,，、;；]+/).map((item) => item.trim()).filter(Boolean)
+    }
+  }
+  if (typeof v['QUESTION_TYPES'] === 'string') {
+    v['QUESTION_TYPES'] = (v['QUESTION_TYPES'] as string)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [k, ...rest] = line.split(':')
+        return { key: k.trim(), label: rest.join(':').trim() || k.trim() }
+      })
+  }
   return v
 }
 
@@ -1108,6 +1148,9 @@ const SystemConfigPage: React.FC = () => {
   const [activeSec, setActiveSec] = useState('')        // 锚点导航当前高亮的小节
   const [dirty, setDirty] = useState<string[]>([])      // 与已加载值不同的配置键
   const loadedRef = useRef<Record<string, unknown>>({}) // 上次加载/保存后的表单快照（脏值对比 + 放弃修改）
+  const [meta, setMeta] = useState<ConfigMeta | null>(null)        // 后端校验元数据（取值范围/长度上限）
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ memory: true }) // 收起的小节
+  const [advOpen, setAdvOpen] = useState(false)                     // 「未收录配置键」兜底面板
 
   // ── 加载 API Key 状态 ──
   const loadApikeyStatus = useCallback(async () => {
@@ -1116,6 +1159,16 @@ const SystemConfigPage: React.FC = () => {
       setApikeyStatus(data)
     } catch {
       // 忽略，非关键信息
+    }
+  }, [])
+
+  // ── 加载后端校验元数据（只为加范围提示，失败不影响配置读写） ──
+  const loadMeta = useCallback(async () => {
+    try {
+      const { data } = await apiClient.get('/api/config/meta')
+      setMeta(data)
+    } catch {
+      // 忽略
     }
   }, [])
 
@@ -1160,52 +1213,70 @@ const SystemConfigPage: React.FC = () => {
 
   // ── 锚点跳转 ──
   const scrollToSection = (sec: string) => {
-    document.getElementById(SECTION_DOM_ID + sec)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setCollapsed((prev) => (prev[sec] ? { ...prev, [sec]: false } : prev))
     setActiveSec(sec)
+    // 等展开的这一帧渲染完再定位，否则测到的是收起后的高度
+    window.setTimeout(() => {
+      document.getElementById(SECTION_DOM_ID + sec)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
   }
 
-  // ── 保存全局配置 ──
-  const handleSave = async () => {
+  // ── 提交 ──
+  const submitConfig = async (values: Record<string, unknown>) => {
+    setSaving(true)
     try {
-      await form.validateFields()
-      setSaving(true)
-      // 使用 getFieldsValue 确保所有字段（包括空值）都被提交
-      const allValues = form.getFieldsValue()
-      // 将 Tags 输入框的逗号分隔字符串转回数组（支持中英文逗号；名单类留空即清空）
-      for (const key of TAG_FIELD_KEYS) {
-        if (typeof allValues[key] === 'string') {
-          // 分隔符与后端 _STRLIST_KEYS 的容错保持一致（中/英逗号、顿号、分号）；
-          // 不按空格拆，避免把「AI 基础」这类含空格的科目名切断
-          allValues[key] = allValues[key].split(/[,，、;；]+/).map((s: string) => s.trim()).filter(Boolean)
-        }
-      }
-      // 题型多行文本 key:label → [{key,label}]
-      if (typeof allValues['QUESTION_TYPES'] === 'string') {
-        allValues['QUESTION_TYPES'] = allValues['QUESTION_TYPES']
-          .split('\n')
-          .map((line: string) => line.trim())
-          .filter(Boolean)
-          .map((line: string) => {
-            const [k, ...rest] = line.split(':')
-            return { key: k.trim(), label: rest.join(':').trim() || k.trim() }
-          })
-      }
-      await apiClient.put('/api/config', { config: allValues })
+      await apiClient.put('/api/config', { config: values })
       message.success(t('configSavedMsg'))
-      loadConfig()
+      await loadConfig()
     } catch (err: unknown) {
-      const e = err as { errorFields?: unknown; response?: { data?: { detail?: string } }; message?: string }
-      if (e?.errorFields) return // 表单校验未通过
+      const e = err as { response?: { data?: { detail?: string } }; message?: string }
       message.error(t('saveFailed') + ': ' + (e?.response?.data?.detail || e?.message || t('unknownError')))
     } finally {
       setSaving(false)
     }
   }
 
+  // ── 保存全局配置 ──
+  const handleSave = async () => {
+    let values: Record<string, unknown>
+    try {
+      await form.validateFields()
+      // 用 getFieldsValue 而不是 validateFields 的返回值，确保未被改动的字段也一并提交
+      values = toApiValues(form.getFieldsValue() as Record<string, unknown>)
+    } catch {
+      return // 表单校验未通过，错误已就地标红
+    }
+    // 涉及安全面/难以回退的项（关防护、改 IP 黑名单、开自动同步）改动后要求二次确认
+    const risky = GLOBAL_CONFIG_FIELDS.filter((f) => f.danger && dirty.includes(f.key))
+    if (risky.length) {
+      Modal.confirm({
+        title: t('dangerConfirmTitle'),
+        icon: <ExclamationCircleOutlined />,
+        content: (
+          <div>
+            <div style={{ marginBottom: 6 }}>{t('dangerConfirmHint')}</div>
+            <ul style={{ paddingLeft: 18, margin: 0 }}>
+              {risky.map((f) => (
+                <li key={f.key}>{t(f.labelKey)}</li>
+              ))}
+            </ul>
+          </div>
+        ),
+        okText: t('saveConfig'),
+        okType: 'danger',
+        cancelText: t('cancel'),
+        onOk: () => submitConfig(values),
+      })
+      return
+    }
+    submitConfig(values)
+  }
+
   useEffect(() => {
     if (user?.role !== 'admin') return
     loadConfig()
-  }, [user?.role, loadConfig])
+    loadMeta()
+  }, [user?.role, loadConfig, loadMeta])
 
   // 滚动时高亮左侧导航当前小节（IntersectionObserver 不依赖外层滚动容器的实现细节）
   useEffect(() => {
@@ -1253,29 +1324,70 @@ const SystemConfigPage: React.FC = () => {
     0,
   )
 
+  // 后端返回的配置键里，本表单没收录、也没有专属管理入口的那些（正常应为空）
+  const knownKeys = new Set(GLOBAL_CONFIG_FIELDS.map((f) => f.key))
+  const unknownKeys = Object.keys(config).filter((k) => !knownKeys.has(k) && !MANAGED_ELSEWHERE_KEYS.includes(k))
+
   // ── 全局配置表单各小节 ──
   const renderGroup = (group: string) => {
     const fields = fieldsOf(group)
     if (!fields.length) return null
+    // 搜索时一律展开，保证命中的项不会被折叠藏住
+    const isOpen = !!q || !collapsed[group]
+    const secDirty = fields.filter((f) => dirty.includes(f.key)).length
     const getLabel = (field: ConfigField) => t(field.labelKey)
-    const getDesc = (field: ConfigField) => field.descKey ? t(field.descKey) : undefined
+    // 数字项把后端 _NUM_RANGES 的范围直接标在说明里，避免"填了才被拒"
+    const getDesc = (field: ConfigField) => {
+      const base = field.descKey ? t(field.descKey) : undefined
+      const range = field.type === 'number' ? meta?.num_ranges?.[field.key] : undefined
+      if (!range) return base
+      const hint = t('rangeHint', { lo: range[0], hi: range[1], unit: field.unitKey ? t(field.unitKey) : '' })
+      return base ? base + hint : hint
+    }
+    // 非即时生效的项挂个徽标，免得以为改了没反应
+    const getLabelNode = (field: ConfigField) => (field.scope ? (
+      <Space size={4}>
+        <span>{getLabel(field)}</span>
+        <Tag color="orange" style={{ fontSize: 11, lineHeight: '18px', marginInlineEnd: 0 }}>
+          {t(SCOPE_TAG_KEYS[field.scope])}
+        </Tag>
+      </Space>
+    ) : getLabel(field))
     const getRule = (field: ConfigField) =>
       field.required !== false ? [{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }] : undefined
     return (
       <div key={group} id={SECTION_DOM_ID + group} style={{ marginBottom: 32, scrollMarginTop: 8 }}>
-        <Title level={5} style={{ marginTop: 0 }}>
+        <Title
+          level={5}
+          style={{ marginTop: 0, cursor: 'pointer', userSelect: 'none' }}
+          onClick={() => setCollapsed((prev) => ({ ...prev, [group]: isOpen }))}
+        >
+          <DownOutlined
+            style={{ fontSize: 10, marginRight: 8, color: 'var(--text-tertiary)', transition: 'transform .2s', transform: isOpen ? 'none' : 'rotate(-90deg)' }}
+          />
           {t(SECTION_TITLES[group])}
           {q ? (
             <Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 6 }}>({fields.length})</Text>
           ) : null}
+          {!isOpen ? (
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 6 }}>
+              {t('sectionCollapsed', { n: fields.length })}
+            </Text>
+          ) : null}
+          {secDirty ? (
+            <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px', marginLeft: 6 }}>
+              {t('secUnsaved', { n: secDirty })}
+            </Tag>
+          ) : null}
         </Title>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16 }}>
+        {/* 折叠只藏视觉、不卸载组件：Form.Item 一旦卸载，提交时这些项的值就丢了 */}
+        <div style={{ display: isOpen ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16, paddingTop: isOpen ? 12 : 0, borderTop: isOpen ? '1px solid var(--border-color)' : 'none' }}>
           {fields.map((field) => (
             <div key={field.key}>
               {field.type === 'boolean' ? (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   valuePropName="checked"
                   extra={getDesc(field)}
                 >
@@ -1284,10 +1396,16 @@ const SystemConfigPage: React.FC = () => {
               ) : field.type === 'number' ? (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
+                  extra={getDesc(field)}
                 >
-                  <InputNumber style={{ width: '100%' }} min={0} />
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    min={meta?.num_ranges?.[field.key]?.[0] ?? 0}
+                    max={meta?.num_ranges?.[field.key]?.[1]}
+                    step={1}
+                  />
                 </Form.Item>
               ) : field.type === 'password' ? (
                 <Form.Item
@@ -1319,7 +1437,7 @@ const SystemConfigPage: React.FC = () => {
               ) : field.type === 'tags' ? (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   // 必填与否交给字段声明（IP 黑名单要能留空 = 不拦任何人），别再硬编码 required
                   rules={getRule(field)}
                   extra={getDesc(field)}
@@ -1330,7 +1448,7 @@ const SystemConfigPage: React.FC = () => {
               ) : field.type === 'question_types' ? (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   rules={[{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }]}
                   extra={getDesc(field)}
                   getValueFromEvent={(e) => e.target.value}
@@ -1340,7 +1458,7 @@ const SystemConfigPage: React.FC = () => {
               ) : field.type === 'roles' ? (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   extra={getDesc(field)}
                 >
                   <Checkbox.Group>
@@ -1351,7 +1469,7 @@ const SystemConfigPage: React.FC = () => {
               ) : field.type === 'notifications' ? (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   extra={getDesc(field)}
                 >
                   <Checkbox.Group>
@@ -1367,7 +1485,7 @@ const SystemConfigPage: React.FC = () => {
               ) : field.type === 'multimodal_toggle' ? (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   valuePropName="checked"
                   extra={getDesc(field)}
                 >
@@ -1378,14 +1496,14 @@ const SystemConfigPage: React.FC = () => {
               ) : (
                 <Form.Item
                   name={field.key}
-                  label={getLabel(field)}
+                  label={getLabelNode(field)}
                   rules={getRule(field)}
                   extra={field.key === 'AGENT_EDITION' ? t('agentEditionExtra') : getDesc(field)}
                 >
                   {field.key === 'AGENT_EDITION' ? (
-                    <Input placeholder={t('placeholder_agentEdition')} />
+                    <Input placeholder={t('placeholder_agentEdition')} maxLength={meta?.str_limits?.[field.key]} />
                   ) : (
-                    <Input />
+                    <Input maxLength={meta?.str_limits?.[field.key]} />
                   )}
                 </Form.Item>
               )}
@@ -1463,7 +1581,6 @@ const SystemConfigPage: React.FC = () => {
               <Form
                 form={form}
                 layout="vertical"
-                initialValues={config}
                 onValuesChange={handleValuesChange}
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
@@ -1506,7 +1623,35 @@ const SystemConfigPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div style={{ flex: 1, minWidth: 0, maxWidth: 960 }}>{visibleZones.map(renderZone)}</div>
+                  <div style={{ flex: 1, minWidth: 0, maxWidth: 960 }}>
+                    {visibleZones.map(renderZone)}
+                    {/* 兜底：后端有、但本表单没给表单项的配置键 —— 防止再出现"改了页面上看不到的参数" */}
+                    {!q && (
+                      <div style={{ marginTop: 8, borderTop: '1px dashed var(--border-color-secondary)', paddingTop: 10 }}>
+                        <div
+                          onClick={() => setAdvOpen((v) => !v)}
+                          style={{ cursor: 'pointer', userSelect: 'none', fontSize: 12 }}
+                        >
+                          <DownOutlined
+                            style={{ fontSize: 10, marginRight: 8, color: 'var(--text-tertiary)', transition: 'transform .2s', transform: advOpen ? 'none' : 'rotate(-90deg)' }}
+                          />
+                          {unknownKeys.length
+                            ? <Text type="warning">{t('unknownKeys', { n: unknownKeys.length })}</Text>
+                            : <Text type="secondary">{t('unknownKeysOk', { n: GLOBAL_CONFIG_FIELDS.length })}</Text>}
+                        </div>
+                        {advOpen && (
+                          <div style={{ marginTop: 6 }}>
+                            <Text type="secondary" style={{ fontSize: 12 }}>{t('unknownKeysHint')}</Text>
+                            {unknownKeys.length > 0 && (
+                              <pre style={{ fontSize: 12, margin: '6px 0 0', padding: 8, borderRadius: 4, background: 'var(--bg-layout)', maxHeight: 200, overflow: 'auto' }}>
+                                {unknownKeys.map((k) => `${k} = ${JSON.stringify(config[k])}`).join('\n')}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* 底部常驻操作栏：改了几项、保存、放弃修改、重新加载 */}
