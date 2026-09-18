@@ -27,85 +27,145 @@ import {
 const { Title, Text } = Typography
 
 // ── 全局配置表单 ──
+//
+// 三级结构：分区(zone) → 小节(section) → 字段。渲染顺序就是 GLOBAL_CONFIG_FIELDS 的声明顺序，
+// 新增一项只要挑一个小节加一行，左侧锚点导航、搜索、脏值统计都会自动跟上。
+//
+// 关于「生效方式」：所有配置都是运行时经 backend get_config_value() 读取（走 mtime 缓存），
+// 保存即生效、**不需要重启服务**。只有两类需要额外说明，用 scope 标注：
+//   nextRound = 下一轮后台任务生效（后台节拍到了才重读）；nextLogin = 只对新的登录会话生效。
 
-const GLOBAL_CONFIG_FIELDS = [
+type EffScope = 'nextRound' | 'nextLogin'
+
+interface ConfigField {
+  key: string
+  labelKey: string
+  descKey?: string
+  type: 'text' | 'password' | 'number' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle'
+  group: string
+  required?: boolean
+  placeholderKey?: string
+  /** 数字单位（i18n key）：配合后端 /api/config/meta 下发的范围显示成「可填 5~3600 秒」 */
+  unitKey?: string
+  /** 生效方式，未标注即保存后立即生效 */
+  scope?: EffScope
+  /** 改动会影响安全面或难以挽回，保存前统一二次确认 */
+  danger?: boolean
+}
+
+interface ConfigZone {
+  id: string
+  titleKey: string
+  descKey: string
+  sections: string[]
+}
+
+const CONFIG_ZONES: ConfigZone[] = [
+  { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive'] },
+  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'chat', 'memory', 'grading', 'imagegen'] },
+  { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
+  { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard', 'ratelimit'] },
+  { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
+]
+
+const SECTION_TITLES: Record<string, string> = {
+  brand: 'group_brand',
+  curriculum: 'group_curriculum',
+  notify: 'group_notify',
+  incentive: 'group_incentive',
+  credentials: 'group_credentials',
+  models: 'group_models',
+  chat: 'group_chat',
+  memory: 'group_memory',
+  grading: 'group_grading',
+  imagegen: 'group_imagegen',
+  upload: 'group_upload',
+  quota: 'group_quota',
+  session: 'group_session',
+  guard: 'group_guard',
+  ratelimit: 'group_ratelimit',
+  upgrade: 'group_upgrade',
+}
+
+const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
+  // ══ ① 基础与内容 ══
   // 品牌信息
   { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', type: 'text', group: 'brand' },
   { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', required: false },
-  // API 密钥
-  { key: 'dashscope_api_key', labelKey: 'field_dashscope_api_key', descKey: 'field_dashscope_api_key_desc', type: 'password', group: 'api' },
-  // 模型与应用配置
-  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'model', required: false },
-  { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', type: 'text', group: 'model' },
-  { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'model' },
-  { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'text', group: 'model' },
-  { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'text', group: 'model' },
-  { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'model' },
-  // AI 对话权限
-  { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'ai' },  // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
-  { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', type: 'boolean', group: 'ai' },
-  { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'ai', required: false },
-  { key: 'CHAT_MEMORY_TTL_MINUTES', labelKey: 'field_CHAT_MEMORY_TTL_MINUTES', descKey: 'field_CHAT_MEMORY_TTL_MINUTES_desc', type: 'number', group: 'ai', required: false },
-  { key: 'CHAT_MEMORY_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_MAX_CHARS', descKey: 'field_CHAT_MEMORY_MAX_CHARS_desc', type: 'number', group: 'ai', required: false },
-  { key: 'CHAT_MEMORY_CONTENT_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS', descKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS_desc', type: 'number', group: 'ai', required: false },
-  { key: 'CHAT_MEMORY_MAX_ROWS', labelKey: 'field_CHAT_MEMORY_MAX_ROWS', descKey: 'field_CHAT_MEMORY_MAX_ROWS_desc', type: 'number', group: 'ai', required: false },
-  { key: 'CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', labelKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', descKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES_desc', type: 'number', group: 'ai', required: false },
-  // 主观题后台批量批改（练习/考试/随堂测验共用同一套参数）
-  { key: 'AI_GRADING_INTERVAL_SEC', labelKey: 'field_AI_GRADING_INTERVAL_SEC', descKey: 'field_AI_GRADING_INTERVAL_SEC_desc', type: 'number', group: 'ai', required: false },
-  { key: 'AI_GRADING_BATCH_SIZE', labelKey: 'field_AI_GRADING_BATCH_SIZE', descKey: 'field_AI_GRADING_BATCH_SIZE_desc', type: 'number', group: 'ai', required: false },
-  { key: 'AI_GRADING_CONCURRENCY', labelKey: 'field_AI_GRADING_CONCURRENCY', descKey: 'field_AI_GRADING_CONCURRENCY_desc', type: 'number', group: 'ai', required: false },
-  { key: 'AI_GRADING_MAX_ITEMS_PER_ROUND', labelKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND', descKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND_desc', type: 'number', group: 'ai', required: false },
-  // 系统限制
-  { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', type: 'number', group: 'limit' },
-  { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', type: 'number', group: 'limit' },
-  { key: 'JWT_EXPIRATION_HOURS', labelKey: 'field_JWT_EXPIRATION_HOURS', type: 'number', group: 'limit' },
-  { key: 'ONLINE_USER_TIMEOUT_SECONDS', labelKey: 'field_ONLINE_USER_TIMEOUT_SECONDS', type: 'number', group: 'limit' },
-  { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', type: 'boolean', group: 'limit' },
-  { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', type: 'number', group: 'limit' },
-  // 令牌滑动续期 + 来源 IP 防护（backend/security_guard.py）
-  { key: 'JWT_RENEW_THRESHOLD_MINUTES', labelKey: 'field_JWT_RENEW_THRESHOLD_MINUTES', descKey: 'field_JWT_RENEW_THRESHOLD_MINUTES_desc', type: 'number', group: 'limit' },
-  { key: 'ENABLE_IP_GUARD', labelKey: 'field_ENABLE_IP_GUARD', descKey: 'field_ENABLE_IP_GUARD_desc', type: 'boolean', group: 'limit', required: false },
-  { key: 'AUTH_FAIL_LIMIT', labelKey: 'field_AUTH_FAIL_LIMIT', descKey: 'field_AUTH_FAIL_LIMIT_desc', type: 'number', group: 'limit' },
-  { key: 'AUTH_FAIL_BAN_SECONDS', labelKey: 'field_AUTH_FAIL_BAN_SECONDS', descKey: 'field_AUTH_FAIL_BAN_SECONDS_desc', type: 'number', group: 'limit' },
-  { key: 'LOGIN_FAIL_LIMIT', labelKey: 'field_LOGIN_FAIL_LIMIT', descKey: 'field_LOGIN_FAIL_LIMIT_desc', type: 'number', group: 'limit' },
-  { key: 'TRUST_PROXY_HEADERS', labelKey: 'field_TRUST_PROXY_HEADERS', descKey: 'field_TRUST_PROXY_HEADERS_desc', type: 'boolean', group: 'limit' },
-  { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'limit', required: false, placeholderKey: 'placeholder_ipDenylist' },
-  { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'limit' },
-  // 课程设置
-  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'subjects' },
-  // 题型设置
-  { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'subjects' },
+  // 课程与题型
+  { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'curriculum' },
+  { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'curriculum' },
   // 消息通知
   { key: 'enabled_notification_types', labelKey: 'field_enabled_notification_types', descKey: 'field_enabled_notification_types_desc', type: 'notifications', group: 'notify' },
-  // 文件类型白名单
-  { key: 'IMAGE_EXTENSIONS', labelKey: 'field_IMAGE_EXTENSIONS', descKey: 'field_IMAGE_EXTENSIONS_desc', type: 'tags', group: 'filetype' },
-  { key: 'DOCUMENT_EXTENSIONS', labelKey: 'field_DOCUMENT_EXTENSIONS', descKey: 'field_DOCUMENT_EXTENSIONS_desc', type: 'tags', group: 'filetype' },
+  // 激励与闯关（后端 ENABLE_BADGES / ENABLE_SUBJECT_TITLES / QUEST_USE_BANK，此前页面看不到）
+  { key: 'ENABLE_BADGES', labelKey: 'field_ENABLE_BADGES', descKey: 'field_ENABLE_BADGES_desc', type: 'boolean', group: 'incentive', required: false },
+  { key: 'ENABLE_SUBJECT_TITLES', labelKey: 'field_ENABLE_SUBJECT_TITLES', descKey: 'field_ENABLE_SUBJECT_TITLES_desc', type: 'boolean', group: 'incentive', required: false },
+  { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'boolean', group: 'incentive' },
+
+  // ══ ② AI 与模型 ══
+  // 服务接入
+  { key: 'dashscope_api_key', labelKey: 'field_dashscope_api_key', descKey: 'field_dashscope_api_key_desc', type: 'password', group: 'credentials' },
+  { key: 'AI_REQUEST_TIMEOUT', labelKey: 'field_AI_REQUEST_TIMEOUT', descKey: 'field_AI_REQUEST_TIMEOUT_desc', type: 'number', group: 'credentials', unitKey: 'unitSecond' },
+  // 模型与端点
+  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'models', required: false },
+  { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', type: 'text', group: 'models' },
+  { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'text', group: 'models' },
+  { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'models' },
+  { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'text', group: 'models' },
+  { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
+  // 对话权限
+  { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat' },
+  // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
+  { key: 'CHAT_MEMORY_ENABLED', labelKey: 'field_CHAT_MEMORY_ENABLED', descKey: 'field_CHAT_MEMORY_ENABLED_desc', type: 'boolean', group: 'memory' },
+  { key: 'CHAT_MEMORY_MAX_TURNS', labelKey: 'field_CHAT_MEMORY_MAX_TURNS', descKey: 'field_CHAT_MEMORY_MAX_TURNS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitTurn' },
+  { key: 'CHAT_MEMORY_TTL_MINUTES', labelKey: 'field_CHAT_MEMORY_TTL_MINUTES', descKey: 'field_CHAT_MEMORY_TTL_MINUTES_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitMinute' },
+  { key: 'CHAT_MEMORY_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_MAX_CHARS', descKey: 'field_CHAT_MEMORY_MAX_CHARS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitChar' },
+  { key: 'CHAT_MEMORY_CONTENT_MAX_CHARS', labelKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS', descKey: 'field_CHAT_MEMORY_CONTENT_MAX_CHARS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitChar' },
+  { key: 'CHAT_MEMORY_MAX_ROWS', labelKey: 'field_CHAT_MEMORY_MAX_ROWS', descKey: 'field_CHAT_MEMORY_MAX_ROWS_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitRow' },
+  { key: 'CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', labelKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES', descKey: 'field_CHAT_MEMORY_PRUNE_INTERVAL_MINUTES_desc', type: 'number', group: 'memory', required: false, unitKey: 'unitMinute', scope: 'nextRound' },
+  // 主观题后台批量批改（backend/ai_grading.py；练习/考试/测验共用一套参数）
+  { key: 'AI_GRADING_INTERVAL_SEC', labelKey: 'field_AI_GRADING_INTERVAL_SEC', descKey: 'field_AI_GRADING_INTERVAL_SEC_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitSecond', scope: 'nextRound' },
+  { key: 'AI_GRADING_BATCH_SIZE', labelKey: 'field_AI_GRADING_BATCH_SIZE', descKey: 'field_AI_GRADING_BATCH_SIZE_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitAnswer', scope: 'nextRound' },
+  { key: 'AI_GRADING_CONCURRENCY', labelKey: 'field_AI_GRADING_CONCURRENCY', descKey: 'field_AI_GRADING_CONCURRENCY_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitThread', scope: 'nextRound' },
+  { key: 'AI_GRADING_MAX_ITEMS_PER_ROUND', labelKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND', descKey: 'field_AI_GRADING_MAX_ITEMS_PER_ROUND_desc', type: 'number', group: 'grading', required: false, unitKey: 'unitItem', scope: 'nextRound' },
   // 图片生成
   { key: 'IMAGE_GEN_ENABLED', labelKey: 'field_IMAGE_GEN_ENABLED', descKey: 'field_IMAGE_GEN_ENABLED_desc', type: 'boolean', group: 'imagegen' },
   { key: 'IMAGE_GEN_MODEL', labelKey: 'field_IMAGE_GEN_MODEL', descKey: 'field_IMAGE_GEN_MODEL_desc', type: 'text', group: 'imagegen' },
   { key: 'IMAGE_GEN_SIZE', labelKey: 'field_IMAGE_GEN_SIZE', descKey: 'field_IMAGE_GEN_SIZE_desc', type: 'text', group: 'imagegen' },
-  // 闯关挑战
-  { key: 'QUEST_USE_BANK', labelKey: 'field_QUEST_USE_BANK', descKey: 'field_QUEST_USE_BANK_desc', type: 'boolean', group: 'quest' },
-  // 版本与升级
-  { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade' },
+
+  // ══ ③ 文件与存储 ══
+  // 上传限制与类型白名单
+  { key: 'MAX_DOC_SIZE_MB', labelKey: 'field_MAX_DOC_SIZE_MB', descKey: 'field_MAX_DOC_SIZE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB' },
+  { key: 'MAX_IMAGE_SIZE_MB', labelKey: 'field_MAX_IMAGE_SIZE_MB', descKey: 'field_MAX_IMAGE_SIZE_MB_desc', type: 'number', group: 'upload', unitKey: 'unitMB' },
+  { key: 'IMAGE_EXTENSIONS', labelKey: 'field_IMAGE_EXTENSIONS', descKey: 'field_IMAGE_EXTENSIONS_desc', type: 'tags', group: 'upload' },
+  { key: 'DOCUMENT_EXTENSIONS', labelKey: 'field_DOCUMENT_EXTENSIONS', descKey: 'field_DOCUMENT_EXTENSIONS_desc', type: 'tags', group: 'upload' },
+  // 下载配额
+  { key: 'TEACHER_DOWNLOAD_QUOTA_GB', labelKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB', descKey: 'field_TEACHER_DOWNLOAD_QUOTA_GB_desc', type: 'number', group: 'quota', unitKey: 'unitGB' },
+
+  // ══ ④ 账号与安全 ══
+  // 登录与会话
+  { key: 'JWT_EXPIRATION_HOURS', labelKey: 'field_JWT_EXPIRATION_HOURS', descKey: 'field_JWT_EXPIRATION_HOURS_desc', type: 'number', group: 'session', unitKey: 'unitHour', scope: 'nextLogin' },
+  { key: 'JWT_RENEW_THRESHOLD_MINUTES', labelKey: 'field_JWT_RENEW_THRESHOLD_MINUTES', descKey: 'field_JWT_RENEW_THRESHOLD_MINUTES_desc', type: 'number', group: 'session', unitKey: 'unitMinute' },
+  { key: 'ONLINE_USER_TIMEOUT_SECONDS', labelKey: 'field_ONLINE_USER_TIMEOUT_SECONDS', descKey: 'field_ONLINE_USER_TIMEOUT_SECONDS_desc', type: 'number', group: 'session', unitKey: 'unitSecond' },
+  // 爆破与 IP 防护（backend/security_guard.py，计数为内存态，重启即清）
+  { key: 'ENABLE_IP_GUARD', labelKey: 'field_ENABLE_IP_GUARD', descKey: 'field_ENABLE_IP_GUARD_desc', type: 'boolean', group: 'guard', required: false, danger: true },
+  { key: 'TRUST_PROXY_HEADERS', labelKey: 'field_TRUST_PROXY_HEADERS', descKey: 'field_TRUST_PROXY_HEADERS_desc', type: 'boolean', group: 'guard' },
+  { key: 'LOGIN_FAIL_LIMIT', labelKey: 'field_LOGIN_FAIL_LIMIT', descKey: 'field_LOGIN_FAIL_LIMIT_desc', type: 'number', group: 'guard', unitKey: 'unitTime' },
+  { key: 'LOGIN_FAIL_WINDOW_SECONDS', labelKey: 'field_LOGIN_FAIL_WINDOW_SECONDS', descKey: 'field_LOGIN_FAIL_WINDOW_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
+  { key: 'AUTH_FAIL_LIMIT', labelKey: 'field_AUTH_FAIL_LIMIT', descKey: 'field_AUTH_FAIL_LIMIT_desc', type: 'number', group: 'guard', unitKey: 'unitTime' },
+  { key: 'AUTH_FAIL_WINDOW_SECONDS', labelKey: 'field_AUTH_FAIL_WINDOW_SECONDS', descKey: 'field_AUTH_FAIL_WINDOW_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
+  { key: 'AUTH_FAIL_BAN_SECONDS', labelKey: 'field_AUTH_FAIL_BAN_SECONDS', descKey: 'field_AUTH_FAIL_BAN_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
+  { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'guard', required: false, placeholderKey: 'placeholder_ipDenylist', danger: true },
+  // 流量限制
+  { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', type: 'boolean', group: 'ratelimit' },
+  { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'ratelimit', unitKey: 'unitTime' },
+
+  // ══ ⑤ 运维与升级 ══
+  { key: 'auto_pull_enabled', labelKey: 'field_auto_pull_enabled', descKey: 'field_auto_pull_enabled_desc', type: 'boolean', group: 'upgrade', danger: true },
 ]
 
 // tags 类字段的键：保存时统一把逗号分隔字符串转回数组（留空 -> []，允许清空）
 const TAG_FIELD_KEYS = GLOBAL_CONFIG_FIELDS.filter((f) => f.type === 'tags').map((f) => f.key)
-
-const GROUP_LABELS: Record<string, string> = {
-  brand: 'group_brand',
-  api: 'group_api',
-  model: 'group_model',
-  ai: 'group_ai',
-  subjects: 'group_subjects',
-  limit: 'group_limit',
-  notify: 'group_notify',
-  filetype: 'group_filetype',
-  imagegen: 'group_imagegen',
-  quest: 'group_quest',
-  upgrade: 'group_upgrade',
-}
 
 // ═══════════════════════════════════════════════
 //  技能管理 Tab 组件（必须定义在组件外部，避免渲染时重复创建）
@@ -1141,13 +1201,13 @@ const SystemConfigPage: React.FC = () => {
   // ── 全局配置表单各分组 ──
   const renderGroup = (group: string) => {
     const fields = GLOBAL_CONFIG_FIELDS.filter((f) => f.group === group)
-    const getLabel = (field: typeof GLOBAL_CONFIG_FIELDS[number]) => t(field.labelKey)
-    const getDesc = (field: typeof GLOBAL_CONFIG_FIELDS[number]) => field.descKey ? t(field.descKey) : undefined
-    const getRule = (field: typeof GLOBAL_CONFIG_FIELDS[number]) =>
+    const getLabel = (field: ConfigField) => t(field.labelKey)
+    const getDesc = (field: ConfigField) => field.descKey ? t(field.descKey) : undefined
+    const getRule = (field: ConfigField) =>
       field.required !== false ? [{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }] : undefined
     return (
       <div key={group} style={{ marginBottom: 32 }}>
-        <Title level={5}>{t(GROUP_LABELS[group])}</Title>
+        <Title level={5}>{t(SECTION_TITLES[group])}</Title>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16 }}>
           {fields.map((field) => (
             <div key={field.key}>
@@ -1275,6 +1335,18 @@ const SystemConfigPage: React.FC = () => {
     )
   }
 
+  // ── 一个分区（zone）= 大标题 + 其下若干小节 ──
+  const renderZone = (zone: ConfigZone) => (
+    <div key={zone.id} style={{ marginBottom: 40 }}>
+      <div>
+        <Title level={4} style={{ margin: 0 }}>{t(zone.titleKey)}</Title>
+        <Text type="secondary" style={{ fontSize: 12 }}>{t(zone.descKey)}</Text>
+      </div>
+      <Divider style={{ margin: '10px 0 20px' }} />
+      {zone.sections.map(renderGroup)}
+    </div>
+  )
+
   return (
     <Card style={{ borderRadius: 8 }}>
       <Space style={{ marginBottom: 16 }}>
@@ -1316,7 +1388,7 @@ const SystemConfigPage: React.FC = () => {
                 initialValues={config}
                 style={{ maxWidth: 900 }}
               >
-                {['brand', 'api', 'model', 'ai', 'subjects', 'limit', 'notify', 'filetype', 'imagegen', 'quest', 'upgrade'].map(renderGroup)}
+                {CONFIG_ZONES.map(renderZone)}
 
                 <Divider />
                 <Space>
@@ -1334,7 +1406,7 @@ const SystemConfigPage: React.FC = () => {
                 </Space>
                 <div style={{ marginTop: 8 }}>
                   <Text type="secondary">
-                    {t('restartNote')}
+                    {t('effectNote')}
                   </Text>
                 </div>
               </Form>
