@@ -87,6 +87,9 @@ const SECTION_TITLES: Record<string, string> = {
   upgrade: 'group_upgrade',
 }
 
+// 锚点导航与小节 DOM id 的前缀
+const SECTION_DOM_ID = 'cfg-sec-'
+
 const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // ══ ① 基础与内容 ══
   // 品牌信息
@@ -166,6 +169,31 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
 
 // tags 类字段的键：保存时统一把逗号分隔字符串转回数组（留空 -> []，允许清空）
 const TAG_FIELD_KEYS = GLOBAL_CONFIG_FIELDS.filter((f) => f.type === 'tags').map((f) => f.key)
+
+// 后端配置 -> 表单值：tags 转逗号串、题型转多行 key:label，并补齐两个"配置文件里可能没写"的默认值
+// （否则老部署一保存就把它们顺手改掉了）。对已经是表单值的对象再调一次是幂等的。
+const toFormValues = (raw: Record<string, unknown>): Record<string, unknown> => {
+  const v = { ...raw }
+  for (const key of TAG_FIELD_KEYS) {
+    if (Array.isArray(v[key])) v[key] = (v[key] as string[]).join(',')
+  }
+  if (Array.isArray(v['QUESTION_TYPES'])) {
+    v['QUESTION_TYPES'] = (v['QUESTION_TYPES'] as { key: string; label: string }[])
+      .map((item) => `${item.key}:${item.label}`)
+      .join('\n')
+  }
+  if (!v['enabled_notification_types']) v['enabled_notification_types'] = ['exam', 'system']
+  if (typeof v['auto_pull_enabled'] !== 'boolean') v['auto_pull_enabled'] = true
+  return v
+}
+
+// 脏值对比用的归一化：数组按逗号串、布尔转 0/1、空值统一成空串
+const normVal = (v: unknown): string => {
+  if (v === undefined || v === null || v === '') return ''
+  if (typeof v === 'boolean') return v ? '1' : '0'
+  if (Array.isArray(v)) return v.join(',')
+  return String(v)
+}
 
 // ═══════════════════════════════════════════════
 //  技能管理 Tab 组件（必须定义在组件外部，避免渲染时重复创建）
@@ -1076,6 +1104,10 @@ const SystemConfigPage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [apikeyStatus, setApikeyStatus] = useState<{ status: string; source: string; hint: string; configured: boolean } | null>(null)
   const [form] = Form.useForm()
+  const [query, setQuery] = useState('')                // 顶部搜索关键词
+  const [activeSec, setActiveSec] = useState('')        // 锚点导航当前高亮的小节
+  const [dirty, setDirty] = useState<string[]>([])      // 与已加载值不同的配置键
+  const loadedRef = useRef<Record<string, unknown>>({}) // 上次加载/保存后的表单快照（脏值对比 + 放弃修改）
 
   // ── 加载 API Key 状态 ──
   const loadApikeyStatus = useCallback(async () => {
@@ -1087,34 +1119,50 @@ const SystemConfigPage: React.FC = () => {
     }
   }, [])
 
+  // ── 把配置灌进表单并记下快照（快照用于脏值统计与「放弃修改」） ──
+  const applyConfig = useCallback((raw: Record<string, unknown>) => {
+    const formValues = toFormValues(raw)
+    loadedRef.current = formValues
+    setDirty([])
+    form.setFieldsValue(formValues)
+  }, [form])
+
   // ── 加载全局配置 ──
   const loadConfig = useCallback(async () => {
     setLoading(true)
     try {
       const { data } = await apiClient.get('/api/config')
       setConfig(data)
-      // 将数组字段转为逗号分隔字符串供 Tags 输入框展示
-      const formValues = { ...data }
-      for (const key of TAG_FIELD_KEYS) {
-        if (Array.isArray(formValues[key])) {
-          formValues[key] = formValues[key].join(',')
-        }
-      }
-      // 题型数组 [{key,label}] → 多行文本 key:label
-      if (Array.isArray(formValues['QUESTION_TYPES'])) {
-        formValues['QUESTION_TYPES'] = formValues['QUESTION_TYPES']
-          .map((t: { key: string; label: string }) => `${t.key}:${t.label}`)
-          .join('\n')
-      }
-      form.setFieldsValue(formValues)
-      // 同时刷新 API Key 状态
+      applyConfig(data)
       loadApikeyStatus()
     } catch {
       message.error(t('loadConfigFailed'))
     } finally {
       setLoading(false)
     }
-  }, [t, form, loadApikeyStatus])
+  }, [t, applyConfig, loadApikeyStatus])
+
+  // ── 逐项比对快照，统计"几项未保存" ──
+  const handleValuesChange = useCallback(() => {
+    const cur = form.getFieldsValue() as Record<string, unknown>
+    setDirty(
+      GLOBAL_CONFIG_FIELDS
+        .filter((f) => normVal(cur[f.key]) !== normVal(loadedRef.current[f.key]))
+        .map((f) => f.key),
+    )
+  }, [form])
+
+  // ── 放弃未保存的修改（回到上次加载/保存的值） ──
+  const handleDiscard = () => {
+    applyConfig(loadedRef.current)
+    message.success(t('discardDone'))
+  }
+
+  // ── 锚点跳转 ──
+  const scrollToSection = (sec: string) => {
+    document.getElementById(SECTION_DOM_ID + sec)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setActiveSec(sec)
+  }
 
   // ── 保存全局配置 ──
   const handleSave = async () => {
@@ -1156,41 +1204,32 @@ const SystemConfigPage: React.FC = () => {
 
   useEffect(() => {
     if (user?.role !== 'admin') return
+    loadConfig()
+  }, [user?.role, loadConfig])
 
-    const init = async () => {
-      setLoading(true)
-      try {
-        const { data } = await apiClient.get('/api/config')
-        setConfig(data)
-        const formValues = { ...data }
-        for (const key of TAG_FIELD_KEYS) {
-          if (Array.isArray(formValues[key])) {
-            formValues[key] = formValues[key].join(',')
-          }
-        }
-        if (Array.isArray(formValues['QUESTION_TYPES'])) {
-          formValues['QUESTION_TYPES'] = formValues['QUESTION_TYPES']
-            .map((t: { key: string; label: string }) => `${t.key}:${t.label}`)
-            .join('\n')
-        }
-        if (!formValues['enabled_notification_types']) {
-          formValues['enabled_notification_types'] = ['exam', 'system']
-        }
-        // 与后端 _auto_pull_enabled() 的默认值保持一致：配置里从没写过就等于开启，
-        // 否则老部署一保存表单就会把开关“顺手”关掉
-        if (typeof formValues['auto_pull_enabled'] !== 'boolean') {
-          formValues['auto_pull_enabled'] = true
-        }
-        form.setFieldsValue(formValues)
-        loadApikeyStatus()
-      } catch {
-        message.error(t('loadConfigFailed'))
-      } finally {
-        setLoading(false)
-      }
-    }
-    init()
-  }, [t, user, form, loadApikeyStatus])
+  // 滚动时高亮左侧导航当前小节（IntersectionObserver 不依赖外层滚动容器的实现细节）
+  useEffect(() => {
+    if (activeTab !== 'global' || loading) return
+    const els = GLOBAL_CONFIG_FIELDS
+      .map((f) => document.getElementById(SECTION_DOM_ID + f.group))
+      .filter((el): el is HTMLDivElement => !!el)
+    if (!els.length) return
+    const tops = new Map<string, number>()
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (en.isIntersecting) tops.set(en.target.id, en.boundingClientRect.top)
+        else tops.delete(en.target.id)
+      })
+      let best = ''
+      let bestTop = Number.POSITIVE_INFINITY
+      tops.forEach((top, id) => {
+        if (top < bestTop) { bestTop = top; best = id }
+      })
+      if (best) setActiveSec(best.slice(SECTION_DOM_ID.length))
+    }, { rootMargin: '-100px 0px -55% 0px', threshold: 0 })
+    els.forEach((el) => io.observe(el))
+    return () => io.disconnect()
+  }, [activeTab, loading, query])
 
   // 非管理员重定向到 AI 对话
   if (user?.role !== 'admin') {
@@ -1198,16 +1237,38 @@ const SystemConfigPage: React.FC = () => {
     return null
   }
 
-  // ── 全局配置表单各分组 ──
+  // ── 搜索过滤：键名 / 名称 / 说明 任一命中即保留，小节与分区随之收缩 ──
+  const q = query.trim().toLowerCase()
+  const fieldHit = (f: ConfigField) =>
+    !q ||
+    f.key.toLowerCase().includes(q) ||
+    t(f.labelKey).toLowerCase().includes(q) ||
+    (f.descKey ? t(f.descKey).toLowerCase().includes(q) : false)
+  const fieldsOf = (section: string) => GLOBAL_CONFIG_FIELDS.filter((f) => f.group === section && fieldHit(f))
+  const visibleZones = CONFIG_ZONES
+    .map((z) => ({ ...z, sections: z.sections.filter((sec) => fieldsOf(sec).length > 0) }))
+    .filter((z) => z.sections.length > 0)
+  const hitCount = visibleZones.reduce(
+    (n, z) => n + z.sections.reduce((m, sec) => m + fieldsOf(sec).length, 0),
+    0,
+  )
+
+  // ── 全局配置表单各小节 ──
   const renderGroup = (group: string) => {
-    const fields = GLOBAL_CONFIG_FIELDS.filter((f) => f.group === group)
+    const fields = fieldsOf(group)
+    if (!fields.length) return null
     const getLabel = (field: ConfigField) => t(field.labelKey)
     const getDesc = (field: ConfigField) => field.descKey ? t(field.descKey) : undefined
     const getRule = (field: ConfigField) =>
       field.required !== false ? [{ required: true, message: t('pleaseInput', { label: getLabel(field) }) }] : undefined
     return (
-      <div key={group} style={{ marginBottom: 32 }}>
-        <Title level={5}>{t(SECTION_TITLES[group])}</Title>
+      <div key={group} id={SECTION_DOM_ID + group} style={{ marginBottom: 32, scrollMarginTop: 8 }}>
+        <Title level={5} style={{ marginTop: 0 }}>
+          {t(SECTION_TITLES[group])}
+          {q ? (
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 6 }}>({fields.length})</Text>
+          ) : null}
+        </Title>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 16 }}>
           {fields.map((field) => (
             <div key={field.key}>
@@ -1382,32 +1443,93 @@ const SystemConfigPage: React.FC = () => {
             key="global"
           >
             <Spin spinning={loading}>
+              {/* 搜索：按名称 / 键名 / 说明过滤，没有命中的小节与分区自动收起 */}
+              <Space style={{ marginBottom: 12 }} wrap>
+                <Input
+                  allowClear
+                  prefix={<SearchOutlined />}
+                  placeholder={t('searchConfig')}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  style={{ width: 320 }}
+                />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {q
+                    ? t('matchedN', { n: hitCount, total: GLOBAL_CONFIG_FIELDS.length })
+                    : t('totalSections', { sections: CONFIG_ZONES.length, fields: GLOBAL_CONFIG_FIELDS.length })}
+                </Text>
+              </Space>
+
               <Form
                 form={form}
                 layout="vertical"
                 initialValues={config}
-                style={{ maxWidth: 900 }}
+                onValuesChange={handleValuesChange}
               >
-                {CONFIG_ZONES.map(renderZone)}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+                  {/* 左侧锚点导航：点击定位，滚动时自动高亮当前小节 */}
+                  <div style={{ position: 'sticky', top: 0, flex: '0 0 178px', width: 178, maxHeight: 'calc(100vh - 220px)', overflowY: 'auto', paddingTop: 4 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>{t('navTitle')}</Text>
+                    {visibleZones.map((zone) => (
+                      <div key={zone.id} style={{ marginTop: 8 }}>
+                        <div
+                          onClick={() => scrollToSection(zone.sections[0])}
+                          style={{ fontSize: 12, fontWeight: 600, cursor: 'pointer', marginBottom: 2, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        >
+                          {t(zone.titleKey)}
+                        </div>
+                        {zone.sections.map((sec) => (
+                          <div
+                            key={sec}
+                            onClick={() => scrollToSection(sec)}
+                            style={{
+                              fontSize: 12,
+                              lineHeight: '22px',
+                              padding: '0 8px',
+                              cursor: 'pointer',
+                              borderRadius: 4,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              color: activeSec === sec ? 'var(--primary-color)' : 'var(--text-secondary)',
+                              background: activeSec === sec ? 'color-mix(in srgb, var(--primary-color) 10%, transparent)' : 'transparent',
+                              fontWeight: activeSec === sec ? 600 : 400,
+                            }}
+                          >
+                            {t(SECTION_TITLES[sec])}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {!visibleZones.length && (
+                      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>{t('noMatch')}</div>
+                    )}
+                  </div>
 
-                <Divider />
-                <Space>
-                  <Button
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    loading={saving}
-                    onClick={handleSave}
-                  >
+                  <div style={{ flex: 1, minWidth: 0, maxWidth: 960 }}>{visibleZones.map(renderZone)}</div>
+                </div>
+
+                {/* 底部常驻操作栏：改了几项、保存、放弃修改、重新加载 */}
+                <div
+                  style={{
+                    position: 'sticky', bottom: 0, zIndex: 20, marginTop: 8, padding: '10px 0',
+                    background: 'var(--bg-container)', borderTop: '1px solid var(--border-color-secondary)',
+                    display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                  }}
+                >
+                  <Tag color={dirty.length ? 'orange' : 'default'} style={{ marginInlineEnd: 0 }}>
+                    {dirty.length ? t('unsavedCount', { n: dirty.length }) : t('noChanges')}
+                  </Tag>
+                  <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={!dirty.length} onClick={handleSave}>
                     {t('saveConfig')}
+                  </Button>
+                  <Button icon={<RollbackOutlined />} disabled={!dirty.length} onClick={handleDiscard}>
+                    {t('discard')}
                   </Button>
                   <Button icon={<ReloadOutlined />} onClick={loadConfig}>
                     {t('reload')}
                   </Button>
-                </Space>
-                <div style={{ marginTop: 8 }}>
-                  <Text type="secondary">
-                    {t('effectNote')}
-                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>{t('effectNote')}</Text>
                 </div>
               </Form>
             </Spin>
