@@ -283,6 +283,13 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "CHAT_MEMORY_MAX_ROWS": (500, 500000),
     "CHAT_MEMORY_CONTENT_MAX_CHARS": (200, 20000),
     "CHAT_MEMORY_PRUNE_INTERVAL_MINUTES": (1, 120),
+    # ── 主观题后台批量批改（backend/ai_grading.py）──
+    # 必须在此登记：_validate_config_updates 只保留认识的键，漏登记会导致
+    # 「系统配置页面改了但保存后不生效」（静默丢弃）。
+    "AI_GRADING_INTERVAL_SEC": (5, 3600),
+    "AI_GRADING_BATCH_SIZE": (1, 50),
+    "AI_GRADING_CONCURRENCY": (1, 8),
+    "AI_GRADING_MAX_ITEMS_PER_ROUND": (1, 500),
 }
 _BOOL_KEYS = {
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
@@ -399,6 +406,11 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
         elif key in _TITLE_LIST_KEYS:
             _validate_title_config(key, value)
             out[key] = value
+    dropped = [k for k in updates if k not in out]
+    if dropped:
+        # 走到这里说明该键在 DEFAULT_CONFIG 里但没有登记任何校验规则 —— 保存会被丢弃。
+        # 补进 _NUM_RANGES/_BOOL_KEYS/_STR_LIMITS/_STRLIST_KEYS 即可。
+        logger.warning(f"[config] 以下配置键无校验规则, 已被忽略: {dropped}")
     return out
 
 
@@ -419,6 +431,23 @@ async def get_config_health(request: Request):
     user = get_current_user(request)
     require_admin(user)
     return config_health()
+
+
+@router.get("/meta", summary="配置项类型与取值范围元数据（管理员）")
+async def get_config_meta(request: Request):
+    """下发后端的校验规则(数值范围/布尔键/文本长度/列表上限), 供前端表单直接复用。
+
+    只含规则不含配置值, 因此不涉及密钥泄露; 前端不再自己复制一份范围表,
+    两处永远不会不一致（改范围只需改后端这一处）。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+    return {
+        "num_ranges": {k: [lo, hi] for k, (lo, hi) in _NUM_RANGES.items()},
+        "bool_keys": sorted(_BOOL_KEYS),
+        "str_limits": _STR_LIMITS,
+        "strlist_keys": _STRLIST_KEYS,
+    }
 
 
 @router.get("/chat-memory", summary="直连对话记忆占用与治理参数（管理员）")
