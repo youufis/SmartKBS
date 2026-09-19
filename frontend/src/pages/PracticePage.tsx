@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import AnswerLine from '../components/AnswerLine'
 import {
   Card, Button, Input, InputNumber, Select, Tag, message, Spin,
   Radio, Space, Typography, Divider, Progress, Table, Modal, Result, Popconfirm, Pagination, Checkbox,
@@ -786,7 +787,7 @@ const TeacherView: React.FC = () => {
                   </div>
                 ))}
                 <div style={{ marginTop: 4 }}>
-                  <Tag color="blue">{t('answerColon')}{q.correct_answer}</Tag>
+                  <AnswerLine color="blue" label={t('answerColon')} value={q.correct_answer} />
                 </div>
               </Card>
             ))}

@@ -13,6 +13,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import type { QuestionInfo } from '../types'
 import { useTranslation } from 'react-i18next'
+import AnswerLine from '../components/AnswerLine'
 import FormulaRenderer from '../components/FormulaRenderer'
 import SVGViewer from '../components/SVGViewer'
 import MediaDisplay from '../components/MediaDisplay'
@@ -739,7 +740,7 @@ const QuestionBankPage: React.FC = () => {
                               )}
                               <MediaDisplay svgContent={null} hasSvg={0} mediaFiles={(q as any).media_files} />
                               <div style={{ marginTop: 8, fontSize: 13 }}>
-                                <Tag color="green">{t('answerColon')}{q.correct_answer}</Tag>
+                                <AnswerLine color="green" label={t('answerColon')} value={q.correct_answer} />
                                 {q.explanation && (
                                   <div style={{ marginTop: 4 }}>
                                     <FormulaRenderer content={q.explanation} />
@@ -903,7 +904,7 @@ const QuestionBankPage: React.FC = () => {
                                 </div>
                               ))}
                               <div style={{ marginTop: 8, fontSize: 13 }}>
-                                <Tag color="green">{t('answerColon')}{q.correct_answer}</Tag>
+                                <AnswerLine color="green" label={t('answerColon')} value={q.correct_answer} />
                                 {q.explanation && (
                                   <div style={{ marginTop: 4 }}>
                                     <FormulaRenderer content={q.explanation} />

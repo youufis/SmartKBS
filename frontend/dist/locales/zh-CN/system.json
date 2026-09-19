@@ -891,5 +891,7 @@
   "confirmBatchDelete": "确定要删除选中的 {{count}} 条消息吗？此操作不可撤销。",
   "deleteSelected": "删除({{count}})",
   "clearSelection": "取消选择",
-  "selectAllCurrentPage": "全选当前页"
+  "selectAllCurrentPage": "全选当前页",
+  "changelogShowMore": "展开全部 {{count}} 条",
+  "changelogCollapse": "收起"
 }

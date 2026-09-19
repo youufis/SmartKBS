@@ -614,6 +614,8 @@ const SkillManagePanel: React.FC = () => {
 const UpgradePanel: React.FC = () => {
   const { t } = useTranslation('system')
   const [verInfo, setVerInfo] = useState<VersionInfo | null>(null)
+  // 更新日志条数会随版本越攒越多，默认只露前几条，避免把升级页撑成长页
+  const [changelogAll, setChangelogAll] = useState(false)
   const [verLoading, setVerLoading] = useState(true) // 初始为 true，首次挂载即加载
   const [upgrading, setUpgrading] = useState(false)
   const [backingUp, setBackingUp] = useState(false)
@@ -888,7 +890,16 @@ const UpgradePanel: React.FC = () => {
             <>
               <Divider />
               <Title level={5}>{t('changelogTitle')}</Title>
-              <Timeline items={verInfo.changelog.map((c: string) => ({ content: c }))} />
+              <div style={{ maxHeight: changelogAll ? 360 : 'none', overflowY: changelogAll ? 'auto' : 'hidden', paddingRight: 6 }}>
+                <Timeline
+                  items={(changelogAll ? verInfo.changelog : verInfo.changelog.slice(0, 6)).map((c: string) => ({ content: c }))}
+                />
+              </div>
+              {verInfo.changelog.length > 6 && (
+                <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setChangelogAll((v) => !v)}>
+                  {changelogAll ? t('changelogCollapse') : t('changelogShowMore', { count: verInfo.changelog.length })}
+                </Button>
+              )}
             </>
           )}
 

@@ -16,6 +16,7 @@ import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
+import AnswerLine from '../components/AnswerLine'
 import { useAuthStore } from '../stores/authStore'
 import QuizEditor from '../components/QuizEditor'
 import type { Question } from '../components/QuizEditor'
@@ -644,7 +645,7 @@ const InteractionPage: React.FC = () => {
                               ))}
                             </div>
                           )}
-                          <Tag color="blue" style={{ marginTop: 4 }}>{t('ipAnswerLabel')}{r.correct_answer}</Tag>
+                          <AnswerLine color="blue" style={{ marginTop: 4 }} label={t('ipAnswerLabel')} value={r.correct_answer} />
                         </div>
                       ),
                     },
@@ -718,7 +719,7 @@ const InteractionPage: React.FC = () => {
                   </div>
                 )}
                 <div style={{ marginTop: 4 }}>
-                  <Tag color="green">{t('answerColon')}{q.answer}</Tag>
+                  <AnswerLine color="green" label={t('answerColon')} value={q.answer} />
                 </div>
                 {q.explanation && (
                   <div style={{ marginTop: 2, fontSize: 12, color: '#888', paddingLeft: 4 }}>

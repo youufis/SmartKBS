@@ -891,5 +891,7 @@
   "confirmBatchDelete": "Are you sure you want to delete {{count}} selected items? This cannot be undone.",
   "deleteSelected": "Delete({{count}})",
   "clearSelection": "Clear selection",
-  "selectAllCurrentPage": "Select all on this page"
+  "selectAllCurrentPage": "Select all on this page",
+  "changelogShowMore": "Show all {{count}} items",
+  "changelogCollapse": "Collapse"
 }
