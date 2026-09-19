@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
+from backend.grading_state import pending_grading_by_exam
 from backend.question_db import (
     execute_query,
     execute_query_one,
@@ -174,6 +175,7 @@ async def list_exams(
     status: str = Query(None, description="筛选状态"),
     subject: str = Query(None, description="筛选科目"),
     keyword: str = Query(None, description="搜索标题"),
+    pending_grading: int = Query(0, description="1=仅看仍有待批改答卷的考试"),
     scope: str = Query("all", description="all/my"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -185,6 +187,7 @@ async def list_exams(
 
     conditions = []
     params = []
+    pending_counts: dict[int, int] = {}
 
     # 权限控制
     if role == 2:  # 学生：只能看到已发布或已结束且是本班教师或管理员创建的考试
@@ -258,22 +261,45 @@ async def list_exams(
             )
             row["my_attempt"] = _normalize_client_attempt(attempt)
     else:
-        # 非学生：常规分页查询
-        count_row = execute_query_one(
-            f"SELECT COUNT(*) as total FROM exams e WHERE {where}", tuple(params)
-        )
-        total = count_row["total"] if count_row else 0
+        # 待批改判定要看 ai_pending / grading_details（JSON），SQL 里近似判断会算错，
+        # 所以带该筛选时先全量取、Python 侧筛完再分页（考试量级很小）
+        if pending_grading:
+            pending_counts, _ = pending_grading_by_exam()
+            all_rows = execute_query(
+                f"""SELECT e.*,
+                    (SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id) as question_count
+                    FROM exams e WHERE {where} ORDER BY e.created_at DESC""",
+                tuple(params),
+            )
+            kept = [r for r in (all_rows or []) if pending_counts.get(int(r["id"]), 0) > 0]
+            total = len(kept)
+            start = (page - 1) * page_size
+            rows = kept[start:start + page_size]
+        else:
+            count_row = execute_query_one(
+                f"SELECT COUNT(*) as total FROM exams e WHERE {where}", tuple(params)
+            )
+            total = count_row["total"] if count_row else 0
 
-        offset = (page - 1) * page_size
-        rows = execute_query(
-            f"""SELECT e.*,
-                (SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id) as question_count
-                FROM exams e
-                WHERE {where}
-                ORDER BY e.created_at DESC
-                LIMIT ? OFFSET ?""",
-            tuple(params) + (page_size, offset),
-        )
+            offset = (page - 1) * page_size
+            rows = execute_query(
+                f"""SELECT e.*,
+                    (SELECT COUNT(*) FROM exam_questions eq WHERE eq.exam_id = e.id) as question_count
+                    FROM exams e
+                    WHERE {where}
+                    ORDER BY e.created_at DESC
+                    LIMIT ? OFFSET ?""",
+                tuple(params) + (page_size, offset),
+            )
+
+    # 每场的待批改份数：与首页「待处理批阅」共用 grading_state 口径
+    if role != 2:
+        _pc = pending_counts if pending_grading else pending_grading_by_exam()[0]
+        for row in rows:
+            try:
+                row["pending_grading"] = _pc.get(int(row["id"]), 0)
+            except (TypeError, ValueError, KeyError):
+                row["pending_grading"] = 0
 
     # 补充 creator_name
     for row in rows:

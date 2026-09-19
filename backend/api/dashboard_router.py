@@ -22,6 +22,7 @@ from backend.title_system import (
 )
 from backend.reward_engine import get_student_total as get_reward_total
 from backend.permission_service import get_user_grade_class
+from backend.grading_state import pending_grading_by_exam
 
 router = APIRouter()
 
@@ -918,9 +919,9 @@ async def teacher_todo(request: Request):
 
     # ── 考试: 待批改答卷 / 进行中的考试 ──
     if is_admin:
-        pending_exam_grading = _q_count(
-            "SELECT COUNT(*) FROM exam_attempts WHERE status='submitted'",
-        )
+        # status='submitted' 只代表「已交卷」，直接拿它计数会把早已判完的卷子永远算成待办
+        _pending_counts, pending_exam_grading = pending_grading_by_exam()
+        pending_exam_grading_exams = len(_pending_counts)
         in_progress_exams = q_execute_query(
             """SELECT id, title, end_time FROM exams
                WHERE status='published' AND (start_time IS NULL OR start_time <= ?)
@@ -936,12 +937,12 @@ async def teacher_todo(request: Request):
         )
     else:
         in_cond, in_params = _in_sql("ea.student_username")
-        pending_exam_grading = _q_count(
-            f"""SELECT COUNT(*) FROM exam_attempts ea
-                JOIN exams e ON e.id = ea.exam_id
-                WHERE ea.status='submitted' AND e.creator_username=?{in_cond}""",
-            (username, *in_params),
+        _pending_counts, pending_exam_grading = pending_grading_by_exam(
+            join="JOIN exams e ON e.id = ea.exam_id",
+            where=f"AND e.creator_username=?{in_cond}",
+            params=(username, *in_params),
         )
+        pending_exam_grading_exams = len(_pending_counts)
         in_progress_exams = q_execute_query(
             """SELECT id, title, end_time FROM exams
                WHERE status='published' AND creator_username=?
@@ -1052,6 +1053,7 @@ async def teacher_todo(request: Request):
 
     result = {
         "pending_exam_grading": pending_exam_grading,
+        "pending_exam_grading_exams": pending_exam_grading_exams,
         "pending_task_grades": pending_task_grades,
         "pending_questions": pending_questions,
         "pending_answer_reviews": pending_answer_reviews,

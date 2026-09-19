@@ -68,11 +68,17 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card hoverable size="small" style={{ height: '100%' }} onClick={() => navigate('/exam')}>
+          <Card hoverable size="small" style={{ height: '100%' }} onClick={() => navigate('/exam?grading=pending')}>
             <Statistic title={t('statsT.pending')} value={pendingTotal}
               prefix={<AuditOutlined style={{ color: pendingTotal > 0 ? '#ff4d4f' : '#52c41a' }} />}
               styles={{ content: { color: pendingTotal > 0 ? '#ff4d4f' : '#52c41a' } }}
-              suffix={<Text type="secondary" style={{ fontSize: 12, marginInlineStart: 6 }}>{t('statsT.pendingSuffix', { papers: todo?.pending_exam_grading ?? 0, tasks: todo?.pending_task_grades ?? 0 })}</Text>} />
+              suffix={(pendingTotal > 0
+                ? t('statsT.pendingSuffix', {
+                  papers: todo?.pending_exam_grading ?? 0,
+                  exams: todo?.pending_exam_grading_exams ?? 0,
+                  tasks: todo?.pending_task_grades ?? 0,
+                })
+                : t('statsT.pendingClear'))} />
           </Card>
         </Col>
         <Col xs={12} md={6}>

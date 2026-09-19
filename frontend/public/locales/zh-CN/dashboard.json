@@ -594,11 +594,12 @@
     "examManage": "已发布考试",
     "examSuffix": "草稿{{draft}} · 已结束{{ended}}",
     "pending": "待处理批阅",
-    "pendingSuffix": "答卷{{papers}} · 任务{{tasks}}",
+    "pendingSuffix": "答卷{{papers}}·{{exams}}场 · 任务{{tasks}}",
     "ongoing": "进行中的活动",
     "ongoingSuffix": "测验{{quiz}} · 抢答{{quick}}",
     "students": "任教学生",
-    "studentsSuffix": "今日活跃 {{active}} 人"
+    "studentsSuffix": "今日活跃 {{active}} 人",
+    "pendingClear": "答卷与任务都已批改"
   },
   "trend": {
     "title": "近7天学习动态",

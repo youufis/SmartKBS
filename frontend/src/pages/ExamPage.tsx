@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   Layout, Card, Table, Button, message, Modal, Form, Input, Select,
   InputNumber, Tag, Space, Typography, Tooltip, Popconfirm, Row, Col,
-  Divider, Empty, Tabs, Spin, Statistic,
+  Divider, Empty, Tabs, Spin, Statistic, Checkbox,
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, DeleteOutlined, EditOutlined,
@@ -20,7 +20,7 @@ import { useAuthStore } from '../stores/authStore'
 import type { ExamInfo, ExamAttempt } from '../types'
 
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import { TYPE_OPTIONS } from '../constants/questionTypes'
@@ -95,6 +95,19 @@ const ExamPage: React.FC = () => {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [statusFilter, setStatusFilter] = useState<string | undefined>()
+  // 首页「待处理批阅」卡片带 ?grading=pending 进来时，列表只留仍有待批改答卷的考试，
+  // 否则会出现「卡片 13（份答卷）/ 列表 9（场考试）」这种看着像丢数据的错位
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [pendingOnly, setPendingOnly] = useState(() => searchParams.get('grading') === 'pending')
+
+  const togglePendingOnly = (v: boolean) => {
+    setPendingOnly(v)
+    setPage(1)
+    const next = new URLSearchParams(searchParams)
+    if (v) next.set('grading', 'pending')
+    else next.delete('grading')
+    setSearchParams(next, { replace: true })
+  }
 
   // ── 创建/编辑弹窗 ──
   const [createModal, setCreateModal] = useState(false)
@@ -190,6 +203,7 @@ const ExamPage: React.FC = () => {
       const scope = isStudent ? 'all' : 'all'
       const res = await examsApi.listExams({
         status: statusFilter,
+        pending_grading: pendingOnly ? 1 : undefined,
         scope,
         page,
         page_size: pageSize,
@@ -201,7 +215,7 @@ const ExamPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, page, pageSize, isStudent, t])
+  }, [statusFilter, page, pageSize, isStudent, t, pendingOnly])
 
   useEffect(() => { const fn = async () => { loadExams() }; fn() }, [loadExams])
 
@@ -627,6 +641,22 @@ const ExamPage: React.FC = () => {
       width: 70,
     },
     {
+      // 让「13 份答卷」在列表里能逐场对上，而不是只看到一个总数
+      title: t('exPendingCol'),
+      key: 'pending_grading',
+      width: 86,
+      render: (_: unknown, r: ExamInfo & { pending_grading?: number }) => {
+        const n = r.pending_grading ?? 0
+        return n > 0
+          ? (
+            <Tooltip title={t('exPendingTip', { count: n })}>
+              <Tag color="orange" style={{ marginInlineEnd: 0 }}>{t('exPendingN', { count: n })}</Tag>
+            </Tooltip>
+          )
+          : <Typography.Text type="secondary" style={{ fontSize: 12 }}>-</Typography.Text>
+      },
+    },
+    {
       title: t('creator'),
       dataIndex: 'creator_name',
       key: 'creator_name',
@@ -899,7 +929,14 @@ const ExamPage: React.FC = () => {
             </Select>
           </Col>
           <Col>
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('totalExams', { count: total })}</Typography.Text>
+            <Checkbox checked={pendingOnly} onChange={(e) => togglePendingOnly(e.target.checked)}>
+              <span style={{ fontSize: 13 }}>{t('exPendingOnly')}</span>
+            </Checkbox>
+          </Col>
+          <Col>
+            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+              {pendingOnly ? t('exPendingHint', { count: total }) : t('totalExams', { count: total })}
+            </Typography.Text>
           </Col>
         </Row>
 

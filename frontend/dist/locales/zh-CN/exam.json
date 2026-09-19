@@ -462,5 +462,10 @@
   "exGrade": "年级",
   "exClass": "班级",
   "exSearchStudent": "搜索姓名 / 学号 / 年级 / 班级",
-  "exTotalStudents": "共 {{count}} 名学生"
+  "exTotalStudents": "共 {{count}} 名学生",
+  "exPendingOnly": "仅看待批改",
+  "exPendingCol": "待批改",
+  "exPendingN": "{{count}} 份",
+  "exPendingTip": "本场还有 {{count}} 份答卷待批改",
+  "exPendingHint": "{{count}} 场考试有待批改答卷"
 }

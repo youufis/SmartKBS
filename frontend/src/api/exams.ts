@@ -21,6 +21,8 @@ export async function listExams(params?: {
   status?: string;
   subject?: string;
   keyword?: string;
+  /** 1 = 仅看仍有待批改答卷的考试（与首页「待处理批阅」同口径） */
+  pending_grading?: number;
   scope?: string;
   page?: number;
   page_size?: number;

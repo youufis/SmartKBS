@@ -462,5 +462,10 @@
   "exGrade": "Grade",
   "exClass": "Class",
   "exSearchStudent": "Search name / ID / grade / class",
-  "exTotalStudents": "{{count}} students"
+  "exTotalStudents": "{{count}} students",
+  "exPendingOnly": "Only pending grading",
+  "exPendingCol": "To grade",
+  "exPendingN": "{{count}}",
+  "exPendingTip": "{{count}} answer sheets still awaiting grading",
+  "exPendingHint": "{{count}} exams awaiting grading"
 }

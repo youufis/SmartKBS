@@ -150,6 +150,8 @@ export interface WeeklyStar {
 
 export interface TeacherTodo {
   pending_exam_grading: number
+  /** 这些答卷分布在几场考试上（答卷份数 ≠ 考试场数） */
+  pending_exam_grading_exams: number
   pending_task_grades: number
   pending_questions: number
   pending_answer_reviews: number

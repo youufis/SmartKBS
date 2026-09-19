@@ -594,11 +594,12 @@
     "examManage": "Published Exams",
     "examSuffix": "{{draft}} drafts · {{ended}} ended",
     "pending": "To Grade",
-    "pendingSuffix": "{{papers}} exams · {{tasks}} tasks",
+    "pendingSuffix": "{{papers}} sheets/{{exams}} exams · {{tasks}} tasks",
     "ongoing": "Ongoing Activities",
     "ongoingSuffix": "{{quiz}} quizzes · {{quick}} quick quiz",
     "students": "My Students",
-    "studentsSuffix": "{{active}} active today"
+    "studentsSuffix": "{{active}} active today",
+    "pendingClear": "All sheets and tasks graded"
   },
   "trend": {
     "title": "7-Day Learning Trend",
