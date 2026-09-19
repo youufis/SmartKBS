@@ -15,6 +15,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useThemeStore } from '../stores/themeStore'
 import { getFileIcon } from '../utils/fileIcon'
+import { compactClassScope } from '../utils/classScope'
 import { getFileKind, KIND_COLOR, DOC_KINDS, MEDIA_KINDS } from '../utils/fileKind'
 
 const { Text } = Typography
@@ -43,6 +44,7 @@ type Dim = 'status' | 'time' | 'kind' | 'course' | 'owner' | 'scope'
 interface Sel { dim: Dim | null; value: string }
 
 const DAY = 86400000
+
 const UNGROUPED = '__none__'
 
 const ResourceBrowser: React.FC<{
@@ -237,6 +239,13 @@ const ResourceBrowser: React.FC<{
   const roleTag = (r?: number | null) =>
     r === 0 ? t('rb.ownerAdmin') : r === 1 ? t('rb.ownerTeacher') : r === 2 ? t('rb.ownerStudent') : ''
 
+  const fullScope = (it: BrowserItem) => {
+    const g = (it.targetGrade || '').trim()
+    const list = String(it.targetClass || '').split(/[,，、]/).map((x) => x.trim()).filter(Boolean)
+    if (!list.length) return g || t('rb.scopeClass')
+    return `${g ? `${g} · ` : ''}${list.map((c) => (g && c.startsWith(g) ? c.slice(g.length) : c)).join('、')}`
+  }
+
   const metaTags = (it: BrowserItem) => {
     const kind = kindOf(it)
     return (
@@ -250,11 +259,13 @@ const ResourceBrowser: React.FC<{
           {t(`kind.${kind}`)}
         </Tag>
         {it.shareScope && it.shareScope !== 'all' && (
-          <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0 }}>
-            {it.shareScope === 'class'
-              ? [it.targetGrade, it.targetClass].filter(Boolean).join(' ') || t('rb.scopeClass')
-              : it.shareScope === 'staff' ? t('rb.scopeStaff') : t('rb.scopeUser')}
-          </Tag>
+          <Tooltip title={it.shareScope === 'class' ? fullScope(it) : undefined}>
+            <Tag style={{ fontSize: 10, lineHeight: '16px', marginInlineEnd: 0, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
+              {it.shareScope === 'class'
+                ? compactClassScope(it.targetGrade || '', it.targetClass || '') || t('rb.scopeClass')
+                : it.shareScope === 'staff' ? t('rb.scopeStaff') : t('rb.scopeUser')}
+            </Tag>
+          </Tooltip>
         )}
       </Space>
     )
@@ -267,6 +278,25 @@ const ResourceBrowser: React.FC<{
     { key: 'doc', label: t('rb.docGroup'), n: facet((i) => DOC_KINDS.includes(kindOf(i))), color: '#722ed1', icon: <FolderOutlined />, on: sel.dim === 'kind' && DOC_KINDS.includes(sel.value as never), next: { dim: 'kind' as Dim, value: 'word' } },
     { key: 'media', label: t('rb.mediaGroup'), n: facet((i) => MEDIA_KINDS.includes(kindOf(i))), color: '#fa8c16', icon: <AppstoreOutlined />, on: sel.dim === 'kind' && MEDIA_KINDS.includes(sel.value as never), next: { dim: 'kind' as Dim, value: 'video' } },
   ]
+
+  /** 已选分类的展示文案（避免把 unseen/week/class 这类代码直接丢到界面上） */
+  const valueLabel = (sl: Sel): string => {
+    if (!sl.dim) return ''
+    if (sl.dim === 'kind') return t(`kind.${sl.value}` as never)
+    if (sl.dim === 'status') {
+      if (sl.value === 'unseen') return mode === 'teacher' ? t('rb.unread') : t('rb.unseen')
+      return mode === 'teacher' ? t('rb.read') : t('rb.seen')
+    }
+    if (sl.dim === 'time') {
+      return sl.value === 'week' ? t('rb.thisWeek') : sl.value === 'month' ? t('rb.thisMonth') : t('rb.earlier')
+    }
+    if (sl.dim === 'scope') {
+      return sl.value === 'all' ? t('rb.scopeAll') : sl.value === 'staff' ? t('rb.scopeStaff')
+        : sl.value === 'class' ? t('rb.scopeClass') : sl.value === 'teacher' ? t('rb.scopeUser') : sl.value
+    }
+    if (sl.dim === 'course') return sl.value === UNGROUPED ? t('rb.noCourse') : sl.value
+    return sl.value
+  }
 
   const border = `1px solid ${token.colorBorderSecondary}`
 
@@ -385,7 +415,7 @@ const ResourceBrowser: React.FC<{
           {sel.dim && (
             <Space size={6} style={{ marginBottom: 8 }}>
               <Tag color="blue" style={{ marginInlineEnd: 0 }}>
-                {DIMS.find((d) => d.key === sel.dim)?.label}: {sel.dim === 'kind' ? t(`kind.${sel.value}` as never) : sel.value === 'unseen' ? (mode === 'teacher' ? t('rb.unread') : t('rb.unseen')) : sel.value === 'seen' ? (mode === 'teacher' ? t('rb.read') : t('rb.seen')) : sel.value === 'week' ? t('rb.thisWeek') : sel.value === 'month' ? t('rb.thisMonth') : sel.value === 'earlier' ? t('rb.earlier') : sel.value === UNGROUPED ? t('rb.noCourse') : sel.value}
+                {DIMS.find((d) => d.key === sel.dim)?.label}: {valueLabel(sel)}
               </Tag>
               <Button type="link" size="small" style={{ padding: 0 }} icon={<CloseCircleOutlined />} onClick={() => setSel({ dim: null, value: '' })}>
                 {t('rb.clearFilter')}
