@@ -322,7 +322,10 @@ def get_subject_title(subject: str, question_count: int) -> dict[str, Any]:
         question_count: 该科累计答题数
 
     Returns:
-        {"level": int, "name": str, "emoji": str, "color": str}
+        {"level": int, "name": str, "emoji": str, "color": str, "subject": str, "question_count": int}
+
+    注意：question_count 必须一并返回。学科称号列表里“没有答题记录”的科目走的是这里
+    的兜底分支，早期版本漏了该字段，前端（成长档案 / 荣誉页）会渲染出 undefined。
     """
     config = _load_subject_title_config()
     result = config[0].copy()
@@ -332,6 +335,7 @@ def get_subject_title(subject: str, question_count: int) -> dict[str, Any]:
         else:
             break
     result["subject"] = subject
+    result["question_count"] = int(question_count or 0)
     return result
 
 

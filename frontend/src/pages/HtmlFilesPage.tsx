@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm } from 'antd'
+import { Layout, Card, Space, Button, Typography, message, Tabs, Tag, Tooltip, Pagination, Modal, Input, Popconfirm, theme } from 'antd'
 import { ReloadOutlined, FileOutlined, ShareAltOutlined, FolderOutlined, PlusOutlined, DeleteOutlined, EditOutlined, InboxOutlined, MinusCircleOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as resourcesApi from '../api/resources'
@@ -7,10 +7,12 @@ import * as sharingApi from '../api/sharing'
 import type { ResourceFile } from '../types'
 import { useAuthStore } from '../stores/authStore'
 import ShareDialog from '../components/ShareDialog'
+import ResourceBrowser, { type BrowserItem } from '../components/ResourceBrowser'
 import { useTranslation } from 'react-i18next'
 
 const HtmlFilesPage: React.FC = () => {
   const { t } = useTranslation('menu')
+  const { token } = theme.useToken()
   const user = useAuthStore((s) => s.user)
   const isAdminOrTeacher = user?.role === 'admin' || user?.role === 'teacher'
   const [files, setFiles] = useState<ResourceFile[]>([])
@@ -22,11 +24,12 @@ const HtmlFilesPage: React.FC = () => {
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
   const [shareFile, setShareFile] = useState<{ path: string; name: string }>({ path: '', name: '' })
   const [shareExisting, setShareExisting] = useState<sharingApi.ShareItem | null>(null)
+  const [shareType, setShareType] = useState<'html' | 'download'>('html')
 
   // ── 分页状态 ──
   const PAGE_SIZE = 24
   const [groupPages, setGroupPages] = useState<Record<string, number>>({})
-  const [sharedPage, setSharedPage] = useState(1)
+  // 共享给我的：分类 / 分页 / 视图由 ResourceBrowser 自管
   // 每页条数受分页器控制，切片与分页必须用同一个值，否则「共 N 条」与实际卡片数对不上
   const [pageSize, setPageSize] = useState(PAGE_SIZE)
 
@@ -43,9 +46,9 @@ const HtmlFilesPage: React.FC = () => {
   // ── 搜索 ──
   const [searchText, setSearchText] = useState('')
 
-  // 搜索时重置分页
+  // 搜索词变化时把「我的资源」各分组翻回第一页（共享给我的由 ResourceBrowser 自管分页）
   useEffect(() => {
-    setSharedPage(1)
+    setGroupPages({})
   }, [searchText])
 
   // ── 分组状态 ──
@@ -101,6 +104,7 @@ const HtmlFilesPage: React.FC = () => {
         setReceivedShares(shareRes.shares.filter(s => s.resource_type === 'html'))
       }
     } catch {
+      // 静默：拉取失败时保留空列表，页面仍可重试
     } finally {
       setLoading(false)
     }
@@ -110,8 +114,9 @@ const HtmlFilesPage: React.FC = () => {
 
   const isFileShared = (nodeKey: string) => myShares.some(s => s.file_path === nodeKey)
 
-  const openShare = (filePath: string, fileName: string) => {
+  const openShare = (filePath: string, fileName: string, type: 'html' | 'download' = 'html') => {
     setShareFile({ path: filePath, name: fileName })
+    setShareType(type)
     setShareExisting(myShares.find(s => s.file_path === filePath) || null)
     setShareDialogOpen(true)
   }
@@ -335,18 +340,28 @@ const HtmlFilesPage: React.FC = () => {
     </Card>
   )
 
-  const sharedItems = receivedShares
-    .filter(s => !kw || (s.file_name || '').toLowerCase().includes(kw))
-    .map(s => ({
-      id: s.id,
-      name: s.file_name,
-      urlPath: s.url_path || s.file_path,
-      owner: s.owner_username,
-      resourceType: s.resource_type,
-    }))
+  const browserItems: BrowserItem[] = receivedShares.map((s) => ({
+    id: s.id,
+    name: s.file_name,
+    urlPath: s.url_path || s.file_path,
+    filePath: s.file_path,
+    resourceType: s.resource_type,
+    ownerUsername: s.owner_username,
+    ownerName: s.owner_name,
+    ownerRole: s.owner_role,
+    shareScope: s.share_scope,
+    targetGrade: s.target_grade,
+    targetClass: s.target_class,
+    createdAt: s.created_at,
+    viewedAt: s.viewed_at,
+    viewCount: s.view_count,
+    courseName: s.course_name,
+    kpName: s.kp_name,
+    bindingCount: s.binding_count,
+  }))
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={14}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
@@ -366,7 +381,7 @@ const HtmlFilesPage: React.FC = () => {
         </div>
 
         {isAdminOrTeacher ? (
-          <Tabs defaultActiveKey="mine" onChange={() => { setGroupPages({}); setSharedPage(1); setActiveGroup(null); }} items={[
+          <Tabs defaultActiveKey="mine" onChange={() => { setGroupPages({}); setActiveGroup(null); }} items={[
             {
               key: 'mine',
               label: <span><FileOutlined /> {t('myResources')}</span>,
@@ -410,8 +425,8 @@ const HtmlFilesPage: React.FC = () => {
                         }}
                         style={{
                           padding: '6px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 13,
-                          background: activeGroup === null ? '#e6f4ff' : 'transparent',
-                          color: activeGroup === null ? '#1677ff' : '#333',
+                          background: activeGroup === null ? token.colorPrimaryBg : 'transparent',
+                          color: activeGroup === null ? token.colorPrimary : token.colorText,
                           border: dragOverGroup === -1 ? '2px dashed #1677ff' : '2px solid transparent',
                           transition: 'all 0.2s',
                         }}
@@ -454,7 +469,7 @@ const HtmlFilesPage: React.FC = () => {
                             background: activeGroup === g.id ? '#e6f4ff'
                               : dragOverGroup === g.id ? '#f0f5ff'
                               : 'transparent',
-                            color: activeGroup === g.id ? '#1677ff' : '#333',
+                            color: activeGroup === g.id ? token.colorPrimary : token.colorText,
                             border: dragOverGroup === g.id ? '2px dashed #1677ff' : '2px solid transparent',
                             transition: 'all 0.2s',
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -523,49 +538,27 @@ const HtmlFilesPage: React.FC = () => {
             },
             {
               key: 'shared',
-              label: <span><ShareAltOutlined /> {t('sharedToMe')} ({sharedItems.length})</span>,
+              label: <span><ShareAltOutlined /> {t('sharedToMe')} ({browserItems.length})</span>,
               children: (
-                <>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                      {sharedItems.slice((sharedPage - 1) * PAGE_SIZE, sharedPage * PAGE_SIZE).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id, item.resourceType))}
-                    {sharedItems.length === 0 && <Typography.Text type="secondary">暂无共享资源</Typography.Text>}
-                  </div>
-                  {sharedItems.length > PAGE_SIZE && (
-                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
-                      <Pagination
-                        current={sharedPage}
-                        total={sharedItems.length}
-                        pageSize={PAGE_SIZE}
-                        onChange={(p) => setSharedPage(p)}
-                        showSizeChanger={false}
-                        showTotal={(n) => t('totalResources', { count: n })}
-                      />
-                    </div>
-                  )}
-                </>
+                <ResourceBrowser
+                  mode="teacher"
+                  items={browserItems}
+                  loading={loading}
+                  onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
+                  onReshare={(it) => openShare(it.filePath, it.name, it.resourceType === 'download' ? 'download' : 'html')}
+                  onRefresh={loadData}
+                />
               ),
             },
           ]} />
         ) : (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-              {sharedItems.slice((sharedPage - 1) * pageSize, sharedPage * pageSize).map((item) => renderFileCard(item.name, item.urlPath, true, item.owner, false, false, item.id, item.resourceType))}
-              {sharedItems.length === 0 && <Typography.Text type="secondary">{t('noSharedResources')}</Typography.Text>}
-            </div>
-            {sharedItems.length > pageSize && (
-              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
-                <Pagination
-                  current={sharedPage}
-                  total={sharedItems.length}
-                  pageSize={pageSize}
-                  pageSizeOptions={['10', '20', '50']}
-                  showSizeChanger
-                  onChange={(p, ps) => { if (ps && ps !== pageSize) { setPageSize(ps); setSharedPage(1) } else { setSharedPage(p) } }}
-                  showTotal={(num) => t('totalResources', { count: num })}
-                />
-              </div>
-            )}
-          </>
+          <ResourceBrowser
+            mode="student"
+            items={browserItems}
+            loading={loading}
+            onOpen={(it) => handleOpenResource(it.urlPath, it.name, it.ownerUsername, it.id, it.resourceType)}
+            onRefresh={loadData}
+          />
         )}
 
         {/* 共享弹窗 */}
@@ -574,7 +567,7 @@ const HtmlFilesPage: React.FC = () => {
           onClose={() => setShareDialogOpen(false)}
           filePath={shareFile.path}
           fileName={shareFile.name}
-          resourceType="html"
+          resourceType={shareType}
           existingShare={shareExisting}
           onSuccess={loadData}
         />

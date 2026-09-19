@@ -631,7 +631,9 @@
     "wrongCta": "{{n}} mistakes to review",
     "wrongClear": "All mistakes mastered",
     "wrongMastered": "{{n}} mastered",
-    "review": "Review"
+    "review": "Review",
+    "answered": "{{count}} questions answered",
+    "subjectNone": "Subject titles: unlock by answering questions"
   },
   "companion": {
     "title": "AI Companion",

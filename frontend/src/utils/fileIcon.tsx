@@ -6,31 +6,10 @@ import {
   GlobalOutlined, FileImageOutlined, VideoCameraOutlined, SoundOutlined,
   FilePdfOutlined, FileWordOutlined, FileExcelOutlined, FilePptOutlined,
   FileZipOutlined, FileMarkdownOutlined, FileTextOutlined, CodeOutlined,
-  FolderOutlined,
 } from '@ant-design/icons'
 
-const EXT_KIND: Record<string, string> = {
-  html: 'web', htm: 'web',
-  png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', bmp: 'img', webp: 'img',
-  svg: 'img', ico: 'img', tif: 'img', tiff: 'img',
-  mp4: 'video', avi: 'video', mov: 'video', wmv: 'video', flv: 'video', mkv: 'video', webm: 'video',
-  mp3: 'audio', wav: 'audio', flac: 'audio', aac: 'audio', ogg: 'audio', m4a: 'audio',
-  pdf: 'pdf',
-  doc: 'word', docx: 'word',
-  xls: 'excel', xlsx: 'excel', csv: 'excel',
-  ppt: 'ppt', pptx: 'ppt',
-  zip: 'zip', rar: 'zip', '7z': 'zip', tar: 'zip', gz: 'zip',
-  md: 'md',
-  txt: 'text',
-  js: 'code', ts: 'code', tsx: 'code', jsx: 'code', json: 'code', py: 'code',
-  java: 'code', c: 'code', cpp: 'code', h: 'code', go: 'code', rs: 'code', css: 'code',
-}
+import { EXT_KIND, KIND_COLOR } from './fileKind'
 
-const KIND_COLOR: Record<string, string> = {
-  web: '#1677ff', img: '#13c2c2', video: '#722ed1', audio: '#eb2f96',
-  pdf: '#f5222d', word: '#2f54eb', excel: '#52c41a', ppt: '#fa541c',
-  zip: '#faad14', md: '#083fa1', text: '#8c8c8c', code: '#6b6bd6',
-}
 
 export function getFileIcon(
   nameOrPath: string,
@@ -56,4 +35,3 @@ export function getFileIcon(
   }
 }
 
-export { FolderOutlined }

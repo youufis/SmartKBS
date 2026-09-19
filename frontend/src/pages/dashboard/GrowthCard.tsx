@@ -18,7 +18,8 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
   useEffect(() => {
     let cancelled = false
     getSubjectTitles().then((d) => {
-      if (!cancelled && Array.isArray(d)) setSubjects(d.filter((s) => s.level > 0))
+      // 只保留真正答过题的学科：入门(level=1) 是零题量的兜底档，列出来反而像“白送的称号”
+      if (!cancelled && Array.isArray(d)) setSubjects(d.filter((s) => (s.question_count ?? 0) > 0))
     }).catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -69,12 +70,20 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
       </div>
 
       {/* 学科称号 */}
+      {subjects.length === 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>{t('growth.subjectNone')}</Text>
+        </div>
+      )}
       {subjects.length > 0 && (
         <div style={{ marginBottom: 10 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>{t('growth.subjectTitles')}：</Text>
           <Space size={4} wrap style={{ marginTop: 2 }}>
             {subjects.slice(0, 5).map((s) => (
-              <Tooltip key={s.subject} title={`${s.name} · ${s.question_count}`}>
+              <Tooltip
+                key={s.subject}
+                title={`${s.emoji || ''} ${s.subject} · ${t('growth.answered', { count: s.question_count ?? 0 })} · ${s.name}`}
+              >
                 <Tag color="geekblue" style={{ margin: 0, fontSize: 11 }}>{s.subject}</Tag>
               </Tooltip>
             ))}

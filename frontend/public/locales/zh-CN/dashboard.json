@@ -631,7 +631,9 @@
     "wrongCta": "有 {{n}} 道错题待巩固",
     "wrongClear": "错题已全部掌握",
     "wrongMastered": "已掌握 {{n}} 题",
-    "review": "去复习"
+    "review": "去复习",
+    "answered": "已答 {{count}} 题",
+    "subjectNone": "学科称号：答题累计后自动解锁"
   },
   "companion": {
     "title": "AI 学伴",

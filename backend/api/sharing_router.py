@@ -6,6 +6,7 @@
 import asyncio
 import os
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
@@ -929,6 +930,52 @@ async def received_shares(request: Request, include_self: bool = False):
         filtered.append(r)
     rows = filtered
 
+    # ── 批量补全展示字段（共享者姓名/角色、当前用户已读态、课程与知识点绑定）──
+    # 统一用一次 IN 查询补，避免往三种角色的 SQL 分支里各加一遍 JOIN
+    owner_map: dict[str, dict[str, Any]] = {}
+    owners = {str(r[1] or "") for r in rows} - {""}
+    if owners:
+        _ph = ",".join("?" for _ in owners)
+        for row in execute_query(
+            f"SELECT username, name, role FROM users WHERE username IN ({_ph})", tuple(owners)
+        ) or []:
+            owner_map[str(row[0])] = {
+                "name": str(row[1] or row[0]),
+                "role": int(row[2]) if row[2] is not None else None,
+            }
+
+    view_map: dict[int, dict[str, Any]] = {}
+    ids = [int(r[0]) for r in rows if r[0] is not None]
+    if ids:
+        _ph = ",".join("?" for _ in ids)
+        for row in execute_query(
+            f"""SELECT resource_id, MAX(viewed_at), COUNT(*)
+                FROM resource_view_logs
+                WHERE student_username=? AND resource_id IN ({_ph})
+                GROUP BY resource_id""",
+            (username, *ids),
+        ) or []:
+            view_map[int(row[0])] = {"viewed_at": row[1], "view_count": int(row[2] or 0)}
+
+    bind_map: dict[int, dict[str, Any]] = {}
+    if ids:
+        _ph = ",".join("?" for _ in ids)
+        for row in execute_query(
+            f"""SELECT cb.resource_id, MIN(c.name), MIN(kp.name), COUNT(*)
+                FROM curriculum_bindings cb
+                JOIN knowledge_points kp ON cb.knowledge_point_id = kp.id
+                JOIN chapters ch ON kp.chapter_id = ch.id
+                JOIN courses c ON ch.course_id = c.id
+                WHERE cb.resource_id IN ({_ph})
+                GROUP BY cb.resource_id""",
+            tuple(ids),
+        ) or []:
+            bind_map[int(row[0])] = {
+                "course_name": str(row[1] or ""),
+                "kp_name": str(row[2] or ""),
+                "binding_count": int(row[3] or 0),
+            }
+
     return {
         "shares": [
             {
@@ -943,6 +990,14 @@ async def received_shares(request: Request, include_self: bool = False):
                 "target_class": r[8] or "",
                 "created_at": r[9],
                 "url_path": _build_url_path(r[1], r[4], r[2]),
+                # 展示增强字段：共享者姓名/角色、当前用户已读态、课程与知识点绑定
+                "owner_name": (owner_map.get(str(r[1] or "")) or {}).get("name") or str(r[1] or ""),
+                "owner_role": (owner_map.get(str(r[1] or "")) or {}).get("role"),
+                "viewed_at": (view_map.get(int(r[0])) or {}).get("viewed_at"),
+                "view_count": (view_map.get(int(r[0])) or {}).get("view_count", 0),
+                "course_name": (bind_map.get(int(r[0])) or {}).get("course_name", ""),
+                "kp_name": (bind_map.get(int(r[0])) or {}).get("kp_name", ""),
+                "binding_count": (bind_map.get(int(r[0])) or {}).get("binding_count", 0),
             }
             for r in rows
         ]

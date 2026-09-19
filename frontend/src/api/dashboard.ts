@@ -172,9 +172,12 @@ export async function getTeacherTodo(): Promise<TeacherTodo> {
 /** 学科称号 */
 export interface SubjectTitle {
   subject: string
+  /** 该学科累计答题数（无记录的学科后端兜底为 0） */
   question_count: number
   level: number
   name: string
+  emoji?: string
+  color?: string
 }
 
 export async function getSubjectTitles(): Promise<SubjectTitle[]> {

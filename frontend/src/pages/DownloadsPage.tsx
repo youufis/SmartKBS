@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List, Input, Pagination } from 'antd'
+import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List, Input, Pagination, theme } from 'antd'
 import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined, SearchOutlined } from '@ant-design/icons'
 import { getFileIcon } from '../utils/fileIcon'
 import * as sharingApi from '../api/sharing'
@@ -17,6 +17,7 @@ interface DownloadFile {
 
 const DownloadsPage: React.FC = () => {
   const { t } = useTranslation('system')
+  const { token } = theme.useToken()
   const user = JSON.parse(localStorage.getItem('smartkb_user') || '{}')
   const username: string = user?.username || 'root'
   const [files, setFiles] = useState<DownloadFile[]>([])
@@ -128,6 +129,7 @@ const DownloadsPage: React.FC = () => {
       }
       loadShares()
     } catch {
+      // 单条失败不阻断整体流程
     } finally {
       setLoading(false)
     }
@@ -251,6 +253,7 @@ const DownloadsPage: React.FC = () => {
             message.error(data.error || t('deleteFailed'))
           }
         } catch {
+          // 删除失败已由接口返回提示，这里不再重复弹窗
         }
       },
     })
@@ -327,7 +330,7 @@ const DownloadsPage: React.FC = () => {
   ]
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <Typography.Title level={4} style={{ margin: 0 }}>{t('fileCenter')}</Typography.Title>
@@ -351,7 +354,7 @@ const DownloadsPage: React.FC = () => {
                 <Typography.Text>{t('uploadToSubdir')}</Typography.Text>
                 <Typography.Text
                   editable={{ onChange: (val) => setUploadDir(val) }}
-                  style={{ fontFamily: 'monospace', background: '#f5f5f5', padding: '2px 8px', borderRadius: 4 }}
+                  style={{ fontFamily: 'monospace', background: token.colorFillTertiary, padding: '2px 8px', borderRadius: 4 }}
                 >
                   {uploadDir || t('rootDir')}
                 </Typography.Text>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Select, Radio, Space, Tag, Divider, Typography, Checkbox } from 'antd'
-import { BookOutlined, GlobalOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons'
+import { Select, Radio, Typography } from 'antd'
+import { BookOutlined, GlobalOutlined, TeamOutlined } from '@ant-design/icons'
 import { fetchGrades, fetchAllGradeClasses } from '../api/gradeClass'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'

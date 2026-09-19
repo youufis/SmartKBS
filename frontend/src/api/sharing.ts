@@ -13,6 +13,20 @@ export interface ShareItem {
   target_class: string;
   created_at: string;
   url_path?: string;
+  /** 共享者真实姓名（后端 join users 得到，缺省回退账号） */
+  owner_name?: string;
+  /** 共享者角色：0 管理员 / 1 教师 / 2 学生 */
+  owner_role?: number | null;
+  /** 当前用户最近一次查看时间，null = 未看 */
+  viewed_at?: string | null;
+  /** 该资源被查看总次数 */
+  view_count?: number;
+  /** 绑定的课程名（取第一个绑定） */
+  course_name?: string;
+  /** 绑定的知识点名（取第一个绑定） */
+  kp_name?: string;
+  /** 绑定知识点数量 */
+  binding_count?: number;
 }
 
 export interface ShareRequest {

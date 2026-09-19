@@ -184,7 +184,7 @@ const SubjectTitleCards: React.FC<{ titles: SubjectTitle[] }> = ({ titles }) => 
               <Tag color={st.color !== 'default' ? st.color : undefined} style={{ alignSelf: 'flex-start' }}>
                 {emoji} Lv.{st.level} {st.name}
               </Tag>
-              <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.answeredQuestions', { count: st.question_count })}</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('reward.answeredQuestions', { count: st.question_count ?? 0 })}</Text>
             </Space>
           </Card>
         </Col>
