@@ -72,13 +72,15 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
             <Statistic title={t('statsT.pending')} value={pendingTotal}
               prefix={<AuditOutlined style={{ color: pendingTotal > 0 ? '#ff4d4f' : '#52c41a' }} />}
               styles={{ content: { color: pendingTotal > 0 ? '#ff4d4f' : '#52c41a' } }}
-              suffix={(pendingTotal > 0
-                ? t('statsT.pendingSuffix', {
-                  papers: todo?.pending_exam_grading ?? 0,
-                  exams: todo?.pending_exam_grading_exams ?? 0,
-                  tasks: todo?.pending_task_grades ?? 0,
-                })
-                : t('statsT.pendingClear'))} />
+              suffix={<Text type="secondary" style={{ fontSize: 12, marginInlineStart: 6 }}>
+                {pendingTotal > 0
+                  ? t('statsT.pendingSuffix', {
+                    papers: todo?.pending_exam_grading ?? 0,
+                    exams: todo?.pending_exam_grading_exams ?? 0,
+                    tasks: todo?.pending_task_grades ?? 0,
+                  })
+                  : t('statsT.pendingClear')}
+              </Text>} />
           </Card>
         </Col>
         <Col xs={12} md={6}>
