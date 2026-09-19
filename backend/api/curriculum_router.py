@@ -29,6 +29,22 @@ from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
 
+# AI 输出降级重试时追加的硬约束（治「夹带客套话 / Markdown 包裹 / 裸反斜杠」）
+_STRICT_JSON_TAIL = (
+    chr(10) + chr(10) + '## 输出硬性要求' + chr(10)
+    + '只输出一个 JSON 数组，第一个字符必须是 [ ，最后一个字符必须是 ] 。' + chr(10)
+    + '不要输出任何说明文字、标题、Markdown 代码块标记或前后缀。' + chr(10)
+    + '字符串内的反斜杠必须写成 ' + chr(92)*2 + ' ，换行写成 ' + chr(92) + 'n ，英文双引号写成 ' + chr(92) + chr(34) + ' 。' + chr(10)
+)
+
+def _ai_json_object_mode() -> bool:
+    """是否强制 response_format=json_object（个别网关不支持，ai_service 会自动降级）"""
+    try:
+        from backend.api.config_router import get_config_value
+        return bool(int(get_config_value("AI_JSON_OBJECT_MODE", 0) or 0))
+    except Exception:
+        return False
+
 LESSON_PLAN_CACHE_DAYS = 7   # G8: 教案缓存有效期(天)
 
 
@@ -2365,7 +2381,14 @@ async def ai_lesson_plan(
 
     async def _do_plan() -> dict[str, Any]:
         try:
-            result = await call_ai_async(prompt, api_key)
+            from backend import ai_json
+
+            result = await call_ai_async(prompt, api_key, max_tokens=8000)
+            if ai_json.looks_like_refusal(result):
+                # 推脱话/半截内容一旦缓存，之后导出 Word 会一直复用这份废稿
+                ai_json.dump_failed_raw("lesson-plan", result or "")
+                logger.warning("AI 备课返回内容过短或像推脱语，未缓存")
+                return {"error": "AI 未生成有效教案内容，请重试或调整知识点描述"}
             _cache_lesson_plan(knowledge_point_id, result)  # G8: 导出时复用, 不再重复烧 AI
             return {
                 "knowledge_point": kp["name"],
@@ -2454,8 +2477,15 @@ async def export_lesson_plan_docx(
             subject=_safe(kp.get("course_name", "")),
         )
         try:
-            lesson_plan_text = await call_ai_async(prompt, api_key)
+            from backend import ai_json
+
+            lesson_plan_text = await call_ai_async(prompt, api_key, max_tokens=8000)
+            if ai_json.looks_like_refusal(lesson_plan_text):
+                ai_json.dump_failed_raw("lesson-plan-export", lesson_plan_text or "")
+                raise HTTPException(status_code=502, detail="AI 未生成有效教案内容，请稍后重试")
             _cache_lesson_plan(kp_id, lesson_plan_text)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"AI 备课助手生成失败: {e}")
             raise HTTPException(status_code=500, detail=f"教案生成失败: {str(e)}")
@@ -2582,22 +2612,21 @@ async def ai_generate_courseware(kp_id: int, request: Request):
     async def _generate() -> dict[str, Any]:
         try:
             logger.info(f"AI 课件开始生成: kp_id={kp_id}, kp_name={kp['name']}")
-            result = await call_ai_async(prompt, api_key)
+            from backend import ai_json
+
+            result = await call_ai_async(prompt, api_key, max_tokens=16000)
             logger.info(f"AI 响应已收到，长度={len(result)}")
 
-            # 清理 AI 可能添加的 markdown 代码块标记
-            html_content = result.strip()
-            if html_content.startswith("```html"):
-                html_content = html_content[7:]
-            elif html_content.startswith("```"):
-                html_content = html_content[3:]
-            if html_content.endswith("```"):
-                html_content = html_content[:-3]
-            html_content = html_content.strip()
+            # 剥掉客套话与 ```fence（模型经常在 HTML 前面先说一句话，
+            # 原来的 startswith("```html") 判断会漏掉这种情况，把说明文字写进课件）
+            html_content = ai_json.extract_html(result)
 
-            if not html_content:
-                logger.error("AI 返回的 HTML 内容为空")
-                return {"error": "AI 返回的 HTML 内容为空"}
+            # 落盘前体检：残缺页面一旦存下来，学生点开就是半截/空白，比报错更难查
+            ok, why = ai_json.html_is_complete(html_content)
+            if not ok:
+                raw_path = ai_json.dump_failed_raw("courseware", result or "")
+                logger.error(f"AI 课件内容不合格: {why} (原文留档: {raw_path or '失败'})")
+                return {"error": f"AI 生成的课件不完整：{why}，请重试"}
 
             # 保存到用户的 html 目录
             html_dir = get_account_html_dir(username)
@@ -2660,35 +2689,19 @@ async def preview_courseware(kp_id: int, request: Request):
 # AI 练习生成
 # ═══════════════════════════════════════════════════════════
 
-def _parse_ai_questions(text: str) -> list[dict[str, Any]] | None:
-    """从 AI 返回文本中解析 JSON 题目数组"""
-    import re
-    # 尝试直接解析
-    try:
-        data = json.loads(text)
-        if isinstance(data, list):
-            return data
-    except json.JSONDecodeError:
-        pass
-    # 尝试从 ```json ``` 代码块提取
-    match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            pass
-    # 尝试从 [ 到 ] 提取最外层数组
-    start = text.find('[')
-    end = text.rfind(']')
-    if start != -1 and end != -1 and end > start:
-        try:
-            data = json.loads(text[start:end + 1])
-            if isinstance(data, list):
-                return data
-        except json.JSONDecodeError:
-            pass
+def _parse_ai_questions(text: str, scene: str = "practice") -> list[dict[str, Any]] | None:
+    """从 AI 返回文本中解析 JSON 题目数组。
+
+    统一走 backend.ai_json：能治客套话、```fence、对象包裹、尾逗号、
+    LaTeX/SVG 里的裸反斜杠、被 max_tokens 截断缺尾括号等常见漂移；
+    实在解析不出来时把原文留档到 LogFiles/ai_raw/，不再只留一个长度。
+    """
+    from backend import ai_json
+
+    got = ai_json.extract_json_array(text)
+    if got:
+        return got
+    ai_json.dump_failed_raw(scene, text or "")
     return None
 
 
@@ -2825,28 +2838,38 @@ async def ai_generate_practice(kp_id: int, request: Request):
                     if remaining <= 0:
                         break
 
-                    # 构造本轮 prompt：第一轮用 gap，后续用 remaining
+                    # 逐轮降级：第 2 轮起题量收敛 + 追加强约束，第 3 轮再去掉配图要求，
+                    # 避免一次输出格式漂移就整单失败
+                    ask = remaining if round_idx == 0 else max(3, min(remaining, (remaining + 1) // 2))
                     if current_count == bank_count:
                         round_prompt = prompt.replace(
                             "生成10道单项选择题",
-                            f"生成{remaining}道单项选择题",
+                            f"生成{ask}道单项选择题",
                         )
                     else:
                         round_prompt = prompt.replace(
                             "生成10道单项选择题",
-                            f"再生成{remaining}道单项选择题（不要与已出的题重复）",
+                            f"再生成{ask}道单项选择题（不要与已出的题重复）",
                         )
+                    if round_idx >= 1:
+                        round_prompt += _STRICT_JSON_TAIL
+                    if round_idx >= 2:
+                        round_prompt += " 本批次 svg_code 与 media_placeholders 一律输出 null，不要输出任何图形代码。"
 
-                    logger.info(f"AI 生成第{round_idx+1}轮: 已有题库{bank_count}道+AI{len(ai_question_ids)}道, 还需{remaining}道")
-                    result_text = await call_ai_async(round_prompt, api_key)
+                    logger.info(f"AI 生成第{round_idx+1}轮: 已有题库{bank_count}道+AI{len(ai_question_ids)}道, 还需{remaining}道, 本轮请求{ask}道")
+                    result_text = await call_ai_async(
+                        round_prompt, api_key,
+                        max_tokens=min(16000, 900 * ask + 1500),
+                        json_mode=_ai_json_object_mode(),
+                    )
                     logger.info(f"AI 第{round_idx+1}轮响应长度={len(result_text)}")
 
-                    questions = _parse_ai_questions(result_text)
+                    questions = _parse_ai_questions(result_text, scene=f"practice-kp{kp_id}-r{round_idx+1}")
                     if not questions:
-                        logger.warning(f"AI 第{round_idx+1}轮返回格式异常")
-                        if current_count == bank_count and len(ai_question_ids) == 0:
-                            return {"error": "AI 返回格式异常，未能解析出题目"}
-                        break
+                        # 不在这里 return：继续下一轮降级重试，全部落空由循环后统一报错
+                        logger.warning(f"AI 第{round_idx+1}轮返回格式异常，降级重试")
+                        await asyncio.sleep(1)
+                        continue
 
                     # 强制 single 类型，限制数量
                     for q in questions:
@@ -3090,9 +3113,21 @@ body {{
 }}
 .q-header {{ display: flex; align-items: flex-start; margin-bottom: 12px; }}
 .q-text {{ font-size: 16px; line-height: 1.6; flex: 1; }}
-.media-area {{ margin: 12px 0; text-align: center; }}
-.media-area svg {{ max-width: 100%; height: auto; border-radius: 8px; background: #fafafa; padding: 8px; }}
-.media-area img {{ max-width: 100%; max-height: 200px; border-radius: 8px; object-fit: contain; }}
+/* 配图按缩略图处理：只有 viewBox、没有 width/height 的内联 SVG，
+   单靠 max-width:100% 会被拉到整行宽（几百 px 高），必须同时限高 */
+.media-area {{ margin: 12px 0; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: flex-start; }}
+.media-item {{ max-width: min(100%, 320px); cursor: zoom-in; border: 1px solid #eee; border-radius: 8px; background: #fafafa; padding: 6px; }}
+.media-item svg, .media-item img {{ display: block; width: 100%; height: auto; max-height: 180px; object-fit: contain; }}
+.media-hint {{ width: 100%; font-size: 11px; color: #999; text-align: center; }}
+.media-lightbox {{ position: fixed; inset: 0; background: rgba(0,0,0,.85); display: none; align-items: center; justify-content: center; z-index: 9999; padding: 20px; }}
+.media-lightbox.show {{ display: flex; }}
+.media-lightbox .lb-body {{ background: #fff; border-radius: 12px; padding: 14px; max-width: 92vw; max-height: 86vh; overflow: auto; text-align: center; }}
+.media-lightbox .lb-body svg, .media-lightbox .lb-body img {{ max-width: 84vw; max-height: 74vh; width: auto; height: auto; }}
+.media-lightbox .lb-media {{ max-width: none; border: none; background: transparent; padding: 0; cursor: default; }}
+/* 只有 viewBox 的 SVG 在 shrink-to-fit 链里 width:auto 会塌成 0，这里给显式宽度 */
+.media-lightbox .lb-media svg, .media-lightbox .lb-media img {{ display: block; width: min(84vw, 620px); height: auto; max-height: 74vh; margin: 0 auto; }}
+.media-lightbox .lb-close {{ position: fixed; top: 14px; right: 20px; color: #fff; font-size: 30px; cursor: pointer; line-height: 1; }}
+.media-lightbox .lb-tip {{ position: fixed; bottom: 14px; left: 0; right: 0; text-align: center; color: rgba(255,255,255,.7); font-size: 12px; }}
 .options {{ margin: 12px 0 4px; }}
 .option-item {{
     display: flex; align-items: flex-start; padding: 10px 14px; margin-bottom: 6px;
@@ -3197,6 +3232,12 @@ body {{
 
     <div id="existingResults" style="display:none;"></div>
 
+    <div class="media-lightbox" id="mediaLightbox" onclick="closeMediaLightbox(event)">
+        <span class="lb-close">&times;</span>
+        <div class="lb-body" id="mediaLightboxBody"></div>
+        <span class="lb-tip">点击空白处或按 Esc 关闭</span>
+    </div>
+
     <div class="submit-area" id="submitArea">
         <button class="btn-submit" id="btnSubmit" onclick="submitPractice()">📤 提交答案</button>
     </div>
@@ -3225,6 +3266,33 @@ const sessionId = {session_id};
 const kpId = {kp_id};
 const userAnswers = {{}};
 
+function zoomMedia(el) {{
+    var box = document.getElementById('mediaLightboxBody');
+    if (!box) return;
+    box.innerHTML = '';
+    box.appendChild(el.cloneNode(true));
+    var clone = box.firstElementChild;
+    if (clone) {{
+        clone.removeAttribute('onclick');
+        clone.className = 'lb-media';   // 摘掉缩略图样式，否则放大后仍被 max-height 限死
+        clone.style.cursor = 'default';
+    }}
+    document.getElementById('mediaLightbox').classList.add('show');
+}}
+
+function closeMediaLightbox(e) {{
+    var lb = document.getElementById('mediaLightbox');
+    if (!lb) return;
+    if (!e || e.target === lb || e.target.className === 'lb-close') lb.classList.remove('show');
+}}
+
+document.addEventListener('keydown', function (e) {{
+    if (e.key === 'Escape') {{
+        var lb = document.getElementById('mediaLightbox');
+        if (lb) lb.classList.remove('show');
+    }}
+}});
+
 function renderQuestions() {{
     const container = document.getElementById('questionsContainer');
     container.innerHTML = '';
@@ -3236,14 +3304,17 @@ function renderQuestions() {{
 
         let mediaHtml = '';
         if (q.svg_code && q.svg_code.trim()) {{
-            mediaHtml += '<div class="media-area">' + q.svg_code + '</div>';
+            mediaHtml += '<div class="media-area">'
+                + '<div class="media-item" onclick="zoomMedia(this)" title="点击查看大图">' + q.svg_code + '</div>'
+                + '<div class="media-hint">🔍 点击配图查看大图</div></div>';
         }}
         if (q.media_files && q.media_files.length > 0) {{
             mediaHtml += '<div class="media-area">';
             q.media_files.forEach(f => {{
-                mediaHtml += '<img src="' + f.url + '" alt="' + (f.alt || '') + '" loading="lazy">';
+                mediaHtml += '<div class="media-item" onclick="zoomMedia(this)" title="点击查看大图">'
+                    + '<img src="' + f.url + '" alt="' + (f.alt || '') + '" loading="lazy"></div>';
             }});
-            mediaHtml += '</div>';
+            mediaHtml += '<div class="media-hint">🔍 点击配图查看大图</div></div>';
         }}
 
         let optionsHtml = '<div class="options">';
@@ -3465,7 +3536,7 @@ function showResults(accuracy, score, totalScore, results, prevResults) {{
         var isCorrect = res && res.is_correct;
         // 从 prevResults 中取学生答案
         var studentAns = '';
-        var correctAns = '';  # G3: 答案只来自服务端返回, 页面数据不再携带
+        var correctAns = '';  // G3: 答案只来自服务端返回, 页面数据不再携带
         if (usePrev && res) {{
             studentAns = res.student_answer || '';
             correctAns = res.correct_answer || correctAns;
@@ -3695,7 +3766,11 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
 
                 logger.info(f"智能练习 AI 补全 第{round_idx+1}轮: kp_id={kp_id}, gap={gap}")
                 try:
-                    result_text = await call_ai_async(smart_prompt, api_key)
+                    result_text = await call_ai_async(
+                        smart_prompt, api_key,
+                        max_tokens=min(16000, 900 * gap + 1500),
+                        json_mode=_ai_json_object_mode(),
+                    )
                     parsed = _parse_ai_questions(result_text)
                     if parsed:
                         # 去重：过滤掉与已有题目重复的

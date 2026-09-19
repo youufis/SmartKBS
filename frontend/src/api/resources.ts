@@ -121,6 +121,8 @@ export interface AiPreviewResult {
   suggested_name: string;
   type_label: string;
   db_saved?: number;  // AI 新题目入库数量
+  db_warning?: string;  // 题目没解析出来/没入库时的提示（以前会静默成功）
+  db_note?: string;     // 正常情况说明：题目全部复用现有题库，无需重复入库
 }
 
 export async function getAiThemes(type: string): Promise<AiTheme[]> {

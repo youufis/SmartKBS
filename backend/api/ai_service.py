@@ -64,7 +64,8 @@ def is_appid_configured() -> bool:
 
 # ── 非流式调用（同步，返回完整文本） ──
 
-def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None) -> str:
+def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
+                 max_tokens: Optional[int] = None) -> str:
     """同步调用 AI，返回完整响应文本（history 仅在直连分支生效）"""
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
@@ -75,17 +76,19 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None) -> s
     if cfg["mode"] == "agent":
         return _call_agent_sync(prompt, api_key, cfg["app_id"])
     else:
-        return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"], history=history)
+        return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
+                                max_tokens=max_tokens)
 
 
 async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120,
-                                    history: Optional[list] = None) -> str:
+                                    history: Optional[list] = None,
+                                    max_tokens: Optional[int] = None) -> str:
     """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
     import asyncio
     loop = asyncio.get_running_loop()
     try:
         result = await asyncio.wait_for(
-            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history),
+            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens),
             timeout=timeout,
         )
         return result
@@ -147,7 +150,8 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
 
 def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                      enable_thinking: Optional[bool] = None,
-                     history: Optional[list] = None) -> str:
+                     history: Optional[list] = None,
+                     max_tokens: Optional[int] = None) -> str:
     """直接调用大模型（同步，OpenAI 兼容接口）
 
     enable_thinking=None 保持现状（由模型默认决定）；传 False 关闭思考链。
@@ -171,6 +175,8 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                 "messages": messages,
                 "stream": False,
             }
+            if max_tokens:
+                payload["max_tokens"] = int(max_tokens)
             if enable_thinking is not None:
                 payload["enable_thinking"] = bool(enable_thinking)
             resp = sync_requests.post(
@@ -181,12 +187,19 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
             )
             if resp.status_code == 200:
                 data = resp.json()
-                content_out = data["choices"][0]["message"]["content"]
+                _ch = (data.get("choices") or [{}])[0]
+                content_out = (_ch.get("message") or {}).get("content") or ""
                 _u = data.get("usage") or {}
-                logger.info(f"_call_model_sync response: model={model}, len={len(content_out)}, "
+                _finish = _ch.get("finish_reason") or "-"
+                logger.info(f"_call_model_sync response: model={model}, len={len(content_out)}, finish={_finish}, "
                             f"prompt_tokens={_u.get('prompt_tokens', '-')}, "
                             f"completion_tokens={_u.get('completion_tokens', '-')}, "
                             f"turns={len(messages)}, head={content_out[:200]}")
+                if _finish == "length":
+                    logger.warning(
+                        "AI 输出被 max_tokens=%s 截断（len=%d）：结果可能不完整，请调大 max_tokens 或缩小单次生成量",
+                        payload.get("max_tokens", "默认"), len(content_out),
+                    )
                 return content_out
             # 400 错误可能是格式问题，尝试下一种格式
             if resp.status_code == 400:
@@ -349,8 +362,13 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
 
 # ── 异步调用（非流式，使用 httpx） ──
 
-async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = None) -> str:
-    """异步调用 AI，返回完整响应文本（不阻塞工作线程）"""
+async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = None,
+                        max_tokens: Optional[int] = None, json_mode: bool = False) -> str:
+    """异步调用 AI，返回完整响应文本（不阻塞工作线程）。
+
+    max_tokens：题目/课件这类长输出必须显式给，否则走服务商默认上限会被静默截断；
+    json_mode：要求模型只回 JSON 对象（部分网关不支持，_call_model_async 里会自动降级）。
+    """
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
@@ -359,7 +377,8 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
     if cfg["mode"] == "agent":
         return await _call_agent_async(prompt, api_key, cfg["app_id"])
     else:
-        return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"], history=history)
+        return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
+                                       max_tokens=max_tokens, json_mode=json_mode)
 
 
 async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
@@ -385,7 +404,8 @@ async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
 
 
 async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str,
-                            history: Optional[list] = None) -> str:
+                            history: Optional[list] = None,
+                            max_tokens: Optional[int] = None, json_mode: bool = False) -> str:
     """异步直接调用大模型（OpenAI 兼容接口）"""
     import httpx
 
@@ -405,6 +425,10 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                 "messages": messages,
                 "stream": False,
             }
+            if max_tokens:
+                payload["max_tokens"] = int(max_tokens)
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
             async with httpx.AsyncClient(timeout=180) as client:
                 resp = await client.post(
                     f"{api_base}/chat/completions",
@@ -413,7 +437,39 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    return data["choices"][0]["message"]["content"]
+                    choice = (data.get("choices") or [{}])[0]
+                    content_out = (choice.get("message") or {}).get("content") or ""
+                    usage = data.get("usage") or {}
+                    finish = choice.get("finish_reason") or ""
+                    logger.info(
+                        "AI 响应: model=%s len=%d finish=%s prompt_tokens=%s completion_tokens=%s head=%r",
+                        model, len(content_out), finish or "-",
+                        usage.get("prompt_tokens", "-"), usage.get("completion_tokens", "-"),
+                        content_out[:160],
+                    )
+                    if finish == "length":
+                        logger.warning(
+                            "AI 输出被 max_tokens=%s 截断（len=%d），结果可能不完整：请调大 max_tokens 或减少单次题量",
+                            payload.get("max_tokens", "默认"), len(content_out),
+                        )
+                    return content_out
+                # 网关不支持 response_format 时降级重试，避免整条链路因参数被拒
+                if resp.status_code == 400 and json_mode:
+                    logger.warning("AI 网关拒绝 response_format=json_object，降级为普通模式重试: %s", resp.text[:200])
+                    json_mode = False
+                    payload.pop("response_format", None)
+                    resp = await client.post(
+                        f"{api_base}/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json=payload,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        choice = (data.get("choices") or [{}])[0]
+                        content_out = (choice.get("message") or {}).get("content") or ""
+                        logger.info("AI 响应(降级后): model=%s len=%d finish=%s head=%r",
+                                    model, len(content_out), choice.get("finish_reason") or "-", content_out[:160])
+                        return content_out
                 if resp.status_code == 400:
                     last_error = resp.text[:300]
                     continue

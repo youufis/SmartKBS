@@ -1032,46 +1032,69 @@ async def get_ai_themes(type: str = Query("animation", description="资源类型
 def _fetch_matching_questions(topic: str, subject: str = "",
                                limit: int = 15,
                                need_types: tuple[str, ...] = ('single', 'true_false')) -> list[dict]:
-    """从 question_bank 检索与主题匹配的试题，按知识点匹配优先"""
+    """从 question_bank 分级检索与主题匹配的试题。
+
+    两条硬规则（都是踩过的坑）：
+    1. 学科名不再当检索词 —— 以前把 subject 也丢进 LIKE，'%通用技术%'
+       会把整门学科的题全捞进来，导致「技术的性质」的章节练习里
+       混进了「结构的含义与普遍性」的题；
+    2. 强相关优先 —— 知识点精确 > 知识点含主题 > 题干含主题 >
+       知识点/题干含关键词，同级内再按 id 倒序补新题。
+    """
     try:
         from backend.question_db import execute_query
-        keywords = _extract_keywords(topic)
-        if subject:
-            keywords.append(subject)
 
-        seen = set()
-        results = []
-        for kw in keywords[:5]:
-            like = f"%{kw}%"
-            rows = execute_query(
-                """SELECT id, type, question_text, options, correct_answer,
+        topic = (topic or "").strip()
+        keywords = [k for k in _extract_keywords(topic) if k and k != subject and k not in topic]
+
+        cols = """SELECT id, type, question_text, options, correct_answer,
                           explanation, knowledge_points, difficulty,
-                          svg_content, has_svg, media_files
+                          svg_content, has_svg, media_files"""
+        type_ph = ",".join("?" for _ in need_types)
+        seen: set[int] = set()
+        results: list[dict] = []
+
+        def _collect(where: str, params: tuple) -> None:
+            if len(results) >= limit:
+                return
+            rows = execute_query(
+                f"""{cols}
                    FROM question_bank
-                   WHERE (question_text LIKE ? OR knowledge_points LIKE ? OR subject LIKE ?)
-                   AND status = 'active'
+                   WHERE status = 'active' AND type IN ({type_ph}) AND ({where})
                    ORDER BY id DESC
                    LIMIT ?""",
-                (like, like, like, limit * 2),
+                tuple(need_types) + tuple(params) + (limit,),
             )
-            for r in rows:
-                qid = r["id"]
-                if qid not in seen and r["type"] in need_types:
-                    seen.add(qid)
-                    # 解析 options JSON
-                    opts = r.get("options")
-                    if opts and isinstance(opts, str):
-                        try:
-                            r["options"] = json.loads(opts)
-                        except (json.JSONDecodeError, TypeError):
-                            r["options"] = {}
-                    results.append(r)
-                    if len(results) >= limit:
-                        return results
+            for r in rows or []:
+                if len(results) >= limit:
+                    break
+                qid = r.get("id")
+                if qid in seen or r.get("type") not in need_types:
+                    continue
+                seen.add(qid)
+                opts = r.get("options")
+                if opts and isinstance(opts, str):
+                    try:
+                        r["options"] = json.loads(opts)
+                    except (json.JSONDecodeError, TypeError):
+                        r["options"] = {}
+                results.append(r)
+
+        if topic:
+            _collect("knowledge_points = ?", (topic,))
+            _collect("knowledge_points LIKE ?", (f"%{topic}%",))
+            _collect("question_text LIKE ?", (f"%{topic}%",))
+        for kw in keywords[:4]:
+            if len(results) >= limit:
+                break
+            _collect("knowledge_points LIKE ?", (f"%{kw}%",))
+            _collect("question_text LIKE ?", (f"%{kw}%",))
+
         return results
     except Exception as e:
         logger.warning(f"题库检索失败: {e}")
         return []
+
 
 
 def _extract_keywords(text: str) -> list[str]:
@@ -1097,13 +1120,27 @@ def _extract_keywords(text: str) -> list[str]:
 
 
 def _save_questions_to_db(questions: list[dict], username: str, name: str = "") -> int:
-    """将题目列表保存到 question_bank，返回保存数量"""
+    """将题目列表保存到 question_bank，返回保存数量。
+
+    入库前按题干精确查重：页面里常有部分题目来自更早的生成结果（已在题库），
+    不做查重就会在 question_bank 里堆出重复题，题库页和组卷都会受影响。
+    """
     import time
-    from backend.question_db import execute_insert
+    from backend.question_db import execute_insert, execute_query
     saved = 0
+    skipped = 0
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     for q in questions:
         try:
+            text = (q.get("question_text") or "").strip()
+            if not text:
+                continue
+            if execute_query(
+                "SELECT id FROM question_bank WHERE question_text = ? AND status = 'active' LIMIT 1",
+                (text,),
+            ):
+                skipped += 1
+                continue
             qid = execute_insert(
                 """INSERT INTO question_bank
                    (type, question_text, options, correct_answer, explanation,
@@ -1130,6 +1167,8 @@ def _save_questions_to_db(questions: list[dict], username: str, name: str = "") 
                 saved += 1
         except Exception as e:
             logger.warning(f"保存题目到题库失败: {e}")
+    if skipped:
+        logger.info("题库查重：跳过 %d 道已存在的题目，实际新增 %d 道", skipped, saved)
     return saved
 
 
@@ -1216,12 +1255,13 @@ async def ai_preview_html(request: Request):
     from backend.prompts import apply_skills
     prompt = apply_skills(prompt, "html-generation")
 
-    # 调用 AI
+    # 调用 AI（HTML 页面动辄上万字，必须显式给 max_tokens，
+    # 否则走服务商默认上限会被静默截断，产出半截页面）
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         logger.info(f"开始 AI 生成 HTML, 类型={gen_type}, 主题={topic}, prompt长度={len(prompt)}")
-        html_content = await call_ai_sync_with_timeout(prompt, api_key, timeout=300)
-        logger.info(f"AI 生成完成, 内容长度={len(html_content) if html_content else 0}")
+        raw_output = await call_ai_sync_with_timeout(prompt, api_key, timeout=300, max_tokens=16000) or ""
+        logger.info(f"AI 生成完成, 内容长度={len(raw_output)}")
     except TimeoutError as e:
         logger.error(f"AI 生成超时: {e}")
         raise HTTPException(status_code=504, detail=f"AI 生成超时，请简化描述或稍后重试")
@@ -1229,29 +1269,52 @@ async def ai_preview_html(request: Request):
         logger.error(f"AI 生成 HTML 失败: {e}")
         raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
 
-    if not html_content or len(html_content.strip()) < 50:
-        raise HTTPException(status_code=502, detail="AI 返回内容为空或过短，请重试")
+    if not raw_output.strip():
+        raise HTTPException(status_code=502, detail="AI 返回内容为空，请重试")
 
-    # 提取纯 HTML
-    html_match = re.search(r'```(?:html)?\s*(\<!DOCTYPE html\>.*?)\s*```', html_content, re.DOTALL | re.IGNORECASE)
-    if html_match:
-        html_content = html_match.group(1).strip()
+    # ── 提取纯 HTML + 落盘前体检 ──
+    # 原来的正则要求 ```html 之后紧跟 <!DOCTYPE，else 分支又会把 </html> 之后的客套话
+    # 一起截进来；模型换个写法（先说一句"好的"、只写 <html>）就会漏剥或带杂质。
+    from backend import ai_json
+
+    multi_files = _parse_multi_file_output(raw_output)
+    if multi_files:
+        main_html = ai_json.extract_html(multi_files.get("index.html") or next(iter(multi_files.values()), ""))
+        if not ai_json.looks_like_html(main_html):
+            ai_json.dump_failed_raw("preview-multi-" + gen_type, raw_output)
+            raise HTTPException(status_code=502, detail="AI 生成的多文件资源缺少可用的 HTML 主入口，请重试")
+        # 多文件产物要保留 === FILE: === 标记，交给 ai-save-multi 拆分，不能提前剥掉
+        html_content = raw_output.strip()
     else:
-        doctype_match = re.search(r'(\<!DOCTYPE html\>.*)', html_content, re.DOTALL | re.IGNORECASE)
-        if doctype_match:
-            html_content = doctype_match.group(1).strip()
+        main_html = ai_json.extract_html(raw_output)
+        ok_html, why = ai_json.html_is_complete(main_html)
+        if not ok_html:
+            ai_json.dump_failed_raw("preview-" + gen_type, raw_output)
+            raise HTTPException(status_code=502, detail=f"AI 生成的页面不完整：{why}，请重试或简化描述")
+        html_content = main_html
 
     # ── 保存 AI 新生成的题目到题库 ──
     new_saved = 0
+    question_extract_warning = ""
+    db_note = ""
     if gen_type in ("quiz", "practice"):
         try:
-            # 从 HTML 中提取 AI 生成的新题目
-            new_questions = _extract_questions_from_html(html_content, real_questions, topic, subject)
+            # new_questions = 题库里没有的新题；parsed_total = 页面题目总数
+            new_questions, parsed_total = _extract_questions_from_html(main_html, real_questions, topic, subject)
             if new_questions:
                 new_saved = _save_questions_to_db(new_questions, username, user_name)
                 if new_saved:
                     logger.info(f"AI 生成的 {new_saved} 道新题目已保存到题库")
+            if parsed_total == 0:
+                # 真失败：页面里根本没解析出题目数据
+                question_extract_warning = "题目未能从生成结果中解析出来，本次没有写入题库，可下载页面查看或重新生成"
+                logger.warning("AI 生成 %s：页面解析到 0 题", gen_type)
+            elif new_saved == 0:
+                # 正常：题目全部复用现有题库（章节练习的既定策略），不是异常
+                db_note = f"本页 {parsed_total} 题全部复用现有题库，无需重复入库"
+                logger.info("AI 生成 %s：%d 题均来自题库复用，无新增入库", gen_type, parsed_total)
         except Exception as e:
+            question_extract_warning = f"题目入库失败：{e}"
             logger.warning(f"保存 AI 题目到题库失败（不影响结果）: {e}")
 
     # ── SVG + 图片配图增强（仅交互/自定义类型需要，简单资源跳过） ──
@@ -1260,23 +1323,25 @@ async def ai_preview_html(request: Request):
             from backend.api.image_gen_service import plan_and_generate_media
             html_dir = get_account_html_dir(username)
             enhanced_html = await plan_and_generate_media(
-                html_content=html_content,
+                html_content=main_html,
                 topic=topic or custom_prompt or "",
                 subject=subject,
                 resource_type=gen_type,
                 api_key=api_key,
                 html_dir=html_dir,
             )
-            if enhanced_html and len(enhanced_html) > len(html_content):
-                logger.info(f"配图增强完成: {len(enhanced_html) - len(html_content)} chars 新增")
-                html_content = enhanced_html
+            if enhanced_html and len(enhanced_html) > len(main_html):
+                logger.info(f"配图增强完成: {len(enhanced_html) - len(main_html)} chars 新增")
+                main_html = enhanced_html
+                if not multi_files:
+                    html_content = enhanced_html
         except ImportError:
             logger.debug("image_gen_service 中未找到 plan_and_generate_media")
         except Exception as e:
             logger.warning(f"配图增强失败（不影响主结果）: {e}")
 
     # 生成建议文件名
-    title = _extract_html_title(html_content)
+    title = _extract_html_title(main_html)
     type_labels = {"animation": "动画讲解", "quiz": "互动答题", "practice": "练习题", "custom": "自定义", "interactive": "实验交互"}
     type_label = type_labels.get(gen_type, "HTML资源")
     if title:
@@ -1293,21 +1358,28 @@ async def ai_preview_html(request: Request):
     }
     if new_saved:
         result["db_saved"] = new_saved
+    if question_extract_warning:
+        result["db_warning"] = question_extract_warning
+    if db_note:
+        result["db_note"] = db_note
 
     return result
 
 
 def _extract_questions_from_html(html_content: str,
                                   existing_questions: list[dict],
-                                  topic: str, subject: str) -> list[dict]:
+                                  topic: str, subject: str) -> tuple[list[dict], int]:
     """从生成的 HTML 中提取 AI 新增的题目（排除已有题库题目）
     
     通过解析 HTML 中的 JavaScript 题目数据（QUESTION_BANK / questions 数组）
     与已有的题库题目对比，找出 AI 新生成的题目。
+
+    返回 (AI 新增题目, 页面解析到的题目总数)。章节练习优先复用题库真题，
+    「新增 0 题」往往是正常的（全部来自题库），只有「解析 0 题」才是真失败。
     """
     # 跳过 animation 和 custom 类型
     if not html_content or "<!DOCTYPE" not in html_content:
-        return []
+        return [], 0
 
     # 构建已有题目的指纹集合（用于去重）
     existing_fingerprints = set()
@@ -1317,6 +1389,7 @@ def _extract_questions_from_html(html_content: str,
         existing_fingerprints.add(f"{text}|{ans}")
 
     new_questions = []
+    parsed_total = 0
 
     # 尝试匹配 quiz 格式: const QUESTION_BANK = [...] 或 const questions = [...]
     import json as _json
@@ -1357,6 +1430,8 @@ def _extract_questions_from_html(html_content: str,
             # 2. 字符串值: : 'xxx' → : "xxx"（但在引号内不转义）
             raw = re.sub(r":\s*'([^']*?)'(\s*[,}\]])", r': "\1"\2', raw)
             parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                parsed_total = len(parsed)
             for item in parsed:
                 qtext = item.get("question", item.get("text", ""))[:50]
                 qans = str(item.get("answer", item.get("correctAnswer", "")))
@@ -1392,7 +1467,7 @@ def _extract_questions_from_html(html_content: str,
         except Exception as e:
             logger.warning(f"解析 HTML 题目数据失败: {e}")
 
-    return new_questions
+    return new_questions, parsed_total
 
 
 @router.post("/ai-save")
@@ -1690,7 +1765,14 @@ async def ai_save_multi_html(request: Request):
 
     # 没有多文件结构，回退到单文件保存
     if not single_html:
-        single_html = ai_output  # 把整个输出当 HTML 保存
+        from backend.ai_json import extract_html, looks_like_html
+
+        # 整段 AI 输出直接当 HTML 存下来，会把客套话/说明文字也写进 .html，
+        # 页面打开就是半截内容 —— 先剥壳并校验，不合格就明确报错
+        candidate = extract_html(ai_output)
+        if not looks_like_html(candidate):
+            raise HTTPException(status_code=400, detail="AI 输出里没找到完整的 HTML 页面（缺少 <!DOCTYPE html>），请重新生成后再保存")
+        single_html = candidate
 
     # 沿用现有的 ai-save 逻辑
     from backend.config import BASE_DIR as _BASE_DIR
@@ -1793,27 +1875,32 @@ async def ai_generate_async(request: Request):
             )
 
             from backend.api.ai_service import call_ai_sync_with_timeout
+            from backend import ai_json
+
             ai_result = await call_ai_sync_with_timeout(prompt, api_key, timeout=ASYNC_AI_TIMEOUT)
             if not ai_result or len(ai_result.strip()) < 50:
                 return {"error": "AI 返回内容为空或过短"}
 
-            # 清理 AI 输出
-            html_cleaned = ai_result.strip()
-            html_match = re.search(
-                r'```(?:html)?\s*(\<!DOCTYPE html\>.*?)\s*```',
-                html_cleaned, re.DOTALL | re.IGNORECASE,
-            )
-            if html_match:
-                html_cleaned = html_match.group(1).strip()
-            else:
-                doctype_match = re.search(
-                    r'(\<!DOCTYPE html\>.*)', html_cleaned, re.DOTALL | re.IGNORECASE,
-                )
-                if doctype_match:
-                    html_cleaned = doctype_match.group(1).strip()
+            # 统一剥壳：原来的正则要求 ```html 之后紧跟 <!DOCTYPE，
+            # 模型先说一句「好的，我来生成」就会漏剥，把客套话写进课件
+            html_cleaned = ai_json.extract_html(ai_result)
 
             # ── 阶段2: 解析多文件结构 ──
             files = _parse_multi_file_output(ai_result)
+
+            # 落盘前体检：残缺页面存下来后学生点开只有半截，比当场报错难查得多
+            if files:
+                probe = files.get("index.html") or next(iter(files.values()), "")
+                if not ai_json.looks_like_html(probe):
+                    raw = ai_json.dump_failed_raw("async-multi", ai_result or "")
+                    logger.warning(f"[异步] 多文件产物里没有可用的 HTML 主入口（原文留档 {raw or '失败'}）")
+                    return {"error": "AI 生成的内容不完整：没找到可用的 HTML 主入口，请重试"}
+            else:
+                ok, why = ai_json.html_is_complete(html_cleaned)
+                if not ok:
+                    raw = ai_json.dump_failed_raw("async-single", ai_result or "")
+                    logger.warning(f"[异步] 单文件产物不合格: {why}（原文留档 {raw or '失败'}）")
+                    return {"error": f"AI 生成的内容不完整：{why}，请重试"}
             html_dir = get_account_html_dir(username)
 
             # 确定目录名

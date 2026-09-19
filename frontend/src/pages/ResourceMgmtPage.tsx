@@ -294,6 +294,12 @@ const ResourceMgmtPage: React.FC = () => {
       }
       if (genResult.db_saved && genResult.db_saved > 0) {
         message.success(t('resource.questionsSaved', { count: genResult.db_saved }))
+      } else if (genResult.db_warning) {
+        // 真失败：页面里没解析出题目
+        message.warning({ content: genResult.db_warning, duration: 6 })
+      } else if (genResult.db_note) {
+        // 正常：题目全部复用现有题库，只是说明，不算异常
+        message.info({ content: genResult.db_note, duration: 4 })
       }
       // 尝试解析多文件格式保存
       const fileName = genResult.suggested_name.replace(/\.html$/i, '')
