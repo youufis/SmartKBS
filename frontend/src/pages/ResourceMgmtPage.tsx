@@ -500,10 +500,10 @@ const ResourceMgmtPage: React.FC = () => {
                           styles={{ body: { padding: 16, textAlign: 'center' as const } }}
                           actions={[
                             <Tooltip title={t('resource.rename')} key="rename">
-                              <EditOutlined onClick={() => openRename(file.path, file.name)} />
+                              <EditOutlined onClick={(e) => { e.stopPropagation(); openRename(file.path, file.name); }} />
                             </Tooltip>,
                             <Tooltip title={t('resource.delete')} key="delete">
-                              <DeleteOutlined style={{ color: '#ff4d4f' }} onClick={() => handleDelete(file.path)} />
+                              <DeleteOutlined style={{ color: '#ff4d4f' }} onClick={(e) => { e.stopPropagation(); handleDelete(file.path); }} />
                             </Tooltip>,
                           ]}
                         >

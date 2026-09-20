@@ -1714,8 +1714,10 @@ async def get_available_resources(
 
     try:
         if resource_type == "html":
-            if not is_admin(username):
-                _register_personal_resources(username, "html")
+            # 管理员同样要登记：以前这里排除了 admin，导致 root 生成的 AI 练习/课件
+            # 永远进不了 shared_resources，绑定候选列表里查不到（磁盘上有、库里没有）。
+            # 登记为 share_scope='teacher' + target_users=本人，仅自己可见，绑定时才放开到课程年级
+            _register_personal_resources(username, "html")
             sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='html' AND owner_username=?"
             params = [username]
             if keyword:
@@ -1725,8 +1727,7 @@ async def get_available_resources(
             results = execute_query(sql, tuple(params))
 
         elif resource_type == "download":
-            if not is_admin(username):
-                _register_personal_resources(username, "download")
+            _register_personal_resources(username, "download")
             sql = "SELECT id, file_name as name FROM shared_resources WHERE resource_type='download' AND owner_username=?"
             params = [username]
             if keyword:
@@ -2656,11 +2657,19 @@ async def ai_generate_courseware(kp_id: int, request: Request):
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
-            logger.info(f"AI 课件已保存: {filepath}")
+            registered = False
+            try:
+                _register_personal_resources(username, "html")
+                registered = True
+            except Exception as reg_err:
+                logger.warning(f"AI 课件自动登记失败（不影响文件已生成）: {reg_err}")
+
+            logger.info(f"AI 课件已保存: {filepath}, 已登记={registered}")
             return {
                 "kp_name": kp["name"],
                 "file_url": file_url,
                 "filename": filename,
+                "registered": registered,
             }
         except Exception as e:
             logger.error(f"AI 课件生成失败: {e}", exc_info=True)
@@ -3072,10 +3081,20 @@ async def ai_generate_practice(kp_id: int, request: Request):
             rel_path = os.path.relpath(filepath, str(BASE_DIR)).replace("\\", "/")
             file_url = f"/api/files/{rel_path}"
 
-            logger.info(f"AI 练习已生成: file={filepath}, 题库={bank_count}, AI={len(ai_question_ids)}, 总计={len(all_question_ids)}")
+            # 落盘即登记为本人私有资源，否则「我的资源」能看到（扫盘）而
+            # 「绑定候选」查不到（读库），两个列表口径不一致最容易让人以为丢了文件
+            registered = False
+            try:
+                _register_personal_resources(username, "html")
+                registered = True
+            except Exception as reg_err:
+                logger.warning(f"AI 练习自动登记失败（不影响文件已生成）: {reg_err}")
+
+            logger.info(f"AI 练习已生成: file={filepath}, 题库={bank_count}, AI={len(ai_question_ids)}, 总计={len(all_question_ids)}, 已登记={registered}")
             return {
                 "file_url": file_url,
                 "filename": filename,
+                "registered": registered,
                 "questions": final_questions,
                 "total": len(all_question_ids),
                 "kp_name": kp["name"],

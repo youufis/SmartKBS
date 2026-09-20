@@ -316,7 +316,7 @@ const HtmlFilesPage: React.FC = () => {
               <Tooltip title={isFileShared(urlPath) ? t('sharedClickToCancel') : t('clickToShare')}>
                 <ShareAltOutlined
                   style={{ color: isFileShared(urlPath) ? '#ff4d4f' : '#999', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
-                  onClick={(e) => { e.preventDefault(); openShare(urlPath, name); }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openShare(urlPath, name); }}
                 />
               </Tooltip>
             )}
@@ -325,7 +325,7 @@ const HtmlFilesPage: React.FC = () => {
                 <MinusCircleOutlined
                   style={{ color: '#999', cursor: 'pointer', fontSize: 13, flexShrink: 0, opacity: 0, transition: 'opacity 0.2s' }}
                   className="resource-card-remove-btn"
-                  onClick={(e) => { e.preventDefault(); handleRemoveFromGroup(urlPath); }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleRemoveFromGroup(urlPath); }}
                 />
               </Tooltip>
             )}
