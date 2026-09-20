@@ -489,13 +489,11 @@ def _quiz_graded(row: Any) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _answer_matches(user_ans: str, correct_ans: str, q_type: str) -> bool:
-    """判分口径与提交端保持一致: 多选按集合比较, 其余忽略大小写与空白"""
-    if q_type == "multiple":
-        us = sorted([x.strip().upper() for x in str(user_ans or "").split(",") if x.strip()])
-        cs = sorted([x.strip().upper() for x in str(correct_ans or "").split(",") if x.strip()])
-        return bool(cs) and us == cs
-    return str(user_ans or "").strip().upper() == str(correct_ans or "").strip().upper()
+def _answer_matches(user_ans: str, correct_ans: str, q_type: str, options: Any = None) -> bool:
+    """判分口径与提交端保持一致：统一走 backend.answer_norm
+    （多选乱序等价、忽略大小写空白，并兼容下标/判断词写法）"""
+    from backend.answer_norm import answers_equal
+    return answers_equal(user_ans, correct_ans, options, q_type)
 
 
 def _teacher_hits_scope(viewer: str, target_grade: str, target_class: str) -> bool:

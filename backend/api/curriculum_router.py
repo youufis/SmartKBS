@@ -29,6 +29,20 @@ from backend.prompts import apply_skills, build_ai_role
 
 router = APIRouter()
 
+def _opts_of(v: Any) -> Any:
+    """题面 options 可能是 dict 也可能是 JSON 字符串，统一成可用形式。"""
+    if isinstance(v, (dict, list)):
+        return v
+    if isinstance(v, str) and v.strip():
+        try:
+            return json.loads(v)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+from backend.answer_norm import answers_equal
+
+
 # AI 输出降级重试时追加的硬约束（治「夹带客套话 / Markdown 包裹 / 裸反斜杠」）
 _STRICT_JSON_TAIL = (
     chr(10) + chr(10) + '## 输出硬性要求' + chr(10)
@@ -2698,11 +2712,33 @@ def _parse_ai_questions(text: str, scene: str = "practice") -> list[dict[str, An
     """
     from backend import ai_json
 
-    got = ai_json.extract_json_array(text)
+    got, _meta = _parse_ai_questions2(text, scene=scene)
+    return got
+
+
+def _parse_ai_questions2(text: str, scene: str = "practice",
+                         salvage: bool = True) -> tuple[list[dict[str, Any]] | None, dict]:
+    """解析题目数组并附带 meta（salvaged=是否靠截断兜底救回来的）。
+
+    salvage=False（严格模式）时不做补齐右括号，被 max_tokens 砍断的输出直接判失败，
+    避免半截题干/缺选项/答案错位的题目入库。
+    """
+    from backend import ai_json
+
+    got, meta = ai_json.extract_json_array2(text, salvage=salvage)
     if got:
-        return got
+        return got, meta
     ai_json.dump_failed_raw(scene, text or "")
-    return None
+    return None, meta
+
+
+def _ai_strict_parse() -> bool:
+    """严格模式开关（默认开）：不接受截断救回的残缺结果，并逐题做字段体检。"""
+    try:
+        from backend.api.config_router import get_config_value
+        return bool(int(get_config_value("AI_STRICT_PARSE", 1) or 0))
+    except Exception:
+        return True
 
 
 @router.post("/ai-practice/{kp_id}")
@@ -2864,17 +2900,48 @@ async def ai_generate_practice(kp_id: int, request: Request):
                     )
                     logger.info(f"AI 第{round_idx+1}轮响应长度={len(result_text)}")
 
-                    questions = _parse_ai_questions(result_text, scene=f"practice-kp{kp_id}-r{round_idx+1}")
+                    from backend import ai_json
+
+                    strict = _ai_strict_parse()
+                    questions, pmeta = _parse_ai_questions2(
+                        result_text,
+                        scene=f"practice-kp{kp_id}-r{round_idx+1}",
+                        salvage=not strict,
+                    )
                     if not questions:
                         # 不在这里 return：继续下一轮降级重试，全部落空由循环后统一报错
                         logger.warning(f"AI 第{round_idx+1}轮返回格式异常，降级重试")
                         await asyncio.sleep(1)
                         continue
 
-                    # 强制 single 类型，限制数量
+                    # 逐题：先剥离误写进题干的选项，再做字段体检，不合格的不入库
+                    good: list[dict[str, Any]] = []
+                    dropped: list[str] = []
                     for q in questions:
                         q["type"] = "single"
-                    questions = questions[:remaining]
+                        q, changed, why = ai_json.strip_options_from_stem(q)
+                        if changed:
+                            logger.info(f"AI 第{round_idx+1}轮 {why}")
+                        ok_q, reason = ai_json.question_is_complete(q)
+                        if ok_q:
+                            good.append(q)
+                        else:
+                            dropped.append(reason)
+                    for d in dropped[:5]:
+                        logger.warning(f"AI 第{round_idx+1}轮丢弃不合格题: {d}")
+
+                    # 严格模式：本轮合格数太少就判失败，交给下一轮降级重试，
+                    # 而不是把「请求 10 题只出 1 题」当部分成功入库、再白烧一轮
+                    min_ok = max(3, int(ask * 0.6)) if strict else 1
+                    if len(good) < min_ok:
+                        logger.warning(
+                            f"AI 第{round_idx+1}轮结果不足：请求{ask}/解析{len(questions)}/合格{len(good)}"
+                            f"（salvaged={pmeta.get('salvaged')}），本轮判失败降级重试"
+                        )
+                        await asyncio.sleep(1)
+                        continue
+
+                    questions = good[:remaining]
 
                     round_new_ids: list[int] = []
                     for q in questions:
@@ -3027,6 +3094,16 @@ async def ai_generate_practice(kp_id: int, request: Request):
 def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int = 0, subject: str = "", kp_id: int = 0, theme: str = "") -> str:
     """生成自包含的 HTML 答题页面"""
     import html as html_mod
+
+    from backend import ai_json as _aj
+
+    # 历史题里有些题干内嵌了整串选项（早期生成没校验），渲染时统一剥掉；
+    # 只影响页面显示，不改数据库
+    cleaned = []
+    for _q in questions:
+        _q2, _changed, _why = _aj.strip_options_from_stem(_q)
+        cleaned.append(_q2)
+    questions = cleaned
 
     kp_name = html_mod.escape(kp.get("name", ""))
     chapter_name = html_mod.escape(kp.get("chapter_name", ""))
@@ -4154,8 +4231,17 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
     ans_map: dict[int, str] = {}
     if graded_ids:
         ph = ",".join("?" * len(graded_ids))
-        for r in q_query(f"SELECT id, correct_answer FROM question_bank WHERE id IN ({ph})", tuple(graded_ids)):
-            ans_map[int(r["id"])] = str(r.get("correct_answer") or "").strip()
+        for r in q_query(
+            f"SELECT id, correct_answer, options, type FROM question_bank WHERE id IN ({ph})",
+            tuple(graded_ids),
+        ):
+            # 带上 options/type：历史题里有 correct_answer 写成选项下标('0')的，
+            # 必须靠归一化映射回字母，否则学生选 A 会被判错
+            ans_map[int(r["id"])] = (
+                str(r.get("correct_answer") or "").strip(),
+                _opts_of(r.get("options")),
+                str(r.get("type") or ""),
+            )
 
     results_list = []
     earned = 0
@@ -4164,8 +4250,8 @@ async def save_ai_practice_result(kp_id: int, req: SavePracticeResultRequest, re
         if not isinstance(raw, dict):
             raw = {}
         sa = str(raw.get("student_answer", "") or "").strip()
-        ca = ans_map.get(qid, "")
-        is_ok = bool(ca) and sa.upper() == ca.upper()
+        ca, ca_opts, ca_type = ans_map.get(qid, ("", None, ""))
+        is_ok = answers_equal(sa, ca, ca_opts, ca_type)
         if is_ok:
             earned += 10
         results_list.append({

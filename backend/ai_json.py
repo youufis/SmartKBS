@@ -148,16 +148,27 @@ def _from_dict(data: Any) -> list | None:
     return None
 
 
-def extract_json_array(text: str) -> list | None:
-    """尽最大努力把 AI 文本里的题目数组取出来；实在拿不到才返回 None。"""
+def extract_json_array(text: str, salvage: bool = True) -> list | None:
+    """尽最大努力把 AI 文本里的题目数组取出来；实在拿不到才返回 None。
+
+    salvage=False 时不做「补齐右括号」的截断兜底（严格模式用），
+    被 max_tokens 砍断的输出会直接判失败，避免半截题目入库。
+    """
+    got, _meta = extract_json_array2(text, salvage=salvage)
+    return got
+
+
+def extract_json_array2(text: str, salvage: bool = True) -> tuple[list | None, dict]:
+    """同上，但额外返回 meta：salvaged(是否走了截断兜底)、tail_chars(原文长度)。"""
+    meta: dict = {"salvaged": False, "chars": len(text or "")}
     if not text or not text.strip():
-        return None
+        return None, meta
 
     direct = _try(text)
     if isinstance(direct, (list, dict)):
         got = _from_dict(direct)
         if got:
-            return got
+            return got, meta
 
     # ```json ... ``` 代码块（可能有多个，逐个试）
     for m in re.finditer(r"```(?:json|JSON)?\*(.+?)```", text, re.DOTALL):
@@ -170,24 +181,30 @@ def extract_json_array(text: str) -> list | None:
     if frag:
         got = _from_dict(_try(frag))
         if got:
-            return got
+            return got, meta
 
-    # 被包成对象的情况
-    frag = _balanced(text, "{", "}")
-    if frag:
-        got = _from_dict(_try(frag))
-        if got:
-            return got
+    # 被包成对象的情况 —— 仅当文本里根本没有数组起始符时才走这条路。
+    # 否则「数组被截断」会被误当成「模型只出了一道题」：
+    # 10 题只入库 1 题、还白烧一轮重试，就是这么来的。
+    if text.find("[") < 0:
+        obj_frag = _balanced(text, "{", "}")
+        if obj_frag:
+            got = _from_dict(_try(obj_frag))
+            if got:
+                return got, meta
+    else:
+        frag = ""  # 数组没配平：留给下面的截断兜底
 
-    # 截断兜底：从后往前逐个补齐右括号再试（模型被 max_tokens 砍断时常见）
-    if frag or text.count("{") > 0:
+    # 截断兜底：补齐右括号再试（模型被 max_tokens 砍断时常见）——严格模式下不做
+    if salvage and text.count("{") > 0:
         cut = text.rstrip()
         for tail in ("}]", "]}", "]}", "}]}]", "]"):
             got = _from_dict(_try(_balanced(cut + tail, "[", "]")))
             if got:
-                logger.warning("AI 输出疑似被截断，已按 %s 兜底解析", tail)
-                return got
-    return None
+                meta["salvaged"] = True
+                logger.warning("AI 输出疑似被截断，已按 %s 兜底解析出 %d 条（严格模式会判本轮失败）", tail, len(got))
+                return got, meta
+    return None, meta
 
 
 def looks_like_html(text: str) -> bool:
@@ -241,3 +258,88 @@ def looks_like_refusal(text: str, min_len: int = 200) -> bool:
         return True
     head = t[:120]
     return any(w in head for w in _REFUSAL_WORDS)
+
+
+_OPT_MARK = re.compile(r"(?:(?<![A-Za-z0-9])([A-D])[\s]*[．.、:：][\s]*)")
+
+
+def strip_options_from_stem(q: dict) -> tuple[dict, bool, str]:
+    """把误写进题干的选项内容从题干里剥掉。
+
+    AI 有时会把整串「A. xxx B. yyy C. zzz D. www」塞进 question 字段，
+    页面渲染时题干和选项区各显示一遍，看起来就是重复。
+    只在证据充分时才动手（≥2 个 A-D 标记且标记数接近选项数，
+    或题干里出现 ≥2 个该题选项原文），避免误伤「下列 A、B、C 三项中…」这类合法题干。
+    """
+    stem = str(q.get("question_text") or q.get("question") or "")
+    opts = q.get("options")
+    if not stem or not isinstance(opts, dict) or len(opts) < 2:
+        return q, False, ""
+
+    marks = list(_OPT_MARK.finditer(stem))
+    letters = {m.group(1) for m in marks}
+    inline_hits = [
+        stem.find(str(v).strip())
+        for v in opts.values()
+        if len(str(v).strip()) >= 6 and str(v).strip() in stem
+    ]
+
+    cut = None
+    if len(letters) >= 2 and len(marks) >= min(len(opts), 2):
+        cut = marks[0].start()
+    elif len(inline_hits) >= 2:
+        first = min(h for h in inline_hits if h >= 0)
+        m = re.search(r"([A-D])[\s]*[．.、:：][\s]*$", stem[:first])
+        cut = m.start() if m else first
+
+    if cut is None or cut < 6:
+        return q, False, ""
+    new_stem = stem[:cut].rstrip("  \t　,，、;；:：—-")
+    if len(new_stem) < 6 or new_stem == stem:
+        return q, False, ""
+
+    q2 = dict(q)
+    if "question_text" in q2:
+        q2["question_text"] = new_stem
+    if "question" in q2:
+        q2["question"] = new_stem
+    return q2, True, "题干内嵌选项已剥离（截去 %d 字，标记 %s）" % (len(stem) - len(new_stem), "".join(sorted(letters)) or "inline")
+
+
+def question_is_complete(q: dict) -> tuple[bool, str]:
+    """题目字段体检：题干/选项/答案三者齐备且答案落在选项键里。"""
+    if not isinstance(q, dict):
+        return False, "不是对象"
+    stem = str(q.get("question_text") or q.get("question") or "").strip()
+    if len(stem) < 6:
+        return False, "题干缺失或过短"
+    opts = q.get("options")
+    if isinstance(opts, str):
+        try:
+            opts = json.loads(opts)
+        except (ValueError, TypeError):
+            return False, "options 不是合法 JSON"
+    if not isinstance(opts, dict) or len(opts) < 2:
+        return False, "选项不足 2 个"
+    ans = str(q.get("answer") or q.get("correct_answer") or "").strip()
+    if not ans:
+        return False, "答案为空"
+
+    keys = [str(k) for k in opts.keys()]
+    letter_keys = [k.upper() for k in keys if len(k) == 1 and k.isalpha()]
+    if letter_keys:
+        letters = {c for c in re.sub(r"[^A-Za-z]", "", ans).upper()}
+        digits = {c for c in re.sub(r"[^0-9]", "", ans)}
+        if letters and letters <= set(letter_keys):
+            return True, ""                      # 字母答案且都落在选项键里
+        if digits and not letters:
+            return False, "答案是选项下标 %r（应为字母 %s）" % (ans, "/".join(letter_keys))
+        if not letters and not digits:
+            # 判断题文字答案（对/错/正确…）交给归一化处理，能落到键上就算合格
+            from backend.answer_norm import normalize_answer
+            norm = normalize_answer(ans, opts)
+            if norm and norm in "".join(letter_keys):
+                return True, ""
+            return False, "答案 %r 无法识别为选项" % ans
+        return False, "答案 %r 不在选项键 %s 内" % (ans, letter_keys)
+    return True, ""

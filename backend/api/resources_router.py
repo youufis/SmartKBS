@@ -1129,9 +1129,21 @@ def _save_questions_to_db(questions: list[dict], username: str, name: str = "") 
     from backend.question_db import execute_insert, execute_query
     saved = 0
     skipped = 0
+    rejected = 0
     now = time.strftime("%Y-%m-%d %H:%M:%S")
-    for q in questions:
+    from backend import ai_json
+
+    for raw_q in questions:
         try:
+            # 先剥掉误写进题干的选项，再做字段体检，不合格的不入库
+            q, _changed, _why = ai_json.strip_options_from_stem(raw_q)
+            if _changed:
+                logger.info("剥离题干内嵌选项: %s", _why)
+            ok_q, reason = ai_json.question_is_complete(q)
+            if not ok_q:
+                rejected += 1
+                logger.warning("跳过不合格题目(%s): %s", reason, (q.get("question_text") or "")[:30])
+                continue
             text = (q.get("question_text") or "").strip()
             if not text:
                 continue
@@ -1167,8 +1179,8 @@ def _save_questions_to_db(questions: list[dict], username: str, name: str = "") 
                 saved += 1
         except Exception as e:
             logger.warning(f"保存题目到题库失败: {e}")
-    if skipped:
-        logger.info("题库查重：跳过 %d 道已存在的题目，实际新增 %d 道", skipped, saved)
+    if skipped or rejected:
+        logger.info("题库入库：查重跳过 %d 道、不合格剔除 %d 道、实际新增 %d 道", skipped, rejected, saved)
     return saved
 
 

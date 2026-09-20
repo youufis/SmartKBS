@@ -122,9 +122,22 @@ def _normalize_objective_answer(v: Any) -> str:
     return "".join(sorted(_ANS_SEP_RE.sub("", str(v if v is not None else "")).upper()))
 
 
-def _is_correct_objective(student_ans: str, correct: str) -> bool:
-    ref = _normalize_objective_answer(correct)
-    return bool(ref) and _normalize_objective_answer(student_ans) == ref
+def _opts_of(v: Any) -> Any:
+    """options 可能是 dict 或 JSON 字符串"""
+    if isinstance(v, (dict, list)):
+        return v
+    if isinstance(v, str) and v.strip():
+        try:
+            return json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _is_correct_objective(student_ans: str, correct: str, options: Any = None, qtype: str = "") -> bool:
+    """客观题判分：统一走 backend.answer_norm（含下标答案、多选乱序、判断词映射）"""
+    from backend.answer_norm import answers_equal
+    return answers_equal(student_ans, correct, options, qtype)
 
 
 def _parse_target_students(raw: Any) -> list[str]:
@@ -1114,7 +1127,10 @@ async def submit_practice(session_id: int, req: PracticeSubmitRequest, request: 
         student_ans = _ans_of(q["id"])
         correct = q["correct_answer"] or ""
         q_score = q["score"] or 10
-        is_correct = _is_correct_objective(student_ans, correct)
+        is_correct = _is_correct_objective(
+            student_ans, correct,
+            _opts_of(q.get("options")), str(q.get("type") or ""),
+        )
         earned += q_score if is_correct else 0
         total += q_score
         graded[qid] = {

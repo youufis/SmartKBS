@@ -1493,7 +1493,9 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         student_answer = req.answers.get(qid, "")
         correct_answer = q["correct_answer"]
         q_score = q["score"] or (total_score / max(len(questions), 1))
-        is_correct = _check_choice_answer(student_answer, correct_answer, q["type"])
+        is_correct = _check_choice_answer(
+            student_answer, correct_answer, q["type"], _exam_opts_of(q.get("options")),
+        )
         if is_correct:
             earned_score += q_score
         graded_answers[qid] = {
@@ -1877,18 +1879,26 @@ async def get_grading_review_detail(attempt_id: int, request: Request):
     }
 
 
-def _check_choice_answer(student: str, correct: str, q_type: str) -> bool:
-    """检查选择题/判断题答案"""
-    if not student or not correct:
-        return False
-    if q_type == "multiple":
-        # 多选题：答案顺序无关，比较集合
-        student_set = set(s.strip().upper() for s in student.split(",") if s.strip())
-        correct_set = set(c.strip().upper() for c in correct.split(",") if c.strip())
-        return student_set == correct_set
-    else:
-        # 单选题和判断题：直接比较（忽略大小写和空白）
-        return student.strip().upper() == correct.strip().upper()
+def _exam_opts_of(v: Any) -> Any:
+    """题目 options 可能是 dict 或 JSON 字符串。"""
+    if isinstance(v, (dict, list)):
+        return v
+    if isinstance(v, str) and v.strip():
+        try:
+            return json.loads(v)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def _check_choice_answer(student: str, correct: str, q_type: str, options: Any = None) -> bool:
+    """选择题/判断题判分：统一走 backend.answer_norm。
+
+    兼容历史与导入数据里的多种写法：选项下标('0')、多选 'ABC'/'A、B、C'、
+    判断题 '对/错/正确'，避免「学生选 A、库里存 0」被判错。
+    """
+    from backend.answer_norm import answers_equal
+    return answers_equal(student, correct, options, q_type)
 
 
 def _check_short_answer(student: str, correct: str) -> bool:
