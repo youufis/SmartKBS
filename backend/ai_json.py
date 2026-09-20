@@ -215,9 +215,13 @@ def looks_like_html(text: str) -> bool:
 def html_is_complete(text: str) -> tuple[bool, str]:
     """课件/练习页落盘前的最低体检：能不能算一份能打开的 HTML。"""
     t = (text or "").strip()
+    low = t.lower()
+    # 跳转入口页（<meta http-equiv=refresh> 指向子目录 index.html）本来就只有一两百字符，
+    # 属于合法产物，不能被「过短」规则误判
+    if 'http-equiv="refresh"' in low and "</html>" in low:
+        return True, ""
     if len(t) < 400:
         return False, "内容过短（%d 字符），疑似未生成完整页面" % len(t)
-    low = t.lower()
     if "<html" not in low:
         return False, "缺少 <html> 标签"
     if "</html>" not in low:
@@ -343,3 +347,130 @@ def question_is_complete(q: dict) -> tuple[bool, str]:
             return False, "答案 %r 无法识别为选项" % ans
         return False, "答案 %r 不在选项键 %s 内" % (ans, letter_keys)
     return True, ""
+
+
+def balanced_slice(text: str, open_ch: str = "[", close_ch: str = "]") -> str:
+    """从第一个 open_ch 起做括号配平（正确跳过字符串内部），返回完整片段。
+
+    注意：这是给 HTML/JS 里抠数组用的通用实现，替代各处手写循环 ——
+    旧写法在 `for i in range(...)` 里改 `i` 想跳过字符串，Python 中无效，
+    等于字符串里的括号也会被算进配平。
+    """
+    start = text.find(open_ch)
+    if start < 0:
+        return ""
+    depth = 0
+    i = start
+    n = len(text)
+    quote = ""
+    while i < n:
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in ('"', "'"):
+            quote = ch
+        elif ch == open_ch:
+            depth += 1
+        elif ch == close_ch:
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+        i += 1
+    return ""
+
+
+def parse_js_array_loose(raw: str) -> Any:
+    """解析 JS 字面量数组：容忍未加引号的键、单引号字符串、尾逗号、undefined、行注释。
+
+    生成的练习页里题目数组常写成 `const questions = [ { id: 1, question: "..." } ]`
+    —— 键没有引号，json.loads 会报「Expecting property name enclosed in double quotes」，
+    于是页面明明有 15 题却被判成「解析到 0 题」，题目永远进不了题库。
+    """
+    import json as _json
+    if not raw:
+        return None
+    try:
+        return _json.loads(raw)
+    except (ValueError, TypeError):
+        pass
+
+    out: list[str] = []
+    i = 0
+    n = len(raw)
+    prev_significant = ""      # 上一个非字符串的结构字符
+    while i < n:
+        ch = raw[i]
+        # 行注释
+        if ch == "/" and i + 1 < n and raw[i + 1] == "/":
+            j = raw.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        # 字符串原样保留（单引号转双引号）
+        if ch in ('"', "'"):
+            quote = ch
+            j = i + 1
+            buf = []
+            while j < n:
+                c = raw[j]
+                if c == "\\":
+                    buf.append(raw[j:j + 2] if j + 1 < n else "\\")
+                    j += 2
+                    continue
+                if c == quote:
+                    break
+                if c == '"' and quote == "'":
+                    buf.append('\\"')
+                else:
+                    buf.append(c)
+                j += 1
+            body = "".join(buf)
+            if quote == "'":
+                body = body.replace("'", "")
+            out.append('"' + body + '"')
+            i = j + 1
+            prev_significant = "str"
+            continue
+        # 未加引号的键：前面是 { 或 , ，标识符后面跟 :
+        if ch.isalpha() or ch in "_$":
+            j = i
+            while j < n and (raw[j].isalnum() or raw[j] in "_$"):
+                j += 1
+            word = raw[i:j]
+            k = j
+            while k < n and raw[k] in " \t\r\n":
+                k += 1
+            if k < n and raw[k] == ":" and prev_significant in ("", "{", ","):
+                out.append('"' + word + '"')
+                i = j
+                prev_significant = "key"
+                continue
+            if word == "undefined" or word == "NaN":
+                out.append("null")
+                i = j
+                prev_significant = "val"
+                continue
+            out.append(word)
+            i = j
+            prev_significant = "val"
+            continue
+        if ch in "{[,":
+            prev_significant = ch
+        elif ch in "}]":
+            prev_significant = ch
+        out.append(ch)
+        i += 1
+
+    fixed = "".join(out)
+    fixed = re.sub(r",\s*([}\]])", r"\1", fixed)      # 尾逗号
+    for cand in (fixed,):
+        try:
+            return _json.loads(cand)
+        except (ValueError, TypeError):
+            continue
+    return None

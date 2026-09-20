@@ -1404,46 +1404,23 @@ def _extract_questions_from_html(html_content: str,
     parsed_total = 0
 
     # 尝试匹配 quiz 格式: const QUESTION_BANK = [...] 或 const questions = [...]
-    import json as _json
+    # 配平与解析统一走 backend.ai_json —— 旧手写循环在 `for i in range(...)` 里改 i
+    # 想跳过字符串（Python 中无效），且严格 json.loads 遇不上「键不带引号」的 JS 字面量，
+    # 于是页面明明有 15 题却被报成「解析到 0 题」，题目永远进不了题库。
+    from backend.ai_json import balanced_slice, parse_js_array_loose
+
     qb_match = re.search(
         r'(?:const|let|var)\s+(?:QUESTION_BANK|questions)\s*=\s*(\[)',
         html_content,
     )
     if qb_match:
         try:
-            # 手动查找匹配的闭合 ]（处理嵌套 []）
-            start = qb_match.start(1)
-            depth = 0
-            end = start
-            for i in range(start, len(html_content)):
-                ch = html_content[i]
-                if ch == '[':
-                    depth += 1
-                elif ch == ']':
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
-                elif ch == '"' or ch == "'":
-                    # 跳过字符串中的内容
-                    quote = ch
-                    i += 1
-                    while i < len(html_content):
-                        if html_content[i] == '\\':
-                            i += 2
-                            continue
-                        if html_content[i] == quote:
-                            break
-                        i += 1
-            raw = html_content[start:end]
-            # 处理单引号 JS 格式，转为标准 JSON
-            # 1. 属性名: 'xxx' → "xxx"
-            raw = re.sub(r"'([^']+)'\s*:", r'"\1":', raw)
-            # 2. 字符串值: : 'xxx' → : "xxx"（但在引号内不转义）
-            raw = re.sub(r":\s*'([^']*?)'(\s*[,}\]])", r': "\1"\2', raw)
-            parsed = _json.loads(raw)
-            if isinstance(parsed, list):
-                parsed_total = len(parsed)
+            raw = balanced_slice(html_content[qb_match.start(1):], "[", "]")
+            parsed = parse_js_array_loose(raw)
+            if not isinstance(parsed, list):
+                logger.warning("解析 HTML 题目数组失败（宽松解析仍不通过）")
+                return new_questions, parsed_total
+            parsed_total = len(parsed)
             for item in parsed:
                 qtext = item.get("question", item.get("text", ""))[:50]
                 qans = str(item.get("answer", item.get("correctAnswer", "")))
@@ -1480,6 +1457,22 @@ def _extract_questions_from_html(html_content: str,
             logger.warning(f"解析 HTML 题目数据失败: {e}")
 
     return new_questions, parsed_total
+
+
+def _register_own_html(username: str) -> bool:
+    """把本账号 html 目录里未入库的文件登记为「仅本人可见」的私有资源。
+
+    与 curriculum_router 的候选登记共用同一实现；生成/保存后立刻调用，
+    否则「我的资源」(扫盘)看得见、知识点绑定候选(读库)看不见。
+    函数内 import 避免模块间循环依赖。
+    """
+    try:
+        from backend.api.curriculum_router import _register_personal_resources
+        _register_personal_resources(username, "html")
+        return True
+    except Exception as e:
+        logger.warning("登记生成资源失败(不影响文件已保存): %s", e)
+        return False
 
 
 @router.post("/ai-save")
@@ -1540,6 +1533,7 @@ async def ai_save_html(request: Request):
         "file_path": rel_path,
         "url_path": rel_path,
         "is_subdir": False,
+        "registered": _register_own_html(username),
     }
 
 
@@ -1766,6 +1760,7 @@ async def ai_save_multi_html(request: Request):
             assets_dir_name = os.path.splitext(main_basename)[0]
 
             file_count = len(files)
+            registered = _register_own_html(username)
             return {
                 "message": f"✅ 多文件资源已保存：{main_basename} + {assets_dir_name}/ 目录 ({file_count} 个文件)",
                 "is_subdir": True,
@@ -1773,6 +1768,7 @@ async def ai_save_multi_html(request: Request):
                 "main_entry": main_basename,
                 "url_path": rel_path,
                 "file_count": file_count,
+                "registered": registered,
             }
 
     # 没有多文件结构，回退到单文件保存
@@ -1935,6 +1931,7 @@ async def ai_generate_async(request: Request):
                     "main_entry": main_basename,
                     "url_path": rel_path,
                     "file_count": len(files),
+                    "registered": _register_own_html(username),
                 }
             else:
                 # 单文件
@@ -1954,6 +1951,7 @@ async def ai_generate_async(request: Request):
                     "is_subdir": False,
                     "file_name": filename,
                     "url_path": rel_path,
+                    "registered": _register_own_html(username),
                 }
 
             # ── 阶段3: 配图增强（如果启用）──
