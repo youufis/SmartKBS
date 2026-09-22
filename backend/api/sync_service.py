@@ -18,6 +18,16 @@ _geo_cache: dict[str, dict[str, Any]] = {}
 _GEO_CACHE_TTL = 86400
 _MAX_GEO_CACHE = 2000          # 防止匿名上报把地理缓存撑爆
 _MAX_SYNC_LOGS = 5000          # 采集记录保留上限(超出丢弃最旧的)
+_ONLINE_WINDOW_HOURS = 25      # 在线窗口: 心跳周期 24h + 1h 余量, 超过视为离线
+
+# 部署机识别键: 主机名 + 来源 IP（receive_sync_report 入库前已剥掉端口）。
+# 不能用 node_id —— backend/.node_id 被提交进了仓库, 所有克隆/打包出去的部署都继承了
+# 同一个 id（历史上是 073b73e486174c2f）, 按 node_id 聚合会把几十台不同机器并成一行,
+# 面板上于是只剩“最后一次上报的那台”。
+# 按「主机名#IP」聚合才是需要的口径: 每台部署、每个出口 IP 各一行、各自判在线;
+# 同一台机器换了出口 IP 会另起一行, 旧 IP 那一行随最后一次心跳超时自然转为离线。
+_IDENTITY_SQL = ("COALESCE(NULLIF(hostname, ''), node_id) || '#' || "
+                 "COALESCE(NULLIF(caller_ip, ''), 'no-ip')")
 
 
 def _require_admin(request: Request) -> str:
@@ -153,20 +163,38 @@ async def receive_sync_report(request: Request):
 
 @router.get("/config-sync/nodes")
 async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=200)):
-    """返回所有同步记录（分页）—— 仅管理员"""
+    """按「部署机 + 出口 IP」汇总同步记录, 并给出各自的在线/离线状态 —— 仅管理员
+
+    在线判定只看一件事: 该身份最后一次上报距现在是否落在 _ONLINE_WINDOW_HOURS 小时内。
+    部署端心跳是 24 小时一轮(backend/config_sync.py 的 _SYNC_INTERVAL), 窗口取 24h + 1h 余量,
+    避免“下一轮心跳还没到, 状态就先跳到离线”的边界闪烁。
+    一律用服务端收到的 last_sync 计时, 不用客户端上报的 timestamp(部署机时钟常不准)。
+    """
     _require_admin(request)
     page = max(1, page)
     offset = (page - 1) * page_size
-    rows = execute_query("SELECT COUNT(*) FROM config_sync_logs")
+    rows = execute_query(f"SELECT COUNT(DISTINCT {_IDENTITY_SQL}) FROM config_sync_logs")
     total = rows[0][0] if rows else 0
-    rows = execute_query("""
-        SELECT id, node_id, hostname, caller_ip, public_ip,
-               country, region, city, isp,
-               app_version, platform_info, first_sync, last_sync, sync_count
-        FROM config_sync_logs
-        ORDER BY first_sync DESC
-        LIMIT ? OFFSET ?
-    """, (page_size, offset))
+    # 每条心跳在表里是一行新记录, 所以取同一身份下 id 最大的一行 = 最后一次心跳;
+    # COUNT(*) 还原真实心跳次数, MIN(first_sync) 作为首次上报时间, IP/地域取最后一次快照。
+    rows = execute_query(
+        "SELECT s.id, s.node_id, s.hostname, s.caller_ip, s.public_ip,"
+        "       s.country, s.region, s.city, s.isp,"
+        "       s.app_version, s.platform_info,"
+        "       a.first_sync, s.last_sync, a.sync_count,"
+        "       CASE WHEN s.last_sync >= datetime('now', ?, 'localtime') THEN 1 ELSE 0 END AS online,"
+        "       CAST((julianday('now', 'localtime') - julianday(s.last_sync)) * 1440 AS INTEGER) AS minutes_ago"
+        " FROM ("
+        f"    SELECT {_IDENTITY_SQL} AS ident, MAX(id) AS max_id,"
+        "           MIN(first_sync) AS first_sync, COUNT(*) AS sync_count"
+        "    FROM config_sync_logs"
+        "    GROUP BY ident"
+        " ) a"
+        " JOIN config_sync_logs s ON s.id = a.max_id"
+        " ORDER BY online DESC, s.last_sync DESC"
+        " LIMIT ? OFFSET ?",
+        (f"-{_ONLINE_WINDOW_HOURS} hour", page_size, offset),
+    )
     result = []
     for r in rows:
         result.append({
@@ -184,6 +212,8 @@ async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size
             "first_sync": r[11],
             "last_sync": r[12],
             "sync_count": r[13],
+            "online": bool(r[14]),
+            "minutes_ago": r[15],
         })
     return {"nodes": result, "total": total, "page": page, "page_size": page_size}
 
@@ -206,15 +236,16 @@ async def clear_sync_logs(request: Request):
 
 @router.post("/config-sync/deduplicate")
 async def deduplicate_sync_logs(request: Request):
-    """IP 去重：相同 IP（不含端口）只保留最新一条记录 —— 仅管理员"""
+    """节点去重：每个「主机名+IP」只保留最后一次上报记录 —— 仅管理员
+
+    旧版按 caller_ip 分组，走花生壳/NAT 穿透时同一出口下不同机器会被并成一条（等于丢数据）；
+    现在与面板同一口径，只收敛完全相同的「主机名#IP」身份的重复心跳。
+    """
     _require_admin(request)
     execute_insert_update(
-        """DELETE FROM config_sync_logs WHERE id NOT IN (
-            SELECT MAX(id) FROM config_sync_logs
-            GROUP BY CASE WHEN INSTR(caller_ip, ':') > 0
-                     THEN SUBSTR(caller_ip, 1, INSTR(caller_ip, ':') - 1)
-                     ELSE caller_ip END
-        )"""
+        "DELETE FROM config_sync_logs WHERE id NOT IN ("
+        f"    SELECT MAX(id) FROM config_sync_logs GROUP BY {_IDENTITY_SQL}"
+        ")",
     )
     rows = execute_query("SELECT COUNT(*) FROM config_sync_logs")
     remaining = rows[0][0] if rows else 0
@@ -223,15 +254,23 @@ async def deduplicate_sync_logs(request: Request):
 
 @router.get("/config-sync/export")
 async def export_sync_logs(request: Request):
-    """导出所有同步记录为 JSON —— 仅管理员"""
+    """导出汇总后的部署记录（与面板同一口径，每台部署每个 IP 一行）—— 仅管理员"""
     _require_admin(request)
-    rows = execute_query("""
-        SELECT id, node_id, hostname, caller_ip, public_ip,
-               country, region, city, isp,
-               app_version, platform_info, first_sync
-        FROM config_sync_logs
-        ORDER BY first_sync DESC
-    """)
+    rows = execute_query(
+        "SELECT s.id, s.node_id, s.hostname, s.caller_ip, s.public_ip,"
+        "       s.country, s.region, s.city, s.isp,"
+        "       s.app_version, s.platform_info, a.first_sync, s.last_sync, a.sync_count,"
+        "       CASE WHEN s.last_sync >= datetime('now', ?, 'localtime') THEN 1 ELSE 0 END"
+        " FROM ("
+        f"    SELECT {_IDENTITY_SQL} AS ident, MAX(id) AS max_id,"
+        "           MIN(first_sync) AS first_sync, COUNT(*) AS sync_count"
+        "    FROM config_sync_logs"
+        "    GROUP BY ident"
+        " ) a"
+        " JOIN config_sync_logs s ON s.id = a.max_id"
+        " ORDER BY s.last_sync DESC",
+        (f"-{_ONLINE_WINDOW_HOURS} hour",),
+    )
     result = []
     for r in rows:
         result.append({
@@ -246,31 +285,41 @@ async def export_sync_logs(request: Request):
             "isp": r[8],
             "app_version": r[9],
             "platform": r[10],
-            "time": r[11],
+            "first_sync": r[11],
+            "last_sync": r[12],
+            "sync_count": r[13],
+            "online": bool(r[14]),
+            "time": r[12],
         })
     return {"nodes": result, "total": len(result)}
 
 
 @router.get("/config-sync/summary")
 async def get_sync_summary(request: Request):
-    """同步统计汇总 —— 仅管理员"""
+    """同步统计汇总（按「主机名+IP」身份去重计数）—— 仅管理员"""
     _require_admin(request)
-    rows = execute_query("SELECT COUNT(DISTINCT node_id) FROM config_sync_logs")
+    rows = execute_query(f"SELECT COUNT(DISTINCT {_IDENTITY_SQL}) FROM config_sync_logs")
     total = rows[0][0] if rows else 0
     today_active = execute_query(
-        "SELECT COUNT(DISTINCT node_id) FROM config_sync_logs "
+        f"SELECT COUNT(DISTINCT {_IDENTITY_SQL}) FROM config_sync_logs "
         "WHERE last_sync >= datetime('now', '-1 day', 'localtime')"
     )[0][0]
     week_active = execute_query(
-        "SELECT COUNT(DISTINCT node_id) FROM config_sync_logs "
+        f"SELECT COUNT(DISTINCT {_IDENTITY_SQL}) FROM config_sync_logs "
         "WHERE last_sync >= datetime('now', '-7 day', 'localtime')"
     )[0][0]
     countries = execute_query(
-        "SELECT country, COUNT(DISTINCT node_id) as cnt "
+        f"SELECT country, COUNT(DISTINCT {_IDENTITY_SQL}) as cnt "
         "FROM config_sync_logs GROUP BY country ORDER BY cnt DESC"
     )
+    online_nodes = execute_query(
+        f"SELECT COUNT(DISTINCT {_IDENTITY_SQL}) FROM config_sync_logs "
+        "WHERE last_sync >= datetime('now', ?, 'localtime')",
+        (f"-{_ONLINE_WINDOW_HOURS} hour",),
+    )[0][0]
     return {
         "total_nodes": total,
+        "online_nodes": online_nodes,
         "today_active": today_active,
         "weekly_active": week_active,
         "country_distribution": [

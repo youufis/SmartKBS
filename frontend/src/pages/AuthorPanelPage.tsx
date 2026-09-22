@@ -25,13 +25,24 @@ interface Deployment {
   first_sync: string
   last_sync: string
   sync_count: number
+  online: boolean
+  minutes_ago: number
 }
 
 interface Stats {
   total_nodes: number
+  online_nodes: number
   today_active: number
   weekly_active: number
   country_distribution: { country: string; count: number }[]
+}
+
+// 距今时长: 后端用服务器时间算好分钟数, 前端只负责口语化展示
+const fmtAgo = (minutes: number | undefined, t: any) => {
+  if (minutes === undefined || minutes === null || minutes < 0) return '-'
+  if (minutes < 60) return t('agoMinutes', { n: minutes })
+  if (minutes < 1440) return t('agoHours', { n: Math.floor(minutes / 60) })
+  return t('agoDays', { n: Math.floor(minutes / 1440) })
 }
 
 const AuthorPanelPage: React.FC = () => {
@@ -116,6 +127,18 @@ const AuthorPanelPage: React.FC = () => {
   }
 
   const columns = [
+    {
+      title: t('status'), key: 'online', width: 92, fixed: 'left' as const,
+      render: (_: any, r: Deployment) => (
+        <Tooltip
+          title={`${t('lastReport')}: ${r.last_sync || r.first_sync}（${fmtAgo(r.minutes_ago, t)}）· ${t('heartbeatTimes', { n: r.sync_count })}`}
+        >
+          <Tag color={r.online ? 'green' : 'default'} style={{ marginRight: 0 }}>
+            {r.online ? '🟢 ' : '⚪ '}{r.online ? t('nodeOnline') : t('nodeOffline')}
+          </Tag>
+        </Tooltip>
+      ),
+    },
     { title: t('nodeId'), dataIndex: 'node_id', key: 'node_id', width: 100, ellipsis: true },
     { title: t('hostname'), dataIndex: 'hostname', key: 'hostname', width: 100 },
     { title: t('publicIp'), dataIndex: 'public_ip', key: 'public_ip', width: 120 },
@@ -129,7 +152,18 @@ const AuthorPanelPage: React.FC = () => {
     { title: t('isp'), dataIndex: 'isp', key: 'isp', width: 80 },
     { title: t('version'), dataIndex: 'app_version', key: 'app_version', width: 70 },
     { title: t('platform'), dataIndex: 'platform', key: 'platform', width: 100, ellipsis: true },
-    { title: t('syncTime'), dataIndex: 'first_sync', key: 'first_sync', width: 160 },
+    {
+      title: t('lastReport'), dataIndex: 'last_sync', key: 'last_sync', width: 176,
+      render: (v: string, r: Deployment) => (
+        <span>
+          {v || r.first_sync}
+          <Typography.Text type="secondary" style={{ marginLeft: 6, fontSize: 12 }}>
+            ({fmtAgo(r.minutes_ago, t)})
+          </Typography.Text>
+        </span>
+      ),
+    },
+    { title: t('firstReport'), dataIndex: 'first_sync', key: 'first_sync', width: 160 },
     {
       title: t('actions'), key: 'action', width: 70, fixed: 'right' as const,
       render: (_: any, r: Deployment) => (
@@ -171,6 +205,17 @@ const AuthorPanelPage: React.FC = () => {
           <Col xs={12} sm={6}>
             <Card size="small" hoverable>
               <Statistic title={t('totalNodes')} value={stats.total_nodes} prefix={<GlobalOutlined />} />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Card size="small" hoverable>
+              <Statistic
+                title={t('onlineNodes')}
+                value={stats.online_nodes}
+                prefix={<ApiOutlined />}
+                suffix={`/ ${stats.total_nodes}`}
+                valueStyle={{ color: stats.online_nodes > 0 ? '#3f8600' : undefined }}
+              />
             </Card>
           </Col>
           <Col xs={12} sm={6}>
@@ -245,7 +290,7 @@ const AuthorPanelPage: React.FC = () => {
             showTotal: (total: number) => t('totalRecords', { count: total }),
           }}
           onChange={handleTableChange}
-          scroll={{ x: 1450 }}
+          scroll={{ x: 1740 }}
           loading={loading}
         />
       </Card>
