@@ -2,6 +2,7 @@
 通知消息与公告系统 API 路由
 提供用户通知的增删改查和公告管理
 """
+import os
 from datetime import datetime
 from typing import Any
 
@@ -213,11 +214,71 @@ def _warn_missing_source(func: str, type_: str, source_type: str, title: str) ->
     )
 
 
+# ── 同一事件的重发保护窗 ──────────────────────────────────────────────
+# 根因见 exam_router._claim_settlement: 后台批改器多进程并跑时, 同一份成绩会被收敛两遍,
+# 学生与教师各收到 2 条一模一样的通知(2026-09-22 实例)。结算侧已加幂等标记, 这里是通知层
+# 的最后一道兜底: 任何双写路径都不会再把同一条消息投递两次。
+# 只对**带活动来源(source_type)**的通知生效 —— 公告/广播类是"老师故意重复发"的合法场景, 不拦。
+# 设环境变量 SMARTKB_NOTIFY_DEDUPE_SEC=0 可整体关闭。
+_NOTIFY_DEDUPE_SEC = int(os.environ.get("SMARTKB_NOTIFY_DEDUPE_SEC", "600"))
+
+
+def _dedupe_keyable(source_type: str) -> bool:
+    return _NOTIFY_DEDUPE_SEC > 0 and bool((source_type or "").strip())
+
+
+def _dup_exists(recipient: str, type_: str, title: str, content: str,
+                source_type: str, source_id: str) -> bool:
+    """窗口内是否已给该收件人投递过完全相同的一条通知。"""
+    if not _dedupe_keyable(source_type) or not (recipient and title):
+        return False
+    try:
+        rows = execute_query(
+            """SELECT id FROM notifications
+                WHERE recipient_username = ? AND type = ? AND title = ?
+                  AND COALESCE(content, '') = ? AND COALESCE(source_type, '') = ?
+                  AND COALESCE(source_id, '') = ?
+                  AND created_at >= datetime('now', ?, 'localtime')
+                LIMIT 1""",
+            (recipient, type_, title, content or "", source_type or "", source_id or "",
+             f"-{_NOTIFY_DEDUPE_SEC} second"),
+        )
+        return bool(rows)
+    except Exception as e:
+        logger.debug(f"[通知] 重发检查失败, 按原逻辑投递: {e}")
+        return False
+
+
+def _already_notified(recipients: list[str], type_: str, title: str, content: str,
+                      source_type: str, source_id: str) -> set:
+    """批量通知用: 一次查回窗口内已经收到过同一条内容的人, 避免逐个查询。"""
+    if not _dedupe_keyable(source_type) or not recipients or not title:
+        return set()
+    marks = ",".join("?" * len(recipients))
+    try:
+        rows = execute_query(
+            f"""SELECT DISTINCT recipient_username FROM notifications
+                 WHERE recipient_username IN ({marks}) AND type = ? AND title = ?
+                   AND COALESCE(content, '') = ? AND COALESCE(source_type, '') = ?
+                   AND COALESCE(source_id, '') = ?
+                   AND created_at >= datetime('now', ?, 'localtime')""",
+            (*recipients, type_, title, content or "", source_type or "", source_id or "",
+             f"-{_NOTIFY_DEDUPE_SEC} second"),
+        )
+        return {r[0] for r in rows or []}
+    except Exception as e:
+        logger.debug(f"[通知] 批量重发检查失败, 按原逻辑投递: {e}")
+        return set()
+
+
 def create_notification(recipient: str, type_: str, title: str, content: str = "", related_link: str = "",
                         source_type: str = "", source_id: str = "", payload: str = ""):
     """创建一条通知（内部调用，会检查类型是否启用）"""
     _warn_missing_source("create_notification", type_, source_type, title)
     if not _is_notification_type_enabled(type_):
+        return
+    if _dup_exists(recipient, type_, title, content, source_type, source_id):
+        logger.info(f"[通知] 窗口内已投递过相同内容, 跳过重发: {recipient} / {title[:40]}")
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -240,6 +301,12 @@ def notify_users(usernames: list[str], type_: str, title: str, content: str = ""
         # R10: 以前这里是静默 return, 教师发布测验/投票后一直等不到通知又查不到原因
         logger.info(f"[通知] 类型 {type_} 未在系统配置(通知类型)中启用, "
                     f"本次未投递 {len(usernames)} 人: {title[:40]}")
+        return
+    dup = _already_notified(list(usernames), type_, title, content, source_type, source_id)
+    if dup:
+        logger.info(f"[通知] 窗口内已投递过 {len(dup)} 人, 本次跳过: {title[:40]}")
+        usernames = [u for u in usernames if u not in dup]
+    if not usernames:
         return
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     sql = """INSERT INTO notifications

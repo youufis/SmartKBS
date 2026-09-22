@@ -82,9 +82,10 @@ async def lifespan(app: FastAPI):
         # 启动期数据口径治理(均幂等, 单项失败互不影响):
         #   - 积分流水分桶/去前缀: 保证"按活动清理积分"能精确定位(活动重置前置)
         #   - 存量通知 source_type/source_id 回填: 保证"按活动清理通知"不再空转
-        from backend.notify_hygiene import backfill_notification_sources
+        from backend.notify_hygiene import backfill_notification_sources, dedupe_notifications
         from backend.reward_hygiene import normalize_reward_activity_keys
-        for _repair in (normalize_reward_activity_keys, backfill_notification_sources):
+        for _repair in (normalize_reward_activity_keys, backfill_notification_sources,
+                        dedupe_notifications):
             try:
                 _res = _repair()
                 if _res.get("changed"):

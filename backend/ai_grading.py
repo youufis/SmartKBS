@@ -409,8 +409,11 @@ async def drain_async(only_source: str = "", only_activity: str = "") -> dict[st
             if not ad:
                 continue
             try:
-                ad.save_batch(attempt_id, items)
-                done_attempts.append((src, attempt_id))
+                applied = ad.save_batch(attempt_id, items)
+                # 返回 None = 该来源还没约定返回值, 照旧收尾; 返回 0 = 本轮对它一次没写,
+                # 不能再触发结算(否则重复收敛会重发一遍成绩通知)
+                if applied is None or applied:
+                    done_attempts.append((src, attempt_id))
             except Exception as e:
                 logger.warning(f"[ai_grading] 写回失败 source={src} attempt={attempt_id}: {e}")
         for src, attempt_id in done_attempts:

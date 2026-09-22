@@ -195,6 +195,70 @@ def backfill_notification_sources(dry_run: bool = False, force: bool = False) ->
     return report
 
 
+# ── 存量重复通知收拢（一次性幂等修复）──────────────────────────────────
+# 2026-09-22 事故: 后台批改器多进程并跑, 同一份成绩被结算两遍, 学生与教师各收到
+# 2 条一模一样的通知。结算侧(_claim_settlement)与投递侧(create_notification 重发窗)已修,
+# 这里把当时留下的重复条目收拢掉。判据保守: 同收件人+同类型+同标题+同正文+同来源,
+# 且两条间隔 ≤ 10 分钟, 保留最早一条(最早那条可能已被读过, 删后来的不会丢已读状态)。
+_DEDUPE_WINDOW_SEC = 600
+_DEDUPE_LOOKBACK = "-30 day"
+_DEDUPE_STATE_KEY = "notification_dedupe_v1"
+
+_DUP_IDS = """SELECT n.id FROM notifications n
+                      JOIN notifications k
+                        ON k.recipient_username = n.recipient_username
+                       AND COALESCE(k.type, '') = COALESCE(n.type, '')
+                       AND k.title = n.title
+                       AND COALESCE(k.content, '') = COALESCE(n.content, '')
+                       AND COALESCE(k.source_type, '') = COALESCE(n.source_type, '')
+                       AND COALESCE(k.source_id, '') = COALESCE(n.source_id, '')
+                       AND k.id < n.id
+                       AND (julianday(n.created_at) - julianday(k.created_at)) * 86400 <= ?
+                     WHERE n.created_at >= datetime('now', ?, 'localtime')"""
+
+
+def dedupe_notifications(dry_run: bool = False, force: bool = False) -> dict[str, Any]:
+    """把时间窗内完全重复的通知收敛成一条；dry_run=True 时只统计不写库。"""
+    report: dict[str, Any] = {
+        "dry_run": dry_run, "duplicates": 0, "deleted": 0,
+        "pass": "skipped(already-marked)", "changed": False,
+    }
+    try:
+        if not force and _state_get(_DEDUPE_STATE_KEY) is not None:
+            return report
+        report["pass"] = "dry-run" if dry_run else "ran"
+        rows = execute_query(
+            "SELECT COUNT(*) FROM notifications WHERE id IN (" + _DUP_IDS + ")",
+            (_DEDUPE_WINDOW_SEC, _DEDUPE_LOOKBACK),
+        )
+        report["duplicates"] = int(rows[0][0]) if rows else 0
+        if not report["duplicates"]:
+            report["pass"] = "ran(nothing-to-do)"
+            if not dry_run:
+                _state_set(_DEDUPE_STATE_KEY, "empty")
+            return report
+        if dry_run:
+            report["changed"] = False
+        else:
+            with get_transaction() as conn:
+                cur = conn.execute(
+                    "DELETE FROM notifications WHERE id IN (" + _DUP_IDS + ")",
+                    (_DEDUPE_WINDOW_SEC, _DEDUPE_LOOKBACK),
+                )
+                report["deleted"] = int(cur.rowcount or 0)
+            report["changed"] = report["deleted"] > 0
+            _state_set(_DEDUPE_STATE_KEY, f"ran:{report['deleted']}")
+        logger.info(
+            f"[通知治理] {'[预演/dry-run] ' if dry_run else ''}重复通知收拢: "
+            f"命中 {report['duplicates']} 条, 删除 {report['deleted']} 条 "
+            f"(窗口 {_DEDUPE_WINDOW_SEC}s, 回扫 {len(_DEDUPE_LOOKBACK)} 内)"
+        )
+    except Exception as e:
+        report["error"] = str(e)
+        logger.warning(f"[通知治理] 重复通知收拢失败（不阻断启动）: {e}")
+    return report
+
+
 if __name__ == "__main__":
     import json
     import sys

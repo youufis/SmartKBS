@@ -132,6 +132,10 @@ def init_question_db():
                 # S-GRADING(P2): 主观题转入后台批量批改的标记(status 仍为 submitted,
                 # 不影响「按 status 统计已交人数/未交名单」的一堆查询)
                 ("ai_pending", "INTEGER DEFAULT 0"),
+                # S-GRADING(P3): 结算幂等标记。后台批改器在多进程下会把同一份答卷收敛两遍
+                # (2026-09-22 实例: 学生与教师各收到 2 条完全相同的成绩通知),
+                # _settle_exam_attempt 用 "空串 → 时间戳" 的 CAS 抢占保证只结算一次。
+                ("settled_at", "TEXT DEFAULT ''"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE exam_attempts ADD COLUMN {col_def[0]} {col_def[1]}")

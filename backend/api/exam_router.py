@@ -1262,6 +1262,29 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
     }
 
 
+def _claim_settlement(attempt_id: Any) -> bool:
+    """抢占本份答卷的"结算权"：抢到才发通知/进错题本/发积分/推学伴。
+
+    settled_at 为空 → 写入当前时间戳, rowcount=1 即抢占成功; 已被别人占过则返回 False。
+    列还没补上(极老库未跑过启动期迁移)时**放行而不是拦死** —— 宁可不幂等, 也不能因为
+    缺列就一条通知都不发。
+    """
+    if not attempt_id:
+        return True
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        changed = execute_update(
+            "UPDATE exam_attempts SET settled_at = ? WHERE id = ? AND ifnull(settled_at, '') = ''",
+            (stamp, attempt_id),
+        )
+    except Exception as e:
+        logger.warning(f"[结算抢占] settled_at 不可用, 按原逻辑继续结算: {e}")
+        return True
+    if not changed:
+        logger.info(f"[结算抢占] 答卷 {attempt_id} 已结算过, 跳过重复的通知/错题本/积分")
+    return bool(changed)
+
+
 def _settle_exam_attempt(attempt: dict, exam: dict | None = None) -> dict:
     """一份考试答卷判分完毕后的收尾：成绩通知 + 教师通知 + 错题本 + 等级积分 + 学伴推送
 
@@ -1276,6 +1299,8 @@ def _settle_exam_attempt(attempt: dict, exam: dict | None = None) -> dict:
         exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
     if not exam:
         return {"settled": False, "reason": "考试不存在"}
+    if not _claim_settlement(attempt.get("id")):
+        return {"settled": False, "reason": "已结算过(重复收敛), 本次不再重发通知"}
     total = float(attempt.get("total_score") or exam.get("total_score") or 0)
     try:
         graded = json.loads(attempt.get("answers") or "{}") if isinstance(attempt.get("answers"), str) \
@@ -1590,7 +1615,8 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
         """UPDATE exam_attempts
            SET status = 'submitted', submitted_at = ?, score = ?, answers = ?,
                auto_graded = 1, graded_by = ?,
-               grading_details = ?, ai_pending = ?
+               grading_details = ?, ai_pending = ?,
+               settled_at = ''
            WHERE id = ? AND status = 'grading'""",
         (now, earned_score,
          json.dumps(graded_answers, ensure_ascii=False),
@@ -1745,6 +1771,8 @@ async def teacher_review_grading(req: TeacherReviewRequest, request: Request):
     if answers_data:
         updates.append("ai_pending = ?")
         params.append(1 if pending_keys(answers_data) else 0)
+        # 教师逐题定分=有新结果要告知, 放开结算标记, 允许再通知一次
+        updates.append("settled_at = ''")
 
     params.append(attempt["id"])
     execute_update(
@@ -2713,22 +2741,28 @@ async def _exam_grade_single(job: GradingJob, api_key: str) -> dict[str, Any]:
     return out
 
 
-def _exam_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str, Any]]]) -> None:
-    """读-改-写一份考试答卷（BEGIN IMMEDIATE 与教师复核互斥；题态已变的条目不覆盖）"""
+def _exam_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str, Any]]]) -> int:
+    """读-改-写一份考试答卷（BEGIN IMMEDIATE 与教师复核互斥；题态已变的条目不覆盖）
+
+    返回本轮**真正写入**的题数: 0 表示这份答卷没被改动(题态已被别的轮次或教师改过),
+    调用方据此决定要不要再收尾结算 —— 空写回不该再发一遍通知。
+    """
     with get_connection() as conn:
         conn.isolation_level = None
         conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT answers, grading_details FROM exam_attempts WHERE id=?",
+        row = conn.execute("SELECT answers, grading_details, score FROM exam_attempts WHERE id=?",
                            (attempt_id,)).fetchone()
         if not row:
             conn.execute("COMMIT")
-            return
+            return 0
         graded = _exam_json_dict(row["answers"])
         details = _exam_json_dict(row["grading_details"])
+        applied = 0
         for job, res in items:
             one = graded.get(str(job.entry_key))
             if not isinstance(one, dict) or one.get("grading") != "pending":
                 continue            # 教师已定分/已被别的轮次写回 → 不覆盖
+            applied += 1
             review = bool(res.get("needs_review"))
             one["grading"] = "review" if review else "graded"
             one["score"] = round(float(res.get("score") or 0), 1)
@@ -2761,14 +2795,18 @@ def _exam_save_batch(attempt_id: int, items: list[tuple[GradingJob, dict[str, An
                     }
         earned = round(sum(float(v.get("score") or 0) for v in graded.values() if isinstance(v, dict)), 1)
         still = pending_keys(graded)
+        # 只有分数真的变了(如教师改判后重批)才放开结算标记; 空写回与同分重批不再重发通知
+        score_changed = abs(earned - float(row["score"] or 0)) > 0.01
         conn.execute(
-            """UPDATE exam_attempts SET answers=?, score=?, grading_details=?, ai_pending=?
+            """UPDATE exam_attempts SET answers=?, score=?, grading_details=?, ai_pending=?,
+                      settled_at = CASE WHEN ? THEN '' ELSE settled_at END
                WHERE id=?""",
             (json.dumps(graded, ensure_ascii=False), earned,
              json.dumps(details, ensure_ascii=False) if details else "",
-             1 if still else 0, attempt_id),
+             1 if still else 0, 1 if score_changed else 0, attempt_id),
         )
         conn.execute("COMMIT")
+        return applied
 
 
 def _exam_finalize_if_done(attempt_id: int) -> None:
