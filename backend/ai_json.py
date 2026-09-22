@@ -6,6 +6,7 @@ json.loads + 正则，一遇漂移就整单失败，而且日志只留下字符�
 """
 import json
 import os
+import pathlib
 import re
 from datetime import datetime
 from typing import Any
@@ -212,6 +213,76 @@ def looks_like_html(text: str) -> bool:
     return "<!doctype" in t[:400].lower() or "<html" in t[:2000].lower()
 
 
+# ── 页面内联脚本体检（防 "# 注释" 这类整页空白事故）──────────────────────
+# 事故复盘: b5e7f90 在练习页模板(Python f-string 里嵌 JS)写了
+#   var correctAns = '';  # G3: 答案只来自服务端返回
+# 而 # 不是 JavaScript 的注释符, 整块 <script> 直接 SyntaxError,
+# renderQuestions() 不执行 → 学生打开是空白页; 服务端只数题目数量,
+# 日志照样报"生成成功"。c7b00e5 改了模板, 但已落盘的页面不会自愈。
+_JS_BLOCK_RE = re.compile(r"<script\b(?![^>]*\ssrc=)[^>]*>(.*?)</script>", re.S | re.I)
+_JS_BAD_INLINE = re.compile(r";[ \t]*#[ \t]*([^\n]*)")
+_JS_BAD_LINEHEAD = re.compile(r"(?m)^[ \t]*#[ \t]*([^\n]*)$")
+# 尾巴"像散文"才判非法: JS 里内嵌 CSS/HTML 字符串常含 #id 选择器,
+# 带花括号或引号的一律放过, 避免误杀正常产物。
+_JS_TAIL_CODE_CHARS = "{}\"'"
+
+_JS_NODE_CHECK = os.environ.get("SMARTKB_PAGE_JS_NODE_CHECK", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def js_guards_ok(html: str) -> tuple[bool, str]:
+    """检查内联 <script> 里有没有 JavaScript 不支持的裸 # 注释。
+
+    只抓两种绝对不会误伤的形状: 语句结束符后紧跟裸 #(x = 1;  # 说明)、
+    或整行以 # 开头(shebang #! 放过)。命中即视为产物不可用。
+    """
+    text = html or ""
+    for blk in _JS_BLOCK_RE.findall(text):
+        for pat in (_JS_BAD_INLINE, _JS_BAD_LINEHEAD):
+            for m in pat.finditer(blk):
+                tail = (m.group(1) or "").strip()
+                if not tail or tail.startswith("!"):
+                    continue
+                if any(ch in tail for ch in _JS_TAIL_CODE_CHARS):
+                    continue
+                line_no = blk[:m.start()].count("\n") + 1
+                return False, ("页面脚本第 %d 行附近有 JavaScript 不支持的裸 # 注释: %s；"
+                               "裸 # 会让整块 <script> 语法报错、页面空白, 请改用 // 或 /* */"
+                               % (line_no, tail[:40]))
+    return True, ""
+
+
+def js_syntax_check(html: str) -> tuple[bool, str]:
+    """可选深检: 用 node --check 对内联脚本做一次真正的 JS 语法校验。
+
+    默认关闭 —— 部署机不一定有 node, 也不想为一次校验起子进程;
+    设 SMARTKB_PAGE_JS_NODE_CHECK=1 打开(开发/回归测试用)。
+    逐块单独校验, 避免多块脚本各自 const 同名被误判。
+    """
+    if not _JS_NODE_CHECK:
+        return True, ""
+    import shutil
+    import subprocess
+    import tempfile
+    node = shutil.which("node")
+    if not node:
+        return True, ""
+    blocks = _JS_BLOCK_RE.findall(html or "")
+    if not blocks:
+        return True, ""
+    tmp = pathlib.Path(tempfile.gettempdir()) / "smartkb_js_check.js"
+    for idx, body in enumerate(blocks, 1):
+        try:
+            tmp.write_text(body, encoding="utf-8")
+            r = subprocess.run([node, "--check", str(tmp)], capture_output=True, timeout=15)
+        except Exception as e:
+            logger.debug(f"[js_syntax_check] 跳过第 {idx} 块: {e}")
+            continue
+        if r.returncode != 0:
+            err = (r.stderr or b"").decode("utf-8", "replace").strip().splitlines()
+            brief = next((ln.strip() for ln in err if "SyntaxError" in ln), "")
+            return False, "页面脚本第 %d 块 node --check 语法失败: %s" % (idx, (brief or (err[:1] and err[0] or ""))[:120])
+    return True, ""
+
 def html_is_complete(text: str) -> tuple[bool, str]:
     """课件/练习页落盘前的最低体检：能不能算一份能打开的 HTML。"""
     t = (text or "").strip()
@@ -232,6 +303,14 @@ def html_is_complete(text: str) -> tuple[bool, str]:
         return False, "script 标签不闭合（%d 开 / %d 闭），输出可能被截断" % (opens, closes)
     if low.count("<style") != low.count("</style>"):
         return False, "style 标签不闭合，输出可能被截断"
+    # 标签齐、长度够，也可能因为一个非法字符让整块脚本不执行(见 js_guards_ok)——
+    # 上面几层只判断"像不像一份 HTML", 这一层判断"能不能跑"
+    ok_js, why_js = js_guards_ok(t)
+    if not ok_js:
+        return False, why_js
+    ok_ns, why_ns = js_syntax_check(t)
+    if not ok_ns:
+        return False, why_ns
     return True, ""
 
 

@@ -2641,7 +2641,7 @@ async def ai_generate_courseware(kp_id: int, request: Request):
             if not ok:
                 raw_path = ai_json.dump_failed_raw("courseware", result or "")
                 logger.error(f"AI 课件内容不合格: {why} (原文留档: {raw_path or '失败'})")
-                return {"error": f"AI 生成的课件不完整：{why}，请重试"}
+                return {"error": f"AI 生成的课件不可用：{why}，请重试"}
 
             # 保存到用户的 html 目录
             html_dir = get_account_html_dir(username)
@@ -3151,7 +3151,7 @@ def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]],
         ensure_ascii=False,
     )
 
-    return f"""<!DOCTYPE html>
+    page = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -3682,6 +3682,16 @@ function showResults(accuracy, score, totalScore, results, prevResults) {{
 </script>
 </body>
 </html>"""
+    # 落盘前体检: 这个模板是 Python f-string 里嵌 JS, 一个裸 # 就能让整块 <script>
+    # SyntaxError —— 页面空白, 而服务端只数题目数量, 日志照样报"生成成功"
+    # (历史上 b5e7f90 引入、c7b00e5 修过模板)。产物不合格就拒绝落盘并留档,
+    # 宁可报错也不给学生一个空白页。AI练习/智能练习/章节练习三个调用点都走这里。
+    ok, why = _aj.html_is_complete(page)
+    if not ok:
+        raw = _aj.dump_failed_raw("practice-page", page or "")
+        logger.error(f"[练习页体检] 拒绝落盘: {why} (产物留档: {raw or '失败'}) kp_id={kp_id}")
+        raise HTTPException(status_code=500, detail=f"练习页体检未通过, 已拒绝生成: {why}")
+    return page
 
 
 @router.post("/ai-practice/{kp_id}/smart-generate")

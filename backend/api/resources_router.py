@@ -1302,7 +1302,7 @@ async def ai_preview_html(request: Request):
         ok_html, why = ai_json.html_is_complete(main_html)
         if not ok_html:
             ai_json.dump_failed_raw("preview-" + gen_type, raw_output)
-            raise HTTPException(status_code=502, detail=f"AI 生成的页面不完整：{why}，请重试或简化描述")
+            raise HTTPException(status_code=502, detail=f"AI 生成的页面不可用：{why}，请重试或简化描述")
         html_content = main_html
 
     # ── 保存 AI 新生成的题目到题库 ──
@@ -1908,7 +1908,7 @@ async def ai_generate_async(request: Request):
                 if not ok:
                     raw = ai_json.dump_failed_raw("async-single", ai_result or "")
                     logger.warning(f"[异步] 单文件产物不合格: {why}（原文留档 {raw or '失败'}）")
-                    return {"error": f"AI 生成的内容不完整：{why}，请重试"}
+                    return {"error": f"AI 生成的内容不可用：{why}，请重试"}
             html_dir = get_account_html_dir(username)
 
             # 确定目录名
