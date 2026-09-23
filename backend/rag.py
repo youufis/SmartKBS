@@ -42,7 +42,7 @@ def _search_questions(prompt: str) -> list[str]:
             return []
 
         results = set()
-        for kw in keywords[:3]:
+        for kw in keywords[:4]:
             like = f"%{kw}%"
             rows = execute_query(
                 """SELECT question_text, correct_answer, knowledge_points, type
@@ -72,7 +72,7 @@ def _search_knowledge_points(prompt: str) -> list[str]:
             return []
 
         results = set()
-        for kw in keywords[:3]:
+        for kw in keywords[:4]:
             like = f"%{kw}%"
             rows = execute_query_dict(
                 """SELECT kp.name as kp_name, c.name as chapter_name,
@@ -93,27 +93,53 @@ def _search_knowledge_points(prompt: str) -> list[str]:
         return []
 
 
-def _extract_keywords(text: str) -> list[str]:
-    """从文本中提取关键词"""
-    # 去除常见停用词
-    stop_words = {"的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
-                  "一", "一个", "上", "也", "很", "到", "说", "要", "去", "你",
-                  "会", "着", "没有", "看", "好", "自己", "这", "他", "她", "它",
-                  "们", "什么", "怎么", "如何", "为什么", "请问", "请", "吗", "呢",
-                  "啊", "吧", "嗯", "哦", "呀", "嘛"}
+# ── 本地检索关键词提取（V6.9 重写）──
+# 旧版把整段贪心匹配当关键词（「技术的价值是什么」→ LIKE '%技术的价值是什%'），必然查空。
+# 新版：按停用单字切段 + 剔除疑问/指令停用词 + 长段补 2-gram 兜底，零依赖。
+_STOP_CHARS = set("的了是在和就都也很更于对从当为把被让使向以之其该此等中里只它他她您吗呢啊吧呀么没有")
+_STOP_WORDS = {"什么", "怎么", "怎样", "如何", "为什么", "哪些", "哪个", "哪里", "多少",
+               "是不是", "有无", "能否", "可否", "可以", "需要", "请问", "帮我", "一下",
+               "以及", "还是", "或者", "然后", "进行", "使用", "通过", "关于", "对于",
+               "以下", "这个", "那个", "一个", "主要", "一般", "通常", "介绍", "简述",
+               "说明", "列举", "举例", "回答", "问题", "要求", "内容", "方面", "作用",
+               "意义", "知识点", "请"}
 
-    # 用正则提取中文字词（2-6个字）
-    words = re.findall(r'[\u4e00-\u9fff]{2,6}', text)
-    # 过滤停用词
-    words = [w for w in words if w not in stop_words and len(w) >= 2]
-    # 去重并限制数量
-    seen = set()
-    unique = []
-    for w in words:
-        if w not in seen:
+
+def _extract_keywords(text: str) -> list[str]:
+    """从查询文本提取可 LIKE 命中的关键词（实词片段，长段优先）。"""
+    kws: list[str] = []
+    seen: set[str] = set()
+
+    def push(w: str) -> None:
+        w = w.strip()
+        if len(w) >= 2 and w not in seen:
             seen.add(w)
-            unique.append(w)
-    return unique[:8]
+            kws.append(w)
+
+    # 1) ASCII 词（Python / Excel / 3D 打印 等）
+    for w in re.findall(r"[A-Za-z][A-Za-z0-9+#.-]{1,15}", text):
+        push(w)
+
+    # 2) 中文段：按停用单字切段，段内再剔除停用词
+    for run in re.findall(r"[\u4e00-\u9fff]+", text):
+        for frag in re.split(f"[{''.join(_STOP_CHARS)}]", run):
+            if not frag:
+                continue
+            for sw in _STOP_WORDS:
+                if frag == sw:
+                    frag = ""
+                    break
+                if len(frag) > len(sw) and sw in frag:
+                    frag = frag.replace(sw, "")
+            if len(frag) < 2:
+                continue
+            push(frag)                    # 整段最精确，优先
+            if len(frag) > 4:             # 长段补 2-gram 兜底（整段查不到时救场）
+                for i in range(len(frag) - 1):
+                    push(frag[i:i + 2])
+
+    kws.sort(key=len, reverse=True)       # 长词（更具体）排前，配合调用侧截断
+    return kws[:8]
 
 
 # ══════════════════════════════════════════════════════════
