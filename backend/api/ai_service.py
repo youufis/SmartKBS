@@ -119,8 +119,9 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     cfg = get_ai_config()
-    # use_kb=False：数据驱动型任务（推荐/批改/分析等）跳过知识库接管，走纯直连
-    if cfg["mode"] == "kb_direct" and not use_kb:
+    # use_kb=False：数据驱动型任务（推荐/批改/分析等）跳过知识库接管，走纯直连，
+    # 并同步关闭思考链——这类任务无需深度推理，开着会把 6 秒的活拖成 60 秒、前端超时。
+    if not use_kb:
         cfg = get_ai_config(use_agent=False)
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
@@ -134,7 +135,8 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
                                 max_tokens=max_tokens, enable_thinking=False, json_mode=json_mode)
     else:
         return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
-                                max_tokens=max_tokens, json_mode=json_mode)
+                                max_tokens=max_tokens, json_mode=json_mode,
+                                enable_thinking=False if not use_kb else None)
 
 
 async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120,
@@ -308,7 +310,7 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
         use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
     """
     cfg = get_ai_config(use_agent=use_agent)
-    if cfg["mode"] == "kb_direct" and not use_kb:
+    if not use_kb:
         cfg = get_ai_config(use_agent=False)
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
@@ -321,7 +323,7 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
                                   enable_thinking=False if enable_thinking is None else enable_thinking)
     else:
         return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
-                                  enable_thinking=enable_thinking)
+                                  enable_thinking=False if not use_kb else enable_thinking)
 
 
 def _call_agent_stream(prompt: str, api_key: str, app_id: str,
@@ -456,7 +458,7 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     cfg = get_ai_config()
-    if cfg["mode"] == "kb_direct" and not use_kb:
+    if not use_kb:
         cfg = get_ai_config(use_agent=False)
     os.environ["DASHSCOPE_API_KEY"] = api_key
     if cfg["mode"] == "agent":
@@ -471,7 +473,8 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
                                        enable_thinking=False)
     else:
         return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
-                                       max_tokens=max_tokens, json_mode=json_mode)
+                                       max_tokens=max_tokens, json_mode=json_mode,
+                                       enable_thinking=False if not use_kb else None)
 
 
 async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
