@@ -941,7 +941,7 @@
   "ipDiff": "Self-reported",
   "geoUnknown": "Unknown location",
   "firstSeen": "First seen",
-  "ipMulti": "{n} IPs",
+  "ipMulti": "{{n}} IPs",
   "ipMultiTip": "Dynamic egress IP; historical IPs merged into one row",
-  "ipActiveDaysTip": "current IP alone active {n}d"
+  "ipActiveDaysTip": "current IP alone active {{n}}d"
 }

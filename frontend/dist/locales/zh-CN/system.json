@@ -941,7 +941,7 @@
   "ipDiff": "自报IP",
   "geoUnknown": "归属未知",
   "firstSeen": "首次活跃",
-  "ipMulti": "{n}个IP",
+  "ipMulti": "{{n}}个IP",
   "ipMultiTip": "该主机为动态出口IP，历史IP已合并为一行",
-  "ipActiveDaysTip": "当前IP单独活跃{n}天"
+  "ipActiveDaysTip": "当前IP单独活跃{{n}}天"
 }
