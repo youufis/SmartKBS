@@ -1,5 +1,5 @@
 {
-"kpLink": "挂接教材知识点",
+  "kpLink": "挂接",
   "kpLinkTip": "把本知识点挂接到教材知识点，题库里的题才能被选中",
   "kpLinkTitle": "挂接教材知识点",
   "kpLinkHint": "可挂多个；候选按「同学科优先 + 题库命中题数」排序。挂接只引用教材知识点，不需要教材编辑权限。",
@@ -10,7 +10,6 @@
   "kpLinkRejected": "部分目标被忽略",
   "kpLinkQuestions": "题",
   "kpLinkEmptyTip": "未挂接：该知识点只能靠名称匹配选题，召不到题时将改由 AI 生成（不拦截）",
-
   "title": "课程导学",
   "curriculumManage": "课程管理",
   "addCourse": "新建课程",
@@ -349,5 +348,7 @@
   "rbSelectResources": "请选择要绑定的资源",
   "rbBindSuccess": "成功绑定 {{count}} 个资源",
   "rbUnbindSuccess": "资源已解绑",
-  "rbUnbindFailed": "解绑失败"
+  "rbUnbindFailed": "解绑失败",
+  "aiTools": "AI 工具",
+  "aiToolsTip": "AI 备课 / AI 推荐 / AI 课件"
 }

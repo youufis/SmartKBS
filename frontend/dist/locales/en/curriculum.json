@@ -1,5 +1,5 @@
 {
-"kpLink": "Link to textbook KPs",
+  "kpLink": "Link",
   "kpLinkTip": "Link this KP to textbook KPs so bank questions become selectable",
   "kpLinkTitle": "Link textbook knowledge points",
   "kpLinkHint": "Multiple allowed. Candidates are ranked by same subject first, then bank hits. Linking only references textbook KPs and needs no textbook edit permission.",
@@ -10,7 +10,6 @@
   "kpLinkRejected": "Some targets were rejected",
   "kpLinkQuestions": "questions",
   "kpLinkEmptyTip": "Not linked: this KP can only match by name; if nothing is recalled it falls back to AI generation (not blocked)",
-
   "title": "Curriculum Guide",
   "curriculumManage": "Course Management",
   "addCourse": "New Course",
@@ -349,5 +348,7 @@
   "rbSelectResources": "Please select resources to bind",
   "rbBindSuccess": "Bound {{count}} resource(s)",
   "rbUnbindSuccess": "Resource unbound",
-  "rbUnbindFailed": "Unbind failed"
+  "rbUnbindFailed": "Unbind failed",
+  "aiTools": "AI tools",
+  "aiToolsTip": "AI lesson plan / recommendation / courseware"
 }

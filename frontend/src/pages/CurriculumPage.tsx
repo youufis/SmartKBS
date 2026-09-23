@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
+  Dropdown,
 } from 'antd'
 
 const { Sider, Content } = Layout
@@ -1518,7 +1519,7 @@ const CurriculumPage: React.FC = () => {
                       }
                       loading={kpLoading}
                       extra={
-                        <Space>
+                        <Space wrap size={4}>
                           {isTeacherOrAdmin && (
                             <Tooltip title={t('kpLinkTip')}>
                               <Button type="link" size="small" icon={<SettingOutlined />}
@@ -1528,36 +1529,34 @@ const CurriculumPage: React.FC = () => {
                             </Tooltip>
                           )}
                           {isTeacherOrAdmin && (
-                            <Tooltip title={t('aiGenerateLessonPlan')}>
-                              <Button type="link" size="small" icon={<RobotOutlined />}
-                                loading={lessonPlanLoading}
-                                onClick={() => handleAiLessonPlan(selectedKp.id)}>
-                                {t('aiLessonPlan')}
-                              </Button>
-                            </Tooltip>
-                          )}
-                          {isTeacherOrAdmin && (
-                            <Tooltip title={t('aiRecommendResource')}>
-                              <Button type="link" size="small" icon={<RobotOutlined />}
-                                onClick={() => handleAiRecommend(selectedKp.id)}>
-                                {t('aiRecommend')}
-                              </Button>
-                            </Tooltip>
-                          )}
-                          {isTeacherOrAdmin && (
-                            <Tooltip title={t('aiGenerateCourseware')}>
-                              <Button type="link" size="small" icon={<FileOutlined />}
-                                onClick={() => handleAiCourseware(selectedKp.id)}>
-                                {t('aiCourseware')}
-                              </Button>
-                            </Tooltip>
-                          )}
-                          {isTeacherOrAdmin && (
                             <Tooltip title={t('aiGeneratePractice')}>
                               <Button type="link" size="small" icon={<FormOutlined />}
                                 onClick={() => handleAiPractice(selectedKp.id)}>
                                 {t('aiPractice')}
                               </Button>
+                            </Tooltip>
+                          )}
+                          {isTeacherOrAdmin && (
+                            <Tooltip title={t('aiToolsTip')}>
+                              <Dropdown
+                                trigger={['click']}
+                                menu={{
+                                  onClick: ({ key }) => {
+                                    if (key === 'lesson-plan') handleAiLessonPlan(selectedKp.id)
+                                    else if (key === 'recommend') handleAiRecommend(selectedKp.id)
+                                    else if (key === 'courseware') handleAiCourseware(selectedKp.id)
+                                  },
+                                  items: [
+                                    { key: 'lesson-plan', icon: <RobotOutlined />, label: t('aiLessonPlan'), disabled: lessonPlanLoading },
+                                    { key: 'recommend', icon: <RobotOutlined />, label: t('aiRecommend') },
+                                    { key: 'courseware', icon: <FileOutlined />, label: t('aiCourseware') },
+                                  ],
+                                }}
+                              >
+                                <Button type="link" size="small" icon={<BulbOutlined />}>
+                                  {t('aiTools')} <DownOutlined />
+                                </Button>
+                              </Dropdown>
                             </Tooltip>
                           )}
                           {isStudent && (
