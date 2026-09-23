@@ -528,7 +528,7 @@ const ExamPage: React.FC = () => {
       const { data } = await apiClient.post(`/api/exams/${questionExam.id}/ai-compose`, {
         target_count: aiComposeCount,
         knowledge_focus: aiComposeFocus,
-      })
+      }, { timeout: 300000 })
       message.success(data.message || t('composeSuccess'))
       if (data.reason) {
         Modal.info({

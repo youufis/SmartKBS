@@ -677,7 +677,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
-            timeout=120,
+            timeout=300,
         )
         if resp.status_code != 200:
             yield {"text": "文档处理失败"}
@@ -729,7 +729,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
-            timeout=120,
+            timeout=300,
         )
         if resp.status_code != 200:
             logger.warning(f"图像API返回非200状态: {resp.status_code} - {resp.text[:300]}")

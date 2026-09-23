@@ -94,7 +94,7 @@ export async function aiGradeTask(task_id: string): Promise<{
   graded_count: number;
   message: string;
 }> {
-  const { data } = await apiClient.post(`/api/tasks/ai-grade/${encodeURIComponent(task_id)}`);
+  const { data } = await apiClient.post(`/api/tasks/ai-grade/${encodeURIComponent(task_id)}`, null, { timeout: 300000 });
   return data;
 }
 

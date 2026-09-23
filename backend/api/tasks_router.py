@@ -801,7 +801,7 @@ async def ai_grade_task(task_id: str, request: Request):
                 f"{api_base}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=req_payload,
-                timeout=180,
+                timeout=300,
             )
             if resp.status_code == 400 and "response_format" in req_payload:
                 req_payload.pop("response_format")  # 网关不支持时降级重试
@@ -809,7 +809,7 @@ async def ai_grade_task(task_id: str, request: Request):
                     f"{api_base}/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json=req_payload,
-                    timeout=180,
+                    timeout=300,
                 )
             if resp.status_code != 200:
                 raise HTTPException(status_code=502, detail=f"AI 模型调用失败: {resp.text[:200]}")

@@ -266,7 +266,7 @@ const QuestionBankPage: React.FC = () => {
     if (!mediaQuestion) return
     setWanxiangLoading(true)
     try {
-      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-image`)
+      await apiClient.post(`/api/questions/${mediaQuestion.id}/generate-image`, null, { timeout: 300000 })
       message.success(t('imageGenerated'))
       await loadQuestions()
       const { data } = await apiClient.get(`/api/questions/${mediaQuestion.id}`)

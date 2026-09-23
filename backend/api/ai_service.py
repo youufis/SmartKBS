@@ -11,6 +11,16 @@ from typing import Any, Optional
 
 from backend.logger import logger
 
+# AI 读超时统一取系统配置 AI_REQUEST_TIMEOUT（默认 300 秒）：前端各 AI 端点的
+# 专属 timeout 不应被后端硬编码的 120/180 秒反向截断，三层（前端/后端/IIS）同向对齐。
+def _ai_read_timeout() -> float:
+    try:
+        from backend.api.config_router import get_config_value
+        return max(60.0, float(get_config_value("AI_REQUEST_TIMEOUT", 300)))
+    except Exception:
+        return 300.0
+
+
 # ── 专用线程池：隔离 AI 调用线程，防止耗尽 asyncio 默认线程池 ──
 # 限制最大 3 个并发 AI 线程，避免长时间等待的 AI 调用阻塞数据库等其他操作
 _ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
@@ -139,7 +149,7 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
                                 enable_thinking=False if not use_kb else None)
 
 
-async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120,
+async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: Optional[float] = None,
                                     history: Optional[list] = None,
                                     max_tokens: Optional[int] = None,
                                     json_mode: bool = False,
@@ -147,6 +157,8 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 12
     """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
     import asyncio
     loop = asyncio.get_running_loop()
+    if timeout is None:
+        timeout = _ai_read_timeout()
     try:
         result = await asyncio.wait_for(
             loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens, json_mode, use_kb),
@@ -247,7 +259,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                 f"{api_base}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
-                timeout=(30, 120),  # (连接超时30秒, 读取超时120秒)
+                timeout=(30, _ai_read_timeout()),  # 连接30秒；读取对齐 AI_REQUEST_TIMEOUT
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -405,7 +417,7 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
                 stream=True,
-                timeout=180,
+                timeout=_ai_read_timeout(),
             )
             if resp.status_code == 400 and json_mode:
                 logger.warning("AI 网关拒绝 response_format=json_object，降级为普通调用重试")
@@ -528,7 +540,7 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                 payload["response_format"] = {"type": "json_object"}
             if enable_thinking is not None and "qwen" in model.lower():
                 payload["enable_thinking"] = bool(enable_thinking)
-            async with httpx.AsyncClient(timeout=180) as client:
+            async with httpx.AsyncClient(timeout=_ai_read_timeout()) as client:
                 resp = await client.post(
                     f"{api_base}/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -662,7 +674,7 @@ def call_multimodal_stream(
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
-            timeout=180,
+            timeout=_ai_read_timeout(),
         )
         if resp.status_code != 200:
             logger.error(f"多模态流式调用失败: status={resp.status_code}, {resp.text[:300]}")
@@ -715,7 +727,7 @@ def call_multimodal_sync(
             f"{api_base}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
-            timeout=(30, 120),
+            timeout=(30, _ai_read_timeout()),
         )
         if resp.status_code == 200:
             data = resp.json()

@@ -72,7 +72,7 @@ const DiscussionMonitorPage: React.FC = () => {
     setSummaryModal(true)
     setSummaryData(null)
     try {
-      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`)
+      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`, null, { timeout: 120000 })
       if (data.status === 'ok') {
         setSummaryData(data)
       } else {

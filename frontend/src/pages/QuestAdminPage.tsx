@@ -507,7 +507,7 @@ const QuestBankTab: React.FC = () => {
     if (!mediaQuestion) return
     setWanxiangLoading(true)
     try {
-      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-image`)
+      await apiClient.post(`/api/quest/admin/bank/${mediaQuestion.id}/generate-image`, null, { timeout: 300000 })
       await loadQuestions()
       const { data } = await apiClient.get(`/api/quest/admin/bank/${mediaQuestion.id}`)
       setMediaQuestion(data)

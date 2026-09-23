@@ -125,7 +125,7 @@ const DiscussionPage: React.FC = () => {
       await aiForm.validateFields()
       setAiLoading(true)
       const values = aiForm.getFieldsValue()
-      const { data } = await apiClient.post('/api/interaction/discussions/ai-generate', values)
+      const { data } = await apiClient.post('/api/interaction/discussions/ai-generate', values, { timeout: 120000 })
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
         if (result && result.status === 'ok' && result.data) {

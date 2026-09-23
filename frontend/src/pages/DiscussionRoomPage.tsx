@@ -281,7 +281,7 @@ const DiscussionRoomPage: React.FC = () => {
     if (!groupId) return
     setGeneratingSummary(true)
     try {
-      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`)
+      const { data } = await apiClient.post(`/api/interaction/groups/${groupId}/ai-summary`, null, { timeout: 120000 })
       if (data.status === 'ok') {
         message.success(t('aiSummarySuccess'))
         setSummaryData(data)

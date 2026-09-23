@@ -217,7 +217,7 @@ const CurriculumPage: React.FC = () => {
     setLessonPlanData(null)
     setLessonPlanModal(true)  // 立即打开弹窗，显示加载状态
     try {
-      const { data } = await apiClient.get('/api/curriculum/ai-lesson-plan', { params: { knowledge_point_id: kpId } })
+      const { data } = await apiClient.get('/api/curriculum/ai-lesson-plan', { params: { knowledge_point_id: kpId }, timeout: 300000 })
       if (data.task_id) {
         const result = await pollAiTask(data.task_id)
         if (result && result.lesson_plan) {
@@ -243,7 +243,7 @@ const CurriculumPage: React.FC = () => {
     setRecResults([])
     setRecModal(true)
     try {
-      const { data } = await apiClient.post(`/api/recommend/knowledge-point/${kpId}`)
+      const { data } = await apiClient.post(`/api/recommend/knowledge-point/${kpId}`, null, { timeout: 120000 })
       setRecResults(data.recommendations || [])
       if (!data.recommendations?.length) {
         message.info(data.message || t('noRecommendations'))
@@ -284,7 +284,7 @@ const CurriculumPage: React.FC = () => {
     setCwUrl('')
     setCwModal(true)
     try {
-      const { data } = await apiClient.post(`/api/curriculum/ai-courseware/${kpId}`)
+      const { data } = await apiClient.post(`/api/curriculum/ai-courseware/${kpId}`, null, { timeout: 300000 })
       const result = await pollAiTask(data.task_id, 120000)
       if (result && result.file_url) {
         setCwUrl(result.file_url)
@@ -394,7 +394,7 @@ const CurriculumPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/curriculum/ai-practice/${selectedKp.id}/from-bank`, {
         question_ids: selectedBankIds,
-      })
+      }, { timeout: 180000 })
       if (data.file_url) {
         setPracticeHtmlUrl(data.file_url)
         setPracticeMode('ai')
@@ -475,7 +475,7 @@ const CurriculumPage: React.FC = () => {
     try {
       const { data } = await apiClient.post(`/api/curriculum/ai-practice/${selectedKp.id}/from-bank`, {
         question_ids: allIds,
-      })
+      }, { timeout: 180000 })
       if (data.file_url) {
         setPracticeHtmlUrl(data.file_url)
         message.success(data.message)
@@ -501,7 +501,7 @@ const CurriculumPage: React.FC = () => {
       // 1. 多渠道搜索题库（knowledge_points + question_text 双重匹配）
       // 2. AI 补全差额（最多10题）
       // 3. 去重合并、创建练习、生成HTML
-      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/smart-generate`)
+      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/smart-generate`, null, { timeout: 180000 })
       if (data.file_url) {
         setPracticeHtmlUrl(data.file_url)
         setMixedAiQuestions([])

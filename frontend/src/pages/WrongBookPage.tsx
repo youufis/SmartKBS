@@ -200,7 +200,7 @@ const WrongBookPage: React.FC = () => {
           subjects: [],
           knowledge_points: kps.join('，'),
           student_username: selectedStudent,
-        })
+        }, { timeout: 180000 })
         // 直接返回题目列表（非异步）
         const questions = gen.questions || []
         // 存入 state 供弹窗使用
