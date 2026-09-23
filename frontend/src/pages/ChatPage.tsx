@@ -201,8 +201,8 @@ const ChatPage: React.FC = () => {
   // 智能教育助手 - SmartKB
   const {
     messages, isStreaming, currentText, filePaths,
-    contextEnhance, ragEnabled, useAgent, sendMessage, stopStreaming, newTopic,
-    setFilePaths, setContextEnhance, setRagEnabled, setUseAgent,
+    contextEnhance, sendMessage, stopStreaming, newTopic,
+    setFilePaths, setContextEnhance,
     historyTree, historyLoading,
     loadHistoryTree,
   } = useChatStore()
@@ -279,16 +279,6 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     chatApi.getUsage().then(setUsage).catch(() => {})
   }, [])
-
-  // 云端知识库未就绪（管理员关开关/撤配置）时自动取消「知识」勾选
-  useEffect(() => {
-    if (usage && !usage.kb_ready && ragEnabled) setRagEnabled(false)
-  }, [usage, ragEnabled, setRagEnabled])
-
-  // 知识库接管后「智能体」开关失效：清掉残留勾选，保证 UI 与实际链路一致
-  useEffect(() => {
-    if (usage?.kb_ready && useAgent) setUseAgent(false)
-  }, [usage, useAgent, setUseAgent])
 
   // 检测最后一条 AI 回复是否有 HTML（派生状态）
   const hasHtmlInResponse = useMemo(() => {
@@ -1234,19 +1224,6 @@ const ChatPage: React.FC = () => {
                 {t('summary')}
               </Checkbox>
             </Tooltip>
-            <Tooltip title={
-              <span style={{ fontSize: 12, lineHeight: 1.6 }}>
-                {usage?.kb_ready
-                  ? t('ragTipCloud')
-                  : t('ragTipNotReady', { reason: usage?.kb_reason || t('ragTipNotReadyDefault') })}
-              </span>
-            }>
-              <Checkbox checked={ragEnabled}
-                disabled={!usage?.kb_ready}
-                onChange={(e) => setRagEnabled(e.target.checked)}>
-                {t('knowledge')}
-              </Checkbox>
-            </Tooltip>
             {hasHtmlInResponse && (
               <Button size="small" icon={<EyeOutlined />} onClick={extractHtmlPreview}>
                 {t('previewHtml')}
@@ -1284,20 +1261,18 @@ const ChatPage: React.FC = () => {
               </Tooltip>
             )}
             {usage && (
-              <Tooltip
-                title={usage.kb_ready ? t('useAgentTakenOverTip')
-                  : usage.appid_configured ? t('useAgentTip') : t('useAgentDisabledTip')}
-              >
-                <Checkbox
-                  checked={usage.appid_configured && !usage.kb_ready ? useAgent : false}
-                  disabled={!usage.appid_configured || !!usage.kb_ready}
-                  onChange={(e) => setUseAgent(e.target.checked)}
-                  style={{ fontSize: 12, marginLeft: 4 }}
-                >
-                  <span style={{ fontSize: 12, color: usage.appid_configured ? '#666' : '#bbb' }}>
-                    {usage.appid_configured && useAgent ? t('useAgent') : t('directModel')}
-                  </span>
-                </Checkbox>
+              <Tooltip title={t('modeBadgeTip')}>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontSize: 12, padding: '2px 8px', borderRadius: 4,
+                  background: usage.chat_mode === 'kb' ? '#f9f0ff' : usage.chat_mode === 'agent' ? '#e6fffb' : '#f6f6f6',
+                  color: usage.chat_mode === 'kb' ? '#722ed1' : usage.chat_mode === 'agent' ? '#13a8a8' : '#999',
+                  border: '1px solid',
+                  borderColor: usage.chat_mode === 'kb' ? '#d3adf7' : usage.chat_mode === 'agent' ? '#87e8de' : '#e8e8e8',
+                  cursor: 'default', whiteSpace: 'nowrap',
+                }}>
+                  {usage.chat_mode === 'kb' ? t('modeKb') : usage.chat_mode === 'agent' ? t('modeAgent') : t('modeLlm')}
+                </span>
               </Tooltip>
             )}
             <div style={{ flex: 1, minWidth: 0 }} />

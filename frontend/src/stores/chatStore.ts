@@ -44,8 +44,6 @@ interface ChatStore {
   currentText: string;
   filePaths: string[];
   contextEnhance: boolean;
-  ragEnabled: boolean;
-  useAgent: boolean;  // True=优先使用智能体(有APPID时)；False=强制直连大模型
   historyTree: TreeNode[];
   historyLoading: boolean;
   historyContent: string;
@@ -57,8 +55,6 @@ interface ChatStore {
   newTopic: () => void;
   setFilePaths: (paths: string[]) => void;
   setContextEnhance: (v: boolean) => void;
-  setRagEnabled: (v: boolean) => void;
-  setUseAgent: (v: boolean) => void;
   addSystemMessage: (content: string) => void;
   loadHistoryTree: () => Promise<void>;
   loadHistoryFile: (path: string) => Promise<void>;
@@ -74,15 +70,13 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   currentText: '',
   filePaths: [],
   contextEnhance: false,
-  ragEnabled: false,
-  useAgent: false,  // 默认直连大模型（响应更快）；有 APPID 时可勾选智能体
   historyTree: [],
   historyLoading: false,
   historyContent: '',
   historyFilename: null,
 
   sendMessage: async (prompt: string) => {
-    const { sessionId, filePaths, contextEnhance, useAgent, ragEnabled, messages } = get();
+    const { sessionId, filePaths, contextEnhance, messages } = get();
     if (!prompt.trim() && filePaths.length === 0) return;
 
     const userMsg: Message = {
@@ -149,7 +143,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     };
 
     await chatStream(
-      { prompt, file_paths: serverFilePaths, session_id: sessionId, context_enhance: contextEnhance, use_agent: useAgent, rag_enabled: ragEnabled },
+      { prompt, file_paths: serverFilePaths, session_id: sessionId, context_enhance: contextEnhance },
       (inc: string) => {
         acc += inc;
         scheduleFlush();
@@ -188,8 +182,6 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   setFilePaths: (paths: string[]) => set({ filePaths: paths }),
   setContextEnhance: (v: boolean) => set({ contextEnhance: v }),
-  setRagEnabled: (v: boolean) => set({ ragEnabled: v }),
-  setUseAgent: (v: boolean) => set({ useAgent: v }),
 
   addSystemMessage: (content: string) => {
     const msg: Message = {

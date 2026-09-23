@@ -13,6 +13,8 @@ export interface UsageInfo {
   /** 云端知识库链路是否就绪（KB_ENABLED + 专属域名 + 检索服务 ID 配套） */
   kb_ready?: boolean;
   kb_reason?: string;
+  /** V6.9 全局聊天模式（服务端裁决）：llm=大模型 agent=智能体 kb=知识库 */
+  chat_mode?: 'llm' | 'agent' | 'kb';
 }
 
 /** 获取当前用户的每日用量 */
@@ -46,8 +48,7 @@ export interface ChatParams {
   file_paths?: string[];
   session_id?: string | null;
   context_enhance?: boolean;
-  use_agent?: boolean;
-  rag_enabled?: boolean;
+  // V6.9：use_agent / rag_enabled 已废弃——聊天链路由系统配置全局裁决，服务端忽略客户端值
 }
 
 /**

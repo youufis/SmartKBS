@@ -130,6 +130,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AI_REQUEST_TIMEOUT', labelKey: 'field_AI_REQUEST_TIMEOUT', descKey: 'field_AI_REQUEST_TIMEOUT_desc', type: 'number', group: 'credentials', unitKey: 'unitSecond' },
   // 模型与端点
   { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'models', required: false },
+  { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', required: false },
   { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', type: 'text', group: 'models' },
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'text', group: 'models' },
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'models' },

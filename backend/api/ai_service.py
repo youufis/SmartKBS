@@ -38,7 +38,9 @@ def get_ai_config(use_agent: bool = True):
         if kb_ok:
             return {"mode": "kb_direct"}
     app_id = get_config_value("APPID", "")
-    if app_id and use_agent:
+    # V6.9 智能体启用闸门：填了 APPID 且勾选 AGENT_ENABLED 才算启用；
+    # 知识库就绪时已在上方被 kb_direct 接管（优先级：知识库 > 智能体 > 大模型）
+    if app_id and use_agent and bool(get_config_value("AGENT_ENABLED", True)):
         return {"mode": "agent", "app_id": app_id}
     return {
         "mode": "direct",

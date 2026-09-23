@@ -41,6 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "dashscope_api_key": "",
     # 模型与应用配置
     "APPID": "",  # 留空则直接调用大模型(MODEL_NAME)；填写后调用百炼智能体应用。注意：APPID 必须与 DASHSCOPE_API_KEY 归属于同一个阿里云账号，否则无法调用
+    "AGENT_ENABLED": True,  # 智能体启用闸门：勾选且 APPID 已填才走智能体；知识库就绪时优先走知识库
     "QWEN_OPENAI_API_BASE": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "MODEL_LONG_NAME": "qwen-long",
     "MODEL_VL_NAME": "qwen3-vl-plus",
@@ -310,7 +311,7 @@ _BOOL_KEYS = {
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
-    "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED",
+    "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
 }
 _STR_LIMITS: dict[str, int] = {
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,

@@ -289,6 +289,8 @@ async def get_usage(request: Request):
     appid_configured = is_appid_configured()
     from backend import bailian_kb
     kb_ready_flag, kb_reason = bailian_kb.kb_ready()
+    from backend.api.ai_service import get_ai_config
+    chat_mode = {"kb_direct": "kb", "agent": "agent"}.get(get_ai_config()["mode"], "llm")
 
     if role_val == 0:
         multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
@@ -298,7 +300,7 @@ async def get_usage(request: Request):
             "multimodal_enabled": multimodal_enabled,
             "model_name": model_name,
             "appid_configured": appid_configured,
-            "kb_ready": kb_ready_flag, "kb_reason": kb_reason,
+            "kb_ready": kb_ready_flag, "kb_reason": kb_reason, "chat_mode": chat_mode,
         }
 
     multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
@@ -312,7 +314,7 @@ async def get_usage(request: Request):
         "multimodal_enabled": multimodal_enabled,
         "model_name": model_name,
         "appid_configured": appid_configured,
-        "kb_ready": kb_ready_flag, "kb_reason": kb_reason,
+        "kb_ready": kb_ready_flag, "kb_reason": kb_reason, "chat_mode": chat_mode,
     }
 
 
@@ -398,6 +400,14 @@ def _chat_event_generator(
     memory_prompt: 写进会话记忆的"用户原句"。学伴/助手会把人设与画像拼进 prompt，
     用它传入原始提问，避免把这些前缀反复带进后续轮次上下文。
     """
+    # ── V6.9 全局模式裁决：聊天链路不再接受客户端开关控制，只认系统配置 ──
+    # 优先级 知识库(kb_direct) > 智能体(agent) > 大模型(direct)，与后台 19 处业务同源裁决。
+    # 客户端传入的 use_agent / rag_enabled 一律忽略（旧版桌面端兼容不报错）。
+    from backend.api.ai_service import get_ai_config as _mode_cfg
+    _mode = _mode_cfg()["mode"]
+    use_agent = (_mode == "agent")
+    rag_enabled = (_mode == "kb_direct")
+
     try:
         enhanced_prompt = enhance_prompt_with_user_context(prompt, user_payload)
         valid_file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
