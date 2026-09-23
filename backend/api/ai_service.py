@@ -123,8 +123,9 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
     elif cfg["mode"] == "kb_direct":
         prompt = _augment_with_kb(prompt)
         d = get_ai_config(use_agent=False)
+        # 接管链路默认关思考链：出题/简答类任务提速数倍（原智能体也无深度思考，行为对齐）
         return _call_model_sync(prompt, api_key, d["model"], d["api_base"], history=history,
-                                max_tokens=max_tokens)
+                                max_tokens=max_tokens, enable_thinking=False)
     else:
         return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
                                 max_tokens=max_tokens)
@@ -227,7 +228,7 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
             }
             if max_tokens:
                 payload["max_tokens"] = int(max_tokens)
-            if enable_thinking is not None:
+            if enable_thinking is not None and "qwen" in model.lower():
                 payload["enable_thinking"] = bool(enable_thinking)
             resp = sync_requests.post(
                 f"{api_base}/chat/completions",
@@ -286,7 +287,8 @@ def call_ai_sync_direct(prompt: str, api_key: str,
 # ── 流式调用（返回事件生成器） ──
 
 def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
-                   use_agent: bool = True, history: Optional[list] = None):
+                   use_agent: bool = True, history: Optional[list] = None,
+                   enable_thinking: Optional[bool] = None):
     """流式调用 AI，返回 (text_generator, get_session_id)
 
     Args:
@@ -300,9 +302,11 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
     elif cfg["mode"] == "kb_direct":
         prompt = _augment_with_kb(prompt)
         d = get_ai_config(use_agent=False)
-        return _call_model_stream(prompt, api_key, d["model"], d["api_base"], history=history)
+        return _call_model_stream(prompt, api_key, d["model"], d["api_base"], history=history,
+                                  enable_thinking=False if enable_thinking is None else enable_thinking)
     else:
-        return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"], history=history)
+        return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
+                                  enable_thinking=enable_thinking)
 
 
 def _call_agent_stream(prompt: str, api_key: str, app_id: str,
@@ -356,7 +360,8 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
 
 
 def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
-                       history: Optional[list] = None):
+                       history: Optional[list] = None,
+                       enable_thinking: Optional[bool] = None):
     """直接调用大模型（流式，OpenAI 兼容接口），yield {"text": str, "session_id": None}"""
     import requests as sync_requests
     content = prompt if prompt else ""
@@ -375,6 +380,9 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
                 "messages": messages,
                 "stream": True,
             }
+            if enable_thinking is not None and "qwen" in model.lower():
+                # 仅 qwen 系列支持 enable_thinking；其他模型传了会被网关拒 400
+                payload["enable_thinking"] = bool(enable_thinking)
             resp = sync_requests.post(
                 f"{api_base}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -436,7 +444,8 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
         prompt = await loop.run_in_executor(_ai_thread_pool, _augment_with_kb, prompt)
         d = get_ai_config(use_agent=False)
         return await _call_model_async(prompt, api_key, d["model"], d["api_base"], history=history,
-                                       max_tokens=max_tokens, json_mode=json_mode)
+                                       max_tokens=max_tokens, json_mode=json_mode,
+                                       enable_thinking=False)
     else:
         return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
                                        max_tokens=max_tokens, json_mode=json_mode)
@@ -466,7 +475,8 @@ async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
 
 async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str,
                             history: Optional[list] = None,
-                            max_tokens: Optional[int] = None, json_mode: bool = False) -> str:
+                            max_tokens: Optional[int] = None, json_mode: bool = False,
+                            enable_thinking: Optional[bool] = None) -> str:
     """异步直接调用大模型（OpenAI 兼容接口）"""
     import httpx
 
@@ -490,6 +500,8 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                 payload["max_tokens"] = int(max_tokens)
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
+            if enable_thinking is not None and "qwen" in model.lower():
+                payload["enable_thinking"] = bool(enable_thinking)
             async with httpx.AsyncClient(timeout=180) as client:
                 resp = await client.post(
                     f"{api_base}/chat/completions",

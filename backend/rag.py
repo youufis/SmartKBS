@@ -122,6 +122,7 @@ def _extract_keywords(text: str) -> list[str]:
 # ══════════════════════════════════════════════════════════
 
 _CLOUD_BUDGET = 4500   # 云端切片字符预算
+_CLOUD_ENOUGH = 3      # 云端命中达到该条数即跳过本地 LIKE 检索（本地查询慢，属降级补充而非必做项）
 _LOCAL_BUDGET = 1500   # 本地题库/大纲预算
 _CHUNK_MAX = 900       # 单条切片截断长度
 
@@ -154,16 +155,19 @@ def retrieve_knowledge_v2(prompt: str, username: str = "") -> tuple[str, list[di
         if lines:
             parts.append("【知识库参考资料】\n\n" + "\n\n".join(lines))
 
-    # 2. 本地试题库 + 课程大纲（原有能力，作为补充/降级）
-    local_parts: list[str] = []
-    questions = _search_questions(prompt)
-    if questions:
-        local_parts.append("【相关试题】\n" + "\n".join(questions[:5]))
-    knowledge = _search_knowledge_points(prompt)
-    if knowledge:
-        local_parts.append("【课程知识点】\n" + "\n".join(knowledge[:5]))
-    if local_parts:
-        parts.append(("\n\n".join(local_parts))[:_LOCAL_BUDGET])
+    # 2. 本地试题库 + 课程大纲（补充/降级用；云端命中足够时跳过——LIKE 查询是主要耗时）
+    if len(references) >= _CLOUD_ENOUGH:
+        logger.debug(f"[RAG] 云端命中 {len(references)} 条，跳过本地 LIKE 检索")
+    else:
+        local_parts: list[str] = []
+        questions = _search_questions(prompt)
+        if questions:
+            local_parts.append("【相关试题】\n" + "\n".join(questions[:5]))
+        knowledge = _search_knowledge_points(prompt)
+        if knowledge:
+            local_parts.append("【课程知识点】\n" + "\n".join(knowledge[:5]))
+        if local_parts:
+            parts.append(("\n\n".join(local_parts))[:_LOCAL_BUDGET])
 
     context = "\n\n".join(parts)[:_CLOUD_BUDGET + _LOCAL_BUDGET + 200]
     return context, references

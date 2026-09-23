@@ -403,6 +403,7 @@ def _chat_event_generator(
         valid_file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
 
         # ── V6.7 RAG 增强：由「知识」开关(rag_enabled)控制 ──
+        chat_kb_takeover = False  # 知识开关+云端就绪：本次走「直连+知识库」，可关思考链提速
         # 云端知识库就绪时走「直连 + 百炼知识库」：强制直连（不走 APPID 智能体，
         # 避免与其自带云端知识库双重注入），检索切片注入 prompt 并下发 references 事件；
         # 未就绪/失败时退回原本地题库+大纲检索，绝不阻塞对话。
@@ -410,6 +411,7 @@ def _chat_event_generator(
             try:
                 from backend import bailian_kb
                 kb_ok, _kb_reason = bailian_kb.kb_ready()
+                chat_kb_takeover = bool(kb_ok)
                 if kb_ok and use_agent:
                     use_agent = False
                 from backend.rag import retrieve_knowledge, retrieve_knowledge_v2
@@ -535,7 +537,8 @@ def _chat_event_generator(
             _finish_status = "ok"
             try:
                 for chunk in _agent_chat_stream(enhanced_prompt, mem_key, dashscope_api_key, username,
-                                                use_agent=use_agent, history=mem_history):
+                                                use_agent=use_agent, history=mem_history,
+                                                enable_thinking=False if chat_kb_takeover else None):
                     _full = chunk["text"]
                     # 增量推送：仅发送相对上一帧的新增片段（回退切换等场景下前缀不匹配时整段补发）
                     inc = _full[len(_prev):] if _full.startswith(_prev) else _full
@@ -619,12 +622,14 @@ def _remember_turn(session_id: Optional[str], username: str, user_text: str,
 
 
 def _agent_chat_stream(prompt: str, session_id: Optional[str], api_key: str, username: str = "",
-                        use_agent: bool = True, history: Optional[list] = None):
+                        use_agent: bool = True, history: Optional[list] = None,
+                        enable_thinking: Optional[bool] = None):
     """AI 流式对话（同步生成器）- 支持智能体/直接调大模型双模式（history 仅直连生效）"""
     from backend.api.ai_service import call_ai_stream
 
     try:
-        for chunk in call_ai_stream(prompt, api_key, session_id, use_agent=use_agent, history=history):
+        for chunk in call_ai_stream(prompt, api_key, session_id, use_agent=use_agent, history=history,
+                                    enable_thinking=enable_thinking):
             yield chunk
     except Exception as e:
         logger.error(f"AI chat error: {e}")

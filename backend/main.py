@@ -62,6 +62,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        # 知识库检索预热：把 TLS 握手与服务端冷启动 costs 消化在启动期，
+        # 首个用户请求即可落在 keep-alive 热连接上（检索本身免费）
+        import threading
+        from backend import bailian_kb
+        threading.Thread(target=bailian_kb.warmup, daemon=True, name="kb-warmup").start()
+    except Exception:
+        pass
+    try:
         from backend.api.sharing_router import cleanup_empty_dir_shares
         cleanup_empty_dir_shares()
     except Exception:

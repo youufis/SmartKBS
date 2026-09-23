@@ -20,6 +20,27 @@ from backend.logger import logger
 
 _SEARCH_PATH = "/api/v1/indices/knowledge/search"
 
+# 持久连接池：检索是高频小请求，keep-alive 复用可省掉每次 TLS 握手（实测 3~4s -> 0.5~1s）
+# httpx.Client 线程安全；域名配置变更时连接池自然新建到主机的连接，无需重建客户端
+_client = None
+_client_lock = None
+
+
+def _get_client():
+    global _client, _client_lock
+    import threading
+    if _client_lock is None:
+        _client_lock = threading.Lock()
+    if _client is None:
+        import httpx
+        with _client_lock:
+            if _client is None:
+                _client = httpx.Client(
+                    limits=httpx.Limits(max_connections=8, max_keepalive_connections=4,
+                                        keepalive_expiry=30.0),
+                )
+    return _client
+
 
 def _get_cfg() -> dict[str, Any]:
     from backend.api.config_router import get_config_value
@@ -81,9 +102,8 @@ def kb_search(query: str, api_key: Optional[str] = None) -> list[dict[str, Any]]
     key = api_key or resolve_api_key()
     if not key or not cfg["base"] or not cfg["agent_id"]:
         return []
-    import httpx
     try:
-        resp = httpx.post(
+        resp = _get_client().post(
             _search_url(cfg["base"]),
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json={"agent_id": cfg["agent_id"], "query": query},
@@ -121,6 +141,17 @@ def kb_search(query: str, api_key: Optional[str] = None) -> list[dict[str, Any]]
     except Exception as e:
         logger.warning(f"[KB] 检索异常，降级本地检索: {e}")
         return []
+
+
+def warmup() -> None:
+    """后台预热：首查要付 TLS 握手 + 服务端冷启动（实测 8s+，会撞超时降级）。
+    服务启动时先打一发（检索免费），让真实用户请求落在热连接上。"""
+    try:
+        ready, _ = kb_ready()
+        if ready:
+            kb_search("知识库预热")
+    except Exception as e:
+        logger.info(f"[KB] 预热未完成（不影响使用）: {e}")
 
 
 def test_kb(query: str = "技术的价值") -> dict[str, Any]:
