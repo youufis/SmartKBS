@@ -300,9 +300,9 @@
   "syncRecords": "同步记录",
   "totalRecords": "共 {{count}} 条",
   "export": "导出",
-  "confirmClearAll": "确定清空全部记录？此操作不可恢复",
+  "confirmClearAll": "确定清空所有同步记录？（活跃天数账本不受影响）",
   "clearAll": "清空",
-  "confirmDeduplicate": "每个节点只保留最后一次上报记录，更早的心跳会被清理，确定执行？",
+  "confirmDeduplicate": "确定按「主机名+IP」去重保留最后一次记录？（活跃天数账本不受影响）",
   "ipDeduplicate": "节点去重",
   "countryDistribution": "🌍 国家/地区分布",
   "deduplicateComplete": "节点去重完成，剩余 {{remaining}} 条记录",
@@ -933,5 +933,12 @@
   "modelTestOk": "大模型连通正常：{{model}} 返回「{{reply}}」，耗时 {{ms}} ms",
   "modelTestFail": "大模型调用失败：{{err}}",
   "field_AGENT_ENABLED": "启用智能体",
-  "field_AGENT_ENABLED_desc": "勾选且已填 APPID 时，未被知识库接管的 AI 调用走智能体应用；知识库就绪时优先走知识库。取消勾选则回落到大模型直连。"
+  "field_AGENT_ENABLED_desc": "勾选且已填 APPID 时，未被知识库接管的 AI 调用走智能体应用；知识库就绪时优先走知识库。取消勾选则回落到大模型直连。",
+  "device": "设备",
+  "network": "网络",
+  "activeDays": "活跃天数",
+  "unitDay": "天",
+  "ipDiff": "自报IP",
+  "geoUnknown": "归属未知",
+  "firstSeen": "首次活跃"
 }

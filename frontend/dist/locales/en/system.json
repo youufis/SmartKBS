@@ -292,9 +292,9 @@
   "syncRecords": "Sync Records",
   "totalRecords": "Total {{count}} records",
   "export": "Export",
-  "confirmClearAll": "Clear all records? This cannot be undone",
+  "confirmClearAll": "Clear all sync records? (the active-days ledger is not affected)",
   "clearAll": "Clear All",
-  "confirmDeduplicate": "Keep only the latest report per node; earlier heartbeats will be removed. Confirm?",
+  "confirmDeduplicate": "Deduplicate by host+IP keeping the latest record? (the active-days ledger is not affected)",
   "ipDeduplicate": "Node Dedup",
   "countryDistribution": "🌍 Country/Region Distribution",
   "deduplicateComplete": "Node dedup completed, {{remaining}} records remaining",
@@ -933,5 +933,12 @@
   "modelTestOk": "LLM OK: {{model}} replied \"{{reply}}\" in {{ms}} ms",
   "modelTestFail": "LLM call failed: {{err}}",
   "field_AGENT_ENABLED": "Enable Agent",
-  "field_AGENT_ENABLED_desc": "When checked and APPID is set, AI calls not taken over by the knowledge base use the agent app; the knowledge base wins when ready. Uncheck to fall back to direct LLM."
+  "field_AGENT_ENABLED_desc": "When checked and APPID is set, AI calls not taken over by the knowledge base use the agent app; the knowledge base wins when ready. Uncheck to fall back to direct LLM.",
+  "device": "Device",
+  "network": "Network",
+  "activeDays": "Active Days",
+  "unitDay": "d",
+  "ipDiff": "Self-reported",
+  "geoUnknown": "Unknown location",
+  "firstSeen": "First seen"
 }

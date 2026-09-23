@@ -1068,6 +1068,28 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── IP 活跃日账本（每 IP 一行，跨天自增；独立于明细清理，永久累计）──
+            c.execute("""CREATE TABLE IF NOT EXISTS ip_active_ledger (
+                ip TEXT PRIMARY KEY,
+                active_days INTEGER NOT NULL DEFAULT 1,
+                last_active TEXT NOT NULL,
+                first_seen TEXT NOT NULL,
+                total_hits INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT
+            )""")
+            try:
+                # 回填：仅账本里没有的 IP，从现存明细按自然日去重建档
+                c.execute("""INSERT OR IGNORE INTO ip_active_ledger
+                             (ip, active_days, last_active, first_seen, total_hits, updated_at)
+                             SELECT caller_ip, COUNT(DISTINCT date(first_sync)),
+                                    MAX(date(first_sync)), MIN(date(first_sync)),
+                                    COUNT(*), datetime('now', 'localtime')
+                             FROM config_sync_logs
+                             WHERE caller_ip NOT IN ('', 'unknown', 'no-ip')
+                             GROUP BY caller_ip""")
+            except sqlite3.OperationalError:
+                pass
+
             # ── IP 地理位置缓存表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS geo_cache (
                 ip TEXT PRIMARY KEY,

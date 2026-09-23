@@ -158,6 +158,26 @@ async def receive_sync_report(request: Request):
     except Exception:
         pass
 
+    # ── V6.9 活跃日账本：每 IP 一行，跨天才 +1（同日多次心跳只涨 hits）──
+    # 独立于明细表：30 天保留、5000 行上限、手动去重/清空都不影响累计口径。
+    try:
+        if caller_ip and caller_ip not in ("unknown", "no-ip"):
+            execute_insert_update(
+                """INSERT INTO ip_active_ledger
+                       (ip, active_days, last_active, first_seen, total_hits, updated_at)
+                   VALUES (?, 1, date('now', 'localtime'), date('now', 'localtime'), 1,
+                           datetime('now', 'localtime'))
+                   ON CONFLICT(ip) DO UPDATE SET
+                       active_days = active_days +
+                           CASE WHEN last_active < excluded.last_active THEN 1 ELSE 0 END,
+                       last_active = MAX(last_active, excluded.last_active),
+                       total_hits  = total_hits + 1,
+                       updated_at  = excluded.updated_at""",
+                (caller_ip,),
+            )
+    except Exception as e:
+        logger.warning(f"活跃日账本写入失败(不影响上报): {e}")
+
     return {"status": "ok", "config": {}, "timestamp": time.time()}
 
 
@@ -183,7 +203,8 @@ async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size
         "       s.app_version, s.platform_info,"
         "       a.first_sync, s.last_sync, a.sync_count,"
         "       CASE WHEN s.last_sync >= datetime('now', ?, 'localtime') THEN 1 ELSE 0 END AS online,"
-        "       CAST((julianday('now', 'localtime') - julianday(s.last_sync)) * 1440 AS INTEGER) AS minutes_ago"
+        "       CAST((julianday('now', 'localtime') - julianday(s.last_sync)) * 1440 AS INTEGER) AS minutes_ago,"
+        "       l.active_days, l.first_seen AS ledger_first_seen, l.total_hits"
         " FROM ("
         f"    SELECT {_IDENTITY_SQL} AS ident, MAX(id) AS max_id,"
         "           MIN(first_sync) AS first_sync, COUNT(*) AS sync_count"
@@ -191,6 +212,7 @@ async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size
         "    GROUP BY ident"
         " ) a"
         " JOIN config_sync_logs s ON s.id = a.max_id"
+        " LEFT JOIN ip_active_ledger l ON l.ip = s.caller_ip"
         " ORDER BY online DESC, s.last_sync DESC"
         " LIMIT ? OFFSET ?",
         (f"-{_ONLINE_WINDOW_HOURS} hour", page_size, offset),
@@ -214,6 +236,9 @@ async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size
             "sync_count": r[13],
             "online": bool(r[14]),
             "minutes_ago": r[15],
+            "active_days": r[16],
+            "ledger_first_seen": r[17],
+            "total_hits": r[18],
         })
     return {"nodes": result, "total": total, "page": page, "page_size": page_size}
 

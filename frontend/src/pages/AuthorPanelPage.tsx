@@ -27,6 +27,9 @@ interface Deployment {
   sync_count: number
   online: boolean
   minutes_ago: number
+  active_days?: number | null
+  ledger_first_seen?: string
+  total_hits?: number
 }
 
 interface Stats {
@@ -126,46 +129,84 @@ const AuthorPanelPage: React.FC = () => {
     setPageSize(pagination.pageSize)
   }
 
+  // V6.9 A 方案：11 列合并为 6 列两行制，全量字段收进 tooltip
+  const shortPlatform = (pv?: string) => {
+    if (!pv) return ''
+    const parts = pv.split(/[-/\s]+/).filter(Boolean)
+    const v = parts.slice(0, 2).join(' ')
+    return v.length > 16 ? v.slice(0, 16) : v
+  }
+
   const columns = [
     {
-      title: t('status'), key: 'online', width: 92, fixed: 'left' as const,
+      title: t('status'), key: 'online', width: 96, fixed: 'left' as const,
       render: (_: any, r: Deployment) => (
-        <Tooltip
-          title={`${t('lastReport')}: ${r.last_sync || r.first_sync}（${fmtAgo(r.minutes_ago, t)}）· ${t('heartbeatTimes', { n: r.sync_count })}`}
-        >
+        <div>
           <Tag color={r.online ? 'green' : 'default'} style={{ marginRight: 0 }}>
-            {r.online ? '🟢 ' : '⚪ '}{r.online ? t('nodeOnline') : t('nodeOffline')}
+            {r.online ? `🟢 ${t('nodeOnline')}` : `⚪ ${t('nodeOffline')}`}
           </Tag>
+          <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{fmtAgo(r.minutes_ago, t)}</div>
+        </div>
+      ),
+    },
+    {
+      title: t('device'), key: 'device', width: 150,
+      render: (_: any, r: Deployment) => (
+        <Tooltip title={`${t('nodeId')}: ${r.node_id}`}>
+          <div>
+            <div style={{ fontWeight: 500 }}>{r.hostname || '-'}</div>
+            <div style={{ fontSize: 11, color: '#999' }}>{(r.node_id || '').slice(0, 8)}</div>
+          </div>
         </Tooltip>
       ),
     },
-    { title: t('nodeId'), dataIndex: 'node_id', key: 'node_id', width: 100, ellipsis: true },
-    { title: t('hostname'), dataIndex: 'hostname', key: 'hostname', width: 100 },
-    { title: t('publicIp'), dataIndex: 'public_ip', key: 'public_ip', width: 120 },
-    { title: t('callerIp'), dataIndex: 'caller_ip', key: 'caller_ip', width: 120 },
     {
-      title: t('location'), key: 'location', width: 180,
+      title: t('network'), key: 'network', width: 220,
+      render: (_: any, r: Deployment) => {
+        const diff = !!r.public_ip && r.public_ip !== r.caller_ip
+        return (
+          <div>
+            <span style={{ fontFamily: 'monospace' }}>{r.caller_ip || '-'}</span>
+            {diff && (
+              <Tooltip title={`${t('publicIp')}: ${r.public_ip}`}>
+                <Tag color="orange" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>
+                  {t('ipDiff')}
+                </Tag>
+              </Tooltip>
+            )}
+            <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+              {[r.country, r.city].filter((x) => x && x !== '未知').join(' ') || t('geoUnknown')}
+              {r.isp ? ` · ${r.isp}` : ''}
+            </div>
+          </div>
+        )
+      },
+    },
+    {
+      title: t('version'), key: 'version', width: 110,
       render: (_: any, r: Deployment) => (
-        <span><EnvironmentOutlined style={{ marginRight: 4 }} />{r.country} {r.region} {r.city}</span>
+        <Tooltip title={r.platform || '-'}>
+          <div>
+            <div>{r.app_version || '-'}</div>
+            <div style={{ fontSize: 11, color: '#999' }}>{shortPlatform(r.platform)}</div>
+          </div>
+        </Tooltip>
       ),
     },
-    { title: t('isp'), dataIndex: 'isp', key: 'isp', width: 80 },
-    { title: t('version'), dataIndex: 'app_version', key: 'app_version', width: 70 },
-    { title: t('platform'), dataIndex: 'platform', key: 'platform', width: 100, ellipsis: true },
     {
-      title: t('lastReport'), dataIndex: 'last_sync', key: 'last_sync', width: 176,
-      render: (v: string, r: Deployment) => (
-        <span>
-          {v || r.first_sync}
-          <Typography.Text type="secondary" style={{ marginLeft: 6, fontSize: 12 }}>
-            ({fmtAgo(r.minutes_ago, t)})
-          </Typography.Text>
-        </span>
+      title: t('activeDays'), key: 'active', width: 92,
+      sorter: (a: Deployment, b: Deployment) => (a.active_days ?? 0) - (b.active_days ?? 0),
+      render: (_: any, r: Deployment) => (
+        <Tooltip title={`${t('firstSeen')}: ${r.ledger_first_seen || r.first_sync} · ${t('heartbeatTimes', { n: r.total_hits ?? r.sync_count })}`}>
+          <div>
+            <span style={{ fontWeight: 500 }}>{r.active_days ?? '-'}</span>
+            <span style={{ fontSize: 11, color: '#999', marginLeft: 2 }}>{t('unitDay')}</span>
+          </div>
+        </Tooltip>
       ),
     },
-    { title: t('firstReport'), dataIndex: 'first_sync', key: 'first_sync', width: 160 },
     {
-      title: t('actions'), key: 'action', width: 70, fixed: 'right' as const,
+      title: t('actions'), key: 'action', width: 60, fixed: 'right' as const,
       render: (_: any, r: Deployment) => (
         <Popconfirm
           title={t('confirmDeleteRecord')}
@@ -173,13 +214,7 @@ const AuthorPanelPage: React.FC = () => {
           okText={t('confirmOk')}
           cancelText={t('cancel')}
         >
-          <Button
-            type="link"
-            danger
-            size="small"
-            icon={<DeleteOutlined />}
-            loading={deleting === r.id}
-          />
+          <Button type="link" danger size="small" icon={<DeleteOutlined />} loading={deleting === r.id} />
         </Popconfirm>
       ),
     },
@@ -195,45 +230,34 @@ const AuthorPanelPage: React.FC = () => {
       <Typography.Title level={4} style={{ marginBottom: 8 }}>
         <ApiOutlined /> {t('console')}
       </Typography.Title>
-      <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
+      <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
         {t('systemOverview')}
       </Typography.Text>
 
       {/* 统计卡片 */}
       {stats && (
-        <Row gutter={16} style={{ marginBottom: 24 }}>
-          <Col xs={12} sm={6}>
-            <Card size="small" hoverable>
-              <Statistic title={t('totalNodes')} value={stats.total_nodes} prefix={<GlobalOutlined />} />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card size="small" hoverable>
-              <Statistic
-                title={t('onlineNodes')}
-                value={stats.online_nodes}
-                prefix={<ApiOutlined />}
-                suffix={`/ ${stats.total_nodes}`}
-                valueStyle={{ color: stats.online_nodes > 0 ? '#3f8600' : undefined }}
-              />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card size="small" hoverable>
-              <Statistic title={t('todayActive')} value={stats.today_active} prefix={<LoginOutlined />} />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card size="small" hoverable>
-              <Statistic title={t('weeklyActive')} value={stats.weekly_active} prefix={<TeamOutlined />} />
-            </Card>
-          </Col>
-          <Col xs={12} sm={6}>
-            <Card size="small" hoverable onClick={() => setMapModalOpen(true)} style={{ cursor: 'pointer' }}>
-              <Statistic title={t('countryRegion')} value={stats.country_distribution.length} prefix={<EnvironmentOutlined />} suffix={t('unitCount')} />
-            </Card>
-          </Col>
-        </Row>
+        <Row gutter={[10, 10]} style={{ marginBottom: 12 }}>
+          {[
+            { title: t('totalNodes'), value: stats.total_nodes, icon: <GlobalOutlined /> },
+            { title: t('onlineNodes'), value: stats.online_nodes, icon: <ApiOutlined />,
+              suffix: `/ ${stats.total_nodes}`, color: stats.online_nodes > 0 ? '#3f8600' : undefined },
+            { title: t('todayActive'), value: stats.today_active, icon: <LoginOutlined /> },
+            { title: t('weeklyActive'), value: stats.weekly_active, icon: <TeamOutlined /> },
+            { title: t('countryRegion'), value: stats.country_distribution.length, icon: <EnvironmentOutlined />,
+              suffix: t('unitCount'), onClick: () => setMapModalOpen(true) },
+          ].map((c, idx) => (
+            <Col key={idx} flex="1 1 0" style={{ minWidth: 128 }}>
+              <Card size="small" hoverable onClick={c.onClick} style={c.onClick ? { cursor: 'pointer' } : undefined}>
+                <Statistic
+                  title={<span style={{ fontSize: 12 }}>{c.title}</span>}
+                  value={c.value}
+                  prefix={c.icon}
+                  suffix={c.suffix}
+                  valueStyle={{ fontSize: 18, color: c.color }}
+                />
+              </Card>
+            </Col>
+          ))}        </Row>
       )}
 
       {/* 节点列表 */}
@@ -279,7 +303,7 @@ const AuthorPanelPage: React.FC = () => {
         <Table
           dataSource={deployments}
           columns={columns}
-          rowKey="node_id"
+          rowKey="id"
           size="small"
           pagination={{
             current: page,
@@ -290,7 +314,7 @@ const AuthorPanelPage: React.FC = () => {
             showTotal: (total: number) => t('totalRecords', { count: total }),
           }}
           onChange={handleTableChange}
-          scroll={{ x: 1740 }}
+          scroll={{ x: 760 }}
           loading={loading}
         />
       </Card>
