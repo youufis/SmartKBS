@@ -585,7 +585,7 @@ async def generate_portrait(request: Request, body: GenerateRequest):
         logger.info(f"开始生成寄语: username={username}")
         try:
             comment_prompt = apply_skills(build_portrait_comment_prompt(profile, style), "portrait")
-            comment = await call_ai_sync_with_timeout(comment_prompt, api_key, timeout=150)
+            comment = await call_ai_sync_with_timeout(comment_prompt, api_key, timeout=150, use_kb=False)
             comment = comment.strip().strip('"\'')
             comment_ok = True
         except Exception as e:

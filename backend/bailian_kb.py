@@ -102,18 +102,23 @@ def kb_search(query: str, api_key: Optional[str] = None) -> list[dict[str, Any]]
     key = api_key or resolve_api_key()
     if not key or not cfg["base"] or not cfg["agent_id"]:
         return []
+    import time as _t
+    url = _search_url(cfg["base"])
+    hdr = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    body = {"agent_id": cfg["agent_id"], "query": query}
     try:
-        resp = _get_client().post(
-            _search_url(cfg["base"]),
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"agent_id": cfg["agent_id"], "query": query},
-            timeout=cfg["timeout_ms"] / 1000.0,
-        )
+        resp = _get_client().post(url, headers=hdr, json=body, timeout=cfg["timeout_ms"] / 1000.0)
+        # 401/429/5xx 多为边缘网关瞬时抖动（响应体非百炼标准 JSON 即可佐证），快速重试一次
+        if resp.status_code in (401, 429, 500, 502, 503):
+            _t.sleep(0.5)
+            resp = _get_client().post(url, headers=hdr, json=body, timeout=cfg["timeout_ms"] / 1000.0)
         data = resp.json() if resp.status_code == 200 else {}
         if not data.get("success"):
+            fp = (key[:6] + "…" + key[-4:]) if len(key) > 12 else "?"
+            snippet = (resp.text or "")[:120].replace("\n", " ")
             logger.warning(
                 f"[KB] 检索失败 http={resp.status_code} code={data.get('code')} "
-                f"msg={data.get('message')} req={data.get('request_id')}"
+                f"msg={data.get('message')} req={data.get('request_id')} key={fp} body={snippet}"
             )
             return []
         nodes = (data.get("data") or {}).get("nodes") or []

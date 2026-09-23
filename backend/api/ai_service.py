@@ -112,12 +112,16 @@ def _augment_with_kb(prompt: str) -> str:
 # ── 非流式调用（同步，返回完整文本） ──
 
 def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
-                 max_tokens: Optional[int] = None, json_mode: bool = False) -> str:
+                 max_tokens: Optional[int] = None, json_mode: bool = False,
+                 use_kb: bool = True) -> str:
     """同步调用 AI，返回完整响应文本（history 仅在直连分支生效）"""
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     cfg = get_ai_config()
+    # use_kb=False：数据驱动型任务（推荐/批改/分析等）跳过知识库接管，走纯直连
+    if cfg["mode"] == "kb_direct" and not use_kb:
+        cfg = get_ai_config(use_agent=False)
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
     if cfg["mode"] == "agent":
@@ -136,13 +140,14 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
 async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120,
                                     history: Optional[list] = None,
                                     max_tokens: Optional[int] = None,
-                                    json_mode: bool = False) -> str:
+                                    json_mode: bool = False,
+                                    use_kb: bool = True) -> str:
     """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
     import asyncio
     loop = asyncio.get_running_loop()
     try:
         result = await asyncio.wait_for(
-            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens, json_mode),
+            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens, json_mode, use_kb),
             timeout=timeout,
         )
         return result
@@ -295,13 +300,16 @@ def call_ai_sync_direct(prompt: str, api_key: str,
 
 def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
                    use_agent: bool = True, history: Optional[list] = None,
-                   enable_thinking: Optional[bool] = None):
+                   enable_thinking: Optional[bool] = None,
+                   use_kb: bool = True):
     """流式调用 AI，返回 (text_generator, get_session_id)
 
     Args:
         use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
     """
     cfg = get_ai_config(use_agent=use_agent)
+    if cfg["mode"] == "kb_direct" and not use_kb:
+        cfg = get_ai_config(use_agent=False)
     os.environ["DASHSCOPE_API_KEY"] = api_key
 
     if cfg["mode"] == "agent":
@@ -437,7 +445,8 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
 # ── 异步调用（非流式，使用 httpx） ──
 
 async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = None,
-                        max_tokens: Optional[int] = None, json_mode: bool = False) -> str:
+                        max_tokens: Optional[int] = None, json_mode: bool = False,
+                        use_kb: bool = True) -> str:
     """异步调用 AI，返回完整响应文本（不阻塞工作线程）。
 
     max_tokens：题目/课件这类长输出必须显式给，否则走服务商默认上限会被静默截断；
@@ -447,6 +456,8 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
 
     cfg = get_ai_config()
+    if cfg["mode"] == "kb_direct" and not use_kb:
+        cfg = get_ai_config(use_agent=False)
     os.environ["DASHSCOPE_API_KEY"] = api_key
     if cfg["mode"] == "agent":
         return await _call_agent_async(prompt, api_key, cfg["app_id"])

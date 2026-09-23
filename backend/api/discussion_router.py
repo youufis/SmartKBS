@@ -382,7 +382,7 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
 
     async def _do_generate() -> dict[str, Any]:
         try:
-            result = await call_ai_async(prompt, api_key, json_mode=True)
+            result = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False)
             if result:
                 data = extract_json_from_text(result)
                 if data:
@@ -762,7 +762,7 @@ async def _auto_generate_report(disc_id: int):
 
                 try:
                     from backend.api.ai_service import call_ai_async
-                    summary = await call_ai_async(prompt, api_key, json_mode=True)
+                    summary = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False)
                     if summary:
                         # 尝试解析 JSON
                         import json as _json
@@ -1175,7 +1175,7 @@ async def ai_suggest(group_id: int, request: Request):
     from backend.api.ai_service import call_ai_async
 
     try:
-        content = await call_ai_async(prompt, api_key)
+        content = await call_ai_async(prompt, api_key, use_kb=False)
         if content:
             # 将 AI 回复作为消息存入
             now_str = _now()
@@ -1279,7 +1279,7 @@ async def generate_group_ai_summary(group_id: int, request: Request):
     from backend.api.ai_service import call_ai_async
 
     try:
-        content = await call_ai_async(prompt, api_key)
+        content = await call_ai_async(prompt, api_key, use_kb=False)
         if not content:
             return {"status": "error", "content": "AI 未返回有效结果"}
 
@@ -1812,7 +1812,7 @@ async def auto_trigger_ai(disc_id: int, request: Request):
         prompt = apply_skills(prompt, "discussion")
 
         try:
-            content = await call_ai_async(prompt, api_key)
+            content = await call_ai_async(prompt, api_key, use_kb=False)
             if content:
                 now_str = _now()
                 execute_insert_update(

@@ -97,7 +97,7 @@ def _call_ai(prompt: str) -> str:
 
     from backend.api.ai_service import call_ai_sync
     try:
-        return call_ai_sync(prompt, api_key)
+        return call_ai_sync(prompt, api_key, use_kb=False)
     except Exception as e:
         return f"AI 调用出错: {str(e)}"
 
@@ -387,7 +387,7 @@ async def ai_generate_poll(req: AiGeneratePoll, request: Request):
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
-        result_text = await call_ai_async(prompt, api_key, json_mode=True)
+        result_text = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成投票失败: {str(e)}")
 
@@ -2469,7 +2469,7 @@ async def ai_quiz_analysis(quiz_id: int, request: Request):
         )
         prompt = apply_skills(prompt, "quiz")
 
-        analysis = await call_ai_async(prompt, api_key)
+        analysis = await call_ai_async(prompt, api_key, use_kb=False)
         return {
             "analysis": analysis,
             "stats": question_stats,
@@ -2646,7 +2646,7 @@ async def ai_class_summary(
         )
         prompt = apply_skills(prompt, "quiz")
 
-        summary = await call_ai_async(prompt, api_key)
+        summary = await call_ai_async(prompt, api_key, use_kb=False)
         return {
             "summary": summary,
             "data": {
@@ -2805,7 +2805,7 @@ async def export_class_summary_docx(
     prompt = apply_skills(prompt, "quiz")
 
     try:
-        summary = await call_ai_async(prompt, api_key)
+        summary = await call_ai_async(prompt, api_key, use_kb=False)
     except Exception as e:
         logger.error(f"AI 课堂总结调用失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")

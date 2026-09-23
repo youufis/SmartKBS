@@ -1586,7 +1586,7 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
         timeout = _get_ai_timeout()
 
         from backend.api.ai_service import call_ai_sync_with_timeout
-        result = await call_ai_sync_with_timeout(prompt, api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, api_key, timeout=timeout, json_mode=True, use_kb=False)
 
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
@@ -1692,7 +1692,7 @@ async def ai_generate_board(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
@@ -1739,7 +1739,7 @@ async def ai_beautify_board(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
@@ -1777,7 +1777,7 @@ async def ai_smart_annotation(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
@@ -1821,7 +1821,7 @@ async def ai_generate_mindmap(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
@@ -1862,7 +1862,7 @@ async def ai_suggest(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         return {"suggestion": result.strip()}
     except TimeoutError as e:
         logger.warning(f"AI 教学建议超时: {e}")
@@ -1902,7 +1902,7 @@ async def export_board_summary(room_id: int, request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         data = _jm_parse(jm.group()) if jm else {}
@@ -2019,7 +2019,7 @@ async def ai_generate_quiz(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
@@ -2063,7 +2063,7 @@ async def ai_generate_bilingual(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:

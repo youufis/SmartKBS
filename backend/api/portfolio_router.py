@@ -604,7 +604,7 @@ async def get_learning_report(username: str, request: Request):
 
     async def _do_report() -> dict[str, Any]:
         try:
-            result = await call_ai_async(prompt, api_key)
+            result = await call_ai_async(prompt, api_key, use_kb=False)
             return {
                 "report": result,
                 "student": {"username": _student_username, "name": student_name, "grade": student_grade, "class": student_class},
@@ -750,7 +750,7 @@ async def export_learning_report_docx(username: str, request: Request):
     )
     prompt = apply_skills(prompt, "portfolio")
 
-    report_text = await call_ai_async(prompt, api_key)
+    report_text = await call_ai_async(prompt, api_key, use_kb=False)
 
     # ── 生成 Word 文档 ──
     doc = Document()

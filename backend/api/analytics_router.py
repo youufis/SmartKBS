@@ -60,7 +60,7 @@ def _call_ai(prompt: str) -> str:  # type: ignore[misc]
 
     from backend.api.ai_service import call_ai_sync
     try:
-        return call_ai_sync(prompt, api_key)
+        return call_ai_sync(prompt, api_key, use_kb=False)
     except Exception as e:
         logger.error(f"AI 学情分析调用失败: {e}")
         return f"AI 分析出错：{str(e)}"
@@ -91,7 +91,7 @@ async def _call_ai_task(description: str, prompt: str, dedupe_key: str = "",
 
     async def _do_analysis() -> dict[str, str]:
         try:
-            result = await call_ai_async(prompt, api_key)
+            result = await call_ai_async(prompt, api_key, use_kb=False)
             return {"result": result}
         except Exception as e:
             logger.error(f"AI 学情分析调用失败: {e}")
@@ -818,7 +818,7 @@ async def export_class_overview_docx(
 
     from backend.api.ai_service import call_ai_async
     try:
-        report_text = await call_ai_async(prompt, api_key)
+        report_text = await call_ai_async(prompt, api_key, use_kb=False)
     except Exception as e:
         logger.error(f"AI 学情分析调用失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
@@ -969,7 +969,7 @@ async def export_teaching_suggestions_docx(
 
     from backend.api.ai_service import call_ai_async
     try:
-        suggestions_text = await call_ai_async(prompt, api_key)
+        suggestions_text = await call_ai_async(prompt, api_key, use_kb=False)
     except Exception as e:
         logger.error(f"AI 教学建议调用失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")
@@ -1104,7 +1104,7 @@ async def export_exam_report_docx(
 
     from backend.api.ai_service import call_ai_async
     try:
-        report_text = await call_ai_async(prompt, api_key)
+        report_text = await call_ai_async(prompt, api_key, use_kb=False)
     except Exception as e:
         logger.error(f"AI 考试分析调用失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 分析出错: {str(e)}")

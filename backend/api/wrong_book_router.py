@@ -604,7 +604,7 @@ async def get_review_plan(request: Request):
 
     async def _do_plan() -> dict[str, Any]:
         try:
-            result = await call_ai_async(prompt, api_key)
+            result = await call_ai_async(prompt, api_key, use_kb=False)
             return {"plan": result}
         except Exception as e:
             logger.error(f"AI 复习计划生成失败: {e}")
@@ -689,7 +689,7 @@ async def export_review_plan_docx(
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
     try:
-        plan_text = await call_ai_async(prompt, api_key)
+        plan_text = await call_ai_async(prompt, api_key, use_kb=False)
     except Exception as e:
         logger.error(f"AI 复习计划生成失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成复习计划失败: {str(e)}")
