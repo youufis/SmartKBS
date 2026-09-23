@@ -1,18 +1,23 @@
-"""公共选题逻辑：按 学科+题型+主题词 从学科题库(question_bank, questions.db)抽题。
+# -*- coding: utf-8 -*-
+"""公共选题入口（适配器）：按 学科族+题型+知识点 从题库抽题。
 
-随堂测验(AI 出题"题库优先、AI 补足")与同步练习(复用开关)共用，
-避免两份实现漂移。返回原始行 dict（options 解析为 dict），
-各业务端自行转换成前端展示格式。
+历史上本文件自己写了一套 `knowledge_points LIKE ? OR question_text LIKE ?` + `ORDER BY
+RANDOM()`，与各活动入口的另 5 套写法互不一致，且命中无优先级、结果每次都抖。
+现在统一走 backend.question_select（分层召回 T1>T2>T3>T4(>T5) + 学科族隔离 + 可解释审计），
+本文件只负责把 question_bank 原始行加工成各业务习惯的形状。
 """
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from backend.question_db import execute_query
+from backend.question_select import log_audit, select_questions
+
+# 最近一次选题的审计信息（调用方可读出来展示"为什么只有 N 题/为什么放宽了"）
+LAST_AUDIT: dict[str, Any] = {}
 
 
-def _parse_json_field(raw: Any, default: Any) -> Any:
+def _parse(raw: Any, default: Any) -> Any:
     if isinstance(raw, str) and raw:
         try:
             return json.loads(raw)
@@ -21,54 +26,48 @@ def _parse_json_field(raw: Any, default: Any) -> Any:
     return raw if raw is not None else default
 
 
+def bank_notice_from_audit(audit: dict[str, Any]) -> str:
+    from backend.question_select import bank_notice
+    return bank_notice(audit or {})
+
+
 def query_bank_questions(
     topic: str,
     subject: str,
     question_type: str,
     count: int,
     types: tuple[str, ...] | None = None,
+    *,
+    scene: str = "question_search",
+    exclude_ids: tuple[int, ...] | list[int] = (),
+    difficulty: str = "",
+    allow_family_fallback: bool = False,
 ) -> list[dict[str, Any]]:
-    """随机抽取题库匹配题。
+    """随机抽取题库匹配题（分层召回；返回 options 已解析为 dict）。
 
-    topic 用于 knowledge_points / question_text 双字段 LIKE 模糊匹配；
-    types 为候选题型白名单（默认与旧随堂测验口径一致：单选+判断）；
+    topic 支持"知识点全名"或以分隔符串起来的多个知识点；
+    types 为候选题型白名单（默认与旧口径一致：单选+判断）；
     question_type != "mixed" 时进一步限定为单一题型。
     """
-    if count <= 0:
-        return []
-    types = tuple(types or ("single", "true_false"))
-    conditions = ["status='active'", "type IN (" + ",".join("?" for _ in types) + ")"]
-    params: list[Any] = list(types)
-
-    if subject:
-        conditions.append("subject=?")
-        params.append(subject)
-
-    if topic:
-        conditions.append("(knowledge_points LIKE ? OR question_text LIKE ?)")
-        kw = f"%{topic}%"
-        params.extend([kw, kw])
-
+    global LAST_AUDIT
+    qtypes: tuple[str, ...]
     if question_type and question_type != "mixed":
-        conditions.append("type=?")
-        params.append(question_type)
-
-    rows = execute_query(
-        """SELECT id, type, question_text, options, correct_answer, explanation,
-                  knowledge_points, difficulty,
-                  svg_content, has_svg, media_files, media_placeholders
-           FROM question_bank
-           WHERE """ + " AND ".join(conditions) + """
-           ORDER BY RANDOM()
-           LIMIT ?""",
-        tuple(params + [count]),
+        qtypes = (question_type,)
+    else:
+        qtypes = tuple(types or ("single", "true_false"))
+    rows, audit = select_questions(
+        kp_name=topic or "", subject=subject or "", types=qtypes, count=count,
+        exclude_ids=list(exclude_ids or []), difficulty=difficulty,
+        allow_family_fallback=allow_family_fallback, seed=f"{scene}|{subject}|{topic}",
     )
-
+    LAST_AUDIT = audit
+    if scene:
+        log_audit(scene, audit)
     out: list[dict[str, Any]] = []
     for r in rows or []:
         r = dict(r)
-        r["options"] = _parse_json_field(r.get("options"), {}) or {}
-        r["media_files"] = _parse_json_field(r.get("media_files"), "")
-        r["media_placeholders"] = _parse_json_field(r.get("media_placeholders"), "")
+        r["options"] = _parse(r.get("options"), {}) or {}
+        r["media_files"] = _parse(r.get("media_files"), "")
+        r["media_placeholders"] = _parse(r.get("media_placeholders"), "")
         out.append(r)
     return out

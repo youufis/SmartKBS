@@ -163,6 +163,47 @@ const CurriculumPage: React.FC = () => {
 
   // ── 知识点详情（右侧面板） ──
   const [selectedKp, setSelectedKp] = useState<KnowledgePoint | null>(null)
+  // ── 挂接教材知识点（一对多；只到知识点级，不允许挂章节） ──
+  const [linkOpen, setLinkOpen] = useState(false)
+  const [linkKp, setLinkKp] = useState<KnowledgePoint | null>(null)
+  const [linkCands, setLinkCands] = useState<curriculumApi.KpLinkCandidate[]>([])
+  const [linkIds, setLinkIds] = useState<number[]>([])
+  const [linkLoading, setLinkLoading] = useState(false)
+  const [linkSaving, setLinkSaving] = useState(false)
+
+  const openKpLink = async (kp: KnowledgePoint) => {
+    setLinkKp(kp); setLinkOpen(true); setLinkLoading(true)
+    try {
+      const res = await curriculumApi.getKpLinks(kp.id)
+      setLinkIds((res.linked || []).map((x) => x.id))
+      setLinkCands(res.candidates || [])
+    } catch {
+      message.error(t('kpLinkLoadFailed'))
+    } finally {
+      setLinkLoading(false)
+    }
+  }
+
+  const saveKpLink = async () => {
+    if (!linkKp) return
+    setLinkSaving(true)
+    try {
+      const res = await curriculumApi.setKpLinks(linkKp.id, linkIds)
+      if (res?.ok) {
+        message.success(res.notice || t('kpLinkSaved'))
+        if (res.rejected?.length) {
+          message.warning(t('kpLinkRejected') + ': ' + res.rejected.map((r) => r.reason).join('; '))
+        }
+        setLinkOpen(false)
+      } else {
+        message.error(t('kpLinkFailed'))
+      }
+    } catch {
+      message.error(t('kpLinkFailed'))
+    } finally {
+      setLinkSaving(false)
+    }
+  }
   const [kpResources, setKpResources] = useState<CurriculumResource[]>([])
   const [kpLoading, setKpLoading] = useState(false)
 
@@ -1424,6 +1465,47 @@ const CurriculumPage: React.FC = () => {
                   </Card>
                 </Col>
 
+                {/* ── 挂接教材知识点：多选、带候选命中题数（提示不拦截） ── */}
+                <Modal
+                  open={linkOpen}
+                  title={`${t('kpLinkTitle')}${linkKp ? ' · ' + linkKp.name : ''}`}
+                  onCancel={() => setLinkOpen(false)}
+                  onOk={saveKpLink}
+                  confirmLoading={linkSaving}
+                  width={680}
+                >
+                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                    {t('kpLinkHint')}
+                  </Typography.Text>
+                  <Select
+                    mode="multiple"
+                    style={{ width: '100%' }}
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    loading={linkLoading}
+                    placeholder={t('kpLinkPlaceholder')}
+                    value={linkIds}
+                    onChange={(v: number[]) => setLinkIds(v)}
+                    options={linkCands.map((c) => ({
+                      value: c.id,
+                      label: `${c.name}${c.subject ? ' [' + c.subject + ']' : ''} · ${c.hits} ${t('kpLinkQuestions')}`,
+                    }))}
+                  />
+                  <div style={{ marginTop: 10 }}>
+                    {linkIds.length === 0 ? (
+                      <Typography.Text type="warning">{t('kpLinkEmptyTip')}</Typography.Text>
+                    ) : (
+                      <Space wrap size={4}>
+                        {linkIds.map((id) => {
+                          const c = linkCands.find((x) => x.id === id)
+                          return <Tag key={id} color={c && c.hits ? 'green' : 'default'}>{c ? c.name : id}</Tag>
+                        })}
+                      </Space>
+                    )}
+                  </div>
+                </Modal>
+
                 {/* ── 右侧：知识点详情面板 ── */}
                 {selectedKp && (
                   <Col span={10}>
@@ -1437,6 +1519,14 @@ const CurriculumPage: React.FC = () => {
                       loading={kpLoading}
                       extra={
                         <Space>
+                          {isTeacherOrAdmin && (
+                            <Tooltip title={t('kpLinkTip')}>
+                              <Button type="link" size="small" icon={<SettingOutlined />}
+                                onClick={() => openKpLink(selectedKp)}>
+                                {t('kpLink')}
+                              </Button>
+                            </Tooltip>
+                          )}
                           {isTeacherOrAdmin && (
                             <Tooltip title={t('aiGenerateLessonPlan')}>
                               <Button type="link" size="small" icon={<RobotOutlined />}

@@ -194,6 +194,23 @@ export async function getAiPracticeThemes(): Promise<AiPracticeTheme[]> {
   return data.themes;
 }
 
+export interface KpLinkInfo { id: number; name: string; subject?: string; chapter?: string }
+export interface KpLinkCandidate extends KpLinkInfo { hits: number; same_subject?: number }
+
+/** 挂接：读某知识点已挂接的教材知识点 + 候选（带各自题库命中题数，同学科优先） */
+export async function getKpLinks(kpId: number): Promise<{ kp: KpLinkInfo; linked: KpLinkInfo[]; candidates: KpLinkCandidate[] }> {
+  const { data } = await apiClient.get('/api/curriculum/kp-links', { params: { kp_id: kpId } });
+  return data;
+}
+
+/** 挂接：整体覆盖式保存（一对多，只到知识点级），返回并入后的召回变化 */
+export async function setKpLinks(kpId: number, textbookKpIds: number[]): Promise<{
+  ok: boolean; linked: number[]; rejected?: { id: number; reason: string }[]; hits_after?: number; notice?: string;
+}> {
+  const { data } = await apiClient.post('/api/curriculum/kp-links', { kp_id: kpId, textbook_kp_ids: textbookKpIds });
+  return data;
+}
+
 /** 预览AI练习HTML页面 */
 export async function getAiPracticePreviewUrl(kpId: number): Promise<string> {
   return `/api/curriculum/ai-practice/${kpId}/preview`;

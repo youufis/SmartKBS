@@ -2817,29 +2817,14 @@ async def ai_generate_practice(kp_id: int, request: Request):
             # 第1步：多渠道搜索题库，优先复用已有题目
             # ══════════════════════════════════════════════════════════
             from backend.question_db import execute_query as q_exec
-            bank_questions = []
-
-            # 策略A：按 knowledge_points 模糊匹配
-            bank_rows_a = q_exec(
-                """SELECT * FROM question_bank
-                   WHERE knowledge_points LIKE ? AND type='single' AND status='active'
-                   ORDER BY created_at DESC LIMIT 20""",
-                (f"%{kp_name}%",),
+            # 统一分层召回（替代旧"策略A 全名 LIKE + 策略B 题干 LIKE"：那种写法按
+            # created_at DESC 取"最新 20 条"而不是最相关的题，且完全没有学科过滤）
+            from backend.question_select import log_audit as _log_audit, select_questions as _sel
+            bank_questions, _bank_audit = _sel(
+                kp_name=kp_name, kp_id=kp_id, subject=subject,
+                types=("single",), count=10, seed="ai_practice:%s" % kp_id,
             )
-            bank_questions.extend(bank_rows_a)
-
-            # 策略B：按 question_text 模糊匹配
-            bank_rows_b = q_exec(
-                """SELECT * FROM question_bank
-                   WHERE question_text LIKE ? AND type='single' AND status='active'
-                   ORDER BY created_at DESC LIMIT 20""",
-                (f"%{kp_name}%",),
-            )
-            seen_ids = {q["id"] for q in bank_questions if q.get("id")}
-            for q in bank_rows_b:
-                if q.get("id") and q["id"] not in seen_ids:
-                    bank_questions.append(q)
-                    seen_ids.add(q["id"])
+            _log_audit("ai_practice(kp=%s)" % kp_id, _bank_audit)
 
             # 解析 JSON 字段
             for q in bank_questions:
@@ -2990,6 +2975,9 @@ async def ai_generate_practice(kp_id: int, request: Request):
                              svg_code, has_svg, media_placeholders),
                         )
                         assert qid is not None, "插入题目失败，qid 为 None"
+                        # 这里 kp_id 是现成的 —— 直接连 ID 边，下次该知识点优先走 T0，不再烧 AI
+                        from backend.question_select import link_question_kp as _link
+                        _link(int(qid), kp_name, kp_id)
                         q["id"] = qid
                         q["index"] = qid
                         if "svg_code" in q and "svg_content" not in q:
@@ -3108,6 +3096,55 @@ async def ai_generate_practice(kp_id: int, request: Request):
 
     task_id = await task_manager.create_task(description="AI 练习生成", coro_factory=_generate)
     return {"task_id": task_id, "message": "AI 练习生成已开始，请稍候..."}
+
+
+
+class KpLinkRequest(BaseModel):
+    kp_id: int
+    textbook_kp_ids: list[int] = []
+
+
+def _kp_link_guard(user: dict[str, Any], kp_id: int) -> str:
+    """挂接权限：只能挂自己任教学科/年级课程下的知识点（管理员不限）。
+    注意这只限制"改谁的条目"，挂接目标可以是任意教材知识点 —— 教师不需要教材编辑权。"""
+    from backend import kp_link as KL
+    chapter_id = KL.kp_chapter_id(kp_id)
+    _assert_can_edit_course(user, _course_of_chapter(chapter_id) if chapter_id else None, "挂接教材知识点")
+    return KL.kp_info(kp_id).get("name", "")
+
+
+@router.get("/kp-links")
+async def get_kp_links(request: Request, kp_id: int = Query(..., ge=1)):
+    """某知识点的挂接现状 + 可挂接教材知识点候选（带各自题库命中题数，同学科优先）。"""
+    from backend import kp_link as KL
+    get_current_user(request)
+    info = KL.kp_info(kp_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    return {
+        "kp": {"id": kp_id, "name": info.get("name", ""), "subject": info.get("subject", ""),
+               "chapter": info.get("chapter", "")},
+        "linked": KL.linked_targets(kp_id),
+        "candidates": KL.candidate_kps(kp_id, limit=80),
+    }
+
+
+@router.post("/kp-links")
+async def set_kp_links(body: KpLinkRequest, request: Request):
+    """整体覆盖式保存挂接（一对多、只到知识点级）。保存后立即回算召回效果。"""
+    from backend import kp_link as KL
+    user = get_current_user(request)
+    name = _kp_link_guard(user, body.kp_id)
+    res = KL.set_links(body.kp_id, body.textbook_kp_ids or [], user.get("username", ""))
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error") or "保存失败")
+    from backend.question_select import select_questions
+    qs, audit = select_questions(kp_name=name, kp_id=body.kp_id,
+                                 subject=KL.kp_info(body.kp_id).get("subject", ""),
+                                 types=("single", "true_false", "multiple"), count=10, rotate="none")
+    res.update({"kp_name": name, "hits_after": len(qs),
+                "notice": "并入后召回变化：题库命中 %d 题" % len(qs)})
+    return res
 
 
 def _generate_practice_html(kp: dict[str, Any], questions: list[dict[str, Any]], session_id: int = 0, subject: str = "", kp_id: int = 0, theme: str = "") -> str:
@@ -3736,47 +3773,16 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
     # ── 第1步：多渠道搜索题库 ──
     from backend.question_db import execute_query as q_exec, execute_insert as q_insert, execute_update as q_update
     from backend.config import BASE_DIR
-    bank_questions = []
-
-    # 策略A：按 knowledge_points 模糊匹配
-    bank_rows_a = q_exec(
-        """SELECT * FROM question_bank
-           WHERE knowledge_points LIKE ? AND type='single' AND status='active'
-           ORDER BY created_at DESC LIMIT 20""",
-        (f"%{kp_name}%",),
+    # 统一分层召回（替代旧策略 A/B/C：A/B 按"最新"取题、C 剥词会造出「的描述」「流程的」
+    # 这类虚词再拿去 LIKE，实测把通用技术/人工智能/生物的题混进信息科技的知识点，
+    # 且三条 SQL 都没有 subject 过滤）。现在：学科族严格隔离 + 标签相等>标签子串>题干实词>
+    # 同章节兄弟知识点，兜底层不开（差额由第2步 AI 补），选不到题时审计日志会说明原因。
+    from backend.question_select import log_audit as _log_audit, select_questions as _sel
+    bank_questions, _bank_audit = _sel(
+        kp_name=kp_name, kp_id=kp_id, subject=subject,
+        types=("single",), count=10, seed="smart_practice:%s" % kp_id,
     )
-    bank_questions.extend(bank_rows_a)
-
-    # 策略B：按 question_text 模糊匹配（捕获 knowledge_points 字段未命中但题干含知识点名的题目）
-    bank_rows_b = q_exec(
-        """SELECT * FROM question_bank
-           WHERE question_text LIKE ? AND type='single' AND status='active'
-           ORDER BY created_at DESC LIMIT 20""",
-        (f"%{kp_name}%",),
-    )
-    # 合并去重（按 id）
-    seen_ids = {q["id"] for q in bank_questions if q.get("id")}
-    for q in bank_rows_b:
-        if q.get("id") and q["id"] not in seen_ids:
-            bank_questions.append(q)
-            seen_ids.add(q["id"])
-
-    # 策略C：如果知识点名包含关键词，尝试按知识点名拆分后搜索（如"冒泡排序优化" → 搜"排序"）
-    import re as _re
-    # 提取核心概念（去掉"原理/方法/技术/概述/应用"等后缀）
-    core_keyword = _re.sub(r'(原理|方法|技术|概述|应用|优化|算法|设计|实现|介绍|基础|入门|进阶|实战)', '', kp_name).strip()
-    if core_keyword and core_keyword != kp_name and len(core_keyword) >= 2:
-        bank_rows_c = q_exec(
-            """SELECT * FROM question_bank
-               WHERE (knowledge_points LIKE ? OR question_text LIKE ?)
-                 AND type='single' AND status='active'
-               ORDER BY created_at DESC LIMIT 10""",
-            (f"%{core_keyword}%", f"%{core_keyword}%"),
-        )
-        for q in bank_rows_c:
-            if q.get("id") and q["id"] not in seen_ids:
-                bank_questions.append(q)
-                seen_ids.add(q["id"])
+    _log_audit("smart_practice(kp=%s)" % kp_id, _bank_audit)
 
     # 解析 JSON 字段
     for q in bank_questions:

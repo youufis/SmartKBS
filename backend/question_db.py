@@ -281,6 +281,23 @@ def init_question_db():
             except sqlite3.OperationalError:
                 pass
             # G3: AI 练习答案键(按知识点保存本次生成的题目顺序), 用于服务端判分
+            # 题目 ↔ 教材知识点 的 ID 级关联（智能选题的 ground truth）
+            # 由 kp_link 从"题目标签文本 = 教材知识点名"的精确相等关系构建，
+            # 一对多/歧义一律不写，避免拿猜出来的关联去出题。
+            c.execute("""CREATE TABLE IF NOT EXISTS question_kp_map (
+                question_id INTEGER NOT NULL,
+                kp_id INTEGER NOT NULL,
+                kp_name TEXT DEFAULT '',
+                source TEXT DEFAULT 'exact_tag',
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                PRIMARY KEY (question_id, kp_id)
+            )""")
+            try:
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qkm_kp ON question_kp_map(kp_id)")
+                c.execute("CREATE INDEX IF NOT EXISTS idx_qkm_q ON question_kp_map(question_id)")
+            except Exception:
+                pass
+
             c.execute("""CREATE TABLE IF NOT EXISTS ai_practice_keys (
                 kp_id INTEGER PRIMARY KEY,
                 question_ids TEXT NOT NULL DEFAULT '[]',

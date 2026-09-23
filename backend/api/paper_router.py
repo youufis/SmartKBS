@@ -103,33 +103,16 @@ def _get_question_pool(
     Returns:
         候选题目列表
     """
-    conditions = ["q.status = 'active'", "q.subject = ?", "q.type != 'code'"]
-    params: list[Any] = [subject]
-
-    if knowledge_points:
-        kp_conditions = []
-        for kp in knowledge_points:
-            kp_conditions.append("q.knowledge_points LIKE ?")
-            params.append(f"%{kp}%")
-        if kp_conditions:
-            conditions.append(f"({' OR '.join(kp_conditions)})")
-
-    if exclude_ids:
-        placeholders = ",".join("?" * len(exclude_ids))
-        conditions.append(f"q.id NOT IN ({placeholders})")
-        params.extend(exclude_ids)
-
-    where = " AND ".join(conditions)
-
-    rows = execute_query(
-        f"""SELECT q.id, q.type, q.question_text, q.options, q.correct_answer,
-                   q.explanation, q.difficulty, q.knowledge_points, q.subject
-            FROM question_bank q
-            WHERE {where}
-            ORDER BY q.difficulty, q.id""",
-        tuple(params),
+    from backend.question_select import log_audit, select_questions
+    # 组卷是"先出池、后按配额拼卷"，因此取满池并允许同学科族兜底（兜底题在池子末尾，
+    # 命中知识点的题排在前面），但仍严格限制在指定学科族内，绝不跨学科。
+    rows, _audit = select_questions(
+        kp_name="、".join(knowledge_points or []), subject=subject,
+        types=("single", "multiple", "true_false", "short", "fill"),
+        count=1000, exclude_ids=list(exclude_ids or []),
+        allow_family_fallback=True, seed="paper",
     )
-
+    log_audit("paper_pool", _audit)
     # 解析 options JSON
     for row in rows:
         if row.get("options") and isinstance(row["options"], str):

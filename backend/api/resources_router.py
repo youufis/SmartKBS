@@ -1032,91 +1032,35 @@ async def get_ai_themes(type: str = Query("animation", description="资源类型
 def _fetch_matching_questions(topic: str, subject: str = "",
                                limit: int = 15,
                                need_types: tuple[str, ...] = ('single', 'true_false')) -> list[dict]:
-    """从 question_bank 分级检索与主题匹配的试题。
+    """从题库取与主题相关的真题 —— 统一走 backend.question_select 的分层召回。
 
-    两条硬规则（都是踩过的坑）：
-    1. 学科名不再当检索词 —— 以前把 subject 也丢进 LIKE，'%通用技术%'
-       会把整门学科的题全捞进来，导致「技术的性质」的章节练习里
-       混进了「结构的含义与普遍性」的题；
-    2. 强相关优先 —— 知识点精确 > 知识点含主题 > 题干含主题 >
-       知识点/题干含关键词，同级内再按 id 倒序补新题。
+    原先这里是第 7 套自己写的分级 LIKE（学科名不当检索词、强相关优先这两条经验
+    已并入统一模块），缺学科族隔离、ID 关联、泛词防护、审计与轮换，故改为适配器，
+    保持返回形状不变（options 已解析）以免动到 prompt 组装处。
     """
     try:
-        from backend.question_db import execute_query
+        from backend.question_select import log_audit, select_questions
 
-        topic = (topic or "").strip()
-        keywords = [k for k in _extract_keywords(topic) if k and k != subject and k not in topic]
-
-        cols = """SELECT id, type, question_text, options, correct_answer,
-                          explanation, knowledge_points, difficulty,
-                          svg_content, has_svg, media_files"""
-        type_ph = ",".join("?" for _ in need_types)
-        seen: set[int] = set()
-        results: list[dict] = []
-
-        def _collect(where: str, params: tuple) -> None:
-            if len(results) >= limit:
-                return
-            rows = execute_query(
-                f"""{cols}
-                   FROM question_bank
-                   WHERE status = 'active' AND type IN ({type_ph}) AND ({where})
-                   ORDER BY id DESC
-                   LIMIT ?""",
-                tuple(need_types) + tuple(params) + (limit,),
-            )
-            for r in rows or []:
-                if len(results) >= limit:
-                    break
-                qid = r.get("id")
-                if qid in seen or r.get("type") not in need_types:
-                    continue
-                seen.add(qid)
-                opts = r.get("options")
-                if opts and isinstance(opts, str):
-                    try:
-                        r["options"] = json.loads(opts)
-                    except (json.JSONDecodeError, TypeError):
-                        r["options"] = {}
-                results.append(r)
-
-        if topic:
-            _collect("knowledge_points = ?", (topic,))
-            _collect("knowledge_points LIKE ?", (f"%{topic}%",))
-            _collect("question_text LIKE ?", (f"%{topic}%",))
-        for kw in keywords[:4]:
-            if len(results) >= limit:
-                break
-            _collect("knowledge_points LIKE ?", (f"%{kw}%",))
-            _collect("question_text LIKE ?", (f"%{kw}%",))
-
-        return results
+        rows, audit = select_questions(
+            kp_name=(topic or "").strip(), subject=(subject or "").strip(),
+            types=tuple(need_types or ("single", "true_false")), count=max(1, int(limit)),
+            rotate="call", seed="resource",
+        )
+        log_audit("resource_real_questions", audit)
+        out: list[dict] = []
+        for r in rows or []:
+            r = dict(r)
+            opts = r.get("options")
+            if opts and isinstance(opts, str):
+                try:
+                    r["options"] = json.loads(opts)
+                except (json.JSONDecodeError, TypeError):
+                    r["options"] = {}
+            out.append(r)
+        return out
     except Exception as e:
         logger.warning(f"题库检索失败: {e}")
         return []
-
-
-
-def _extract_keywords(text: str) -> list[str]:
-    """从文本中提取关键词"""
-    import re
-    stop_words = {"的", "了", "在", "是", "我", "有", "和", "就", "不", "人", "都",
-                  "一", "一个", "上", "也", "很", "到", "说", "要", "去", "你",
-                  "会", "着", "没有", "看", "好", "自己", "这", "他", "她", "它",
-                  "们", "那", "些", "能", "下", "过", "出", "来", "么", "个",
-                  "里", "后", "前", "从", "被", "把", "让", "对", "与", "为",
-                  "以", "及", "但", "而", "或", "如果", "因为", "所以", "可以",
-                  "什么", "怎么", "如何", "哪些", "为何", "怎样", "啥"}
-    # 按中英文标点/空格拆分
-    tokens = re.split(r'[\s,，。；：、！？（）()【】\[\]{}""""''\/\\+＝=#@&*%]', text)
-    result = []
-    for t in tokens:
-        t = t.strip()
-        if len(t) >= 2 and t not in stop_words:
-            result.append(t)
-    if not result:
-        result = [text.strip()] if text.strip() else []
-    return result
 
 
 def _save_questions_to_db(questions: list[dict], username: str, name: str = "") -> int:
@@ -1125,6 +1069,8 @@ def _save_questions_to_db(questions: list[dict], username: str, name: str = "") 
     入库前按题干精确查重：页面里常有部分题目来自更早的生成结果（已在题库），
     不做查重就会在 question_bank 里堆出重复题，题库页和组卷都会受影响。
     """
+    from backend.question_select import link_question_kp  # 落库即与教材知识点连 ID 边（供 T0 用）
+
     import time
     from backend.question_db import execute_insert, execute_query
     saved = 0
@@ -1147,10 +1093,16 @@ def _save_questions_to_db(questions: list[dict], username: str, name: str = "") 
             text = (q.get("question_text") or "").strip()
             if not text:
                 continue
-            if execute_query(
+            _dup = execute_query(
                 "SELECT id FROM question_bank WHERE question_text = ? AND status = 'active' LIMIT 1",
                 (text,),
-            ):
+            )
+            if _dup:
+                # 题已存在 —— 也要把边补上，历史 AI 题才能进 T0 候选池
+                try:
+                    link_question_kp(int(_dup[0]["id"]), q.get("knowledge_points", ""))
+                except Exception:
+                    pass
                 skipped += 1
                 continue
             qid = execute_insert(
@@ -1177,6 +1129,7 @@ def _save_questions_to_db(questions: list[dict], username: str, name: str = "") 
             )
             if qid:
                 saved += 1
+                link_question_kp(int(qid), q.get("knowledge_points", ""))
         except Exception as e:
             logger.warning(f"保存题目到题库失败: {e}")
     if skipped or rejected:

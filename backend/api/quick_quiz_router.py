@@ -259,38 +259,15 @@ def _load_questions_from_bank(subject: str = "", knowledge_points: str = "",
                                 exclude_ids: Optional[list[int]] = None) -> list[dict[str, Any]]:
     """从学科题库（questions.db question_bank）加载题目"""
     exclude_ids = exclude_ids or []
-    conditions = ["status='active'"]
-    params = []
-
-    if subject:
-        conditions.append("subject=?")
-        params.append(subject)
-    if knowledge_points:
-        kws = [kw.strip() for kw in knowledge_points.split(",") if kw.strip()]
-        if kws:
-            kw_conditions = " OR ".join(["knowledge_points LIKE ?" for _ in kws])
-            conditions.append(f"({kw_conditions})")
-            params.extend([f"%{kw}%" for kw in kws])
-    if difficulty:
-        conditions.append("difficulty=?")
-        params.append(difficulty)
-    if exclude_ids:
-        placeholders = ",".join(["?" for _ in exclude_ids])
-        conditions.append(f"id NOT IN ({placeholders})")
-        params.extend(exclude_ids)
-
-    where = " AND ".join(conditions)
-
-    rows = qb_execute_query(
-        f"""SELECT id, type, question_text, options, correct_answer, explanation,
-                   svg_content, has_svg, media_files, media_placeholders
-            FROM question_bank
-            WHERE {where} AND type IN ('single', 'true_false')
-            ORDER BY RANDOM()
-            LIMIT ?""",
-        tuple(params + [count]),
+    # 统一分层召回：学科族隔离（信息技术≡信息科技可互认，但不与通用技术/人工智能互串）、
+    # 知识点相关性优先、指定难度不够时自动放宽（旧写法 difficulty 精确等值常整批选空）。
+    from backend.question_select import log_audit, select_questions
+    rows, _audit = select_questions(
+        kp_name=knowledge_points or "", subject=subject or "",
+        types=("single", "true_false"), count=count,
+        exclude_ids=list(exclude_ids), difficulty=difficulty or "", seed="quick_quiz",
     )
-
+    log_audit("quick_quiz", _audit)
     questions = []
     for r in rows:
         opts = {}

@@ -846,51 +846,29 @@ async def auto_select_questions(exam_id: int, req: AutoSelectRequest, request: R
     if not _can_manage_exam(username, exam):
         raise HTTPException(status_code=403, detail="无权操作此考试")
 
-    # 构建查询条件
-    conditions = ["q.status = 'active'", "q.type != 'code'"]
-    params = []
+    # 统一分层召回（替代原先"单个关键词 LIKE 命中即等概率 + random.sample"的写法）：
+    # 学科族内按 标签相等 > 标签子串 > 题干实词 > 同章节兄弟知识点 排序取题；
+    # 考试入口不会自动生成题目，因此允许"同学科族兜底"填满题量，但兜底数量会进审计日志，
+    # 老师能看到"这套卷里有几题不是本知识点的"。指定了学科则绝不跨学科给题。
+    from backend.question_select import log_audit, select_questions
 
-    if req.subject:
-        conditions.append("q.subject = ?")
-        params.append(req.subject)
-
-    if req.difficulty:
-        conditions.append("q.difficulty = ?")
-        params.append(req.difficulty)
-
-    if req.question_types:
-        placeholders = ",".join("?" * len(req.question_types))
-        conditions.append(f"q.type IN ({placeholders})")
-        params.extend(req.question_types)
-
-    if req.knowledge_keyword:
-        kw = f"%{req.knowledge_keyword}%"
-        conditions.append("(q.knowledge_points LIKE ? OR q.question_text LIKE ?)")
-        params.extend([kw, kw])
-
-    # 排除已添加的题目
+    existing_ids: list[int] = []
     if req.exclude_existing:
-        conditions.append("q.id NOT IN (SELECT question_id FROM exam_questions WHERE exam_id = ?)")
-        params.append(exam_id)
-
-    where = " AND ".join(conditions)
-
-    # 获取符合条件的题目列表
-    rows = execute_query(
-        f"SELECT q.id, q.type, q.question_text, q.difficulty, q.knowledge_points FROM question_bank q WHERE {where}",
-        tuple(params),
+        existing_ids = [r["question_id"] for r in execute_query(
+            "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)) or []]
+    q_types = tuple(req.question_types) if req.question_types else (
+        "single", "multiple", "true_false", "short", "fill")
+    want = max(1, min(req.count, 200))
+    selected, _audit = select_questions(
+        kp_name=req.knowledge_keyword or "", subject=req.subject or "",
+        types=q_types, count=want, exclude_ids=existing_ids,
+        difficulty=req.difficulty or "", allow_family_fallback=True,
+        seed="exam:%s" % exam_id,
     )
-
-    if not rows:
-        raise HTTPException(status_code=404, detail="未找到符合条件的题目")
-
-    # count 上限校验
-    select_count = max(1, min(req.count, 200, len(rows)))
-
-    # 随机选取
-    import random
-    selected = random.sample(rows, select_count)
-
+    log_audit("exam_auto_select(exam=%s)" % exam_id, _audit)
+    if not selected:
+        raise HTTPException(status_code=404,
+                            detail="未找到符合条件的题目（学科/题型/知识点在题库里没有可用题）")
     # 获取当前最大排序序号
     max_order_row = execute_query_one(
         "SELECT COALESCE(MAX(sort_order), -1) as max_order FROM exam_questions WHERE exam_id = ?",

@@ -1,4 +1,16 @@
 {
+"kpLink": "Link to textbook KPs",
+  "kpLinkTip": "Link this KP to textbook KPs so bank questions become selectable",
+  "kpLinkTitle": "Link textbook knowledge points",
+  "kpLinkHint": "Multiple allowed. Candidates are ranked by same subject first, then bank hits. Linking only references textbook KPs and needs no textbook edit permission.",
+  "kpLinkPlaceholder": "Search and select textbook KPs",
+  "kpLinkSaved": "Links saved",
+  "kpLinkFailed": "Failed to save links",
+  "kpLinkLoadFailed": "Failed to load candidates",
+  "kpLinkRejected": "Some targets were rejected",
+  "kpLinkQuestions": "questions",
+  "kpLinkEmptyTip": "Not linked: this KP can only match by name; if nothing is recalled it falls back to AI generation (not blocked)",
+
   "title": "Curriculum Guide",
   "curriculumManage": "Course Management",
   "addCourse": "New Course",

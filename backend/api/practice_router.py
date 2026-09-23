@@ -361,6 +361,13 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
             notes.append(f"AI 新生成 {len(ai_qs)} 道(要求 {remaining} 道, 已尽力补足)")
         else:
             notes.append(f"AI 新生成 {len(ai_qs)} 道")
+    try:  # 提示不拦截：把"题库命中多少、为什么缺"直接告诉老师
+        from backend.question_search import LAST_AUDIT, bank_notice_from_audit
+        _notice = bank_notice_from_audit(LAST_AUDIT)
+        if _notice:
+            notes.append(_notice)
+    except Exception:
+        pass
 
     return bank_qs + ai_qs, "；".join(notes)
 
@@ -412,6 +419,9 @@ async def _persist_generated_questions(questions: list[dict], req: PracticeGener
         if qid is None:
             logger.warning(f"题目入库失败, 已跳过: {q_text[:40]}")
             continue
+        # 知识点名唯一命中教材知识点时才连边（歧义不猜），供选题 T0 复用
+        from backend.question_select import link_question_kp as _link
+        _link(int(qid), req.knowledge_points or q.get("knowledge_point", ""))
         q["id"] = qid
         q["index"] = qid
         # 统一字段名：AI 返回 svg_code -> 前端用 svg_content
