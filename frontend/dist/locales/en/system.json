@@ -277,7 +277,7 @@
   "agoMinutes": "{{n}} min ago",
   "agoHours": "{{n}} h ago",
   "agoDays": "{{n}} d ago",
-  "confirmDeleteRecord": "Delete this record?",
+  "confirmDeleteRecord": "Delete all sync records of this device? (old-IP rows won't reappear; the active-days ledger is kept)",
   "confirmOk": "OK",
   "cancel": "Cancel",
   "country": "Country/Region",
@@ -940,5 +940,8 @@
   "unitDay": "d",
   "ipDiff": "Self-reported",
   "geoUnknown": "Unknown location",
-  "firstSeen": "First seen"
+  "firstSeen": "First seen",
+  "ipMulti": "{n} IPs",
+  "ipMultiTip": "Dynamic egress IP; historical IPs merged into one row",
+  "ipActiveDaysTip": "current IP alone active {n}d"
 }

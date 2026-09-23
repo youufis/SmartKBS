@@ -30,6 +30,9 @@ interface Deployment {
   active_days?: number | null
   ledger_first_seen?: string
   total_hits?: number
+  ip_count?: number
+  ip_list?: string[]
+  ip_active_days?: number | null
 }
 
 interface Stats {
@@ -167,6 +170,13 @@ const AuthorPanelPage: React.FC = () => {
         return (
           <div>
             <span style={{ fontFamily: 'monospace' }}>{r.caller_ip || '-'}</span>
+            {(r.ip_count ?? 1) > 1 && (
+              <Tooltip title={`${t('ipMultiTip')}：${(r.ip_list || []).join('、')}`}>
+                <Tag color="blue" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>
+                  {t('ipMulti', { n: r.ip_count })}
+                </Tag>
+              </Tooltip>
+            )}
             {diff && (
               <Tooltip title={`${t('publicIp')}: ${r.public_ip}`}>
                 <Tag color="orange" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>
@@ -197,7 +207,7 @@ const AuthorPanelPage: React.FC = () => {
       title: t('activeDays'), key: 'active', width: 92,
       sorter: (a: Deployment, b: Deployment) => (a.active_days ?? 0) - (b.active_days ?? 0),
       render: (_: any, r: Deployment) => (
-        <Tooltip title={`${t('firstSeen')}: ${r.ledger_first_seen || r.first_sync} · ${t('heartbeatTimes', { n: r.total_hits ?? r.sync_count })}`}>
+        <Tooltip title={`${t('firstSeen')}: ${r.ledger_first_seen || r.first_sync} · ${t('heartbeatTimes', { n: r.total_hits ?? r.sync_count })}${(r.ip_active_days ?? 0) > 0 && r.ip_active_days !== r.active_days ? ` · ${t('ipActiveDaysTip', { n: r.ip_active_days })}` : ''}`}>
           <div>
             <span style={{ fontWeight: 500 }}>{r.active_days ?? '-'}</span>
             <span style={{ fontSize: 11, color: '#999', marginLeft: 2 }}>{t('unitDay')}</span>

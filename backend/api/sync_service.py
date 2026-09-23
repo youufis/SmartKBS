@@ -175,6 +175,22 @@ async def receive_sync_report(request: Request):
                        updated_at  = excluded.updated_at""",
                 (caller_ip,),
             )
+        # 主机名账本：动态 IP 下设备级累计（与 IP 账本同一套跨天自增语义）
+        host = str(hostname or "").strip()
+        if host:
+            execute_insert_update(
+                """INSERT INTO host_active_ledger
+                       (hostname, active_days, last_active, first_seen, total_hits, updated_at)
+                   VALUES (?, 1, date('now', 'localtime'), date('now', 'localtime'), 1,
+                           datetime('now', 'localtime'))
+                   ON CONFLICT(hostname) DO UPDATE SET
+                       active_days = active_days +
+                           CASE WHEN last_active < excluded.last_active THEN 1 ELSE 0 END,
+                       last_active = MAX(last_active, excluded.last_active),
+                       total_hits  = total_hits + 1,
+                       updated_at  = excluded.updated_at""",
+                (host,),
+            )
     except Exception as e:
         logger.warning(f"活跃日账本写入失败(不影响上报): {e}")
 
@@ -193,7 +209,11 @@ async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size
     _require_admin(request)
     page = max(1, page)
     offset = (page - 1) * page_size
-    rows = execute_query(f"SELECT COUNT(DISTINCT {_IDENTITY_SQL}) FROM config_sync_logs")
+    # V6.9 合并口径：有主机名的按「H:主机名」聚合成一行（动态出口 IP 换网不再滞留多行），
+    # 无主机名的退回「I:IP#node_id」独立成行。展示行取该身份最后一次心跳（含最新 IP/地域快照）。
+    merge_ident = ("CASE WHEN hostname IS NOT NULL AND hostname <> '' THEN 'H:' || hostname "
+                   "ELSE 'I:' || COALESCE(NULLIF(caller_ip, ''), 'no-ip') || '#' || node_id END")
+    rows = execute_query(f"SELECT COUNT(DISTINCT {merge_ident}) FROM config_sync_logs")
     total = rows[0][0] if rows else 0
     # 每条心跳在表里是一行新记录, 所以取同一身份下 id 最大的一行 = 最后一次心跳;
     # COUNT(*) 还原真实心跳次数, MIN(first_sync) 作为首次上报时间, IP/地域取最后一次快照。
@@ -204,15 +224,21 @@ async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size
         "       a.first_sync, s.last_sync, a.sync_count,"
         "       CASE WHEN s.last_sync >= datetime('now', ?, 'localtime') THEN 1 ELSE 0 END AS online,"
         "       CAST((julianday('now', 'localtime') - julianday(s.last_sync)) * 1440 AS INTEGER) AS minutes_ago,"
-        "       l.active_days, l.first_seen AS ledger_first_seen, l.total_hits"
+        "       COALESCE(h.active_days, l.active_days) AS active_days,"
+        "       COALESCE(h.first_seen, l.first_seen) AS ledger_first_seen,"
+        "       COALESCE(h.total_hits, l.total_hits) AS total_hits,"
+        "       a.ip_count, a.ip_list, l.active_days AS ip_active_days"
         " FROM ("
-        f"    SELECT {_IDENTITY_SQL} AS ident, MAX(id) AS max_id,"
-        "           MIN(first_sync) AS first_sync, COUNT(*) AS sync_count"
+        f"    SELECT {merge_ident} AS ident, MAX(id) AS max_id,"
+        "           MIN(first_sync) AS first_sync, COUNT(*) AS sync_count,"
+        "           COUNT(DISTINCT NULLIF(caller_ip, '')) AS ip_count,"
+        "           GROUP_CONCAT(DISTINCT NULLIF(caller_ip, '')) AS ip_list"
         "    FROM config_sync_logs"
         "    GROUP BY ident"
         " ) a"
         " JOIN config_sync_logs s ON s.id = a.max_id"
         " LEFT JOIN ip_active_ledger l ON l.ip = s.caller_ip"
+        " LEFT JOIN host_active_ledger h ON h.hostname = s.hostname"
         " ORDER BY online DESC, s.last_sync DESC"
         " LIMIT ? OFFSET ?",
         (f"-{_ONLINE_WINDOW_HOURS} hour", page_size, offset),
@@ -239,16 +265,30 @@ async def get_sync_nodes(request: Request, page: int = Query(1, ge=1), page_size
             "active_days": r[16],
             "ledger_first_seen": r[17],
             "total_hits": r[18],
+            "ip_count": r[19] or 1,
+            "ip_list": [x for x in (r[20] or "").split(",") if x],
+            "ip_active_days": r[21],
         })
     return {"nodes": result, "total": total, "page": page, "page_size": page_size}
 
 
 @router.delete("/config-sync/record/{record_id}")
 async def delete_sync_record(record_id: int, request: Request):
-    """删除指定单条记录 —— 仅管理员"""
+    """删除该设备的同步记录 —— 仅管理员
+
+    V6.9 列表按主机名合并后，「一行」= 该主机的全部明细：
+    - 有主机名：删除该主机名全部明细（只删展示行的话，下一条旧明细会顶上来，即"删不掉"的根因）
+    - 无主机名：仅删该展示行
+    活跃天数账本（IP/主机）不随删除清零——它是累计口径，与明细清理互不影响。
+    """
     _require_admin(request)
-    execute_insert_update("DELETE FROM config_sync_logs WHERE id=?", (record_id,))
-    return {"status": "ok", "id": record_id}
+    row = execute_query("SELECT hostname FROM config_sync_logs WHERE id=?", (record_id,))
+    host = str(row[0][0] or "") if row else ""
+    if host:
+        execute_insert_update("DELETE FROM config_sync_logs WHERE hostname=?", (host,))
+    else:
+        execute_insert_update("DELETE FROM config_sync_logs WHERE id=?", (record_id,))
+    return {"status": "ok", "id": record_id, "hostname": host}
 
 
 @router.delete("/config-sync/clear")

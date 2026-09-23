@@ -1090,6 +1090,27 @@ def init_db():
             except sqlite3.OperationalError:
                 pass
 
+            # ── 主机活跃日账本（每主机名一行；动态出口 IP 场景下与 IP 账本并行累计）──
+            c.execute("""CREATE TABLE IF NOT EXISTS host_active_ledger (
+                hostname TEXT PRIMARY KEY,
+                active_days INTEGER NOT NULL DEFAULT 1,
+                last_active TEXT NOT NULL,
+                first_seen TEXT NOT NULL,
+                total_hits INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT
+            )""")
+            try:
+                c.execute("""INSERT OR IGNORE INTO host_active_ledger
+                             (hostname, active_days, last_active, first_seen, total_hits, updated_at)
+                             SELECT hostname, COUNT(DISTINCT date(first_sync)),
+                                    MAX(date(first_sync)), MIN(date(first_sync)),
+                                    COUNT(*), datetime('now', 'localtime')
+                             FROM config_sync_logs
+                             WHERE hostname IS NOT NULL AND hostname <> ''
+                             GROUP BY hostname""")
+            except sqlite3.OperationalError:
+                pass
+
             # ── IP 地理位置缓存表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS geo_cache (
                 ip TEXT PRIMARY KEY,

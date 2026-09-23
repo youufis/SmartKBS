@@ -285,7 +285,7 @@
   "agoMinutes": "{{n}} 分钟前",
   "agoHours": "{{n}} 小时前",
   "agoDays": "{{n}} 天前",
-  "confirmDeleteRecord": "确定删除此记录？",
+  "confirmDeleteRecord": "删除该设备的全部同步记录？（旧IP行不会再出现；活跃天数账本保留）",
   "confirmOk": "确定",
   "cancel": "取消",
   "country": "国家/地区",
@@ -940,5 +940,8 @@
   "unitDay": "天",
   "ipDiff": "自报IP",
   "geoUnknown": "归属未知",
-  "firstSeen": "首次活跃"
+  "firstSeen": "首次活跃",
+  "ipMulti": "{n}个IP",
+  "ipMultiTip": "该主机为动态出口IP，历史IP已合并为一行",
+  "ipActiveDaysTip": "当前IP单独活跃{n}天"
 }
