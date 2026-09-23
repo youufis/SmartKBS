@@ -287,6 +287,8 @@ async def get_usage(request: Request):
     # 管理员不受限
     from backend.api.ai_service import is_appid_configured
     appid_configured = is_appid_configured()
+    from backend import bailian_kb
+    kb_ready_flag, kb_reason = bailian_kb.kb_ready()
 
     if role_val == 0:
         multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
@@ -296,6 +298,7 @@ async def get_usage(request: Request):
             "multimodal_enabled": multimodal_enabled,
             "model_name": model_name,
             "appid_configured": appid_configured,
+            "kb_ready": kb_ready_flag, "kb_reason": kb_reason,
         }
 
     multimodal_enabled = get_config_value("ENABLE_MULTIMODAL", False)
@@ -309,6 +312,7 @@ async def get_usage(request: Request):
         "multimodal_enabled": multimodal_enabled,
         "model_name": model_name,
         "appid_configured": appid_configured,
+        "kb_ready": kb_ready_flag, "kb_reason": kb_reason,
     }
 
 
@@ -398,12 +402,25 @@ def _chat_event_generator(
         enhanced_prompt = enhance_prompt_with_user_context(prompt, user_payload)
         valid_file_paths = [fp for fp in file_paths if fp and os.path.exists(fp)]
 
-        # ── V3.2 RAG 增强：由「知识」开关(rag_enabled)控制，从试题库和课程大纲检索相关知识 ──
+        # ── V6.7 RAG 增强：由「知识」开关(rag_enabled)控制 ──
+        # 云端知识库就绪时走「直连 + 百炼知识库」：强制直连（不走 APPID 智能体，
+        # 避免与其自带云端知识库双重注入），检索切片注入 prompt 并下发 references 事件；
+        # 未就绪/失败时退回原本地题库+大纲检索，绝不阻塞对话。
         if rag_enabled:
             try:
-                from backend.rag import retrieve_knowledge
-                rag_context = retrieve_knowledge(prompt, username)
-                logger.info(f"[RAG] 知识检索已执行 (user={username}, context_len={len(rag_context or '')})")
+                from backend import bailian_kb
+                kb_ok, _kb_reason = bailian_kb.kb_ready()
+                if kb_ok and use_agent:
+                    use_agent = False
+                from backend.rag import retrieve_knowledge, retrieve_knowledge_v2
+                if kb_ok:
+                    rag_context, kb_hit_refs = retrieve_knowledge_v2(prompt, username)
+                else:
+                    rag_context, kb_hit_refs = retrieve_knowledge(prompt, username), []
+                logger.info(f"[RAG] 知识检索已执行 (user={username}, cloud={'on' if kb_ok else 'off'}, "
+                            f"refs={len(kb_hit_refs)}, context_len={len(rag_context or '')})")
+                if kb_hit_refs:
+                    yield f"data: {json.dumps({'type': 'references', 'items': kb_hit_refs}, ensure_ascii=False)}\n\n"
                 if rag_context:
                     from backend.prompts import build_ai_role
                     from backend.permission_service import get_teacher_subjects
@@ -412,10 +429,17 @@ def _chat_event_generator(
                     user_role = get_user_role(username)
                     teacher_subjects = get_teacher_subjects(username) if user_role in (0, 1) else []
                     ai_role = build_ai_role(subjects=teacher_subjects) if teacher_subjects else build_ai_role()
-                    system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
-                    if "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
-                        rag_context = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
-                    enhanced_prompt = f"{system_role}\n\n{rag_context}\n\n用户问题：{enhanced_prompt}"
+                    if "【知识库参考资料】" in rag_context:
+                        system_role = (f"{ai_role}请优先依据【知识库参考资料】作答，引用资料内容时可注明《文档名》；"
+                                       f"资料未覆盖的部分可结合学科常识补充，但不得与资料矛盾；资料与问题无关时忽略资料。")
+                        context_block = f"以下是从教师知识库中检索到的资料：\n\n{rag_context}"
+                    elif "【相关试题】" in rag_context or "【课程知识点】" in rag_context:
+                        system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
+                        context_block = f"以下是数据库中检索到的相关教学资源，请参考这些内容回答：\n\n{rag_context}"
+                    else:
+                        system_role = f"{ai_role}请用你的学科知识回答用户的问题。"
+                        context_block = rag_context
+                    enhanced_prompt = f"{system_role}\n\n{context_block}\n\n用户问题：{enhanced_prompt}"
             except Exception as e:
                 logger.warning(f"RAG 检索失败: {e}")
 
@@ -445,7 +469,7 @@ def _chat_event_generator(
         mem_key, mem_history, mem_active = session_id, None, False
         try:
             from backend.api.ai_service import get_ai_config
-            if chat_memory.enabled() and get_ai_config(use_agent=use_agent)["mode"] == "direct":
+            if chat_memory.enabled() and get_ai_config(use_agent=use_agent)["mode"] in ("direct", "kb_direct"):
                 mem_key = chat_memory.ensure_session(username, session_id)
                 mem_active = True
                 hist = chat_memory.get_history(mem_key, username)

@@ -114,3 +114,56 @@ def _extract_keywords(text: str) -> list[str]:
             seen.add(w)
             unique.append(w)
     return unique[:8]
+
+
+# ══════════════════════════════════════════════════════════
+#  V6.7 「直连 + 知识库」融合检索
+#  百炼云端知识库（bailian_kb）优先，本地试题库/课程大纲兜底补充
+# ══════════════════════════════════════════════════════════
+
+_CLOUD_BUDGET = 4500   # 云端切片字符预算
+_LOCAL_BUDGET = 1500   # 本地题库/大纲预算
+_CHUNK_MAX = 900       # 单条切片截断长度
+
+
+def retrieve_knowledge_v2(prompt: str, username: str = "") -> tuple[str, list[dict]]:
+    """融合检索：返回 (资料上下文文本, 云端引用列表)
+
+    引用列表元素 {doc_name, score, title}，供前端展示来源；本地检索结果不计入引用。
+    """
+    parts: list[str] = []
+    references: list[dict] = []
+
+    # 1. 百炼云端知识库
+    try:
+        from backend import bailian_kb
+        chunks = bailian_kb.kb_search(prompt)
+    except Exception as e:
+        logger.warning(f"云端知识库检索异常（忽略，走本地）: {e}")
+        chunks = []
+    if chunks:
+        used = 0
+        lines: list[str] = []
+        for i, c in enumerate(chunks):
+            text = c["text"][:_CHUNK_MAX]
+            if used + len(text) > _CLOUD_BUDGET:
+                break
+            lines.append(f"〔资料{i + 1}·《{c['doc_name']}》·相关度{c['score']}〕\n{text}")
+            used += len(text)
+            references.append({"doc_name": c["doc_name"], "score": c["score"], "title": c["title"]})
+        if lines:
+            parts.append("【知识库参考资料】\n\n" + "\n\n".join(lines))
+
+    # 2. 本地试题库 + 课程大纲（原有能力，作为补充/降级）
+    local_parts: list[str] = []
+    questions = _search_questions(prompt)
+    if questions:
+        local_parts.append("【相关试题】\n" + "\n".join(questions[:5]))
+    knowledge = _search_knowledge_points(prompt)
+    if knowledge:
+        local_parts.append("【课程知识点】\n" + "\n".join(knowledge[:5]))
+    if local_parts:
+        parts.append(("\n\n".join(local_parts))[:_LOCAL_BUDGET])
+
+    context = "\n\n".join(parts)[:_CLOUD_BUDGET + _LOCAL_BUDGET + 200]
+    return context, references

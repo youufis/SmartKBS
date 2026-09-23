@@ -130,6 +130,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "AI_GRADING_BATCH_SIZE": 8,               # 一次 AI 调用合并评几份答案
     "AI_GRADING_CONCURRENCY": 2,              # 同时进行中的批改调用数（避免挤占对话/出题）
     "AI_GRADING_MAX_ITEMS_PER_ROUND": 60,     # 单轮最多批多少题（防一次跑太久）
+    # ── 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）──
+    # 开启后聊天页「知识」勾选走 直连大模型 + 百炼知识检索服务；关闭时勾选只启用本地题库/大纲检索（原行为）。
+    "KB_ENABLED": False,
+    "KB_API_BASE": "",       # 业务空间专属域名（https://llm-xxx.cn-beijing.maas.aliyuncs.com），须与 API Key 同空间
+    "KB_AGENT_ID": "",       # 知识检索服务 ID（aid-xxx），控制台"知识服务→知识检索"创建并发布后获得
+    "KB_TOP_K": 5,           # 每次检索最多注入的资料条数
+    "KB_MIN_SCORE": 0.5,     # 相关度阈值（0.01~1.00），低分切片丢弃
+    "KB_TIMEOUT_MS": 5000,   # 检索超时（毫秒），超时静默降级本地检索，不阻塞对话
 }
 
 
@@ -290,18 +298,26 @@ _NUM_RANGES: dict[str, tuple[float, float]] = {
     "AI_GRADING_BATCH_SIZE": (1, 50),
     "AI_GRADING_CONCURRENCY": (1, 8),
     "AI_GRADING_MAX_ITEMS_PER_ROUND": (1, 500),
+    # ── 百炼知识库检索（backend/bailian_kb.py）──
+    "KB_TOP_K": (1, 20),
+    "KB_TIMEOUT_MS": (500, 30000),
+}
+# 浮点范围校验（_NUM_RANGES 会取整，0.01~1.00 的阈值必须走这里）
+_FLOAT_RANGES: dict[str, tuple[float, float]] = {
+    "KB_MIN_SCORE": (0.01, 1.00),
 }
 _BOOL_KEYS = {
     "ENABLE_MULTIMODAL", "ENABLE_REQUEST_LIMIT", "IMAGE_GEN_ENABLED",
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
-    "auto_pull_enabled", "CHAT_MEMORY_ENABLED",
+    "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED",
 }
 _STR_LIMITS: dict[str, int] = {
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,
     "MODEL_LONG_NAME": 80, "MODEL_VL_NAME": 80, "MODEL_NAME": 80,
     "IMAGE_GEN_MODEL": 80, "IMAGE_GEN_SIZE": 32,
     "dashscope_api_key": 200, "APPID": 128,
+    "KB_API_BASE": 300, "KB_AGENT_ID": 128,
 }
 _STRLIST_KEYS = {"IMAGE_EXTENSIONS": 60, "DOCUMENT_EXTENSIONS": 60, "enabled_skills": 100,
                  "SUBJECTS": 40, "enabled_notification_types": 40, "IP_DENYLIST": 64}
@@ -367,6 +383,15 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
             if not lo <= num <= hi:
                 raise HTTPException(status_code=400, detail=f"{key} 需在 {lo}~{hi} 之间，当前 {num}")
             out[key] = num
+        elif key in _FLOAT_RANGES:
+            lo, hi = _FLOAT_RANGES[key]
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail=f"{key} 必须是数字（{lo}~{hi}）")
+            if not lo <= num <= hi:
+                raise HTTPException(status_code=400, detail=f"{key} 需在 {lo}~{hi} 之间，当前 {num}")
+            out[key] = round(num, 2)
         elif key in _BOOL_KEYS:
             if isinstance(value, bool):
                 out[key] = value
@@ -379,7 +404,7 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
                 raise HTTPException(status_code=400, detail=f"{key} 必须是文本")
             if len(value) > _STR_LIMITS[key]:
                 raise HTTPException(status_code=400, detail=f"{key} 最长 {_STR_LIMITS[key]} 字")
-            out[key] = value.strip() if key in ("dashscope_api_key", "APPID") else value
+            out[key] = value.strip() if key in ("dashscope_api_key", "APPID", "KB_API_BASE", "KB_AGENT_ID") else value
         elif key in _STRLIST_KEYS:
             if isinstance(value, str):
                 # 容错：标签输入框有时会把整串原样送来（旧前端 / 直接调 API），
@@ -444,6 +469,7 @@ async def get_config_meta(request: Request):
     require_admin(user)
     return {
         "num_ranges": {k: [lo, hi] for k, (lo, hi) in _NUM_RANGES.items()},
+        "float_ranges": {k: [lo, hi] for k, (lo, hi) in _FLOAT_RANGES.items()},
         "bool_keys": sorted(_BOOL_KEYS),
         "str_limits": _STR_LIMITS,
         "strlist_keys": _STRLIST_KEYS,
@@ -561,6 +587,102 @@ async def get_multimodal_status(request: Request):
     get_current_user(request)
     cfg = load_config()
     return {"multimodal_enabled": cfg.get("ENABLE_MULTIMODAL", False)}
+
+
+@router.post("/model-test", summary="直连大模型连通性自检（管理员）")
+async def model_connectivity_test(request: Request):
+    """实测「QWEN_OPENAI_API_BASE + MODEL_NAME + API Key」直连链路是否可用。
+
+    返回 {ok, cost_ms, model, reply} 或 {ok:false, error}，不抛异常。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+    import time
+    cfg = load_config()
+    base = str(cfg.get("QWEN_OPENAI_API_BASE", "") or "").strip().rstrip("/") \
+        or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model = str(cfg.get("MODEL_NAME", "") or "").strip()
+    key = str(cfg.get("dashscope_api_key", "") or "").strip()
+    if not key:
+        import os
+        key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not key:
+        return {"ok": False, "error": "API Key 未配置"}
+    if not model:
+        return {"ok": False, "error": "未填写 MODEL_NAME（模型与端点 → 对话模型）"}
+    t0 = time.time()
+    try:
+        import httpx
+        resp = httpx.post(
+            f"{base}/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": [{"role": "user", "content": "回复OK"}], "max_tokens": 16},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            d = resp.json()
+            reply = ((d.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+            return {"ok": True, "cost_ms": int((time.time() - t0) * 1000),
+                    "model": model, "reply": str(reply).strip()[:30] or "（空回复，但链路通）"}
+        return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:180]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+@router.post("/appid-test", summary="智能体应用连通性自检（管理员）")
+async def appid_connectivity_test(request: Request):
+    """用一条最小提问实测 APPID 智能体是否可用（Key 与 APPID 须同账号）。
+
+    返回 {ok, cost_ms, reply} 或 {ok:false, error}，不抛异常。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+    import time
+    cfg = load_config()
+    app_id = str(cfg.get("APPID", "") or "").strip()
+    if not app_id:
+        return {"ok": False, "error": "未填写 APPID（留空时系统本就直连大模型，无需测试）"}
+    key = str(cfg.get("dashscope_api_key", "") or "").strip()
+    if not key:
+        import os
+        key = os.environ.get("DASHSCOPE_API_KEY", "")
+    if not key:
+        return {"ok": False, "error": "API Key 未配置"}
+    t0 = time.time()
+    try:
+        import os
+        os.environ["DASHSCOPE_API_KEY"] = key
+        from dashscope import Application as DashScopeApp
+        resp = DashScopeApp.call(app_id=app_id,
+                                 messages=[{"role": "user", "content": "回复OK"}],
+                                 stream=False)
+        text = None
+        output = getattr(resp, "output", None)
+        if isinstance(output, str):
+            text = output
+        elif output is not None:
+            text = (output.get("text") if hasattr(output, "get") else getattr(output, "text", None))
+        if text:
+            return {"ok": True, "cost_ms": int((time.time() - t0) * 1000),
+                    "reply": str(text).strip()[:30]}
+        code = str(getattr(resp, "code", "") or "")
+        msg = str(getattr(resp, "message", "") or "")
+        return {"ok": False,
+                "error": (code + " " + msg).strip() or "智能体返回为空（请检查应用是否已发布、知识库是否正常）"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+@router.post("/kb-test", summary="知识库检索连通性自检（管理员）")
+async def kb_connectivity_test(request: Request):
+    """用一条真实检索验证「专属域名 + 检索服务 ID + API Key」三件套是否配套。
+
+    返回 {ok, total, cost_ms, sample} 或 {ok:false, error:原因}，不抛异常。
+    """
+    user = get_current_user(request)
+    require_admin(user)
+    from backend import bailian_kb
+    return bailian_kb.test_kb()
 
 
 @router.get("/titles", summary="获取称号配置（管理员）")

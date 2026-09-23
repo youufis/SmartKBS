@@ -1,7 +1,7 @@
 /** 对话状态管理 (Zustand) */
 import i18n from '../i18n'
 import { create } from 'zustand';
-import type { Message, TreeNode } from '../types';
+import type { KbReference, Message, TreeNode } from '../types';
 import { chatStream, checkApiKeyStatus } from '../api/chat';
 import * as historyApi from '../api/history';
 import apiClient from '../api/client';
@@ -127,6 +127,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
     // S1: 后端按「增量」推送，前端累积并节流渲染（约 ≤16 次/秒），结束/出错时最终落屏
     let acc = '';
+    // 知识库引用来源：随 SSE references 事件到达，挂在当条 assistant 消息下
+    const kbRefs: KbReference[] = [];
     let lastFlush = 0;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
@@ -136,6 +138,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       const last = msgs[msgs.length - 1];
       if (last && last.role === 'assistant') {
         last.content = acc;
+        if (kbRefs.length) last.references = kbRefs;
         set({ messages: [...msgs], currentText: acc });
       }
     };
@@ -166,7 +169,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
         }
         abortController = null;
       },
-      abortController.signal
+      abortController.signal,
+      (items) => { kbRefs.push(...items); }
     );
   },
 

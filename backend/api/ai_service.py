@@ -26,6 +26,17 @@ def get_ai_config(use_agent: bool = True):
         use_agent: 是否优先使用智能体。True=有 APPID 时使用智能体；False=强制直接调大模型
     """
     from backend.api.config_router import get_config_value
+    if use_agent:
+        # V6.8 知识库接管：检索链路就绪时，原本走 APPID 智能体的全部 AI 业务
+        # 统一改走「直连 + 知识库检索」（接管语义与原智能体一致：自带知识库）。
+        # KB 未启用/配置不全 → 照旧走智能体；use_agent=False → 永远纯直连。
+        try:
+            from backend import bailian_kb
+            kb_ok, _ = bailian_kb.kb_ready()
+        except Exception:
+            kb_ok = False
+        if kb_ok:
+            return {"mode": "kb_direct"}
     app_id = get_config_value("APPID", "")
     if app_id and use_agent:
         return {"mode": "agent", "app_id": app_id}
@@ -62,6 +73,40 @@ def is_appid_configured() -> bool:
     return bool(app_id)
 
 
+# ── V6.8 「直连 + 知识库」接管：统一注入点 ──
+
+_KB_INJECT_HEAD = (
+    "【知识库参考资料】以下内容检索自教师知识库（标注了文档名与相关度）。"
+    "若与当前任务相关，请优先以其为依据作答或创作，并保留任务原有的输出格式要求；"
+    "与任务无关时忽略本资料。\n\n"
+)
+
+
+_KB_INJECT_HEAD_LOCAL = (
+    "【教学参考资料】以下内容检索自平台题库与课程大纲。"
+    "若与当前任务相关，请优先以其为依据作答或创作，并保留任务原有的输出格式要求；"
+    "与任务无关时忽略本资料。\n\n"
+)
+
+
+def _augment_with_kb(prompt: str) -> str:
+    """kb_direct 模式：检索知识库并把资料前置到任务 prompt。
+
+    检索失败/无命中时原样返回（等同纯直连），绝不抛异常阻塞业务。
+    """
+    try:
+        from backend.rag import retrieve_knowledge_v2
+        context, _refs = retrieve_knowledge_v2(prompt)
+    except Exception as e:
+        logger.warning(f"[KB] 接管模式检索失败，退回纯直连: {e}")
+        return prompt
+    if not context:
+        return prompt
+    # 注入头按实际来源措辞：云端命中用「知识库资料」头，纯本地兜底用通用头
+    head = _KB_INJECT_HEAD if "【知识库参考资料】" in context else _KB_INJECT_HEAD_LOCAL
+    return f"{head}{context}\n\n———\n【当前任务】\n{prompt}"
+
+
 # ── 非流式调用（同步，返回完整文本） ──
 
 def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
@@ -75,6 +120,11 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
 
     if cfg["mode"] == "agent":
         return _call_agent_sync(prompt, api_key, cfg["app_id"])
+    elif cfg["mode"] == "kb_direct":
+        prompt = _augment_with_kb(prompt)
+        d = get_ai_config(use_agent=False)
+        return _call_model_sync(prompt, api_key, d["model"], d["api_base"], history=history,
+                                max_tokens=max_tokens)
     else:
         return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
                                 max_tokens=max_tokens)
@@ -247,6 +297,10 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
 
     if cfg["mode"] == "agent":
         return _call_agent_stream(prompt, api_key, cfg["app_id"], session_id)
+    elif cfg["mode"] == "kb_direct":
+        prompt = _augment_with_kb(prompt)
+        d = get_ai_config(use_agent=False)
+        return _call_model_stream(prompt, api_key, d["model"], d["api_base"], history=history)
     else:
         return _call_model_stream(prompt, api_key, cfg["model"], cfg["api_base"], history=history)
 
@@ -376,6 +430,13 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
     os.environ["DASHSCOPE_API_KEY"] = api_key
     if cfg["mode"] == "agent":
         return await _call_agent_async(prompt, api_key, cfg["app_id"])
+    elif cfg["mode"] == "kb_direct":
+        import asyncio
+        loop = asyncio.get_running_loop()
+        prompt = await loop.run_in_executor(_ai_thread_pool, _augment_with_kb, prompt)
+        d = get_ai_config(use_agent=False)
+        return await _call_model_async(prompt, api_key, d["model"], d["api_base"], history=history,
+                                       max_tokens=max_tokens, json_mode=json_mode)
     else:
         return await _call_model_async(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
                                        max_tokens=max_tokens, json_mode=json_mode)

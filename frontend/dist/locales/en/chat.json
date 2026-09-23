@@ -161,5 +161,10 @@
   "fileTag": "(file)",
   "unknownError": "Unknown error",
   "loadFailed": "Load failed",
-  "aiThinking": "AI is thinking..."
+  "aiThinking": "AI is thinking...",
+  "ragTipCloud": "Uses 'direct LLM + Bailian knowledge base': retrieves references first, sources shown under the answer",
+  "ragTipNotReady": "Cloud knowledge base not ready: {{reason}}",
+  "ragTipNotReadyDefault": "Configure it in System Settings > Knowledge Base Retrieval",
+  "refSources": "Sources",
+  "useAgentTakenOverTip": "Knowledge base mode has taken over the agent service: former agent calls now run as 'direct + knowledge retrieval'"
 }

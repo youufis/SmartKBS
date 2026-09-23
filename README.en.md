@@ -14,7 +14,7 @@
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-8.2.0-blue)
+![Version](https://img.shields.io/badge/Version-8.3.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,12 +30,12 @@
 
 ---
 
-> 📌 **V8.2.0 Highlights**:
-> ⏱️ **Blocking AI calls removed**: exam submission no longer reports failure when the grade was in fact saved
-> 🎯 **Quiz & Quest**: rooms no longer freeze on the last question, restart-after-reset works, quest start no longer times out
-> 📰 **Self-healing news feeds**: dead RSS sources replaced and validated per feed, circuit breaker + reserve pool; brief 57.2s -> 6.6s
-> 🔄 **Trustworthy auto-upgrade**: nothing stays stuck in “upgrading”, no false “success”, unverified migrations flagged
-> 📈 **Correct statistics**: subject titles and weekly portraits stop under-counting (legacy shell tables cleaned with a safety valve)
+> 📌 **V8.3.0 Highlights**:
+> 📚 **Knowledge base takeover**: Bailian retrieval fully wired in - one switch moves every former agent flow (question generation, lesson plans, grading, analytics) to "direct + knowledge retrieval", degrading gracefully so nothing blocks
+> 🧠 **Citable answers**: check "Knowledge" in chat to retrieve per message; sources with document names and relevance scores appear under answers (teachers/admins)
+> 🔌 **Three self-tests**: the config page adds Test Retrieval / Test LLM / Test Agent, catching a mismatched workspace domain, service id or API key in one click
+> ⚙️ **Config hardening**: six knowledge base knobs with float threshold validation and bilingual strings
+> 🛡️ **Zero regression**: with the master switch off, behavior is byte-identical to 8.2
 
 ---
 
@@ -973,6 +973,16 @@ Git-based online incremental upgrade system:
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
 ## 📦 Changelog
+
+### v8.3.0 (2026-09-23)
+
+- 📚 **Bailian knowledge base integration**: new `backend/bailian_kb.py` retrieval module plus a cloud-local fusion layer; the "direct + knowledge base" mode takes over the former agent path - question generation, lesson plans, grading, analytics and 19 other AI flows now retrieve first and generate second, with configurable top-k, relevance threshold and timeout, degrading to local lookup or plain direct calls so no business is blocked; flipping the master switch restores the old path instantly
+- 🧠 **Chat "Knowledge" checkbox**: greyed out with the exact missing item when the cloud knowledge base is not ready; when checked it retrieves per message and lists sources under the answer (document name + relevance, visible to teachers and admins); the "Agent" checkbox is disabled while takeover is active so UI and routing stay consistent
+- 🔌 **Connectivity self-tests**: the config page gains "Test Retrieval / Test LLM / Test Agent" buttons (`kb-test` / `model-test` / `appid-test`), one click pinpoints a mismatched dedicated domain, search service id or API key
+- ⚙️ **Config system**: new float range validation (`_FLOAT_RANGES`) with the six knowledge base keys registered; i18next interpolation fixed to double braces (test result placeholders used to show up literally)
+- ⚠️ **Breaking changes**: none
+
+---
 
 ### v8.2.0 (2026-09-14)
 

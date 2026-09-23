@@ -23,19 +23,28 @@ export interface AuthState {
   token: string | null;
 }
 
+// 知识库引用来源（「直连 + 百炼知识库」模式随 SSE references 事件下发）
+export interface KbReference {
+  doc_name: string;
+  score?: number;
+  title?: string;
+}
+
 // 聊天消息
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
+  references?: KbReference[];
 }
 
 // SSE 流式数据块
 export interface SSEChunk {
-  type: 'delta' | 'done' | 'error';
+  type: 'delta' | 'done' | 'error' | 'references';
   content?: string;
   session_id?: string;
+  items?: KbReference[];
 }
 
 // 用户管理 - 用户列表项

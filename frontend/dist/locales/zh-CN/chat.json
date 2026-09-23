@@ -161,5 +161,10 @@
   "fileTag": "(文件)",
   "unknownError": "未知错误",
   "loadFailed": "加载失败",
-  "aiThinking": "AI 思考中..."
+  "aiThinking": "AI 思考中...",
+  "ragTipCloud": "勾选后走「直连 + 百炼知识库」：先检索知识库资料再作答，回答下方附引用来源",
+  "ragTipNotReady": "云端知识库未就绪：{{reason}}",
+  "ragTipNotReadyDefault": "请在「系统配置 → 知识库检索」完成配置",
+  "refSources": "引用来源",
+  "useAgentTakenOverTip": "知识库模式已接管智能体服务：原智能体调用统一改走「直连 + 知识库」"
 }

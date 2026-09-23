@@ -41,7 +41,7 @@ interface ConfigField {
   key: string
   labelKey: string
   descKey?: string
-  type: 'text' | 'password' | 'number' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle'
   group: string
   required?: boolean
   placeholderKey?: string
@@ -62,7 +62,7 @@ interface ConfigZone {
 
 const CONFIG_ZONES: ConfigZone[] = [
   { id: 'basic', titleKey: 'zone_basic', descKey: 'zone_basic_desc', sections: ['brand', 'curriculum', 'notify', 'incentive'] },
-  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'chat', 'memory', 'grading', 'imagegen'] },
+  { id: 'ai', titleKey: 'zone_ai', descKey: 'zone_ai_desc', sections: ['credentials', 'models', 'knowledgebase', 'chat', 'memory', 'grading', 'imagegen'] },
   { id: 'files', titleKey: 'zone_files', descKey: 'zone_files_desc', sections: ['upload', 'quota'] },
   { id: 'security', titleKey: 'zone_security', descKey: 'zone_security_desc', sections: ['session', 'guard', 'ratelimit'] },
   { id: 'ops', titleKey: 'zone_ops', descKey: 'zone_ops_desc', sections: ['upgrade'] },
@@ -75,6 +75,7 @@ const SECTION_TITLES: Record<string, string> = {
   incentive: 'group_incentive',
   credentials: 'group_credentials',
   models: 'group_models',
+  knowledgebase: 'group_knowledgebase',
   chat: 'group_chat',
   memory: 'group_memory',
   grading: 'group_grading',
@@ -99,6 +100,7 @@ const SCOPE_TAG_KEYS: Record<NonNullable<ConfigField['scope']>, string> = {
 // 后端下发的校验元数据（GET /api/config/meta），前端不再自己复制一份取值范围
 interface ConfigMeta {
   num_ranges: Record<string, [number, number]>
+  float_ranges?: Record<string, [number, number]>
   bool_keys: string[]
   str_limits: Record<string, number>
   strlist_keys: Record<string, number>
@@ -133,6 +135,13 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'models' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'text', group: 'models' },
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
+  // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
+  { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', type: 'boolean', group: 'knowledgebase', required: false },
+  { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
+  { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
+  { key: 'KB_TOP_K', labelKey: 'field_KB_TOP_K', descKey: 'field_KB_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
+  { key: 'KB_MIN_SCORE', labelKey: 'field_KB_MIN_SCORE', descKey: 'field_KB_MIN_SCORE_desc', type: 'float', group: 'knowledgebase', required: false },
+  { key: 'KB_TIMEOUT_MS', labelKey: 'field_KB_TIMEOUT_MS', descKey: 'field_KB_TIMEOUT_MS_desc', type: 'number', group: 'knowledgebase', required: false, unitKey: 'unitMilliSecond' },
   // 对话权限
   { key: 'ENABLE_AI_CHAT_FOR_ROLES', labelKey: 'field_ENABLE_AI_CHAT_FOR_ROLES', descKey: 'field_ENABLE_AI_CHAT_FOR_ROLES_desc', type: 'roles', group: 'chat' },
   // 直连模式多轮记忆（backend/chat_memory.py；APPID 留空时才生效）
@@ -1154,6 +1163,21 @@ const SystemConfigPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [apikeyStatus, setApikeyStatus] = useState<{ status: string; source: string; hint: string; configured: boolean } | null>(null)
+  // 知识库连通性自检（POST /api/config/kb-test）
+  const [kbTesting, setKbTesting] = useState(false)
+  const [kbTestResult, setKbTestResult] = useState<{
+    ok: boolean; total?: number; cost_ms?: number; error?: string
+    sample?: { doc_name: string; score: number }[]
+  } | null>(null)
+  // 直连大模型 / APPID 智能体连通性自检（POST /api/config/model-test | /appid-test）
+  const [modelTesting, setModelTesting] = useState(false)
+  const [modelTestResult, setModelTestResult] = useState<{
+    ok: boolean; cost_ms?: number; model?: string; reply?: string; error?: string
+  } | null>(null)
+  const [appidTesting, setAppidTesting] = useState(false)
+  const [appidTestResult, setAppidTestResult] = useState<{
+    ok: boolean; cost_ms?: number; reply?: string; error?: string
+  } | null>(null)
   const [form] = Form.useForm()
   const [query, setQuery] = useState('')                // 顶部搜索关键词
   const [activeSec, setActiveSec] = useState('')        // 锚点导航当前高亮的小节
@@ -1350,7 +1374,9 @@ const SystemConfigPage: React.FC = () => {
     // 数字项把后端 _NUM_RANGES 的范围直接标在说明里，避免"填了才被拒"
     const getDesc = (field: ConfigField) => {
       const base = field.descKey ? t(field.descKey) : undefined
-      const range = field.type === 'number' ? meta?.num_ranges?.[field.key] : undefined
+      const range = field.type === 'number' ? meta?.num_ranges?.[field.key]
+        : field.type === 'float' ? meta?.float_ranges?.[field.key]
+        : undefined
       if (!range) return base
       const hint = t('rangeHint', { lo: range[0], hi: range[1], unit: field.unitKey ? t(field.unitKey) : '' })
       return base ? base + hint : hint
@@ -1416,6 +1442,20 @@ const SystemConfigPage: React.FC = () => {
                     min={meta?.num_ranges?.[field.key]?.[0] ?? 0}
                     max={meta?.num_ranges?.[field.key]?.[1]}
                     step={1}
+                  />
+                </Form.Item>
+              ) : field.type === 'float' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  extra={getDesc(field)}
+                >
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    min={meta?.float_ranges?.[field.key]?.[0] ?? 0.01}
+                    max={meta?.float_ranges?.[field.key]?.[1] ?? 1}
+                    step={0.05}
+                    precision={2}
                   />
                 </Form.Item>
               ) : field.type === 'password' ? (
@@ -1520,6 +1560,81 @@ const SystemConfigPage: React.FC = () => {
               )}
             </div>
           ))}
+          {group === 'models' && isOpen && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+              <Tooltip title={t('modelTestHint')}>
+                <Button size="small" loading={modelTesting} onClick={async () => {
+                  setModelTesting(true); setModelTestResult(null)
+                  try {
+                    const { data } = await apiClient.post('/api/config/model-test')
+                    setModelTestResult(data)
+                  } catch (e: any) {
+                    setModelTestResult({ ok: false, error: e?.response?.data?.detail || e.message || 'request failed' })
+                  } finally { setModelTesting(false) }
+                }}>{t('modelTestBtn')}</Button>
+              </Tooltip>
+              <Tooltip title={t('appidTestHint')}>
+                <Button size="small" loading={appidTesting} onClick={async () => {
+                  setAppidTesting(true); setAppidTestResult(null)
+                  try {
+                    const { data } = await apiClient.post('/api/config/appid-test')
+                    setAppidTestResult(data)
+                  } catch (e: any) {
+                    setAppidTestResult({ ok: false, error: e?.response?.data?.detail || e.message || 'request failed' })
+                  } finally { setAppidTesting(false) }
+                }}>{t('appidTestBtn')}</Button>
+              </Tooltip>
+              {modelTestResult && (
+                <Alert
+                  style={{ width: '100%', marginTop: 4 }}
+                  type={modelTestResult.ok ? 'success' : 'error'}
+                  showIcon
+                  message={modelTestResult.ok
+                    ? t('modelTestOk', { model: modelTestResult.model, reply: modelTestResult.reply, ms: modelTestResult.cost_ms })
+                    : t('modelTestFail', { err: modelTestResult.error })}
+                />
+              )}
+              {appidTestResult && (
+                <Alert
+                  style={{ width: '100%', marginTop: 4 }}
+                  type={appidTestResult.ok ? 'success' : 'error'}
+                  showIcon
+                  message={appidTestResult.ok
+                    ? t('appidTestOk', { reply: appidTestResult.reply, ms: appidTestResult.cost_ms })
+                    : t('appidTestFail', { err: appidTestResult.error })}
+                />
+              )}
+            </div>
+          )}
+          {group === 'knowledgebase' && isOpen && (
+            <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+              <Button size="small" loading={kbTesting} onClick={async () => {
+                setKbTesting(true); setKbTestResult(null)
+                try {
+                  const { data } = await apiClient.post('/api/config/kb-test')
+                  setKbTestResult(data)
+                } catch (e: any) {
+                  setKbTestResult({ ok: false, error: e?.response?.data?.detail || e.message || 'request failed' })
+                } finally { setKbTesting(false) }
+              }}>{t('kbTestBtn')}</Button>
+              <Text type="secondary" style={{ fontSize: 12 }}>{t('kbTestHint')}</Text>
+              {kbTestResult && (
+                <Alert
+                  style={{ width: '100%', marginTop: 4 }}
+                  type={kbTestResult.ok ? 'success' : 'error'}
+                  showIcon
+                  message={kbTestResult.ok
+                    ? t('kbTestOk', { n: kbTestResult.total, ms: kbTestResult.cost_ms })
+                    : t('kbTestFail', { err: kbTestResult.error })}
+                  description={kbTestResult.ok && kbTestResult.sample?.length ? (
+                    <span style={{ fontSize: 12 }}>
+                      {t('kbTestSample')}：{kbTestResult.sample.map((x) => `《${x.doc_name}》(${x.score})`).join('、')}
+                    </span>
+                  ) : undefined}
+                />
+              )}
+            </div>
+          )}
         </div>
       </div>
     )

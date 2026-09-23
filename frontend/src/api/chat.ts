@@ -1,5 +1,6 @@
 /** 对话 API（SSE 流式） */
 import apiClient from './client';
+import type { KbReference } from '../types';
 
 export interface UsageInfo {
   enabled: boolean;
@@ -9,6 +10,9 @@ export interface UsageInfo {
   multimodal_enabled?: boolean;
   model_name?: string;
   appid_configured?: boolean;
+  /** 云端知识库链路是否就绪（KB_ENABLED + 专属域名 + 检索服务 ID 配套） */
+  kb_ready?: boolean;
+  kb_reason?: string;
 }
 
 /** 获取当前用户的每日用量 */
@@ -55,7 +59,8 @@ export async function chatStream(
   onDelta: (text: string) => void,
   onDone: (sessionId: string) => void,
   onError: (error: string) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onReferences?: (items: KbReference[]) => void
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token');
 
@@ -106,6 +111,9 @@ export async function chatStream(
                 break;
               case 'error':
                 onError(data.content || '未知错误');
+                break;
+              case 'references':
+                onReferences?.(data.items || []);
                 break;
             }
           } catch {

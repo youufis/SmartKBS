@@ -42,6 +42,23 @@ const COMPANION_AVATARS: Record<string, string> = {
   humorous: '😄',
 }
 
+/** 知识库引用来源行：文档名 + 相关度分数 */
+const KbRefSources: React.FC<{ refs: Message['references'] }> = ({ refs }) => {
+  const { t } = useTranslation('chat')
+  if (!refs || refs.length === 0) return null
+  return (
+    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed #e8e8e8', fontSize: 12, color: '#8c8c8c', lineHeight: 1.8 }}>
+      📖 {t('refSources')}：
+      {refs.map((r, i) => (
+        <span key={i} style={{ marginRight: 10 }}>
+          [{i + 1}] {r.doc_name}
+          {typeof r.score === 'number' ? ` (${r.score.toFixed(2)})` : ''}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 const MessageBubble: React.FC<{
   msg: Message
   isStreaming?: boolean
@@ -49,7 +66,9 @@ const MessageBubble: React.FC<{
   companionMode?: boolean
   companionName?: string
   companionPersonality?: string
-}> = ({ msg, isStreaming, onPreviewHtml, companionMode, companionName, companionPersonality }) => {
+  /** 是否渲染知识库引用来源（P0 仅教师/管理员） */
+  showRefs?: boolean
+}> = ({ msg, isStreaming, onPreviewHtml, companionMode, companionName, companionPersonality, showRefs }) => {
   const { t } = useTranslation('chat')
   const isUser = msg.role === 'user'
   const companionAvatar = COMPANION_AVATARS[companionPersonality || 'encouraging'] || '🧠'
@@ -134,6 +153,7 @@ const MessageBubble: React.FC<{
                 </span>
               ))}
             </div>
+            {!isUser && showRefs && <KbRefSources refs={msg.references} />}
           </div>
         </div>
       </div>
@@ -170,6 +190,7 @@ const MessageBubble: React.FC<{
               ))}
           </div>
         )}
+        {!isUser && showRefs && <KbRefSources refs={msg.references} />}
       </div>
     </div>
   )
@@ -258,6 +279,16 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     chatApi.getUsage().then(setUsage).catch(() => {})
   }, [])
+
+  // 云端知识库未就绪（管理员关开关/撤配置）时自动取消「知识」勾选
+  useEffect(() => {
+    if (usage && !usage.kb_ready && ragEnabled) setRagEnabled(false)
+  }, [usage, ragEnabled, setRagEnabled])
+
+  // 知识库接管后「智能体」开关失效：清掉残留勾选，保证 UI 与实际链路一致
+  useEffect(() => {
+    if (usage?.kb_ready && useAgent) setUseAgent(false)
+  }, [usage, useAgent, setUseAgent])
 
   // 检测最后一条 AI 回复是否有 HTML（派生状态）
   const hasHtmlInResponse = useMemo(() => {
@@ -796,6 +827,7 @@ const ChatPage: React.FC = () => {
               companionMode={companionMode}
               companionName={curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
               companionPersonality={companionConfig?.personality}
+              showRefs={curRole === 'teacher' || curRole === 'admin'}
             />
           ))
         )}
@@ -1204,10 +1236,13 @@ const ChatPage: React.FC = () => {
             </Tooltip>
             <Tooltip title={
               <span style={{ fontSize: 12, lineHeight: 1.6 }}>
-                {t('ragTip')}
+                {usage?.kb_ready
+                  ? t('ragTipCloud')
+                  : t('ragTipNotReady', { reason: usage?.kb_reason || t('ragTipNotReadyDefault') })}
               </span>
             }>
               <Checkbox checked={ragEnabled}
+                disabled={!usage?.kb_ready}
                 onChange={(e) => setRagEnabled(e.target.checked)}>
                 {t('knowledge')}
               </Checkbox>
@@ -1250,11 +1285,12 @@ const ChatPage: React.FC = () => {
             )}
             {usage && (
               <Tooltip
-                title={usage.appid_configured ? t('useAgentTip') : t('useAgentDisabledTip')}
+                title={usage.kb_ready ? t('useAgentTakenOverTip')
+                  : usage.appid_configured ? t('useAgentTip') : t('useAgentDisabledTip')}
               >
                 <Checkbox
-                  checked={usage.appid_configured ? useAgent : false}
-                  disabled={!usage.appid_configured}
+                  checked={usage.appid_configured && !usage.kb_ready ? useAgent : false}
+                  disabled={!usage.appid_configured || !!usage.kb_ready}
                   onChange={(e) => setUseAgent(e.target.checked)}
                   style={{ fontSize: 12, marginLeft: 4 }}
                 >
