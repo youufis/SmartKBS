@@ -166,5 +166,9 @@
   "ragTipNotReady": "Cloud knowledge base not ready: {{reason}}",
   "ragTipNotReadyDefault": "Configure it in System Settings > Knowledge Base Retrieval",
   "refSources": "Sources",
-  "useAgentTakenOverTip": "Knowledge base mode has taken over the agent service: former agent calls now run as 'direct + knowledge retrieval'"
+  "useAgentTakenOverTip": "Knowledge base mode has taken over the agent service: former agent calls now run as 'direct + knowledge retrieval'",
+  "modeLlm": "LLM",
+  "modeAgent": "Agent",
+  "modeKb": "Knowledge Base",
+  "modeBadgeTip": "The chat pipeline is set by system config (priority: knowledge base > agent > LLM); admins adjust it in System Settings"
 }

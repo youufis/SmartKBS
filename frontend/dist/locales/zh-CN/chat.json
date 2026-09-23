@@ -166,5 +166,9 @@
   "ragTipNotReady": "云端知识库未就绪：{{reason}}",
   "ragTipNotReadyDefault": "请在「系统配置 → 知识库检索」完成配置",
   "refSources": "引用来源",
-  "useAgentTakenOverTip": "知识库模式已接管智能体服务：原智能体调用统一改走「直连 + 知识库」"
+  "useAgentTakenOverTip": "知识库模式已接管智能体服务：原智能体调用统一改走「直连 + 知识库」",
+  "modeLlm": "大模型",
+  "modeAgent": "智能体",
+  "modeKb": "知识库",
+  "modeBadgeTip": "AI 对话链路由系统配置决定（优先级：知识库 > 智能体 > 大模型），教师/管理员可在「系统配置」调整"
 }

@@ -931,5 +931,7 @@
   "modelTestBtn": "Test LLM",
   "modelTestHint": "Verifies the direct 'Base URL + model + API Key' chain with one minimal call (tiny cost).",
   "modelTestOk": "LLM OK: {{model}} replied \"{{reply}}\" in {{ms}} ms",
-  "modelTestFail": "LLM call failed: {{err}}"
+  "modelTestFail": "LLM call failed: {{err}}",
+  "field_AGENT_ENABLED": "Enable Agent",
+  "field_AGENT_ENABLED_desc": "When checked and APPID is set, AI calls not taken over by the knowledge base use the agent app; the knowledge base wins when ready. Uncheck to fall back to direct LLM."
 }
