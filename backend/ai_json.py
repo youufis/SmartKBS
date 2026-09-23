@@ -90,10 +90,42 @@ def _repair(s: str) -> str:
     return s
 
 
+def _fix_delim_quotes(s: str) -> str:
+    """只转换「JSON 定界位」上的全角引号/漂移符号，字符串内容里的中文引号原样保留。
+
+    典型病态输出（qwen 关思考链长输出时全半角混用）：
+      "C": “下料”和“画线”的顺序…",   ← 值以全角引号起头
+      "D"> 不同的人对同一过程…",      ← 键名冒号漂移成 >
+      "D": 环节的数量是固定不变的…"   ← 值丢失开引号
+    旧 _repair 把全角引号全局换成 ASCII，反而把内容里合法的引号变成
+    未转义定界符——所以必须定向处理，且排在其它修复之前试。
+    """
+    # 1) 定界位开引号：紧跟 : , [ { 之后（可含空白）的全角引号 → ASCII
+    s = re.sub(r'([:\[,\{\}\]]\s*)[“”]', r'\1"', s)
+    # 2) 定界位闭引号：后面紧跟 , : } ] 或行尾/换行的全角引号 → ASCII
+    s = re.sub(r'[“”](\s*(?:[,\:\}\]]|\r?\n\s*[\}\]]))', r'"\1', s)
+    # 3) 键名冒号漂移："D"> → "D":（先于补开引号，让规则 4 能接手其后的裸值）
+    s = re.sub(r'("([A-Za-z_\u4e00-\u9fff]{1,12})")>', r'"\2":', s)
+    # 3b) 键名连闭引号一起漂移："D> 值 → "D": "值
+    s = re.sub(r'"([A-Za-z_\u4e00-\u9fff]{1,3})>\s*(?=[\u4e00-\u9fff“"])', r'"\1": "', s)
+    # 4) 值整体丢失开引号："key": 中文……" → 补上 ASCII 开引号（仅限以汉字裸起的值）
+    s = re.sub(r'("[A-Za-z_\u4e00-\u9fff]+"\s*:\s*)([\u4e00-\u9fff][^"\n]*?)(?=")',
+               r'\1"\2', s)
+    return s
+
+
+def _repair_delim(s: str) -> str:
+    """定界修复 + 非法转义 + 尾逗号（不做全局引号替换，保住内容引号）"""
+    s = _fix_delim_quotes(s)
+    s = _fix_escapes(s)
+    s = _drop_trailing_commas(s)
+    return s
+
+
 def _try(text: str) -> Any:
     if not text:
         return None
-    for cand in (text, _repair(text)):
+    for cand in (text, _repair_delim(text), _repair(text)):
         try:
             return json.loads(cand)
         except (ValueError, TypeError):
@@ -149,6 +181,14 @@ def _from_dict(data: Any) -> list | None:
     return None
 
 
+def try_parse(text: str) -> Any:
+    """AI 输出 → Python 对象（dict/list）：原文直解失败后走定界/转义/尾逗号修复。
+
+    给「本地已截好 JSON 片段、只差一步解析」的调用点用；彻底失败返回 None。
+    """
+    return _try(text)
+
+
 def extract_json_array(text: str, salvage: bool = True) -> list | None:
     """尽最大努力把 AI 文本里的题目数组取出来；实在拿不到才返回 None。
 
@@ -172,10 +212,10 @@ def extract_json_array2(text: str, salvage: bool = True) -> tuple[list | None, d
             return got, meta
 
     # ```json ... ``` 代码块（可能有多个，逐个试）
-    for m in re.finditer(r"```(?:json|JSON)?\*(.+?)```", text, re.DOTALL):
+    for m in re.finditer(r"```(?:json|JSON)?\s*(.+?)```", text, re.DOTALL):
         got = _from_dict(_try(m.group(1).strip()))
         if got:
-            return got
+            return got, meta
 
     # 客套话 + 裸数组：括号配平取最外层
     frag = _balanced(text, "[", "]")

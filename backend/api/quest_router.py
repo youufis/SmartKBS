@@ -95,7 +95,15 @@ def _lenient_json_loads(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         _bs = chr(92)
         _pat = _bs + _bs + '(?![' + _bs + _bs + '"/bfnru])'
-        return json.loads(re.sub(_pat, lambda m: _bs + _bs, text))
+        try:
+            return json.loads(re.sub(_pat, lambda m: _bs + _bs, text))
+        except json.JSONDecodeError:
+            # 最后兜底：统一容错层；仍失败则抛原始异常走既有错误路径
+            from backend import ai_json
+            parsed = ai_json.try_parse(text)
+            if isinstance(parsed, dict):
+                return parsed
+            raise
 
 def _call_ai_generate_question(api_key: str, used_categories: list[str],
                                  question_index: int) -> dict[str, Any]:
@@ -111,7 +119,7 @@ def _call_ai_generate_question(api_key: str, used_categories: list[str],
         # 直连大模型并关闭思考链：出题只要严格 JSON，无需推理链。
         # （实测思考链会把单次调用拖到 20-30s，3 题串行直接打爆前端 30s 超时）
         # 在共享线程池中运行同步调用，避免阻塞事件循环
-        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False)
+        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False, json_mode=True)
         text = future.result(timeout=45)
         # 清理可能的 markdown 代码块
         text = text.strip()
@@ -327,7 +335,7 @@ def _call_ai_phone_friend(api_key: str, question: str, options: dict[str, Any]) 
     prompt = apply_skills(prompt, "quest")
     try:
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync_direct
-        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False)
+        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False, json_mode=True)
         text = future.result(timeout=30)
         return text.strip().strip('"').strip("'")
     except Exception as e:
@@ -347,7 +355,7 @@ def _call_ai_audience_vote(api_key: str, question: str, options: dict[str, Any])
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync_direct
-        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False)
+        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False, json_mode=True)
         text = future.result(timeout=30)
         text = text.strip()
         if text.startswith("```"):
@@ -1719,7 +1727,7 @@ async def quest_bank_generate_svg(question_id: int, request: Request):
     prompt = apply_skills(prompt, "quest")
     try:
         # 同步 AI 调用放线程里跑, 避免阻塞事件循环（同闯关出题口径）
-        text = await asyncio.to_thread(call_ai_sync_direct, prompt, api_key)
+        text = await asyncio.to_thread(call_ai_sync_direct, prompt, api_key, json_mode=True)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成 SVG 失败: {str(e)}")
 

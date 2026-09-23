@@ -242,7 +242,7 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
         # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
         try:
-            result_text = await call_ai_async(prompt, api_key)
+            result_text = await call_ai_async(prompt, api_key, json_mode=True)
         except Exception as e:
             # AI 失败但有题库题目 → 静默返回题库结果
             if all_questions:
@@ -387,7 +387,7 @@ async def ai_generate_poll(req: AiGeneratePoll, request: Request):
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
-        result_text = await call_ai_async(prompt, api_key)
+        result_text = await call_ai_async(prompt, api_key, json_mode=True)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成投票失败: {str(e)}")
 
@@ -1761,10 +1761,10 @@ def _ai_content_review(content: str, username: str, role: str = "question") -> t
         except concurrent.futures.TimeoutError:
             logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
             return True, ""
+        from backend import ai_json
         jm = re.search(r'\{[^}]+\}', result)
-        if jm:
-            data = json.loads(jm.group())
-            if not data.get("safe", True):
+        data = (ai_json.try_parse(jm.group()) if jm else None) or ai_json.try_parse(result) or {}
+        if isinstance(data, dict) and not data.get("safe", True):
                 _record_rejection(username, content)
                 return False, data.get("reason", "内容不合规")
         return True, ""

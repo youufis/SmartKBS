@@ -188,7 +188,7 @@ async def ai_code_review(submission_id: int, request: Request):
 
     async def _do() -> dict[str, Any]:
         try:
-            rt = await call_ai_async(prompt, api_key)
+            rt = await call_ai_async(prompt, api_key, json_mode=True)
             d = extract_json_from_text(rt)
             if d:
                 q_update("UPDATE code_submissions SET ai_review=?, ai_review_status='completed' WHERE id=?", (json.dumps(d, ensure_ascii=False), submission_id))
@@ -502,7 +502,7 @@ async def ai_generate_code_problem(req: AiGenerateCodeProblem, request: Request)
 
     async def _do() -> dict[str, Any]:
         try:
-            rt = await call_ai_async(prompt, api_key)
+            rt = await call_ai_async(prompt, api_key, json_mode=True)
             d = extract_json_from_text(rt)
             if d:
                 return {"status": "ok", "data": d, "raw": rt}

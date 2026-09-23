@@ -197,7 +197,7 @@ async def recommend_resources(kp_id: int, request: Request, refresh: bool = Quer
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
-        result_text = await call_ai_async(prompt, api_key)
+        result_text = await call_ai_async(prompt, api_key, json_mode=True)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 推荐失败: {str(e)}")
 

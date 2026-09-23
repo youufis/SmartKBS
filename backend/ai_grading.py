@@ -203,7 +203,7 @@ async def _grade_single_fallback(job: GradingJob, api_key: str) -> dict[str, Any
                 half_minus=str(job.max_score * 0.4),
                 student_answer=str(job.answer_text or "").replace("{", "{{").replace("}", "}}"),
             )
-        result = extract_json_from_text(await call_ai_async(prompt, api_key))
+        result = extract_json_from_text(await call_ai_async(prompt, api_key, json_mode=True))
         if isinstance(result, dict):
             score = _clamp(result.get("score"), job.max_score)
             if score is not None:
@@ -293,7 +293,7 @@ async def _grade_batch_call(jobs: list[GradingJob], api_key: str, sem: asyncio.S
 
     async with sem:
         try:
-            text = await call_ai_async(_build_batch_prompt(jobs), api_key)
+            text = await call_ai_async(_build_batch_prompt(jobs), api_key, json_mode=True)
             parsed = _parse_batch_result(text, len(jobs))
         except Exception as e:
             logger.warning(f"[ai_grading] 批量批改调用失败(题面 {str(jobs[0].question_text)[:24]!r}, {len(jobs)} 份): {e}")

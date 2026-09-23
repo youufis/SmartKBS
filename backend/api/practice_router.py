@@ -339,7 +339,7 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
             raise HTTPException(status_code=400, detail="未配置 API Key，请在系统配置中设置")
         prompt = _build_generate_prompt(req, avoid_texts=[q["question"] for q in bank_qs])
         try:
-            result_text = await call_ai_async(prompt, api_key)
+            result_text = await call_ai_async(prompt, api_key, json_mode=True)
         except Exception as e:
             if bank_qs:
                 return bank_qs, "；".join(notes + [f"AI 补足失败({e})，仅返回题库题"])

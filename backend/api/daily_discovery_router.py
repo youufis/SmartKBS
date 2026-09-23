@@ -170,6 +170,20 @@ def _parse_ai_response(text: str) -> list[dict]:
     except Exception:
         pass
 
+    # 4.5 统一容错层兜底（全角定界/转义漂移/尾逗号）
+    try:
+        from backend import ai_json
+        cards = ai_json.try_parse(text)
+        if isinstance(cards, list):
+            return cards
+        if isinstance(cards, dict):
+            for key in ("cards", "data", "result", "items"):
+                if key in cards and isinstance(cards[key], list):
+                    return cards[key]
+            return [cards]
+    except Exception:
+        pass
+
     # 5. 最后尝试：从 Markdown 格式降级解析
     try:
         cards = _parse_markdown_cards(text)
@@ -422,7 +436,7 @@ class DiscoveryService:
                 extra_instructions="请生成8条有趣的知识卡片，涵盖不同领域。"
             )
             prompt = apply_skills(prompt, "daily-discovery")
-            text = call_ai_sync_direct(prompt, api_key)
+            text = call_ai_sync_direct(prompt, api_key, json_mode=True)
             cards = _parse_ai_response(text)
             for card in cards:
                 try:
@@ -469,7 +483,7 @@ class DiscoveryService:
             )
             prompt = apply_skills(prompt, "daily-discovery")
             try:
-                text = call_ai_sync_direct(prompt, api_key)
+                text = call_ai_sync_direct(prompt, api_key, json_mode=True)
                 cards = _parse_ai_response(text)
                 saved = 0
                 for card in cards:
@@ -531,7 +545,7 @@ class DiscoveryService:
             raise HTTPException(503, "AI 服务不可用，请配置 API Key")
 
         try:
-            text = call_ai_sync_direct(prompt, api_key)
+            text = call_ai_sync_direct(prompt, api_key, json_mode=True)
             new_cards = _parse_ai_response(text)
         except Exception as e:
             logger.warning(f"AI 刷新失败: {e}")

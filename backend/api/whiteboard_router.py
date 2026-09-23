@@ -146,6 +146,15 @@ def _assert_room_access(user: dict, room_id: int, need_manage: bool = False,
     raise HTTPException(status_code=403, detail=f"无权访问该房间的{what}")
 
 
+def _jm_parse(frag: str) -> dict:
+    """白板 AI 动作 JSON：直解失败走统一容错层；仍失败抛异常走既有错误路径"""
+    from backend import ai_json
+    data = ai_json.try_parse(frag)
+    if not isinstance(data, dict):
+        raise ValueError("AI 返回格式异常")
+    return data
+
+
 def _get_ai_timeout() -> int:
     """获取 AI 请求超时配置（秒）"""
     return int(get_config_value("AI_REQUEST_TIMEOUT", 300))
@@ -1577,14 +1586,14 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
         timeout = _get_ai_timeout()
 
         from backend.api.ai_service import call_ai_sync_with_timeout
-        result = await call_ai_sync_with_timeout(prompt, api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, api_key, timeout=timeout, json_mode=True)
 
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if not jm:
             yield _sse("error", {"message": "AI 返回格式异常"})
             return
-        data = json.loads(jm.group())
+        data = _jm_parse(jm.group())
 
         mode = data.get("mode", "svg")
 
@@ -1683,11 +1692,11 @@ async def ai_generate_board(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
-            data = json.loads(jm.group())
+            data = _jm_parse(jm.group())
             return {"title": data.get("title", kp_name), "shapes": data.get("shapes", [])}
         return {"title": kp_name, "shapes": [], "raw": result}
     except TimeoutError as e:
@@ -1730,11 +1739,11 @@ async def ai_beautify_board(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
-            data = json.loads(jm.group())
+            data = _jm_parse(jm.group())
             return {"title": data.get("title", "美化板书"), "shapes": data.get("shapes", [])}
         return {"title": "美化板书", "shapes": [], "raw": result}
     except TimeoutError as e:
@@ -1768,11 +1777,11 @@ async def ai_smart_annotation(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
-            data = json.loads(jm.group())
+            data = _jm_parse(jm.group())
             return data
         return {"summary": "", "label_type": "comment", "label_text": result, "color": "#ff4d4f"}
     except TimeoutError as e:
@@ -1812,11 +1821,11 @@ async def ai_generate_mindmap(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
-            data = json.loads(jm.group())
+            data = _jm_parse(jm.group())
             return {"title": data.get("title", "思维导图"), "shapes": data.get("shapes", [])}
         return {"title": "思维导图", "shapes": [], "raw": result}
     except TimeoutError as e:
@@ -1853,7 +1862,7 @@ async def ai_suggest(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         return {"suggestion": result.strip()}
     except TimeoutError as e:
         logger.warning(f"AI 教学建议超时: {e}")
@@ -1893,10 +1902,10 @@ async def export_board_summary(room_id: int, request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
-        data = json.loads(jm.group()) if jm else {}
+        data = _jm_parse(jm.group()) if jm else {}
     except TimeoutError as e:
         logger.warning(f"AI 导出总结超时: {e}")
         raise HTTPException(status_code=504, detail=str(e))
@@ -2010,11 +2019,11 @@ async def ai_generate_quiz(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
-            data = json.loads(jm.group())
+            data = _jm_parse(jm.group())
             return data
         return {"error": "AI 返回格式异常", "raw": result}
     except TimeoutError as e:
@@ -2054,11 +2063,11 @@ async def ai_generate_bilingual(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout)
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True)
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
-            data = json.loads(jm.group())
+            data = _jm_parse(jm.group())
             pairs = data.get("pairs", [])
             # 将双语对转为 TLDraw 形状
             shapes = []

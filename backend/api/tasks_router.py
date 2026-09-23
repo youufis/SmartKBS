@@ -786,20 +786,31 @@ async def ai_grade_task(task_id: str, request: Request):
     # 6. 调用 qwen-long
     try:
         async with httpx.AsyncClient() as client:
+            req_payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": f"{build_ai_role()}正在批改学生提交的作业对话记录。"},
+                    {"role": "system", "content": f"fileid://{file_id}"},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                # 批改结果必须是 JSON：网关层强制合法格式，杜绝「AI 返回格式异常」
+                "response_format": {"type": "json_object"},
+            }
             resp = await client.post(
                 f"{api_base}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": f"{build_ai_role()}正在批改学生提交的作业对话记录。"},
-                        {"role": "system", "content": f"fileid://{file_id}"},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "stream": False,
-                },
+                json=req_payload,
                 timeout=180,
             )
+            if resp.status_code == 400 and "response_format" in req_payload:
+                req_payload.pop("response_format")  # 网关不支持时降级重试
+                resp = await client.post(
+                    f"{api_base}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=req_payload,
+                    timeout=180,
+                )
             if resp.status_code != 200:
                 raise HTTPException(status_code=502, detail=f"AI 模型调用失败: {resp.text[:200]}")
 
@@ -821,7 +832,10 @@ async def ai_grade_task(task_id: str, request: Request):
                 cleaned = cleaned.rsplit("```", 1)[0]
         cleaned = cleaned.strip()
 
-        result_data = json.loads(cleaned)
+        from backend import ai_json
+        result_data = ai_json.try_parse(cleaned)
+        if result_data is None:
+            raise ValueError("AI 返回格式异常（容错层亦无法解析）")
         grades_list = result_data.get("grades", [])
         class_summary = result_data.get("summary", "")
 

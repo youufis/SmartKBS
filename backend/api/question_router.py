@@ -315,7 +315,7 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
     # 调用 AI
     try:
-        result_text = await _call_dashscope_agent(prompt, api_key)
+        result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True)
     except Exception as e:
         logger.error(f"AI 生成试题失败: {e}")
         raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
@@ -428,14 +428,41 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
     )
 
 
-async def _call_dashscope_agent(prompt: str, api_key: str) -> str:
-    """调用 AI（异步）- 支持智能体/直接调大模型双模式"""
+async def _call_dashscope_agent(prompt: str, api_key: str, json_mode: bool = False) -> str:
+    """调用 AI（异步）- 支持智能体/直接调大模型双模式；json_mode 由网关保证输出合法 JSON"""
     from backend.api.ai_service import call_ai_async
-    return await call_ai_async(prompt, api_key)
+    return await call_ai_async(prompt, api_key, json_mode=json_mode)
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
-    """解析 AI 返回的 JSON 试题列表（多策略鲁棒解析）"""
+    """解析 AI 返回的 JSON 试题列表：先走快速策略，失败再上 8.2 容错层兜底。
+
+    兜底层处理：客套话包裹、fence 代码块、尾逗号、非法转义、截断补齐；
+    全部失败时原文留档 LogFiles/ai_raw 便于复盘；
+    解析成功后剥离误写进题干的选项（strip 只在证据充分时动手，不会误伤）。
+    """
+    from backend import ai_json
+    questions = _parse_ai_response_fast(text)
+    if not questions:
+        got, meta = ai_json.extract_json_array2(text, salvage=True)
+        if got:
+            logger.info(f"[题解析] 容错层兜底成功 salvaged={meta.get('salvaged')}，共 {len(got)} 条")
+            questions = got
+        elif (text or "").strip():
+            raw_path = ai_json.dump_failed_raw("questions", text)
+            logger.error(f"[题解析] 全部策略失败（原文留档: {raw_path}）前200字: {text[:200]}")
+    out: list[dict[str, Any]] = []
+    for q in questions or []:
+        if isinstance(q, dict):
+            q, changed, why = ai_json.strip_options_from_stem(q)
+            if changed:
+                logger.info(f"[题解析] 已剥离题干内嵌选项（{why}）")
+        out.append(q)
+    return out
+
+
+def _parse_ai_response_fast(text: str) -> list[dict[str, Any]]:
+    """解析 AI 返回的 JSON 试题列表（多策略鲁棒解析）——快速路径，失败交给上层容错层"""
     text = text.strip()
     if not text:
         return []
@@ -1079,7 +1106,7 @@ async def extract_questions_from_text(
             prompt = _build_extract_prompt(subject, difficulty, batches[0] if batches else content)
             logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
             try:
-                result_text = await _call_dashscope_agent(prompt, api_key)
+                result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True)
             except Exception as e:
                 logger.error(f"AI 提取试题失败: {e}")
                 raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
@@ -1101,7 +1128,7 @@ async def extract_questions_from_text(
                     last_err = "返回无法解析"
                     for _attempt in (1, 2):
                         try:
-                            rt = await _call_dashscope_agent(p, api_key)
+                            rt = await _call_dashscope_agent(p, api_key, json_mode=True)
                             qs = _parse_ai_response(rt)
                             if qs:
                                 return qs, None
@@ -1528,7 +1555,8 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
     logger.info(f"开始调用AI生成多媒体试题: subject={req.subject}, type={req.question_type}")
 
     try:
-        result_text = await _call_dashscope_agent(prompt, api_key)
+        # 含配图出题输出长、结构复杂：走 json_mode，由网关兜底 JSON 合法性
+        result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
 

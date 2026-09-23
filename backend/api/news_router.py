@@ -952,7 +952,7 @@ class NewsService:
             )
             # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
             # NW20: 关掉思考链 —— 摘要无需推理，实测单篇 30.5s → 约 3s，学生点开就能看见摘要
-            text = call_ai_sync_direct(prompt, api_key, enable_thinking=False)
+            text = call_ai_sync_direct(prompt, api_key, enable_thinking=False, json_mode=True)
 
             # 安全解析 AI 返回的 JSON
             result = extract_json_from_text(text) if isinstance(text, str) else {}
@@ -1130,7 +1130,7 @@ class NewsService:
                 api_key = _get_dashscope_api_key()
                 if api_key:
                     try:
-                        content = call_ai_sync_direct(prompt, api_key, enable_thinking=False)
+                        content = call_ai_sync_direct(prompt, api_key, enable_thinking=False, json_mode=True)
                     except Exception as e:
                         logger.warning(f"[新闻] 简报 AI 生成失败，改用本地兜底稿: {e}")
                 if not content or not content.strip():

@@ -402,6 +402,12 @@ def _loads_json_repair(candidate: str):
     variants.append(_strip_ctrl_chars(base))
     variants.append(_fix_json_escapes(base))
     variants.append(_fix_json_escapes(_strip_ctrl_chars(base)))
+    # 定界位全角引号/键名冒号漂移修复（与 ai_json 统一策略，覆盖 qwen 全半角混用）
+    try:
+        from backend.ai_json import _repair_delim
+        variants.append(_repair_delim(base))
+    except Exception:
+        pass
     # 裸换行常被模型塞进字符串值里 → 换成空格再试
     variants.append(base.replace("\n", " ").replace("\r", " "))
     if base[:1] in ("[", "{"):

@@ -110,7 +110,7 @@ def _augment_with_kb(prompt: str) -> str:
 # ── 非流式调用（同步，返回完整文本） ──
 
 def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
-                 max_tokens: Optional[int] = None) -> str:
+                 max_tokens: Optional[int] = None, json_mode: bool = False) -> str:
     """同步调用 AI，返回完整响应文本（history 仅在直连分支生效）"""
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
@@ -125,21 +125,22 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
         d = get_ai_config(use_agent=False)
         # 接管链路默认关思考链：出题/简答类任务提速数倍（原智能体也无深度思考，行为对齐）
         return _call_model_sync(prompt, api_key, d["model"], d["api_base"], history=history,
-                                max_tokens=max_tokens, enable_thinking=False)
+                                max_tokens=max_tokens, enable_thinking=False, json_mode=json_mode)
     else:
         return _call_model_sync(prompt, api_key, cfg["model"], cfg["api_base"], history=history,
-                                max_tokens=max_tokens)
+                                max_tokens=max_tokens, json_mode=json_mode)
 
 
 async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: int = 120,
                                     history: Optional[list] = None,
-                                    max_tokens: Optional[int] = None) -> str:
+                                    max_tokens: Optional[int] = None,
+                                    json_mode: bool = False) -> str:
     """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
     import asyncio
     loop = asyncio.get_running_loop()
     try:
         result = await asyncio.wait_for(
-            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens),
+            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens, json_mode),
             timeout=timeout,
         )
         return result
@@ -202,7 +203,8 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
 def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                      enable_thinking: Optional[bool] = None,
                      history: Optional[list] = None,
-                     max_tokens: Optional[int] = None) -> str:
+                     max_tokens: Optional[int] = None,
+                     json_mode: bool = False) -> str:
     """直接调用大模型（同步，OpenAI 兼容接口）
 
     enable_thinking=None 保持现状（由模型默认决定）；传 False 关闭思考链。
@@ -230,6 +232,8 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                 payload["max_tokens"] = int(max_tokens)
             if enable_thinking is not None and "qwen" in model.lower():
                 payload["enable_thinking"] = bool(enable_thinking)
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
             resp = sync_requests.post(
                 f"{api_base}/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -266,7 +270,8 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
 
 
 def call_ai_sync_direct(prompt: str, api_key: str,
-                        enable_thinking: Optional[bool] = None) -> str:
+                        enable_thinking: Optional[bool] = None,
+                        json_mode: bool = False) -> str:
     """强制直接调用大模型（绕过智能体），用于知识闯关等不需要 APPID 的场景
 
     enable_thinking=False 可关闭思考链 —— 摘要、简报、改写这类无需推理的任务能省 10 倍等待。
@@ -281,7 +286,7 @@ def call_ai_sync_direct(prompt: str, api_key: str,
     logger.info(f"call_ai_sync_direct: model={model}, prompt_len={len(prompt)}, "
                 f"thinking={'默认' if enable_thinking is None else enable_thinking}, "
                 f"prompt_head={prompt[:120]}")
-    return _call_model_sync(prompt, api_key, model, api_base, enable_thinking=enable_thinking)
+    return _call_model_sync(prompt, api_key, model, api_base, enable_thinking=enable_thinking, json_mode=json_mode)
 
 
 # ── 流式调用（返回事件生成器） ──
@@ -390,6 +395,11 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
                 stream=True,
                 timeout=180,
             )
+            if resp.status_code == 400 and json_mode:
+                logger.warning("AI 网关拒绝 response_format=json_object，降级为普通调用重试")
+                return _call_model_sync(prompt, api_key, model, api_base,
+                                        enable_thinking=enable_thinking, history=history,
+                                        max_tokens=max_tokens, json_mode=False)
             if resp.status_code == 400 and fmt == "str":
                 continue  # 尝试数组格式
             if resp.status_code != 200:

@@ -1116,7 +1116,17 @@ def _extract_json_from_ai_response(text: str) -> dict[str, Any] | None:
                 try:
                     return json.loads(text[i:j + 1])
                 except (json.JSONDecodeError, TypeError):
-                    return None
+                    break
+    # 最后兜底：统一容错层（全角定界/冒号漂移/非法转义/尾逗号）
+    from backend import ai_json
+    parsed = ai_json.try_parse(text)
+    if isinstance(parsed, dict):
+        return parsed
+    i0, j0 = text.find("{"), text.rfind("}")
+    if 0 <= i0 < j0:
+        parsed = ai_json.try_parse(text[i0:j0 + 1])
+        if isinstance(parsed, dict):
+            return parsed
     return None
 
 
@@ -1141,7 +1151,7 @@ async def _grade_short_with_ai(q: dict[str, Any], student_answer: str, api_key: 
             # S-GRADING: 评分 prompt 不注入技能 —— 技能段会多塞约 1900 字教学指令
             # (「禁止直接给出最终答案、要展示推导过程」等), 与「只输出 JSON」冲突,
             # 返回变成散文 → 解析失败 → 静默退回关键词判 0 分。与练习侧同一结论。
-            ai_resp = await call_ai_async(prompt, api_key)
+            ai_resp = await call_ai_async(prompt, api_key, json_mode=True)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
                 ai_score = float(result.get("score", 0))
@@ -1196,7 +1206,7 @@ async def _grade_essay_with_ai(q: dict[str, Any], student_answer: str, api_key: 
                 max_score=str(q_score),
                 student_answer=str(student_answer or "").replace('{', '{{').replace('}', '}}'),
             )
-            ai_resp = await call_ai_async(prompt, api_key)
+            ai_resp = await call_ai_async(prompt, api_key, json_mode=True)
             result = _extract_json_from_ai_response(ai_resp)
             if result:
                 ai_score = float(result.get("score", 0))
@@ -2487,7 +2497,7 @@ async def ai_compose_exam(exam_id: int, req: AIComposeRequest, request: Request)
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
-        ai_response = await call_ai_async(prompt, api_key)
+        ai_response = await call_ai_async(prompt, api_key, json_mode=True)
     except Exception as e:
         logger.error(f"AI 组卷调用失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 组卷失败: {str(e)}")

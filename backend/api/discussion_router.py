@@ -237,10 +237,10 @@ def _ai_content_review(content: str, username: str) -> tuple[bool, str]:
         except concurrent.futures.TimeoutError:
             logger.warning(f"AI 内容审核超时（15秒），已放行: user={username}")
             return True, ""
+        from backend import ai_json
         jm = re.search(r'\{[^}]+\}', result)
-        if jm:
-            data = json.loads(jm.group())
-            if not data.get("safe", True):
+        data = (ai_json.try_parse(jm.group()) if jm else None) or ai_json.try_parse(result) or {}
+        if isinstance(data, dict) and not data.get("safe", True):
                 _record_discussion_rejection(username, content)
                 return False, data.get("reason", "内容不合规")
         return True, ""
@@ -382,7 +382,7 @@ async def ai_generate_discussion(req: AiGenerateDiscussion, request: Request):
 
     async def _do_generate() -> dict[str, Any]:
         try:
-            result = await call_ai_async(prompt, api_key)
+            result = await call_ai_async(prompt, api_key, json_mode=True)
             if result:
                 data = extract_json_from_text(result)
                 if data:
@@ -762,7 +762,7 @@ async def _auto_generate_report(disc_id: int):
 
                 try:
                     from backend.api.ai_service import call_ai_async
-                    summary = await call_ai_async(prompt, api_key)
+                    summary = await call_ai_async(prompt, api_key, json_mode=True)
                     if summary:
                         # 尝试解析 JSON
                         import json as _json
