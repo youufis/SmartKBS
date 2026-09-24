@@ -24,7 +24,8 @@ from backend.auth import (
     increment_failed_attempts,
     reset_failed_attempts,
     SECURITY_QUESTIONS,
-)
+
+    is_graduated,)
 from backend.api.auth_guard import unauthorized
 from backend.api.config_router import get_config_value
 from backend.security_guard import record_login_failure
