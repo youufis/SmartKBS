@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
+import { fetchGrades } from '../api/gradeClass'
 
 const { Option } = Select
 const { Dragger } = Upload
@@ -74,10 +75,8 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setSubjects(data.subjects)
     }).catch(() => {})
-    apiClient.get('/api/config/grades').then(({ data }) => {
-      const list = data?.grades
-      if (list?.length > 0) setGradeOptions(list.map((g: any) => g.name || g))
-    }).catch(() => {})
+    // 年级下拉取实际有在读学生的年级（/config/grades 是 K12 主数据，含本校没有的年级）
+    fetchGrades().then((list) => { if (list.length > 0) setGradeOptions(list) }).catch(() => {})
   }, [])
 
   // ── 动态进度 ──

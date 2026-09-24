@@ -17,6 +17,7 @@ import * as examsApi from '../api/exams'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { fetchGrades } from '../api/gradeClass'
 
 const ExamComposePage: React.FC = () => {
   const { t } = useTranslation('exam')
@@ -66,12 +67,9 @@ const ExamComposePage: React.FC = () => {
 
   async function loadGrades() {
     try {
-      const { data } = await apiClient.get('/api/config/grades')
-      const gradeList = data?.grades
-      if (gradeList?.length > 0) {
-        // 新API返回 [{id, name, stage, sort_order}, ...]
-        setGrades(gradeList.map((g: any) => g.name || g))
-      }
+      // 动态取实际有学生的年级（如仅 高一/高二），不再用 K12 主数据预设
+      const list = await fetchGrades()
+      if (list.length > 0) setGrades(list)
     } catch { /* ignore */ }
   }
 

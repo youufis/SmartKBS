@@ -105,7 +105,14 @@ def kb_search(query: str, api_key: Optional[str] = None) -> list[dict[str, Any]]
     import time as _t
     url = _search_url(cfg["base"])
     hdr = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    body = {"agent_id": cfg["agent_id"], "query": query}
+    # 百炼检索接口限制 query ≤ 4500 字节：备课/生成HTML 等长任务 prompt 直接当检索词会被
+    # InvalidParameter 拒绝（表现为 http=401 body=exceeds the limit），按字节安全截断
+    q = query
+    if len(q.encode("utf-8")) > 4000:
+        q = q[:1300]
+        while len(q.encode("utf-8")) > 4000:
+            q = q[:-100]
+    body = {"agent_id": cfg["agent_id"], "query": q}
     try:
         resp = _get_client().post(url, headers=hdr, json=body, timeout=cfg["timeout_ms"] / 1000.0)
         # 401/429/5xx 多为边缘网关瞬时抖动（响应体非百炼标准 JSON 即可佐证），快速重试一次
