@@ -242,7 +242,8 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
         # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
         try:
-            result_text = await call_ai_async(prompt, api_key, json_mode=True)
+            result_text = await call_ai_async(prompt, api_key, json_mode=True,
+                                  kb_query=f"{req.subject} {req.topic}")
         except Exception as e:
             # AI 失败但有题库题目 → 静默返回题库结果
             if all_questions:
