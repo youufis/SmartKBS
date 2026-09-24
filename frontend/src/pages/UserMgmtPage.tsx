@@ -139,7 +139,8 @@ const UserMgmtPage: React.FC = () => {
     }
     setSearchLoading(true)
     try {
-      const { users } = await usersApi.getAllUsers(keyword)
+      // 搜索覆盖全部状态（含毕业归档），结果表内可直接点「恢复」
+      const { users } = await usersApi.getAllUsers(keyword, 'all')
       setSearchResult(users)
     } catch (err: unknown) {
       message.error((err as ApiError)?.response?.data?.detail || t('searchFailed'))
