@@ -315,7 +315,8 @@ async def generate_questions(req: GenerateRequest, request: Request):
 
     # 调用 AI
     try:
-        result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True)
+        result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True,
+                                              kb_query=f"{req.subject} {req.knowledge_points}")
     except Exception as e:
         logger.error(f"AI 生成试题失败: {e}")
         raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
@@ -428,10 +429,11 @@ def _build_generate_prompt(subject: str, knowledge_points: str, type_desc: str, 
     )
 
 
-async def _call_dashscope_agent(prompt: str, api_key: str, json_mode: bool = False) -> str:
+async def _call_dashscope_agent(prompt: str, api_key: str, json_mode: bool = False,
+                                kb_query: str = "") -> str:
     """调用 AI（异步）- 支持智能体/直接调大模型双模式；json_mode 由网关保证输出合法 JSON"""
     from backend.api.ai_service import call_ai_async
-    return await call_ai_async(prompt, api_key, json_mode=json_mode)
+    return await call_ai_async(prompt, api_key, json_mode=json_mode, kb_query=kb_query)
 
 
 def _parse_ai_response(text: str) -> list[dict[str, Any]]:
@@ -1106,7 +1108,7 @@ async def extract_questions_from_text(
             prompt = _build_extract_prompt(subject, difficulty, batches[0] if batches else content)
             logger.info(f"开始调用AI提取试题: subject={subject}, source={source_label}, content_len={len(content)}")
             try:
-                result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True)
+                result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True, kb_query=subject)
             except Exception as e:
                 logger.error(f"AI 提取试题失败: {e}")
                 raise HTTPException(status_code=502, detail=f"AI 提取失败: {str(e)}")
@@ -1128,7 +1130,7 @@ async def extract_questions_from_text(
                     last_err = "返回无法解析"
                     for _attempt in (1, 2):
                         try:
-                            rt = await _call_dashscope_agent(p, api_key, json_mode=True)
+                            rt = await _call_dashscope_agent(p, api_key, json_mode=True, kb_query=_subject)
                             qs = _parse_ai_response(rt)
                             if qs:
                                 return qs, None
@@ -1556,7 +1558,8 @@ async def generate_questions_with_media(req: GenerateWithMediaRequest, request: 
 
     try:
         # 含配图出题输出长、结构复杂：走 json_mode，由网关兜底 JSON 合法性
-        result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True)
+        result_text = await _call_dashscope_agent(prompt, api_key, json_mode=True,
+                                          kb_query=f"{req.subject} {req.knowledge_points}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"AI 生成失败: {str(e)}")
 

@@ -304,7 +304,7 @@ async def _select_questions_by_ai(
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
     try:
-        ai_response = await call_ai_async(prompt, api_key, json_mode=True)
+        ai_response = await call_ai_async(prompt, api_key, json_mode=True, kb_query=knowledge_focus)
         logger.info(f"AI 组卷返回: {str(ai_response)[:300]}")
     except Exception as e:
         logger.error(f"AI 组卷调用失败: {e}")

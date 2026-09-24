@@ -1225,7 +1225,8 @@ async def ai_preview_html(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         logger.info(f"开始 AI 生成 HTML, 类型={gen_type}, 主题={topic}, prompt长度={len(prompt)}")
-        raw_output = await call_ai_sync_with_timeout(prompt, api_key, timeout=300, max_tokens=16000) or ""
+        raw_output = await call_ai_sync_with_timeout(prompt, api_key, timeout=300, max_tokens=16000,
+                                                             kb_query=topic) or ""
         logger.info(f"AI 生成完成, 内容长度={len(raw_output)}")
     except TimeoutError as e:
         logger.error(f"AI 生成超时: {e}")
@@ -1838,7 +1839,7 @@ async def ai_generate_async(request: Request):
             from backend.api.ai_service import call_ai_sync_with_timeout
             from backend import ai_json
 
-            ai_result = await call_ai_sync_with_timeout(prompt, api_key, timeout=ASYNC_AI_TIMEOUT)
+            ai_result = await call_ai_sync_with_timeout(prompt, api_key, timeout=ASYNC_AI_TIMEOUT, kb_query=theme)
             if not ai_result or len(ai_result.strip()) < 50:
                 return {"error": "AI 返回内容为空或过短"}
 

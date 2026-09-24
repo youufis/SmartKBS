@@ -2401,7 +2401,8 @@ async def ai_lesson_plan(
         try:
             from backend import ai_json
 
-            result = await call_ai_async(prompt, api_key, max_tokens=8000)
+            result = await call_ai_async(prompt, api_key, max_tokens=8000,
+                                      kb_query=f"{kp['course_name']} {kp['chapter_name']} {kp['name']}")
             if ai_json.looks_like_refusal(result):
                 # 推脱话/半截内容一旦缓存，之后导出 Word 会一直复用这份废稿
                 ai_json.dump_failed_raw("lesson-plan", result or "")
@@ -2497,7 +2498,8 @@ async def export_lesson_plan_docx(
         try:
             from backend import ai_json
 
-            lesson_plan_text = await call_ai_async(prompt, api_key, max_tokens=8000)
+            lesson_plan_text = await call_ai_async(prompt, api_key, max_tokens=8000,
+                                             kb_query=f"{kp['course_name']} {kp['chapter_name']} {kp['name']}")
             if ai_json.looks_like_refusal(lesson_plan_text):
                 ai_json.dump_failed_raw("lesson-plan-export", lesson_plan_text or "")
                 raise HTTPException(status_code=502, detail="AI 未生成有效教案内容，请稍后重试")

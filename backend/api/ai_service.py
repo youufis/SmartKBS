@@ -101,14 +101,33 @@ _KB_INJECT_HEAD_LOCAL = (
 )
 
 
-def _augment_with_kb(prompt: str) -> str:
+def _kb_query_of(prompt: str, kb_query: str = "") -> str:
+    """检索词选取（与任务 prompt 解耦）：显式 kb_query > 短提问原样 > 长模板提关键词。
+
+    备课/组卷/生成HTML 等任务 prompt 动辄上万字符，直接当检索词既超接口限制
+    （百炼 query≤4500 字节）又稀释语义——这里保证送进检索的永远是一条干净的查询。
+    """
+    q = (kb_query or "").strip()
+    if q:
+        return q[:1200]
+    if len(prompt) <= 300:
+        return prompt
+    try:
+        from backend.rag import _extract_keywords
+        kws = _extract_keywords(prompt)[:6]
+        return " ".join(kws) if kws else prompt[:300]
+    except Exception:
+        return prompt[:300]
+
+
+def _augment_with_kb(prompt: str, kb_query: str = "") -> str:
     """kb_direct 模式：检索知识库并把资料前置到任务 prompt。
 
     检索失败/无命中时原样返回（等同纯直连），绝不抛异常阻塞业务。
     """
     try:
         from backend.rag import retrieve_knowledge_v2
-        context, _refs = retrieve_knowledge_v2(prompt)
+        context, _refs = retrieve_knowledge_v2(_kb_query_of(prompt, kb_query))
     except Exception as e:
         logger.warning(f"[KB] 接管模式检索失败，退回纯直连: {e}")
         return prompt
@@ -123,7 +142,7 @@ def _augment_with_kb(prompt: str) -> str:
 
 def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
                  max_tokens: Optional[int] = None, json_mode: bool = False,
-                 use_kb: bool = True) -> str:
+                 use_kb: bool = True, kb_query: str = "") -> str:
     """同步调用 AI，返回完整响应文本（history 仅在直连分支生效）"""
     if not api_key or not api_key.strip():
         raise ValueError("API Key 为空，请在系统配置中设置 API Key")
@@ -138,7 +157,7 @@ def call_ai_sync(prompt: str, api_key: str, history: Optional[list] = None,
     if cfg["mode"] == "agent":
         return _call_agent_sync(prompt, api_key, cfg["app_id"])
     elif cfg["mode"] == "kb_direct":
-        prompt = _augment_with_kb(prompt)
+        prompt = _augment_with_kb(prompt, kb_query)
         d = get_ai_config(use_agent=False)
         # 接管链路默认关思考链：出题/简答类任务提速数倍（原智能体也无深度思考，行为对齐）
         return _call_model_sync(prompt, api_key, d["model"], d["api_base"], history=history,
@@ -153,7 +172,7 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: Optional
                                     history: Optional[list] = None,
                                     max_tokens: Optional[int] = None,
                                     json_mode: bool = False,
-                                    use_kb: bool = True) -> str:
+                                    use_kb: bool = True, kb_query: str = "") -> str:
     """带超时的异步 AI 调用，将同步调用放到专用线程池中执行"""
     import asyncio
     loop = asyncio.get_running_loop()
@@ -161,7 +180,7 @@ async def call_ai_sync_with_timeout(prompt: str, api_key: str, timeout: Optional
         timeout = _ai_read_timeout()
     try:
         result = await asyncio.wait_for(
-            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens, json_mode, use_kb),
+            loop.run_in_executor(_ai_thread_pool, call_ai_sync, prompt, api_key, history, max_tokens, json_mode, use_kb, kb_query),
             timeout=timeout,
         )
         return result
@@ -315,7 +334,7 @@ def call_ai_sync_direct(prompt: str, api_key: str,
 def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
                    use_agent: bool = True, history: Optional[list] = None,
                    enable_thinking: Optional[bool] = None,
-                   use_kb: bool = True):
+                   use_kb: bool = True, kb_query: str = ""):
     """流式调用 AI，返回 (text_generator, get_session_id)
 
     Args:
@@ -329,7 +348,7 @@ def call_ai_stream(prompt: str, api_key: str, session_id: Optional[str] = None,
     if cfg["mode"] == "agent":
         return _call_agent_stream(prompt, api_key, cfg["app_id"], session_id)
     elif cfg["mode"] == "kb_direct":
-        prompt = _augment_with_kb(prompt)
+        prompt = _augment_with_kb(prompt, kb_query)
         d = get_ai_config(use_agent=False)
         return _call_model_stream(prompt, api_key, d["model"], d["api_base"], history=history,
                                   enable_thinking=False if enable_thinking is None else enable_thinking)
@@ -460,7 +479,7 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
 
 async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = None,
                         max_tokens: Optional[int] = None, json_mode: bool = False,
-                        use_kb: bool = True) -> str:
+                        use_kb: bool = True, kb_query: str = "") -> str:
     """异步调用 AI，返回完整响应文本（不阻塞工作线程）。
 
     max_tokens：题目/课件这类长输出必须显式给，否则走服务商默认上限会被静默截断；
@@ -478,7 +497,7 @@ async def call_ai_async(prompt: str, api_key: str, history: Optional[list] = Non
     elif cfg["mode"] == "kb_direct":
         import asyncio
         loop = asyncio.get_running_loop()
-        prompt = await loop.run_in_executor(_ai_thread_pool, _augment_with_kb, prompt)
+        prompt = await loop.run_in_executor(_ai_thread_pool, _augment_with_kb, prompt, kb_query)
         d = get_ai_config(use_agent=False)
         return await _call_model_async(prompt, api_key, d["model"], d["api_base"], history=history,
                                        max_tokens=max_tokens, json_mode=json_mode,
