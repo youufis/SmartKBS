@@ -110,14 +110,8 @@ def _kb_query_of(prompt: str, kb_query: str = "") -> str:
     q = (kb_query or "").strip()
     if q:
         return q[:1200]
-    if len(prompt) <= 300:
-        return prompt
-    try:
-        from backend.rag import _extract_keywords
-        kws = _extract_keywords(prompt)[:6]
-        return " ".join(kws) if kws else prompt[:300]
-    except Exception:
-        return prompt[:300]
+    # 未显式给主题时原样下传，由 rag.resolve_search_query 统一收敛（与聊天同一策略）
+    return prompt
 
 
 def _augment_with_kb(prompt: str, kb_query: str = "") -> str:

@@ -153,18 +153,33 @@ _LOCAL_BUDGET = 1500   # 本地题库/大纲预算
 _CHUNK_MAX = 900       # 单条切片截断长度
 
 
+def resolve_search_query(text: str) -> str:
+    """检索词收口（所有入口共用）：短提问原样；长文本提取核心关键词。
+
+    聊天里用户常粘贴整段材料再在末尾提问——整段文本既超百炼 4500 字节限制、
+    又被开头材料稀释主题，这里统一收敛成一条干净的主题检索词；
+    原始长文本仍会完整进入模型的任务区，检索词只影响"查什么资料"。
+    """
+    t = (text or "").strip()
+    if len(t) <= 300:
+        return t
+    kws = _extract_keywords(t)[:6]
+    return " ".join(kws) if kws else t[:300]
+
+
 def retrieve_knowledge_v2(prompt: str, username: str = "") -> tuple[str, list[dict]]:
     """融合检索：返回 (资料上下文文本, 云端引用列表)
 
     引用列表元素 {doc_name, score, title}，供前端展示来源；本地检索结果不计入引用。
+    云端检索词经 resolve_search_query 收敛（聊天/业务/未来新入口一律自动受护）。
     """
     parts: list[str] = []
     references: list[dict] = []
 
-    # 1. 百炼云端知识库
+    # 1. 百炼云端知识库（检索词收口：长文本→核心关键词）
     try:
         from backend import bailian_kb
-        chunks = bailian_kb.kb_search(prompt)
+        chunks = bailian_kb.kb_search(resolve_search_query(prompt))
     except Exception as e:
         logger.warning(f"云端知识库检索异常（忽略，走本地）: {e}")
         chunks = []
