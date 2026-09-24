@@ -183,7 +183,7 @@ async def dashboard_summary(request: Request):
             rank = _db_count(
                 """SELECT COUNT(*) + 1 FROM student_total_points stp
                    JOIN users u ON stp.student_username = u.username
-                   WHERE u.role=2 AND u.grade_id=? AND stp.total_points > ?""",
+                   WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade_id=? AND stp.total_points > ?""",
                 (grade_id, total_score),
             )
         else:
@@ -536,7 +536,7 @@ async def dashboard_summary(request: Request):
             _teacher_student_names = [s["username"] for s in _teacher_students]
             total_students = len(_teacher_student_names)
         else:
-            total_students = _db_count("SELECT COUNT(*) FROM users WHERE role = 2")
+            total_students = _db_count("SELECT COUNT(*) FROM users WHERE role = 2 AND IFNULL(status,'active')='active'")
 
         if role == 0:
             total_teachers = _db_count("SELECT COUNT(*) FROM users WHERE role = 1")

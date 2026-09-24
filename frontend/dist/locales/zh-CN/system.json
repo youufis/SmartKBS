@@ -943,5 +943,17 @@
   "firstSeen": "首次活跃",
   "ipMulti": "{{n}}个IP",
   "ipMultiTip": "该主机为动态出口IP，历史IP已合并为一行",
-  "ipActiveDaysTip": "当前IP单独活跃{{n}}天"
+  "ipActiveDaysTip": "当前IP单独活跃{{n}}天",
+  "statusCol": "状态",
+  "enrolledTag": "在校",
+  "actionsCol": "操作",
+  "restoreBtn": "恢复",
+  "restoreConfirm": "恢复该账号为在校状态？将重新允许登录。",
+  "restoreSuccess": "已恢复为在校状态",
+  "restoreFailed": "恢复失败",
+  "filterActive": "在校生",
+  "filterGraduated": "毕业归档",
+  "filterAll": "全部用户",
+  "graduatedArchiveLabel": "毕业归档（禁登录、留数据）：",
+  "restoredLabel": "↩️ 已恢复 {{n}} 个毕业归档账号"
 }

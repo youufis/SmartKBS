@@ -80,6 +80,12 @@ def check_password(password: str, hashed: bytes) -> bool:
 
 # ── JWT ──
 
+def is_graduated(username: str) -> bool:
+    """账号是否已被毕业归档（毕业=登录拦截，数据全保留，管理员可恢复）"""
+    rows = execute_query("SELECT IFNULL(status, 'active') FROM users WHERE username=?", (username,))
+    return bool(rows) and rows[0][0] == "graduated"
+
+
 def get_token_version(username: str) -> int:
     """获取用户当前的 token 版本号"""
     rows = execute_query("SELECT token_version FROM users WHERE username=?", (username,))

@@ -943,5 +943,17 @@
   "firstSeen": "First seen",
   "ipMulti": "{{n}} IPs",
   "ipMultiTip": "Dynamic egress IP; historical IPs merged into one row",
-  "ipActiveDaysTip": "current IP alone active {{n}}d"
+  "ipActiveDaysTip": "current IP alone active {{n}}d",
+  "statusCol": "Status",
+  "enrolledTag": "Enrolled",
+  "actionsCol": "Actions",
+  "restoreBtn": "Restore",
+  "restoreConfirm": "Restore this account to enrolled status? Login will be re-enabled.",
+  "restoreSuccess": "Restored to enrolled status",
+  "restoreFailed": "Restore failed",
+  "filterActive": "Enrolled",
+  "filterGraduated": "Graduated",
+  "filterAll": "All users",
+  "graduatedArchiveLabel": "Graduated & archived (login off, data kept): ",
+  "restoredLabel": "↩️ Restored {{n}} graduated account(s)"
 }

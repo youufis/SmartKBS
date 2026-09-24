@@ -205,7 +205,7 @@ def _save_to_student_chat(student_name, cls, content, grade="", actor="", actor_
     username = None
     try:
         rows = execute_query(
-            "SELECT username, grade_id, class_id FROM users WHERE role=2 AND name=?",
+            "SELECT username, grade_id, class_id FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND name=?",
             (student_name,),
         )
     except Exception as e:
@@ -269,14 +269,14 @@ async def api_grades(request: Request):
             """SELECT DISTINCT g.name
                FROM users u
                JOIN grades g ON u.grade_id = g.id
-               WHERE u.role=2 AND g.is_active=1
+               WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND g.is_active=1
                ORDER BY g.sort_order"""
         )
         if rows:
             return [r["name"] for r in rows]
         # 降级：从 users 表旧字段获取
         old_rows = execute_query(
-            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND grade IS NOT NULL AND grade!='' ORDER BY grade"
         )
         return [row[0] for row in old_rows]
     # 教师：从 teacher_assignments → grades 表获取任教年级
@@ -285,7 +285,7 @@ async def api_grades(request: Request):
         return [g["name"] for g in grades]
     # 降级：如果教师未配置任教记录，从有学生数据的年级中获取
     rows = execute_query(
-        "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+        "SELECT DISTINCT grade FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND grade IS NOT NULL AND grade!='' ORDER BY grade"
     )
     return [row[0] for row in rows]
 
@@ -310,7 +310,7 @@ async def api_classes(request: Request):
                 """SELECT DISTINCT c.display_name, c.sort_order
                    FROM users u
                    JOIN classes c ON u.class_id = c.id
-                   WHERE u.role=2 AND u.grade_id=? AND c.grade_id=?
+                   WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade_id=? AND c.grade_id=?
                    ORDER BY c.sort_order""",
                 (grade_info["id"], grade_info["id"]),
             )
@@ -478,7 +478,7 @@ async def api_mark(request: Request):
             import re
             cls_num = re.sub(r'[^\d]', '', str(cls)) if cls else ""
             student_user = execute_query(
-                "SELECT username FROM users WHERE role=2 AND name=? AND grade=? AND (class=? OR class=?)",
+                "SELECT username FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND name=? AND grade=? AND (class=? OR class=?)",
                 (student, grade, cls_num, f"{cls_num}班"),
             )
             if student_user:
@@ -745,7 +745,7 @@ async def attendance_grades(request: Request):
 
     if role == 0:
         rows = execute_query(
-            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND grade IS NOT NULL AND grade!='' ORDER BY grade"
         )
         return [row[0] for row in rows]
     else:
@@ -809,7 +809,7 @@ async def attendance_summary(request: Request):
 
     # 直接查数据库获取该年级+班级所有学生的用户名（兼容 class="1" 和 class="1班"）
     student_rows = execute_query(
-        "SELECT username, name FROM users WHERE role=2 AND grade=? AND (class=? OR class=?)",
+        "SELECT username, name FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND grade=? AND (class=? OR class=?)",
         (grade, cls_num, f"{cls_num}班"),
     )
     # 建立 name -> username 映射

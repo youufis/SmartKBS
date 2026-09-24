@@ -49,9 +49,18 @@ export async function getUserInfo(username: string): Promise<any> {
   return data;
 }
 
-export async function getAllUsers(keyword?: string): Promise<{ users: UserItem[]; total: number }> {
-  const params = keyword ? { keyword } : {};
+export async function getAllUsers(keyword?: string, status?: string): Promise<{ users: UserItem[]; total: number }> {
+  const params: Record<string, string> = {};
+  if (keyword) params.keyword = keyword;
+  // 学生状态：不传=仅在校生；graduated=仅毕业归档；all=全部
+  if (status) params.status = status;
   const { data } = await apiClient.get('/api/users', { params });
+  return data;
+}
+
+/** 恢复毕业归档账号为在校（仅管理员） */
+export async function restoreGraduatedUser(username: string): Promise<{ message: string }> {
+  const { data } = await apiClient.post(`/api/users/${encodeURIComponent(username)}/restore`);
   return data;
 }
 
@@ -288,6 +297,10 @@ export interface GradePromotionResult {
   updated_rollcall: number;
   errors: string[];
   skipped?: string[];
+  /** 毕业归档统计（direction=up 时毕业年级自动归档） */
+  graduated?: Record<string, number>;
+  /** 降级时恢复的毕业归档账号数 */
+  restored?: number;
 }
 
 /** 预览升年级影响范围 */

@@ -59,6 +59,9 @@ export interface UserItem {
   grade: string;
   /** 教师任教学科列表 */
   subjects?: string[];
+  /** V6.9 毕业归档：active=在校 graduated=毕业归档 */
+  status?: string;
+  graduated_year?: string;
 }
 
 // 历史记录 - 树节点

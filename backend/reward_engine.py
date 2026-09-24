@@ -479,7 +479,7 @@ def get_class_ranking(grade: str, class_name: str = "",
                     """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
                        FROM users u
                        LEFT JOIN student_total_points stp ON u.username = stp.student_username
-                       WHERE u.role=2 AND u.grade_id=? AND u.class_id=?
+                       WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade_id=? AND u.class_id=?
                        ORDER BY points DESC""",
                     (grade_id, class_id),
                 )
@@ -488,7 +488,7 @@ def get_class_ranking(grade: str, class_name: str = "",
                     """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
                        FROM users u
                        LEFT JOIN student_total_points stp ON u.username = stp.student_username
-                       WHERE u.role=2 AND u.grade_id=?
+                       WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade_id=?
                        ORDER BY points DESC""",
                     (grade_id,),
                 )
@@ -497,7 +497,7 @@ def get_class_ranking(grade: str, class_name: str = "",
                 """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
                    FROM users u
                    LEFT JOIN student_total_points stp ON u.username = stp.student_username
-                   WHERE u.role=2 AND u.grade=? AND (u.class=? OR u.class=?)
+                   WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade=? AND (u.class=? OR u.class=?)
                    ORDER BY points DESC""",
                 (grade, cls_num, f"{cls_num}班"),
             )
@@ -509,7 +509,7 @@ def get_class_ranking(grade: str, class_name: str = "",
             f"""SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
                FROM users u
                LEFT JOIN student_total_points stp ON u.username = stp.student_username
-               WHERE u.role=2 AND u.grade=? AND u.class IN ({placeholders})
+               WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade=? AND u.class IN ({placeholders})
                ORDER BY points DESC""",
             (grade, *allowed_classes),
         )
@@ -521,7 +521,7 @@ def get_class_ranking(grade: str, class_name: str = "",
                 """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
                    FROM users u
                    LEFT JOIN student_total_points stp ON u.username = stp.student_username
-                   WHERE u.role=2 AND u.grade_id=?
+                   WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade_id=?
                    ORDER BY points DESC""",
                 (grade_id,),
             )
@@ -530,7 +530,7 @@ def get_class_ranking(grade: str, class_name: str = "",
                 """SELECT u.name, u.username, COALESCE(stp.total_points, 0) as points
                    FROM users u
                    LEFT JOIN student_total_points stp ON u.username = stp.student_username
-                   WHERE u.role=2 AND u.grade=?
+                   WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade=?
                    ORDER BY points DESC""",
                 (grade,),
             )

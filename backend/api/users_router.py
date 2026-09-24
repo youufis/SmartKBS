@@ -735,10 +735,35 @@ async def get_user_info(username: str, request: Request):
     }
 
 
+@router.post("/{username}/restore")
+async def restore_graduated_user(username: str, request: Request):
+    """恢复毕业归档账号（仅管理员）：状态回到在校，恢复登录能力。
+
+    归档只关登录入口、不动任何数据，因此恢复同样轻量。
+    """
+    current_user = get_current_user(request)
+    if _caller_role(current_user) != 0:
+        raise HTTPException(status_code=403, detail="权限不足：仅管理员可以恢复毕业账号")
+    rows = execute_query(
+        "SELECT role, IFNULL(status,'active'), name FROM users WHERE username=?", (username,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    role_val, st_val, name_val = rows[0]
+    if role_val != 2:
+        raise HTTPException(status_code=400, detail="仅学生账号存在毕业归档状态")
+    if st_val != "graduated":
+        raise HTTPException(status_code=400, detail=f"账号 '{username}' 当前不是毕业归档状态")
+    execute_insert_update(
+        "UPDATE users SET status='active', graduated_year=NULL WHERE username=?", (username,))
+    logger.info(f"管理员 {current_user['username']} 恢复毕业账号: {username}({name_val})")
+    return {"message": f"账号 '{username}' 已恢复为在校状态"}
+
+
 @router.get("")
 async def get_all_users(
     request: Request,
     keyword: Optional[str] = None,
+    status: Optional[str] = Query(None, description="学生状态：空=仅在校生，graduated=仅毕业归档，all=全部"),
     page: int = Query(0, ge=0, description="0 表示不分页(默认, 兼容旧前端); >0 时按分页返回"),
     page_size: int = Query(200, ge=1, le=500, description="分页大小, 上限 500"),
 ):
@@ -757,19 +782,24 @@ async def get_all_users(
     if conds:
         kw = f"%{like_escape(keyword.strip())}%"
         params = [kw, kw]
+    # V6.9 毕业归档：默认列表只呈现在校生；毕业生需显式 status=graduated/all
+    if status == "graduated":
+        conds.append("IFNULL(status,'active')='graduated'")
+    elif status != "all":
+        conds.append("IFNULL(status,'active')='active'")
     if caller_role == 1:
         scope_sql, scope_params = _teacher_visibility_filter(current_user["username"])
         conds.append("(" + scope_sql + ")")
         params.extend(scope_params)
     where = " WHERE " + " AND ".join(conds) if conds else ""
-    sql = "SELECT username, class, name, gender, role, grade FROM users" + where + " ORDER BY username"
+    sql = "SELECT username, class, name, gender, role, grade, IFNULL(status,'active'), IFNULL(graduated_year,'') FROM users" + where + " ORDER BY username"
     limit_sql = ""
     if page > 0:
         limit_sql = " LIMIT ? OFFSET ?"
         params.extend([page_size, (page - 1) * page_size])
     rows = execute_query(sql + limit_sql, tuple(params))
     users = []
-    for username, class_val, name_val, gender_val, role_val, grade_val in rows:
+    for username, class_val, name_val, gender_val, role_val, grade_val, status_val, grad_year_val in rows:
         role_name = {0: "管理员", 1: "教师", 2: "普通用户"}.get(role_val, "普通用户")
         gender_name = "男" if gender_val == 1 else "女" if gender_val == 0 else ""
         # 获取教师/管理员的任教学科
@@ -785,6 +815,8 @@ async def get_all_users(
             "role": role_name,
             "grade": grade_val or "",
             "subjects": subjects,
+            "status": status_val,
+            "graduated_year": grad_year_val,
         })
 
     return {"users": users, "total": len(users)}

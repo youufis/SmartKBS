@@ -78,6 +78,10 @@ async def login(req: LoginRequest, fastapi_request: Request):
         record_login_failure(fastapi_request, username)
         raise HTTPException(status_code=401, detail="密码错误")
 
+    # 毕业归档拦截：数据保留在平台，登录入口关闭（管理员可在用户管理恢复）
+    if is_graduated(username):
+        raise HTTPException(status_code=403, detail="账号已毕业归档，无法登录。如需查询历史学习数据，请联系管理员")
+
     # 登录前递增 token_version，使旧 token 失效（强制单点登录）
     increment_token_version(username)
     token = create_jwt_token(username, role_val, name=name_val or "")

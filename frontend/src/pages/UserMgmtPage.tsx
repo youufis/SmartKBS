@@ -1,10 +1,10 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 // 用户管理
 import {
   Layout, Card, Tabs, Form, Input, Button, message,
   Modal, Progress, Table, Upload, Space, Radio, Select, Typography,
-  Tag, Checkbox, Alert,
+  Tag, Checkbox, Alert, Popconfirm,
 } from 'antd'
 import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, RollbackOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
@@ -152,15 +152,28 @@ const UserMgmtPage: React.FC = () => {
   // ── 用户列表 ──
   const [allUsers, setAllUsers] = useState<UserItem[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
+  // V6.9 毕业归档：列表状态过滤（默认只看在校生）
+  const [userStatusFilter, setUserStatusFilter] = useState<'active' | 'graduated' | 'all'>('active')
   const handleListUsers = async () => {
     setUsersLoading(true)
     try {
-      const { users } = await usersApi.getAllUsers()
+      const { users } = await usersApi.getAllUsers(undefined, userStatusFilter === 'active' ? undefined : userStatusFilter)
       setAllUsers(users)
     } catch {
       message.error(t('loadUserListFailed'))
     } finally {
       setUsersLoading(false)
+    }
+  }
+  useEffect(() => { handleListUsers() }, [userStatusFilter])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRestoreGraduate = async (username: string) => {
+    try {
+      const res = await usersApi.restoreGraduatedUser(username)
+      message.success(res.message || t('restoreSuccess'))
+      handleListUsers()
+    } catch (err: unknown) {
+      message.error((err as ApiError)?.response?.data?.detail || t('restoreFailed'))
     }
   }
 
@@ -336,7 +349,7 @@ const UserMgmtPage: React.FC = () => {
           <p style={{ marginBottom: 12 }}>此操作将执行以下变更：</p>
           <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
             <li>更新所有学生的年级（{promoteDesc}）</li>
-            {graduateDesc && <li>毕业年级学生保持现状：{graduateDesc}</li>}
+            {graduateDesc && <li>毕业年级学生将自动归档（禁止登录、数据保留，可在用户管理恢复）：{graduateDesc}</li>}
             {promoteOptions.sync_scores && <li>同步更新课堂积分的年级归属</li>}
             {promoteOptions.sync_rollcall && <li>同步更新点名数据的年级归属</li>}
             {promoteOptions.match_class && <li>按同名班级自动匹配新年级班级</li>}
@@ -534,6 +547,26 @@ const UserMgmtPage: React.FC = () => {
         return record.subjects.join('、')
       },
     },
+    {
+      title: t('statusCol'), key: 'status', width: 100,
+      render: (_: any, record: any) => {
+        if (record.role !== '普通用户') return '-'
+        return record.status === 'graduated'
+          ? <Tag color="orange">{t('graduateTag')}{record.graduated_year ? `·${record.graduated_year}` : ''}</Tag>
+          : <Tag color="green">{t('enrolledTag')}</Tag>
+      },
+    },
+    {
+      title: t('actionsCol'), key: 'restore', width: 70,
+      render: (_: any, record: any) => (
+        record.status === 'graduated' ? (
+          <Popconfirm title={t('restoreConfirm')} okText={t('confirmOk')} cancelText={t('cancel')}
+            onConfirm={() => handleRestoreGraduate(record.username)}>
+            <Button type="link" size="small" style={{ padding: 0 }}>{t('restoreBtn')}</Button>
+          </Popconfirm>
+        ) : null
+      ),
+    },
   ]
 
   // 定义各标签页的可见权限
@@ -696,7 +729,15 @@ const UserMgmtPage: React.FC = () => {
       label: t('userManagement'),
       children: (
         <Space orientation="vertical" style={{ width: '100%' }}>
-          <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>{t('refresh')}</Button>
+          <Space>
+            <Button onClick={handleListUsers} loading={usersLoading} icon={<ReloadOutlined />}>{t('refresh')}</Button>
+            <Select value={userStatusFilter} onChange={(v) => setUserStatusFilter(v)} style={{ width: 130 }}
+              options={[
+                { value: 'active', label: t('filterActive') },
+                { value: 'graduated', label: t('filterGraduated') },
+                { value: 'all', label: t('filterAll') },
+              ]} />
+          </Space>
           {allUsers.length > 0 && (
             <Table dataSource={allUsers} columns={userColumns} rowKey="username"
               size="small" pagination={{ pageSize: 30 }} scroll={{ y: 400 }} />
@@ -1002,6 +1043,15 @@ const UserMgmtPage: React.FC = () => {
                           )}
                           {promoteResult.skipped && promoteResult.skipped.length > 0 && (
                             <Typography.Text type="warning">⚠️ 跳过 {promoteResult.skipped.length} 个无年级信息的学生</Typography.Text>
+                          )}
+                          {promoteResult.graduated && Object.keys(promoteResult.graduated).length > 0 && (
+                            <Typography.Text>
+                              🎓 {t('graduatedArchiveLabel')}
+                              {Object.entries(promoteResult.graduated).map(([g, c]) => t('gradeCountPlain', { grade: g, count: c })).join('、')}
+                            </Typography.Text>
+                          )}
+                          {!!promoteResult.restored && (
+                            <Typography.Text>{t('restoredLabel', { n: promoteResult.restored })}</Typography.Text>
                           )}
                           <Typography.Text type="secondary">
                             更新 users 表 {promoteResult.updated_users} 条

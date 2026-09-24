@@ -39,6 +39,16 @@ def init_db():
             except sqlite3.OperationalError:
                 pass  # 列已存在
 
+            # 兼容旧表：毕业归档 status（active/graduated）与毕业学年（V6.9）
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
+            try:
+                c.execute("ALTER TABLE users ADD COLUMN graduated_year TEXT")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
+
             # 兼容旧表：添加 token_version 列（单点登录用）
             try:
                 c.execute("ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 0")

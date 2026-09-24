@@ -67,7 +67,7 @@ async def api_my_grades(request: Request):
     teacher = _get_teacher(request)
     if is_admin(teacher):
         rows = execute_query(
-            "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+            "SELECT DISTINCT grade FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND grade IS NOT NULL AND grade!='' ORDER BY grade"
         )
         return [row[0] for row in rows]
     # 教师 → 任教年级
@@ -76,7 +76,7 @@ async def api_my_grades(request: Request):
         return [g["name"] for g in grades]
     # 学生 → 返回全校有学生的年级
     rows = execute_query(
-        "SELECT DISTINCT grade FROM users WHERE role=2 AND grade IS NOT NULL AND grade!='' ORDER BY grade"
+        "SELECT DISTINCT grade FROM users WHERE role=2 AND IFNULL(status,'active')='active' AND grade IS NOT NULL AND grade!='' ORDER BY grade"
     )
     return [row[0] for row in rows]
 
@@ -133,7 +133,7 @@ def _enrich_with_reward_points(students: list[dict[str, Any]], grade: str) -> li
         """SELECT u.username, u.name, COALESCE(stp.total_points, 0)
            FROM users u
            LEFT JOIN student_total_points stp ON u.username = stp.student_username
-           WHERE u.role=2 AND u.grade=?""",
+           WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade=?""",
         (grade,),
     )
     # S-NO: 学号(username)唯一, 优先按学号精确关联 —— 同年级同名学生不再互相串分

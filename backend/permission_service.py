@@ -329,7 +329,7 @@ def get_students_in_scope(username: str, grade_id: int | None = None, class_id: 
     from backend.auth import is_admin
     if is_admin(username):
         # 管理员：可筛选
-        conditions = ["u.role=2"]
+        conditions = ["u.role=2", "IFNULL(u.status,'active')='active'"]
         params = []
         if grade_id:
             conditions.append("u.grade_id=?")
@@ -361,12 +361,12 @@ def get_students_in_scope(username: str, grade_id: int | None = None, class_id: 
         if cid is None:
             # 该年级全部学生
             students = execute_query_dict(
-                "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND u.grade_id=?",
+                "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade_id=?",
                 (gid,),
             )
         else:
             students = execute_query_dict(
-                "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND u.grade_id=? AND u.class_id=?",
+                "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade_id=? AND u.class_id=?",
                 (gid, cid),
             )
         for s in students:
@@ -444,7 +444,7 @@ def get_students_by_scope(
     # 管理员创建的活动，默认全体可见
     if target_scope == "all" or target_scope == "teacher_classes" and is_admin(creator_username):
         return execute_query_dict(
-            "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 ORDER BY u.grade, u.class, u.name"
+            "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND IFNULL(u.status,'active')='active' ORDER BY u.grade, u.class, u.name"
         )
 
     if target_scope == "teacher_classes":
@@ -460,7 +460,7 @@ def get_students_by_scope(
         seen = set()
         for g_name in grades:
             rows = execute_query_dict(
-                "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND u.grade=?",
+                "SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade=?",
                 (g_name,),
             )
             for s in rows:
@@ -483,7 +483,7 @@ def get_students_by_scope(
                 c_num = re.sub(r'[^\d]', '', c_name) if c_name else ''
                 rows = execute_query_dict(
                     """SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id
-                       FROM users u WHERE u.role=2 AND u.grade=? AND (u.class=? OR u.class=?)""",
+                       FROM users u WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.grade=? AND (u.class=? OR u.class=?)""",
                     (g_name, c_name, c_num),
                 )
                 for s in rows:
@@ -501,7 +501,7 @@ def get_students_by_scope(
             return get_students_in_scope(creator_username)
         placeholders = ",".join("?" for _ in usernames)
         return execute_query_dict(
-            f"SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND u.username IN ({placeholders})",
+            f"SELECT u.username, u.name, u.grade, u.class, u.grade_id, u.class_id FROM users u WHERE u.role=2 AND IFNULL(u.status,'active')='active' AND u.username IN ({placeholders})",
             tuple(usernames),
         )
 
@@ -1071,7 +1071,8 @@ def execute_grade_promotion(
     # ── 查出所有学生（role=2）──
     # 优先用 grade_id，若无则尝试通过 grade 名称反查
     students = execute_query_dict(
-        """SELECT u.username, u.grade, u.grade_id, u.class, u.class_id
+        """SELECT u.username, u.grade, u.grade_id, u.class, u.class_id,
+                  IFNULL(u.status,'active') AS status
            FROM users u WHERE u.role=2"""
     )
 
@@ -1084,7 +1085,11 @@ def execute_grade_promotion(
     # 分类统计
     promoted: dict[str, int] = {}
     not_moved: dict[str, int] = {}
+    graduated: dict[str, int] = {}   # V6.9 毕业归档统计（升年级时毕业年级自动归档）
+    skipped_graduated = 0            # 已归档毕业生跳过数
     skipped: list[str] = []
+    from datetime import datetime as _dt
+    grad_year = str(_dt.now().year)
 
     # ── 事务：所有 users 更新在一个事务中完成 ──
     if not dry_run:
@@ -1100,6 +1105,13 @@ def execute_grade_promotion(
             username = stu["username"]
             gid = stu["grade_id"]
             g_name_text = stu["grade"]
+
+            # V6.9 已归档毕业生不参与任何升/降级位移：
+            # 升级时他们本就该停在毕业年级；降级时只恢复状态、不搬年级，
+            # 否则会把「高三毕业生」错降回高二，破坏撤销语义。
+            if str(stu.get("status") or "active") == "graduated":
+                skipped_graduated += 1
+                continue
 
             # 若 grade_id 为空，尝试通过 grade 名称反查
             if not gid and g_name_text:
@@ -1124,6 +1136,16 @@ def execute_grade_promotion(
                 # 不可移动：升年级时是毕业年级，降级时是最低年级
                 display_name = _resolve_grade_name(gid, g_name_text)
                 not_moved[display_name] = not_moved.get(display_name, 0) + 1
+                # V6.9 毕业自动跟随升年级执行：归档状态 + 踢出在线会话，数据零改动
+                if direction == "up":
+                    graduated[display_name] = graduated.get(display_name, 0) + 1
+                    if not dry_run:
+                        assert conn_outer is not None
+                        conn_outer.execute(
+                            "UPDATE users SET status='graduated', graduated_year=?, "
+                            "token_version=token_version+1 WHERE username=?",
+                            (grad_year, username),
+                        )
                 continue
 
             next_name = next_info["name"]
@@ -1158,6 +1180,15 @@ def execute_grade_promotion(
                 "UPDATE users SET grade=?, grade_id=?, class_id=? WHERE username=?",
                 (next_name, next_id, new_class_id, username),
             )
+
+        # V6.9 降级是升年级的逆操作：批量恢复毕业归档账号（毕业只是升级的副作用）
+        restored = 0
+        if direction == "down" and not dry_run:
+            assert conn_outer is not None
+            restored = conn_outer.execute(
+                "UPDATE users SET status='active', graduated_year=NULL "
+                "WHERE IFNULL(status,'active')='graduated' AND role=2"
+            ).rowcount
 
         # 同步更新 scores
         updated_scores = 0
@@ -1249,6 +1280,9 @@ def execute_grade_promotion(
         "updated_users": promoted_count,
         "updated_scores": updated_scores if sync_scores and not dry_run else 0,
         "updated_rollcall": updated_rollcall if sync_rollcall and not dry_run else 0,
+        "graduated": graduated,
+        "skipped_graduated": skipped_graduated,
+        "restored": restored if direction == "down" and not dry_run else 0,
         "errors": errors,
     }
     if skipped:
