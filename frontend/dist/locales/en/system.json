@@ -842,7 +842,7 @@
   "iConfirmDelete": "I confirm deleting the {{count}} users above with all their data",
   "batchUpgradeTitle": "Bulk Grade Promotion",
   "upgradePathHint": "Auto-advance by stage: G1→G2→…→G6→(graduate), J1→J2→J3→(graduate), S1→S2→S3→(graduate).",
-  "gradRetainHint": "Graduating students keep their accounts but are not advanced.",
+  "gradRetainHint": "Graduating students are archived automatically: login disabled, data kept, restorable by admins in User Management.",
   "previewUpgrade": "Preview promotion",
   "totalStudentsN": "{{count}} students total",
   "curGrade": "Current grade",
@@ -955,5 +955,7 @@
   "filterGraduated": "Graduated",
   "filterAll": "All users",
   "graduatedArchiveLabel": "Graduated & archived (login off, data kept): ",
-  "restoredLabel": "↩️ Restored {{n}} graduated account(s)"
+  "restoredLabel": "↩️ Restored {{n}} graduated account(s)",
+  "upgradeFixedEffects": "Upgrade also migrates class points and roll-call data by grade, and re-assigns classes by matching names (e.g. Class 1 -> Class 1).",
+  "unmatchedClassHint": "{{n}} student(s) had no same-name class in the new grade (class cleared); create the classes first, then re-assign in User Management."
 }

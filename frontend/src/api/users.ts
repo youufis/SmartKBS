@@ -301,6 +301,8 @@ export interface GradePromotionResult {
   graduated?: Record<string, number>;
   /** 降级时恢复的毕业归档账号数 */
   restored?: number;
+  /** 同名班级匹配失败人数（新年级未建班，class_id 已置空待归班） */
+  unmatched_class?: number;
 }
 
 /** 预览升年级影响范围 */

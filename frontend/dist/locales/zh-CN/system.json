@@ -842,7 +842,7 @@
   "iConfirmDelete": "我确认删除以上 {{count}} 个用户及其全部数据",
   "batchUpgradeTitle": "批量升年级",
   "upgradePathHint": "按学段自动升级：一年级→二年级→…→六年级→（毕业），初一→初二→初三→（毕业），高一→高二→高三→（毕业）。",
-  "gradRetainHint": "毕业年级学生保留账号但不再升级。",
+  "gradRetainHint": "毕业年级学生将自动归档：禁止登录、数据保留，管理员可在用户管理恢复。",
   "previewUpgrade": "预览升年级",
   "totalStudentsN": "共 {{count}} 名学生",
   "curGrade": "当前年级",
@@ -955,5 +955,7 @@
   "filterGraduated": "毕业归档",
   "filterAll": "全部用户",
   "graduatedArchiveLabel": "毕业归档（禁登录、留数据）：",
-  "restoredLabel": "↩️ 已恢复 {{n}} 个毕业归档账号"
+  "restoredLabel": "↩️ 已恢复 {{n}} 个毕业归档账号",
+  "upgradeFixedEffects": "升级将同步迁移课堂积分与点名数据的年级归属，并按同名班级自动归班（如 1班 → 1班）。",
+  "unmatchedClassHint": "{{n}} 人未匹配到新年级同名班级（班级已置空），请先在新年级建班，再到用户管理归班。"
 }

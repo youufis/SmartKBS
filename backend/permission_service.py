@@ -1086,6 +1086,7 @@ def execute_grade_promotion(
     promoted: dict[str, int] = {}
     not_moved: dict[str, int] = {}
     graduated: dict[str, int] = {}   # V6.9 毕业归档统计（升年级时毕业年级自动归档）
+    unmatched_class = 0            # 同名班级匹配失败计数（新年级未建班）
     skipped_graduated = 0            # 已归档毕业生跳过数
     skipped: list[str] = []
     from datetime import datetime as _dt
@@ -1172,6 +1173,7 @@ def execute_grade_promotion(
                     new_class_id = row[0]
                 else:
                     new_class_id = None  # 新年级无同名班级
+                    unmatched_class += 1
             elif not match_class:
                 new_class_id = stu["class_id"]  # 保留原值
 
@@ -1281,6 +1283,7 @@ def execute_grade_promotion(
         "updated_scores": updated_scores if sync_scores and not dry_run else 0,
         "updated_rollcall": updated_rollcall if sync_rollcall and not dry_run else 0,
         "graduated": graduated,
+        "unmatched_class": unmatched_class,
         "skipped_graduated": skipped_graduated,
         "restored": restored if direction == "down" and not dry_run else 0,
         "errors": errors,

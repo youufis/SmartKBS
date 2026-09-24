@@ -309,11 +309,6 @@ const UserMgmtPage: React.FC = () => {
   const [promoteLoading, setPromoteLoading] = useState(false)
   const [promoteExecuting, setPromoteExecuting] = useState(false)
   const [promoteResult, setPromoteResult] = useState<GradePromotionResult | null>(null)
-  const [promoteOptions, setPromoteOptions] = useState({
-    sync_scores: true,
-    sync_rollcall: true,
-    match_class: true,
-  })
   const [promoteReversing, setPromoteReversing] = useState(false)
 
   const handlePreviewPromote = async () => {
@@ -350,9 +345,9 @@ const UserMgmtPage: React.FC = () => {
           <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
             <li>更新所有学生的年级（{promoteDesc}）</li>
             {graduateDesc && <li>毕业年级学生将自动归档（禁止登录、数据保留，可在用户管理恢复）：{graduateDesc}</li>}
-            {promoteOptions.sync_scores && <li>同步更新课堂积分的年级归属</li>}
-            {promoteOptions.sync_rollcall && <li>同步更新点名数据的年级归属</li>}
-            {promoteOptions.match_class && <li>按同名班级自动匹配新年级班级</li>}
+            <li>同步迁移课堂积分与点名数据的年级归属</li>
+            <li>按同名班级自动归班（如 1班 → 1班），未匹配者将在结果中提醒</li>
+            <li>毕业年级学生自动归档：禁止登录、数据保留，可在用户管理恢复</li>
           </ul>
           <p style={{ color: '#fa8c16', marginTop: 8 }}>此操作不可撤销，请确认已备份数据。</p>
         </div>
@@ -363,10 +358,7 @@ const UserMgmtPage: React.FC = () => {
       onOk: async () => {
         setPromoteExecuting(true)
         try {
-          const result = await usersApi.executePromoteGrades({
-            ...promoteOptions,
-            confirm: true,
-          })
+          const result = await usersApi.executePromoteGrades({ confirm: true })
           setPromoteResult(result)
           if (result.success) {
             message.success(t('promoteExecSuccess'))
@@ -398,9 +390,9 @@ const UserMgmtPage: React.FC = () => {
           <p style={{ marginBottom: 12 }}>降级是升年级的逆操作，将执行以下变更：</p>
           <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
             <li>{reverseDesc || t('demoteByUpgradeMap')}</li>
-            {promoteOptions.sync_scores && <li>同步降级课堂积分的年级归属</li>}
-            {promoteOptions.sync_rollcall && <li>同步降级点名数据的年级归属</li>}
-            {promoteOptions.match_class && <li>按同名班级自动匹配</li>}
+            <li>同步回迁课堂积分与点名数据的年级归属</li>
+            <li>按同名班级自动归班</li>
+            <li>毕业归档账号一并恢复为在校（保持其毕业年级不动）</li>
           </ul>
           <p style={{ color: '#fa8c16', marginTop: 8 }}>毕业年级学生不受影响。降级可多次执行，每次都是升年级的逆操作。</p>
         </div>
@@ -411,10 +403,7 @@ const UserMgmtPage: React.FC = () => {
       onOk: async () => {
         setPromoteReversing(true)
         try {
-          const result = await usersApi.reversePromoteGrades({
-            ...promoteOptions,
-            confirm: true,
-          })
+          const result = await usersApi.reversePromoteGrades({ confirm: true })
           if (result.success) {
             message.success(t('demoteSuccess'))
             setPromotePreview(null)
@@ -971,29 +960,10 @@ const UserMgmtPage: React.FC = () => {
                       style={{ marginBottom: 12 }}
                     />
 
-                    {/* 选项 */}
-                    <Card size="small" type="inner" title={t('upgradeOptions')} style={{ marginBottom: 12 }}>
-                      <Space orientation="vertical">
-                        <Checkbox
-                          checked={promoteOptions.sync_scores}
-                          onChange={(e) => setPromoteOptions(prev => ({ ...prev, sync_scores: e.target.checked }))}
-                        >
-                          {t('syncScoresHint')}
-                        </Checkbox>
-                        <Checkbox
-                          checked={promoteOptions.sync_rollcall}
-                          onChange={(e) => setPromoteOptions(prev => ({ ...prev, sync_rollcall: e.target.checked }))}
-                        >
-                          {t('syncRollcallHint')}
-                        </Checkbox>
-                        <Checkbox
-                          checked={promoteOptions.match_class}
-                          onChange={(e) => setPromoteOptions(prev => ({ ...prev, match_class: e.target.checked }))}
-                        >
-                          {t('matchClassHint')}
-                        </Checkbox>
-                      </Space>
-                    </Card>
+                    {/* 行为已固化：三项同步永远执行（关闭只会产生脏数据），不再提供开关 */}
+                    <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                      {t('upgradeFixedEffects')}
+                    </Typography.Text>
 
                     {/* 执行按钮 */}
                     <Space>
@@ -1052,6 +1022,9 @@ const UserMgmtPage: React.FC = () => {
                           )}
                           {!!promoteResult.restored && (
                             <Typography.Text>{t('restoredLabel', { n: promoteResult.restored })}</Typography.Text>
+                          )}
+                          {!!promoteResult.unmatched_class && (
+                            <Typography.Text type="warning">⚠️ {t('unmatchedClassHint', { n: promoteResult.unmatched_class })}</Typography.Text>
                           )}
                           <Typography.Text type="secondary">
                             更新 users 表 {promoteResult.updated_users} 条
