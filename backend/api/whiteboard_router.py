@@ -1586,7 +1586,8 @@ async def _generate_diagram_stream(description: str, subject: str, api_key: str)
         timeout = _get_ai_timeout()
 
         from backend.api.ai_service import call_ai_sync_with_timeout
-        result = await call_ai_sync_with_timeout(prompt, api_key, timeout=timeout, json_mode=True, use_kb=False)
+        result = await call_ai_sync_with_timeout(prompt, api_key, timeout=timeout, json_mode=True,
+                                      kb_query=f"{subject} {description}")
 
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
@@ -1692,7 +1693,9 @@ async def ai_generate_board(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
+        # 板书=内容创作：走知识库检索贴教材（与备课同口径），检索词=知识点+学科+年级
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True,
+                                                 kb_query=f"{kp_name} {subject} {grade}")
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
@@ -2019,7 +2022,9 @@ async def ai_generate_quiz(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
+        # 随堂提问=出题：走知识库检索贴教材，检索词=知识点+学科
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True,
+                                                 kb_query=f"{kp_name} {subject}")
         import re
         jm = re.search(r'\{[\s\S]*\}', result.strip())
         if jm:
