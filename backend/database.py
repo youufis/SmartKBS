@@ -18,6 +18,29 @@ from backend.logger import logger
 DB_PATH = Path(__file__).resolve().parent / "smartkb.db"
 
 
+def _ensure_column(c, table: str, column: str, ddl_type: str, attempts: int = 5) -> None:
+    """幂等加列：仅吞「duplicate column」（列已存在=成功）；
+
+    数据库被其他进程占用（locked/busy）时每秒重试——uvicorn --reload 或双实例
+    并存的新老进程交接窗口里，旧实现把锁异常一并吞掉，导致列没建上又无人知晓，
+    下游所有引用该列的查询集体报错（登录 500 的根因）。
+    """
+    import time as _t
+    for i in range(attempts):
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+            return
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            if "duplicate column" in msg:
+                return
+            if ("locked" in msg or "busy" in msg) and i < attempts - 1:
+                _t.sleep(1)
+                continue
+            logger.error(f"迁移失败(重试{attempts}次后): {table}.{column} -> {e}")
+            return
+
+
 def init_db():
     """初始化用户数据库（如果表不存在则创建）"""
     try:
@@ -40,14 +63,8 @@ def init_db():
                 pass  # 列已存在
 
             # 兼容旧表：毕业归档 status（active/graduated）与毕业学年（V6.9）
-            try:
-                c.execute("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'")
-            except sqlite3.OperationalError:
-                pass  # 列已存在
-            try:
-                c.execute("ALTER TABLE users ADD COLUMN graduated_year TEXT")
-            except sqlite3.OperationalError:
-                pass  # 列已存在
+            _ensure_column(c, "users", "status", "TEXT DEFAULT 'active'")
+            _ensure_column(c, "users", "graduated_year", "TEXT")
 
             # 兼容旧表：添加 token_version 列（单点登录用）
             try:

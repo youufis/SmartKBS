@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 import bcrypt
+from backend.logger import logger
 import jwt
 
 from backend.config import (
@@ -81,9 +82,17 @@ def check_password(password: str, hashed: bytes) -> bool:
 # ── JWT ──
 
 def is_graduated(username: str) -> bool:
-    """账号是否已被毕业归档（毕业=登录拦截，数据全保留，管理员可恢复）"""
-    rows = execute_query("SELECT IFNULL(status, 'active') FROM users WHERE username=?", (username,))
-    return bool(rows) and rows[0][0] == "graduated"
+    """账号是否已被毕业归档（毕业=登录拦截，数据全保留，管理员可恢复）。
+
+    fail-open：迁移未落库等异常时放行登录并告警——登录入口可用性优先于
+    归档强制，绝不允许因单列缺失把全校挡在门外（500）。
+    """
+    try:
+        rows = execute_query("SELECT IFNULL(status, 'active') FROM users WHERE username=?", (username,))
+        return bool(rows) and rows[0][0] == "graduated"
+    except Exception as e:
+        logger.warning(f"毕业归档校验失败（本次放行登录）: {e}")
+        return False
 
 
 def get_token_version(username: str) -> int:
