@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Layout, Input, Button, Space, Checkbox, message, Modal,
   Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag,
-  List, Empty,
+  List, Empty, theme,
 } from 'antd'
 import {
   SendOutlined, StopOutlined, PlusOutlined,
@@ -30,7 +30,7 @@ const { TextArea } = Input
 const TypingCursor: React.FC = () => (
   <span className="typing-cursor" style={{
     display: 'inline-block', width: 2, height: '1em',
-    backgroundColor: '#1677ff', marginLeft: 2,
+    backgroundColor: 'var(--primary-color)', marginLeft: 2,
     animation: 'blink 1s step-end infinite',
   }} />
 )
@@ -47,7 +47,7 @@ const KbRefSources: React.FC<{ refs: Message['references'] }> = ({ refs }) => {
   const { t } = useTranslation('chat')
   if (!refs || refs.length === 0) return null
   return (
-    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed #e8e8e8', fontSize: 12, color: '#8c8c8c', lineHeight: 1.8 }}>
+    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--border-color-secondary)', fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.8 }}>
       📖 {t('refSources')}：
       {refs.map((r, i) => (
         <span key={i} style={{ marginRight: 10 }}>
@@ -80,7 +80,7 @@ const MessageBubble: React.FC<{
     const codeContent = String(children).replace(/\n$/, '')
     return (
       <div style={{ position: 'relative' }}>
-        <pre style={{ background: '#f5f5f5', padding: '8px 12px', borderRadius: 4, overflowX: 'auto', fontSize: 13 }}>
+        <pre style={{ background: 'var(--bg-layout)', padding: '8px 12px', borderRadius: 4, overflowX: 'auto', fontSize: 13 }}>
           <code className={className}>{codeContent}</code>
         </pre>
         {isHtmlBlock && onPreviewHtml && (
@@ -148,7 +148,7 @@ const MessageBubble: React.FC<{
                 {msg.content || ''}
               </ReactMarkdown>
               {isStreaming && (msg.content ? <TypingCursor /> : (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#999', fontSize: 13 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)', fontSize: 13 }}>
                   <Spin size="small" /> {t('aiThinking')}
                 </span>
               ))}
@@ -184,7 +184,7 @@ const MessageBubble: React.FC<{
               {msg.content || ''}
             </ReactMarkdown>
             {isStreaming && (msg.content ? <TypingCursor /> : (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#999', fontSize: 13 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)', fontSize: 13 }}>
                   <Spin size="small" /> {t('aiThinking')}
                 </span>
               ))}
@@ -198,6 +198,7 @@ const MessageBubble: React.FC<{
 
 const ChatPage: React.FC = () => {
   const { t } = useTranslation('chat')
+  const { token } = theme.useToken()
   // 智能教育助手 - SmartKB
   const {
     messages, isStreaming, currentText, filePaths,
@@ -609,7 +610,7 @@ const ChatPage: React.FC = () => {
   const isAnyStreaming = companionMode ? companionIsStreaming : isStreaming
   const activeMessages = companionMode ? companionMessages : messages
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'hidden' }}>
       {/* 顶部模式切换 */}
       <div style={{
         padding: '8px 24px',
@@ -717,7 +718,7 @@ const ChatPage: React.FC = () => {
                   <Typography.Title level={4} style={{ color: '#13c2c2', margin: 0 }}>
                     {t('greetingTeacher')}
                   </Typography.Title>
-                  <Typography.Text style={{ color: '#999', marginTop: 8, maxWidth: 520, fontSize: 14 }}>
+                  <Typography.Text style={{ color: token.colorTextTertiary, marginTop: 8, maxWidth: 520, fontSize: 14 }}>
                     {t('greetingTeacherDesc')}
                   </Typography.Text>
                   <div style={{ marginTop: 20, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -761,7 +762,7 @@ const ChatPage: React.FC = () => {
                   <Typography.Title level={4} style={{ color: '#667eea', margin: 0 }}>
                     {t('greetingStudent', { name: companionConfig?.companion_name || t('companionName') })}
                   </Typography.Title>
-                  <Typography.Text style={{ color: '#999', marginTop: 8, maxWidth: 400, fontSize: 14 }}>
+                  <Typography.Text style={{ color: token.colorTextTertiary, marginTop: 8, maxWidth: 400, fontSize: 14 }}>
                     {'<'}{companionConfig?.personality_label || t('companionName')}{'>'} {t('companionTagline', { label: '' })}
                   </Typography.Text>
                   <div style={{ marginTop: 20, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -784,7 +785,7 @@ const ChatPage: React.FC = () => {
                     </Button>
                   </div>
                   {companionProfile && (
-                    <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 13, color: '#888' }}>
+                    <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 13, color: token.colorTextTertiary }}>
                       {companionProfile.titles?.main && (
                         <span>🏆 {companionProfile.titles.main}</span>
                       )}
@@ -799,7 +800,7 @@ const ChatPage: React.FC = () => {
                 </div>
               )
             ) : (
-              <div style={{ textAlign: 'center', paddingTop: 40, color: '#999' }}>
+              <div style={{ textAlign: 'center', paddingTop: 40, color: token.colorTextTertiary }}>
                 <Typography.Title level={4} type="secondary">{t('emptyChatTitle')}</Typography.Title>
                 <Typography.Text type="secondary">{t('emptyChatDesc')}</Typography.Text>
               </div>
@@ -848,7 +849,7 @@ const ChatPage: React.FC = () => {
                 }}>🎓</div>
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 14, color: '#13c2c2' }}>{t('assistantMode')}</div>
-                  <div style={{ fontSize: 11, color: '#999' }}>{t('greetingTeacherDesc')}</div>
+                  <div style={{ fontSize: 11, color: token.colorTextTertiary }}>{t('greetingTeacherDesc')}</div>
                 </div>
               </div>
 
@@ -864,33 +865,33 @@ const ChatPage: React.FC = () => {
                     <div style={{ display: 'flex', justifyContent: 'space-around', textAlign: 'center' }}>
                       {companionTeacherData.total_students !== undefined && (
                         <div>
-                          <div style={{ fontSize: 22, fontWeight: 700, color: '#52c41a' }}>{companionTeacherData.total_students}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>{t('students')}</div>
+                          <div style={{ fontSize: 22, fontWeight: 700, color: token.colorSuccess }}>{companionTeacherData.total_students}</div>
+                          <div style={{ fontSize: 11, color: token.colorTextTertiary }}>{t('students')}</div>
                         </div>
                       )}
                       {companionTeacherData.exam_stats && (
                         <div>
-                          <div style={{ fontSize: 22, fontWeight: 700, color: '#1677ff' }}>{companionTeacherData.exam_stats.total}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>{t('exams')}</div>
+                          <div style={{ fontSize: 22, fontWeight: 700, color: token.colorPrimary }}>{companionTeacherData.exam_stats.total}</div>
+                          <div style={{ fontSize: 11, color: token.colorTextTertiary }}>{t('exams')}</div>
                         </div>
                       )}
                       {companionTeacherData.total_submissions !== undefined && (
                         <div>
-                          <div style={{ fontSize: 22, fontWeight: 700, color: '#fa8c16' }}>{companionTeacherData.total_submissions}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>{t('submitted')}</div>
+                          <div style={{ fontSize: 22, fontWeight: 700, color: token.colorWarning }}>{companionTeacherData.total_submissions}</div>
+                          <div style={{ fontSize: 11, color: token.colorTextTertiary }}>{t('submitted')}</div>
                         </div>
                       )}
                       {companionTeacherData.rollcall_this_week !== undefined && (
                         <div>
                           <div style={{ fontSize: 22, fontWeight: 700, color: '#722ed1' }}>{companionTeacherData.rollcall_this_week}</div>
-                          <div style={{ fontSize: 11, color: '#888' }}>{t('rollcall')}</div>
+                          <div style={{ fontSize: 11, color: token.colorTextTertiary }}>{t('rollcall')}</div>
                         </div>
                       )}
                     </div>
                   </div>
 
                   {/* 今日概况 */}
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 12, lineHeight: 1.8 }}>
+                  <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 12, lineHeight: 1.8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>{t('todayChats')}</span>
                       <span style={{ fontWeight: 600 }}>{companionTeacherData.today_chat_count ?? 0} {t('times')}</span>
@@ -905,12 +906,12 @@ const ChatPage: React.FC = () => {
 
                   {/* 考试状态 + 课堂互动 */}
                   <div style={{
-                    background: '#fafafa', borderRadius: 8, padding: 10,
+                    background: token.colorFillQuaternary, borderRadius: 8, padding: 10,
                     border: '1px solid #f0f0f0',
                   }}>
                     {companionTeacherData.exam_stats && (
                       <div style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>📋 {t('exams')}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: token.colorTextSecondary, marginBottom: 4 }}>📋 {t('exams')}</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <Tag color="default" style={{ fontSize: 11 }}>{t('status.draft')} {companionTeacherData.exam_stats.draft}</Tag>
                           <Tag color="blue" style={{ fontSize: 11 }}>{t('status.published')} {companionTeacherData.exam_stats.published}</Tag>
@@ -920,7 +921,7 @@ const ChatPage: React.FC = () => {
                     )}
                     {(companionTeacherData.teacher_quiz_count !== undefined || companionTeacherData.teacher_poll_count !== undefined) && (
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4 }}>🎯 {t('activity')}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: token.colorTextSecondary, marginBottom: 4 }}>🎯 {t('activity')}</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {companionTeacherData.teacher_quiz_count !== undefined && <Tag color="purple" style={{ fontSize: 11 }}>{t('quiz')} {companionTeacherData.teacher_quiz_count}</Tag>}
                           {companionTeacherData.teacher_poll_count !== undefined && <Tag color="orange" style={{ fontSize: 11 }}>{t('poll')} {companionTeacherData.teacher_poll_count}</Tag>}
@@ -931,7 +932,7 @@ const ChatPage: React.FC = () => {
                   </div>
                 </>
               ) : (
-                <div style={{ textAlign: 'center', padding: '12px 0', color: '#ccc', fontSize: 12 }}>
+                <div style={{ textAlign: 'center', padding: '12px 0', color: token.colorTextDescription, fontSize: 12 }}>
                   {t('loadingTeachingData')}
                 </div>
               )}
@@ -943,7 +944,7 @@ const ChatPage: React.FC = () => {
               <div style={{ textAlign: 'center', marginBottom: 16 }}>
                 <span style={{ fontSize: 32 }}>{companionProfile.titles?.main === '初窥门径' ? '🥚' : '🏆'}</span>
                 <div style={{ fontWeight: 600 }}>{companionProfile.titles?.main || t('companionName')}</div>
-                <div style={{ fontSize: 12, color: '#999' }}>{companionProfile.total_points || 0} {t('points')}</div>
+                <div style={{ fontSize: 12, color: token.colorTextTertiary }}>{companionProfile.total_points || 0} {t('points')}</div>
               </div>
 
               {/* 薄弱点 */}
@@ -953,10 +954,10 @@ const ChatPage: React.FC = () => {
                   {companionProfile.weakness.slice(0, 3).map((w, i) => (
                     <div key={i} style={{
                       fontSize: 12, padding: '4px 8px', marginTop: 4,
-                      background: '#fff2f0', borderRadius: 4,
+                      background: token.colorErrorBg, borderRadius: 4,
                     }}>
                       {w.kp}
-                      <span style={{ color: '#ff4d4f', marginLeft: 4 }}>
+                      <span style={{ color: token.colorError, marginLeft: 4 }}>
                         {'❌'.repeat(Math.min(w.wrong_count, 3))}
                       </span>
                     </div>
@@ -982,7 +983,7 @@ const ChatPage: React.FC = () => {
               {companionProfile.streak_days > 0 && (
                 <div style={{ marginBottom: 16 }}>
                   <Typography.Text style={{ fontSize: 12, fontWeight: 600 }}>{t('streakDays')}</Typography.Text>
-                  <div style={{ fontSize: 20, fontWeight: 700, color: '#fa8c16' }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: token.colorWarning }}>
                     {companionProfile.streak_days} {t('days')}
                   </div>
                 </div>
@@ -991,11 +992,11 @@ const ChatPage: React.FC = () => {
               {/* 学习建议 */}
               {companionProfile.recommendation && (
                 <div style={{
-                  padding: 8, background: '#f6ffed', borderRadius: 4,
+                  padding: 8, background: token.colorSuccessBg, borderRadius: 4,
                   fontSize: 12, marginBottom: 16,
                 }}>
-                  <Typography.Text style={{ color: '#52c41a', fontWeight: 600 }}>{t('companionAdvice')}</Typography.Text>
-                  <div style={{ marginTop: 4, color: '#666' }}>{companionProfile.recommendation}</div>
+                  <Typography.Text style={{ color: token.colorSuccess, fontWeight: 600 }}>{t('companionAdvice')}</Typography.Text>
+                  <div style={{ marginTop: 4, color: token.colorTextSecondary }}>{companionProfile.recommendation}</div>
                 </div>
               )}
 
@@ -1004,18 +1005,18 @@ const ChatPage: React.FC = () => {
                 <div
                   onClick={() => { setPushModalOpen(true); companionLoadPushes(); }}
                   style={{
-                    padding: 8, background: '#fff7e6', borderRadius: 4,
+                    padding: 8, background: token.colorWarningBg, borderRadius: 4,
                     fontSize: 12, cursor: 'pointer',
                     transition: 'background 0.2s',
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#ffedd5'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#fff7e6'; }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorWarningBgHover; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorWarningBg; }}
                 >
-                  <Typography.Text style={{ color: '#fa8c16', fontWeight: 600 }}>
+                  <Typography.Text style={{ color: token.colorWarning, fontWeight: 600 }}>
                     {t('unreadMessages')}
-                    <span style={{ float: 'right', fontSize: 11, fontWeight: 400, color: '#d48806' }}>{t('viewAll')}</span>
+                    <span style={{ float: 'right', fontSize: 11, fontWeight: 400, color: token.colorWarning }}>{t('viewAll')}</span>
                   </Typography.Text>
-                  <div style={{ marginTop: 4, color: '#666' }}>
+                  <div style={{ marginTop: 4, color: token.colorTextSecondary }}>
                     {t('unreadCountMessage', { count: companionUnreadCount })}
                   </div>
                 </div>
@@ -1069,7 +1070,7 @@ const ChatPage: React.FC = () => {
                     reminder: { color: '#ff4d4f', icon: '📌', label: t('pushReminder') },
                     milestone: { color: '#722ed1', icon: '⭐', label: t('pushMilestone') },
                   }
-                  const cfg = PUSH_TYPES[item.push_type] || { color: '#999', icon: '💌', label: item.push_type_label }
+                  const cfg = PUSH_TYPES[item.push_type] || { color: 'var(--text-tertiary)', icon: '💌', label: item.push_type_label }
                   const isUnread = !item.is_read
                   return (
                     <List.Item
@@ -1078,7 +1079,7 @@ const ChatPage: React.FC = () => {
                         background: isUnread ? '#f6f8ff' : 'transparent',
                         cursor: 'default',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = token.colorFillTertiary }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.background = isUnread ? '#f6f8ff' : 'transparent'
                       }}
@@ -1229,7 +1230,7 @@ const ChatPage: React.FC = () => {
                 {t('previewHtml')}
               </Button>
             )}
-            <div style={{ width: 1, height: 20, background: '#e8e8e8', margin: '0 2px' }} />
+            <div style={{ width: 1, height: 20, background: token.colorBorderSecondary, margin: '0 2px' }} />
             <Button size="small" icon={<PlusOutlined />} onClick={() => {
               // 清除图片预览和文件缓存
               setImagePreviewHtml('')
@@ -1277,19 +1278,19 @@ const ChatPage: React.FC = () => {
             )}
             <div style={{ flex: 1, minWidth: 0 }} />
             {usage && (
-              <div style={{ fontSize: 12, color: '#999', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 12, color: token.colorTextTertiary, whiteSpace: 'nowrap' }}>
                 {usage.remaining === -1 ? (
-                  <span style={{ color: '#bbb' }}>{t('adminUnlimited')}</span>
+                  <span style={{ color: token.colorTextDescription }}>{t('adminUnlimited')}</span>
                 ) : usage.enabled ? (
                   <span>
                     <span style={{ color: usage.remaining > 5 ? '#52c41a' : usage.remaining > 0 ? '#faad14' : '#ff4d4f', marginRight: 4 }}>●</span>
                     {t('todayUsed', { used: usage.used, max: usage.max })}
                     {usage.remaining > 0
-                      ? <span style={{ marginLeft: 4, color: '#aaa' }}>{t('remaining')} {usage.remaining}</span>
-                      : <span style={{ marginLeft: 4, color: '#ff4d4f', fontWeight: 600 }}>{t('usedUp')}</span>}
+                      ? <span style={{ marginLeft: 4, color: token.colorTextDescription }}>{t('remaining')} {usage.remaining}</span>
+                      : <span style={{ marginLeft: 4, color: token.colorError, fontWeight: 600 }}>{t('usedUp')}</span>}
                   </span>
                 ) : (
-                  <span style={{ color: '#bbb' }}>{t('rateLimitDisabled')}</span>
+                  <span style={{ color: token.colorTextDescription }}>{t('rateLimitDisabled')}</span>
                 )}
               </div>
             )}
@@ -1389,13 +1390,13 @@ const ChatPage: React.FC = () => {
               style={{ cursor: 'pointer' }}
             >
               <Space align="center">
-                <SendOutlined style={{ fontSize: 18, color: '#1677ff' }} />
+                <SendOutlined style={{ fontSize: 18, color: token.colorPrimary }} />
                 <div>
                   <Typography.Text strong>{task.name}</Typography.Text>
                   {task.description && (
                     <Typography.Paragraph
                       ellipsis={{ rows: 1 }}
-                      style={{ margin: 0, fontSize: 12, color: '#888', maxWidth: 260 }}
+                      style={{ margin: 0, fontSize: 12, color: token.colorTextTertiary, maxWidth: 260 }}
                     >
                       {task.description}
                     </Typography.Paragraph>
