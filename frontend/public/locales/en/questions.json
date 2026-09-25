@@ -399,5 +399,10 @@
   "masteredCount": "{{count}} mastered",
   "statusPending": "To review",
   "statusMastered": "Mastered",
-  "statusAll": "All"
+  "statusAll": "All",
+  "masterCol": "Mastery",
+  "unmarkMastered": "Unmark mastered",
+  "markMasteredOk": "Marked as mastered",
+  "markPendingOk": "Moved back to pending",
+  "markFailed": "Operation failed, please retry"
 }

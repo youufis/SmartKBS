@@ -122,6 +122,7 @@
   "newsFetchPartial": "部分新闻源不可用",
   "newsSourceUnreachable": "新闻源暂不可达，系统会自动重试",
   "newsSourceHealth": "新闻源状态",
+  "newsTotalCount": "共 {{total}} 条",
   "refreshBusy": "已有抓取在进行中，稍后会自动更新列表",
   "refreshEmpty": "各新闻源均无 72 小时内的新内容",
   "refreshOk": "已更新：新增 {{added}} 条，续期 {{renewed}} 条",

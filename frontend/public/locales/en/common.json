@@ -119,6 +119,7 @@
   "newsFetchPartial": "some sources unavailable",
   "newsSourceUnreachable": "News sources are temporarily unreachable; auto retry is scheduled",
   "newsSourceHealth": "News source status",
+  "newsTotalCount": "{{total}} items in total",
   "refreshBusy": "A fetch is already running; the list will update shortly",
   "refreshEmpty": "No fresh items within the last 72 hours from any source",
   "refreshOk": "Updated: {{added}} new, {{renewed}} renewed",

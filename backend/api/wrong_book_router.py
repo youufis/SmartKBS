@@ -350,6 +350,47 @@ async def get_wrong_questions(
     }
 
 
+class MasterToggleRequest(BaseModel):
+    wrong_book_id: int
+    status: str = "mastered"  # mastered=已掌握 pending=取消(重回待掌握)
+
+
+@router.post("/master", summary="手动切换单条错题的掌握状态")
+async def toggle_wrong_mastered(req: MasterToggleRequest, request: Request):
+    """学生自主控制错题本: 把某道题标为已掌握(从待掌握列表消失)或取消。
+
+    与判分自动标记共用同一 status 字段: 标掌握后再次答错会由 _upsert_wrong
+    自动重开为 pending, 所以手动标记不会把题永久锁死在错题本外。
+    """
+    user = get_current_user(request)
+    if req.status not in ("mastered", "pending"):
+        raise HTTPException(status_code=400, detail="status 仅支持 mastered 或 pending")
+
+    rows = db_dict("SELECT id, student_username, status FROM wrong_book WHERE id=?", (req.wrong_book_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="错题记录不存在")
+
+    owner = rows[0]["student_username"]
+    # W1/W2 同一守卫: 学生一律本人, 教师限任教范围, 管理员不限
+    if _assert_can_access_student(user, owner) != owner:
+        raise HTTPException(status_code=403, detail="无权修改其他学生的错题本")
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if req.status == "mastered":
+        updated = _db_write(
+            "UPDATE wrong_book SET status='mastered', mastered_at=? WHERE id=? AND status<>'mastered'",
+            (now, req.wrong_book_id),
+        )
+    else:
+        updated = _db_write(
+            "UPDATE wrong_book SET status='pending', mastered_at=NULL WHERE id=? AND status<>'pending'",
+            (req.wrong_book_id,),
+        )
+    logger.info(f"错题手动切换掌握状态: {user.get('username')} wb={req.wrong_book_id} "
+                f"-> {req.status} (updated={updated})")
+    return {"ok": True, "updated": updated, "wrong_book_id": req.wrong_book_id, "status": req.status}
+
+
 @router.get("/students", summary="获取有错题记录的学生列表")
 async def get_students_with_wrong(
     request: Request,

@@ -399,5 +399,10 @@
   "masteredCount": "已掌握 {{count}} 题",
   "statusPending": "待掌握错题",
   "statusMastered": "已掌握",
-  "statusAll": "全部"
+  "statusAll": "全部",
+  "masterCol": "掌握状态",
+  "unmarkMastered": "取消已掌握",
+  "markMasteredOk": "已标记为已掌握",
+  "markPendingOk": "已移回待掌握",
+  "markFailed": "操作失败，请重试"
 }

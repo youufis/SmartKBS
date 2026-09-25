@@ -242,22 +242,39 @@ export const useCompanionStore = create<CompanionStore>()((set, get) => ({
 
     abortController = new AbortController();
 
+    // 后端 SSE 的 delta 帧只携带新增片段（与智答模式同一协议），前端负责累加并 ~60ms 节流落屏
+    let acc = '';
+    let lastFlush = 0;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      lastFlush = Date.now();
+      const msgs = get().companionMessages;
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === 'assistant') {
+        last.content = acc;
+        set({ companionMessages: [...msgs], currentText: acc });
+      }
+    };
+    const scheduleFlush = () => {
+      if (flushTimer) return;
+      const wait = Math.max(0, 60 - (Date.now() - lastFlush));
+      flushTimer = setTimeout(() => { flushTimer = null; flush(); }, wait);
+    };
+
     await companionApi.companionChat(
       prompt,
-      (text) => {
-        set({ currentText: text });
-        const msgs = get().companionMessages;
-        const last = msgs[msgs.length - 1];
-        if (last && last.role === 'assistant') {
-          last.content = text;
-          set({ companionMessages: [...msgs] });
-        }
+      (inc: string) => {
+        acc += inc;
+        scheduleFlush();
       },
       () => {
+        flush();
         set({ isStreaming: false, currentText: '' });
         abortController = null;
       },
       (error) => {
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
         const msgs = get().companionMessages;
         const last = msgs[msgs.length - 1];
         if (last && last.role === 'assistant') {

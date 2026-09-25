@@ -1,12 +1,12 @@
 /** 热点新闻 - 独立页面 */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Card, Tag, Button, Space, Typography, Progress,
-  message, Spin, Modal, Drawer, Tabs, Empty, Tooltip, Result,
+  Card, Tag, Button, Space, Typography, Progress, Pagination,
+  message, Spin, Modal, Drawer, Empty, Tooltip, Result,
 } from 'antd';
 import {
   GlobalOutlined, ReloadOutlined, HeartOutlined, HeartFilled,
-  EyeOutlined, ArrowLeftOutlined, BookOutlined, RightOutlined,
+  EyeOutlined, ArrowLeftOutlined, BookOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -17,7 +17,10 @@ import { useAuthStore } from '../stores/authStore';
 import { useTranslation } from 'react-i18next'
 import { RowList, RowItem } from '../components/RowList'
 
-const { Text, Paragraph, Title } = Typography;
+const { Text, Paragraph } = Typography;
+
+/** 后端 /api/news/list 的每页条数（与 page_size 默认值一致） */
+const PAGE_SIZE = 20;
 
 const CATEGORY_COLORS: Record<string, string> = {
   '国内': 'red', '国际': 'blue', '科技': 'cyan',
@@ -31,7 +34,7 @@ const NewsHubPage: React.FC = () => {
   const user = useAuthStore((s) => s.user);
   const isTeacherOrAdmin = user?.role === 'teacher' || user?.role === 'admin';
   const {
-    articles, categories, loading, stats,
+    articles, categories, loading, stats, total,
     loadList, loadCategories, getDetail, toggleFavorite, loadStats,
     refreshing, lastFetch, refreshNow,
   } = useNewsStore();
@@ -46,22 +49,6 @@ const NewsHubPage: React.FC = () => {
   const [briefingGenerating, setBriefingGenerating] = useState(false);
   const [briefingError, setBriefingError] = useState('');
   const briefingTimer = useRef<number | null>(null);
-  const tabsItems = [
-    { key: 'feed', label: t('newsList') },
-    { key: 'briefing', label: t('dailyBriefing') },
-  ];
-
-  useEffect(() => {
-    loadCategories();
-    loadStats();
-
-    // 如果有指定新闻ID，自动打开详情
-    const newsId = searchParams.get('id');
-    if (newsId) {
-      handleViewDetail(Number(newsId));
-    }
-  }, []);
-
   useEffect(() => {
     loadList(activeCategory, page);
   }, [activeCategory, page]);
@@ -76,6 +63,11 @@ const NewsHubPage: React.FC = () => {
     coldStartFilled.current = true;
     void refreshNow().then(() => loadList('', 1)).catch(() => undefined);
   }, [loading, articles.length, activeCategory, page]);
+
+  // 切分类/刷新后条数变少，可能停在一张空页上，自动回到第 1 页
+  useEffect(() => {
+    if (!loading && page > 1 && articles.length === 0 && total > 0) setPage(1);
+  }, [loading, articles.length, page, total]);
 
   const handleCategoryChange = (cat: string) => {
     setActiveCategory(cat);
@@ -93,6 +85,17 @@ const NewsHubPage: React.FC = () => {
       setDetailLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadCategories();
+    loadStats();
+
+    // 如果有指定新闻ID，自动打开详情
+    const newsId = searchParams.get('id');
+    if (newsId) {
+      handleViewDetail(Number(newsId));
+    }
+  }, []);
 
   const handleToggleFavorite = async (newsId: number, isFav: boolean) => {
     await toggleFavorite(newsId, isFav);
@@ -324,6 +327,7 @@ const NewsHubPage: React.FC = () => {
             </Button>
           </Empty>
         ) : (
+          <>
           <RowList
             items={articles}
             renderItem={(item) => (
@@ -382,6 +386,17 @@ const NewsHubPage: React.FC = () => {
               />
             )}
           />
+          {total > PAGE_SIZE && (
+            <div style={{ padding: '12px 16px', textAlign: 'center', borderTop: '1px solid var(--border-color-secondary, #f0f0f0)' }}>
+              <Pagination
+                current={page} pageSize={PAGE_SIZE} total={total}
+                size="small" showSizeChanger={false}
+                showTotal={(tt) => t('newsTotalCount', { total: tt })}
+                onChange={(p) => setPage(p)}
+              />
+            </div>
+          )}
+          </>
         )}
       </Card>
 

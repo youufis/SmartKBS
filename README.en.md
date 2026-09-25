@@ -322,6 +322,7 @@ Step-by-step guided paper generation wizard supporting smart selection and profe
 Automatically collects student wrong answers for AI-assisted review:
 
 - **📋 Wrong Answer Collection**: Grouped by exam for display
+- **✅ Mark as Mastered**: Each wrong question can be marked mastered (and undone), with To review / Mastered / All filtering actually in sync
 - **📐 Multimedia Display**: Supports LaTeX formulas and image display
 - **🤖 AI Review Plan**: One-click generation of personalized review reports (wrong answer analysis, knowledge point review suggestions, targeted practice questions)
 - **👁️ Three-Level Linked Viewing (Teacher)**: Filter by grade → class → student
@@ -439,7 +440,7 @@ Dual knowledge expansion modules, allowing students to easily broaden their hori
   7-day deduplication window, supports favorites and manual refresh. Smart knowledge pool replenishes on demand,
   no consumption when unused, browsing earns points and badges.
 - **📰 Trending News**: RSS aggregation of mainstream news feeds (Chinanews, IT Home, etc.),
-  AI on-demand summaries + subject association, supports daily briefing and favorites.
+  AI on-demand summaries + subject association, supports daily briefing, favorites and paginated browsing (no longer capped at the first 20 items).
   2h cache lazy loading, 72h rolling cleanup, zero fetching when no one is accessing; the source list is editable in system config, with a per-source circuit breaker and a standby pool.
 
 > **Available to all users**
@@ -981,11 +982,11 @@ Git-based online incremental upgrade system:
 
 ### v8.3.0 (2026-09-23)
 
-- 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests
+- 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests; companion and assistant replies reassemble streamed fragments again instead of showing only the last character
 - 🤖 **AI generation and grading hardened**: explicit output length caps with truncation recorded, tolerant JSON parsing and pre-save checks so incomplete artifacts are never stored silently; answers normalised for grading and generated artifacts auto-registered
 - 🏠 **Dashboard and task list rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home with star of the week; to-dos are filtered by class scope and pending grading now counts real work
 - 🗂️ **Sharing centre closed out**: resource browsing and Shared Files share one browser (categories, stats strip, grid/list, pagination, preferences) and directory shares show as folders; fixed files never counting as seen and to-do links that wouldn't open
-- 🌙 **Theme and copy**: the dark-mode palette completed and hard-coded colours removed; translation placeholders and untranslated strings closed out, deprecated component warnings cleared
+- 🌙 **Theme, copy and page details**: the dark-mode palette completed and hard-coded colours removed; translation placeholders and untranslated strings closed out, deprecated component warnings cleared; the wrong-answer book lets students mark each question mastered (undoable) with the three-way filter really working, and trending news gained its paging control
 - ⚠️ **Breaking changes**: none
 
 ### v8.2.0 (2026-09-14)

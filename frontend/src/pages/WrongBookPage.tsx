@@ -22,6 +22,10 @@ interface WrongQuestion {
   score: number
   max_score: number
   knowledge_points: string
+  /** 错题本行 ID 与掌握状态（手动「已掌握」用） */
+  wrong_book_id?: number
+  wb_status?: string
+  mastered_at?: string
   /** SVG 配图 */
   svg_content?: string
   has_svg?: number
@@ -131,10 +135,11 @@ const WrongBookPage: React.FC = () => {
   }
 
 
-  const loadData = async (studentUsername?: string) => {
+  const loadData = async (studentUsername?: string, status?: string) => {
     setLoading(true)
     try {
-      const params: Record<string, string> = { status: wrongStatus }
+      // status 可显式传入: 筛选切换时 setState 后闭包里仍是旧值，会永远慢一步
+      const params: Record<string, string> = { status: status ?? wrongStatus }
       if (studentUsername) params.student_username = studentUsername
       const { data: res } = await apiClient.get('/api/wrong-book/list', { params })
       setData(res)
@@ -149,6 +154,22 @@ const WrongBookPage: React.FC = () => {
     const student = students.find(s => s.username === username)
     setSelectedStudentName(student?.name || username)
     if (username) loadData(username)
+  }
+
+  // 手动切换单条错题的掌握状态（学生自主控制错题本）
+  const [masterBusy, setMasterBusy] = useState<number | null>(null)
+  const toggleMastered = async (r: WrongQuestion, next: 'mastered' | 'pending') => {
+    const wbId = Number(r.wrong_book_id)
+    if (!wbId) { message.error(t('markFailed')); return }
+    setMasterBusy(wbId)
+    try {
+      await apiClient.post('/api/wrong-book/master', { wrong_book_id: wbId, status: next })
+      message.success(next === 'mastered' ? t('markMasteredOk') : t('markPendingOk'))
+      await loadData(isStudent ? undefined : selectedStudent)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || t('markFailed'))
+    }
+    setMasterBusy(null)
   }
 
   // 错题考试列表分页
@@ -302,7 +323,7 @@ const WrongBookPage: React.FC = () => {
                   <Text type="secondary" style={{ fontSize: 12 }}>{t('masteredCount', { count: data.mastered_total })}</Text>
                 )}
                 <Select size="small" style={{ width: 130 }} value={wrongStatus}
-                  onChange={(v: any) => { setWrongStatus(v); loadData(isStudent ? undefined : selectedStudent) }}>
+                  onChange={(v: any) => { setWrongStatus(v); loadData(isStudent ? undefined : selectedStudent, v) }}>
                   <Select.Option value="pending">{t('statusPending')}</Select.Option>
                   <Select.Option value="mastered">{t('statusMastered')}</Select.Option>
                   <Select.Option value="all">{t('statusAll')}</Select.Option>
@@ -370,6 +391,24 @@ const WrongBookPage: React.FC = () => {
                           render: (_: any, r: any) => (r.max_score
                             ? <Text type="danger">{r.score} / {r.max_score}</Text>
                             : <Tag color="red">{t('wrongTimes', { count: r.wrong_count || 1 })}</Tag>),
+                        },
+                        {
+                          title: t('masterCol'), key: 'master', width: wrongStatus === 'all' ? 172 : 104,
+                          render: (_: any, r: any) => {
+                            const done = r.wb_status === 'mastered'
+                            return (
+                              <Space size={4}>
+                                {wrongStatus === 'all' && (
+                                  <Tag color={done ? 'green' : 'red'}>{done ? t('statusMastered') : t('statusPending')}</Tag>
+                                )}
+                                <Button size="small" type={done ? 'link' : 'primary'} ghost={!done}
+                                  loading={masterBusy === Number(r.wrong_book_id)}
+                                  onClick={() => toggleMastered(r, done ? 'pending' : 'mastered')}>
+                                  {done ? t('unmarkMastered') : t('mastered')}
+                                </Button>
+                              </Space>
+                            )
+                          },
                         },
                       ]}
                     />
