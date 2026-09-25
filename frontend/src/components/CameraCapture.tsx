@@ -5,6 +5,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react'
 import { Modal, Button, Space, Typography, message } from 'antd'
 import { CameraOutlined, ReloadOutlined, CheckOutlined, PictureOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 
 interface CameraCaptureProps {
   open: boolean
@@ -13,6 +14,7 @@ interface CameraCaptureProps {
 }
 
 const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture }) => {
+  const { t } = useTranslation('common')
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fallbackInputRef = useRef<HTMLInputElement>(null)
@@ -204,7 +206,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture 
     canvas.toBlob(
       (blob) => {
         if (!blob) {
-          message.error('拍照失败，请重试')
+          message.error(t('cameraCaptureFailed'))
           return
         }
         const timestamp = Date.now()
@@ -271,7 +273,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture 
 
   return (
     <Modal maskClosable={false}
-      title={<span><CameraOutlined style={{ marginRight: 8 }} />拍照输入</span>}
+      title={<span><CameraOutlined style={{ marginRight: 8 }} />{t('cameraInputTitle')}</span>}
       open={open}
       onCancel={handleClose}
       footer={null}

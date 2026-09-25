@@ -5,6 +5,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { Button, Tooltip, message } from 'antd'
 import { AudioOutlined, StopOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 
 // SpeechRecognition 类型声明（部分浏览器尚未纳入 TypeScript 标准库）
 interface SpeechRecognitionInstance {
@@ -58,6 +59,7 @@ const SpeechRecognitionAPI:
   })()
 
 const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled }) => {
+  const { t } = useTranslation('common')
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const [listening, setListening] = useState(false)
   const [supported] = useState(() => !!SpeechRecognitionAPI)
@@ -100,22 +102,22 @@ const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled }) => {
       switch (event.error) {
         case 'not-allowed':
         case 'permission-denied':
-          message.warning('麦克风权限被拒绝，请在浏览器设置中允许麦克风访问')
+          message.warning(t('micDeniedTip'))
           break
         case 'no-speech':
           // 无语音输入时静默处理，不提示
           break
         case 'audio-capture':
-          message.warning('未检测到麦克风设备')
+          message.warning(t('micNoneTip'))
           break
         case 'network':
-          message.warning('语音识别网络错误，请检查网络连接')
+          message.warning(t('micNetworkTip'))
           break
         case 'aborted':
           // 用户手动停止，不提示
           break
         default:
-          message.warning(`语音识别错误: ${event.error}`)
+          message.warning(t('micErrorTip', { error: event.error }))
       }
     }
 

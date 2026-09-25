@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Modal, Button, Typography, Space, Progress, Spin } from 'antd'
 import { CloseOutlined, StopOutlined, LoadingOutlined, CheckCircleOutlined, WarningOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -39,6 +40,7 @@ const ProgressModal: React.FC<Props> = ({
   onCancel,
   onClose,
 }) => {
+  const { t } = useTranslation('common')
   const doneSteps = steps.filter(s => s.status === 'done').length
   const totalSteps = steps.length
   const percent = totalSteps > 0 ? Math.round((doneSteps / totalSteps) * 100) : 0
@@ -82,7 +84,7 @@ const ProgressModal: React.FC<Props> = ({
         {/* 总进度条 */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>总体进度</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('overallProgressLabel')}</Text>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {formatTime(elapsed)}
               {status === 'running' && <Spin size="small" style={{ marginLeft: 8 }} />}

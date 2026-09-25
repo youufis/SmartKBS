@@ -342,15 +342,15 @@ const UserMgmtPage: React.FC = () => {
       width: 520,
       content: (
         <div>
-          <p style={{ marginBottom: 12 }}>此操作将执行以下变更：</p>
+          <p style={{ marginBottom: 12 }}>{t('promoteIntro')}</p>
           <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
-            <li>更新所有学生的年级（{promoteDesc}）</li>
-            {graduateDesc && <li>毕业年级学生将自动归档（禁止登录、数据保留，可在用户管理恢复）：{graduateDesc}</li>}
-            <li>同步迁移课堂积分与点名数据的年级归属</li>
-            <li>按同名班级自动归班（如 1班 → 1班），未匹配者将在结果中提醒</li>
-            <li>毕业年级学生自动归档：禁止登录、数据保留，可在用户管理恢复</li>
+            <li>{t('promoteStudentsLine', { desc: promoteDesc })}</li>
+            {graduateDesc && <li>{t('promoteGraduateLine', { desc: graduateDesc })}</li>}
+            <li>{t('promotePointsLine')}</li>
+            <li>{t('promoteClassLine')}</li>
+            <li>{t('promoteArchiveLine')}</li>
           </ul>
-          <p style={{ color: '#fa8c16', marginTop: 8 }}>此操作不可撤销，请确认已备份数据。</p>
+          <p style={{ color: '#fa8c16', marginTop: 8 }}>{t('promoteIrreversible')}</p>
         </div>
       ),
       okText: t('confirmExecute'),
@@ -388,14 +388,14 @@ const UserMgmtPage: React.FC = () => {
       width: 520,
       content: (
         <div>
-          <p style={{ marginBottom: 12 }}>降级是升年级的逆操作，将执行以下变更：</p>
+          <p style={{ marginBottom: 12 }}>{t('demoteIntro')}</p>
           <ul style={{ paddingLeft: 20, lineHeight: 2 }}>
             <li>{reverseDesc || t('demoteByUpgradeMap')}</li>
-            <li>同步回迁课堂积分与点名数据的年级归属</li>
-            <li>按同名班级自动归班</li>
-            <li>毕业归档账号一并恢复为在校（保持其毕业年级不动）</li>
+            <li>{t('demotePointsLine')}</li>
+            <li>{t('demoteClassLine')}</li>
+            <li>{t('demoteRestoreLine')}</li>
           </ul>
-          <p style={{ color: '#fa8c16', marginTop: 8 }}>毕业年级学生不受影响。降级可多次执行，每次都是升年级的逆操作。</p>
+          <p style={{ color: '#fa8c16', marginTop: 8 }}>{t('demoteNote')}</p>
         </div>
       ),
       okText: t('confirmDemote'),
@@ -917,7 +917,7 @@ const UserMgmtPage: React.FC = () => {
 
           {/* ── 批量升年级 ── */}
           <Card size="small" title={<span><RiseOutlined /> {t('batchUpgradeTitle')}</span>}
-            extra={isAdmin ? null : <Typography.Text type="warning">仅管理员可用</Typography.Text>}>
+            extra={isAdmin ? null : <Typography.Text type="warning">{t('adminOnlyHint')}</Typography.Text>}>
             {isAdmin ? (
               <Space orientation="vertical" style={{ width: '100%' }}>
                 <Typography.Text type="secondary">
@@ -998,7 +998,7 @@ const UserMgmtPage: React.FC = () => {
                     style={{ marginTop: 12, background: promoteResult.success ? '#f6ffed' : '#fff2f0' }}>
                     <Space orientation="vertical">
                       {!promoteResult.success && (
-                        <Typography.Text type="danger">❌ 升年级失败，数据已全部回滚</Typography.Text>
+                        <Typography.Text type="danger">{t('promoteFailedRollback')}</Typography.Text>
                       )}
                       {promoteResult.errors?.map((e, i) => (
                         <Typography.Text key={i} type="danger" style={{ fontSize: 12 }}>{e}</Typography.Text>
@@ -1039,7 +1039,7 @@ const UserMgmtPage: React.FC = () => {
                 )}
               </Space>
             ) : (
-              <Typography.Text type="secondary">升年级操作仅限管理员使用</Typography.Text>
+              <Typography.Text type="secondary">{t('promoteAdminOnly')}</Typography.Text>
             )}
           </Card>
         </Space>

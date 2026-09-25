@@ -440,8 +440,8 @@ const InteractionPage: React.FC = () => {
               ) : q.type === 'true_false' ? (
                 <Radio.Group onChange={(e) => setQuizAnswers({ ...quizAnswers, [i]: e.target.value })}>
                   <Space>
-                    <Radio value="对" style={{ lineHeight: 2 }}>对</Radio>
-                    <Radio value="错" style={{ lineHeight: 2 }}>错</Radio>
+                    <Radio value="对" style={{ lineHeight: 2 }}>{t('judgeTrue')}</Radio>
+                    <Radio value="错" style={{ lineHeight: 2 }}>{t('judgeFalse')}</Radio>
                   </Space>
                 </Radio.Group>
               ) : (

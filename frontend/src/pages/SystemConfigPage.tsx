@@ -734,7 +734,7 @@ const UpgradePanel: React.FC = () => {
           <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '12px 16px' }}>
             <Text strong style={{ color: '#d48806' }}>{t('rollbackNoteTitle')}</Text>
             <ul style={{ margin: '8px 0 0 0', paddingLeft: 20, color: '#555' }}>
-              <li><Trans i18nKey="rollbackNote1">回滚仅恢复代码文件，<strong>数据库和用户数据不受影响</strong></Trans></li>
+              <li><Trans ns="system" i18nKey="rollbackNote1">回滚仅恢复代码文件，<strong>数据库和用户数据不受影响</strong></Trans></li>
               <li>{t('rollbackNote2')}</li>
               <li>{t('rollbackNote3')}</li>
             </ul>

@@ -55,7 +55,7 @@ const CompanionSettings: React.FC = () => {
     try {
       await updateConfig({ enabled, personality, companion_name: companionName.trim() })
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || e?.message || '保存失败')
+      message.error(e?.response?.data?.detail || e?.message || t('saveFailed'))
     } finally {
       setSaving(false)
     }

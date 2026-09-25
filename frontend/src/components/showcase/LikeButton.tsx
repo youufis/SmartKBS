@@ -3,6 +3,7 @@ import { HeartOutlined, HeartFilled } from '@ant-design/icons'
 import { message } from 'antd'
 import { toggleLike } from '../../api/showcase'
 import { useAuthStore } from '../../stores/authStore'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
   showcaseId: number;
@@ -14,6 +15,7 @@ interface Props {
 const PARTICLE_EMOJIS = ['❤️', '⭐', '✨', '💫', '🌟', '🎉']
 
 const LikeButton: React.FC<Props> = ({ showcaseId, liked, count, onLikeChange }) => {
+  const { t } = useTranslation('common')
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
   const btnRef = useRef<HTMLButtonElement>(null)
 
@@ -37,7 +39,7 @@ const LikeButton: React.FC<Props> = ({ showcaseId, liked, count, onLikeChange })
   const handleClick = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (!isLoggedIn) {
-      message.warning('请先登录')
+      message.warning(t('pleaseLoginFirst'))
       return
     }
     try {
@@ -48,7 +50,7 @@ const LikeButton: React.FC<Props> = ({ showcaseId, liked, count, onLikeChange })
         spawnParticles(rect.left + rect.width / 2, rect.top + rect.height / 2)
       }
     } catch {
-      message.error('操作失败')
+      message.error(t('operationFailedShort'))
     }
   }, [showcaseId, isLoggedIn, onLikeChange, spawnParticles])
 

@@ -4,15 +4,9 @@ import { Form, Input, Select, InputNumber, Row, Col, Button, Space, Divider, Typ
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 const { Option } = Select
 
-const TYPE_OPTIONS = [
-  { value: 'single', label: '单选题' },
-  { value: 'multiple', label: '多选题' },
-  { value: 'true_false', label: '判断题' },
-  { value: 'short', label: '简答题' },
-  { value: 'fill', label: '填空题' },
-  { value: 'essay', label: '作文' },
-  { value: 'subjective', label: '主观题' },
-]
+/** 组卷可选题型；显示名一律走 i18n 的 pcType_* 键，不再在这里硬编码中文标签 */
+const TYPE_OPTIONS = ['single', 'multiple', 'true_false', 'short', 'fill', 'essay', 'subjective']
+  .map((value) => ({ value }))
 
 interface PaperConfigFormProps {
   subjects: string[]

@@ -292,6 +292,11 @@
   "writeAnswer": "Write Answer",
   "answerPlaceholder": "Enter your answer (supports Markdown), or click \"AI Suggest\" to generate...",
   "quest": {
+  "quest.rules.gameDesc": "AI generates trivia questions on the fly across 12 knowledge domains, up to 15 per run — <s>one wrong answer ends the run</s>!",
+  "quest.rules.timerDesc": "Each question has a <s>30-second</s> limit; running out counts as wrong.",
+  "quest.rules.lifelineDesc": "<s>Fifty-fifty</s>: drop one wrong option, leaving 3 (score ×85%)<br/><s>Phone a friend</s>: the AI gives you a hint (score ×70%)<br/><s>Audience poll</s>: vote split from 100 audience members (score ×70%)",
+  "quest.rules.scoreDesc": "Q1: 10 pts → Q2-3: 15 pts → Q4-6: 20 pts →<br/>Q7-9: 25 pts → Q10-12: 30 pts → Q13-15: <s>50 pts</s>",
+  "quest.rules.badgeDesc": "Every correct answer banks points; clearing a run grants <s>🏅 Quest Badge ×1</s>, stackable without limit.<br/>Milestones unlock titles: 🥉 Newcomer → 🥈 Rising Challenger → 🥇 Quest Master → 💎 Diamond Quester → 👑 Quest Legend",
     "title": "⚡ Knowledge Quest",
     "subtitle": "12 Categories · One wrong ends",
     "bankMode": "📚 Question Bank",

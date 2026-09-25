@@ -8,6 +8,15 @@
   "dirtyCloseOk": "放弃并关闭",
   "dirtyCloseStay": "继续编辑",
   "app": {
+  "micDeniedTip": "麦克风权限被拒绝，请在浏览器设置中允许麦克风访问",
+  "micNoneTip": "未检测到麦克风设备",
+  "micNetworkTip": "语音识别网络错误，请检查网络连接",
+  "micErrorTip": "语音识别错误: {{error}}",
+  "cameraInputTitle": "拍照输入",
+  "cameraCaptureFailed": "拍照失败，请重试",
+  "pleaseLoginFirst": "请先登录",
+  "operationFailedShort": "操作失败",
+  "overallProgressLabel": "总体进度",
     "name": "SmartKBS 智慧教学平台",
     "shortName": "SmartKBS",
     "tagline": "全学段通用 AI 教学管理系统"

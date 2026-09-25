@@ -169,8 +169,8 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
               {configured && editing
                 ? t('ssEditHint')
                 : currentQ1 && !currentQ2
-                  ? <Trans i18nKey="ssLegacy1" components={{ 1: <Text strong /> }} />
-                  : <Trans i18nKey="ssIntro" components={{ 1: <Text strong /> }} />
+                  ? <Trans ns="login" i18nKey="ssLegacy1" components={{ 1: <Text strong /> }} />
+                  : <Trans ns="login" i18nKey="ssIntro" components={{ 1: <Text strong /> }} />
               }
             </Text>
           </div>

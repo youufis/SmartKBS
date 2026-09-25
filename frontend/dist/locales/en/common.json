@@ -8,6 +8,15 @@
   "dirtyCloseOk": "Discard and close",
   "dirtyCloseStay": "Keep editing",
   "app": {
+  "micDeniedTip": "Microphone access was denied — allow it in your browser settings",
+  "micNoneTip": "No microphone detected",
+  "micNetworkTip": "Speech recognition network error — check your connection",
+  "micErrorTip": "Speech recognition error: {{error}}",
+  "cameraInputTitle": "Camera Input",
+  "cameraCaptureFailed": "Capture failed, please try again",
+  "pleaseLoginFirst": "Please sign in first",
+  "operationFailedShort": "Operation failed",
+  "overallProgressLabel": "Overall progress",
     "name": "SmartKBS Learning Platform",
     "shortName": "SmartKBS",
     "tagline": "AI-Powered Education for All Levels"

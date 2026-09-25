@@ -398,7 +398,7 @@ const QuestPage: React.FC = () => {
           <div>
             <Title level={5}>{t('quest.rules.gameTitle')}</Title>
             <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.gameDesc">
+              <Trans ns="questions" i18nKey="quest.rules.gameDesc" components={{ s: <Text strong />, br: <br /> }}>
                 AI 即时生成百科单选题，涵盖 12 大知识领域。每轮最多 15 题，<Text strong>答错一题即终止</Text>！
               </Trans>
             </Paragraph>
@@ -406,7 +406,7 @@ const QuestPage: React.FC = () => {
           <div>
             <Title level={5}>{t('quest.rules.timerTitle')}</Title>
             <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.timerDesc">
+              <Trans ns="questions" i18nKey="quest.rules.timerDesc" components={{ s: <Text strong />, br: <br /> }}>
                 每题限时 <Text strong>30 秒</Text>，超时视为答错。
               </Trans>
             </Paragraph>
@@ -414,7 +414,7 @@ const QuestPage: React.FC = () => {
           <div>
             <Title level={5}>{t('quest.rules.lifelineTitle')}</Title>
             <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.lifelineDesc">
+              <Trans ns="questions" i18nKey="quest.rules.lifelineDesc" components={{ s: <Text strong />, br: <br /> }}>
                 <Text strong>去伪存真</Text>：去掉一个错误选项，变 3 选 1（得分 ×85%）<br />
                 <Text strong>远程连线</Text>：AI 朋友给提示线索（得分 ×70%）<br />
                 <Text strong>群策群力</Text>：100 位观众投票分布（得分 ×70%）
@@ -424,7 +424,7 @@ const QuestPage: React.FC = () => {
           <div>
             <Title level={5}>{t('quest.rules.scoreTitle')}</Title>
             <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.scoreDesc">
+              <Trans ns="questions" i18nKey="quest.rules.scoreDesc" components={{ s: <Text strong />, br: <br /> }}>
                 第 1 题：10 分 → 2-3 题：15 分 → 4-6 题：20 分 →<br />
                 7-9 题：25 分 → 10-12 题：30 分 → 13-15 题：<Text strong>50 分</Text>
               </Trans>
@@ -433,7 +433,7 @@ const QuestPage: React.FC = () => {
           <div>
             <Title level={5}>{t('quest.rules.badgeTitle')}</Title>
             <Paragraph>
-              <Trans ns="questions" i18nKey="quest.rules.badgeDesc">
+              <Trans ns="questions" i18nKey="quest.rules.badgeDesc" components={{ s: <Text strong />, br: <br /> }}>
                 每次闯关答对1题即可积累积分，全部通关获得 <Text strong>🏅 闯关徽章 ×1</Text>，可无限累积！<br />
                 集齐里程碑还可解锁专属称号：🥉初出茅庐 → 🥈闯关新秀 → 🥇闯关达人 → 💎闯关大师 → 👑闯关传奇
               </Trans>
