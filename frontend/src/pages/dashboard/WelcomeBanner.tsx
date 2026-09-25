@@ -11,6 +11,7 @@ import type { PortraitData } from '../../api/portrait'
 import { teacherScopeText } from '../../utils/studentLabel'
 import { deadlineInfo } from './fmt'
 import type { DashboardSummary } from '../../api/dashboard'
+import { reportLoadError } from '../../utils/loadError'
 
 const { Text } = Typography
 
@@ -32,7 +33,7 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
     let cancelled = false
     getTodayPortrait().then((res) => {
       if (!cancelled && res.exists && res.portrait && !res.portrait.deleted) setPortrait(res.portrait)
-    }).catch(() => {})
+    }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.TodayPortrait' }) })
     return () => { cancelled = true }
   }, [isStudent])
 

@@ -6,6 +6,7 @@ import { Button, Card, Progress, Space, Tag, Tooltip, Typography } from 'antd'
 import { RightOutlined } from '@ant-design/icons'
 import { getSubjectTitles, type DashboardSummary, type SubjectTitle } from '../../api/dashboard'
 import { useChartTheme } from './chartTheme'
+import { reportLoadError } from '../../utils/loadError'
 
 const { Text } = Typography
 
@@ -20,7 +21,7 @@ const GrowthCard: React.FC<{ summary: DashboardSummary }> = ({ summary }) => {
     getSubjectTitles().then((d) => {
       // 只保留真正答过题的学科：入门(level=1) 是零题量的兜底档，列出来反而像“白送的称号”
       if (!cancelled && Array.isArray(d)) setSubjects(d.filter((s) => (s.question_count ?? 0) > 0))
-    }).catch(() => {})
+    }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.GrowthCard' }) })
     return () => { cancelled = true }
   }, [])
 

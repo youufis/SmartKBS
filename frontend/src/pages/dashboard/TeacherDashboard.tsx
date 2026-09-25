@@ -18,6 +18,7 @@ import ActivityTimelineCard from './ActivityTimelineCard'
 import TeacherTodoBar from './TeacherTodoBar'
 import ClassStarsCard from './ClassStarsCard'
 import DailyQuoteCard from './DailyQuoteCard'
+import { reportLoadError } from '../../utils/loadError'
 
 const { Text } = Typography
 
@@ -30,7 +31,7 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
 
   useEffect(() => {
     let cancelled = false
-    getTeacherTodo().then((d) => { if (!cancelled) setTodo(d) }).catch(() => {})
+    getTeacherTodo().then((d) => { if (!cancelled) setTodo(d) }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.TeacherTodo' }) })
     return () => { cancelled = true }
   }, [])
 

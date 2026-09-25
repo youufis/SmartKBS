@@ -17,6 +17,7 @@ import apiClient from '../api/client'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import { useTranslation, Trans } from 'react-i18next'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -129,7 +130,7 @@ const QuestBattlePage: React.FC = () => {
           if (isMountedRef.current) navigate(`/quest/result/${questId}`)
         }, 1500)
       }
-    } catch { /* ignore */ } finally {
+    } catch (err) { reportLoadError(err, { key: 'quest.timeout' }) } finally {
       setAnswering(false)
     }
   }, [questId, navigate])

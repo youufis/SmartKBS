@@ -21,6 +21,7 @@ import QuickActionsCard from './QuickActionsCard'
 import ActivityTimelineCard from './ActivityTimelineCard'
 import PendingExamsCard from './PendingExamsCard'
 import DailyQuoteCard from './DailyQuoteCard'
+import { reportLoadError } from '../../utils/loadError'
 
 const { Text } = Typography
 
@@ -44,7 +45,7 @@ const StudentDashboard: React.FC = () => {
       const overdue = withDl.filter((x) => x.diff < 0).length
       const urgent = withDl.filter((x) => x.diff >= 0 && x.diff < 24 * 3600000).length
       setUrgentStats({ overdue, urgent })
-    }).catch(() => {}).finally(() => {
+    }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.StudentTodo' }) }).finally(() => {
       if (!cancelled) setTodoLoading(false)
     })
     // 学伴初始化（问候推送 + 留言列表）

@@ -6,6 +6,7 @@ import { Area, AreaChart, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } f
 import { RiseOutlined } from '@ant-design/icons'
 import { getLearningTrend, type LearningTrend } from '../../api/dashboard'
 import { tooltipStyle, useChartTheme } from './chartTheme'
+import { reportLoadError } from '../../utils/loadError'
 
 const { Text } = Typography
 
@@ -16,7 +17,7 @@ const TrendCard: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
-    getLearningTrend(7).then((d) => { if (!cancelled) setTrend(d) }).catch(() => {})
+    getLearningTrend(7).then((d) => { if (!cancelled) setTrend(d) }).catch((err) => { if (!cancelled) reportLoadError(err, { key: 'dashboard.TrendCard' }) })
     return () => { cancelled = true }
   }, [])
 

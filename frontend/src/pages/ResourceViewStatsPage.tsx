@@ -15,6 +15,7 @@ import {
 import apiClient from '../api/client'
 import * as trackingApi from '../api/tracking'
 import { useAuthStore } from '../stores/authStore'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -69,7 +70,7 @@ const ResourceViewStatsPage: React.FC = () => {
         days: 30,
       })
       setOverview(data)
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'viewStats.overview', retry: () => { void loadOverview() } }) }
   }
 
   useEffect(() => {
@@ -82,7 +83,7 @@ const ResourceViewStatsPage: React.FC = () => {
       .then(({ data }) => {
         if (data.courses) setCourses(data.courses)
       })
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'viewStats.courses' }) })
   }, [])
 
   // 加载所有共享资源的浏览统计（服务端一次聚合查询；共享给自己的资源不参与统计）

@@ -15,6 +15,7 @@ import { useAuthStore } from '../stores/authStore'
 import { pollAiTask } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
 import LearningProgress from '../components/LearningProgress'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -132,7 +133,7 @@ const AnalyticsPage: React.FC = () => {
           if (!data.includes(grade)) setGrade(data[0])
         }
       })
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'analytics.grades' }) })
   }, [user?.username, grade])
 
   // 加载班级列表
@@ -142,7 +143,7 @@ const AnalyticsPage: React.FC = () => {
         .then(({ data }) => {
           if (Array.isArray(data)) setClasses(data)
         })
-        .catch(() => {})
+        .catch((err) => { reportLoadError(err, { key: 'analytics.classes' }) })
     }
   }, [grade, user?.username])
 
@@ -153,7 +154,7 @@ const AnalyticsPage: React.FC = () => {
         if (data?.exams) setExams(data.exams)
         else if (Array.isArray(data)) setExams(data)
       })
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'analytics.exams' }) })
   }, [])
 
   // 加载学情进度数据
@@ -164,7 +165,7 @@ const AnalyticsPage: React.FC = () => {
         setCourses(list)
         if (list.length > 0) setCourseId(list[0].id)
       })
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'analytics.courses' }) })
   }, [])
 
   // 加载学情进度下拉选项（教师只能看到自己的年级和班级）
@@ -177,7 +178,7 @@ const AnalyticsPage: React.FC = () => {
           setProgressGrade(undefined)
         }
       })
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'analytics.progressGrades' }) })
   }, [user?.username, progressGrade])
 
   // 当进度年级变化时，加载对应班级
@@ -220,7 +221,7 @@ const AnalyticsPage: React.FC = () => {
         totalStudents: stats.total_students ?? data.total ?? 0,
         avgRate: stats.avg_rate ?? 0,
       })
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'analytics.progress', retry: () => { void loadProgress(progressPage) } }) }
     setProgressLoading(false)
   }
 
