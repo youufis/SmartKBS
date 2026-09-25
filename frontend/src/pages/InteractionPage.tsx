@@ -74,7 +74,7 @@ const InteractionPage: React.FC = () => {
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'interaction.subjects' }) })
   }, [])
 
   // ── 当前激活的 Tab ──

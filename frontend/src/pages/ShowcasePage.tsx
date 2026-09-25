@@ -10,6 +10,7 @@ import ShowcaseFilterBar from '../components/showcase/ShowcaseFilterBar'
 import ShowcasePreviewModal from '../components/showcase/ShowcasePreviewModal'
 import GenerateDialog from '../components/showcase/GenerateDialog'
 import '../styles/showcase.css'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -146,7 +147,7 @@ const ShowcasePage: React.FC = () => {
         const { default: apiClient } = await import('../api/client')
         const { data } = await apiClient.get('/api/scores/my-grades')
         if (Array.isArray(data) && data.length > 0) setGrades(data)
-      } catch { /* 静默 */ }
+      } catch (err) { reportLoadError(err, { key: 'showcase.grades' }) }
     })()
   }, [])
 

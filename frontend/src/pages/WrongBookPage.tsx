@@ -111,7 +111,7 @@ const WrongBookPage: React.FC = () => {
       setStudents(res.students || [])
       setSelectedStudent('')
       setData(null)
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'wrongBook.students' }) }
   }
 
   const handleGradeChange = (grade: string) => {

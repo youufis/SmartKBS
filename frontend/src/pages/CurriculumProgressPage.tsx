@@ -12,6 +12,7 @@ import * as curriculumApi from '../api/curriculum'
 import { useAuthStore } from '../stores/authStore'
 import apiClient from '../api/client'
 import LearningProgress from '../components/LearningProgress'
+import { reportLoadError } from '../utils/loadError'
 
 const { Option } = Select
 
@@ -61,7 +62,7 @@ const CurriculumProgressPage: React.FC = () => {
         const grades = Array.isArray(data) ? data : []
         setGradeOptions(grades)
       })
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'curriculumProgress.data' }) })
   }, [user?.username])
 
   useEffect(() => {

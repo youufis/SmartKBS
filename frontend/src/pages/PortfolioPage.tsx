@@ -20,6 +20,7 @@ import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import * as trackingApi from '../api/tracking'
 import { useAuthStore } from '../stores/authStore'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -187,7 +188,7 @@ const PortfolioPage: React.FC = () => {
   const [viewStats, setViewStats] = useState<{ total_views: number; unique_html: number; unique_download: number; total_reward_points: number }>({ total_views: 0, unique_html: 0, unique_download: 0, total_reward_points: 0 })
 
   useEffect(() => {
-    trackingApi.getMyViewStats().then(setViewStats).catch(() => {})
+    trackingApi.getMyViewStats().then(setViewStats).catch((err) => { reportLoadError(err, { key: 'portfolio.viewStats' }) })
   }, [])
 
   const handleGenerateReport = async () => {

@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ResetActivityButton from '../components/ResetActivityButton'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -71,7 +72,7 @@ const DiscussionPage: React.FC = () => {
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'discussion.subjects' }) })
   }, [])
 
   // 加载讨论列表

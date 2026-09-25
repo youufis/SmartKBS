@@ -15,6 +15,7 @@ import type {
 } from '../api/users'
 import { useAuthStore } from '../stores/authStore'
 import { useSubjectOptions } from '../hooks/useSubjectOptions'
+import { reportLoadError } from '../utils/loadError'
 
 interface ApiError {
   response?: { data?: { detail?: string } }
@@ -69,7 +70,7 @@ const UserMgmtPage: React.FC = () => {
       if (data.role_name === '管理员') {
         updForm.setFieldsValue({ subjects })
       }
-    } catch { /* 用户不存在 */ }
+    } catch (err) { reportLoadError(err, { key: 'userMgmt.detail' }) }
   }
   const handleUpdate = async (values: Record<string, unknown>) => {
     const v = values as Record<string, string> & { subjects?: string[] }

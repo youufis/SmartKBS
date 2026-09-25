@@ -15,6 +15,7 @@ import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -31,7 +32,7 @@ const ClassSummaryPage: React.FC = () => {
   useEffect(() => {
     apiClient.get('/api/scores/my-grades')
       .then(({ data }) => setGrades(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'classSummary.grades' }) })
   }, [])
 
   // 年级变更 → 加载班级
@@ -41,7 +42,7 @@ const ClassSummaryPage: React.FC = () => {
     if (!selectedGrade) return
     apiClient.get('/api/scores/classes', { params: { grade: selectedGrade, teacher: user?.username || 'root' } })
       .then(({ data }) => setClasses(Array.isArray(data) ? data : []))
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'classSummary.classes' }) })
   }, [selectedGrade, user?.username])
 
   const grade = selectedGrade || ''

@@ -481,7 +481,7 @@ const TeacherView: React.FC = () => {
         setSubjectOptions(data.subjects)
         setSubject(data.subjects[0])
       }
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'practice.subjects' }) })
   }, [])
 
   const generateQuestions = async () => {

@@ -411,9 +411,9 @@ const RewardPage: React.FC = () => {
               setGrades(grades)
               setSelectedGrade(grades[0])
             }
-          }).catch(() => {})
+          }).catch((err) => { reportLoadError(err, { key: 'reward.grades' }) })
         }
-      }).catch(() => {})
+      }).catch((err) => { reportLoadError(err, { key: 'reward.subjects' }) })
     }
   }, [isTeacherOrAdmin])
 
@@ -422,7 +422,7 @@ const RewardPage: React.FC = () => {
     if (selectedGrade) {
       apiClient.get('/api/scores/classes', { params: { grade: selectedGrade } }).then(({ data }) => {
         setClasses(Array.isArray(data) ? data : [])
-      }).catch(() => {})
+      }).catch((err) => { reportLoadError(err, { key: 'reward.classes' }) })
     }
   }, [selectedGrade])
 

@@ -7,6 +7,7 @@ import type { TreeNode } from '../types'
 import { getFileIcon } from '../utils/fileIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { reportLoadError } from '../utils/loadError'
 
 // 展平树节点为文件列表
 function flattenTree(nodes: TreeNode[], basePath = ''): { name: string; path: string; isLeaf: boolean }[] {
@@ -167,18 +168,18 @@ const ResourceMgmtPage: React.FC = () => {
     if (!aiModalOpen) return
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setAiSubjectOptions(data.subjects)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.subjects' }) })
     apiClient.get('/api/scores/my-grades').then(({ data }) => {
       // 返回格式: string[]，如 ["高一", "高二"]
       if (Array.isArray(data) && data.length > 0) {
         setAiGradeOptions(data)
       }
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.grades' }) })
     // 加载当前类型的主题
     resourcesApi.getAiThemes(aiGenType).then(themes => {
       setAiThemes(themes)
       if (themes.length > 0) setAiTheme(themes[0].id)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.themes' }) })
   }, [aiModalOpen, aiGenType])
 
   // 切换类型时加载主题
@@ -187,7 +188,7 @@ const ResourceMgmtPage: React.FC = () => {
     resourcesApi.getAiThemes(type).then(themes => {
       setAiThemes(themes)
       if (themes.length > 0) setAiTheme(themes[0].id)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'resourceMgmt.themesByType' }) })
   }
 
   // ── AI 生成+保存（一步完成）──

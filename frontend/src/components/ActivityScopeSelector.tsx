@@ -5,6 +5,7 @@ import { fetchGrades, fetchAllGradeClasses } from '../api/gradeClass'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { classText } from '../utils/studentLabel'
+import { reportLoadError } from '../utils/loadError'
 
 const { Text } = Typography
 
@@ -50,12 +51,12 @@ const ActivityScopeSelector: React.FC<Props> = ({
 
   // 使用共享 gradeClass 服务加载年级/班级
   useEffect(() => {
-    fetchGrades().then(setGrades).catch(() => {})
+    fetchGrades().then(setGrades).catch((err) => { reportLoadError(err, { key: 'scope.grades' }) })
   }, [])
 
   useEffect(() => {
     if (grades.length > 0) {
-      fetchAllGradeClasses().then(setClassOptions).catch(() => {})
+      fetchAllGradeClasses().then(setClassOptions).catch((err) => { reportLoadError(err, { key: 'scope.classes' }) })
     }
   }, [grades])
 

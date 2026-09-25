@@ -15,6 +15,7 @@ import * as activityMonitorApi from '../api/activityMonitor'
 import type { StudentProgress } from '../api/activityMonitor'
 import { useAuthStore } from '../stores/authStore'
 import { fetchGrades, fetchClasses } from '../api/gradeClass'
+import { reportLoadError } from '../utils/loadError'
 
 const { Text } = Typography
 
@@ -35,7 +36,7 @@ const LearningProgress: React.FC = () => {
 
   // 加载年级
   useEffect(() => {
-    fetchGrades().then(setGrades).catch(() => {})
+    fetchGrades().then(setGrades).catch((err) => { reportLoadError(err, { key: 'learningProgress.grades' }) })
   }, [])
 
   // 年级变化 -> 加载班级

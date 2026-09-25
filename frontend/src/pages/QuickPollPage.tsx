@@ -19,6 +19,7 @@ import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -68,7 +69,7 @@ const QuickPollPage: React.FC = () => {
         votedMap[p.id] = p.voted === true
       }
       setVotedPolls(votedMap)
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'quickPoll.list' }) }
     setPollLoading(false)
   }
 

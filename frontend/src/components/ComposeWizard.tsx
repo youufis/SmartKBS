@@ -12,6 +12,7 @@ import QuestionPreview from './QuestionPreview'
 import type { SelectedQuestion } from './QuestionPreview'
 import * as examsApi from '../api/exams'
 import type { ComposeResponse, TypeConfigItem } from '../api/exams'
+import { reportLoadError } from '../utils/loadError'
 
 interface ComposeWizardProps {
   examId: number
@@ -43,7 +44,7 @@ const ComposeWizard: React.FC<ComposeWizardProps> = ({
   React.useEffect(() => {
     examsApi.getKnowledgePoints().then((res) => {
       setKnowledgePoints(res.knowledge_points)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'compose.knowledgePoints' }) })
   }, [])
 
   // 表单初始值

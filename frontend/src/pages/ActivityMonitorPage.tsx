@@ -19,6 +19,7 @@ import type {
 import { useAuthStore } from '../stores/authStore';
 import ResourceViewStatsPage from './ResourceViewStatsPage';
 import ResetActivityButton from '../components/ResetActivityButton';
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography;
 
@@ -115,7 +116,7 @@ const ActivityMonitorPage: React.FC = () => {
     if (!isTeacherOrAdmin) return;
     activityMonitorApi.getTeacherGradesClasses().then((res) => {
       setGradeClasses(res.grades);
-    }).catch(() => {});
+    }).catch((err) => { reportLoadError(err, { key: 'activityMonitor.grades' }) });
   }, [isTeacherOrAdmin]);
 
   // ── 刷新计数器（用于触发重新加载）──

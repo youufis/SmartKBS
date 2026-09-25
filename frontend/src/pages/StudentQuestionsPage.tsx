@@ -21,6 +21,7 @@ import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -245,7 +246,7 @@ const StudentQuestionsPage: React.FC = () => {
         const { data } = await apiClient.get(`/api/interaction/questions/${answerModal.id}/answers`)
         const approved = (data.answers || []).filter((a: any) => a.status === 'approved')
         setModalAnswers(approved)
-      } catch { /* ignore */ }
+      } catch (err) { reportLoadError(err, { key: 'studentQuestions.answers' }) }
       setModalAnswersLoading(false)
     })()
   }, [answerModal?.id])

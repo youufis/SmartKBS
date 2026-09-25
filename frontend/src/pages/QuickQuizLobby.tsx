@@ -15,6 +15,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -91,7 +92,7 @@ const QuickQuizLobby: React.FC = () => {
             // 重新加载玩家列表
             const { data: reloadData } = await apiClient.get(`/api/quick-quiz/room/${roomId}`)
             setPlayers(reloadData.players || [])
-          } catch { /* 加入失败，可能无权限等 */ }
+          } catch (err) { reportLoadError(err, { key: 'quickQuizLobby.join' }) }
         }
       }
     } catch (err: any) {

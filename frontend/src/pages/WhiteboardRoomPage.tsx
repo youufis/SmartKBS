@@ -24,6 +24,7 @@ import * as whiteboardApi from '../api/whiteboard'
 import apiClient from '../api/client'
 import type { Editor } from 'tldraw'
 import type { WhiteboardMode, WhiteboardMember } from '../types'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -69,7 +70,7 @@ const WhiteboardRoomPage: React.FC = () => {
     }
     load()
     // 注册当前用户进入房间（HTTP 方式，WS 不通时仍能被识别）
-    whiteboardApi.registerToRoom(rid).catch(() => {})
+    whiteboardApi.registerToRoom(rid).catch((err) => { reportLoadError(err, { key: 'whiteboardRoom.register' }) })
   }, [rid, navigate])
 
   // ── 加载成员 ──

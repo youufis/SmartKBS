@@ -28,6 +28,7 @@ import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { closeWithDirtyGuard } from '../utils/dirtyClose'
+import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -87,7 +88,7 @@ const ExamPage: React.FC = () => {
         setSubjects(data.subjects)
         subjectOptions = data.subjects
       }
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'exam.subjects' }) })
   }, [])
 
   // ── 考试列表 ──
