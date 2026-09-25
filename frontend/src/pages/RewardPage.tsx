@@ -836,14 +836,25 @@ const RewardPage: React.FC = () => {
         </div>
 
         {isStudent ? renderStudentView() : (
-          <Tabs activeKey={activeTab} onChange={setActiveTab}>
-            <Tabs.TabPane tab={<span><TrophyOutlined /> {t('scoreRank')}</span>} key="my">
-              {renderTeacherView()}
-            </Tabs.TabPane>
-            <Tabs.TabPane tab={<span><HistoryOutlined /> {t('myScore')}</span>} key="history">
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+          {
+            key: 'my',
+            label: <span><TrophyOutlined /> {t('scoreRank')}</span>,
+            children: renderTeacherView(),
+          },
+          {
+            key: 'history',
+            label: <span><HistoryOutlined /> {t('myScore')}</span>,
+            children: (
               <TeacherMyPoints />
-            </Tabs.TabPane>
-          </Tabs>
+            ),
+          },
+          ]}
+        />
+
         )}
       </Card>
     </div>

@@ -1681,12 +1681,14 @@ const SystemConfigPage: React.FC = () => {
           />
         )}
 
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          {/* ── 系统配置 Tab ── */}
-          <Tabs.TabPane
-            tab={<span><SettingOutlined /> {t('systemConfig')}</span>}
-            key="global"
-          >
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+          {
+            key: 'global',
+            label: <span><SettingOutlined /> {t('systemConfig')}</span>,
+            children: (
             <Spin spinning={loading}>
               {/* 搜索：按名称 / 键名 / 说明过滤，没有命中的小节与分区自动收起 */}
               <Space style={{ marginBottom: 12 }} wrap>
@@ -1805,21 +1807,19 @@ const SystemConfigPage: React.FC = () => {
                 </div>
               </Form>
             </Spin>
-          </Tabs.TabPane>
-
-          {/* ── 技能管理 Tab ── */}
-          <Tabs.TabPane
-            tab={<span><SettingOutlined /> {t('skillManagement')}</span>}
-            key="skills"
-          >
+            ),
+          },
+          {
+            key: 'skills',
+            label: <span><SettingOutlined /> {t('skillManagement')}</span>,
+            children: (
             <SkillManagePanel />
-          </Tabs.TabPane>
-
-          {/* ── 缓存管理 Tab ── */}
-          <Tabs.TabPane
-            tab={<span><ReloadOutlined /> {t('cacheManagement')}</span>}
-            key="cache"
-          >
+            ),
+          },
+          {
+            key: 'cache',
+            label: <span><ReloadOutlined /> {t('cacheManagement')}</span>,
+            children: (
             <Card title={t('clearTempFiles')}>
               <Text style={{ display: 'block', marginBottom: 16 }}>
                 {t('tempFileDesc')}
@@ -1858,17 +1858,18 @@ const SystemConfigPage: React.FC = () => {
                 </Button>
               </Space>
             </Card>
-          </Tabs.TabPane>
-
-          {/* ── 版本管理 Tab ── */}
-          <Tabs.TabPane
-            tab={<span><SyncOutlined /> {t('version')}</span>}
-            key="upgrade"
-          >
+            ),
+          },
+          {
+            key: 'upgrade',
+            label: <span><SyncOutlined /> {t('version')}</span>,
+            children: (
             <UpgradePanel />
-          </Tabs.TabPane>
+            ),
+          },
+          ]}
+        />
 
-        </Tabs>
     </Card>
   )
 }

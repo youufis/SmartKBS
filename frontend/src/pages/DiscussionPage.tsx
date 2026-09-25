@@ -378,12 +378,17 @@ const DiscussionPage: React.FC = () => {
           </Space>
         )}
 
-        <Tabs activeKey={activeTab} onChange={setActiveTab} tabBarStyle={{ marginBottom: 16 }}>
-          <Tabs.TabPane tab={t('allDiscussions')} key="all" />
-          <Tabs.TabPane tab={t('pendingDiscussions')} key="pending" />
-          <Tabs.TabPane tab={t('activeDiscussions')} key="active" />
-          <Tabs.TabPane tab={t('endedDiscussions')} key="ended" />
-        </Tabs>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          tabBarStyle={{ marginBottom: 16 }}
+          items={[
+            { key: 'all', label: t('allDiscussions') },
+            { key: 'pending', label: t('pendingDiscussions') },
+            { key: 'active', label: t('activeDiscussions') },
+            { key: 'ended', label: t('endedDiscussions') },
+          ]}
+        />
 
         <Spin spinning={loading}>
           {filtered.length === 0 ? (
