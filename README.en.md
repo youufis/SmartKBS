@@ -340,8 +340,8 @@ Displays HTML teaching resource files in a card grid:
   - **Admin Sharing**: Can select "Everyone", "Specific Teacher", "Specific Grade/Class"
   - **Teacher Sharing**: Select "Admin and Teachers" + "Own Classes"
 - **🔍 Search & Filter**: Search by file name
-- **🗂️ Unified Browser**: students' Shared Resources, teachers' Shared With Me and students' Shared Files all run on one `ResourceBrowser` (unseen / time / type / course / sharer / audience facets + grid & list views + remembered preferences)
-- **🔗 Deep Links**: `/shared-center?tab=downloads` lands straight on the Shared Files tab; the task list and share notifications route there
+- **🗂️ Unified Browser**: students' Shared Resources, teachers' Shared With Me and students' Shared Files share one browsing UI (unseen / time / type / course / sharer / audience facets + grid & list views + remembered preferences)
+- **🔗 Direct positioning**: opening a task-list or share notification lands straight on the right tab instead of the default one
 - **🤖 AI Generation**: 5 resource types (Animation Explanation, Interactive Quiz, Chapter Exercise, Lab Interaction, Custom HTML)
 - **👁️ Resource View Tracking**: Automatically records student viewing behavior
 
@@ -499,7 +499,7 @@ Classroom instant voting system:
 
 #### ❓ Question Management
 
-Student Q&A + Teacher approval integrated management (`/student-questions`):
+Integrated student Q&A and teacher approval management:
 
 - 🙋 **Student Questions**: Students initiate questions (supports anonymous)
 - 🤖 **AI-Assisted Answering**: AI automatically generates suggested answers, teachers can modify before publishing
@@ -714,9 +714,9 @@ All nine activity types (Exam, Smart Practice, Quick Quiz, Online Task, Class Qu
 - **📩 Student notice**: an acknowledgement can be pushed to affected students and is rendered in the reader's UI language (no leftover Chinese in English mode)
 - **🧮 Points**: after revoking the activity's ledger rows, affected students' totals are recomputed immediately using the same rules as the daily reconciliation (no title upgrades)
 - **🛡️ Permissions**: administrators can reset everything (resetting another user's activity is flagged as an override in the audit log); teachers may only reset activities they created — for course exercises this requires being both the resource owner and a teacher of that grade; students see no entry point and every endpoint rejects them
-- **📝 Audit trail**: each reset is recorded in `activity_reset_logs` (operator and role, activity id/type/title, options, deleted rows per table, points revoked, students affected, students notified, timestamp)
+- **📝 Audit trail**: every reset writes a full audit record (operator and role, activity id/type/title, options, deleted rows per table, points revoked, students affected, students notified, timestamp)
 
-> Single entry point: `/api/activity-reset/{scopes,preview,reset,logs}`; supporting a new activity type only means adding one entry to the registry in `backend/activity_reset.py`.
+> Every activity type shares the same reset flow (pick scope → preview → confirm → audit trail); new activity types get it for free.
 
 ---
 
@@ -982,7 +982,7 @@ Git-based online incremental upgrade system:
 ### v8.3.0 (2026-09-23)
 
 - 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests
-- 🤖 **AI generation and grading hardened**: explicit `max_tokens` with truncation recorded, tolerant JSON parsing and pre-save checks so incomplete artifacts are never stored silently; answers normalised for grading and generated artifacts auto-registered
+- 🤖 **AI generation and grading hardened**: explicit output length caps with truncation recorded, tolerant JSON parsing and pre-save checks so incomplete artifacts are never stored silently; answers normalised for grading and generated artifacts auto-registered
 - 🏠 **Dashboard and task list rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home with star of the week; to-dos are filtered by class scope and pending grading now counts real work
 - 🗂️ **Sharing centre closed out**: resource browsing and Shared Files share one browser (categories, stats strip, grid/list, pagination, preferences) and directory shares show as folders; fixed files never counting as seen and to-do links that 404'd
 - 🌙 **Theme and copy**: Midnight theme tokens completed and hard-coded colours removed; i18n placeholders and untranslated keys closed out, antd v6 deprecation warnings cleared
