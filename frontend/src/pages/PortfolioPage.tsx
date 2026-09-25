@@ -345,15 +345,15 @@ const PortfolioPage: React.FC = () => {
         </Card>
       )}
 
-      {/* ─── 数据总览卡片 ─── */}
-      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+      {/* ─── 数据总览卡片：八项一行铺满，不再折第二行浪费空间 ─── */}
+      <Row gutter={[8, 8]} style={{ marginBottom: 16 }}>
         {totalDataPoints.map((item) => (
-          <Col xs={12} sm={8} lg={4} key={item.label}>
+          <Col xs={12} sm={8} md={6} lg={3} key={item.label}>
             <Card hoverable size="small" style={{ textAlign: 'center' }}>
               <Space orientation="vertical" size={2}>
-                <span style={{ fontSize: 22, color: item.color }}>{item.icon}</span>
-                <Text strong style={{ fontSize: 20, color: item.color }}>{item.value}</Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>{item.label}</Text>
+                <span style={{ fontSize: 20, color: item.color, lineHeight: '24px' }}>{item.icon}</span>
+                <Text strong style={{ fontSize: 19, color: item.color }}>{item.value}</Text>
+                <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{item.label}</Text>
               </Space>
             </Card>
           </Col>
