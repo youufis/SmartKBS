@@ -1035,8 +1035,8 @@ Git-based online incremental upgrade system:
 
 Don't want to install Python or Node.js? Use the desktop installer — double-click and go.
 
-1. Download the latest installer from Releases: [SmartKBS Releases](https://github.com/youufis/SmartKBS/releases)
-   (currently `SmartKBS-Setup-8.3.0.exe`, ~120 MB, **Windows x64 only**)
+1. Download the latest installer: [SmartKBS latest release](https://github.com/youufis/SmartKBS/releases/latest) (redirects to the newest release)
+   (file name looks like `SmartKBS-Setup-<version>.exe`, ~120 MB, **Windows x64 only**)
 2. Run it: wizard (Simplified Chinese), pick your install folder, desktop and Start Menu shortcuts are created for you
 3. Launch SmartKBS: the built-in backend starts on its own and the app window opens once port `8086` is ready
 4. Local access at `http://127.0.0.1:8086`; students on the same LAN use `http://LAN-IP-of-this-machine:8086` (e.g. `http://192.168.1.100:8086`)

@@ -1035,8 +1035,8 @@ AI 对课堂互动数据进行综合分析：
 
 不想装 Python 和 Node.js，就用桌面版安装包 —— 双击装完就能用。
 
-1. 到 Releases 下载最新安装包：[SmartKBS Releases](https://github.com/youufis/SmartKBS/releases)
-   （当前为 `SmartKBS-Setup-8.3.0.exe`，约 120 MB，**仅 Windows x64**）
+1. 下载最新安装包：[SmartKBS 最新版下载](https://github.com/youufis/SmartKBS/releases/latest)（自动跳最新 Release）
+   （安装包命名形如 `SmartKBS-Setup-版本号.exe`，约 120 MB，**仅 Windows x64**）
 2. 双击安装：简体中文向导，可自选安装目录，自动创建桌面与开始菜单快捷方式
 3. 启动 SmartKBS：桌面版自动拉起内置后端，等 `8086` 就绪后自动打开应用窗口
 4. 本机访问 `http://127.0.0.1:8086`；同一局域网内的学生访问 `http://本机局域网IP:8086`（如 `http://192.168.1.100:8086`）
