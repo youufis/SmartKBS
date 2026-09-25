@@ -636,7 +636,7 @@ const PortfolioPage: React.FC = () => {
         {reportLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>{t('portfolio.generatingReport')}</div>
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('portfolio.generatingReport')}</div>
           </div>
         ) : reportData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>

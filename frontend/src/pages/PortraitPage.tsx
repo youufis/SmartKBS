@@ -173,7 +173,7 @@ const PortraitPage: React.FC = () => {
         content: (
           <div>
             <p>{t('regenerateDesc', { points: 100 })}</p>
-            <p style={{ color: '#888', fontSize: 13 }}>{t('pointsNotEnough')}</p>
+            <p style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>{t('pointsNotEnough')}</p>
           </div>
         ),
         okText: t('okRegenerate', { points: 100 }),
@@ -379,7 +379,7 @@ const PortraitPage: React.FC = () => {
                     lineHeight: 1.8,
                     whiteSpace: 'pre-wrap',
                     fontStyle: 'italic',
-                    color: '#595959',
+                    color: 'var(--text-secondary)',
                   }}
                 >
                   {todayPortrait.ai_comment || t('ptNoNote')}
@@ -741,7 +741,7 @@ const PortraitPage: React.FC = () => {
                         </Space>
                         <Paragraph
                           ellipsis={{ rows: 2 }}
-                          style={{ margin: 0, fontSize: 12, color: '#8c8c8c' }}
+                          style={{ margin: 0, fontSize: 12, color: 'var(--text-tertiary)' }}
                         >
                           {portrait.ai_comment}
                         </Paragraph>
@@ -808,9 +808,9 @@ const PortraitPage: React.FC = () => {
               <div style={{
                 marginTop: 12,
                 padding: '12px 16px',
-                background: '#fafafa',
+                background: 'var(--bg-layout)',
                 borderRadius: 8,
-                border: '1px solid #f0f0f0',
+                border: '1px solid var(--border-color)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <Tag style={{ margin: 0 }}>
@@ -1015,8 +1015,8 @@ const PortraitPage: React.FC = () => {
       </div>
       {themePickerOpen && (
         <div style={{
-          background: '#fafafa', borderRadius: 10, padding: '12px 16px',
-          marginBottom: 16, border: '1px solid #f0f0f0',
+          background: 'var(--bg-layout)', borderRadius: 10, padding: '12px 16px',
+          marginBottom: 16, border: '1px solid var(--border-color)',
         }}>
           <Text type="secondary" style={{ display: 'block', marginBottom: 10, fontSize: 13 }}>
             {t('ptThemeHint')}

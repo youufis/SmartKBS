@@ -147,15 +147,15 @@ const TitleDirectory: React.FC<{ titleConfig: MainTitle[]; currentLevel: number 
               <Card size="small" style={{
                 opacity: unlocked ? 1 : 0.5,
                 border: unlocked ? `1px solid ${color}40` : '1px dashed #d9d9d9',
-                background: unlocked ? `${color}08` : '#fafafa', textAlign: 'center',
+                background: unlocked ? `${color}08` : 'var(--bg-layout)', textAlign: 'center',
               }}>
                 <div style={{ fontSize: 28, marginBottom: 4 }}>{title.emoji}</div>
                 <Tag color={unlocked && title.color !== 'default' ? title.color : undefined} style={{ fontSize: 11, margin: 0 }}>Lv.{title.level}</Tag>
                 <div style={{ fontSize: 13, fontWeight: unlocked ? 600 : 400, marginTop: 2 }}>{title.name}</div>
                 {unlocked
                   ? <CheckCircleFilled style={{ color: '#52c41a', fontSize: 14, marginTop: 2 }} />
-                  : <LockFilled style={{ color: '#d9d9d9', fontSize: 14, marginTop: 2 }} />}
-                <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                  : <LockFilled style={{ color: 'var(--text-tertiary)', fontSize: 14, marginTop: 2 }} />}
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
                   {unlocked ? t('reward.unlocked') : t('reward.unlockAt', { points: title.min_points || '?' })}
                 </div>
               </Card>
@@ -217,7 +217,7 @@ const BadgeWall: React.FC<{ badges: BadgeItem[] }> = ({ badges }) => {
                 <Text strong style={{ fontSize: 12 }}>{badge.name}</Text><br />
                 {badge.unlocked
                   ? <Text style={{ fontSize: 10, color: '#52c41a' }}>{t('reward.unlocked')}</Text>
-                  : <Text style={{ fontSize: 10, color: '#999' }}>{t('reward.locked')}</Text>}
+                  : <Text style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>{t('reward.locked')}</Text>}
               </Card>
             </Tooltip>
           </Col>
