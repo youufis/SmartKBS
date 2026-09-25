@@ -1,4 +1,8 @@
 {
+  "promoteSkippedNoGrade": "⚠️ 跳过 {{count}} 个无年级信息的学生",
+  "companionDefaultTitle": "初窥门径",
+  "companionStreakDays": "🔥 {{count}} 天",
+  "selectedCount": "已选择 {{count}} 项",
   "promoteIntro": "此操作将执行以下变更：",
   "promoteStudentsLine": "更新所有学生的年级（{{desc}}）",
   "promoteGraduateLine": "毕业年级学生将自动归档（禁止登录、数据保留，可在用户管理恢复）：{{desc}}",

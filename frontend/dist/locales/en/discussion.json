@@ -1,4 +1,5 @@
 {
+  "groupIndexName": "Group {{index}}",
   "title": "Discussion",
   "createDiscussion": "Create Discussion",
   "joinDiscussion": "Join Discussion",

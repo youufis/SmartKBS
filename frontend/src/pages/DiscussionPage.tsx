@@ -352,7 +352,7 @@ const DiscussionPage: React.FC = () => {
         </div>
         {isStudent && disc.has_joined && disc.status === 'active' && disc.my_group && (
           <div style={{ marginTop: 4 }}>
-            <Tag color="blue">{disc.group_mode === 'none' ? t('joinedChat') : `${t('myGroup')}: ${disc.my_group.name || `第${disc.my_group.group_index}组`}`}</Tag>
+            <Tag color="blue">{disc.group_mode === 'none' ? t('joinedChat') : `${t('myGroup')}: ${disc.my_group.name || t('groupIndexName', { index: disc.my_group.group_index })}`}</Tag>
           </div>
         )}
       </Card>

@@ -52,6 +52,7 @@ const NotificationsPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const [filter, setFilter] = useState('all')
   const [selectedNotifIds, setSelectedNotifIds] = useState<Set<number>>(new Set())
 
@@ -60,6 +61,7 @@ const NotificationsPage: React.FC = () => {
   const [pushLoading, setPushLoading] = useState(false)
   const [pushTotal, setPushTotal] = useState(0)
   const [pushPage, setPushPage] = useState(1)
+  const [pushPageSize, setPushPageSize] = useState(20)
   const [pushFilter, setPushFilter] = useState('all')
   const [selectedPushIds, setSelectedPushIds] = useState<Set<number>>(new Set())
 
@@ -227,12 +229,12 @@ const NotificationsPage: React.FC = () => {
                 <Spin spinning={loading}>
                   {notifications.length === 0 ? <Empty description={t('noNotifications')} /> : <>
                     {selectedNotifIds.size > 0 && <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fff7e6', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <Text strong>已选择 {selectedNotifIds.size} 项</Text>
+                      <Text strong>{t('selectedCount', { count: selectedNotifIds.size })}</Text>
                       <Button size="small" onClick={() => selectAllCurrentPageNotifs(true)}>{t('selectAllCurrentPage')}</Button>
                       <Button size="small" danger onClick={handleBatchDeleteNotifs}>{t('deleteSelected', { count: selectedNotifIds.size })}</Button>
                       <Button size="small" onClick={() => setSelectedNotifIds(new Set())}>{t('clearSelection')}</Button>
                     </div>}
-                    <List dataSource={notifications} renderItem={renderNotifItem} pagination={{ current: page, pageSize: 20, total, showSizeChanger: true, showTotal: (tot) => t('totalNotifications', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p) => setPage(p) }} />
+                    <List dataSource={notifications} renderItem={renderNotifItem} pagination={{ current: page, pageSize, total, showSizeChanger: true, showTotal: (tot) => t('totalNotifications', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p, ps) => { if (ps && ps !== pageSize) { setPageSize(ps); setPage(1) } else { setPage(p) } } }} />
                   </>}
                 </Spin>
               </>
@@ -249,12 +251,12 @@ const NotificationsPage: React.FC = () => {
                 <Spin spinning={pushLoading}>
                   {pushes.length === 0 ? <Empty description={t('noNotifications')} /> : <>
                     {selectedPushIds.size > 0 && <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fff7e6', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <Text strong>已选择 {selectedPushIds.size} 项</Text>
+                      <Text strong>{t('selectedCount', { count: selectedPushIds.size })}</Text>
                       <Button size="small" onClick={() => selectAllCurrentPagePushes(true)}>{t('selectAllCurrentPage')}</Button>
                       <Button size="small" danger onClick={handleBatchDeletePushes}>{t('deleteSelected', { count: selectedPushIds.size })}</Button>
                       <Button size="small" onClick={() => setSelectedPushIds(new Set())}>{t('clearSelection')}</Button>
                     </div>}
-                    <List dataSource={pushes} renderItem={renderPushItem} pagination={{ current: pushPage, pageSize: 20, total: pushTotal, showSizeChanger: true, showTotal: (tot) => t('totalMessages', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p) => setPushPage(p) }} />
+                    <List dataSource={pushes} renderItem={renderPushItem} pagination={{ current: pushPage, pageSize: pushPageSize, total: pushTotal, showSizeChanger: true, showTotal: (tot) => t('totalMessages', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p, ps) => { if (ps && ps !== pushPageSize) { setPushPageSize(ps); setPushPage(1) } else { setPushPage(p) } } }} />
                   </>}
                 </Spin>
               </>

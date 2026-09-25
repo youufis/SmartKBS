@@ -508,7 +508,7 @@ const QuickQuizConsole: React.FC = () => {
                             {k}. {options[k] || ''}
                             {k === correctAnswer && ' ✅'}
                           </Text>
-                          <Text strong>{v}人 ({pct}%)</Text>
+                          <Text strong>{t('qqPeoplePercent', { v, pct })}</Text>
                         </div>
                         <Progress
                           percent={pct}

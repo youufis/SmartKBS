@@ -1,4 +1,5 @@
 {
+  "pointsWithStar": "⭐ {{count}} pts",
   "title": "Knowledge Q&A",
   "inputPlaceholder": "Type your question, press Enter to send...",
   "inputPlaceholderCompanion": "Chat with {{name}} about your study...",

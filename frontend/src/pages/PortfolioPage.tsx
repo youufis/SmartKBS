@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useReducer } from 'react'
 import { useTranslation } from 'react-i18next'
+import { classText } from '../utils/studentLabel'
 import { useRewardLabels } from '../utils/rewardLabels'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
@@ -287,7 +288,7 @@ const PortfolioPage: React.FC = () => {
             </div>
             <Space style={{ marginTop: 4, flexWrap: 'wrap' }}>
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.grade}</Tag>
-              <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.class}班</Tag>
+              <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{classText(student.class)}</Tag>
               <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>{student.username}</Tag>
               {titleInfo?.main_title && (
                 <Tag color={titleInfo.main_title.color !== 'default' ? titleInfo.main_title.color : undefined}

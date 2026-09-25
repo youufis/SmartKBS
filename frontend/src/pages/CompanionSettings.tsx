@@ -218,10 +218,10 @@ const CompanionSettings: React.FC = () => {
                 {/* 称号与积分 */}
                 <div style={{ textAlign: 'center', marginBottom: 16 }}>
                   <span style={{ fontSize: 40 }}>{profile.titles?.main === '初窥门径' ? '🥚' : '🏆'}</span>
-                  <div style={{ fontWeight: 600, fontSize: 16, marginTop: 4 }}>{profile.titles?.main || '初窥门径'}</div>
+                  <div style={{ fontWeight: 600, fontSize: 16, marginTop: 4 }}>{profile.titles?.main || t('companionDefaultTitle')}</div>
                   <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 4 }}>
                     <Tag color="orange">⭐ {profile.total_points || 0} {t('points')}</Tag>
-                    {profile.streak_days > 0 && <Tag color="red">🔥 {profile.streak_days} 天</Tag>}
+                    {profile.streak_days > 0 && <Tag color="red">{t('companionStreakDays', { count: profile.streak_days })}</Tag>}
                   </div>
                 </div>
 

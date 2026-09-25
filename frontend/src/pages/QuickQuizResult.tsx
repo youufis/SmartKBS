@@ -260,7 +260,7 @@ const QuickQuizResult: React.FC = () => {
                     </div>
                   )}
                   <Divider style={{ margin: '8px 0' }} />
-                  <Text type="secondary">本题作答：{q.total_answers} 人，正确 {q.correct_count} 人</Text>
+                  <Text type="secondary">{t('qqAnswerStats', { total: q.total_answers, correct: q.correct_count })}</Text>
                   {q.option_stats && (
                     <div style={{ marginTop: 4 }}>
                       {Object.entries(q.option_stats).map(([k, v]: any) => (

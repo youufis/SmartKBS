@@ -1,4 +1,8 @@
 {
+  "promoteSkippedNoGrade": "⚠️ Skipped {{count}} students without a grade",
+  "companionDefaultTitle": "First Steps",
+  "companionStreakDays": "🔥 {{count}} days",
+  "selectedCount": "{{count}} selected",
   "promoteIntro": "This operation will apply the following changes:",
   "promoteStudentsLine": "Update every student's grade ({{desc}})",
   "promoteGraduateLine": "Graduating students are archived automatically (login blocked, data kept, restorable in User Management): {{desc}}",

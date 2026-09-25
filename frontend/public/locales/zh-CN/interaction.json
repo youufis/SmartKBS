@@ -1,4 +1,6 @@
 {
+  "qqPeoplePercent": "{{v}} 人（{{pct}}%）",
+  "qqAnswerStats": "本题作答：{{total}} 人，正确 {{correct}} 人",
   "title": "随堂测验",
   "quizTitle": "测验标题",
   "startQuiz": "开始测验",

@@ -1013,7 +1013,7 @@ const UserMgmtPage: React.FC = () => {
                             </Typography.Text>
                           )}
                           {promoteResult.skipped && promoteResult.skipped.length > 0 && (
-                            <Typography.Text type="warning">⚠️ 跳过 {promoteResult.skipped.length} 个无年级信息的学生</Typography.Text>
+                            <Typography.Text type="warning">{t('promoteSkippedNoGrade', { count: promoteResult.skipped.length })}</Typography.Text>
                           )}
                           {promoteResult.graduated && Object.keys(promoteResult.graduated).length > 0 && (
                             <Typography.Text>

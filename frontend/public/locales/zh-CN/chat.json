@@ -1,4 +1,5 @@
 {
+  "pointsWithStar": "⭐ {{count}} 积分",
   "title": "知识问答",
   "inputPlaceholder": "输入你的问题，按 Enter 发送...",
   "inputPlaceholderCompanion": "和 {{name}} 聊聊你的学习...",

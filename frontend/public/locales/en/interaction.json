@@ -1,4 +1,6 @@
 {
+  "qqPeoplePercent": "{{v}} people ({{pct}}%)",
+  "qqAnswerStats": "Answered: {{total}} · Correct: {{correct}}",
   "title": "Class Quiz",
   "quizTitle": "Quiz Title",
   "startQuiz": "Start Quiz",

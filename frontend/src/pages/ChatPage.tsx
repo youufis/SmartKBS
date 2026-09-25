@@ -790,7 +790,7 @@ const ChatPage: React.FC = () => {
                         <span>🏆 {companionProfile.titles.main}</span>
                       )}
                       {companionProfile.total_points !== undefined && (
-                        <span>⭐ {companionProfile.total_points} 积分</span>
+                        <span>{t('pointsWithStar', { count: companionProfile.total_points })}</span>
                       )}
                       {companionProfile.streak_days > 0 && (
                         <span>🔥 {t('daysStreak', { count: companionProfile.streak_days })}</span>

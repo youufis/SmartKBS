@@ -1,4 +1,5 @@
 {
+  "groupIndexName": "第{{index}}组",
   "title": "分组讨论",
   "createDiscussion": "创建讨论",
   "joinDiscussion": "加入讨论",
