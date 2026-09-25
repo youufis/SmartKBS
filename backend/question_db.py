@@ -136,6 +136,11 @@ def init_question_db():
                 # (2026-09-22 实例: 学生与教师各收到 2 条完全相同的成绩通知),
                 # _settle_exam_attempt 用 "空串 → 时间戳" 的 CAS 抢占保证只结算一次。
                 ("settled_at", "TEXT DEFAULT ''"),
+                # B1 考试完整性: 中途答案草稿。单独成列而不是复用 answers ——
+                # answers 只在交卷时写入，「已交人数/未交名单/AI 批改扫描」全按
+                # status + answers 口径统计，混用会污染这些查询。
+                ("draft_answers", "TEXT DEFAULT ''"),
+                ("draft_saved_at", "TEXT DEFAULT ''"),
             ]:
                 try:
                     c.execute(f"ALTER TABLE exam_attempts ADD COLUMN {col_def[0]} {col_def[1]}")

@@ -268,6 +268,8 @@ export interface ExamInfo {
   target_users?: string;
   /** 学生端专用：我的答题记录 */
   my_attempt?: ExamAttempt | null;
+  /** B1: 服务端按 started_at + duration 裁决的剩余秒数；未设时长为 null */
+  remaining_seconds?: number | null;
   /** 详情接口返回的题目列表 */
   questions?: ExamQuestion[];
 }
@@ -307,6 +309,9 @@ export interface ExamAttempt {
   score: number;
   total_score: number;
   answers: Record<string, any> | null;
+  /** B1: 中途自动保存的草稿（交卷后清空），可能是 JSON 字符串或对象 */
+  draft_answers?: string | Record<string, any> | null;
+  draft_saved_at?: string;
   auto_graded: number;
   exam_title?: string;
   exam_subject?: string;

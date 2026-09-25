@@ -126,8 +126,19 @@ export async function startExam(examId: number): Promise<{
   message: string;
   attempt_id: number;
   existing: boolean;
+  /** B1: 倒计时一律以服务端为准（刷新/换设备不再从头计） */
+  remaining_seconds?: number | null;
 }> {
   const { data } = await apiClient.post(`/api/exams/${examId}/start`);
+  return data;
+}
+
+/** B1: 保存答题草稿（不判分、不改状态，交卷后服务端自动清空） */
+export async function saveExamDraft(
+  examId: number,
+  answers: Record<string, string>
+): Promise<{ message: string; saved_at: string; remaining_seconds?: number | null }> {
+  const { data } = await apiClient.post(`/api/exams/${examId}/save`, { answers }, { timeout: 15000 });
   return data;
 }
 

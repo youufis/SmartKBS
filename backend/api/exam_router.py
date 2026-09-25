@@ -944,6 +944,28 @@ def _attempt_deadline(attempt: dict, exam: dict):
     return started + timedelta(minutes=dur, seconds=180)
 
 
+def _remaining_seconds(exam: dict, attempt: dict | None) -> int | None:
+    """服务端裁决的剩余作答秒数（倒计时以服务端为准，刷新不再从头计）
+
+    未设时长返回 None（只受考试起止窗约束）。这里给的是「到个人时长结束」的秒数，
+    归零后前端自动交卷；真正拒绝提交的硬截止在 _attempt_deadline（含 +3 分钟宽限）。
+    """
+    if not attempt:
+        return None
+    try:
+        dur = float(exam.get("duration") or 0)
+    except (TypeError, ValueError):
+        dur = 0
+    if dur <= 0:
+        return None
+    try:
+        started = datetime.strptime(str(attempt.get("started_at") or ""), "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+    left = int(dur * 60 - (datetime.now() - started).total_seconds())
+    return max(0, left)
+
+
 def _normalize_client_attempt(attempt):
     """客户端只识别 in_progress/submitted: 过期记录不返回, 批改中短暂表现为进行中"""
     if attempt and attempt.get("status") == "grading":
@@ -1028,6 +1050,8 @@ async def start_exam(exam_id: int, request: Request):
                 "message": "检测到进行中的答题，继续作答",
                 "attempt_id": in_progress["id"],
                 "existing": True,
+                # 倒计时以服务端 started_at 为准，刷新/换设备不再重置
+                "remaining_seconds": _remaining_seconds(exam, in_progress),
             }
         execute_update(
             "UPDATE exam_attempts SET status='expired' WHERE id=? AND status IN ('in_progress','grading')",
@@ -1059,6 +1083,7 @@ async def start_exam(exam_id: int, request: Request):
                 "message": "检测到进行中的答题，继续作答",
                 "attempt_id": _active["id"],
                 "existing": True,
+                "remaining_seconds": _remaining_seconds(exam, _active),
             }
         raise
 
@@ -1066,6 +1091,68 @@ async def start_exam(exam_id: int, request: Request):
         "message": "考试开始",
         "attempt_id": attempt_id,
         "existing": False,
+        "remaining_seconds": _remaining_seconds(exam, {"started_at": now_str}),
+    }
+
+
+class ExamDraftSave(BaseModel):
+    """学生中途保存的答题草稿（不判分、不改状态）"""
+    answers: dict[str, Any]
+
+
+_DRAFT_MAX_ITEMS = 500      # 一份卷子不可能有这么多题，超出即视为异常请求
+_DRAFT_MAX_BYTES = 200_000  # 草稿 JSON 上限 200KB
+
+
+@router.post("/{exam_id}/save")
+async def save_exam_draft(exam_id: int, req: ExamDraftSave, request: Request):
+    """答题中途保存草稿：刷新、误关、断网后不再整卷重做。
+
+    只允许本人、只允许 in_progress、只允许在个人时限内；
+    题号一律过滤成本卷真实题目，避免把垃圾键写进草稿。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    if user.get("role", 2) != 2:
+        raise HTTPException(status_code=403, detail="仅学生可以保存答题草稿")
+
+    exam = execute_query_one("SELECT * FROM exams WHERE id = ?", (exam_id,))
+    if not exam:
+        raise HTTPException(status_code=404, detail="考试不存在")
+
+    attempt = execute_query_one(
+        """SELECT id, started_at FROM exam_attempts
+           WHERE exam_id = ? AND student_username = ? AND status = 'in_progress'
+           ORDER BY id DESC LIMIT 1""",
+        (exam_id, username),
+    )
+    if not attempt:
+        raise HTTPException(status_code=400, detail="没有进行中的答题记录")
+
+    _dl = _attempt_deadline(attempt, exam)
+    if _dl is not None and datetime.now() > _dl:
+        raise HTTPException(status_code=400, detail="答题已超出考试时长限制")
+
+    if len(req.answers) > _DRAFT_MAX_ITEMS:
+        raise HTTPException(status_code=400, detail="草稿内容异常（题目数超限）")
+
+    valid_ids = {str(r[0]) for r in (execute_query(
+        "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)
+    ) or [])}
+    cleaned = {k: v for k, v in req.answers.items() if str(k) in valid_ids}
+    payload = json.dumps(cleaned, ensure_ascii=False)
+    if len(payload.encode("utf-8")) > _DRAFT_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="草稿内容过大，请缩短作答文本")
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    execute_update(
+        "UPDATE exam_attempts SET draft_answers = ?, draft_saved_at = ? WHERE id = ? AND status = 'in_progress'",
+        (payload, now_str, attempt["id"]),
+    )
+    return {
+        "message": "草稿已保存",
+        "saved_at": now_str,
+        "remaining_seconds": _remaining_seconds(exam, attempt),
     }
 
 
@@ -1604,7 +1691,7 @@ async def submit_exam(exam_id: int, req: ExamSubmit, request: Request):
            SET status = 'submitted', submitted_at = ?, score = ?, answers = ?,
                auto_graded = 1, graded_by = ?,
                grading_details = ?, ai_pending = ?,
-               settled_at = ''
+               settled_at = '', draft_answers = '', draft_saved_at = ''
            WHERE id = ? AND status = 'grading'""",
         (now, earned_score,
          json.dumps(graded_answers, ensure_ascii=False),

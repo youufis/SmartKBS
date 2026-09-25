@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Layout, Card, Button, message, Radio, Checkbox, Input,
-  Typography, Space, Tag, Spin, Result, Progress, Row, Col, Divider,
+  Layout, Card, Button, message, Modal, Radio, Checkbox, Input, Alert,
+  Typography, Space, Tag, Spin, Result, Progress, Row, Col, Divider, theme,
 } from 'antd'
 import {
   ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined,
@@ -17,10 +17,59 @@ import type { ExamInfo, ExamQuestion } from '../types'
 const { TextArea } = Input
 const { Text, Title } = Typography
 
+/** B1: 本地草稿镜像键（断网或服务端草稿缺失时的兜底） */
+const draftKey = (examId: string | number, attemptId?: number | null) =>
+  `smartkb_exam_draft_${examId}_${attemptId ?? 0}`
+
+/** 草稿/正式答案都可能是 {qid: string} 或 {qid: {student_answer}}，统一成 {qid: string} */
+function normalizeAnswerMap(raw: unknown): Record<string, string> | null {
+  let obj: any = raw
+  if (typeof obj === 'string') {
+    if (!obj.trim()) return null
+    try { obj = JSON.parse(obj) } catch { return null }
+  }
+  if (!obj || typeof obj !== 'object') return null
+  const out: Record<string, string> = {}
+  Object.keys(obj).forEach((qid) => {
+    const v = obj[qid]
+    out[qid] = v && typeof v === 'object' ? String(v.student_answer ?? '') : String(v ?? '')
+  })
+  return Object.keys(out).length ? out : null
+}
+
+function readLocalDraft(examId: string | number, attemptId?: number | null) {
+  try {
+    const raw = localStorage.getItem(draftKey(examId, attemptId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { at?: number; answers?: unknown }
+    const map = normalizeAnswerMap(parsed?.answers)
+    return map ? { at: Number(parsed.at) || 0, answers: map } : null
+  } catch { return null }
+}
+
+/**
+ * 续答恢复优先级：服务端草稿与本地镜像取「更新且更全」的那个，
+ * 都没有才回落到已提交的 answers（兼容老数据）。
+ */
+function pickRestoredAnswers(attempt: any, examId: string | number, attemptId?: number | null) {
+  const server = normalizeAnswerMap(attempt?.draft_answers)
+  const serverAt = attempt?.draft_saved_at
+    ? new Date(String(attempt.draft_saved_at).replace(' ', 'T')).getTime() || 0
+    : 0
+  const local = readLocalDraft(examId, attemptId)
+  if (server && local) {
+    const localNewer = local.at > serverAt
+    const localMore = Object.keys(local.answers).length > Object.keys(server).length
+    return (localNewer && localMore) ? local.answers : server
+  }
+  return server || local?.answers || normalizeAnswerMap(attempt?.answers)
+}
+
 const ExamTakePage: React.FC = () => {
   const { t } = useTranslation('exam')
   const { examId } = useParams<{ examId: string }>()
   const navigate = useNavigate()
+  const { token } = theme.useToken()
 
   const TYPE_LABELS: Record<string, string> = {
     single: t('singleChoice'),
@@ -54,6 +103,14 @@ const ExamTakePage: React.FC = () => {
   // ── 计时器 ──
   const [timeLeft, setTimeLeft] = useState<number>(0)
   const [timerActive, setTimerActive] = useState(false)
+  // B1: 个人时限已到（服务端裁决），页面转只读但仍允许交卷
+  const [timeExpired, setTimeExpired] = useState(false)
+  // B1: 草稿自动保存状态与本地时间戳
+  const [draftState, setDraftState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [draftAt, setDraftAt] = useState('')
+  const draftTimerRef = useRef<number | null>(null)
+  // 恢复出来的答案不要立刻反向回写一次草稿
+  const draftSkipRef = useRef(true)
 
   // ── 加载考试 ──
   const loadExam = useCallback(async () => {
@@ -69,27 +126,30 @@ const ExamTakePage: React.FC = () => {
       const qs = detail.questions || []
       setQuestions(qs)
 
-      // 计时器
-      if (detail.duration) {
+      // B1: 倒计时以服务端 started_at 算出的剩余秒数为准，刷新/换设备不再从头计
+      const serverLeft = typeof startRes.remaining_seconds === 'number'
+        ? startRes.remaining_seconds
+        : (typeof detail.remaining_seconds === 'number' ? detail.remaining_seconds : null)
+      if (serverLeft !== null) {
+        setTimeLeft(serverLeft)
+        if (serverLeft <= 0) {
+          setTimeExpired(true)
+          setTimerActive(false)
+        } else {
+          setTimerActive(true)
+        }
+      } else if (detail.duration) {
+        // 未设个人时长的老口径：只受考试起止窗约束
         setTimeLeft(detail.duration * 60)
         setTimerActive(true)
       }
 
-      // 如果是继续答题，恢复之前的答案
-      if (startRes.existing && detail.my_attempt?.answers) {
-        try {
-          const savedAnswers = typeof detail.my_attempt.answers === 'string'
-            ? JSON.parse(detail.my_attempt.answers)
-            : detail.my_attempt.answers
-          const restored: Record<string, string> = {}
-          Object.keys(savedAnswers).forEach((qid) => {
-            restored[qid] = typeof savedAnswers[qid] === 'object'
-              ? (savedAnswers[qid] as any).student_answer || ''
-              : savedAnswers[qid]
-          })
+      // B1: 续答恢复（服务端草稿 / 本地镜像 / 已提交答案 三级兜底）
+      if (startRes.existing) {
+        const restored = pickRestoredAnswers(detail.my_attempt, examId, startRes.attempt_id)
+        if (restored) {
+          draftSkipRef.current = true
           setAnswers(restored)
-        } catch {
-          // ignore
         }
       }
     } catch (err: any) {
@@ -155,6 +215,10 @@ const ExamTakePage: React.FC = () => {
     try {
       const res = await examsApi.submitExam(Number(examId), answers)
       setSubmitted(true)
+      // B1: 交卷成功即清草稿（服务端写库时一并清空 draft_answers）
+      if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
+      try { localStorage.removeItem(draftKey(examId, attemptId)) } catch { /* 忽略 */ }
+      setDraftState('idle')
       setResult({
         score: res.score,
         total_score: res.total_score,
@@ -209,9 +273,50 @@ const ExamTakePage: React.FC = () => {
   /** S-GRADING(P2): 一道题当前是否还在批改中(分数未定, 不显示得分与对错) */
   const isPendingItem = (d: any) => d?.grading === 'pending' || d?.graded_by === 'queued'
 
+  // ── B1: 答案变化 → 先落本地镜像，再防抖 2s 回写服务端草稿 ──
+  useEffect(() => {
+    if (!examId || submitted) return
+    if (draftSkipRef.current) { draftSkipRef.current = false; return }
+    try {
+      localStorage.setItem(draftKey(examId, attemptId), JSON.stringify({ at: Date.now(), answers }))
+    } catch { /* 隐私模式忽略 */ }
+    setDraftState('saving')
+    if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
+    draftTimerRef.current = window.setTimeout(async () => {
+      try {
+        await examsApi.saveExamDraft(Number(examId), answers)
+        setDraftState('saved')
+        setDraftAt(new Date().toLocaleTimeString())
+      } catch {
+        // 不打断答题：状态标出来，下一次改动自然重试
+        setDraftState('error')
+      }
+    }, 2000)
+    return () => { if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current) }
+  }, [answers, attemptId, examId, submitted])
+
+  // ── B1: 有未交卷内容时拦一下刷新/关标签 ──
+  const dirty = !submitted && Object.keys(answers).length > 0
+  useEffect(() => {
+    if (!dirty) return
+    const onLeave = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onLeave)
+    return () => window.removeEventListener('beforeunload', onLeave)
+  }, [dirty])
+
   // ── 返回 ──
   const handleBack = () => {
-    navigate('/exam')
+    if (!dirty) { navigate('/exam'); return }
+    Modal.confirm({
+      title: t('exLeaveTitle'),
+      content: t('exLeaveContent'),
+      okText: t('exLeaveOk'),
+      cancelText: t('exLeaveStay'),
+      onOk: () => navigate('/exam'),
+    })
   }
 
   // ── 渲染题目 ──
@@ -237,11 +342,11 @@ const ExamTakePage: React.FC = () => {
         <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
 
         {q.type === 'single' && q.options && (
-          <Radio.Group value={answer} onChange={(e) => setAnswer(qId, e.target.value)}>
+          <Radio.Group value={answer} disabled={timeExpired} onChange={(e) => setAnswer(qId, e.target.value)}>
             <Space orientation="vertical" style={{ width: '100%' }}>
               {Object.entries(q.options).map(([key, val]) => (
                 <Radio key={key} value={key}
-                  style={{ padding: '8px 12px', borderRadius: 6, border: answer === key ? '1px solid #1677ff' : '1px solid #eee', width: '100%', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  style={{ padding: '8px 12px', borderRadius: 6, border: answer === key ? `1px solid ${token.colorPrimary}` : `1px solid ${token.colorBorderSecondary}`, width: '100%', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   <strong>{key}.</strong> <FormulaRenderer content={val as string} inline />
                 </Radio>
               ))}
@@ -250,12 +355,12 @@ const ExamTakePage: React.FC = () => {
         )}
 
         {q.type === 'multiple' && q.options && (
-          <Checkbox.Group value={answer ? answer.split(',') : []}>
+          <Checkbox.Group value={answer ? answer.split(',') : []} disabled={timeExpired}>
             <Space orientation="vertical" style={{ width: '100%' }}>
               {Object.entries(q.options).map(([key, val]) => (
                 <Checkbox key={key} value={key}
                   onChange={(e) => handleMultipleChange(qId, key, e.target.checked)}
-                  style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #eee', width: '100%', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  style={{ padding: '8px 12px', borderRadius: 6, border: `1px solid ${token.colorBorderSecondary}`, width: '100%', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                   <strong>{key}.</strong> <FormulaRenderer content={val as string} inline />
                 </Checkbox>
               ))}
@@ -264,16 +369,17 @@ const ExamTakePage: React.FC = () => {
         )}
 
         {q.type === 'true_false' && (
-          <Radio.Group value={answer} onChange={(e) => setAnswer(qId, e.target.value)}>
+          <Radio.Group value={answer} disabled={timeExpired} onChange={(e) => setAnswer(qId, e.target.value)}>
             <Space>
-              <Radio value="true" style={{ padding: '8px 20px', borderRadius: 6, border: answer === 'true' ? '1px solid #1677ff' : '1px solid #eee' }}>{t('true')}</Radio>
-              <Radio value="false" style={{ padding: '8px 20px', borderRadius: 6, border: answer === 'false' ? '1px solid #1677ff' : '1px solid #eee' }}>{t('false')}</Radio>
+              <Radio value="true" style={{ padding: '8px 20px', borderRadius: 6, border: answer === 'true' ? `1px solid ${token.colorPrimary}` : `1px solid ${token.colorBorderSecondary}` }}>{t('true')}</Radio>
+              <Radio value="false" style={{ padding: '8px 20px', borderRadius: 6, border: answer === 'false' ? `1px solid ${token.colorPrimary}` : `1px solid ${token.colorBorderSecondary}` }}>{t('false')}</Radio>
             </Space>
           </Radio.Group>
         )}
 
         {(q.type === 'short' || q.type === 'fill' || q.type === 'essay' || q.type === 'subjective') && (
           <TextArea rows={q.type === 'essay' ? 10 : q.type === 'subjective' ? 8 : q.type === 'short' ? 4 : 3}
+            disabled={timeExpired}
             value={answer}
             onChange={(e) => setAnswer(qId, e.target.value)}
             placeholder={q.type === 'essay' ? t('essayPlaceholder') : q.type === 'subjective' ? t('answerPlaceholder') : q.type === 'fill' ? t('fillPlaceholder') : t('answerPlaceholder')}
@@ -293,7 +399,7 @@ const ExamTakePage: React.FC = () => {
     const gradedDetails = allDetails.filter((d: any) => !isPendingItem(d))
     const correctCount = gradedDetails.filter((d: any) => d.is_correct).length
     return (
-      <Layout style={{ minHeight: '100vh', background: '#f5f5f5', padding: 24 }}>
+      <Layout style={{ minHeight: '100vh', background: token.colorBgLayout, padding: 24 }}>
         <Card style={{ maxWidth: 700, margin: '40px auto' }}>
           <Result
             status={pendingCount > 0 ? 'info' : (result.passed ? 'success' : 'error')}
@@ -301,14 +407,14 @@ const ExamTakePage: React.FC = () => {
             subTitle={
               <Space orientation="vertical" size={8}>
                 <Typography.Title level={2}
-                  style={{ color: pendingCount > 0 ? '#1677ff' : (result.passed ? '#52c41a' : '#ff4d4f'), margin: 0 }}>
+                  style={{ color: pendingCount > 0 ? token.colorPrimary : (result.passed ? token.colorSuccess : token.colorError), margin: 0 }}>
                   {result.score} {t('points')}
                 </Typography.Title>
                 <Typography.Text type="secondary">
                   {t('fullScore')} {result.total_score} {t('points')}
                 </Typography.Text>
                 {pendingCount > 0 && (
-                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                  <Typography.Text type="secondary" style={{ fontSize: 14 }}>
                     {t('exGradingPendingHint', { count: pendingCount })}
                   </Typography.Text>
                 )}
@@ -338,17 +444,17 @@ const ExamTakePage: React.FC = () => {
                     && (detail.grading_type === 'essay' || !!(dims.content || dims.structure || dims.language))
                   return (
                     <Card key={qId} size="small"
-                      style={{ marginTop: 8, background: pendingItem ? '#e6f4ff' : (detail.is_correct ? '#f6ffed' : '#fff2f0') }}>
+                      style={{ marginTop: 8, background: pendingItem ? token.colorPrimaryBg : (detail.is_correct ? token.colorSuccessBg : token.colorErrorBg) }}>
                       <Space orientation="vertical" style={{ width: '100%' }}>
                         <Space wrap>
                           {pendingItem
-                            ? <ClockCircleOutlined style={{ color: '#1677ff', fontSize: 18 }} />
+                            ? <ClockCircleOutlined style={{ color: token.colorPrimary, fontSize: 18 }} />
                             : detail.is_correct
-                            ? <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 18 }} />
-                            : <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />}
+                            ? <CheckCircleOutlined style={{ color: token.colorSuccess, fontSize: 18 }} />
+                            : <CloseCircleOutlined style={{ color: token.colorError, fontSize: 18 }} />}
                           <span>{t('yourAnsColon')}{detail.student_answer || t('unanswered')}</span>
                           {!detail.is_correct && !pendingItem && (
-                            <span style={{ color: '#888' }}>{t('correctAnsColon')}{detail.correct_answer}</span>
+                            <span style={{ color: token.colorTextTertiary }}>{t('correctAnsColon')}{detail.correct_answer}</span>
                           )}
                           {pendingItem
                             ? <Tag color="blue">{t('exGradingPending')}</Tag>
@@ -359,51 +465,51 @@ const ExamTakePage: React.FC = () => {
 
                         {/* AI 简答题评语 */}
                         {detail.comment && (
-                          <div style={{ color: '#1677ff', fontSize: 13 }}>
+                          <div style={{ color: token.colorPrimary, fontSize: 14 }}>
                             <strong>{t('aiCommentColon')}</strong>{detail.comment}
                           </div>
                         )}
                         {detail.feedback && (
-                          <div style={{ color: '#52c41a', fontSize: 13 }}>
+                          <div style={{ color: token.colorSuccess, fontSize: 14 }}>
                             <strong>{t('studyAdviceColon')}</strong>{detail.feedback}
                           </div>
                         )}
 
                         {/* AI 主观题/作文 多维评分 */}
                         {isEssay && detail.dimensions && (
-                          <div style={{ background: '#fafafa', padding: 12, borderRadius: 6, width: '100%' }}>
+                          <div style={{ background: token.colorFillQuaternary, padding: 12, borderRadius: 6, width: '100%' }}>
                             <div style={{ fontWeight: 'bold', marginBottom: 8 }}>{t('multiScore')}</div>
                             <Row gutter={16}>
                               {detail.dimensions.content && (
                                 <Col span={8}>
                                   <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#1677ff' }}>{detail.dimensions.content.score}</div>
-                                    <div style={{ fontSize: 12, color: '#666' }}>{t('dimContent')}/10</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.content.comment}</div>
+                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: token.colorPrimary }}>{detail.dimensions.content.score}</div>
+                                    <div style={{ fontSize: 13, color: token.colorTextSecondary }}>{t('dimContent')}/10</div>
+                                    <div style={{ fontSize: 13, color: token.colorTextTertiary }}>{detail.dimensions.content.comment}</div>
                                   </div>
                                 </Col>
                               )}
                               {detail.dimensions.structure && (
                                 <Col span={8}>
                                   <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#52c41a' }}>{detail.dimensions.structure.score}</div>
-                                    <div style={{ fontSize: 12, color: '#666' }}>{t('dimStructure')}/10</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.structure.comment}</div>
+                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: token.colorSuccess }}>{detail.dimensions.structure.score}</div>
+                                    <div style={{ fontSize: 13, color: token.colorTextSecondary }}>{t('dimStructure')}/10</div>
+                                    <div style={{ fontSize: 13, color: token.colorTextTertiary }}>{detail.dimensions.structure.comment}</div>
                                   </div>
                                 </Col>
                               )}
                               {detail.dimensions.language && (
                                 <Col span={8}>
                                   <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: '#faad14' }}>{detail.dimensions.language.score}</div>
-                                    <div style={{ fontSize: 12, color: '#666' }}>{t('dimLanguage')}/10</div>
-                                    <div style={{ fontSize: 12, color: '#888' }}>{detail.dimensions.language.comment}</div>
+                                    <div style={{ fontSize: 20, fontWeight: 'bold', color: token.colorWarning }}>{detail.dimensions.language.score}</div>
+                                    <div style={{ fontSize: 13, color: token.colorTextSecondary }}>{t('dimLanguage')}/10</div>
+                                    <div style={{ fontSize: 13, color: token.colorTextTertiary }}>{detail.dimensions.language.comment}</div>
                                   </div>
                                 </Col>
                               )}
                             </Row>
                             {detail.overall_comment && (
-                              <div style={{ marginTop: 8, fontSize: 13, color: '#333' }}>
+                              <div style={{ marginTop: 8, fontSize: 14, color: token.colorText }}>
                                 <strong>{t('overallColon')}</strong>{detail.overall_comment}
                               </div>
                             )}
@@ -412,7 +518,7 @@ const ExamTakePage: React.FC = () => {
                                 <strong>{t('improveColon')}</strong>
                                 <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                                   {detail.improvement_suggestions.map((s: string, i: number) => (
-                                    <li key={i} style={{ color: '#666' }}>{s}</li>
+                                    <li key={i} style={{ color: token.colorTextSecondary }}>{s}</li>
                                   ))}
                                 </ul>
                               </div>
@@ -434,7 +540,7 @@ const ExamTakePage: React.FC = () => {
   // ── 加载中 ──
   if (loading) {
     return (
-      <Layout style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#f5f5f5' }}>
+      <Layout style={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', background: token.colorBgLayout }}>
         <Spin size="large" description={t('loadingExam')} />
       </Layout>
     )
@@ -442,7 +548,7 @@ const ExamTakePage: React.FC = () => {
 
   if (!exam || questions.length === 0) {
     return (
-      <Layout style={{ minHeight: '100vh', background: '#f5f5f5', padding: 24 }}>
+      <Layout style={{ minHeight: '100vh', background: token.colorBgLayout, padding: 24 }}>
         <Result status="warning" title={t('examNoQ')}
           subTitle={t('contactTeacherAddQ')}
           extra={<Button onClick={handleBack}>{t('backBtn')}</Button>} />
@@ -455,11 +561,11 @@ const ExamTakePage: React.FC = () => {
   const progressPercent = Math.round((answeredCount / questions.length) * 100)
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
+    <Layout style={{ minHeight: '100vh', background: token.colorBgLayout }}>
       {/* ── 顶栏 ── */}
       <div style={{
-        background: '#fff', padding: '12px 24px',
-        borderBottom: '1px solid #f0f0f0',
+        background: token.colorBgContainer, padding: '12px 24px',
+        borderBottom: `1px solid ${token.colorBorderSecondary}`,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         position: 'sticky', top: 0, zIndex: 100,
       }}>
@@ -471,13 +577,21 @@ const ExamTakePage: React.FC = () => {
           <span>
             <ClockCircleOutlined style={{ marginRight: 4 }} />
             {t('remainTime')}
-            <Text strong style={{ color: timeLeft < 300 ? '#ff4d4f' : '#1677ff', fontSize: 18 }}>
+            <Text strong style={{ color: timeLeft < 300 ? token.colorError : token.colorPrimary, fontSize: 18 }}>
               {formatTime(timeLeft)}
             </Text>
           </span>
           <span>
             {t('progressLabel')}{answeredCount}/{questions.length}
           </span>
+          {/* B1: 草稿自动保存状态（失败不打断答题，只标出来） */}
+          {!submitted && draftState !== 'idle' && (
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              {draftState === 'saving' && t('exDraftSaving')}
+              {draftState === 'saved' && t('exDraftSaved', { at: draftAt })}
+              {draftState === 'error' && t('exDraftRetry')}
+            </Text>
+          )}
           <Button type="primary" icon={<SendOutlined />}
             loading={submitting}
             onClick={() => {
@@ -492,16 +606,19 @@ const ExamTakePage: React.FC = () => {
       </div>
 
       <div style={{ padding: 16, maxWidth: 960, margin: '0 auto', width: '100%' }}>
+        {timeExpired && (
+          <Alert type="warning" showIcon style={{ marginBottom: 12 }} title={t('exTimeOverBanner')} />
+        )}
         {/* ── 进度条 ── */}
         <Progress percent={progressPercent} size="small" style={{ marginBottom: 16 }} />
 
         {/* ── 题号导航 ── */}
         <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{t('qNavLabel')}</Text>
+          <Text strong style={{ fontSize: 14, whiteSpace: 'nowrap' }}>{t('qNavLabel')}</Text>
           <Space size={12}>
-            <Text style={{ fontSize: 12 }}><Tag color="#1677ff" style={{ lineHeight: '18px', padding: '0 6px' }}>1</Tag> {t('tkCurrent')}</Text>
-            <Text style={{ fontSize: 12 }}><Tag color="#52c41a" style={{ lineHeight: '18px', padding: '0 6px' }}>2</Tag> {t('tkAnswered')}</Text>
-            <Text style={{ fontSize: 12 }}><Tag color="#f0f0f0" style={{ lineHeight: '18px', padding: '0 6px', border: '1px solid #d9d9d9' }}>3</Tag> {t('tkUnanswered')}</Text>
+            <Text style={{ fontSize: 13 }}><Tag color={token.colorPrimary} style={{ lineHeight: '18px', padding: '0 6px' }}>1</Tag> {t('tkCurrent')}</Text>
+            <Text style={{ fontSize: 13 }}><Tag color={token.colorSuccess} style={{ lineHeight: '18px', padding: '0 6px' }}>2</Tag> {t('tkAnswered')}</Text>
+            <Text style={{ fontSize: 13 }}><Tag color={token.colorFillSecondary} style={{ lineHeight: '18px', padding: '0 6px', border: `1px solid ${token.colorBorder}` }}>3</Tag> {t('tkUnanswered')}</Text>
           </Space>
         </div>
         <div style={{ marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -511,18 +628,18 @@ const ExamTakePage: React.FC = () => {
             let tagColor: string
             let borderStyle: React.CSSProperties = {}
             if (isCurrent) {
-              tagColor = '#1677ff'
+              tagColor = token.colorPrimary
             } else if (answered) {
-              tagColor = '#52c41a'
+              tagColor = token.colorSuccess
             } else {
-              tagColor = '#f0f0f0'
-              borderStyle = { border: '1px solid #d9d9d9', color: '#666' }
+              tagColor = token.colorFillSecondary
+              borderStyle = { border: `1px solid ${token.colorBorder}`, color: token.colorTextSecondary }
             }
             return (
               <Tag
                 key={q.id}
                 color={tagColor}
-                style={{ cursor: 'pointer', padding: '2px 10px', fontSize: 13, minWidth: 32, textAlign: 'center', ...borderStyle }}
+                style={{ cursor: 'pointer', padding: '2px 10px', fontSize: 14, minWidth: 32, textAlign: 'center', ...borderStyle }}
                 onClick={() => setCurrentIndex(idx)}
               >
                 {idx + 1}
