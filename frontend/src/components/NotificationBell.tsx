@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Badge, Popover, List, Button, Space, Typography, Empty, Spin, Tag, Tooltip } from 'antd'
+import { Badge, Popover, Button, Space, Typography, Empty, Spin, Tag, Tooltip, theme } from 'antd'
 import {
   BellOutlined, CheckOutlined, DeleteOutlined,
   FileAddOutlined, TrophyOutlined, CheckCircleOutlined,
@@ -15,6 +15,7 @@ import type { NotificationItem } from '../api/notifications'
 import type { PushMessage } from '../api/companion'
 import { useNoticeText } from '../utils/notificationText'
 import { startPoller, stopPoller } from '../utils/poller'
+import { RowList, RowItem } from './RowList'
 
 const { Text } = Typography
 
@@ -37,6 +38,7 @@ const PUSH_TYPE_CONFIG: Record<string, { color: string; icon: string }> = {
 
 const NotificationBell: React.FC = () => {
   const { t } = useTranslation('common')
+  const { token } = theme.useToken()
   const noticeText = useNoticeText()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -182,22 +184,17 @@ const NotificationBell: React.FC = () => {
             {notifications.length > 0 && (
               <div style={{ padding: '4px 12px', fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>{t('nbSystem')}</div>
             )}
-            <List
-              dataSource={notifications}
+            <RowList
+              items={notifications}
               renderItem={(item) => {
                 const cfg = TYPE_CONFIG[item.type] || TYPE_CONFIG.info
-                        const nt = noticeText(item)
+                const nt = noticeText(item)
+                const unreadBg = token.colorPrimaryBg
                 return (
-                  <List.Item
-                    style={{
-                      padding: '8px 12px',
-                      background: item.is_read ? 'transparent' : '#f6f8ff',
-                      cursor: 'pointer',
-                    }}
+                  <RowItem
+                    style={{ background: item.is_read ? 'transparent' : unreadBg, cursor: 'pointer' }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)' }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = item.is_read ? 'transparent' : '#f6f8ff'
-                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = item.is_read ? 'transparent' : unreadBg }}
                     onClick={() => {
                       if (item.related_link) {
                         navigate(item.related_link)
@@ -206,34 +203,29 @@ const NotificationBell: React.FC = () => {
                     }}
                     actions={
                       item.is_read
-                        ? [<Button type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => handleDelete(e, item.id)} />]
+                        ? [<Button key="del" type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => handleDelete(e, item.id)} />]
                         : [
-                          <Button type="text" size="small" icon={<CheckOutlined />} onClick={(e) => handleMarkRead(e, item.id)} />,
-                          <Button type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => handleDelete(e, item.id)} />,
+                          <Button key="read" type="text" size="small" icon={<CheckOutlined />} onClick={(e) => handleMarkRead(e, item.id)} />,
+                          <Button key="del" type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => handleDelete(e, item.id)} />,
                         ]
                     }
-                  >
-                    <List.Item.Meta
-                      avatar={
-                        <span style={{ fontSize: 16, color: cfg.color }}>{cfg.icon}</span>
-                      }
-                      title={
-                        <Space size={4}>
-                          <Text strong={!item.is_read} style={{ fontSize: 13 }}>{nt.title}</Text>
-                          {!item.is_read && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('nbNew')}</Tag>}
-                        </Space>
-                      }
-                      description={
-                        <div>
-                          {item.content && <Text type="secondary" style={{ fontSize: 12 }}>{nt.content}</Text>}
-                          <br />
-                          <Text type="secondary" style={{ fontSize: 11 }}>
-                            {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
-                          </Text>
-                        </div>
-                      }
-                    />
-                  </List.Item>
+                    avatar={<span style={{ fontSize: 16, color: cfg.color }}>{cfg.icon}</span>}
+                    title={
+                      <Space size={4}>
+                        <Text strong={!item.is_read} style={{ fontSize: 13 }}>{nt.title}</Text>
+                        {!item.is_read && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('nbNew')}</Tag>}
+                      </Space>
+                    }
+                    description={
+                      <div>
+                        {item.content && <Text type="secondary" style={{ fontSize: 12 }}>{nt.content}</Text>}
+                        <br />
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
+                        </Text>
+                      </div>
+                    }
+                  />
                 )
               }}
             />
@@ -241,49 +233,40 @@ const NotificationBell: React.FC = () => {
             {isStudent && pushes.length > 0 && (
               <>
                 <div style={{ padding: '4px 12px', fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, borderTop: notifications.length > 0 ? '1px solid #f0f0f0' : 'none' }}>{t('nbCompanion')}</div>
-                <List
-                  dataSource={pushes}
+                <RowList
+                  items={pushes}
                   renderItem={(item) => {
                     const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: 'var(--text-tertiary)', icon: '💌' }
                     return (
-                      <List.Item
-                        style={{
-                          padding: '8px 12px',
-                          background: 'transparent',
-                          cursor: 'default',
-                        }}
+                      <RowItem
+                        style={{ background: 'transparent', cursor: 'default' }}
                         onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)' }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                         actions={[
-                          <Button type="text" size="small" icon={<CheckOutlined />}
+                          <Button key="read" type="text" size="small" icon={<CheckOutlined />}
                             onClick={(e) => handlePushMarkRead(e, item.id)}
                           />,
-                          <Button type="text" size="small" icon={<DeleteOutlined />}
+                          <Button key="del" type="text" size="small" icon={<DeleteOutlined />}
                             onClick={(e) => handlePushDelete(e, item.id)}
                           />,
                         ]}
-                      >
-                        <List.Item.Meta
-                          avatar={
-                            <span style={{ fontSize: 16 }}>{cfg.icon}</span>
-                          }
-                          title={
-                            <Space size={4}>
-                              <Text style={{ fontSize: 13 }}>{item.title}</Text>
-                              <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('nbCompanionTag')}</Tag>
-                            </Space>
-                          }
-                          description={
-                            <div>
-                              {item.content && <Text type="secondary" style={{ fontSize: 12 }}>{item.content}</Text>}
-                              <br />
-                              <Text type="secondary" style={{ fontSize: 11 }}>
-                                {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
-                              </Text>
-                            </div>
-                          }
-                        />
-                      </List.Item>
+                        avatar={<span style={{ fontSize: 16 }}>{cfg.icon}</span>}
+                        title={
+                          <Space size={4}>
+                            <Text style={{ fontSize: 13 }}>{item.title}</Text>
+                            <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{t('nbCompanion')}</Tag>
+                          </Space>
+                        }
+                        description={
+                          <div>
+                            {item.content && <Text type="secondary" style={{ fontSize: 12 }}>{item.content}</Text>}
+                            <br />
+                            <Text type="secondary" style={{ fontSize: 11 }}>
+                              {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}
+                            </Text>
+                          </div>
+                        }
+                      />
                     )
                   }}
                 />
