@@ -43,7 +43,7 @@
 
 **SmartKBS** is a fully-featured AI-powered smart teaching management platform designed for all grades and subjects, specifically tailored for primary, middle, and high school education scenarios. The system is not limited to any specific subject — through flexible configuration, it can adapt to mathematics, Chinese, English, physics, chemistry, biology, history, geography, information technology, general technology, artificial intelligence, and any other subject's teaching needs.
 
-Built with **FastAPI + React**, the system adopts a modern front-end/back-end separation architecture, deeply integrating Alibaba Cloud DashScope (Tongyi Qianwen/Tongyi Wanxiang) and DeepSeek large language model capabilities. Through a flexible AI invocation service (supporting both Bailian Agent application and direct model invocation modes), it provides teachers and students with a one-stop intelligent teaching and learning experience.
+Built with **FastAPI + React**, the system adopts a modern front-end/back-end separation architecture, deeply integrating Alibaba Cloud DashScope (Tongyi Qianwen/Tongyi Wanxiang) and DeepSeek large language model capabilities. Through a flexible AI invocation service offering three modes — knowledge-base-augmented model calls, Bailian Agent application, and direct model invocation — with automatic takeover by priority (knowledge base &gt; agent &gt; model), it provides teachers and students with a one-stop intelligent teaching and learning experience.
 
 **📦 Three ways to deploy**: one-click Windows desktop installer (no environment, no Python / Node.js) · source package deployment · Git clone deployment (with online incremental upgrades). See the [Deployment Guide](#-deployment-guide).
 
@@ -438,9 +438,9 @@ Dual knowledge expansion modules, allowing students to easily broaden their hori
 - **📖 Daily Picks**: AI fun knowledge card pool; each person randomly draws 6 cards,
   7-day deduplication window, supports favorites and manual refresh. Smart knowledge pool replenishes on demand,
   no consumption when unused, browsing earns points and badges.
-- **📰 Trending News**: RSS aggregation of 5 major official sources (Xinhua, CCTV, etc.),
+- **📰 Trending News**: RSS aggregation of mainstream news feeds (Chinanews, IT Home, etc.),
   AI on-demand summaries + subject association, supports daily briefing and favorites.
-  2h cache lazy loading, 72h rolling cleanup, zero fetching when no one is accessing.
+  2h cache lazy loading, 72h rolling cleanup, zero fetching when no one is accessing; the source list is editable in system config, with a per-source circuit breaker and a standby pool.
 
 > **Available to all users**
 
@@ -1014,9 +1014,9 @@ Git-based online incremental upgrade system:
 
 ### v7.6.0 ~ v7.4.0 (2026-07)
 
-- 🎯 **AI skill system**: 20 modular skills injected per scenario across 25 API routers, output runs through deep analysis -> structured output -> self review, with a skill management page
-- 🌐 **Internationalisation**: every page switches between Chinese and English (react-i18next, 13 namespaces, 2000+ keys)
-- 🏆 **Hall of Fame and UI consistency**: honour wall with 10 gradient themes; 24px spacing standard applied to ~60 pages
+- 🎯 **AI skill system**: 20 modular skills injected per scenario across 40+ API routers, output runs through deep analysis -> structured output -> self review, with a skill management page
+- 🌐 **Internationalisation**: every page switches between Chinese and English (react-i18next, 13 namespaces, 4400+ keys)
+- 🏆 **Hall of Fame and UI consistency**: honour wall with 10 gradient themes; 24px spacing standard applied to 70+ pages
 - ⚠️ **Breaking changes**: none
 
 ### v7.3.0 ~ v6.0.0 (H1 2026)
@@ -1169,7 +1169,7 @@ SmartKBS/
 │   ├── downloads_api.py        # File download API
 │   ├── system_config.json      # Runtime configuration
 │   ├── api/                    # API route modules
-│   │   ├── ai_service.py       # Unified AI invocation service (dual mode)
+│   │   ├── ai_service.py       # Unified AI invocation service (three modes, auto takeover)
 │   │   ├── image_gen_service.py# Tongyi Wanxiang image generation
 │   │   └── ... (route files)
 │   ├── prompts/                # AI Prompt templates
@@ -1289,7 +1289,7 @@ SmartKBS/
 | **Database** | SQLite (dual-database architecture) |
 | **Authentication** | JWT (bcrypt + PyJWT), Token Version SSO |
 | **AI Models** | Tongyi Qianwen DashScope (Qwen), DeepSeek |
-| **AI Invocation Modes** | Bailian Agent Application / Direct Model Invocation (dual mode) |
+| **AI Invocation Modes** | Knowledge base + model / Bailian Agent Application / Direct model invocation (three modes with priority-based takeover, auto-degrading when the knowledge base is unavailable) |
 | **Image Generation** | Tongyi Wanxiang (wanx2.1/wan2.2) |
 | **Streaming** | Server-Sent Events (SSE) |
 | **Real-Time Communication** | WebSocket (Whiteboard / Discussion / Quick-Answer) |
