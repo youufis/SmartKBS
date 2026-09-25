@@ -1,4 +1,5 @@
 {
+  "ipQuizOneShot": "You cannot answer this quiz again after submitting.",
   "qqPeoplePercent": "{{v}} people ({{pct}}%)",
   "qqAnswerStats": "Answered: {{total}} · Correct: {{correct}}",
   "title": "Class Quiz",

@@ -1,4 +1,5 @@
 {
+  "ipQuizOneShot": "提交后不能重复作答。",
   "qqPeoplePercent": "{{v}} 人（{{pct}}%）",
   "qqAnswerStats": "本题作答：{{total}} 人，正确 {{correct}} 人",
   "title": "随堂测验",

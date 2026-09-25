@@ -315,7 +315,6 @@ const ExamTakePage: React.FC = () => {
     const ok = await confirmUnanswered({
       missing,
       total: questions.length,
-      t,
       extra: t('unansweredOneShot'),
     })
     if (ok) void handleSubmit()

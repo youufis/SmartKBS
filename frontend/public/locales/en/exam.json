@@ -1,4 +1,5 @@
 {
+  "unansweredOneShot": "You cannot change answers after submitting, and it uses one of your attempts.",
   "title": "Exam Center",
   "createExam": "Create Exam",
   "editExam": "Edit Exam",

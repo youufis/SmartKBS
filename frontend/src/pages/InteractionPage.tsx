@@ -194,7 +194,7 @@ const InteractionPage: React.FC = () => {
     const qs: any[] = takingQuiz.questions || []
     // P0 防误交：随堂测验提交后不能重复作答，没答完必须先确认
     const missing = unansweredIndexes(qs, (_q, i) => !!(quizAnswers[i] || '').trim())
-    const ok = await confirmUnanswered({ missing, total: qs.length, t, extra: t('ipQuizOneShot') })
+    const ok = await confirmUnanswered({ missing, total: qs.length, extra: t('ipQuizOneShot') })
     if (!ok) return
     const answers = qs.map((_q: any, i: number) => ({
       question_index: i,
