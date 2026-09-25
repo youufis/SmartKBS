@@ -274,12 +274,31 @@ def _log_resource_access(rel_path: str, username: str, role: int, path_parts: li
                 owner_username = path_parts[0]
 
         # 通过文件路径查询共享记录中的资源 ID
-        file_rel = "/".join(path_parts[path_parts.index(dir_type) + 1:])
+        # 注意：URL 里的目录段是 "downloads"，而 resource_type 是 "download"，
+        # 早先用 dir_type 去 index 会 ValueError 被外层 except 静默吞掉，
+        # 结果是共享文件的浏览记录从来没关联到 resource_id（已读态/浏览量/积分全丢）
+        _dir_seg = "html" if dir_type == "html" else "downloads"
+        file_rel = "/".join(path_parts[path_parts.index(_dir_seg) + 1:]) if _dir_seg in path_parts else ""
         from backend.database import execute_query_one
-        share = execute_query_one(
-            "SELECT id, owner_username FROM shared_resources WHERE resource_type=? AND (file_path=? OR file_path LIKE ?) LIMIT 1",
-            (dir_type, file_rel, f"%/{file_rel}"),
-        )
+
+        def _find_share(fp: str):
+            return execute_query_one(
+                "SELECT id, owner_username FROM shared_resources "
+                "WHERE resource_type=? AND (file_path=? OR file_path LIKE ?) LIMIT 1",
+                (dir_type, fp, f"%/{fp}"),
+            )
+
+        share = _find_share(file_rel) if file_rel else None
+        if file_rel and not share:
+            # 目录型共享（一个共享指向整个文件夹）：文件自己没有共享记录，
+            # 逐级向上找「父目录被共享」的那条，否则目录里的文件永远带 resource_id=0，
+            # 已读态、浏览量、首次浏览积分全都对不上号
+            _segs = [s for s in file_rel.strip("/").split("/") if s]
+            for _i in range(len(_segs) - 1, 0, -1):
+                _d = "/".join(_segs[:_i])
+                share = _find_share(_d) or _find_share(_d + "/")
+                if share:
+                    break
         if share:
             resource_id = share["id"]
             owner_username = share["owner_username"]

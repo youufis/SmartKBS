@@ -1,11 +1,24 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { Layout, Space, Button, Typography, message, Table, Modal, Tooltip, Card, Dropdown, Drawer, List, Input, Pagination, theme } from 'antd'
-import { UploadOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined, FolderOutlined, FolderOpenOutlined, ShareAltOutlined, SearchOutlined } from '@ant-design/icons'
-import { getFileIcon } from '../utils/fileIcon'
-import * as sharingApi from '../api/sharing'
-import ShareDialog from '../components/ShareDialog'
-import apiClient from '../api/client'
+/**
+ * 文件中心：教师/管理员管理自己名下的共享文件，接收方（学生 / 其他教师）浏览「共享文件」
+ * 接收侧统一走 ResourceBrowser（与「共享资源」同一套分类栏 + 统计条 + 网格/列表 + 偏好记忆），
+ * 目录型共享（一个共享指向整个文件夹）在这里点开是浏览文件夹，单个文件点开是下载。
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Button, Card, Dropdown, Drawer, Empty, Input, Layout, Modal, Space, Table, Tooltip, Typography, message, theme,
+} from 'antd'
+import {
+  DeleteOutlined, DownloadOutlined, FolderOpenOutlined, FolderOutlined, ReloadOutlined,
+  SearchOutlined, ShareAltOutlined, UploadOutlined,
+} from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import * as sharingApi from '../api/sharing'
+import apiClient from '../api/client'
+import ShareDialog from '../components/ShareDialog'
+import ResourceBrowser, { type BrowserItem } from '../components/ResourceBrowser'
+import { getFileIcon } from '../utils/fileIcon'
+import { formatBytes, getFileKind, KIND_COLOR } from '../utils/fileKind'
+import { useAuthStore } from '../stores/authStore'
 
 interface DownloadFile {
   name: string
@@ -15,11 +28,21 @@ interface DownloadFile {
   is_dir?: boolean
 }
 
+/** 后端没给 is_dir 时的兜底（旧版本产物）：末段没有扩展名就按目录处理 */
+const looksLikeDir = (p: string) => {
+  const clean = String(p || '').replace(/\/+$/, '')
+  const last = clean.split('/').pop() || ''
+  return !/\.[a-zA-Z0-9]+$/.test(last)
+}
+
 const DownloadsPage: React.FC = () => {
   const { t } = useTranslation('system')
   const { token } = theme.useToken()
-  const user = JSON.parse(localStorage.getItem('smartkb_user') || '{}')
-  const username: string = user?.username || 'root'
+  const user = useAuthStore((s) => s.user)
+  const username = user?.username || ''
+  const isStudent = user?.role === 'student'
+
+  // ── 我的文件（教师/管理员） ──
   const [files, setFiles] = useState<DownloadFile[]>([])
   const [loading, setLoading] = useState(false)
   const [usage, setUsage] = useState(0)
@@ -29,6 +52,8 @@ const DownloadsPage: React.FC = () => {
   const [uploadDir, setUploadDir] = useState('')
   const dirInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [ownPage, setOwnPage] = useState(1)
+  const [ownPageSize, setOwnPageSize] = useState(50)
 
   // ── 共享 ──
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
@@ -37,15 +62,12 @@ const DownloadsPage: React.FC = () => {
   const [shareInherited, setShareInherited] = useState(false)
   const [myShares, setMyShares] = useState<sharingApi.ShareItem[]>([])
   const [receivedShares, setReceivedShares] = useState<sharingApi.ShareItem[]>([])
-  const [sharedPage, setSharedPage] = useState(1)
-  const SHARED_PAGE_SIZE = 20
 
-  // ── 搜索 ──
+  // ── 搜索（只作用于「我的文件」表格，接收侧的搜索由 ResourceBrowser 自管） ──
   const [searchText, setSearchText] = useState('')
-
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchText(e.target.value)
-    setSharedPage(1)
+    setOwnPage(1)
   }
 
   // ── 浏览共享目录 ──
@@ -62,6 +84,7 @@ const DownloadsPage: React.FC = () => {
         params: { owner, dir_path: dirPath },
       })
       if (data.error) {
+        // 目录被删 / 共享被撤时给个明确提示，别让抽屉空着让人以为没文件
         message.error(data.error)
         setBrowseDirFiles([])
       } else {
@@ -73,18 +96,21 @@ const DownloadsPage: React.FC = () => {
       setBrowseDirLoading(false)
     }
   }
+
   const loadShares = async () => {
     try {
-      const res = await sharingApi.getMyShares()
-      setMyShares(res.shares)
-      const receivedRes = await sharingApi.getReceivedShares()
-      setReceivedShares(receivedRes.shares)
-    } catch { /* ignore */ }
+      const [myRes, receivedRes] = await Promise.all([
+        sharingApi.getMyShares(),
+        sharingApi.getReceivedShares(),
+      ])
+      setMyShares(myRes.shares)
+      setReceivedShares(receivedRes.shares.filter((s) => s.resource_type === 'download'))
+    } catch { /* 忽略：保留上一次结果，页面仍可手动刷新重试 */ }
   }
 
   // 检查文件/目录是否已共享（精确匹配或继承自目录共享）
   const isFileShared = (filePath: string) => {
-    return myShares.some(s => {
+    return myShares.some((s) => {
       // 规范化路径，去掉末尾的 /
       const sp = s.file_path.replace(/\/+$/, '')
       const fp = filePath.replace(/\/+$/, '')
@@ -96,11 +122,11 @@ const DownloadsPage: React.FC = () => {
   const findShareRecord = (filePath: string): { record: sharingApi.ShareItem | null; inherited: boolean } => {
     const fp = filePath.replace(/\/+$/, '')
     // 精确匹配优先
-    const exact = myShares.find(s => s.file_path.replace(/\/+$/, '') === fp)
+    const exact = myShares.find((s) => s.file_path.replace(/\/+$/, '') === fp)
     if (exact) return { record: exact, inherited: false }
     // 按路径深度排序，找最匹配的目录共享（路径最长的前缀）
     const dirShares = myShares
-      .filter(s => fp.startsWith(s.file_path.replace(/\/+$/, '') + '/'))
+      .filter((s) => fp.startsWith(s.file_path.replace(/\/+$/, '') + '/'))
       .sort((a, b) => b.file_path.length - a.file_path.length)
     if (dirShares[0]) return { record: dirShares[0], inherited: true }
     return { record: null, inherited: false }
@@ -114,9 +140,7 @@ const DownloadsPage: React.FC = () => {
     setShareDialogOpen(true)
   }
 
-  const isStudent = user?.role === 'student'
-
-  const loadFiles = useCallback(async () => {
+  const loadData = useCallback(async () => {
     setLoading(true)
     try {
       if (!isStudent) {
@@ -127,7 +151,7 @@ const DownloadsPage: React.FC = () => {
         setUsageStr(data.usage_str || '')
         setQuotaStr(data.quota_str || '')
       }
-      loadShares()
+      await loadShares()
     } catch {
       // 单条失败不阻断整体流程
     } finally {
@@ -135,8 +159,8 @@ const DownloadsPage: React.FC = () => {
     }
   }, [isStudent])
 
-  const loadFilesRef = useRef(loadFiles)
-  useEffect(() => { loadFilesRef.current = loadFiles })
+  const loadFilesRef = useRef(loadData)
+  useEffect(() => { loadFilesRef.current = loadData })
   useEffect(() => {
     const timer = setTimeout(() => loadFilesRef.current(), 0)
     return () => clearTimeout(timer)
@@ -193,7 +217,7 @@ const DownloadsPage: React.FC = () => {
     } else {
       message.success(t('uploadComplete', { count: success }))
     }
-    loadFiles()
+    loadData()
   }
 
   // 上传整个目录
@@ -237,7 +261,7 @@ const DownloadsPage: React.FC = () => {
     } else {
       message.success(t('uploadComplete', { count: success }))
     }
-    loadFiles()
+    loadData()
   }
 
   const handleDelete = (filename: string) => {
@@ -248,7 +272,7 @@ const DownloadsPage: React.FC = () => {
         try {
           const { data } = await apiClient.post('/api/downloads/delete', { filename })
           if (data.success) {
-            loadFiles()
+            loadData()
           } else {
             message.error(data.error || t('deleteFailed'))
           }
@@ -264,8 +288,53 @@ const DownloadsPage: React.FC = () => {
     // 如果 path 就是文件名本身（根目录），sep 直接使用 name
     // 如果 path 包含子目录（如 "subdir/文件.png"），则保留子目录路径
     const sep = record.path
-    const baseUrl = `/api/files/${encodeURIComponent(`${username}/downloads/${sep}`)}`
-    return baseUrl
+    return `/api/files/${encodeURIComponent(`${username}/downloads/${sep}`)}`
+  }
+
+  // ── 接收侧：条目映射 ──
+  const browserItems = useMemo<BrowserItem[]>(() => receivedShares.map((s) => {
+    const isDir = typeof s.is_dir === 'boolean'
+      ? s.is_dir
+      : looksLikeDir(s.file_path)
+    const size = formatBytes(s.total_size || 0)
+    return {
+      id: s.id,
+      name: s.file_name,
+      urlPath: s.url_path || s.file_path,
+      filePath: s.file_path,
+      resourceType: 'download',
+      entryType: isDir ? ('dir' as const) : ('file' as const),
+      sub: isDir
+        ? ((s.file_count || 0) > 0 ? t('dirStat', { count: s.file_count, size }) : undefined)
+        : ((s.total_size || 0) > 0 ? size : undefined),
+      ownerUsername: s.owner_username,
+      ownerName: s.owner_name,
+      ownerRole: s.owner_role,
+      shareScope: s.share_scope,
+      targetGrade: s.target_grade,
+      targetClass: s.target_class,
+      createdAt: s.created_at,
+      viewedAt: s.viewed_at,
+      viewCount: s.view_count,
+      courseName: s.course_name,
+      kpName: s.kp_name,
+      bindingCount: s.binding_count,
+    }
+  }), [receivedShares, t])
+
+  /** 自己名下也有同一份文件时，「再共享给学生」才有意义（否则会把别人目录里的路径当成自己的文件共享） */
+  const ownPathSet = useMemo(
+    () => new Set(files.map((f) => f.path.replace(/\/+$/, ''))),
+    [files],
+  )
+
+  const openItem = (it: BrowserItem) => {
+    if (it.entryType === 'dir') {
+      void openBrowseDir(it.ownerUsername, it.filePath, it.name)
+      return
+    }
+    // 学生点开文件时后端 serve_static_file 会记浏览日志（含目录型共享的归属），无需前端再埋点
+    window.open(`/api/files/${it.urlPath}`, '_blank', 'noopener')
   }
 
   const columns = [
@@ -275,12 +344,13 @@ const DownloadsPage: React.FC = () => {
       key: 'path',
       render: (path: string, record: DownloadFile) => (
         <Space>
-          {record.is_dir ? <FolderOutlined style={{ color: '#faad14' }} /> : getFileIcon(record.name || path)}
+          {record.is_dir
+            ? <FolderOutlined style={{ color: KIND_COLOR.dir }} />
+            : getFileIcon(record.name || path)}
           {record.is_dir ? (
             <Typography.Text strong>{record.name}/</Typography.Text>
           ) : (
-            <a href={buildDownloadUrl(record)}
-               target="_blank" rel="noreferrer">
+            <a href={buildDownloadUrl(record)} target="_blank" rel="noreferrer">
               {path}
             </a>
           )}
@@ -291,9 +361,8 @@ const DownloadsPage: React.FC = () => {
       title: t('fileSize'),
       dataIndex: 'size',
       key: 'size',
-      width: 100,
-      render: (size: number, record: DownloadFile) =>
-        record.is_dir ? '-' : size < 1024 ? `${size} B` : size < 1048576 ? `${(size/1024).toFixed(1)} KB` : `${(size/1048576).toFixed(1)} MB`,
+      width: 110,
+      render: (size: number, record: DownloadFile) => (record.is_dir ? '-' : formatBytes(size)),
     },
     {
       title: t('updateTime'),
@@ -317,7 +386,7 @@ const DownloadsPage: React.FC = () => {
           <Tooltip title={record.is_dir ? t('shareDir') : (isFileShared(record.path) ? t('sharedClickManage') : t('clickToShare'))}>
             <Button type="link" size="small"
               icon={<ShareAltOutlined />}
-              style={{ color: isFileShared(record.path) ? '#ff4d4f' : '#999' }}
+              style={{ color: isFileShared(record.path) ? token.colorError : token.colorTextDescription }}
               onClick={() => openShare(record.path, record.name)} />
           </Tooltip>
           <Tooltip title={t('delete')}>
@@ -329,25 +398,24 @@ const DownloadsPage: React.FC = () => {
     },
   ]
 
+  const ownShown = files.filter((f) => {
+    if (f.name === 'index.html') return false
+    if (!searchText.trim()) return true
+    const kw = searchText.trim().toLowerCase()
+    return f.name.toLowerCase().includes(kw) || f.path.toLowerCase().includes(kw)
+  })
+
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Typography.Title level={4} style={{ margin: 0 }}>{t('fileCenter')}</Typography.Title>
-          <Space>
-            <Input
-              placeholder={t('searchFileName')}
-              prefix={<SearchOutlined />}
-              value={searchText}
-              onChange={handleSearchChange}
-              allowClear
-              style={{ width: 220 }}
-            />
-            <Button icon={<ReloadOutlined />} onClick={loadFiles} loading={loading}>{t('refresh')}</Button>
-          </Space>
+          <Typography.Title level={5} style={{ margin: 0, fontSize: 18 }}>
+            {isStudent ? t('sharedFiles') : t('fileCenter')}
+          </Typography.Title>
+          <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>{t('refresh')}</Button>
         </div>
 
-        {!isStudent ? (
+        {!isStudent && (
           <>
             <Card size="small">
               <Space wrap>
@@ -380,162 +448,133 @@ const DownloadsPage: React.FC = () => {
               </Space>
             </Card>
 
-            <Table
-              dataSource={files.filter(f => {
-                if (f.name === 'index.html') return false
-                if (!searchText.trim()) return true
-                const kw = searchText.trim().toLowerCase()
-                return f.name.toLowerCase().includes(kw) || f.path.toLowerCase().includes(kw)
-              })}
-              columns={columns}
-              rowKey="path"
-              loading={loading}
-              pagination={{ pageSize: 50, size: 'small' }}
+            <Card
               size="small"
-              footer={() => (
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('storageUsed')} {usageStr}
-                  {quota > 0 ? ` / ${t('quota')} ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / ${t('quota')} ${quotaStr}`}
-                </Typography.Text>
+              title={<Space size={6}><FolderOutlined style={{ color: KIND_COLOR.dir }} />{t('myFiles')}</Space>}
+              extra={(
+                <Input
+                  placeholder={t('searchFileName')}
+                  prefix={<SearchOutlined style={{ color: token.colorTextDescription }} />}
+                  value={searchText}
+                  onChange={handleSearchChange}
+                  allowClear
+                  size="small"
+                  style={{ width: 220 }}
+                />
               )}
-            />
+              styles={{ body: { padding: '0 8px 8px' } }}
+            >
+              <Table
+                dataSource={ownShown}
+                columns={columns}
+                rowKey="path"
+                loading={loading}
+                size="small"
+                pagination={{
+                  current: ownPage,
+                  pageSize: ownPageSize,
+                  size: 'small',
+                  showSizeChanger: true,
+                  pageSizeOptions: ['20', '50', '100'],
+                  showTotal: (n) => t('totalFiles', { count: n }),
+                  onChange: (p, ps) => {
+                    if (ps !== ownPageSize) { setOwnPageSize(ps); setOwnPage(1) } else { setOwnPage(p) }
+                  },
+                }}
+                locale={{
+                  emptyText: (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={<Typography.Text type="secondary">{searchText.trim() ? t('noMatchFiles') : t('noOwnFiles')}</Typography.Text>}
+                    />
+                  ),
+                }}
+                footer={() => (
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {t('storageUsed')} {usageStr}
+                    {quota > 0 ? ` / ${t('quota')} ${quotaStr}（${(usage / quota * 100).toFixed(1)}%）` : ` / ${t('quota')} ${quotaStr}`}
+                  </Typography.Text>
+                )}
+              />
+            </Card>
           </>
-        ) : (
-          <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>
-            {t('sharedToYou')}
-          </Typography.Text>
         )}
 
-        {/* 共享文件列表 */}
-        {(() => {
-          const kw = searchText.trim().toLowerCase()
-          const downloadShares = receivedShares
-            .filter(s => s.resource_type === 'download')
-            .filter(s => !kw || (s.file_name || '').toLowerCase().includes(kw))
-          // 检测是否为目录共享（file_path 不含扩展名且接收方看不到精确匹配的文件时视为目录）
-          const dirShares = downloadShares.filter(s => {
-            const hasExt = /\.[a-zA-Z0-9]+$/.test(s.file_path)
-            return !hasExt
-          })
-          const fileShares = downloadShares.filter(s => !dirShares.includes(s))
-          // 合并分页（目录优先，文件其次），按页码偏移
-          const totalShares = dirShares.length + fileShares.length
-          const skipCount = (sharedPage - 1) * SHARED_PAGE_SIZE
-          const allShares: { type: string; item: sharingApi.ShareItem }[] = [
-            ...dirShares.map(s => ({ type: 'dir', item: s })),
-            ...fileShares.map(s => ({ type: 'file', item: s })),
-          ]
-          const pagedAll = allShares.slice(skipCount, skipCount + SHARED_PAGE_SIZE)
-          const pagedDir = pagedAll.filter(x => x.type === 'dir').map(x => x.item)
-          const pagedFile = pagedAll.filter(x => x.type === 'file').map(x => x.item)
-          return downloadShares.length > 0 ? (
-            <Card size="small" title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> {t('sharedFiles')} ({downloadShares.length})</>}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                {pagedDir.map((s) => (
-                  <Card key={s.id} size="small" hoverable
-                    onClick={() => openBrowseDir(s.owner_username, s.file_path, s.file_name)}
-                    style={{ cursor: 'pointer' }}>
-                    <Card.Meta
-                      avatar={<FolderOutlined style={{ color: '#faad14' }} />}
-                      title={
-                        <Typography.Text strong
-                          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-                          📁 {s.file_name}/
-                        </Typography.Text>
-                      }
-                      description={<span style={{ fontSize: 11 }}>{t('fromUserClickBrowse', { name: s.owner_username })}</span>}
-                    />
-                  </Card>
-                ))}
-                {pagedFile.map((s) => {
-                  const fullPath = s.url_path || s.file_path
-                  const fileUrl = `/api/files/${fullPath}`
+        {/* ── 共享给我的文件（学生端 = 「共享文件」标签页本体） ── */}
+        <Card
+          size="small"
+          title={<Space size={6}><ShareAltOutlined style={{ color: token.colorPrimary }} />{t('receivedFiles')}</Space>}
+          extra={(
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {t('totalFiles', { count: browserItems.length })}
+            </Typography.Text>
+          )}
+        >
+          <ResourceBrowser
+            variant="files"
+            mode={isStudent ? 'student' : 'teacher'}
+            items={browserItems}
+            loading={loading}
+            onOpen={openItem}
+            onReshare={isStudent ? undefined : (it) => openShare(it.filePath, it.name)}
+            canReshare={(it) => ownPathSet.has(it.filePath.replace(/\/+$/, ''))}
+            onRefresh={loadData}
+          />
+        </Card>
+
+        {/* 浏览共享目录抽屉 */}
+        {browseDirInfo && (
+          <Drawer
+            title={<><FolderOpenOutlined style={{ color: KIND_COLOR.dir, marginRight: 8 }} />{browseDirInfo.dirName || t('sharedDir')}</>}
+            open={browseDirOpen}
+            onClose={() => setBrowseDirOpen(false)}
+            size={600}
+            extra={(
+              <Button type="text" icon={<ReloadOutlined />} onClick={() => {
+                void openBrowseDir(browseDirInfo.owner, browseDirInfo.dirPath, browseDirInfo.dirName)
+              }} loading={browseDirLoading}>{t('refresh')}</Button>
+            )}
+          >
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+              {t('sharedDirFromPrefix')} <strong>{browseDirInfo.owner}</strong> {t('sharedDirFromSuffix')}
+            </Typography.Text>
+            {browseDirFiles.length === 0 && !browseDirLoading ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={(
+                <Typography.Text type="secondary">{t('noFilesInDir')}</Typography.Text>
+              )} />
+            ) : (
+              <div style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 8, overflow: 'hidden' }}>
+                {browseDirFiles.map((item, idx) => {
+                  const fileUrl = `/api/files/${encodeURIComponent(`${browseDirInfo.owner}/downloads/${item.path}`)}`
+                  const kind = getFileKind(item.path || item.name)
                   return (
-                    <Card key={s.id} size="small" hoverable>
-                      <Card.Meta
-                        avatar={getFileIcon(fullPath)}
-                        title={
-                          <a href={fileUrl} target="_blank" rel="noreferrer"
-                            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
-                            {s.file_name}
-                          </a>
-                        }
-                        description={<span style={{ fontSize: 11 }}>{t('fromUser', { name: s.owner_username })}</span>}
-                      />
-                    </Card>
+                    <div
+                      key={item.path}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', minWidth: 0,
+                        background: idx % 2 ? token.colorFillQuaternary : 'transparent',
+                        borderBottom: idx === browseDirFiles.length - 1 ? 'none' : `1px solid ${token.colorBorderSecondary}`,
+                      }}
+                    >
+                      <span style={{ flexShrink: 0, color: KIND_COLOR[kind] }}>{getFileIcon(item.path || item.name, { fontSize: 16 })}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Typography.Text style={{ fontSize: 13 }} ellipsis>{item.name}</Typography.Text>
+                        <div>
+                          <Typography.Text type="secondary" style={{ fontSize: 11.5 }}>
+                            {formatBytes(item.size)}{item.mtime ? ` · ${item.mtime}` : ''}
+                          </Typography.Text>
+                        </div>
+                      </div>
+                      <Button size="small" type="primary" ghost icon={<DownloadOutlined />} href={fileUrl} target="_blank" rel="noreferrer">
+                        {t('download')}
+                      </Button>
+                    </div>
                   )
                 })}
               </div>
-              {totalShares > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
-                  <Pagination
-                    current={sharedPage}
-                    total={totalShares}
-                    pageSize={SHARED_PAGE_SIZE}
-                    showSizeChanger
-                    showTotal={(total) => t('totalFiles', { count: total })}
-                    pageSizeOptions={['10', '20', '50']}
-                    onChange={(p) => setSharedPage(p)}
-                  />
-                </div>
-              )}
-            </Card>
-          ) : null;
-        })()}
-        {!isStudent && receivedShares.filter(s => s.resource_type === 'download').length === 0 && (
-          <Typography.Text type="secondary" style={{ padding: 16, display: 'block' }}>{t('noSharedFiles')}</Typography.Text>
+            )}
+          </Drawer>
         )}
-
-        {/* 浏览共享目录抽屉 */}
-        <Drawer
-          title={<><FolderOpenOutlined style={{ color: '#faad14', marginRight: 8 }} />{browseDirInfo?.dirName || t('sharedDir')}</>}
-          open={browseDirOpen}
-          onClose={() => setBrowseDirOpen(false)}
-          size={600}
-          extra={
-            <Button type="text" icon={<ReloadOutlined />} onClick={() => {
-              if (browseDirInfo) openBrowseDir(browseDirInfo.owner, browseDirInfo.dirPath, browseDirInfo.dirName)
-            }} loading={browseDirLoading}>{t('refresh')}</Button>
-          }
-        >
-          {browseDirInfo && (
-            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-              {t('sharedDirFromPrefix')} <strong>{browseDirInfo.owner}</strong> {t('sharedDirFromSuffix')}
-            </Typography.Text>
-          )}
-          {browseDirFiles.length === 0 && !browseDirLoading ? (
-            <Typography.Text type="secondary">{t('noFilesInDir')}</Typography.Text>
-          ) : (
-            <List
-              loading={browseDirLoading}
-              dataSource={browseDirFiles}
-              renderItem={(item) => {
-                const fileUrl = browseDirInfo
-                  ? `/api/files/${encodeURIComponent(`${browseDirInfo.owner}/downloads/${item.path}`)}`
-                  : '#'
-                return (
-                  <List.Item
-                    actions={[
-                      <a href={fileUrl} target="_blank" rel="noreferrer">
-                        <DownloadOutlined /> {t('download')}
-                      </a>,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      avatar={getFileIcon(item.path || item.name)}
-                      title={item.name}
-                      description={
-                        item.size < 1024 ? `${item.size} B` :
-                        item.size < 1048576 ? `${(item.size/1024).toFixed(1)} KB` :
-                        `${(item.size/1048576).toFixed(1)} MB`
-                      }
-                    />
-                  </List.Item>
-                )
-              }}
-            />
-          )}
-        </Drawer>
 
         {/* 共享弹窗 */}
         <ShareDialog

@@ -58,16 +58,19 @@ async def log_resource_view(request: Request):
         )
 
         # 首次浏览共享资源奖励 1 分（幂等，不重复累计）
-        try:
-            from backend.reward_engine import award_participation
-            award_participation(
-                student_username=username,
-                activity_type="resource_view",
-                activity_id=str(resource_id),
-                activity_title=file_path.split("/")[-1] or "共享资源",
-            )
-        except Exception as reward_err:
-            logger.warning(f"资源浏览积分奖励失败: {reward_err}")
+        # resource_id<=0 说明这次浏览没对应到任何共享记录，过去会以 activity_id="0"
+        # 发一笔「全账号只此一次」的幽灵分，属误发，这里直接跳过
+        if resource_id and int(resource_id) > 0:
+            try:
+                from backend.reward_engine import award_participation
+                award_participation(
+                    student_username=username,
+                    activity_type="resource_view",
+                    activity_id=str(resource_id),
+                    activity_title=file_path.split("/")[-1] or "共享资源",
+                )
+            except Exception as reward_err:
+                logger.warning(f"资源浏览积分奖励失败: {reward_err}")
 
         return {"message": "记录成功"}
     except Exception as e:

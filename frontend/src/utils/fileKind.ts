@@ -5,6 +5,8 @@
 export type FileKind =
   | 'web' | 'img' | 'video' | 'audio' | 'pdf' | 'word' | 'excel'
   | 'ppt' | 'zip' | 'md' | 'text' | 'code' | 'other'
+  /** 目录型共享条目（整个文件夹共享给接收方），不参与扩展名映射 */
+  | 'dir'
 
 export const EXT_KIND: Record<string, FileKind> = {
   html: 'web', htm: 'web',
@@ -27,6 +29,7 @@ export const KIND_COLOR: Record<string, string> = {
   web: '#1677ff', img: '#13c2c2', video: '#722ed1', audio: '#eb2f96',
   pdf: '#f5222d', word: '#2f54eb', excel: '#52c41a', ppt: '#fa541c',
   zip: '#faad14', md: '#083fa1', text: '#8c8c8c', code: '#6b6bd6',
+  other: '#8c8c8c', dir: '#faad14',
 }
 
 const base = (nameOrPath: string) =>
@@ -43,3 +46,12 @@ export function getFileKind(nameOrPath: string): FileKind {
 export const DOC_KINDS: FileKind[] = ['pdf', 'word', 'excel', 'ppt', 'md', 'text']
 /** 影音图片类 */
 export const MEDIA_KINDS: FileKind[] = ['video', 'audio', 'img']
+
+/** 字节数转可读大小（与后端 downloads 的展示口径一致） */
+export function formatBytes(n: number): string {
+  const v = Number(n) || 0
+  if (v < 1024) return `${v} B`
+  if (v < 1048576) return `${(v / 1024).toFixed(1)} KB`
+  if (v < 1073741824) return `${(v / 1048576).toFixed(1)} MB`
+  return `${(v / 1073741824).toFixed(2)} GB`
+}

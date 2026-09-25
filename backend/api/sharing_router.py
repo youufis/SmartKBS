@@ -5,6 +5,7 @@
 """
 import asyncio
 import os
+import time
 from datetime import datetime
 from typing import Any
 
@@ -70,6 +71,82 @@ def _build_url_path(owner: str, resource_type: str, file_path: str) -> str:
     return f"{owner}/{dir_name}/{file_path}"
 
 
+# ── 目录型共享：条目类型与内容统计（「共享文件」浏览器要区分目录/文件两种条目）──
+
+_DIR_STATS_TTL = 60.0      # 秒。目录内容不需要实时，避免每次 /received 都全量扫盘
+_DIR_STATS_MAX = 2000      # 单次最多统计的文件数，防止超大目录把接口拖慢
+_dir_stats_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def is_dir_share_path(file_path: str) -> bool:
+    """按共享记录里的路径判断是不是「目录型共享」（一个共享指向整个文件夹）
+
+    目录共享入库形态是 "pics/" 或 "pics"（末段没有扩展名），文件共享必然带扩展名。
+    与 cleanup_empty_dir_shares 用同一套判定，避免两处各猜一遍。
+    """
+    p = str(file_path or "").replace("\\", "/").strip()
+    if not p:
+        return False
+    if p.endswith("/"):
+        return True
+    last = p.rstrip("/").split("/")[-1]
+    return "." not in last
+
+
+def download_share_stats(owner: str, file_path: str, res_type: str = "download") -> dict[str, Any]:
+    """共享文件条目的展示数据：是不是目录、里面几个文件、总共多大（进程内 60 秒缓存）
+
+    只对 download 类型扫盘：目录走有界递归，单文件只做一次 stat。
+    """
+    if res_type != "download":
+        return {"is_dir": False, "file_count": 0, "total_size": 0}
+    looks_dir = is_dir_share_path(file_path)
+    info: dict[str, Any] = {"is_dir": looks_dir, "file_count": 0, "total_size": 0}
+
+    rel = str(file_path or "").replace("\\", "/").strip("/")
+    _pfx = f"{owner}/downloads/"
+    if rel.startswith(_pfx):          # 容忍入库时已带 owner/downloads 前缀的历史写法
+        rel = rel[len(_pfx):]
+    key = f"{owner}|{rel}"
+    now = time.time()
+    cached = _dir_stats_cache.get(key)
+    if cached and now - cached[0] < _DIR_STATS_TTL:
+        return cached[1]
+
+    file_count = 0
+    total_size = 0
+    try:
+        from backend.api.downloads_router import _get_user_downloads_dir
+        target = os.path.join(_get_user_downloads_dir(owner), *rel.split("/")) if rel else ""
+        if target and looks_dir and os.path.isdir(target):
+            for dirpath, _dirnames, filenames in os.walk(target):
+                for fn in filenames:
+                    file_count += 1
+                    try:
+                        total_size += os.path.getsize(os.path.join(dirpath, fn))
+                    except OSError:
+                        pass
+                    if file_count >= _DIR_STATS_MAX:
+                        break
+                if file_count >= _DIR_STATS_MAX:
+                    break
+        elif target and not looks_dir and os.path.isfile(target):
+            file_count = 1
+            try:
+                total_size = os.path.getsize(target)
+            except OSError:
+                total_size = 0
+    except Exception as e:
+        logger.debug(f"[sharing] 共享文件统计失败 {owner}/{rel}: {e}")
+
+    info.update({"file_count": file_count, "total_size": total_size})
+    _dir_stats_cache[key] = (now, info)
+    if len(_dir_stats_cache) > 512:   # 简单回收，别让缓存在长驻进程里无上限增长
+        for k in [k for k, v in _dir_stats_cache.items() if now - v[0] > _DIR_STATS_TTL * 10]:
+            _dir_stats_cache.pop(k, None)
+    return info
+
+
 def cleanup_empty_dir_shares(owner_username: str | None = None):
     """清理不存在的空目录的共享记录
 
@@ -92,10 +169,8 @@ def cleanup_empty_dir_shares(owner_username: str | None = None):
         )
         removed = 0
         for rid, owner, file_path, res_type in rows:
-            # 判断是否为目录共享：路径以 / 结尾，或者路径中不含扩展名
-            last_part = file_path.rstrip("/").split("/")[-1]
-            is_dir = file_path.endswith("/") or "." not in last_part
-            if not is_dir:
+            # 判断是否为目录共享：与 is_dir_share_path 同一口径
+            if not is_dir_share_path(file_path):
                 continue
             dir_name = dir_name_map.get(res_type, "downloads")
             clean_path = file_path.strip("/")
@@ -494,7 +569,7 @@ def purge_dead_share_rows(owner: str | None = None, resource_ids: list | None = 
         fp = str(sfp or "").replace("\\", "/")
         dir_name = "html" if stype == "html" else "downloads"
         last = fp.rstrip("/").split("/")[-1]
-        is_dir = fp.endswith("/") or "." not in last
+        is_dir = is_dir_share_path(fp)
         if is_dir:
             rel = fp[len(f"{sowner}/{dir_name}/"):] if fp.startswith(f"{sowner}/{dir_name}/") else fp
             full_dir = os.path.join(str(DATA_DIR), sowner, dir_name, rel.rstrip("/"))
@@ -976,6 +1051,12 @@ async def received_shares(request: Request, include_self: bool = False):
                 "binding_count": int(row[3] or 0),
             }
 
+    # 共享文件条目：补「是不是目录 / 几个文件 / 总共多大」，前端据此渲染文件夹与文件卡片
+    dir_map: dict[int, dict[str, Any]] = {}
+    for r in rows:
+        if r[0] is not None and str(r[4] or "") == "download":
+            dir_map[int(r[0])] = download_share_stats(str(r[1] or ""), str(r[2] or ""), "download")
+
     return {
         "shares": [
             {
@@ -998,6 +1079,10 @@ async def received_shares(request: Request, include_self: bool = False):
                 "course_name": (bind_map.get(int(r[0])) or {}).get("course_name", ""),
                 "kp_name": (bind_map.get(int(r[0])) or {}).get("kp_name", ""),
                 "binding_count": (bind_map.get(int(r[0])) or {}).get("binding_count", 0),
+                # 目录型共享（一个共享指向整个文件夹）：前端显示为文件夹条目并保留目录浏览
+                "is_dir": bool((dir_map.get(int(r[0])) or {}).get("is_dir")),
+                "file_count": (dir_map.get(int(r[0])) or {}).get("file_count", 0),
+                "total_size": (dir_map.get(int(r[0])) or {}).get("total_size", 0),
             }
             for r in rows
         ]

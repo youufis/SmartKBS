@@ -2382,7 +2382,7 @@ async def get_task_todo(request: Request):
     try:
         if grade:
             shared_items = execute_query(
-                """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type
+                """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type, sr.owner_username
                    FROM shared_resources sr
                    WHERE (sr.share_scope='all'
                         OR (sr.share_scope='class' AND (sr.target_grade=? OR INSTR(sr.target_grade, ?)>0) AND (sr.target_class='' OR sr.target_class IS NULL OR sr.target_class=? OR INSTR(sr.target_class, ?)>0))
@@ -2399,7 +2399,7 @@ async def get_task_todo(request: Request):
             )
         else:
             shared_items = execute_query(
-                """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type
+                """SELECT sr.id, sr.file_name, sr.file_path, sr.resource_type, sr.owner_username
                    FROM shared_resources sr
                    WHERE sr.share_scope='all'
                      AND NOT EXISTS (
@@ -2412,14 +2412,26 @@ async def get_task_todo(request: Request):
                    LIMIT 30""",
                 (username,),
             )
+        from backend.api.sharing_router import _build_url_path, is_dir_share_path
         for si in shared_items:
             file_path = str(si[2] or '').lstrip('/')
-            resource_url = f"/api/files/{file_path}" if file_path else "/shared-center"
+            res_type = str(si[3] or '')
+            owner_name = str(si[4] or '') if len(si) > 4 else ''
+            is_dir = bool(file_path) and res_type != 'html' and is_dir_share_path(file_path)
+            if not file_path:
+                resource_url = "/shared-center"
+            elif is_dir:
+                # 目录型共享没有「单个文件」可开，落到共享中心的「共享文件」标签里浏览
+                resource_url = "/shared-center?tab=downloads"
+            else:
+                # file_path 存的是相对共享者目录的路径，必须补 owner/html|downloads 前缀，
+                # 否则 /api/files/xxx.mp4 丢了归属目录，学生点了必 404
+                resource_url = f"/api/files/{_build_url_path(owner_name, res_type, file_path)}"
             items.append({
                 "id": f"shared_resource-{si[0]}",
                 "type": "shared_resource",
                 "title": str(si[1] or si[2] or f'资源#{si[0]}'),
-                "description": f"{'HTML 资源' if si[3]=='html' else '共享文件'} · 点击查看",
+                "description": f"{'HTML 资源' if res_type=='html' else ('共享目录' if is_dir else '共享文件')} · 点击查看",
                 "subject": "",
                 "status": "pending",
                 "priority": 30,

@@ -27,6 +27,11 @@ export interface ShareItem {
   kp_name?: string;
   /** 绑定知识点数量 */
   binding_count?: number;
+  /** 目录型共享：一个共享指向整个文件夹（接收方点进去浏览而不是直接下载） */
+  is_dir?: boolean;
+  /** 目录内文件数 / 该共享条目总大小（字节）；仅 download 类型返回 */
+  file_count?: number;
+  total_size?: number;
 }
 
 export interface ShareRequest {

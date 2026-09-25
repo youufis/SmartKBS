@@ -1,6 +1,7 @@
 /**
  * 资源共享浏览器：左侧分类栏 + 顶部统计条 + 网格/列表双视图
  * 学生端「共享资源」与教师端「共享给我的」共用，靠 mode 切换分类维度与默认视图
+ * variant='files' 时是「共享文件」浏览器：条目可以是目录（点进去浏览文件夹）或单个文件（直接下载）
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import {
@@ -8,9 +9,9 @@ import {
 } from 'antd'
 import {
   AppstoreOutlined, BarsOutlined, BookOutlined, ClockCircleOutlined, CloseCircleOutlined,
-  EyeInvisibleOutlined, EyeOutlined, FolderOutlined, GlobalOutlined, InboxOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, ReloadOutlined, SearchOutlined, ShareAltOutlined,
-  TeamOutlined, UserOutlined,
+  DownloadOutlined, EyeInvisibleOutlined, EyeOutlined, FileZipOutlined, FolderOpenOutlined,
+  FolderOutlined, GlobalOutlined, InboxOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
+  ReloadOutlined, SearchOutlined, ShareAltOutlined, TeamOutlined, UserOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useThemeStore } from '../stores/themeStore'
@@ -38,6 +39,10 @@ export interface BrowserItem {
   courseName?: string
   kpName?: string
   bindingCount?: number
+  /** 条目类型：dir=目录型共享（点开是浏览文件夹），其余按单个文件处理 */
+  entryType?: 'file' | 'dir'
+  /** 名称后面的补充信息（文件大小、目录内文件数），只展示不参与分类 */
+  sub?: string
 }
 
 type Dim = 'status' | 'time' | 'kind' | 'course' | 'owner' | 'scope'
@@ -50,18 +55,32 @@ const UNGROUPED = '__none__'
 const ResourceBrowser: React.FC<{
   items: BrowserItem[]
   mode: 'student' | 'teacher'
+  /** html=课件资源（默认，与旧版行为一致）；files=共享文件（含目录型条目） */
+  variant?: 'html' | 'files'
   loading?: boolean
   onOpen: (item: BrowserItem) => void
   onReshare?: (item: BrowserItem) => void
+  /** 逐条目判断能否「再共享」：文件中心里只有自己名下也有同一份时才值得再共享 */
+  canReshare?: (item: BrowserItem) => boolean
+  /** 覆盖条目主操作按钮的文案与图标（文件版是「下载」/「浏览」） */
+  openLabel?: string
+  openIcon?: React.ReactNode
+  /** 是否显示「阅读状态」维度。教师端浏览文件不留痕，默认给关掉免得永远「未读」 */
+  showStatus?: boolean
   onRefresh?: () => void
-}> = ({ items, mode, loading, onOpen, onReshare, onRefresh }) => {
+}> = ({ items, mode, variant = 'html', loading, onOpen, onReshare, canReshare, openLabel, openIcon, showStatus, onRefresh }) => {
   const { t } = useTranslation('menu')
   const { token } = theme.useToken()
   const isDark = useThemeStore((s) => s.current) === 'midnight'
+  const isFiles = variant === 'files'
+  // 阅读状态：HTML 侧维持原样；文件侧只有学生有浏览留痕
+  const showStatusOn = showStatus ?? !(isFiles && mode === 'teacher')
+  // 偏好分开存，避免「共享文件」把「共享资源」的视图/排序/每页条数覆盖掉
+  const prefKey = isFiles ? `smartkb_rb_files_${mode}` : `smartkb_rb_${mode}`
 
   const [kw, setKw] = useState('')
   const [sel, setSel] = useState<Sel>({ dim: null, value: '' })
-  const [sort, setSort] = useState('unseen')
+  const [sort, setSort] = useState(showStatusOn ? 'unseen' : 'new')
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(24)
@@ -74,7 +93,7 @@ const ResourceBrowser: React.FC<{
   // 记住偏好（学生端与教师端分开记）
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(`smartkb_rb_${mode}`)
+      const raw = localStorage.getItem(prefKey)
       if (raw) {
         const p = JSON.parse(raw) as { view?: string; sort?: string; pageSize?: number }
         if (p.view === 'grid' || p.view === 'list') setView(p.view)
@@ -82,15 +101,33 @@ const ResourceBrowser: React.FC<{
         if (p.pageSize) setPageSize(p.pageSize)
       }
     } catch { /* 隐私模式忽略 */ }
-  }, [mode])
+  }, [prefKey])
 
   useEffect(() => {
-    try { localStorage.setItem(`smartkb_rb_${mode}`, JSON.stringify({ view, sort, pageSize })) } catch { /* 忽略 */ }
-  }, [mode, view, sort, pageSize])
+    try { localStorage.setItem(prefKey, JSON.stringify({ view, sort, pageSize })) } catch { /* 忽略 */ }
+  }, [prefKey, view, sort, pageSize])
 
   useEffect(() => { setPage(1) }, [kw, sel, sort, mode])
 
-  const kindOf = (it: BrowserItem) => getFileKind(it.filePath || it.name || '')
+  const kindOf = (it: BrowserItem) =>
+    it.entryType === 'dir' ? 'dir' : getFileKind(it.filePath || it.name || '')
+  /** 是否给这条目摆「再共享」按钮（外部可逐条判断） */
+  const canShare = (it: BrowserItem) => (canReshare ? canReshare(it) : !!onReshare)
+  /** 目录条目统一用「打开的文件夹」图标，不跟扩展名猜 */
+  const entryIcon = (it: BrowserItem, fontSize: number) =>
+    it.entryType === 'dir'
+      ? <FolderOpenOutlined style={{ color: KIND_COLOR.dir, fontSize }} />
+      : getFileIcon(it.filePath || it.name, { fontSize })
+  /** 条目主操作：目录/文件的行为差异由调用方的 onOpen 决定 */
+  const itemOpen = (it: BrowserItem) => onOpen(it)
+  /** 条目主操作按钮：外部指定优先，否则目录=浏览、文件=下载、课件=打开 */
+  const openTextOf = (it: BrowserItem) =>
+    openLabel || (isFiles ? (it.entryType === 'dir' ? t('rb.browse') : t('rb.download')) : t('rb.open'))
+  const openIconOf = (it: BrowserItem) =>
+    openIcon
+    || (isFiles
+      ? (it.entryType === 'dir' ? <FolderOpenOutlined /> : <DownloadOutlined />)
+      : <GlobalOutlined />)
 
   const searched = useMemo(() => {
     const k = kw.trim().toLowerCase()
@@ -150,16 +187,49 @@ const ResourceBrowser: React.FC<{
 
   // ── 各维度的选项与计数（计数基于「已搜索、未分类」的集合，保证与点击后看到的一致）──
   const facet = (pred: (it: BrowserItem) => boolean) => searched.filter(pred).length
+  const kindOptions = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const i of searched) m.set(kindOf(i), (m.get(kindOf(i)) || 0) + 1)
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+      .map(([v, n]) => ({ value: v, label: t(`kind.${v}`), n }))
+  }, [searched, t])
+  const courseOptions = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const i of searched) {
+      const key = i.courseName || UNGROUPED
+      m.set(key, (m.get(key) || 0) + 1)
+    }
+    const rows = [...m.entries()].filter(([k]) => k !== UNGROUPED).sort((a, b) => b[1] - a[1])
+    const none = m.get(UNGROUPED)
+    if (none) rows.push([t('rb.noCourse'), none])
+    return rows.map(([v, n]) => ({ value: v === t('rb.noCourse') ? UNGROUPED : v, label: v, n }))
+  }, [searched, t])
+  const ownerOptions = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const i of searched) {
+      const key = i.ownerName || i.ownerUsername
+      m.set(key, (m.get(key) || 0) + 1)
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([v, n]) => ({ value: v, label: v, n }))
+  }, [searched])
+  const scopeOptions = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const i of searched) m.set(i.shareScope || '?', (m.get(i.shareScope || '?') || 0) + 1)
+    const label = (v: string) => v === 'all' ? t('rb.scopeAll') : v === 'staff' ? t('rb.scopeStaff')
+      : v === 'class' ? t('rb.scopeClass') : v === 'teacher' ? t('rb.scopeUser') : v
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([v, n]) => ({ value: v, label: label(v), n }))
+  }, [searched, t])
+
   const DIMS: { key: Dim; label: string; icon: React.ReactNode; options: { value: string; label: string; n: number }[] }[] = [
-    {
-      key: 'status',
+    ...(showStatusOn ? [{
+      key: 'status' as Dim,
       label: t('rb.dimStatus'),
       icon: <EyeOutlined />,
       options: [
-        { value: 'unseen', label: mode === 'teacher' ? t('rb.unread') : t('rb.unseen'), n: facet((i) => !i.viewedAt) },
-        { value: 'seen', label: mode === 'teacher' ? t('rb.read') : t('rb.seen'), n: facet((i) => !!i.viewedAt) },
+        { value: 'unseen', label: mode === 'teacher' ? t('rb.unread') : t('rb.unseen'), n: facet((i: BrowserItem) => !i.viewedAt) },
+        { value: 'seen', label: mode === 'teacher' ? t('rb.read') : t('rb.seen'), n: facet((i: BrowserItem) => !!i.viewedAt) },
       ],
-    },
+    }] : []),
     {
       key: 'time',
       label: t('rb.dimTime'),
@@ -172,56 +242,13 @@ const ResourceBrowser: React.FC<{
     },
     {
       key: 'kind',
-      label: t('rb.dimKind'),
+      label: isFiles ? t('rb.dimKindFiles') : t('rb.dimKind'),
       icon: <AppstoreOutlined />,
-      options: useMemo(() => {
-        const m = new Map<string, number>()
-        for (const i of searched) m.set(kindOf(i), (m.get(kindOf(i)) || 0) + 1)
-        return [...m.entries()].sort((a, b) => b[1] - a[1])
-          .map(([v, n]) => ({ value: v, label: t(`kind.${v}`), n }))
-      }, [searched, t]),
+      options: kindOptions,
     },
-    {
-      key: 'course',
-      label: t('rb.dimCourse'),
-      icon: <BookOutlined />,
-      options: useMemo(() => {
-        const m = new Map<string, number>()
-        for (const i of searched) {
-          const key = i.courseName || UNGROUPED
-          m.set(key, (m.get(key) || 0) + 1)
-        }
-        const rows = [...m.entries()].filter(([k]) => k !== UNGROUPED).sort((a, b) => b[1] - a[1])
-        const none = m.get(UNGROUPED)
-        if (none) rows.push([t('rb.noCourse'), none])
-        return rows.map(([v, n]) => ({ value: v === t('rb.noCourse') ? UNGROUPED : v, label: v, n }))
-      }, [searched, t]),
-    },
-    {
-      key: 'owner',
-      label: t('rb.dimOwner'),
-      icon: <TeamOutlined />,
-      options: useMemo(() => {
-        const m = new Map<string, number>()
-        for (const i of searched) {
-          const key = i.ownerName || i.ownerUsername
-          m.set(key, (m.get(key) || 0) + 1)
-        }
-        return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([v, n]) => ({ value: v, label: v, n }))
-      }, [searched]),
-    },
-    {
-      key: 'scope',
-      label: t('rb.dimScope'),
-      icon: <GlobalOutlined />,
-      options: useMemo(() => {
-        const m = new Map<string, number>()
-        for (const i of searched) m.set(i.shareScope || '?', (m.get(i.shareScope || '?') || 0) + 1)
-        const label = (v: string) => v === 'all' ? t('rb.scopeAll') : v === 'staff' ? t('rb.scopeStaff')
-          : v === 'class' ? t('rb.scopeClass') : v === 'teacher' ? t('rb.scopeUser') : v
-        return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([v, n]) => ({ value: v, label: label(v), n }))
-      }, [searched, t]),
-    },
+    { key: 'course', label: t('rb.dimCourse'), icon: <BookOutlined />, options: courseOptions },
+    { key: 'owner', label: t('rb.dimOwner'), icon: <TeamOutlined />, options: ownerOptions },
+    { key: 'scope', label: t('rb.dimScope'), icon: <GlobalOutlined />, options: scopeOptions },
   ]
 
   const relTime = (ts?: string) => {
@@ -271,12 +298,42 @@ const ResourceBrowser: React.FC<{
     )
   }
 
-  const stripCells = [
-    { key: 'unseen', label: mode === 'teacher' ? t('rb.unread') : t('rb.unseen'), n: facet((i) => !i.viewedAt), color: '#ff4d4f', icon: <EyeInvisibleOutlined />, on: sel.dim === 'status' && sel.value === 'unseen', next: { dim: 'status' as Dim, value: 'unseen' } },
-    { key: 'week', label: t('rb.thisWeek'), n: facet((i) => inWeek(i.createdAt)), color: '#1677ff', icon: <ClockCircleOutlined />, on: sel.dim === 'time' && sel.value === 'week', next: { dim: 'time' as Dim, value: 'week' } },
-    { key: 'web', label: t('kind.web'), n: facet((i) => kindOf(i) === 'web'), color: '#13c2c2', icon: <GlobalOutlined />, on: sel.dim === 'kind' && sel.value === 'web', next: { dim: 'kind' as Dim, value: 'web' } },
-    { key: 'doc', label: t('rb.docGroup'), n: facet((i) => DOC_KINDS.includes(kindOf(i))), color: '#722ed1', icon: <FolderOutlined />, on: sel.dim === 'kind' && DOC_KINDS.includes(sel.value as never), next: { dim: 'kind' as Dim, value: 'word' } },
-    { key: 'media', label: t('rb.mediaGroup'), n: facet((i) => MEDIA_KINDS.includes(kindOf(i))), color: '#fa8c16', icon: <AppstoreOutlined />, on: sel.dim === 'kind' && MEDIA_KINDS.includes(sel.value as never), next: { dim: 'kind' as Dim, value: 'video' } },
+  const stripCells: {
+    key: string; label: string; n: number; color: string; icon: React.ReactNode; on: boolean; next: Sel
+  }[] = [
+    ...(showStatusOn ? [{
+      key: 'unseen', label: mode === 'teacher' ? t('rb.unread') : t('rb.unseen'),
+      n: facet((i: BrowserItem) => !i.viewedAt), color: token.colorError, icon: <EyeInvisibleOutlined />,
+      on: sel.dim === 'status' && sel.value === 'unseen', next: { dim: 'status' as Dim, value: 'unseen' },
+    }] : []),
+    {
+      key: 'week', label: t('rb.thisWeek'), n: facet((i) => inWeek(i.createdAt)),
+      color: token.colorPrimary, icon: <ClockCircleOutlined />,
+      on: sel.dim === 'time' && sel.value === 'week', next: { dim: 'time' as Dim, value: 'week' },
+    },
+    isFiles ? {
+      key: 'dir', label: t('kind.dir'), n: facet((i) => i.entryType === 'dir'),
+      color: KIND_COLOR.dir, icon: <FolderOpenOutlined />,
+      on: sel.dim === 'kind' && sel.value === 'dir', next: { dim: 'kind' as Dim, value: 'dir' },
+    } : {
+      key: 'web', label: t('kind.web'), n: facet((i) => kindOf(i) === 'web'),
+      color: KIND_COLOR.web, icon: <GlobalOutlined />,
+      on: sel.dim === 'kind' && sel.value === 'web', next: { dim: 'kind' as Dim, value: 'web' },
+    },
+    {
+      key: 'doc', label: t('rb.docGroup'), n: facet((i) => DOC_KINDS.includes(kindOf(i))),
+      color: '#722ed1', icon: <FolderOutlined />,
+      on: sel.dim === 'kind' && DOC_KINDS.includes(sel.value as never), next: { dim: 'kind' as Dim, value: 'word' },
+    },
+    isFiles ? {
+      key: 'zip', label: t('kind.zip'), n: facet((i) => kindOf(i) === 'zip'),
+      color: KIND_COLOR.zip, icon: <FileZipOutlined />,
+      on: sel.dim === 'kind' && sel.value === 'zip', next: { dim: 'kind' as Dim, value: 'zip' },
+    } : {
+      key: 'media', label: t('rb.mediaGroup'), n: facet((i) => MEDIA_KINDS.includes(kindOf(i))),
+      color: '#fa8c16', icon: <AppstoreOutlined />,
+      on: sel.dim === 'kind' && MEDIA_KINDS.includes(sel.value as never), next: { dim: 'kind' as Dim, value: 'video' },
+    },
   ]
 
   /** 已选分类的展示文案（避免把 unseen/week/class 这类代码直接丢到界面上） */
@@ -308,13 +365,13 @@ const ResourceBrowser: React.FC<{
           <Input
             allowClear size="small" style={{ width: 220 }}
             prefix={<SearchOutlined style={{ color: token.colorTextDescription }} />}
-            placeholder={t('rb.searchPh')}
+            placeholder={isFiles ? t('rb.searchPhFiles') : t('rb.searchPh')}
             value={kw} onChange={(e) => setKw(e.target.value)}
           />
           <Select
             size="small" style={{ width: 120 }} value={sort} onChange={setSort}
             options={[
-              { value: 'unseen', label: t('rb.sortUnseen') },
+              ...(showStatusOn ? [{ value: 'unseen', label: t('rb.sortUnseen') }] : []),
               { value: 'new', label: t('rb.sortNew') },
               { value: 'name', label: t('rb.sortName') },
               { value: 'owner', label: t('rb.sortOwner') },
@@ -379,7 +436,8 @@ const ResourceBrowser: React.FC<{
                   color: !sel.dim ? token.colorPrimary : token.colorText,
                 }}
               >
-                <InboxOutlined style={{ marginRight: 6 }} />{t('rb.all')} ({searched.length})
+                <InboxOutlined style={{ marginRight: 6 }} />
+                {isFiles ? t('rb.allFiles') : t('rb.all')} ({searched.length})
               </div>
               {DIMS.map((d) => (
                 <div key={d.key} style={{ marginTop: 6 }}>
@@ -428,7 +486,13 @@ const ResourceBrowser: React.FC<{
               <Card style={{ borderRadius: 8 }}>
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={<Text type="secondary">{kw || sel.dim ? t('rb.noMatch') : mode === 'teacher' ? t('rb.emptyTeacher') : t('rb.emptyStudent')}</Text>}
+                  description={<Text type="secondary">
+                    {kw || sel.dim
+                      ? t('rb.noMatch')
+                      : mode === 'teacher'
+                        ? (isFiles ? t('rb.emptyTeacherFiles') : t('rb.emptyTeacher'))
+                        : (isFiles ? t('rb.emptyStudentFiles') : t('rb.emptyStudent'))}
+                  </Text>}
                 />
               </Card>
             ) : view === 'grid' ? (
@@ -440,13 +504,13 @@ const ResourceBrowser: React.FC<{
                       key={it.id}
                       size="small"
                       hoverable
-                      onClick={() => onOpen(it)}
+                      onClick={() => itemOpen(it)}
                       style={{ borderRadius: 8, cursor: 'pointer' }}
                       styles={{ body: { padding: '10px 12px' } }}
                     >
                       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                         <span style={{ fontSize: 18, lineHeight: '22px', color: KIND_COLOR[kind], flexShrink: 0 }}>
-                          {getFileIcon(it.filePath || it.name, { fontSize: 18 })}
+                          {entryIcon(it, 18)}
                         </span>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{
@@ -455,11 +519,14 @@ const ResourceBrowser: React.FC<{
                           }}>
                             {it.name}
                           </div>
+                          {it.sub && (
+                            <Text type="secondary" style={{ fontSize: 11.5 }}>{it.sub}</Text>
+                          )}
                           {metaTags(it)}
                         </div>
-                        {!it.viewedAt && (
+                        {showStatusOn && !it.viewedAt && (
                           <Tooltip title={mode === 'teacher' ? t('rb.unread') : t('rb.unseen')}>
-                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff4d4f', flexShrink: 0, marginTop: 6 }} />
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: token.colorError, flexShrink: 0, marginTop: 6 }} />
                           </Tooltip>
                         )}
                       </div>
@@ -473,7 +540,7 @@ const ResourceBrowser: React.FC<{
                           {(it.viewCount ?? 0) > 0 && (
                             <Text type="secondary" style={{ fontSize: 11 }}><EyeOutlined /> {it.viewCount}</Text>
                           )}
-                          {onReshare && (
+                          {onReshare && canShare(it) && (
                             <Tooltip title={t('rb.reshare')}>
                               <Button size="small" type="text" icon={<ShareAltOutlined style={{ fontSize: 13 }} />}
                                 onClick={(e) => { e.stopPropagation(); onReshare(it) }} />
@@ -492,7 +559,7 @@ const ResourceBrowser: React.FC<{
                   return (
                     <div
                       key={it.id}
-                      onClick={() => onOpen(it)}
+                      onClick={() => itemOpen(it)}
                       style={{
                         display: 'grid', gridTemplateColumns: 'minmax(180px,3fr) 1.2fr 0.9fr 1.1fr 0.8fr auto',
                         gap: 8, alignItems: 'center', padding: '9px 12px', cursor: 'pointer',
@@ -501,22 +568,27 @@ const ResourceBrowser: React.FC<{
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <span style={{ flexShrink: 0 }}>{getFileIcon(it.filePath || it.name, { fontSize: 16 })}</span>
+                        <span style={{ flexShrink: 0 }}>{entryIcon(it, 16)}</span>
                         <Text style={{ fontSize: 13 }} ellipsis>{it.name}</Text>
-                        {!it.viewedAt && <Tag color="red" style={{ fontSize: 10, marginInlineEnd: 0, lineHeight: '15px' }}>{mode === 'teacher' ? t('rb.unread') : t('rb.unseen')}</Tag>}
+                        {it.sub && (
+                          <Text type="secondary" style={{ fontSize: 11.5, flexShrink: 0 }}>{it.sub}</Text>
+                        )}
+                        {showStatusOn && !it.viewedAt && (
+                          <Tag color="red" style={{ fontSize: 10, marginInlineEnd: 0, lineHeight: '15px' }}>{mode === 'teacher' ? t('rb.unread') : t('rb.unseen')}</Tag>
+                        )}
                       </div>
                       <Text type="secondary" style={{ fontSize: 12 }} ellipsis>{it.kpName || it.courseName || '—'}</Text>
                       <Tag style={{ fontSize: 10, marginInlineEnd: 0, color: KIND_COLOR[kind], borderColor: KIND_COLOR[kind], background: 'transparent' }}>{t(`kind.${kind}`)}</Tag>
                       <Text type="secondary" style={{ fontSize: 12 }} ellipsis>{it.ownerName || it.ownerUsername}</Text>
                       <Text type="secondary" style={{ fontSize: 12 }}>{relTime(it.createdAt)}</Text>
                       <Space size={4}>
-                        {onReshare && (
+                        {onReshare && canShare(it) && (
                           <Tooltip title={t('rb.reshare')}>
                             <Button size="small" type="text" icon={<ShareAltOutlined />} onClick={(e) => { e.stopPropagation(); onReshare(it) }} />
                           </Tooltip>
                         )}
-                        <Button size="small" type="primary" ghost icon={<GlobalOutlined />} onClick={(e) => { e.stopPropagation(); onOpen(it) }}>
-                          {t('rb.open')}
+                        <Button size="small" type="primary" ghost icon={openIconOf(it)} onClick={(e) => { e.stopPropagation(); itemOpen(it) }}>
+                          {openTextOf(it)}
                         </Button>
                       </Space>
                     </div>
@@ -526,7 +598,8 @@ const ResourceBrowser: React.FC<{
             )}
           </Spin>
 
-          {shown.length > pageSize && (
+          {/* 文件版条目普遍少，一页装得下也保留这一行：总数与「每页条数」要能看见、能改 */}
+          {shown.length > 0 && (shown.length > pageSize || isFiles) && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
               <Pagination
                 size="small"
