@@ -338,6 +338,8 @@ Displays HTML teaching resource files in a card grid:
   - **Admin Sharing**: Can select "Everyone", "Specific Teacher", "Specific Grade/Class"
   - **Teacher Sharing**: Select "Admin and Teachers" + "Own Classes"
 - **🔍 Search & Filter**: Search by file name
+- **🗂️ Unified Browser**: students' Shared Resources, teachers' Shared With Me and students' Shared Files all run on one `ResourceBrowser` (unseen / time / type / course / sharer / audience facets + grid & list views + remembered preferences)
+- **🔗 Deep Links**: `/shared-center?tab=downloads` lands straight on the Shared Files tab; the task list and share notifications route there
 - **🤖 AI Generation**: 5 resource types (Animation Explanation, Interactive Quiz, Chapter Exercise, Lab Interaction, Custom HTML)
 - **👁️ Resource View Tracking**: Automatically records student viewing behavior
 
@@ -417,8 +419,9 @@ Download directory file management:
 - 📤 Upload / 📥 Download / 🗑️ Delete
 - 📊 Quota management (independent quota per teacher)
 - 📁 Subdirectory support
-- 🔗 Directory sharing (entire directory automatically inherits permissions)
-- 👁️ Students can view shared files
+- 🔗 Directory sharing (the whole directory inherits permissions; recipients see it as a folder entry showing how many files it holds and its total size)
+- 🗂️ Unified resource browser: shares the category sidebar / stats strip / grid & list views / search, sort, pagination and remembered preferences with Shared Resources
+- 👁️ Students can view shared files, with unseen/seen state and view counts tracked (first view awards 1 point)
 
 > **Available to Admin and Teacher; Students can view shared files**
 
@@ -974,93 +977,53 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
+> **Two layers, don't mix them up**: the `changelog` in `version.json` is the **outline shown by the upgrade dialog** - one line per theme, kept under 15 entries, new work is merged into the existing line instead of piling up. This section is the **per-version outline**, no more than 6 short bullets per release. Implementation detail (table columns, script names, root-cause analysis) belongs in commit messages and `git log`.
+
 ### v8.3.0 (2026-09-23)
 
-- 📚 **Bailian knowledge base integration**: new `backend/bailian_kb.py` retrieval module plus a cloud-local fusion layer; the "direct + knowledge base" mode takes over the former agent path - question generation, lesson plans, grading, analytics and 19 other AI flows now retrieve first and generate second, with configurable top-k, relevance threshold and timeout, degrading to local lookup or plain direct calls so no business is blocked; flipping the master switch restores the old path instantly
-- 🧠 **Chat "Knowledge" checkbox**: greyed out with the exact missing item when the cloud knowledge base is not ready; when checked it retrieves per message and lists sources under the answer (document name + relevance, visible to teachers and admins); the "Agent" checkbox is disabled while takeover is active so UI and routing stay consistent
-- 🔌 **Connectivity self-tests**: the config page gains "Test Retrieval / Test LLM / Test Agent" buttons (`kb-test` / `model-test` / `appid-test`), one click pinpoints a mismatched dedicated domain, search service id or API key
-- ⚙️ **Config system**: new float range validation (`_FLOAT_RANGES`) with the six knowledge base keys registered; i18next interpolation fixed to double braces (test result placeholders used to show up literally)
+- 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests
+- 🤖 **AI generation and grading hardened**: explicit `max_tokens` with truncation recorded, tolerant JSON parsing and pre-save checks so incomplete artifacts are never stored silently; answers normalised for grading and generated artifacts auto-registered
+- 🏠 **Dashboard and task list rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home with star of the week; to-dos are filtered by class scope and pending grading now counts real work
+- 🗂️ **Sharing centre closed out**: resource browsing and Shared Files share one browser (categories, stats strip, grid/list, pagination, preferences) and directory shares show as folders; fixed files never counting as seen and to-do links that 404'd
+- 🌙 **Theme and copy**: Midnight theme tokens completed and hard-coded colours removed; i18n placeholders and untranslated keys closed out, antd v6 deprecation warnings cleared
 - ⚠️ **Breaking changes**: none
-
----
 
 ### v8.2.0 (2026-09-14)
 
-- ⏱️ **AI calls off the request path**: grading moved out of `submit` with idempotent receipts, per-endpoint timeouts added, and SSE streaming hooked into both Starlette generations plus a real `text/event-stream` startup self-check - one slow AI call can no longer stall the whole site
-- 🎯 **Classroom activity stability**: quick-answer rooms auto-advance once everyone has answered and restart safely after reset; knowledge quests return immediately and fill remaining questions in the background with thinking disabled (~3s/question); code problems consolidated into Code Practice
-- 📈 **Statistics and data semantics corrected**: 7 legacy shell tables cleaned at startup (only when empty), quizzes count real answers, exercise reset clears view counts, Hall of Glory uses live points
-- 📰 **News self-heal and speed-up**: sources replaced and validated per feed with a circuit breaker and reserve pool, feed list now configurable without a release; daily brief cold start 57.2s -> 6.6s, per-article summary 30.5s -> 2.5s
-- 🔄 **Reliable upgrade and sessions**: orphan upgrade records reconcile against git HEAD, unverified migrations flagged and notified, state file written atomically under lock; a single shared poller ends idle-page 401 floods, IP guarding defaults to off while failed attempts still log IP, UA and referer
+- ⏱️ **AI calls fully async**: grading moved off the request path, idempotent `submit` receipts, per-endpoint timeouts; SSE streaming repaired with a real startup self-check
+- 🎯 **Classroom activity stability**: quick-quiz rooms advance once everyone has answered and restart safely; knowledge quests return immediately and fill remaining questions in the background; code problems moved to Code Practice
+- 📈 **Statistics and data integrity**: 7 same-named empty tables cleaned, quizzes counted by real answers, practice resets clear view counts, Hall of Fame uses live point totals
+- 📰 **News feeds self-heal**: sources re-validated with per-source circuit breaker and standby pool; daily brief cold start 57.2s -> 6.6s
+- 🔄 **Upgrade and auth trust**: orphan upgrade records reconciled against git HEAD, state files written atomically under a lock, 401 spam from idle pages fixed
 - ⚠️ **Breaking changes**: none
-
----
 
 ### v8.1.0 (2026-09-07)
 
-- 🔄 **Activity data reset**: nine activity types can clear participation while keeping content, with dry-run preview, typed confirmation, optional rollback and notification, fully audited; admins reset everything, teachers only their own activities, students always rejected
-- 🧮 **Point immediacy**: totals recompute as soon as an activity is deleted or reset; grading races no longer leave orphan grades
-- 🌐 **i18n and rules consolidated**: messages served as `code + params` and rendered from the bilingual dictionary, `policy` / `i18n_key` decided by the API, confirmation phrase validated server-side; `notifications` gained a localizable `payload` column
-- 🧹 **Text safety**: new `backend/text_utils.py` strips markdown and braces before any length clipping, replacing nine unsafe index slices
+- 🔄 **Activity data reset**: 9 activity types can clear participation data while keeping the activity itself, with dry-run preview, name confirmation, rollback and a full audit trail; teachers limited to their own activities
+- 🧮 **Points immediacy**: affected students' totals recalculated right after a delete or reset; grading/deletion races no longer write orphan scores
+- 🌐 **i18n and rules pushed to the backend**: copy delivered as `code + params` and resolved against the bilingual dictionary; "needs confirmation / has data to delete" decided server-side
+- 🧹 **Text safety**: one shared text outlet (strip markdown and braces before truncating) replacing 9 index-based hard truncations
 - ⚠️ **Breaking changes**: none
-
----
 
 ### v8.0.0 (2026-09-05)
 
-- 🔒 **Site-wide authorization hardening**: 16 rounds of per-feature audit; anonymous reads and cross-teacher writes closed
-- 🎯 **Classroom and configuration governance**: roll-call ownership pinned to the login identity, publishing limited to assigned classes, class analytics fixed (previously always 0); system config writes atomically with backup fallback, value validation and masked secrets, skill write endpoints admin-only
-- 📊 **Features and polish**: export pagination, announcement scope, token leakage via URL, duplicated activity and stale rename bindings fixed; untranslated bilingual keys completed
-- ⚠️ **Breaking changes**: roll-call writes and history require login within assigned scope; quizzes/polls may only target the teacher's own classes; config API masks secrets
+- 🔒 **Site-wide authorisation hardening**: 16 rounds of per-feature review closing anonymous reads and cross-teacher writes
+- 🎯 **Classroom and config governance**: roll-call and interaction ownership taken from the logged-in identity, publishing limited to taught classes, class analytics repaired; config writes atomic with backup, validation and secret masking
+- 📊 **Experience fixes**: export pagination, announcement scope, tokens leaking into URLs, duplicated dashboard activity, resource rename residue; untranslated keys completed in both languages
+- ⚠️ **Breaking changes**: roll-call write endpoints require login and are limited to taught classes; quizzes and polls can only target your own classes; config endpoints now return masked secrets
 
----
+### v7.6.0 ~ v7.4.0 (2026-07)
 
-### v7.6.0 (2026-07-08)
+- 🎯 **AI skill system**: 20 modular skills injected per scenario across 25 API routers, output runs through deep analysis -> structured output -> self review, with a skill management page
+- 🌐 **Internationalisation**: every page switches between Chinese and English (react-i18next, 13 namespaces, 2000+ keys)
+- 🏆 **Hall of Fame and UI consistency**: honour wall with 10 gradient themes; 24px spacing standard applied to ~60 pages
+- ⚠️ **Breaking changes**: none
 
-- 🎯 **Skill Document System**: 20 modular AI skills, auto-injected by scene into 25 API routes
-- ⚡ **Three-Stage Quality Enhancement**: Deep Analysis → Structured Output → Self-Review, verified by A/B testing
-- 🧩 **8 Core Skills + 12 Domain Skills**: Covering chat, exams, quizzes, whiteboard, code review and all scenarios
-- 📋 **Skill Management Page**: Visual list, toggle all on/off, detail preview, paginated search
-- 🔌 **Unified Injection**: `apply_skills(prompt, scene)` one-liner across all routers
+### v7.3.0 ~ v6.0.0 (H1 2026)
 
----
-
-### v7.5.0 (2026-07-07)
-
-- 🌐 **i18n Multi-Language Support**: One-click switch between Chinese and English across all pages
-- 🔤 **react-i18next Integration**: 13 namespaces, ~2000+ translation keys
-- 🔄 **Language Switching Optimized**: Default Chinese, localStorage persistence, fixed sync issues
-
----
-
-### v7.4.0 (2026-07-06)
-
-- 🏆 **Hall of Glory**: Student honor showcase wall with integrated points/titles/badges display, 10 gradient themes, like interaction
-- 📐 **Site-wide UI Unification**: 24px margin standard, Card container standardization across all ~60 pages
-- 🐛 **Fixes**: Q&A page layout adaptation, Card margin consistency across pages
-
----
-
-### v7.3.0 ~ v6.0.0
-
-- ⭐ **Daily Picks**: AI fun knowledge card pool, on-demand replenishment with zero waste, 7-day deduplication window
-- 📰 **Trending News**: RSS aggregation of 5 major sources, AI on-demand summaries + subject association + daily briefing
-- ⚡ **Anti-Waste Architecture**: Zero AI/Zero fetching when no one is using, on-demand triggering
-- 🏆 **6 New Badges**: Knowledge Explorer, Encyclopedia Expert, Collector, Current Affairs Rookie, Current Affairs Pro, Know-It-All
-- 🔍 **Comprehensive Security Audit**: 12 functional module audits, fixes applied
-- 🔧 **Architecture & Quality Optimization**: Async refactoring, N+1 optimization, JSON unification, normalization
-- 🎯 **Activity Target Scope Control**: 6 activity types support precise target scope specification
-- 🎨 **AI Self-Portrait**: 15 creative styles, sharing gallery with like interaction
-- 🤖 **AI Companion & Teaching Assistant**: Companion with 3 personalities, proactive push; Assistant with smart lesson planning, auto exam generation
-- 🖍️ **Collaborative Whiteboard**: Presentation/Interactive/Self-Study modes, AI teaching assistance
-- 📝 **Smart Practice & Course Exercises**: AI-directed questioning, auto-grading, points rewards
-- 🎮 **Challenge Management Upgrade**: AI batch question generation, online incremental upgrade
-- 🖼️ **Multimodal Dialogue**: Simultaneous image + text input
-- 💻 **AI-Generated HTML Resources**: 5 types, question bank + AI mixed questioning
-- 📐 **All-Grade All-Subject Refactoring**: Subject hardcoding removed, multi-subject teacher assignment
-- 🎭 **Multi-Theme Appearance System**: 5 beautiful themes with one-click switching
-- 📋 **User Management Upgrade**: Batch import, batch grade promotion, single sign-on
-- 📊 **Learning Analytics & Growth Portfolio**: Exam analysis, class reports, five-dimension statistics
-- 📄 **Smart Paper Generation & Word Export**: Step-by-step wizard, LaTeX formula rendering
+- 📰 **Knowledge extension**: daily pick card pool (7-day de-duplication, on-demand refill) plus RSS hot-news aggregation and daily brief; zero AI / zero fetching while nobody is around
+- 🤖 **Teaching and interaction**: AI study companion and teaching assistant (lesson prep, paper generation), collaborative whiteboard in three modes, smart and course practice with auto grading, quest batch generation, multimodal chat, 5 types of AI-generated HTML resources
+- 🧱 **Platform work**: all-grade all-subject refactor, multi-theme appearance, bulk user import and grade promotion, learning analytics and growth portfolio, smart paper generation with Word export, new badges and a full security audit
 
 ---
 
