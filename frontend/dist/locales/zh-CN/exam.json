@@ -1,4 +1,5 @@
 {
+  "unansweredOneShot": "提交后不能修改，并会消耗一次答题机会。",
   "title": "考试中心",
   "createExam": "创建考试",
   "editExam": "编辑考试",

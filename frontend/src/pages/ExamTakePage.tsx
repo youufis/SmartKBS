@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 import * as examsApi from '../api/exams'
 import type { ExamInfo, ExamQuestion } from '../types'
 
@@ -164,6 +165,33 @@ const ExamTakePage: React.FC = () => {
     if (examId) loadExam()
   }, [examId, loadExam])
 
+  const handleSubmit = async () => {
+    if (!examId || !attemptId) return
+    setSubmitting(true)
+    try {
+      const res = await examsApi.submitExam(Number(examId), answers)
+      setSubmitted(true)
+      // B1: 交卷成功即清草稿（服务端写库时一并清空 draft_answers）
+      if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
+      try { localStorage.removeItem(draftKey(examId, attemptId)) } catch { /* 忽略 */ }
+      setDraftState('idle')
+      setResult({
+        score: res.score,
+        total_score: res.total_score,
+        passed: res.passed,
+        details: res.details || undefined,
+        pending_ai: Number(res.pending_ai || 0),
+      })
+      // S-GRADING(P2): 主观题不再卡在本请求里, 提交即刻返回, 成绩判完自动刷新
+      if (Number(res.pending_ai || 0) > 0) message.info(t('exSubmitQueued', { count: res.pending_ai }))
+      else message.success(t('submitSuccess'))
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || t('submitFailed'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   // ── 计时器逻辑 ──
   useEffect(() => {
     if (!timerActive || timeLeft <= 0) return
@@ -209,32 +237,6 @@ const ExamTakePage: React.FC = () => {
   }
 
   // ── 提交 ──
-  const handleSubmit = async () => {
-    if (!examId || !attemptId) return
-    setSubmitting(true)
-    try {
-      const res = await examsApi.submitExam(Number(examId), answers)
-      setSubmitted(true)
-      // B1: 交卷成功即清草稿（服务端写库时一并清空 draft_answers）
-      if (draftTimerRef.current) window.clearTimeout(draftTimerRef.current)
-      try { localStorage.removeItem(draftKey(examId, attemptId)) } catch { /* 忽略 */ }
-      setDraftState('idle')
-      setResult({
-        score: res.score,
-        total_score: res.total_score,
-        passed: res.passed,
-        details: res.details || undefined,
-        pending_ai: Number(res.pending_ai || 0),
-      })
-      // S-GRADING(P2): 主观题不再卡在本请求里, 提交即刻返回, 成绩判完自动刷新
-      if (Number(res.pending_ai || 0) > 0) message.info(t('exSubmitQueued', { count: res.pending_ai }))
-      else message.success(t('submitSuccess'))
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || t('submitFailed'))
-    } finally {
-      setSubmitting(false)
-    }
-  }
 
   // ── S-GRADING(P2): 主观题在后台批改时轮询成绩(8 秒一次, 最多 12 次≈96 秒) ──
   const pollRef = useRef<number | null>(null)
@@ -306,6 +308,18 @@ const ExamTakePage: React.FC = () => {
     window.addEventListener('beforeunload', onLeave)
     return () => window.removeEventListener('beforeunload', onLeave)
   }, [dirty])
+
+  /** P0 防误交：没答完必须明确点「仍然提交」才交卷（考试提交后不可改，还消耗答题机会） */
+  const handleClickSubmit = async () => {
+    const missing = unansweredIndexes(questions, (q) => !!(answers[String((q as { id?: number }).id ?? '')] || '').trim())
+    const ok = await confirmUnanswered({
+      missing,
+      total: questions.length,
+      t,
+      extra: t('unansweredOneShot'),
+    })
+    if (ok) void handleSubmit()
+  }
 
   // ── 返回 ──
   const handleBack = () => {
@@ -594,12 +608,7 @@ const ExamTakePage: React.FC = () => {
           )}
           <Button type="primary" icon={<SendOutlined />}
             loading={submitting}
-            onClick={() => {
-              if (answeredCount < questions.length) {
-                message.warning(t('unansweredConfirm', { count: questions.length - answeredCount }))
-              }
-              handleSubmit()
-            }}>
+            onClick={() => { void handleClickSubmit() }}>
             {t('submitBtn')}
           </Button>
         </Space>

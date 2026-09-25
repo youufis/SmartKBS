@@ -24,6 +24,7 @@ import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
+import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
 const { Title, Text } = Typography
 
 /** S-GRADING(P3): 这道题的分是谁给的 */
@@ -45,6 +46,7 @@ const InteractionPage: React.FC = () => {
   const [quizEditorOpen, setQuizEditorOpen] = useState(false)
   const [takingQuiz, setTakingQuiz] = useState<any>(null)
   const [quizAnswers, setQuizAnswers] = useState<Record<number, string>>({})
+  const [quizSubmitting, setQuizSubmitting] = useState(false)
   const [quizResult, setQuizResult] = useState<any>(null)
   const [quizResultsView, setQuizResultsView] = useState<any>(null)
   // S-GRADING(P3): 结果弹窗对应的测验 id(自动刷新/催批要用) + 催批中状态
@@ -189,10 +191,16 @@ const InteractionPage: React.FC = () => {
 
   const handleSubmitQuiz = async () => {
     if (!takingQuiz) return
-    const answers = takingQuiz.questions.map((_q: any, i: number) => ({
+    const qs: any[] = takingQuiz.questions || []
+    // P0 防误交：随堂测验提交后不能重复作答，没答完必须先确认
+    const missing = unansweredIndexes(qs, (_q, i) => !!(quizAnswers[i] || '').trim())
+    const ok = await confirmUnanswered({ missing, total: qs.length, t, extra: t('ipQuizOneShot') })
+    if (!ok) return
+    const answers = qs.map((_q: any, i: number) => ({
       question_index: i,
       answer: quizAnswers[i] || '',
     }))
+    setQuizSubmitting(true)
     try {
       const { data } = await apiClient.post(`/api/interaction/quizzes/${takingQuiz.id}/answer`, { answers: JSON.stringify(answers) })
       setQuizResult(data)
@@ -200,6 +208,8 @@ const InteractionPage: React.FC = () => {
       if (Number(data?.pending_ai || 0) > 0) message.info(t('ipGradingQueued', { count: data.pending_ai }))
     } catch (err: any) {
       message.error(err.response?.data?.detail || t('submitFailed'))
+    } finally {
+      setQuizSubmitting(false)
     }
   }
 
@@ -408,7 +418,7 @@ const InteractionPage: React.FC = () => {
       <Modal maskClosable={false} title={takingQuiz?.title} open={!!takingQuiz && !quizResult}
         onCancel={() => { setTakingQuiz(null); setQuizResult(null) }}
         footer={[
-          <Button key="submit" type="primary" onClick={handleSubmitQuiz}>{t('submit')}</Button>,
+          <Button key="submit" type="primary" loading={quizSubmitting} onClick={() => { void handleSubmitQuiz() }}>{t('submit')}</Button>,
         ]}
         width={640}>
         {takingQuiz?.questions?.map((q: any, i: number) => (

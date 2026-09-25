@@ -1,4 +1,9 @@
 {
+  "guardUnansweredTitle": "还有 {{count}} 题未作答",
+  "guardAllBlankTitle": "一道题都还没作答",
+  "guardUnansweredList": "未作答：第 {{list}} 题。",
+  "guardStillSubmit": "仍然提交",
+  "guardKeepAnswering": "回去补答",
   "loadFailedTitle": "数据加载失败",
   "loadFailedDesc": "网络或服务暂时不可用，请点击重试。",
   "retryLoad": "重试",
