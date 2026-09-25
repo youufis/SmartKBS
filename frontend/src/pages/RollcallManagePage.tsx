@@ -490,9 +490,9 @@ const RollcallTool: React.FC = () => {
               { key: 'R', label: t('reset') },
             ].map(k => (
               <kbd key={k.key} style={{
-                background: '#f5f5f5', border: '1px solid #d9d9d9',
+                background: 'var(--bg-layout)', border: '1px solid var(--border-color-secondary)',
                 borderRadius: 4, padding: '2px 8px', fontSize: 12,
-                fontFamily: 'inherit', color: '#888',
+                fontFamily: 'inherit', color: 'var(--text-tertiary)',
               }}>
                 <span style={{ color: '#1677ff', fontWeight: 600 }}>{k.key}</span> {k.label}
               </kbd>
@@ -516,7 +516,7 @@ const RollcallTool: React.FC = () => {
               {[...history].reverse().map((h, i) => {
                 const idx = history.length - i
                 const label = { correct: t('correctWithEmoji'), incorrect: t('participateWithEmoji'), skip: t('skipWithEmoji') }[h.result] || h.result
-                const pts = h.points > 0 ? <span style={{ color: '#52c41a', fontWeight: 700 }}>+{h.points}</span> : <span style={{ color: '#999' }}>-</span>
+                const pts = h.points > 0 ? <span style={{ color: '#52c41a', fontWeight: 700 }}>+{h.points}</span> : <span style={{ color: 'var(--text-tertiary)' }}>-</span>
                 return (
                   <div key={i} style={{
                     display: 'flex', alignItems: 'center', padding: '6px 12px',
@@ -734,7 +734,7 @@ const SessionsManager: React.FC = () => {
               <div style={{ maxHeight: 200, overflow: 'auto', marginBottom: 16 }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: '#fafafa' }}>
+                    <tr style={{ background: 'var(--bg-layout)' }}>
                       <th style={thStyle}>{t('student')}</th>
                       <th style={thStyle}>{t('weight')}</th>
                     </tr>
@@ -762,7 +762,7 @@ const SessionsManager: React.FC = () => {
               <div style={{ maxHeight: 300, overflow: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: '#fafafa' }}>
+                    <tr style={{ background: 'var(--bg-layout)' }}>
                       <th style={thStyle}>{t('time')}</th>
                       <th style={thStyle}>{t('student')}</th>
                       <th style={thStyle}>{t('result')}</th>
@@ -1388,11 +1388,11 @@ const RollcallManagePage: React.FC = () => {
 }
 
 const thStyle: React.CSSProperties = {
-  padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid #f0f0f0',
+  padding: '8px 12px', textAlign: 'left', borderBottom: '1px solid var(--border-color)',
   fontWeight: 600, fontSize: 13,
 }
 const tdStyle: React.CSSProperties = {
-  padding: '6px 12px', borderBottom: '1px solid #f0f0f0', fontSize: 13,
+  padding: '6px 12px', borderBottom: '1px solid var(--border-color)', fontSize: 13,
 }
 
 export default RollcallManagePage

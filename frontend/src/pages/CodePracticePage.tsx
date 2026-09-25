@@ -126,22 +126,22 @@ const CompactCodeView: React.FC<{
           width: descCollapsed ? 36 : '35%',
           minWidth: descCollapsed ? 36 : 260,
           maxHeight: 400, overflow: 'auto',
-          background: '#fafafa', borderRadius: 6,
+          background: 'var(--bg-layout)', borderRadius: 6,
           padding: descCollapsed ? '8px 4px' : 12,
-          border: '1px solid #f0f0f0',
+          border: '1px solid var(--border-color)',
           cursor: descCollapsed ? 'pointer' : 'default',
           transition: 'width 0.2s, minWidth 0.2s, padding 0.2s',
           flexShrink: 0,
         }} onClick={() => { if (descCollapsed) setDescCollapsed(false) }}>
           {descCollapsed ? (
-            <div style={{ writingMode: 'vertical-rl', fontSize: 13, color: '#888', userSelect: 'none' }}>
+            <div style={{ writingMode: 'vertical-rl', fontSize: 13, color: 'var(--text-tertiary)', userSelect: 'none' }}>
               <span onClick={(e) => { e.stopPropagation(); setDescCollapsed(false) }} style={{ cursor: 'pointer', color: '#1677ff' }}>📄 {t('problemTitle')}</span>
             </div>
           ) : (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 <Text strong style={{ fontSize: 14 }}>{problemData.title}</Text>
-                <Button type="text" size="small" icon={<MinusSquareOutlined />} onClick={() => setDescCollapsed(true)} style={{ color: '#999' }} />
+                <Button type="text" size="small" icon={<MinusSquareOutlined />} onClick={() => setDescCollapsed(true)} style={{ color: 'var(--text-tertiary)' }} />
               </div>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: '#555' }}>
                 <ReactMarkdown>{problemData.description || ''}</ReactMarkdown>
@@ -150,7 +150,7 @@ const CompactCodeView: React.FC<{
                 <div style={{ marginTop: 8 }}>
                   <Text strong style={{ fontSize: 12 }}>{t('example')}：</Text>
                   {problemData.sample_cases.map((sc: any, i: number) => (
-                    <div key={sc.id || i} style={{ background: '#fff', padding: 6, borderRadius: 4, marginTop: 4, fontSize: 12, border: '1px solid #e8e8e8' }}>
+                    <div key={sc.id || i} style={{ background: 'var(--bg-container)', padding: 6, borderRadius: 4, marginTop: 4, fontSize: 12, border: '1px solid var(--border-color-secondary)' }}>
                       <Text type="secondary">{t('explanation')} {i + 1}</Text>
                       {sc.description && <Text type="secondary"> — {sc.description}</Text>}
                       <pre style={{ margin: 2, fontSize: 11 }}>{t('input')}：{sc.input || t('cpNone')}{'\n'}{t('output')}：{sc.expected_output}</pre>
@@ -202,7 +202,7 @@ const CompactCodeView: React.FC<{
               <span style={{ color: '#f48771' }}>⚠ {runResult.error}</span>
             ) : (
               <>
-                {runResult.stdout ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre> : <span style={{ color: '#888' }}>{t('noOutput')}</span>}
+                {runResult.stdout ? <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre> : <span style={{ color: 'var(--text-tertiary)' }}>{t('noOutput')}</span>}
                 {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 4 }}>{runResult.stderr}</pre>}
               </>
             )}
@@ -212,7 +212,7 @@ const CompactCodeView: React.FC<{
         {runHistory.length > 1 && !submissionResult && (
           <div style={{ marginTop: 6 }}>
             <details style={{ fontSize: 12 }}>
-              <summary style={{ cursor: 'pointer', color: '#888', userSelect: 'none' }}>
+              <summary style={{ cursor: 'pointer', color: 'var(--text-tertiary)', userSelect: 'none' }}>
                 {t('runHistory')}（{runHistory.length} {t('countRuns')}）
               </summary>
               <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 4 }}>
@@ -223,7 +223,7 @@ const CompactCodeView: React.FC<{
                     borderLeft: `3px solid ${entry.exit_code === 0 ? '#52c41a' : '#f48771'}`,
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <span style={{ color: '#888' }}>#{runHistory.length - idx} {entry.createdAt}</span>
+                      <span style={{ color: 'var(--text-tertiary)' }}>#{runHistory.length - idx} {entry.createdAt}</span>
                       <span style={{ color: entry.exit_code === 0 ? '#52c41a' : '#f48771' }}>
                         Exit {entry.exit_code} | {entry.execution_time}s
                       </span>
@@ -1245,7 +1245,7 @@ const CodePracticePage: React.FC = () => {
     return (
       <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 180px)' }}>
         {/* 左面板：题目描述 */}
-        <div style={{ width: '40%', overflow: 'auto', background: '#fff', borderRadius: 8, padding: 16, border: '1px solid #f0f0f0' }}>
+        <div style={{ width: '40%', overflow: 'auto', background: 'var(--bg-container)', borderRadius: 8, padding: 16, border: '1px solid var(--border-color)' }}>
           <Space style={{ marginBottom: 12 }}>
             <Button icon={<ArrowLeftOutlined />} onClick={handleBack} size="small">{t('start')}</Button>
             <Title level={5} style={{ margin: 0 }}>{currentProblem.title}</Title>
@@ -1266,7 +1266,7 @@ const CodePracticePage: React.FC = () => {
                 <Card key={sc.id} size="small" style={{ marginBottom: 8 }}>
                   <Text strong>{t('explanation')} {i + 1}</Text>
                   {sc.description && <Text type="secondary"> — {sc.description}</Text>}
-                  <pre style={{ background: '#f5f5f5', padding: 8, borderRadius: 4, marginTop: 4, fontSize: 12 }}>
+                  <pre style={{ background: 'var(--bg-layout)', padding: 8, borderRadius: 4, marginTop: 4, fontSize: 12 }}>
                     <Text strong>{t('input')}：</Text>{sc.input || t('cpNone')}{'\n'}
                     <Text strong>{t('output')}：</Text>{sc.expected_output}
                   </pre>
@@ -1398,11 +1398,11 @@ const CodePracticePage: React.FC = () => {
                           </div>
                         ) : (
                           <>
-                            <div style={{ color: '#888', marginBottom: 4 }}>Exit Code: {runResult.exit_code} | Time: {runResult.execution_time}s | {t('cpInputLabel')}: {customInput || t('cpEmpty')}</div>
+                            <div style={{ color: 'var(--text-tertiary)', marginBottom: 4 }}>Exit Code: {runResult.exit_code} | Time: {runResult.execution_time}s | {t('cpInputLabel')}: {customInput || t('cpEmpty')}</div>
                             {runResult.stdout ? (
                               <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{runResult.stdout}</pre>
                             ) : (
-                              <div style={{ color: '#888' }}>{t('noOutput')}</div>
+                              <div style={{ color: 'var(--text-tertiary)' }}>{t('noOutput')}</div>
                             )}
                             {runResult.stderr && <pre style={{ margin: 0, color: '#f48771', marginTop: 8 }}>{runResult.stderr}</pre>}
                           </>
@@ -1411,7 +1411,7 @@ const CodePracticePage: React.FC = () => {
                       {/* 运行历史 */}
                       {runHistory.length > 1 && (
                         <details style={{ marginTop: 8, fontSize: 13 }}>
-                          <summary style={{ cursor: 'pointer', color: '#888', userSelect: 'none' }}>
+                          <summary style={{ cursor: 'pointer', color: 'var(--text-tertiary)', userSelect: 'none' }}>
                             {t('runHistory')}（{runHistory.length} {t('countRuns')}）
                           </summary>
                           <div style={{ maxHeight: 200, overflow: 'auto', marginTop: 4 }}>
@@ -1422,7 +1422,7 @@ const CodePracticePage: React.FC = () => {
                                 borderLeft: `3px solid ${entry.exit_code === 0 ? '#52c41a' : '#f48771'}`,
                               }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                                  <span style={{ color: '#888' }}>#{runHistory.length - idx} {entry.createdAt}</span>
+                                  <span style={{ color: 'var(--text-tertiary)' }}>#{runHistory.length - idx} {entry.createdAt}</span>
                                   <span style={{ color: entry.exit_code === 0 ? '#52c41a' : '#f48771' }}>
                                     Exit {entry.exit_code} | {entry.execution_time}s
                                   </span>

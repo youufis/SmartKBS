@@ -889,7 +889,7 @@ const ExamPage: React.FC = () => {
   }
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         {/* ── 标题和操作栏 ── */}
         <Row justify="space-between" align="middle">
@@ -1033,7 +1033,7 @@ const ExamPage: React.FC = () => {
               expandedRowRender: (record) => (
                 <div style={{ padding: '8px 0', maxWidth: 800 }}>
                   <Typography.Text style={{ fontSize: 14 }}>{record.description || t('noDescription')}</Typography.Text>
-                  <div style={{ marginTop: 8, fontSize: 13, color: '#888' }}>
+                  <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-tertiary)' }}>
                     {t('creatorColon')}{record.creator_name || record.creator_username} |
                     {t('durationColon')}{record.duration}{t('minutes')} |
                     {t('passingScoreColon')}{record.pass_score}{t('scoreUnit')}
@@ -1534,7 +1534,7 @@ const ExamPage: React.FC = () => {
         {explainLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>{t('aiAnalyzing')}</div>
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('aiAnalyzing')}</div>
           </div>
         ) : explainData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
@@ -1608,7 +1608,7 @@ const ExamPage: React.FC = () => {
                     <Typography.Paragraph style={{ fontWeight: 500, marginBottom: 8 }}><FormulaRenderer content={q.question_text} /></Typography.Paragraph>
                     <MediaDisplay svgContent={q.svg_content} hasSvg={q.has_svg} mediaFiles={(q as any).media_files} size="large" />
                     {optionLabels.length > 0 && (
-                      <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+                      <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-layout)', borderRadius: 4 }}>
                         {optionLabels.map((key: string) => {
                           const isSelected = ans.student_answer?.includes(key)
                           const isCorrectOpt = q.correct_answer?.includes(key)
@@ -1651,7 +1651,7 @@ const ExamPage: React.FC = () => {
 
                       {/* AI 主观题/作文 多维评分 */}
                       {isEssay && (ans.dimensions || q.dimensions) && (
-                        <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 6, marginTop: 4 }}>
+                        <div style={{ background: 'var(--bg-layout)', padding: 10, borderRadius: 6, marginTop: 4 }}>
                           <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{t('aiMultiScore')}</div>
                           <Row gutter={8}>
                             {['content', 'structure', 'language'].map((dim) => {
@@ -1660,17 +1660,17 @@ const ExamPage: React.FC = () => {
                               const labels2: Record<string, string> = { content: t('dimContent'), structure: t('dimStructure'), language: t('dimLanguage') }
                               return (
                                 <Col span={8} key={dim}>
-                                  <div style={{ textAlign: 'center', background: '#fff', borderRadius: 4, padding: 4 }}>
+                                  <div style={{ textAlign: 'center', background: 'var(--bg-container)', borderRadius: 4, padding: 4 }}>
                                     <div style={{ fontSize: 18, fontWeight: 'bold', color: '#1677ff' }}>{dimData.score}</div>
-                                    <div style={{ fontSize: 11, color: '#666' }}>{labels2[dim]}/10</div>
-                                    <div style={{ fontSize: 11, color: '#888' }}>{dimData.comment}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{labels2[dim]}/10</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{dimData.comment}</div>
                                   </div>
                                 </Col>
                               )
                             })}
                           </Row>
                           {(ans.overall_comment || q.overall_comment) && (
-                            <div style={{ marginTop: 6, fontSize: 12, color: '#333' }}>
+                            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-primary)' }}>
                               <strong>{t('overallColon')}</strong>{ans.overall_comment || q.overall_comment}
                             </div>
                           )}
@@ -1679,7 +1679,7 @@ const ExamPage: React.FC = () => {
                               <strong>{t('improveColon')}</strong>
                               <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
                                 {(ans.improvement_suggestions || q.improvement_suggestions || []).map((s: string, i: number) => (
-                                  <li key={i} style={{ color: '#666' }}>{s}</li>
+                                  <li key={i} style={{ color: 'var(--text-secondary)' }}>{s}</li>
                                 ))}
                               </ul>
                             </div>
@@ -1813,7 +1813,7 @@ const StudentExamDetail: React.FC<{
 
             {/* 选择题选项 */}
             {optionLabels.length > 0 && (
-              <div style={{ marginBottom: 8, padding: 8, background: '#fafafa', borderRadius: 4 }}>
+              <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-layout)', borderRadius: 4 }}>
                 {optionLabels.map((key: string) => {
                   const isSelected = ans.student_answer?.includes(key)
                   const isCorrectOpt = q.correct_answer?.includes(key)
@@ -1858,7 +1858,7 @@ const StudentExamDetail: React.FC<{
 
               {/* AI 主观题/作文 多维评分 */}
               {isEssay && (ans.dimensions?.content || q.dimensions?.content) && (
-                <div style={{ background: '#f5f5f5', padding: 10, borderRadius: 6, marginTop: 4 }}>
+                <div style={{ background: 'var(--bg-layout)', padding: 10, borderRadius: 6, marginTop: 4 }}>
                   <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{t('aiMultiScore')}</div>
                   <Row gutter={8}>
                     {['content', 'structure', 'language'].map((dim) => {
@@ -1867,17 +1867,17 @@ const StudentExamDetail: React.FC<{
                       const labels: Record<string, string> = { content: t('dimContent'), structure: t('dimStructure'), language: t('dimLanguage') }
                       return (
                         <Col span={8} key={dim}>
-                          <div style={{ textAlign: 'center', background: '#fff', borderRadius: 4, padding: 4 }}>
+                          <div style={{ textAlign: 'center', background: 'var(--bg-container)', borderRadius: 4, padding: 4 }}>
                             <div style={{ fontSize: 18, fontWeight: 'bold', color: '#1677ff' }}>{dimData.score}</div>
-                            <div style={{ fontSize: 11, color: '#666' }}>{labels[dim]}/10</div>
-                            <div style={{ fontSize: 11, color: '#888' }}>{dimData.comment}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{labels[dim]}/10</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{dimData.comment}</div>
                           </div>
                         </Col>
                       )
                     })}
                   </Row>
                   {(ans.overall_comment || q.overall_comment) && (
-                    <div style={{ marginTop: 6, fontSize: 12, color: '#333' }}>
+                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-primary)' }}>
                       <strong>{t('overallColon')}</strong>{ans.overall_comment || q.overall_comment}
                     </div>
                   )}

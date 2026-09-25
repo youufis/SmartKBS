@@ -336,7 +336,7 @@ const DiscussionRoomPage: React.FC = () => {
   }, [groupId])
 
   return (
-    <div style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
+    <div style={{ height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', borderRadius: 8, overflow: 'hidden', background: 'var(--bg-container)' }}>
       {/* 顶部栏 */}
       <Card
         style={{ marginBottom: 0, borderRadius: 0 }}
@@ -350,7 +350,7 @@ const DiscussionRoomPage: React.FC = () => {
                 {groupInfo?.name || (discussionInfo?.group_mode === 'none' ? t('noGroup') : `${t('groupMode')}${t('roomList')}`)}
               </Text>
               {discussionInfo && (
-                <div className="markdown-content" style={{ fontSize: 13, color: '#888' }}>
+                <div className="markdown-content" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{discussionInfo.title}</ReactMarkdown>
                 </div>
               )}
@@ -431,7 +431,7 @@ const DiscussionRoomPage: React.FC = () => {
           items={[
             {
               key: 'topic',
-              label: <span style={{ fontSize: 13, color: '#888' }}>{t('viewTopic')}</span>,
+              label: <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('viewTopic')}</span>,
               children: (
                 <div className="markdown-content" style={{ fontSize: 13, color: '#555', padding: '4px 0 8px 0' }}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{discussionInfo.description}</ReactMarkdown>
@@ -439,7 +439,7 @@ const DiscussionRoomPage: React.FC = () => {
               ),
             },
           ]}
-          style={{ background: '#fafafa', borderBottom: '1px solid #f0f0f0' }}
+          style={{ background: 'var(--bg-layout)', borderBottom: '1px solid var(--border-color)' }}
         />
       )}
 
@@ -448,7 +448,7 @@ const DiscussionRoomPage: React.FC = () => {
         style={{
           flex: 1,
           overflow: 'auto',
-          background: '#f5f5f5',
+          background: 'var(--bg-layout)',
           padding: '12px 16px',
           minHeight: 0,
         }}
@@ -536,7 +536,7 @@ const DiscussionRoomPage: React.FC = () => {
 
       {/* 输入区 */}
       <Card
-        style={{ borderRadius: '0 0 8px 8px', borderTop: '1px solid #f0f0f0' }}
+        style={{ borderRadius: '0 0 8px 8px', borderTop: '1px solid var(--border-color)' }}
         styles={{ body: { padding: '12px 16px' } }}
       >
         <Space.Compact style={{ width: '100%' }}>
@@ -603,7 +603,7 @@ const DiscussionRoomPage: React.FC = () => {
                     <div style={{
                       marginTop: 8, padding: 12, background: '#f6ffed',
                       borderRadius: 8, border: '1px solid #b7eb8f', lineHeight: 1.8,
-                      fontSize: 14, color: '#333',
+                      fontSize: 14, color: 'var(--text-primary)',
                     }}>
                       {parsed.summary || t('noContent')}
                     </div>
@@ -664,12 +664,12 @@ const DiscussionRoomPage: React.FC = () => {
                   {/* 原始 AI 回复 */}
                   {raw && (
                     <details style={{ marginTop: 16 }}>
-                      <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>
+                      <summary style={{ cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 13 }}>
                         {t('viewRawAIResponse')}
                       </summary>
                       <pre style={{
-                        marginTop: 8, padding: 12, background: '#f5f5f5',
-                        borderRadius: 6, fontSize: 12, color: '#666',
+                        marginTop: 8, padding: 12, background: 'var(--bg-layout)',
+                        borderRadius: 6, fontSize: 12, color: 'var(--text-secondary)',
                         whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                         maxHeight: 300, overflow: 'auto',
                       }}>

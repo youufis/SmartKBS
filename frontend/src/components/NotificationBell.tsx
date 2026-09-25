@@ -24,7 +24,7 @@ const TYPE_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = {
   task: { color: '#faad14', icon: <CheckCircleOutlined /> },
   rollcall: { color: '#722ed1', icon: <AuditOutlined /> },
   share: { color: '#13c2c2', icon: <InfoCircleOutlined /> },
-  info: { color: '#999', icon: <InfoCircleOutlined /> },
+  info: { color: 'var(--text-tertiary)', icon: <InfoCircleOutlined /> },
 }
 
 const PUSH_TYPE_CONFIG: Record<string, { color: string; icon: string }> = {
@@ -161,7 +161,7 @@ const NotificationBell: React.FC = () => {
 
   const content = (
     <div style={{ width: 360, maxHeight: 420, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--border-color)' }}>
         <Text strong>{t('nbTitle')}</Text>
         <Space size={4}>
           {unreadCount > 0 && (
@@ -180,7 +180,7 @@ const NotificationBell: React.FC = () => {
           <>
             {/* 系统通知 */}
             {notifications.length > 0 && (
-              <div style={{ padding: '4px 12px', fontSize: 11, color: '#999', fontWeight: 600 }}>{t('nbSystem')}</div>
+              <div style={{ padding: '4px 12px', fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600 }}>{t('nbSystem')}</div>
             )}
             <List
               dataSource={notifications}
@@ -194,7 +194,7 @@ const NotificationBell: React.FC = () => {
                       background: item.is_read ? 'transparent' : '#f6f8ff',
                       cursor: 'pointer',
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)' }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.background = item.is_read ? 'transparent' : '#f6f8ff'
                     }}
@@ -240,11 +240,11 @@ const NotificationBell: React.FC = () => {
             {/* 学伴推送（仅学生） */}
             {isStudent && pushes.length > 0 && (
               <>
-                <div style={{ padding: '4px 12px', fontSize: 11, color: '#999', fontWeight: 600, borderTop: notifications.length > 0 ? '1px solid #f0f0f0' : 'none' }}>{t('nbCompanion')}</div>
+                <div style={{ padding: '4px 12px', fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, borderTop: notifications.length > 0 ? '1px solid #f0f0f0' : 'none' }}>{t('nbCompanion')}</div>
                 <List
                   dataSource={pushes}
                   renderItem={(item) => {
-                    const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: '#999', icon: '💌' }
+                    const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: 'var(--text-tertiary)', icon: '💌' }
                     return (
                       <List.Item
                         style={{
@@ -252,7 +252,7 @@ const NotificationBell: React.FC = () => {
                           background: 'transparent',
                           cursor: 'default',
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)' }}
                         onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                         actions={[
                           <Button type="text" size="small" icon={<CheckOutlined />}
@@ -292,7 +292,7 @@ const NotificationBell: React.FC = () => {
           </>
         )}
       </div>
-      <div style={{ borderTop: '1px solid #f0f0f0', padding: '6px 12px', textAlign: 'center' }}>
+      <div style={{ borderTop: '1px solid var(--border-color)', padding: '6px 12px', textAlign: 'center' }}>
         <Button type="link" size="small" onClick={() => { setOpen(false); navigate('/notifications') }}>
           {t('nbViewAll')} <RightOutlined />
         </Button>
@@ -310,7 +310,7 @@ const NotificationBell: React.FC = () => {
     >
       <Tooltip title={t('nbTitle')}>
         <Badge count={unreadCount + pushUnreadCount} size="small" offset={[-2, 2]}>
-          <BellOutlined style={{ fontSize: 18, cursor: 'pointer', color: '#666' }} />
+          <BellOutlined style={{ fontSize: 18, cursor: 'pointer', color: 'var(--text-secondary)' }} />
         </Badge>
       </Tooltip>
     </Popover>

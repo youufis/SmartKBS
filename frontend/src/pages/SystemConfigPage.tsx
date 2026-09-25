@@ -596,14 +596,14 @@ const SkillManagePanel: React.FC = () => {
                   <pre style={{
                     marginTop: 8,
                     padding: 12,
-                    background: '#f5f5f5',
+                    background: 'var(--bg-layout)',
                     borderRadius: 6,
                     fontSize: 13,
                     maxHeight: 400,
                     overflow: 'auto',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-all',
-                    border: '1px solid #e8e8e8',
+                    border: '1px solid var(--border-color-secondary)',
                   }}>
                     {selectedSkill.raw_content}
                   </pre>
@@ -978,7 +978,7 @@ const UpgradePanel: React.FC = () => {
               style={{ marginTop: 8, marginBottom: 8 }}
             />
           )}
-          <p style={{ fontSize: 12, color: '#999' }}>
+          <p style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
             {restarting ? t('waitingServiceHint') : t('noResponseHint')}
           </p>
           {upgradeProg.error && (
@@ -1068,11 +1068,11 @@ const UpgradePanel: React.FC = () => {
                         width: 560,
                         content: (
                           <div style={{ marginTop: 8 }}>
-                            <p style={{ color: '#888', marginBottom: 8 }}>
+                            <p style={{ color: 'var(--text-tertiary)', marginBottom: 8 }}>
                               {t('executor')}：{r.admin} ｜ {t('sourceIP')}：{r.client_ip || t('unknown')} ｜ {t('timestamp')}：{r.timestamp}
                             </p>
                             {r.commits !== undefined && (
-                              <p style={{ color: '#888', marginBottom: 12 }}>
+                              <p style={{ color: 'var(--text-tertiary)', marginBottom: 12 }}>
                                 {t('commitsCount', { count: r.commits })}
                               </p>
                             )}
@@ -1086,7 +1086,7 @@ const UpgradePanel: React.FC = () => {
                               </div>
                             )}
                             {r.reconciled_from && (!fileList || fileList.length === 0) && (
-                              <p style={{ color: '#888', fontSize: 12, marginBottom: 12 }}>
+                              <p style={{ color: 'var(--text-tertiary)', fontSize: 12, marginBottom: 12 }}>
                                 {t('reconciledDetailMissing')}
                               </p>
                             )}

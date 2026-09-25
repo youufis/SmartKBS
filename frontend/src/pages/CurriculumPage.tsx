@@ -1145,7 +1145,7 @@ const CurriculumPage: React.FC = () => {
 
 
   return (
-    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: '#f5f5f5' }}>
+    <Layout style={{ minHeight: 'calc(100vh - 64px)', background: 'var(--bg-layout)' }}>
       {/* ── 加载中 ── */}
       {loading && (
         <div style={{ textAlign: 'center', padding: 80 }}>
@@ -1187,7 +1187,7 @@ const CurriculumPage: React.FC = () => {
       )}
 
       {!loading && courses.length > 0 && (
-        <Layout style={{ height: 'calc(100vh - 64px)', background: '#f5f5f5', overflow: 'hidden' }}>
+        <Layout style={{ height: 'calc(100vh - 64px)', background: 'var(--bg-layout)', overflow: 'hidden' }}>
           {/* ── 左侧：课程分类导航（可折叠） ── */}
           <Sider
             width={260}
@@ -1197,8 +1197,8 @@ const CurriculumPage: React.FC = () => {
             onCollapse={setSiderCollapsed}
             trigger={null}
             style={{
-              background: '#fff',
-              borderRight: '1px solid #f0f0f0',
+              background: 'var(--bg-container)',
+              borderRight: '1px solid var(--border-color)',
               overflow: 'auto',
               height: '100%',
             }}
@@ -1210,9 +1210,9 @@ const CurriculumPage: React.FC = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 height: 48,
-                borderBottom: '1px solid #f0f0f0',
+                borderBottom: '1px solid var(--border-color)',
                 cursor: 'pointer',
-                color: '#666',
+                color: 'var(--text-secondary)',
                 fontSize: 16,
               }}
               onClick={() => setSiderCollapsed(!siderCollapsed)}
@@ -1224,7 +1224,7 @@ const CurriculumPage: React.FC = () => {
             {!siderCollapsed && (
               <>
                 {/* 侧栏头部 */}
-                <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--border-color)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                     <Typography.Title level={5} style={{ margin: 0 }}>
                       {isStudent ? t('studentGuide') : t('courseTitle')}
@@ -1268,15 +1268,15 @@ const CurriculumPage: React.FC = () => {
                             gap: 8,
                             fontSize: 15,
                             fontWeight: 700,
-                            color: '#333',
+                            color: 'var(--text-primary)',
                             userSelect: 'none',
                             borderRadius: 0,
                             transition: 'all 0.2s',
                           }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)' }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
                         >
-                          <span style={{ fontSize: 13, width: 20, textAlign: 'center', color: '#999' }}>
+                          <span style={{ fontSize: 13, width: 20, textAlign: 'center', color: 'var(--text-tertiary)' }}>
                             {isExpanded ? <DownOutlined /> : <RightOutlined />}
                           </span>
                           <span style={{ fontSize: 18 }}>{subjectIcon}</span>
@@ -1305,7 +1305,7 @@ const CurriculumPage: React.FC = () => {
                             }}
                             onMouseEnter={(e) => {
                               if (activeCourseId !== course.id) {
-                                e.currentTarget.style.background = '#f5f5f5'
+                                e.currentTarget.style.background = 'var(--bg-layout)'
                               }
                             }}
                             onMouseLeave={(e) => {
@@ -1364,7 +1364,7 @@ const CurriculumPage: React.FC = () => {
                           borderLeft: isActive ? '3px solid #1677ff' : '3px solid transparent',
                           transition: 'all 0.2s',
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-layout)' }}
                         onMouseLeave={(e) => {
                           e.currentTarget.style.background = isActive ? '#e6f4ff' : 'transparent'
                         }}
@@ -1382,7 +1382,7 @@ const CurriculumPage: React.FC = () => {
           <Content style={{ padding: '0 12px', overflow: 'auto', height: '100%' }}>
             {!activeCourse ? (
               <div style={{ textAlign: 'center', padding: '120px 40px' }}>
-                <BookOutlined style={{ fontSize: 64, color: '#d9d9d9', marginBottom: 24 }} />
+                <BookOutlined style={{ fontSize: 64, color: 'var(--border-color-secondary)', marginBottom: 24 }} />
                 <Typography.Title level={4} type="secondary" style={{ margin: '0 0 8px' }}>
                   {t('selectCourseFromLeft')}
                 </Typography.Title>
@@ -1879,7 +1879,7 @@ const CurriculumPage: React.FC = () => {
         {lessonPlanLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>{t('aiGeneratingLessonPlan')}</div>
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('aiGeneratingLessonPlan')}</div>
           </div>
         ) : lessonPlanData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 14, lineHeight: 1.8, padding: '0 4px' }}>
@@ -1901,7 +1901,7 @@ const CurriculumPage: React.FC = () => {
         {recLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>{t('aiAnalyzing')}</div>
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('aiAnalyzing')}</div>
           </div>
         ) : recResults.length === 0 ? (
           <Empty description={t('noRecommendations')} />
@@ -1970,10 +1970,10 @@ const CurriculumPage: React.FC = () => {
         {cwLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>{t('aiGeneratingCourseware')}</div>
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('aiGeneratingCourseware')}</div>
           </div>
         ) : cwUrl ? (
-          <div style={{ height: '70vh', border: '1px solid #d9d9d9', borderRadius: 4, overflow: 'hidden' }}>
+          <div style={{ height: '70vh', border: '1px solid var(--border-color-secondary)', borderRadius: 4, overflow: 'hidden' }}>
             <iframe src={cwUrl} style={{ width: '100%', height: '100%', border: 'none' }} title={t('cyCoursewarePreview')} />
           </div>
         ) : null}
@@ -1991,7 +1991,7 @@ const CurriculumPage: React.FC = () => {
         {practiceLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>
               {t('cyGenPracticeWait')}
               <br /><span style={{ fontSize: 13 }}>{t('autoGenerateHtml')}</span>
             </div>

@@ -402,9 +402,9 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
         {selectedGrades.length > 0 && gradeClassData.length > 0 && (
           <div
             style={{
-              border: '1px solid #e8e8e8',
+              border: '1px solid var(--border-color-secondary)',
               borderRadius: 8, padding: '12px',
-              background: '#fafafa',
+              background: 'var(--bg-layout)',
             }}
           >
             <Space style={{ marginBottom: 10, display: 'flex', justifyContent: 'space-between' }}>
@@ -433,9 +433,9 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
                 const indeterminate = gradeSelectedClasses.length > 0 && !allSelected
 
                 return (
-                  <div key={grade} style={{ marginBottom: 8, padding: '6px 8px', background: '#fff', borderRadius: 6, border: '1px solid #f0f0f0' }}>
+                  <div key={grade} style={{ marginBottom: 8, padding: '6px 8px', background: 'var(--bg-container)', borderRadius: 6, border: '1px solid var(--border-color)' }}>
                     <Space style={{ marginBottom: 4 }}>
-                      <Typography.Text strong style={{ fontSize: 12, color: '#666' }}>{grade}</Typography.Text>
+                      <Typography.Text strong style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{grade}</Typography.Text>
                       <Checkbox
                         checked={allSelected}
                         indeterminate={indeterminate}
@@ -486,7 +486,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
           </Typography.Text>
         )}
 
-        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8, color: '#999' }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8, color: 'var(--text-tertiary)' }}>
           {t('sdClassHint')}
         </Typography.Text>
       </div>
@@ -550,7 +550,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             </Typography.Text>
 
             {/* ── 当前共享目标概览（可移除） ── */}
-            <div style={{ border: '1px solid #e8e8e8', borderRadius: 8, padding: '10px 14px', background: '#fafafa', marginBottom: 12 }}>
+            <div style={{ border: '1px solid var(--border-color-secondary)', borderRadius: 8, padding: '10px 14px', background: 'var(--bg-layout)', marginBottom: 12 }}>
               <Typography.Text strong style={{ fontSize: 13 }}>{t('sdCurrentTargets')}</Typography.Text>
               <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {/* 共享范围标签 */}
@@ -659,7 +659,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
                       }}
                     >
                       <Radio value={opt.value} disabled={disabled}>{opt.label}</Radio>
-                      <div style={{ fontSize: 12, color: '#999', marginTop: 4, marginLeft: 24 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, marginLeft: 24 }}>
                         {opt.desc}
                       </div>
                     </div>
@@ -693,7 +693,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
                     return <Tag closable={closable} onClose={onClose} style={{ margin: 2 }}>{label}</Tag>
                   }}
                 />
-                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6, color: '#999' }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6, color: 'var(--text-tertiary)' }}>
                   {t('sdSelectedVisible')}
                 </Typography.Text>
               </div>

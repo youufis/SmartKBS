@@ -1077,8 +1077,8 @@ export const AIPanel: React.FC<Props> = ({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        borderLeft: '1px solid #f0f0f0',
-        background: '#fff',
+        borderLeft: '1px solid var(--border-color)',
+        background: 'var(--bg-container)',
         flexShrink: 0,
         userSelect: 'text',
       }}
@@ -1087,11 +1087,11 @@ export const AIPanel: React.FC<Props> = ({
       <div
         style={{
           padding: '12px 16px',
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: '1px solid var(--border-color)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          background: '#fafafa',
+          background: 'var(--bg-layout)',
         }}
       >
         <Space>
@@ -1192,7 +1192,7 @@ export const AIPanel: React.FC<Props> = ({
             />
           </Tooltip>
         </Space>
-        <div style={{ fontSize: 11, color: '#bbb', marginTop: 6 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>
           {t('aiTipInput')}
         </div>
       </div>
@@ -1210,10 +1210,10 @@ export const AIPanel: React.FC<Props> = ({
         }}
       >
         {messages.length === 0 && !loading && (
-          <div style={{ textAlign: 'center', color: '#bbb', marginTop: 40 }}>
+          <div style={{ textAlign: 'center', color: 'var(--text-tertiary)', marginTop: 40 }}>
             <RobotOutlined style={{ fontSize: 40, display: 'block', marginBottom: 12 }} />
             <Text type="secondary">{t('aiAskPlaceholder')}</Text>
-            <div style={{ marginTop: 8, fontSize: 12, color: '#ccc' }}>
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-tertiary)' }}>
               {t('aiAskExample')}
             </div>
           </div>
@@ -1252,7 +1252,7 @@ export const AIPanel: React.FC<Props> = ({
                       code: ({ children, className }) => {
                         const isInline = !className
                         return isInline
-                          ? <code style={{ background: '#eee', padding: '1px 4px', borderRadius: 3, fontSize: 13 }}>{children}</code>
+                          ? <code style={{ background: 'var(--bg-layout)', padding: '1px 4px', borderRadius: 3, fontSize: 13 }}>{children}</code>
                           : <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 8, borderRadius: 6, overflow: 'auto', fontSize: 13 }}>{children}</pre>
                       },
                     }}
@@ -1263,7 +1263,7 @@ export const AIPanel: React.FC<Props> = ({
               )}
               {msg.isStreaming && <LoadingOutlined style={{ marginLeft: 4 }} />}
             </div>
-            <div style={{ fontSize: 11, color: '#bbb', marginTop: 2, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
               {msg.role === 'user' ? t('aiYou') : isTeacher ? t('aiAssist') : t('aiMate')}
             </div>
           </div>
@@ -1276,7 +1276,7 @@ export const AIPanel: React.FC<Props> = ({
               style={{
                 padding: '8px 12px',
                 borderRadius: 12,
-                background: '#f5f5f5',
+                background: 'var(--bg-layout)',
                 fontSize: 14,
                 lineHeight: 1.6,
                 wordBreak: 'break-word',
@@ -1291,7 +1291,7 @@ export const AIPanel: React.FC<Props> = ({
               </div>
               <span style={{ display: 'inline-block', animation: 'blink 1s step-end infinite' }}>▍</span>
             </div>
-            <div style={{ fontSize: 11, color: '#bbb', marginTop: 2 }}>{isTeacher ? t('aiAssist') : t('aiMate')}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>{isTeacher ? t('aiAssist') : t('aiMate')}</div>
           </div>
         )}
 
@@ -1306,7 +1306,7 @@ export const AIPanel: React.FC<Props> = ({
       </div>
 
       {/* ── 输入区 ── */}
-      <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0' }}>
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color)' }}>
         {loading ? (
           <Button block danger icon={<StopOutlined />} onClick={handleStop}>
             {t('aiStop')}
@@ -1335,7 +1335,7 @@ export const AIPanel: React.FC<Props> = ({
             />
           </Space.Compact>
         )}
-        <div style={{ fontSize: 11, color: '#ccc', marginTop: 4, textAlign: 'right' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4, textAlign: 'right' }}>
           {t('aiSendHint')}
         </div>
       </div>

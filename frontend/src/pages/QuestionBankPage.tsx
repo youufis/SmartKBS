@@ -448,7 +448,7 @@ const QuestionBankPage: React.FC = () => {
       key: 'id',
       width: 72,
       render: (id: number) => (
-        <span style={{ fontSize: 12, color: '#999', fontFamily: 'monospace' }}>#{id}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>#{id}</span>
       ),
     },
     {
@@ -487,7 +487,7 @@ const QuestionBankPage: React.FC = () => {
       width: 150,
       ellipsis: true,
       render: (text: string) => text ? (
-        <span style={{ fontSize: 13, color: '#666' }}>{text}</span>
+        <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{text}</span>
       ) : '-',
     },
     {
@@ -505,7 +505,7 @@ const QuestionBankPage: React.FC = () => {
       key: 'creator_name',
       width: 100,
       render: (name: string, record: QuestionInfo) => (
-        <span style={{ fontSize: 13, color: '#888' }}>
+        <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
           {name || record.creator_username}
         </span>
       ),
@@ -561,7 +561,7 @@ const QuestionBankPage: React.FC = () => {
       render: (_: any, record: QuestionInfo) => {
         // 权限：管理员（role=0）可操作全部，教师只能操作自己的
         const canEdit = user?.role === 'admin' || record.creator_username === user?.username
-        if (!canEdit) return <span style={{ color: '#ccc', fontSize: 12 }}>{t('onlyCreatorCanOperate')}</span>
+        if (!canEdit) return <span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('onlyCreatorCanOperate')}</span>
         return (
           <Space size="small">
             <Tooltip title={t('editQuestion')}>
@@ -590,7 +590,7 @@ const QuestionBankPage: React.FC = () => {
   ]
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', fontSize: 14, padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         {/* ── 标题和操作栏 ── */}
         <Row justify="space-between" align="middle">
@@ -928,7 +928,7 @@ const QuestionBankPage: React.FC = () => {
         {/* ── 筛选栏 ── */}
         <Row gutter={12} align="middle" style={{ marginTop: 8 }}>
           <Col>
-            <span style={{ fontSize: 13, color: '#888' }}><FilterOutlined /> {t('filter')}：</span>
+            <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}><FilterOutlined /> {t('filter')}：</span>
           </Col>
           <Col span={3}>
             <Select
@@ -1023,7 +1023,7 @@ const QuestionBankPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-                <div style={{ marginTop: 4, fontSize: 12, color: '#aaa' }}>
+                <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-tertiary)' }}>
                   {t('knowledgePointColon')}{record.knowledge_points || '-'} | {t('creator')}：{record.creator_name || record.creator_username}
                 </div>
               </div>
@@ -1093,9 +1093,9 @@ const QuestionBankPage: React.FC = () => {
               return (
                 <div style={{
                   marginTop: -16, marginBottom: 16, padding: '8px 12px',
-                  background: '#f9f9f9', borderRadius: 6, border: '1px solid #e8e8e8',
+                  background: 'var(--bg-layout)', borderRadius: 6, border: '1px solid var(--border-color-secondary)',
                 }}>
-                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>📐 {t('livePreview')}：</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 4 }}>📐 {t('livePreview')}：</div>
                   <div style={{ fontSize: 14, lineHeight: 1.8 }}>
                     <FormulaRenderer content={qt} />
                   </div>
@@ -1107,7 +1107,7 @@ const QuestionBankPage: React.FC = () => {
           {/* ── 选项编辑（非简答题） ── */}
           {editingQuestion?.type !== 'short' && (
             <Form.Item label={t('options')} required>
-              <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: 12, background: '#fafafa' }}>
+              <div style={{ border: '1px solid var(--border-color-secondary)', borderRadius: 6, padding: 12, background: 'var(--bg-layout)' }}>
                 {optionEntries.length === 0 && (
                   <Typography.Text type="secondary" style={{ fontSize: 13 }}>
                     {t('noOptionsYet')}
@@ -1133,9 +1133,9 @@ const QuestionBankPage: React.FC = () => {
                       {entry.value && (
                         <div style={{
                           marginTop: 2, padding: '2px 8px',
-                          background: '#fff', borderRadius: 4,
-                          fontSize: 13, color: '#666',
-                          border: '1px dashed #e8e8e8',
+                          background: 'var(--bg-container)', borderRadius: 4,
+                          fontSize: 13, color: 'var(--text-secondary)',
+                          border: '1px dashed var(--border-color-secondary)',
                         }}>
                           <FormulaRenderer content={entry.value} inline />
                         </div>
@@ -1267,7 +1267,7 @@ const QuestionBankPage: React.FC = () => {
           {showFormulaHelp && (
             <div style={{
               padding: '8px 12px', background: '#f6f8fa', borderRadius: 6,
-              border: '1px solid #e8e8e8', fontSize: 12, lineHeight: 2, marginBottom: 8,
+              border: '1px solid var(--border-color-secondary)', fontSize: 12, lineHeight: 2, marginBottom: 8,
             }}>
               <Typography.Text strong style={{ fontSize: 13 }}>{t('latexExamplesTitle')}</Typography.Text>
               <table style={{ width: '100%', marginTop: 4, borderCollapse: 'collapse' }}>
@@ -1282,8 +1282,8 @@ const QuestionBankPage: React.FC = () => {
                     ['化学式', '$\\ce{H2O}$ / $\\ce{CO2}$', '$\\ce{H2O}$'],
                     ['矢量', '$\\vec{v}$ / $\\overrightarrow{AB}$', '$\\vec{v}$'],
                   ].map(([desc, syntax, preview], i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '2px 8px', color: '#666', width: 80 }}>{desc}</td>
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '2px 8px', color: 'var(--text-secondary)', width: 80 }}>{desc}</td>
                       <td style={{ padding: '2px 8px', fontFamily: 'monospace', fontSize: 11 }}>{syntax}</td>
                       <td style={{ padding: '2px 8px' }}><FormulaRenderer content={preview} inline /></td>
                     </tr>

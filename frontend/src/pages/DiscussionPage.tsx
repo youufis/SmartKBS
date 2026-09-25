@@ -336,13 +336,13 @@ const DiscussionPage: React.FC = () => {
               {disc.subject && <Tag>{disc.subject}</Tag>}
             </Space>
             {disc.description && (
-              <div className="markdown-content" style={{ color: '#666', fontSize: 13, marginTop: 4 }}>
+              <div className="markdown-content" style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 4 }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{disc.description}</ReactMarkdown>
               </div>
             )}
           </div>
         </div>
-        <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 13, color: '#888' }}>
+        <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 13, color: 'var(--text-tertiary)' }}>
           <span><TeamOutlined /> {disc.total_members || 0}{t('people')}{t('participants')}</span>
           <span><MessageOutlined /> {disc.total_messages || 0}{t('messages_')}</span>
           <span><RobotOutlined /> {getAiRoleLabel(disc.ai_role)}</span>
@@ -402,7 +402,7 @@ const DiscussionPage: React.FC = () => {
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{disc.description}</ReactMarkdown>
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: 24, fontSize: 13, color: '#888', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: 24, fontSize: 13, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
                       <span><TeamOutlined /> {t('participants')}：{disc.total_members || 0}</span>
                       <span><MessageOutlined /> {t('messageCount')}：{disc.total_messages || 0}</span>
                       <span><RobotOutlined /> {t('aiRole_')}：{getAiRoleLabel(disc.ai_role) || '-'}</span>
@@ -417,9 +417,9 @@ const DiscussionPage: React.FC = () => {
                       )}
                     </div>
                     {isTeacherOrAdmin && (
-                      <div style={{ marginTop: 10, borderTop: '1px solid #f0f0f0', paddingTop: 10 }}>
+                      <div style={{ marginTop: 10, borderTop: '1px solid var(--border-color)', paddingTop: 10 }}>
                         <Space>
-                          <span style={{ fontSize: 13, color: '#888' }}>📋 {t('aiSummary')}：</span>
+                          <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>📋 {t('aiSummary')}：</span>
                           {disc.status === 'pending' && <Tag style={{ margin: 0 }}>{t('notStarted')}</Tag>}
                           {disc.status === 'active' && <Tag color="processing" style={{ margin: 0 }}>{t('inProgress')}</Tag>}
                           {disc.status === 'ended' && disc.has_summary && (
@@ -547,13 +547,13 @@ const DiscussionPage: React.FC = () => {
                 {STATUS_MAP[detailModal.status]?.label}
               </Tag>
               <Tag>{detailModal.subject || t('noSubject')}</Tag>
-              <span style={{ marginLeft: 12, color: '#888' }}>
+              <span style={{ marginLeft: 12, color: 'var(--text-tertiary)' }}>
                 <RobotOutlined /> {getAiRoleLabel(detailModal.ai_role)}
               </span>
             </div>
 
             {detailModal.description && (
-              <div className="markdown-content" style={{ marginBottom: 16, color: '#666' }}>
+              <div className="markdown-content" style={{ marginBottom: 16, color: 'var(--text-secondary)' }}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{detailModal.description}</ReactMarkdown>
               </div>
             )}
