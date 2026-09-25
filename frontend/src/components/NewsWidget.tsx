@@ -1,10 +1,11 @@
 /** 热点新闻 - 首页Widget */
 import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Card, Tag, Button, Space, Typography, List, Spin, Progress } from 'antd';
+import { Card, Tag, Button, Space, Typography, Spin, Progress } from 'antd';
 import { GlobalOutlined, RightOutlined, EyeOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useNewsStore } from '../stores/newsStore';
+import { RowList, RowItem } from './RowList'
 
 const { Text } = Typography;
 
@@ -43,16 +44,14 @@ const NewsWidget: React.FC = () => {
           <Spin />
         </div>
       ) : (
-        <List
-          size="small"
-          dataSource={articles.slice(0, 3)}
+        <RowList
+          items={articles.slice(0, 3)}
           renderItem={(item) => (
-            <List.Item
+            <RowItem
+              dense
               style={{ cursor: 'pointer' }}
               onClick={() => navigate(`/news-hub?id=${item.id}`)}
-            >
-              <List.Item.Meta
-                title={
+              title={
                   <Space size={4}>
                     <Tag color={CATEGORY_COLORS[item.category] || 'default'}
                       style={{ fontSize: 10, lineHeight: '16px' }}>
@@ -78,8 +77,7 @@ const NewsWidget: React.FC = () => {
                     )}
                   </Space>
                 }
-              />
-            </List.Item>
+            />
           )}
         />
       )}

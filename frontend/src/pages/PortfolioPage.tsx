@@ -6,7 +6,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card, Row, Col, Statistic, Typography, Spin, Tag, Space,
   Timeline, Empty, Alert, Button, Select, message,
-  Table, List, Modal,
+  Table, Modal,
 } from 'antd'
 import {
   TrophyOutlined, FileAddOutlined, CheckCircleOutlined,
@@ -21,6 +21,7 @@ import { pollAiTask } from '../api/aiTask'
 import * as trackingApi from '../api/tracking'
 import { useAuthStore } from '../stores/authStore'
 import { reportLoadError } from '../utils/loadError'
+import { RowList, RowItem } from '../components/RowList'
 
 const { Title, Text } = Typography
 
@@ -511,20 +512,18 @@ const PortfolioPage: React.FC = () => {
           {/* 任务完成 */}
           {tasks.tasks.length > 0 && (
             <Card title={<Space><CheckCircleOutlined />{t('taskCompleted')}</Space>} style={{ marginBottom: 16 }} size="small">
-              <List
-                size="small"
-                dataSource={tasks.tasks}
+              <RowList
+                items={tasks.tasks}
                 renderItem={(item) => (
-                  <List.Item>
-                    <List.Item.Meta
-                      title={item.name}
-                      description={
+                  <RowItem
+                    dense
+                    title={item.name}
+                    description={
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           {item.description} | {t('portfolio.submittedAt', { date: item.submitted_at?.slice(0, 10) || t('portfolio.unknown') })}
                         </Text>
-                      }
-                    />
-                  </List.Item>
+                        }
+                  />
                 )}
               />
             </Card>

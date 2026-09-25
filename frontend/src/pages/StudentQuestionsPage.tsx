@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import {
-  Card, Button, Space, Typography, List, Tag, Modal,
+  Card, Button, Space, Typography, Tag, Modal,
   Form, Input, Select, message, Empty, Spin, Popconfirm,
   Checkbox,
 } from 'antd'
@@ -22,6 +22,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { reportLoadError } from '../utils/loadError'
+import { RowList, RowItem } from '../components/RowList'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -390,8 +391,9 @@ const StudentQuestionsPage: React.FC = () => {
 
         <Spin spinning={questionLoading}>
           {questions.length === 0 ? <Empty description={t('noQuestions')} /> : (
-            <List
-              dataSource={questions}
+            <RowList
+              items={questions}
+              split={false}
               renderItem={(q: any) => (
                 <QuestionItem
                   q={q}

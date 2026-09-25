@@ -53,17 +53,19 @@ interface RowItemProps {
   onClick?: () => void
   onMouseEnter?: (e: MouseEvent<HTMLDivElement>) => void
   onMouseLeave?: (e: MouseEvent<HTMLDivElement>) => void
+  /** 对应 antd List 的 size="small"（行内边距 4px 16px） */
+  dense?: boolean
   style?: CSSProperties
 }
 
-export function RowItem({ avatar, title, description, actions, onClick, onMouseEnter, onMouseLeave, style }: RowItemProps) {
+export function RowItem({ avatar, title, description, actions, onClick, onMouseEnter, onMouseLeave, dense, style }: RowItemProps) {
   const { token } = theme.useToken()
   const actionCount = actions?.length ?? 0
   return (
     <div
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 0', color: token.colorText, ...style,
+        padding: dense ? '4px 16px' : '8px 0', color: token.colorText, ...style,
       }}
       onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
     >

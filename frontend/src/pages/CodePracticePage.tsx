@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Card, List, Typography, Button, Space, Tag, Modal, Spin,
+  Card, Typography, Button, Space, Tag, Modal, Spin,
   message, Tabs, Empty, Select, Statistic, Row, Col,
   Table, Progress, Descriptions, Divider, Input, Alert, InputNumber,
   Pagination,
@@ -22,6 +22,7 @@ import CodeEditor from '../components/CodeEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
+import { RowList, RowItem } from '../components/RowList'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -1287,27 +1288,28 @@ const CodePracticePage: React.FC = () => {
             {submissions.length === 0 ? (
               <Text type="secondary">{t('noHistory')}</Text>
             ) : (
-              <List
-                size="small"
-                dataSource={submissions}
+              <RowList
+                items={submissions}
                 renderItem={(s: any) => {
                   const st = STATUS_MAP[s.status]
                   return (
-                    <List.Item
-                      style={{ cursor: 'pointer' }}
+                    <RowItem
+                      dense
+                      style={{ cursor: 'pointer', width: '100%' }}
                       onClick={async () => {
                         try {
                           const { data } = await apiClient.get(`/api/code/submissions/${s.id}`)
                           setSubmissionResult(data)
                         } catch { /* ignore */ }
                       }}
-                    >
-                      <Space>
-                        <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || s.status}</Tag>
-                        <Text type="secondary" style={{ fontSize: 12 }}>{t('scorePoints', { score: s.score })}</Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>{s.created_at?.slice(5, 16)}</Text>
-                      </Space>
-                    </List.Item>
+                      title={(
+                        <Space>
+                          <Tag color={st?.color}>{st?.icon} {t(st?.labelKey ?? '') || s.status}</Tag>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{t('scorePoints', { score: s.score })}</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>{s.created_at?.slice(5, 16)}</Text>
+                        </Space>
+                      )}
+                    />
                   )
                 }}
               />

@@ -4,7 +4,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react'
 import {
-  Card, Button, Typography, Space, Tag, Avatar, List, message, Spin,
+  Card, Button, Typography, Space, Tag, Avatar, message, Spin,
 } from 'antd'
 import {
   ThunderboltOutlined, TeamOutlined, UserOutlined,
@@ -16,6 +16,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { reportLoadError } from '../utils/loadError'
+import { RowList, RowItem } from '../components/RowList'
 
 const { Title, Text } = Typography
 
@@ -262,15 +263,17 @@ const QuickQuizLobby: React.FC = () => {
             <Text type="secondary">{t('noPlayersWaiting')}</Text>
           </div>
         ) : (
-          <List
-            dataSource={players}
+          <RowList
+            items={players}
             renderItem={(p: any, idx: number) => (
-              <List.Item>
+              <RowItem
+                title={(
                 <Space>
                   <Avatar icon={<UserOutlined />} style={{ backgroundColor: ['#1677ff', '#52c41a', '#fa8c16', '#eb2f96', '#722ed1'][idx % 5] }} />
                   <Text strong>{p.student_name || p.student_username}</Text>
                 </Space>
-              </List.Item>
+                )}
+              />
             )}
           />
         )}
