@@ -47,6 +47,8 @@
 DashScope（通义千问/通义万相）与 DeepSeek 等大语言模型能力，通过灵活的 AI 调用服务
 （支持百炼智能体应用与直接调用大模型双模式），为师生提供一站式的智能化教学与学习体验。
 
+**📦 三种部署方式**：Windows 桌面版一键安装（零环境，不需要 Python / Node.js）· 源码包部署 · Git 克隆部署（支持在线增量升级）。详见 [部署安装指引](#-部署安装指引)。
+
 > 💡 **核心设计理念**
 >
 > - **🧠 AI Native 全场景注入**
@@ -1029,7 +1031,26 @@ AI 对课堂互动数据进行综合分析：
 
 ## 📦 部署安装指引
 
-### 方式一：下载源码包部署（推荐新手）
+### 方式一：一键部署 · SmartKBS 桌面版（零环境，最省事）
+
+不想装 Python 和 Node.js，就用桌面版安装包 —— 双击装完就能用。
+
+1. 到 Releases 下载最新安装包：[SmartKBS Releases](https://github.com/youufis/SmartKBS/releases)
+   （当前为 `SmartKBS-Setup-8.3.0.exe`，约 120 MB，**仅 Windows x64**）
+2. 双击安装：简体中文向导，可自选安装目录，自动创建桌面与开始菜单快捷方式
+3. 启动 SmartKBS：桌面版自动拉起内置后端，等 `8086` 就绪后自动打开应用窗口
+4. 本机访问 `http://127.0.0.1:8086`；同一局域网内的学生访问 `http://本机局域网IP:8086`（如 `http://192.168.1.100:8086`）
+   （首次启动请在 Windows 防火墙弹窗中选「允许访问」，否则其他设备连不上）
+
+| 项目 | 说明 |
+| --- | --- |
+| 运行依赖 | 无。目标机器不需要 Python / Node.js（Electron 壳 + PyInstaller 后端 + Vite 前端） |
+| 数据存放 | `%APPDATA%\SmartKBS\`（数据库、上传文件、日志都在此），**卸载重装不丢数据** |
+| 升级方式 | 下载新版安装包直接覆盖安装；桌面版不走「在线增量升级」（那是 Git 部署专属） |
+| 端口 | 固定 `8086`。若这台机器已用 IIS 跑着 Web 版，先停掉，否则桌面版起不来 |
+| 支持平台 | 目前只发布 Windows x64 安装包；macOS / Linux 的打包配置已就绪但暂未出包 |
+
+### 方式二：下载源码包部署（需 Python 环境）
 
 1. 从 GitHub 下载最新源码 ZIP：[youufis/SmartKBS](https://github.com/youufis/SmartKBS)
 2. 解压到服务器目录（如 `D:\SmartKBS`）
@@ -1045,7 +1066,7 @@ AI 对课堂互动数据进行综合分析：
    python backend/main.py
    ```
 
-### 方式二：Git 克隆部署（推荐，支持在线升级）
+### 方式三：Git 克隆部署（推荐学校机房，支持在线升级）
 
 ```bash
 git clone https://github.com/youufis/SmartKBS.git

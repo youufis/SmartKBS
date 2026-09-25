@@ -45,6 +45,8 @@
 
 Built with **FastAPI + React**, the system adopts a modern front-end/back-end separation architecture, deeply integrating Alibaba Cloud DashScope (Tongyi Qianwen/Tongyi Wanxiang) and DeepSeek large language model capabilities. Through a flexible AI invocation service (supporting both Bailian Agent application and direct model invocation modes), it provides teachers and students with a one-stop intelligent teaching and learning experience.
 
+**📦 Three ways to deploy**: one-click Windows desktop installer (no environment, no Python / Node.js) · source package deployment · Git clone deployment (with online incremental upgrades). See the [Deployment Guide](#-deployment-guide).
+
 > 💡 **Core Design Philosophy**
 >
 > - **🧠 AI Native, Full-Scenario Integration**
@@ -1029,7 +1031,26 @@ Git-based online incremental upgrade system:
 
 ## 📦 Deployment Guide
 
-### Method 1: Download Source Package (Recommended for Beginners)
+### Method 1: One-Click Install · SmartKBS Desktop (no environment needed)
+
+Don't want to install Python or Node.js? Use the desktop installer — double-click and go.
+
+1. Download the latest installer from Releases: [SmartKBS Releases](https://github.com/youufis/SmartKBS/releases)
+   (currently `SmartKBS-Setup-8.3.0.exe`, ~120 MB, **Windows x64 only**)
+2. Run it: wizard (Simplified Chinese), pick your install folder, desktop and Start Menu shortcuts are created for you
+3. Launch SmartKBS: the built-in backend starts on its own and the app window opens once port `8086` is ready
+4. Local access at `http://127.0.0.1:8086`; students on the same LAN use `http://LAN-IP-of-this-machine:8086` (e.g. `http://192.168.1.100:8086`)
+   (click "Allow access" on the first Windows Firewall prompt, or other devices can't reach it)
+
+| Item | Notes |
+| --- | --- |
+| Runtime dependencies | None — no Python / Node.js needed (Electron shell + PyInstaller backend + Vite frontend) |
+| Data location | `%APPDATA%\SmartKBS\` (database, uploads, logs) — **survives uninstall and reinstall** |
+| Upgrading | Just install the newer build over it; the desktop edition does not use the online incremental upgrade (Git deployments only) |
+| Port | Fixed `8086`. If the web edition already runs on this machine under IIS, stop it first or the desktop app won't start |
+| Platforms | Only a Windows x64 installer is published today; macOS / Linux packaging is configured but not released |
+
+### Method 2: Download Source Package (requires Python)
 
 1. Download the latest source code ZIP from GitHub: [youufis/SmartKBS](https://github.com/youufis/SmartKBS)
 2. Extract to server directory (e.g., `D:\SmartKBS`)
@@ -1045,7 +1066,7 @@ Git-based online incremental upgrade system:
    python backend/main.py
    ```
 
-### Method 2: Git Clone Deployment (Recommended, Supports Online Upgrade)
+### Method 3: Git Clone Deployment (Recommended, Supports Online Upgrade)
 
 ```bash
 git clone https://github.com/youufis/SmartKBS.git
