@@ -8,6 +8,7 @@ import 'tldraw/tldraw.css'
 import { useWhiteboardStore } from '../../stores/whiteboardStore'
 import { useWhiteboardWS } from '../../hooks/useWhiteboardWS'
 import apiClient from '../../api/client'
+import { reportLoadError } from '../../utils/loadError'
 
 // 使用自建 WebSocket 后端，屏蔽 TLDraw 默认的云同步面板和右下角水印
 const minimalComponents: TLComponents = {
@@ -214,7 +215,7 @@ if (readOnlyRef.current && !httpSyncedRef.current) {
         })
       }
     })
-    .catch(() => {})
+    .catch((err) => { reportLoadError(err, { key: 'whiteboard.snapshot' }) })
 }
 // 主动请求服务端推送最新快照（解决初始演示模式学生端收不到内容的问题）
 ws.send({ type: 'request_sync' })

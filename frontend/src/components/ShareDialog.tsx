@@ -9,6 +9,7 @@ import {
 import * as sharingApi from '../api/sharing'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { reportLoadError } from '../utils/loadError'
 
 interface ShareDialogProps {
   open: boolean
@@ -89,7 +90,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
       apiClient.get('/api/users', { params: { keyword: '' } }).then(res => {
         const allUsers: sharingApi.UserItem[] = res.data?.users || []
         setTeachers(allUsers.filter(u => u.role === '教师' || u.role === '管理员'))
-      }).catch(() => {})
+      }).catch((err) => { reportLoadError(err, { key: 'share.teacherList' }) })
 
       // 加载年级列表
       apiClient.get('/api/rollcall/grades').then(res => {
@@ -100,7 +101,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
           setSelectedGrades([...gs])
           setGradeSelectAll(true)
         }
-      }).catch(() => {})
+      }).catch((err) => { reportLoadError(err, { key: 'share.gradeList' }) })
     }
   }, [open, existingShare, isAdmin, isTeacher])
 

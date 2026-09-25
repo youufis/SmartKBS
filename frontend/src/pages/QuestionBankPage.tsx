@@ -20,6 +20,7 @@ import MediaDisplay from '../components/MediaDisplay'
 import PlaceholderManager from '../components/PlaceholderManager'
 import { TYPE_LABELS, TYPE_COLORS, TYPE_OPTIONS } from '../constants/questionTypes'
 import { closeWithDirtyGuard } from '../utils/dirtyClose'
+import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -49,7 +50,7 @@ const QuestionBankPage: React.FC = () => {
       if (data?.subjects?.length > 0) {
         subjectOptions = data.subjects
       }
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'questionBank.subjects' }) })
   }, [])
   // ── 生成试题表单 ──
   const [generateForm] = Form.useForm()

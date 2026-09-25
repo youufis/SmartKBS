@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
 import { registerUser, extractApiErrorDetail } from '../api/users'
+import { reportLoadError } from '../utils/loadError'
 
 const { Text } = Typography
 
@@ -64,7 +65,7 @@ const ScorePage: React.FC = () => {
     if (isAdmin) {
       apiClient.get('/api/scores/teachers').then(({ data }) => {
         if (Array.isArray(data)) setTeacherList(data)
-      }).catch(() => {})
+      }).catch((err) => { reportLoadError(err, { key: 'score.teachers' }) })
     }
   }, [isAdmin])
 
@@ -77,7 +78,7 @@ const ScorePage: React.FC = () => {
           setGrade((prev) => data.includes(prev) ? prev : data[0])
         }
       })
-      .catch(() => {})
+      .catch((err) => { reportLoadError(err, { key: 'score.grades' }) })
   }, [currentTeacher])
 
   const [grade, setGrade] = useState<string>('')

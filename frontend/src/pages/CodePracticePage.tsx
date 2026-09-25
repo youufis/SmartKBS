@@ -21,6 +21,7 @@ import { useAuthStore } from '../stores/authStore'
 import CodeEditor from '../components/CodeEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -65,7 +66,7 @@ const CompactCodeView: React.FC<{
         setCustomInput(data.sample_cases[0].input)
       }
       if (data?.starter_code) setCode(data.starter_code)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'codePractice.problem' }) })
   }, [problemId])
 
   const handleRun = async () => {

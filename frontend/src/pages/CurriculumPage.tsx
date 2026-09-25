@@ -28,6 +28,7 @@ import ResourceBinder from '../components/ResourceBinder'
 import AICurriculumGenerator from '../components/AICurriculumGenerator'
 import type { Course, ChapterTreeNode, KnowledgePoint, CurriculumResource } from '../types'
 import ResetActivityButton from '../components/ResetActivityButton'
+import { reportLoadError } from '../utils/loadError'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -89,9 +90,9 @@ const CurriculumPage: React.FC = () => {
   useEffect(() => {
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setSubjectOptions(data.subjects)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'curriculum.subjects' }) })
     // 年级下拉取实际有在读学生的年级（/config/grades 是 K12 主数据，含本校没有的年级）
-    fetchGrades().then((list) => { if (list.length > 0) setGradeOptions(list) }).catch(() => {})
+    fetchGrades().then((list) => { if (list.length > 0) setGradeOptions(list) }).catch((err) => { reportLoadError(err, { key: 'curriculum.grades' }) })
   }, [])
 
   // ── 课程树数据 ──
@@ -314,15 +315,15 @@ const CurriculumPage: React.FC = () => {
     curriculumApi.getAiPracticeThemes().then(themes => {
       setPracticeThemes(themes)
       if (themes.length > 0) setPracticeTheme(themes[0].id)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'curriculum.practiceThemes' }) })
     // 加载学科
     apiClient.get('/api/config/subjects').then(({ data }) => {
       if (data?.subjects?.length > 0) setPracticeSubjectOptions(data.subjects)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'curriculum.practiceSubjects' }) })
     // 加载年级
     apiClient.get('/api/scores/my-grades').then(({ data }) => {
       if (Array.isArray(data) && data.length > 0) setPracticeGradeOptions(data)
-    }).catch(() => {})
+    }).catch((err) => { reportLoadError(err, { key: 'curriculum.practiceGrades' }) })
     if (activeCourse?.subject) setPracticeSubject(activeCourse.subject)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [practiceModal])

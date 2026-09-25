@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -162,7 +163,7 @@ const QuickQuizConsole: React.FC = () => {
     try {
       const res = await apiClient.get(`/api/quick-quiz/room/${roomId}/current-question`)
       loadCurrentQuestionFromData(res.data)
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'quickQuiz.currentQuestion', retry: () => { void loadCurrentQuestion() } }) }
   }
 
   const connectWebSocket = () => {

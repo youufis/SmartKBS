@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import * as authApi from '../api/auth'
 import { useTranslation, Trans } from 'react-i18next'
+import { reportLoadError } from '../utils/loadError'
 
 const { Text } = Typography
 
@@ -33,7 +34,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
   useEffect(() => {
     if (open) {
       setEditing(false)
-      authApi.getSecurityQuestions().then(setQuestions).catch(() => {})
+      authApi.getSecurityQuestions().then(setQuestions).catch((err) => { reportLoadError(err, { key: 'security.questions' }) })
       authApi.getSecurityStatus().then((status) => {
         setCurrentQ1(status.question1 || '')
         setCurrentQ2(status.question2 || '')
@@ -44,7 +45,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
           setEditing(true)
           form.setFieldsValue({ question1: status.question1 })
         }
-      }).catch(() => {})
+      }).catch((err) => { reportLoadError(err, { key: 'security.status' }) })
       form.resetFields()
     }
   }, [open, form])
