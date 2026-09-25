@@ -86,7 +86,7 @@ const AboutPage: React.FC = () => {
           icon={<LockOutlined />}
           showIcon
           style={{ marginBottom: 16 }}
-          message={
+          title={
             <span>
               {t('updateAvailable')}
               <Button

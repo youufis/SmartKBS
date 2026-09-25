@@ -220,7 +220,7 @@ const PortfolioPage: React.FC = () => {
   }
 
   if (error) {
-    return <Alert type="error" message={error} showIcon />
+    return <Alert type="error" title={error} showIcon />
   }
 
   if (!data) {
@@ -308,7 +308,7 @@ const PortfolioPage: React.FC = () => {
       {/* ─── 综合摘要 ─── */}
       <Alert
         type="info"
-        message={
+        title={
           <Space>
             <BookOutlined />
             <Text>{data.summary}</Text>

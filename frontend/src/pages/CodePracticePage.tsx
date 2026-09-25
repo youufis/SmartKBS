@@ -1135,7 +1135,7 @@ const CodePracticePage: React.FC = () => {
             <Alert
               type="success"
               showIcon
-              message={t('aiGenerateComplete')}
+              title={t('aiGenerateComplete')}
               description={
                 <div>
                   <Text strong>{t('title')}：</Text>{aiGenResult.title}<br />

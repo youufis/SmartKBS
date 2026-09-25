@@ -411,7 +411,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
           </Space>
 
           <Alert
-            message={t('aiGenerator.alertHint')}
+            title={t('aiGenerator.alertHint')}
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
@@ -507,7 +507,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       {step === 3 && (
         <div style={{ padding: '16px 0' }}>
           <Alert
-            message={t('aiGenerator.errorTitle')}
+            title={t('aiGenerator.errorTitle')}
             description={
               <div>
                 <Typography.Paragraph style={{ marginBottom: 8 }}>{errorMsg}</Typography.Paragraph>

@@ -159,7 +159,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
       {lockedMsg && (
         <Alert
           type="warning"
-          message={lockedMsg}
+          title={lockedMsg}
           style={{ marginBottom: 16 }}
           showIcon
         />
@@ -250,7 +250,7 @@ const ForgotPasswordModal: React.FC<Props> = ({ open, onClose }) => {
         <Form form={passwordForm} onFinish={handleResetPassword} layout="vertical">
           <Alert
             type="success"
-            message={t('fpBothPassed')}
+            title={t('fpBothPassed')}
             style={{ marginBottom: 16 }}
             showIcon
           />

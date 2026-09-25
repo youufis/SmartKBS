@@ -848,7 +848,7 @@ const UserMgmtPage: React.FC = () => {
                 <Alert
                   type="error"
                   showIcon
-                  message={t('deleteWarnCount', { count: bulkPreview.matched_count })}
+                  title={t('deleteWarnCount', { count: bulkPreview.matched_count })}
                   description={bulkPreview.message}
                 />
                 {bulkPreview.preview.length > 0 && (

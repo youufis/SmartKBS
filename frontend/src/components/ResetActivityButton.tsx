@@ -221,12 +221,12 @@ const ResetActivityButton: React.FC<Props> = ({
         onOk={() => { if (result) { setOpen(false); return; } void doReset(); }}
       >
         <Spin spinning={loading}>
-          {error && <Alert type="error" showIcon style={{ marginBottom: 12 }} message={errText(error)} />}
+          {error && <Alert type="error" showIcon style={{ marginBottom: 12 }} title={errText(error)} />}
 
           {!result && preview && (
             <>
               <Alert type="warning" showIcon style={{ marginBottom: 12 }}
-                     message={t('activityMonitor.reset.warning')}
+                     title={t('activityMonitor.reset.warning')}
                      description={t('activityMonitor.reset.warningDesc')} />
 
               <Descriptions size="small" column={1} bordered style={{ marginBottom: 12 }}
@@ -302,7 +302,7 @@ const ResetActivityButton: React.FC<Props> = ({
 
               {preview.status_reset && !preview.status_reset.will_change && !!preview.status_reset.from && (
                 <Alert type="info" showIcon style={{ marginBottom: 8 }}
-                       message={t('activityMonitor.reset.statusKeep', {
+                       title={t('activityMonitor.reset.statusKeep', {
                          status: sv(preview.status_reset.from, preview.status_reset.from_label),
                        })} />
               )}
@@ -310,7 +310,7 @@ const ResetActivityButton: React.FC<Props> = ({
               {preview.warnings.length > 0 && (
                 <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
                   {preview.warnings.map((w) => (
-                    <Alert key={w.code || w.text} type="error" showIcon message={warnText(w)} />
+                    <Alert key={w.code || w.text} type="error" showIcon title={warnText(w)} />
                   ))}
                 </Space>
               )}
@@ -322,7 +322,7 @@ const ResetActivityButton: React.FC<Props> = ({
               )}
               {nothingToDo && (
                 <Alert style={{ marginTop: 12 }} type="success" showIcon
-                       message={t('activityMonitor.reset.nothing')} />
+                       title={t('activityMonitor.reset.nothing')} />
               )}
 
               {/* 是否需要输入确认口令由服务端 policy 决定（无名活动不该被卡死） */}
@@ -341,7 +341,7 @@ const ResetActivityButton: React.FC<Props> = ({
           {result && (
             <>
               <Alert type="success" showIcon style={{ marginBottom: 12 }}
-                     message={t('activityMonitor.reset.doneTitle')}
+                     title={t('activityMonitor.reset.doneTitle')}
                      description={t('activityMonitor.reset.doneDesc', {
                        rows: result.deleted_total, points: result.rewards_points,
                        students: result.students_affected, notified: result.notified_students,

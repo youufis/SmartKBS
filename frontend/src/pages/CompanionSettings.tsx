@@ -275,7 +275,7 @@ const CompanionSettings: React.FC = () => {
                   <Alert
                     type="info"
                     showIcon
-                    message={`💡 ${t('companionSuggestion')}`}
+                    title={`💡 ${t('companionSuggestion')}`}
                     description={profile.recommendation}
                     style={{ fontSize: 12 }}
                   />

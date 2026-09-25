@@ -407,7 +407,7 @@ const PortraitPage: React.FC = () => {
               {generating ? '✨ ' + t('ptCreating') : `🔥 ${t('regenerateWithPoints')}`}
             </Button>
             {error && (
-              <Alert type="error" message={error} showIcon closable
+              <Alert type="error" title={error} showIcon closable
                 onClose={() => usePortraitStore.setState({ error: null })}
                 style={{ marginTop: 12, maxWidth: 400, margin: '12px auto 0' }}
               />
@@ -481,7 +481,7 @@ const PortraitPage: React.FC = () => {
               {error && (
                 <Alert
                   type="error"
-                  message={error}
+                  title={error}
                   showIcon
                   closable
                   style={{ marginTop: 16, maxWidth: 400, margin: '16px auto 0' }}

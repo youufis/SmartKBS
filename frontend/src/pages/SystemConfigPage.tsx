@@ -416,7 +416,7 @@ const SkillManagePanel: React.FC = () => {
           />
         </Space>
         {errorMsg && (
-          <Alert type="warning" showIcon message={errorMsg} style={{ margin: 0, flex: 1 }} />
+          <Alert type="warning" showIcon title={errorMsg} style={{ margin: 0, flex: 1 }} />
         )}
       </div>
 
@@ -580,7 +580,7 @@ const SkillManagePanel: React.FC = () => {
 
             {/* 原始文档内容 */}
             {selectedSkill.parse_error && (
-              <Alert type="warning" showIcon message={t('skillParseError')} description={selectedSkill.parse_error} style={{ marginBottom: 16 }} />
+              <Alert type="warning" showIcon title={t('skillParseError')} description={selectedSkill.parse_error} style={{ marginBottom: 16 }} />
             )}
             {selectedSkill.raw_content && (
               editing ? (
@@ -667,7 +667,7 @@ const UpgradePanel: React.FC = () => {
         <div>
           {isPrefetched && (
             <Alert type="success" showIcon icon={<DownloadOutlined />}
-              message={t('upgradeCodeCached')}
+              title={t('upgradeCodeCached')}
               description={t('upgradeCodeCachedDesc')}
               style={{ marginBottom: 12 }}
             />
@@ -845,7 +845,7 @@ const UpgradePanel: React.FC = () => {
         <Alert
           type="error"
           showIcon
-          message={t('gitEnvError')}
+          title={t('gitEnvError')}
           description={
             <div>
               {!verInfo.git_available ? (
@@ -973,7 +973,7 @@ const UpgradePanel: React.FC = () => {
               type="warning"
               showIcon
               icon={<SyncOutlined spin />}
-              message={t('waitingServiceRecovery')}
+              title={t('waitingServiceRecovery')}
               description={t('serviceUnavailable')}
               style={{ marginTop: 8, marginBottom: 8 }}
             />
@@ -982,7 +982,7 @@ const UpgradePanel: React.FC = () => {
             {restarting ? t('waitingServiceHint') : t('noResponseHint')}
           </p>
           {upgradeProg.error && (
-            <Alert type="error" message={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
+            <Alert type="error" title={upgradeProg.error} showIcon style={{ marginTop: 8 }} />
           )}
         </Card>
       )}
@@ -993,7 +993,7 @@ const UpgradePanel: React.FC = () => {
           type="warning"
           showIcon
           icon={<ExclamationCircleOutlined />}
-          message={t('migrationsUnverifiedTitle')}
+          title={t('migrationsUnverifiedTitle')}
           description={
             <div>
               <p style={{ marginBottom: 8 }}>{t('migrationsUnverifiedDesc')}</p>
@@ -1590,7 +1590,7 @@ const SystemConfigPage: React.FC = () => {
                   style={{ width: '100%', marginTop: 4 }}
                   type={modelTestResult.ok ? 'success' : 'error'}
                   showIcon
-                  message={modelTestResult.ok
+                  title={modelTestResult.ok
                     ? t('modelTestOk', { model: modelTestResult.model, reply: modelTestResult.reply, ms: modelTestResult.cost_ms })
                     : t('modelTestFail', { err: modelTestResult.error })}
                 />
@@ -1600,7 +1600,7 @@ const SystemConfigPage: React.FC = () => {
                   style={{ width: '100%', marginTop: 4 }}
                   type={appidTestResult.ok ? 'success' : 'error'}
                   showIcon
-                  message={appidTestResult.ok
+                  title={appidTestResult.ok
                     ? t('appidTestOk', { reply: appidTestResult.reply, ms: appidTestResult.cost_ms })
                     : t('appidTestFail', { err: appidTestResult.error })}
                 />
@@ -1624,7 +1624,7 @@ const SystemConfigPage: React.FC = () => {
                   style={{ width: '100%', marginTop: 4 }}
                   type={kbTestResult.ok ? 'success' : 'error'}
                   showIcon
-                  message={kbTestResult.ok
+                  title={kbTestResult.ok
                     ? t('kbTestOk', { n: kbTestResult.total, ms: kbTestResult.cost_ms })
                     : t('kbTestFail', { err: kbTestResult.error })}
                   description={kbTestResult.ok && kbTestResult.sample?.length ? (
@@ -1662,7 +1662,7 @@ const SystemConfigPage: React.FC = () => {
 
         {apikeyStatus && !apikeyStatus.configured && (
           <Alert
-            message={t('apiKeyNotConfigured')}
+            title={t('apiKeyNotConfigured')}
             description={
               <span>
                 {apikeyStatus.hint}。{t('apiKeyHint')}
@@ -1826,7 +1826,7 @@ const SystemConfigPage: React.FC = () => {
               </Text>
               <Space orientation="vertical" style={{ width: '100%' }}>
                 <Alert
-                  message={t('cleanupWarning')}
+                  title={t('cleanupWarning')}
                   type="warning"
                   showIcon
                 />
