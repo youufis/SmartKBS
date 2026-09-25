@@ -984,8 +984,8 @@ Git-based online incremental upgrade system:
 - 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests
 - 🤖 **AI generation and grading hardened**: explicit output length caps with truncation recorded, tolerant JSON parsing and pre-save checks so incomplete artifacts are never stored silently; answers normalised for grading and generated artifacts auto-registered
 - 🏠 **Dashboard and task list rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home with star of the week; to-dos are filtered by class scope and pending grading now counts real work
-- 🗂️ **Sharing centre closed out**: resource browsing and Shared Files share one browser (categories, stats strip, grid/list, pagination, preferences) and directory shares show as folders; fixed files never counting as seen and to-do links that 404'd
-- 🌙 **Theme and copy**: Midnight theme tokens completed and hard-coded colours removed; i18n placeholders and untranslated keys closed out, antd v6 deprecation warnings cleared
+- 🗂️ **Sharing centre closed out**: resource browsing and Shared Files share one browser (categories, stats strip, grid/list, pagination, preferences) and directory shares show as folders; fixed files never counting as seen and to-do links that wouldn't open
+- 🌙 **Theme and copy**: the dark-mode palette completed and hard-coded colours removed; translation placeholders and untranslated strings closed out, deprecated component warnings cleared
 - ⚠️ **Breaking changes**: none
 
 ### v8.2.0 (2026-09-14)
@@ -994,14 +994,14 @@ Git-based online incremental upgrade system:
 - 🎯 **Classroom activity stability**: quick-quiz rooms advance once everyone has answered and restart safely; knowledge quests return immediately and fill remaining questions in the background; code problems moved to Code Practice
 - 📈 **Statistics and data integrity**: 7 same-named empty tables cleaned, quizzes counted by real answers, practice resets clear view counts, Hall of Fame uses live point totals
 - 📰 **News feeds self-heal**: sources re-validated with per-source circuit breaker and standby pool; daily brief cold start 57.2s -> 6.6s
-- 🔄 **Upgrade and auth trust**: orphan upgrade records reconciled against git HEAD, state files written atomically under a lock, 401 spam from idle pages fixed
+- 🔄 **Upgrade and auth trust**: upgrade records stuck in progress reconciled against the actual code version, state files written safely under a lock, repeated sign-out prompts from idle pages fixed
 - ⚠️ **Breaking changes**: none
 
 ### v8.1.0 (2026-09-07)
 
 - 🔄 **Activity data reset**: 9 activity types can clear participation data while keeping the activity itself, with dry-run preview, name confirmation, rollback and a full audit trail; teachers limited to their own activities
 - 🧮 **Points immediacy**: affected students' totals recalculated right after a delete or reset; grading/deletion races no longer write orphan scores
-- 🌐 **i18n and rules pushed to the backend**: copy delivered as `code + params` and resolved against the bilingual dictionary; "needs confirmation / has data to delete" decided server-side
+- 🌐 **Text and rules handled by the backend**: messages delivered as semantic codes and resolved against the bilingual dictionary; "needs confirmation / has data to delete" decided server-side
 - 🧹 **Text safety**: one shared text outlet (strip markdown and braces before truncating) replacing 9 index-based hard truncations
 - ⚠️ **Breaking changes**: none
 
