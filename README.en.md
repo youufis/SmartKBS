@@ -979,8 +979,6 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-> **Two layers, don't mix them up**: the `changelog` in `version.json` is the **outline shown by the upgrade dialog** - one line per theme, kept under 15 entries, new work is merged into the existing line instead of piling up. This section is the **per-version outline**, no more than 6 short bullets per release. Implementation detail (table columns, script names, root-cause analysis) belongs in commit messages and `git log`.
-
 ### v8.3.0 (2026-09-23)
 
 - 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests
