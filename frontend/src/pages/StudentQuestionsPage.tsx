@@ -138,7 +138,7 @@ const QuestionItem: React.FC<QuestionItemProps> = ({ q, isTeacherOrAdmin, isStud
       </div>
       {/* 展开的学生回答列表（教师端） */}
       {expanded && isTeacherOrAdmin && (
-        <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid #d9d9d9' }}>
+        <div style={{ marginTop: 8, paddingLeft: 16, borderLeft: '2px solid var(--border-color-secondary)' }}>
           {studentAnswers.length === 0 ? (
             <Text type="secondary">{t('noStudentAnswers')}</Text>
           ) : (
@@ -414,9 +414,9 @@ const StudentQuestionsPage: React.FC = () => {
           <div style={{ marginTop: 12, textAlign: 'center' }}>
             {questions.length > 0 && (
               <div style={{ marginTop: 12, textAlign: 'center' }}>
-                <span style={{ color: '#999', fontSize: 13, marginRight: 12 }}>{t('totalQuestions', { count: questionTotal })}</span>
+                <span style={{ color: 'var(--text-tertiary)', fontSize: 13, marginRight: 12 }}>{t('totalQuestions', { count: questionTotal })}</span>
                 <button
-                  style={{ border: '1px solid #d9d9d9', background: '#fff', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', margin: '0 4px', fontSize: 13, color: questionPage <= 1 ? '#d9d9d9' : '#333' }}
+                  style={{ border: '1px solid var(--border-color-secondary)', background: 'var(--bg-container)', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', margin: '0 4px', fontSize: 13, color: questionPage <= 1 ? '#d9d9d9' : '#333' }}
                   disabled={questionPage <= 1}
                   onClick={() => {
                     const newPage = questionPage - 1
@@ -426,7 +426,7 @@ const StudentQuestionsPage: React.FC = () => {
                 >{t('prevPage')}</button>
                 <span style={{ margin: '0 8px', fontSize: 13 }}>{questionPage}</span>
                 <button
-                  style={{ border: '1px solid #d9d9d9', background: '#fff', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', margin: '0 4px', fontSize: 13, color: questionPage * questionPageSize >= questionTotal ? '#d9d9d9' : '#333' }}
+                  style={{ border: '1px solid var(--border-color-secondary)', background: 'var(--bg-container)', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', margin: '0 4px', fontSize: 13, color: questionPage * questionPageSize >= questionTotal ? '#d9d9d9' : '#333' }}
                   disabled={questionPage * questionPageSize >= questionTotal}
                   onClick={() => {
                     const newPage = questionPage + 1
@@ -482,7 +482,7 @@ const StudentQuestionsPage: React.FC = () => {
         ]}
         width={640}>
         {/* 问题信息 */}
-        <Card size="small" style={{ marginBottom: 12, background: '#fafafa' }}>
+        <Card size="small" style={{ marginBottom: 12, background: 'var(--bg-layout)' }}>
           <div style={{ marginBottom: 8 }}>
             {answerModal?.is_anonymous ? <Tag>{t('anonymous')}</Tag> : (
               isTeacherOrAdmin ? <Tag>{answerModal?.student_username}</Tag> : null

@@ -114,17 +114,17 @@ const QuickQuizResult: React.FC = () => {
         <Card style={{ borderRadius: 12, marginBottom: 16 }} size="small">
           <Row gutter={24} style={{ textAlign: 'center' }}>
             <Col span={4}>
-              <div style={{ fontSize: 13, color: '#888' }}>{t('myRank')}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('myRank')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: myRank === 1 ? '#ff4d4f' : '#1677ff' }}>
                 {myRank ? `#${myRank}` : '-'}
               </div>
             </Col>
             <Col span={5}>
-              <div style={{ fontSize: 13, color: '#888' }}>{t('totalScore')}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('totalScore')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: '#faad14' }}>{my_info.total_score}</div>
             </Col>
             <Col span={5}>
-              <div style={{ fontSize: 13, color: '#888' }}>{t('correctWrong')}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('correctWrong')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold' }}>
                 <span style={{ color: '#52c41a' }}>{my_info.correct_count}</span>
                 <span style={{ color: '#ddd' }}> / </span>
@@ -132,7 +132,7 @@ const QuickQuizResult: React.FC = () => {
               </div>
             </Col>
             <Col span={5}>
-              <div style={{ fontSize: 13, color: '#888' }}>{t('accuracy')}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('accuracy')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: '#1677ff' }}>
                 {my_info.correct_count + my_info.wrong_count > 0
                   ? `${Math.round(my_info.correct_count / (my_info.correct_count + my_info.wrong_count) * 100)}%`
@@ -141,7 +141,7 @@ const QuickQuizResult: React.FC = () => {
               </div>
             </Col>
             <Col span={5}>
-              <div style={{ fontSize: 13, color: '#888' }}>{t('maxStreak')}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('maxStreak')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: '#eb2f96' }}>
                 {my_info.max_streak > 1 ? `🔥 ${my_info.max_streak}` : '-'}
               </div>

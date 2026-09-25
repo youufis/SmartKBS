@@ -295,27 +295,27 @@ const QuestBattlePage: React.FC = () => {
     <div>
       {/* ── 顶部状态栏 ── */}
       <Card
-        style={{ borderRadius: 12, marginBottom: 16, background: '#fafafa' }}
+        style={{ borderRadius: 12, marginBottom: 16, background: 'var(--bg-layout)' }}
         styles={{ body: { padding: '12px 16px' } }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 20, flex: 1, flexWrap: 'wrap' }}>
             <div>
-              <div style={{ fontSize: 12, color: '#888' }}>{t('quest.round')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{t('quest.round')}</div>
               <div style={{ fontSize: 18, fontWeight: 600 }}>
                 <ThunderboltOutlined style={{ marginRight: 4 }} />
                 {currentIdx} / {questInfo.total_questions}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: 12, color: '#888' }}>{t('score')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{t('score')}</div>
               <div style={{ fontSize: 18, fontWeight: 600, color: '#faad14' }}>
                 <TrophyOutlined style={{ marginRight: 4 }} />
                 {questInfo.score}
               </div>
             </div>
             <div>
-              <div style={{ fontSize: 12, color: '#888' }}>{t('quest.totalCorrect')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{t('quest.totalCorrect')}</div>
               <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a' }}>
                 <CheckCircleOutlined style={{ marginRight: 4 }} />
                 {questInfo.correct_count}
@@ -475,7 +475,7 @@ const QuestBattlePage: React.FC = () => {
               </div>
             </div>
             {question?.explanation && (
-              <div style={{ marginTop: 8, marginBottom: 0, color: '#666' }}>
+              <div style={{ marginTop: 8, marginBottom: 0, color: 'var(--text-secondary)' }}>
                 <Text type="secondary">💡 </Text>
                 <FormulaRenderer content={question.explanation} />
               </div>

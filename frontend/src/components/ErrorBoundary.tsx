@@ -50,14 +50,14 @@ class ErrorBoundary extends React.Component<Props, State> {
           justifyContent: 'center',
           alignItems: 'center',
           minHeight: '100vh',
-          background: '#f5f5f5',
+          background: 'var(--bg-layout)',
           padding: 24,
         }}>
           <Result
             status="error"
             title={i18n.t('common:ebTitle')}
             subTitle={
-              <span style={{ color: '#999', fontSize: 13 }}>
+              <span style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>
                 {i18n.t('common:ebDesc')}
                 {this.state.error && (
                   <details style={{ marginTop: 8, textAlign: 'left', maxWidth: 500 }}>

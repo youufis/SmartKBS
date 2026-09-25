@@ -237,9 +237,9 @@ const CardSection: React.FC<{
   <div
     style={{
       padding: '16px',
-      background: '#fafafa',
+      background: 'var(--bg-layout)',
       borderRadius: 8,
-      border: '1px solid #f0f0f0',
+      border: '1px solid var(--border-color)',
     }}
   >
     <div style={{ marginBottom: 12 }}>

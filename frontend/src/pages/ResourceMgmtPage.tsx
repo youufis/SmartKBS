@@ -380,14 +380,14 @@ const ResourceMgmtPage: React.FC = () => {
 
   if (!isAdminOrTeacher) {
     return (
-      <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, padding: 24 }}>
+      <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, padding: 24 }}>
         <Typography.Text type="secondary">{t('resource.accessDenied')}</Typography.Text>
       </Layout>
     )
   }
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Tabs defaultActiveKey="files" items={[
         {
           key: 'files',
@@ -589,7 +589,7 @@ const ResourceMgmtPage: React.FC = () => {
               </div>
               <div>
                 <Typography.Text strong style={{ marginBottom: 4, display: 'block' }}>
-                  {t('resource.expCustomReq')} <span style={{ color: '#888', fontWeight: 400 }}>{t('resource.expCustomReqOptional')}</span>
+                  {t('resource.expCustomReq')} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{t('resource.expCustomReqOptional')}</span>
                 </Typography.Text>
                 <Input.TextArea
                   rows={3}

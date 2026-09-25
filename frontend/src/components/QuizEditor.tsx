@@ -263,8 +263,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               marginBottom: 16,
               padding: 16,
               borderRadius: 8,
-              border: '1px solid #e8e8e8',
-              background: '#fafafa',
+              border: '1px solid var(--border-color-secondary)',
+              background: 'var(--bg-layout)',
             }}
           >
             {/* 题号 + 题型 + 操作 */}
@@ -305,8 +305,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
             {q.question.trim() && (
               <div style={{
                 marginBottom: 12, padding: '4px 8px',
-                borderRadius: 4, background: '#fff',
-                border: '1px dashed #d9d9d9', fontSize: 13, color: '#888',
+                borderRadius: 4, background: 'var(--bg-container)',
+                border: '1px dashed var(--border-color-secondary)', fontSize: 13, color: 'var(--text-tertiary)',
               }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>{t('qePreview')}</Text>
                 <FormulaRenderer content={q.question} />
@@ -400,8 +400,8 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
               {q.explanation.trim() && (
                 <div style={{
                   marginTop: 4, padding: '4px 8px',
-                  borderRadius: 4, background: '#fff',
-                  border: '1px dashed #d9d9d9', fontSize: 13, color: '#888',
+                  borderRadius: 4, background: 'var(--bg-container)',
+                  border: '1px dashed var(--border-color-secondary)', fontSize: 13, color: 'var(--text-tertiary)',
                 }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>{t('qePreview')}</Text>
                   <FormulaRenderer content={q.explanation} />

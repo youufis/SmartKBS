@@ -74,7 +74,7 @@ const AboutPage: React.FC = () => {
   return (
     <div onClick={handlePageClick} style={{
       width: '100%', padding: 24,
-      background: '#fff', borderRadius: 8, minHeight: 'calc(100vh - 160px)',
+      background: 'var(--bg-container)', borderRadius: 8, minHeight: 'calc(100vh - 160px)',
     }}>
       <Typography.Title level={3} style={{ userSelect: 'none' }}>
         ℹ️ {t('about')}

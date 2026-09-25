@@ -232,7 +232,7 @@ const WrongBookPage: React.FC = () => {
   }, [isStudent])
 
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 24 }}>
+    <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
@@ -288,7 +288,7 @@ const WrongBookPage: React.FC = () => {
         ) : !data || data.exams.length === 0 ? (
           <Card>
             <Space orientation="vertical" style={{ width: '100%', textAlign: 'center', padding: 40 }}>
-              <BookOutlined style={{ fontSize: 48, color: '#d9d9d9' }} />
+              <BookOutlined style={{ fontSize: 48, color: 'var(--border-color-secondary)' }} />
               <Text type="secondary">{t('noWrongQuestions')}</Text>
             </Space>
           </Card>
@@ -348,7 +348,7 @@ const WrongBookPage: React.FC = () => {
                               {Object.entries(opts).map(([k, v]) => {
                                 const isStudent = ansKeys.has(keyOf(k)) || (sameAns && keyOf(k) === keyOf(r.student_answer))
                                 const isCorrect = corKeys.has(keyOf(k)) || (sameAns && keyOf(k) === keyOf(r.correct_answer))
-                                let color = '#333'
+                                let color = 'var(--text-primary)'
                                 if (isStudent && isCorrect) color = '#52c41a'
                                 else if (isStudent) color = '#ff4d4f'
                                 else if (isCorrect) color = '#52c41a'
@@ -411,7 +411,7 @@ const WrongBookPage: React.FC = () => {
         {planLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-              <div style={{ marginTop: 16, color: '#666' }}>{t('genPlanLoading')}</div>
+              <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('genPlanLoading')}</div>
           </div>
         ) : planData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '0 4px' }}>
@@ -459,7 +459,7 @@ const WrongBookPage: React.FC = () => {
         {genLoading ? (
           <div style={{ textAlign: 'center', padding: '60px 0' }}>
             <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#666' }}>{t('generatingPracticeDesc')}</div>
+            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{t('generatingPracticeDesc')}</div>
           </div>
         ) : generatedQuestions.length > 0 && (
           <>

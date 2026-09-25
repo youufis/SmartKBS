@@ -697,13 +697,13 @@ const QuestBankTab: React.FC = () => {
       <Space orientation="vertical" style={{ width: '100%' }} size={8}>
         <div>
           <Text strong style={{ fontSize: 13 }}>{t('questionLabel')}</Text>
-          <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
+          <div style={{ marginTop: 4, padding: '8px 12px', background: 'var(--bg-layout)', borderRadius: 6 }}>
             <FormulaRenderer content={r.question_text} />
           </div>
         </div>
         <div>
           <Text strong style={{ fontSize: 13 }}>{t('optionsLabel')}</Text>
-          <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
+          <div style={{ marginTop: 4, padding: '8px 12px', background: 'var(--bg-layout)', borderRadius: 6 }}>
             {Object.entries(r.options || {}).map(([k, v]) => (
               <div key={k} style={{ marginBottom: 4 }}>
                 <Tag color={k === r.correct_answer ? 'green' : 'default'}>{k}</Tag>
@@ -719,7 +719,7 @@ const QuestBankTab: React.FC = () => {
         {r.explanation && (
           <div>
             <Text strong style={{ fontSize: 13 }}>{t('explanationLabel')}</Text>
-            <div style={{ marginTop: 4, padding: '8px 12px', background: '#fafafa', borderRadius: 6 }}>
+            <div style={{ marginTop: 4, padding: '8px 12px', background: 'var(--bg-layout)', borderRadius: 6 }}>
               <FormulaRenderer content={r.explanation} />
             </div>
           </div>

@@ -31,7 +31,7 @@ const NotificationsPage: React.FC = () => {
     task: { color: '#faad14', icon: <CheckCircleOutlined />, label: t('notifTask') },
     rollcall: { color: '#722ed1', icon: <AuditOutlined />, label: t('notifRollcall') },
     share: { color: '#13c2c2', icon: <InfoCircleOutlined />, label: t('notifShare') },
-    info: { color: '#999', icon: <InfoCircleOutlined />, label: t('notifInfo') },
+    info: { color: 'var(--text-tertiary)', icon: <InfoCircleOutlined />, label: t('notifInfo') },
   }
 
   const PUSH_TYPE_CONFIG = {
@@ -168,7 +168,7 @@ const NotificationsPage: React.FC = () => {
   }
 
   const renderPushItem = (item) => {
-    const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: '#999', icon: '\uD83D\uDCEC', label: item.push_type_label }
+    const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: 'var(--text-tertiary)', icon: '\uD83D\uDCEC', label: item.push_type_label }
     const isSelected = selectedPushIds.has(item.id)
     return (
       <List.Item key={item.id} style={{ background: item.is_read ? 'transparent' : '#f6f8ff', padding: '12px 16px', borderRadius: 8, marginBottom: 4 }} actions={[

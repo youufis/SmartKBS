@@ -459,7 +459,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
       {/* ── 步骤 2：预览 ── */}
       {step === 2 && result && (
         <div>
-          <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '12px 16px', marginBottom: 16, background: '#f6ffed' }}>
+          <div style={{ border: '1px solid var(--border-color)', borderRadius: 8, padding: '12px 16px', marginBottom: 16, background: '#f6ffed' }}>
             <Space>
               <BookOutlined style={{ fontSize: 20, color: '#52c41a' }} />
               <div>
@@ -514,7 +514,7 @@ const AICurriculumGenerator: React.FC<Props> = ({ open, onClose, onSuccess }) =>
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {t('aiGenerator.possibleReasons')}
                 </Typography.Text>
-                <ul style={{ fontSize: 12, color: '#888', marginTop: 4, paddingLeft: 20 }}>
+                <ul style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4, paddingLeft: 20 }}>
                   <li>{t('aiGenerator.reasonApiKey')}</li>
                   <li>{t('aiGenerator.reasonContent')}</li>
                   <li>{t('aiGenerator.reasonTimeout')}</li>

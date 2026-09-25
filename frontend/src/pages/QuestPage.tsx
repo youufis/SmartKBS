@@ -282,7 +282,7 @@ const QuestPage: React.FC = () => {
                 fontSize: 16,
                 background: '#ffd700',
                 borderColor: '#ffd700',
-                color: '#333',
+                color: 'var(--text-primary)',
                 fontWeight: 600,
                 boxShadow: '0 4px 14px rgba(255, 215, 0, 0.4)',
               }}
@@ -345,7 +345,7 @@ const QuestPage: React.FC = () => {
               styles={{ content: { color: '#722ed1', fontSize: 22 } }}
             />
             {bankStats?.by_category && bankStats.by_category.length > 0 && (
-              <div style={{ marginTop: 4, fontSize: 11, color: '#999' }}>
+              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-tertiary)' }}>
                 {bankStats.by_category.slice(0, 3).map((c: any) =>
                   `${c.category}${c.count}${t('quest.questions')}`
                 ).join(' · ')}

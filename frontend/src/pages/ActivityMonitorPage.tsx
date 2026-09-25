@@ -482,7 +482,7 @@ const ActivityMonitorPage: React.FC = () => {
         >
           {!selectedGradeId || !selectedClassId ? (
             /* ── 未选定年级/班级时提示 ── */
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-tertiary)' }}>
               <BarChartOutlined style={{ fontSize: 48, marginBottom: 16 }} />
               <div>{t('activityMonitor.selectHint')}</div>
             </div>
@@ -490,7 +490,7 @@ const ActivityMonitorPage: React.FC = () => {
             /* ── 加载中 ── */
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <Spin />
-              <div style={{ marginTop: 8, color: '#999' }}>{t('activityMonitor.loading')}</div>
+              <div style={{ marginTop: 8, color: 'var(--text-tertiary)' }}>{t('activityMonitor.loading')}</div>
             </div>
           ) : statusDetail ? (
             /* ── 有数据时 ── */

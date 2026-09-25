@@ -148,7 +148,7 @@ const AuthorPanelPage: React.FC = () => {
           <Tag color={r.online ? 'green' : 'default'} style={{ marginRight: 0 }}>
             {r.online ? `🟢 ${t('nodeOnline')}` : `⚪ ${t('nodeOffline')}`}
           </Tag>
-          <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{fmtAgo(r.minutes_ago, t)}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>{fmtAgo(r.minutes_ago, t)}</div>
         </div>
       ),
     },
@@ -158,7 +158,7 @@ const AuthorPanelPage: React.FC = () => {
         <Tooltip title={`${t('nodeId')}: ${r.node_id}`}>
           <div>
             <div style={{ fontWeight: 500 }}>{r.hostname || '-'}</div>
-            <div style={{ fontSize: 11, color: '#999' }}>{(r.node_id || '').slice(0, 8)}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{(r.node_id || '').slice(0, 8)}</div>
           </div>
         </Tooltip>
       ),
@@ -184,7 +184,7 @@ const AuthorPanelPage: React.FC = () => {
                 </Tag>
               </Tooltip>
             )}
-            <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
               {[r.country, r.city].filter((x) => x && x !== '未知').join(' ') || t('geoUnknown')}
               {r.isp ? ` · ${r.isp}` : ''}
             </div>
@@ -198,7 +198,7 @@ const AuthorPanelPage: React.FC = () => {
         <Tooltip title={r.platform || '-'}>
           <div>
             <div>{r.app_version || '-'}</div>
-            <div style={{ fontSize: 11, color: '#999' }}>{shortPlatform(r.platform)}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{shortPlatform(r.platform)}</div>
           </div>
         </Tooltip>
       ),
@@ -210,7 +210,7 @@ const AuthorPanelPage: React.FC = () => {
         <Tooltip title={`${t('firstSeen')}: ${r.ledger_first_seen || r.first_sync} · ${t('heartbeatTimes', { n: r.total_hits ?? r.sync_count })}${(r.ip_active_days ?? 0) > 0 && r.ip_active_days !== r.active_days ? ` · ${t('ipActiveDaysTip', { n: r.ip_active_days })}` : ''}`}>
           <div>
             <span style={{ fontWeight: 500 }}>{r.active_days ?? '-'}</span>
-            <span style={{ fontSize: 11, color: '#999', marginLeft: 2 }}>{t('unitDay')}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginLeft: 2 }}>{t('unitDay')}</span>
           </div>
         </Tooltip>
       ),

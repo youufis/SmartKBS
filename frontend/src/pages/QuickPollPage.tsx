@@ -303,7 +303,7 @@ const QuickPollPage: React.FC = () => {
         ]}
         width={500}>
         {takingPoll?.options?.map((opt: any, i: number) => (
-          <div key={i} style={{ marginBottom: 8, padding: '8px 12px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+          <div key={i} style={{ marginBottom: 8, padding: '8px 12px', background: 'var(--bg-layout)', borderRadius: 4, border: '1px solid var(--border-color)' }}>
             {takingPoll.poll_type === 'multiple' ? (
               <Checkbox
                 checked={(selectedOptions[takingPoll.id] || []).includes(i)}

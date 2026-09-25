@@ -306,7 +306,7 @@ const StudentView: React.FC = () => {
               )}
             </div>
             {r.explanation && (
-              <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+              <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-layout)', borderRadius: 4 }}>
                 <Text type="secondary"><FormulaRenderer content={r.explanation} /></Text>
               </div>
             )}

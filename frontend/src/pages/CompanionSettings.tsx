@@ -178,9 +178,9 @@ const CompanionSettings: React.FC = () => {
               </div>
               <div style={{
                 flex: 1, padding: '10px 14px', borderRadius: '16px 16px 16px 4px',
-                background: '#fff', border: '1px solid #e8ecf4',
+                background: 'var(--bg-container)', border: '1px solid #e8ecf4',
                 boxShadow: '0 2px 8px rgba(102,126,234,0.08)',
-                fontSize: 13, lineHeight: 1.6, color: '#333',
+                fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)',
               }}>
                 {PREVIEW_TEXT[personality]}
               </div>
@@ -265,7 +265,7 @@ const CompanionSettings: React.FC = () => {
                   <div style={{ marginBottom: 12 }}>
                     <Text style={{ fontSize: 12, fontWeight: 600 }}>🏅 {t('recentAchievements')}</Text>
                     {profile.milestones.slice(0, 2).map((m, i) => (
-                      <div key={i} style={{ fontSize: 12, marginTop: 4, color: '#666' }}>• {m}</div>
+                      <div key={i} style={{ fontSize: 12, marginTop: 4, color: 'var(--text-secondary)' }}>• {m}</div>
                     ))}
                   </div>
                 )}
@@ -282,7 +282,7 @@ const CompanionSettings: React.FC = () => {
                 )}
               </>
             ) : (
-              <div style={{ textAlign: 'center', padding: '24px 0', color: '#999' }}>
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text-tertiary)' }}>
                 <Spin size="small" />
                 <div style={{ marginTop: 8 }}>{t('noProfileData')}</div>
               </div>

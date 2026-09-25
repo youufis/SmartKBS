@@ -196,7 +196,7 @@ const TitleCelebration: React.FC = () => {
 
           {/* 描述 */}
           <div style={{
-            background: '#f5f5f5',
+            background: 'var(--bg-layout)',
             borderRadius: 12,
             padding: '12px 16px',
             margin: '12px 0',

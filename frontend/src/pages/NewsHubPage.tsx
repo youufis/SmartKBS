@@ -508,7 +508,7 @@ const NewsHubPage: React.FC = () => {
             <div style={{ fontSize: 14, lineHeight: 1.8, whiteSpace: 'pre-wrap' }}>
               {briefing.brief_content}
             </div>
-            <div style={{ marginTop: 16, borderTop: '1px solid #f0f0f0', paddingTop: 12 }}>
+            <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
               <Text type="secondary">
                 {t('briefingInfo', { count: briefing.article_count, date: briefing.generated_at?.slice(0, 16) })}
               </Text>

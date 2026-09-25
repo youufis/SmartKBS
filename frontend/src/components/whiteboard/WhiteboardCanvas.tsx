@@ -297,7 +297,7 @@ ws.send({ type: 'request_sync' })
         <div style={{
           position: 'absolute', inset: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: '#f5f5f5', zIndex: 1000,
+          background: 'var(--bg-layout)', zIndex: 1000,
         }}>
           加载中...
         </div>

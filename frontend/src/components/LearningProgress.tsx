@@ -230,7 +230,7 @@ const LearningProgress: React.FC = () => {
       {/* 学生详情表格 */}
       <Card size="small" title={selectedStudent ? t('individualProgress') : t('classProgress')}>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /><div style={{ marginTop: 8, color: '#999' }}>{t('loadingData')}</div></div>
+          <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /><div style={{ marginTop: 8, color: 'var(--text-tertiary)' }}>{t('loadingData')}</div></div>
         ) : progressData.length === 0 ? (
           <Empty description={t('selectGradeClassPrompt')} />
         ) : (

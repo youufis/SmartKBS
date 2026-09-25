@@ -166,7 +166,7 @@ const QuizManager: React.FC = () => {
       key: 'id',
       width: 72,
       render: (_: any, __: any, idx: number) => (
-        <span style={{ fontSize: 12, color: '#999', fontFamily: 'monospace' }}>#{idx + 1}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>#{idx + 1}</span>
       ),
     },
     {
@@ -204,7 +204,7 @@ const QuizManager: React.FC = () => {
       key: '_creatorName',
       width: 90,
       render: (name: string) => (
-        <span style={{ fontSize: 13, color: '#888' }}>{name || '-'}</span>
+        <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{name || '-'}</span>
       ),
     },
     {
@@ -321,14 +321,14 @@ const QuizManager: React.FC = () => {
           </div>
         )}
       </div>
-      <div style={{ marginTop: 4, fontSize: 12, color: '#aaa' }}>
+      <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-tertiary)' }}>
         {t('qmSourceLine', { title: record._quizTitle, score: record.score ?? '-' })}
       </div>
     </div>
   )
 
   return (
-    <Layout style={{ height: '100%', background: '#fff', borderRadius: 8, overflow: 'auto', padding: 20, fontSize: 14 }}>
+    <Layout style={{ height: '100%', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 20, fontSize: 14 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
         {/* ── 标题和操作栏 ── */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

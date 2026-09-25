@@ -270,13 +270,13 @@ const WhiteboardRoomPage: React.FC = () => {
       position: fullscreen ? 'fixed' : 'relative',
       top: 0, left: 0, right: 0, bottom: 0,
       zIndex: fullscreen ? 1000 : 1,
-      background: '#fff',
+      background: 'var(--bg-container)',
     }}>
       {/* ── 顶栏 ── */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '8px 16px', borderBottom: '1px solid #f0f0f0',
-        background: '#fafafa', flexShrink: 0,
+        padding: '8px 16px', borderBottom: '1px solid var(--border-color)',
+        background: 'var(--bg-layout)', flexShrink: 0,
       }}>
         <Space>
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleLeave} />
@@ -397,8 +397,8 @@ const WhiteboardRoomPage: React.FC = () => {
       {/* ── 底部状态栏 ── */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '4px 16px', borderTop: '1px solid #f0f0f0',
-        background: '#fafafa', flexShrink: 0, fontSize: 12, color: '#888',
+        padding: '4px 16px', borderTop: '1px solid var(--border-color)',
+        background: 'var(--bg-layout)', flexShrink: 0, fontSize: 12, color: 'var(--text-tertiary)',
       }}>
         <span>
           {readOnly ? '👁 ' + t('wbReadonly') : '✏️ ' + t('wbEditable')}
@@ -422,7 +422,7 @@ const WhiteboardRoomPage: React.FC = () => {
       >
         {members.map((m) => (
           <div key={m.username} style={{
-            padding: '8px 0', borderBottom: '1px solid #f0f0f0',
+            padding: '8px 0', borderBottom: '1px solid var(--border-color)',
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           }}>
             <div>

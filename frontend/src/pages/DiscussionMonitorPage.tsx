@@ -219,12 +219,12 @@ const DiscussionMonitorPage: React.FC = () => {
                     <MessageOutlined /> {g.message_count}{t('messages_')}
                   </div>
                   {g.last_preview && (
-                    <div style={{ color: '#888', marginBottom: 4, fontSize: 12 }}>
+                    <div style={{ color: 'var(--text-tertiary)', marginBottom: 4, fontSize: 12 }}>
                       {t('lastMessage')} {g.last_preview}
                     </div>
                   )}
                   {g.last_active && (
-                    <div style={{ color: '#aaa', fontSize: 11 }}>
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
                       {t('lastActive')} {g.last_active}
                     </div>
                   )}
@@ -280,7 +280,7 @@ const DiscussionMonitorPage: React.FC = () => {
                 <div style={{
                   marginTop: 8, padding: 12, background: '#f6ffed',
                   borderRadius: 8, border: '1px solid #b7eb8f', lineHeight: 1.8,
-                  fontSize: 14, color: '#333',
+                  fontSize: 14, color: 'var(--text-primary)',
                 }}>
                   {summaryData.content.parsed.summary || t('noContent')}
                 </div>
@@ -335,12 +335,12 @@ const DiscussionMonitorPage: React.FC = () => {
               )}
 
               <details style={{ marginTop: 16 }}>
-                <summary style={{ cursor: 'pointer', color: '#888', fontSize: 13 }}>
+                <summary style={{ cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: 13 }}>
                   {t('viewRawAIResponse')}
                 </summary>
                 <pre style={{
-                  marginTop: 8, padding: 12, background: '#f5f5f5',
-                  borderRadius: 6, fontSize: 12, color: '#666',
+                  marginTop: 8, padding: 12, background: 'var(--bg-layout)',
+                  borderRadius: 6, fontSize: 12, color: 'var(--text-secondary)',
                   whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                   maxHeight: 300, overflow: 'auto',
                 }}>

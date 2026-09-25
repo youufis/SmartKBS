@@ -411,7 +411,7 @@ const InteractionPage: React.FC = () => {
         ]}
         width={640}>
         {takingQuiz?.questions?.map((q: any, i: number) => (
-          <div key={i} style={{ marginBottom: 12, padding: 12, background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+          <div key={i} style={{ marginBottom: 12, padding: 12, background: 'var(--bg-layout)', borderRadius: 4, border: '1px solid var(--border-color)' }}>
             <div style={{ marginBottom: 8 }}>
               <Text strong>{i + 1}. </Text>
               <FormulaRenderer content={q.question || q.question_text} />
@@ -542,7 +542,7 @@ const InteractionPage: React.FC = () => {
                       )}
                     </div>
                     {r.explanation && (
-                      <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                      <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-layout)', borderRadius: 4 }}>
                         <Text type="secondary"><FormulaRenderer content={r.explanation} /></Text>
                       </div>
                     )}
@@ -707,7 +707,7 @@ const InteractionPage: React.FC = () => {
             {aiQuizResult.questions.map((q: any, i: number) => (
               <div key={i} style={{
                 padding: 10, marginTop: 8, borderRadius: 6,
-                background: '#fafafa', border: '1px solid #f0f0f0',
+                background: 'var(--bg-layout)', border: '1px solid var(--border-color)',
               }}>
                 <Text strong>{i + 1}. </Text><FormulaRenderer content={q.question} />
                 <MediaDisplay svgContent={q.svg_content || q.svg_code} hasSvg={q.has_svg || (q.svg_code ? 1 : 0)} mediaFiles={(q as any).media_files} size="normal" />
@@ -722,7 +722,7 @@ const InteractionPage: React.FC = () => {
                   <AnswerLine color="green" label={t('answerColon')} value={q.answer} />
                 </div>
                 {q.explanation && (
-                  <div style={{ marginTop: 2, fontSize: 12, color: '#888', paddingLeft: 4 }}>
+                  <div style={{ marginTop: 2, fontSize: 12, color: 'var(--text-tertiary)', paddingLeft: 4 }}>
                     💡 <FormulaRenderer content={q.explanation} />
                   </div>
                 )}

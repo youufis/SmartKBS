@@ -323,7 +323,7 @@ const HtmlFilesPage: React.FC = () => {
             {showGroupActions && activeGroup !== null && (
               <Tooltip title={t('removeFromGroup')}>
                 <MinusCircleOutlined
-                  style={{ color: '#999', cursor: 'pointer', fontSize: 13, flexShrink: 0, opacity: 0, transition: 'opacity 0.2s' }}
+                  style={{ color: 'var(--text-tertiary)', cursor: 'pointer', fontSize: 13, flexShrink: 0, opacity: 0, transition: 'opacity 0.2s' }}
                   className="resource-card-remove-btn"
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleRemoveFromGroup(urlPath); }}
                 />
@@ -480,11 +480,11 @@ const HtmlFilesPage: React.FC = () => {
                           </span>
                           <span onClick={(e) => e.stopPropagation()} className="resource-group-actions" style={{ flexShrink: 0, display: 'flex', gap: 2, opacity: 0, transition: 'opacity 0.2s' }}>
                             <Tooltip title={t('rename')}>
-                              <EditOutlined style={{ fontSize: 11, cursor: 'pointer', color: '#999' }}
+                              <EditOutlined style={{ fontSize: 11, cursor: 'pointer', color: 'var(--text-tertiary)' }}
                                 onClick={() => openRenameGroup(g)} />
                             </Tooltip>
                             <Popconfirm title={t('confirmDeleteGroup')} onConfirm={() => handleDeleteGroup(g)}>
-                              <DeleteOutlined style={{ fontSize: 11, cursor: 'pointer', color: '#999' }} />
+                              <DeleteOutlined style={{ fontSize: 11, cursor: 'pointer', color: 'var(--text-tertiary)' }} />
                             </Popconfirm>
                           </span>
                         </div>

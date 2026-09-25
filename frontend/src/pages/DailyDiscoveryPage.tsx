@@ -91,7 +91,7 @@ const DailyDiscoveryPage: React.FC = () => {
         >
           {card.summary}
         </Paragraph>
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-color)' }}>
           <Tooltip title={t('viewDetail')}>
             <Button size="small" icon={<EyeOutlined />} onClick={() => handleView(card)}>
               {t('detail')}

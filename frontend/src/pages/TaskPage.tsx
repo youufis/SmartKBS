@@ -276,7 +276,7 @@ const TaskPage: React.FC = () => {
     {
       title: t('taskDescription'), dataIndex: 'description', key: 'description', width: 200,
       render: (d: string) => d ? (
-        <Typography.Paragraph ellipsis={{ rows: 1 }} style={{ margin: 0, fontSize: 13, color: '#666' }}>
+        <Typography.Paragraph ellipsis={{ rows: 1 }} style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
           {d}
         </Typography.Paragraph>
       ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>--</Typography.Text>,
@@ -496,7 +496,7 @@ const TaskPage: React.FC = () => {
                     <Tag>{t('totalStudents')}{classSummary.total_students}</Tag>
                   </Space>
                 )}
-                <Typography.Paragraph style={{ fontSize: 13, margin: '4px 0', color: '#595959' }}>
+                <Typography.Paragraph style={{ fontSize: 13, margin: '4px 0', color: 'var(--text-secondary)' }}>
                   💡 {classSummary.overall_comment}
                 </Typography.Paragraph>
                 {classSummary.teaching_suggestions && (
@@ -539,7 +539,7 @@ const TaskPage: React.FC = () => {
                     if (!r.gradeInfo) return <Typography.Text type="secondary">{t('noGradeData')}</Typography.Text>
                     return (
                       <div style={{ padding: '8px 0 4px 0' }}>
-                        <Typography.Paragraph style={{ fontSize: 13, margin: '0 0 8px 0', color: '#595959' }}>
+                        <Typography.Paragraph style={{ fontSize: 13, margin: '0 0 8px 0', color: 'var(--text-secondary)' }}>
                           💬 {r.gradeInfo.comment}
                         </Typography.Paragraph>
                         {r.gradeInfo.strengths?.length > 0 && (
@@ -670,7 +670,7 @@ const TaskPage: React.FC = () => {
                     </Tag>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <Typography.Text style={{ fontSize: 13, color: '#595959' }}>
+                    <Typography.Text style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
                       {myGrade.comment}
                     </Typography.Text>
                   </div>

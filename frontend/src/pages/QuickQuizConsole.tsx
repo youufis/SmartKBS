@@ -684,7 +684,7 @@ const QuickQuizConsole: React.FC = () => {
         {bankLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
         ) : bankQuestions.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-tertiary)' }}>
             {bankTotal === 0 ? t('noMatchingQuestions') : t('noMoreQuestions')}
           </div>
         ) : (

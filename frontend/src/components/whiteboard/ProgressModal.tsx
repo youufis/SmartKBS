@@ -137,7 +137,7 @@ const ProgressModal: React.FC<Props> = ({
         )}
 
         {/* 步骤列表 */}
-        <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, overflow: 'hidden' }}>
+        <div style={{ border: '1px solid var(--border-color)', borderRadius: 6, overflow: 'hidden' }}>
           {steps.map((step, i) => (
             <div
               key={step.key}
@@ -152,7 +152,7 @@ const ProgressModal: React.FC<Props> = ({
               {/* 状态图标 */}
               <div style={{ width: 20, marginRight: 10, textAlign: 'center' }}>
                 {step.status === 'pending' && (
-                  <span style={{ width: 16, height: 16, display: 'inline-block', borderRadius: '50%', border: '2px solid #d9d9d9' }} />
+                  <span style={{ width: 16, height: 16, display: 'inline-block', borderRadius: '50%', border: '2px solid var(--border-color-secondary)' }} />
                 )}
                 {step.status === 'active' && (
                   <Spin size="small" />

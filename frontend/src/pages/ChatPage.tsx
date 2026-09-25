@@ -907,7 +907,7 @@ const ChatPage: React.FC = () => {
                   {/* 考试状态 + 课堂互动 */}
                   <div style={{
                     background: token.colorFillQuaternary, borderRadius: 8, padding: 10,
-                    border: '1px solid #f0f0f0',
+                    border: '1px solid var(--border-color)',
                   }}>
                     {companionTeacherData.exam_stats && (
                       <div style={{ marginBottom: 8 }}>
@@ -1039,7 +1039,7 @@ const ChatPage: React.FC = () => {
           {/* 头部 */}
           <div style={{
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
+            padding: '8px 12px', borderBottom: '1px solid var(--border-color)',
           }}>
             <Typography.Text strong style={{ fontSize: 14 }}>{t('pushModalTitle')}</Typography.Text>
             <Space size={4}>
@@ -1130,7 +1130,7 @@ const ChatPage: React.FC = () => {
           </div>
           {/* 底部 */}
           {companionPushes.length > 0 && (
-            <div style={{ borderTop: '1px solid #f0f0f0', padding: '6px 12px', textAlign: 'center' }}>
+            <div style={{ borderTop: '1px solid var(--border-color)', padding: '6px 12px', textAlign: 'center' }}>
               <Button type="link" size="small"
                 onClick={() => { setPushModalOpen(false); navigate('/notifications') }}
               >
@@ -1151,7 +1151,7 @@ const ChatPage: React.FC = () => {
         <Space orientation="vertical" style={{ width: '100%' }} size={6}>
           {/* 图片预览 */}
           {imagePreviewHtml && (
-            <div dangerouslySetInnerHTML={{ __html: imagePreviewHtml }} style={{ borderBottom: '1px solid #f0f0f0', padding: '4px 0' }} />
+            <div dangerouslySetInnerHTML={{ __html: imagePreviewHtml }} style={{ borderBottom: '1px solid var(--border-color)', padding: '4px 0' }} />
           )}
 
           {/* 隐藏的文件上传 input */}

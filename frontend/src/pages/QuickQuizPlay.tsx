@@ -365,7 +365,7 @@ const QuickQuizPlay: React.FC = () => {
   return (
     <Card style={{ borderRadius: 8 }}>
       {/* 顶部状态栏 */}
-      <Card style={{ borderRadius: 12, marginBottom: 16, background: '#fafafa' }}
+      <Card style={{ borderRadius: 12, marginBottom: 16, background: 'var(--bg-layout)' }}
         styles={{ body: { padding: '12px 16px' } }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <Space>

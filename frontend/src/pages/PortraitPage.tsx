@@ -448,7 +448,7 @@ const PortraitPage: React.FC = () => {
               {selectedStyle !== 'random' && (
                 <div style={{
                   padding: 12,
-                  background: '#f9f9f9',
+                  background: 'var(--bg-layout)',
                   borderRadius: 8,
                   margin: '0 auto 24px',
                   maxWidth: 400,
@@ -934,7 +934,7 @@ const PortraitPage: React.FC = () => {
             alignItems: 'center',
             gap: 16,
             padding: 12,
-            background: '#f9f9f9',
+            background: 'var(--bg-layout)',
             borderRadius: 8,
           }}>
             {sharingPortrait.image_url ? (

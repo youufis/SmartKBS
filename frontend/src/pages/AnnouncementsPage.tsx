@@ -323,7 +323,7 @@ const AnnouncementsPage: React.FC = () => {
               {detailModal.target_grade && <Tag>{detailModal.target_grade}</Tag>}
               {detailModal.target_class && <Tag>{classText(detailModal.target_class)}</Tag>}
             </Space>
-            <div style={{ color: '#999', fontSize: 12, marginBottom: 16 }}>
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginBottom: 16 }}>
               {t('anPublisher')}{detailModal.creator_name || detailModal.creator_username}
               &nbsp;|&nbsp;
               {detailModal.created_at ? new Date(detailModal.created_at).toLocaleString('zh-CN') : ''}

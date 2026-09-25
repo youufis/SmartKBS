@@ -130,7 +130,7 @@ const ActivityScopeSelector: React.FC<Props> = ({
   }
 
   return (
-    <div style={{ border: '1px solid #d9d9d9', borderRadius: 6, padding: '12px 16px', background: '#fafafa' }}>
+    <div style={{ border: '1px solid var(--border-color-secondary)', borderRadius: 6, padding: '12px 16px', background: 'var(--bg-layout)' }}>
       <Text strong style={{ marginBottom: 8, display: 'block' }}>
         <GlobalOutlined /> {t('activityScopeTitle')}
       </Text>
@@ -180,7 +180,7 @@ const ActivityScopeSelector: React.FC<Props> = ({
       )}
 
       {/* 范围说明 */}
-      <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
+      <div style={{ marginTop: 8, color: 'var(--text-tertiary)', fontSize: 12 }}>
         {scope === 'teacher_classes' && t('scopeDescTeacherClasses')}
         {scope === 'all' && t('scopeDescAll')}
         {scope === 'grade' && selectedGrades.length > 0 && t('scopeDescGradeSelected', { grades: selectedGrades.join('、') })}

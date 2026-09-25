@@ -113,7 +113,7 @@ const TaskTodoPage: React.FC = () => {
     curriculum: { label: t('todo.category.curriculum'), color: '#13c2c2', icon: <BookOutlined /> },
     interactive: { label: t('todo.category.interactive'), color: '#ff4d4f', icon: <ThunderboltOutlined /> },
     challenge: { label: t('todo.category.challenge'), color: '#52c41a', icon: <FolderOutlined /> },
-    service: { label: t('todo.category.service'), color: '#8c8c8c', icon: <BellOutlined /> },
+    service: { label: t('todo.category.service'), color: 'var(--text-tertiary)', icon: <BellOutlined /> },
   }), [t])
 
   const TYPE_CONFIG = useMemo<Record<string, { icon: React.ReactNode; color: string }>>(() => ({
@@ -220,7 +220,7 @@ const TaskTodoPage: React.FC = () => {
     urgent: { title: t('todo.group.urgent'), hint: t('todo.groupHint.urgent'), icon: <ClockCircleOutlined />, color: '#fa8c16' },
     live: { title: t('todo.group.live'), hint: t('todo.groupHint.live'), icon: <ThunderboltOutlined />, color: '#13c2c2' },
     study: { title: t('todo.group.study'), hint: t('todo.groupHint.study'), icon: <FileAddOutlined />, color: '#1677ff' },
-    suggest: { title: t('todo.group.suggest'), hint: t('todo.groupHint.suggest'), icon: <FolderOutlined />, color: '#8c8c8c' },
+    suggest: { title: t('todo.group.suggest'), hint: t('todo.groupHint.suggest'), icon: <FolderOutlined />, color: 'var(--text-tertiary)' },
   }
 
   const go = (url: string) => {
@@ -229,7 +229,7 @@ const TaskTodoPage: React.FC = () => {
   }
 
   const renderRow = (item: TaskTodoItem, idx: number) => {
-    const cfg = TYPE_CONFIG[item.type] || { icon: <BellOutlined />, color: '#8c8c8c' }
+    const cfg = TYPE_CONFIG[item.type] || { icon: <BellOutlined />, color: 'var(--text-tertiary)' }
     const dl = deadlineInfo(item.deadline, now)
     const dlText = item.deadline ? dlLabel(dl) : item.live ? '' : t('todo.noDeadline')
     const dlColor = !item.deadline ? ct.tick : dl?.level === 'overdue' ? '#ff4d4f' : dl?.level === 'today' ? '#fa8c16' : '#faad14'

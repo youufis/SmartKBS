@@ -520,7 +520,7 @@ const QuickQuizPage: React.FC = () => {
             maxLength={6}
             autoFocus
           />
-          <div style={{ marginTop: 12, color: '#888' }}>
+          <div style={{ marginTop: 12, color: 'var(--text-tertiary)' }}>
             {t('askTeacherForCode')}
           </div>
         </div>
