@@ -1136,7 +1136,8 @@ async def save_exam_draft(exam_id: int, req: ExamDraftSave, request: Request):
     if len(req.answers) > _DRAFT_MAX_ITEMS:
         raise HTTPException(status_code=400, detail="草稿内容异常（题目数超限）")
 
-    valid_ids = {str(r[0]) for r in (execute_query(
+    # question_db.execute_query 返回的是字典行（不是元组），必须按列名取
+    valid_ids = {str(r["question_id"]) for r in (execute_query(
         "SELECT question_id FROM exam_questions WHERE exam_id = ?", (exam_id,)
     ) or [])}
     cleaned = {k: v for k, v in req.answers.items() if str(k) in valid_ids}
