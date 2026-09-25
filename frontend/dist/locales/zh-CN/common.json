@@ -1,4 +1,7 @@
 {
+  "loadFailedTitle": "数据加载失败",
+  "loadFailedDesc": "网络或服务暂时不可用，请点击重试。",
+  "retryLoad": "重试",
   "noPermission": "没有访问该页面的权限",
   "noPermissionDesc": "该页面仅教师或管理员可用；如需访问请联系管理员开通。",
   "backPrevPage": "返回上一页",

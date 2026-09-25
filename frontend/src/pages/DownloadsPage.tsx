@@ -19,6 +19,7 @@ import ResourceBrowser, { type BrowserItem } from '../components/ResourceBrowser
 import { getFileIcon } from '../utils/fileIcon'
 import { formatBytes, getFileKind, KIND_COLOR } from '../utils/fileKind'
 import { useAuthStore } from '../stores/authStore'
+import { reportLoadError } from '../utils/loadError'
 
 interface DownloadFile {
   name: string
@@ -105,7 +106,7 @@ const DownloadsPage: React.FC = () => {
       ])
       setMyShares(myRes.shares)
       setReceivedShares(receivedRes.shares.filter((s) => s.resource_type === 'download'))
-    } catch { /* 忽略：保留上一次结果，页面仍可手动刷新重试 */ }
+    } catch (err) { reportLoadError(err, { key: 'DownloadsPage.loadShares', retry: () => { void loadShares() } }) }
   }
 
   // 检查文件/目录是否已共享（精确匹配或继承自目录共享）

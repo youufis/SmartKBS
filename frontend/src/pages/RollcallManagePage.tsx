@@ -15,6 +15,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import { reportLoadError } from '../utils/loadError'
 
 const { Text, Title } = Typography
 
@@ -158,7 +159,7 @@ const RollcallTool: React.FC = () => {
         setTotal(data.total || 0)
         setCorrectCount(data.correct_count || 0)
       }
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'RollcallManagePage.loadHistoryData' }) }
   }, [teacherUsername])
 
   const refreshHistory = useCallback(() => loadHistoryData(grade, cls), [grade, cls, loadHistoryData])

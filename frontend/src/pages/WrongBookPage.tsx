@@ -8,6 +8,7 @@ import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { classText } from '../utils/studentLabel'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -88,7 +89,7 @@ const WrongBookPage: React.FC = () => {
       setSelectedStudent('')
       setStudents([])
       setData(null)
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'WrongBookPage.loadGrades', retry: () => { void loadGrades() } }) }
   }
 
   const loadClasses = async (grade: string) => {
@@ -99,7 +100,7 @@ const WrongBookPage: React.FC = () => {
       setSelectedStudent('')
       setStudents([])
       setData(null)
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'WrongBookPage.loadClasses' }) }
   }
 
   const loadStudents = async (grade: string, cls: string) => {

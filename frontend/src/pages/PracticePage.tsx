@@ -24,6 +24,7 @@ const TYPE_LABELS_LOCAL: Record<string, string> = typeLabel as Record<string, st
 import ResetActivityButton from '../components/ResetActivityButton'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -535,7 +536,7 @@ const TeacherView: React.FC = () => {
     try {
       const { data } = await apiClient.get('/api/practice/sessions')
       setSessions(data.sessions || [])
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'PracticePage.loadSessions', retry: () => { void loadSessions() } }) }
     finally { setLoadingSessions(false) }
   }, [])
 

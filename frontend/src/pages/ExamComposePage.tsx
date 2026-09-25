@@ -18,6 +18,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { fetchGrades } from '../api/gradeClass'
+import { reportLoadError } from '../utils/loadError'
 
 const ExamComposePage: React.FC = () => {
   const { t } = useTranslation('exam')
@@ -62,7 +63,7 @@ const ExamComposePage: React.FC = () => {
       if (data?.subjects?.length > 0) {
         setSubjects(data.subjects)
       }
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'ExamComposePage.loadSubjects', retry: () => { void loadSubjects() } }) }
   }
 
   async function loadGrades() {

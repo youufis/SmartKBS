@@ -16,6 +16,7 @@ import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import { useRewardLabels, REWARD_TAG_COLORS } from '../utils/rewardLabels'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 
@@ -302,7 +303,7 @@ const TeacherMyPoints: React.FC = () => {
           setTMyPoints(p.data.total_points || 0)
           setTMyHistory(Array.isArray(h.data) ? h.data : [])
         }
-      } catch { /* ignore */ }
+      } catch (err) { reportLoadError(err, { key: 'RewardPage.load', retry: () => { void load() } }) }
     }
     load()
     return () => { ignore = true }
@@ -491,7 +492,7 @@ const RewardPage: React.FC = () => {
           setMyPoints(pointsRes.data.total_points || 0)
           setMyHistory(Array.isArray(historyRes.data) ? historyRes.data : [])
         }
-      } catch { /* 忽略 */ }
+      } catch (err) { reportLoadError(err, { key: 'RewardPage.fetchData', retry: () => { void fetchData() } }) }
       if (!ignore) setLoading(false)
     }
     fetchData()
@@ -508,7 +509,7 @@ const RewardPage: React.FC = () => {
         setTitleInfo(titleRes.data)
         if (configRes.data?.main_titles) setTitleConfig(configRes.data.main_titles)
       }
-    } catch { /* 忽略 */ }
+    } catch (err) { reportLoadError(err, { key: 'RewardPage.fetchTitleInfo', retry: () => { void fetchTitleInfo() } }) }
   }, [])
 
   useEffect(() => {
@@ -524,7 +525,7 @@ const RewardPage: React.FC = () => {
           setTitleInfo(titleRes.data)
           if (configRes.data?.main_titles) setTitleConfig(configRes.data.main_titles)
         }
-      } catch { /* 忽略 */ }
+      } catch (err) { reportLoadError(err, { key: 'RewardPage.load', retry: () => { void load() } }) }
     }
     load()
     return () => { ignore.current = true }

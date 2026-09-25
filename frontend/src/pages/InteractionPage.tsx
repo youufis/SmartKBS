@@ -23,6 +23,7 @@ import type { Question } from '../components/QuizEditor'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
+import { reportLoadError } from '../utils/loadError'
 const { Title, Text } = Typography
 
 /** S-GRADING(P3): 这道题的分是谁给的 */
@@ -100,7 +101,7 @@ const InteractionPage: React.FC = () => {
     try {
       const { data } = await apiClient.get('/api/interaction/quizzes', { params: { page_size: 50 } })
       setQuizzes(data.quizzes || [])
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'InteractionPage.loadQuizzes', retry: () => { void loadQuizzes() } }) }
     setQuizLoading(false)
   }
 

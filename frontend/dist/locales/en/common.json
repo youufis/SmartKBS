@@ -1,4 +1,7 @@
 {
+  "loadFailedTitle": "Failed to load data",
+  "loadFailedDesc": "The network or service is unavailable right now — please retry.",
+  "retryLoad": "Retry",
   "noPermission": "You don't have access to this page",
   "noPermissionDesc": "This page is for teachers and administrators only. Contact an administrator if you need access.",
   "backPrevPage": "Go back",

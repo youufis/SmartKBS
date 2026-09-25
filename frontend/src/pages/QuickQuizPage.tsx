@@ -22,6 +22,7 @@ import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
 import ResetActivityButton from '../components/ResetActivityButton'
+import { reportLoadError } from '../utils/loadError'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -79,7 +80,7 @@ const QuickQuizPage: React.FC = () => {
     try {
       const { data } = await apiClient.get('/api/quick-quiz/history')
       setHistory(data.records || [])
-    } catch { /* ignore */ }
+    } catch (err) { reportLoadError(err, { key: 'QuickQuizPage.loadHistory', retry: () => { void loadHistory() } }) }
     finally { setHistoryLoading(false) }
   }
 
