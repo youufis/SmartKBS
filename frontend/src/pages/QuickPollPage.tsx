@@ -5,7 +5,7 @@
 import React, { useState, useEffect } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import {
-  Card, Button, Space, Typography, List, Tag, Modal,
+  Card, Button, Space, Typography, Tag, Modal,
   Form, Input, Select, message, Empty, Spin, Radio, Popconfirm,
   Checkbox, Progress, Divider, Pagination,
 } from 'antd'
@@ -20,6 +20,7 @@ import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
+import { RowList } from '../components/RowList'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -227,8 +228,9 @@ const QuickPollPage: React.FC = () => {
         <Spin spinning={pollLoading}>
           {polls.length === 0 ? <Empty description={t('noPolls')} /> : (
             <>
-            <List
-              dataSource={polls.slice((pollPage - 1) * pollPageSize, pollPage * pollPageSize)}
+            <RowList
+              items={polls.slice((pollPage - 1) * pollPageSize, pollPage * pollPageSize)}
+              split={false}
               renderItem={(poll: any) => {
                 const isMultiple = poll.poll_type === 'multiple'
                 const hasVoted = poll.voted ?? votedPolls[poll.id]

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Card, List, Tag, Typography, Button, Space, Empty, Spin,
-  message, Popconfirm, Segmented, Tabs, Checkbox,
+  Card, Tag, Typography, Button, Space, Empty, Spin, Pagination,
+  message, Popconfirm, Segmented, Tabs, Checkbox, theme,
 } from 'antd'
 import {
   CheckOutlined, DeleteOutlined, ReloadOutlined,
@@ -18,11 +18,13 @@ import { useCompanionStore } from '../stores/companionStore'
 import type { NotificationItem } from '../api/notifications'
 import type { PushMessage } from '../api/companion'
 import { useNoticeText } from '../utils/notificationText'
+import { RowList, RowItem, RowMeta } from '../components/RowList'
 
 const { Text } = Typography
 
 const NotificationsPage: React.FC = () => {
   const { t } = useTranslation('system')
+  const { token } = theme.useToken()
   const noticeText = useNoticeText()
 
   const TYPE_CONFIG = {
@@ -96,7 +98,7 @@ const NotificationsPage: React.FC = () => {
   }
 
   const toggleNotifSelect = (id, checked) => {
-    setSelectedNotifIds(prev => { const n = new Set(prev); checked ? n.add(id) : n.delete(id); return n })
+    setSelectedNotifIds(prev => { const n = new Set(prev); if (checked) { n.add(id) } else { n.delete(id) }; return n })
   }
 
   const selectAllCurrentPageNotifs = (checked) => {
@@ -136,7 +138,7 @@ const NotificationsPage: React.FC = () => {
   }
 
   const togglePushSelect = (id, checked) => {
-    setSelectedPushIds(prev => { const n = new Set(prev); checked ? n.add(id) : n.delete(id); return n })
+    setSelectedPushIds(prev => { const n = new Set(prev); if (checked) { n.add(id) } else { n.delete(id) }; return n })
   }
 
   const selectAllCurrentPagePushes = (checked) => {
@@ -157,15 +159,15 @@ const NotificationsPage: React.FC = () => {
     const nt = noticeText(item)
     const isSelected = selectedNotifIds.has(item.id)
     return (
-      <List.Item key={item.id} style={{ background: item.is_read ? 'transparent' : '#f6f8ff', padding: '12px 16px', borderRadius: 8, marginBottom: 4 }} actions={[
+      <RowItem key={item.id} style={{ background: item.is_read ? 'transparent' : token.colorPrimaryBg, padding: '12px 16px', borderRadius: 8, marginBottom: 4 }} actions={[
         !item.is_read && <Button key="read" type="text" icon={<CheckOutlined />} onClick={() => handleMarkRead(item.id)}>{t('markAsRead')}</Button>,
         <Popconfirm key="del" title={t('confirmDelete')} onConfirm={() => handleDelete(item.id)}><Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button></Popconfirm>,
       ].filter(Boolean)}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1 }}>
           <Checkbox checked={isSelected} onChange={(e) => toggleNotifSelect(item.id, e.target.checked)} style={{ marginTop: 4 }} />
-          <List.Item.Meta avatar={<span style={{ fontSize: 20, color: cfg.color }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{nt.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div>{item.content && <Text type="secondary">{nt.content}</Text>}<br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text>{item.related_link && <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>{t('viewDetails')}</Button>}</div>} />
+          <RowMeta avatar={<span style={{ fontSize: 20, color: cfg.color }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{nt.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div>{item.content && <Text type="secondary">{nt.content}</Text>}<br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text>{item.related_link && <Button type="link" size="small" style={{ padding: 0, marginLeft: 8 }} onClick={() => navigate(item.related_link)}>{t('viewDetails')}</Button>}</div>} />
         </div>
-      </List.Item>
+      </RowItem>
     )
   }
 
@@ -173,15 +175,15 @@ const NotificationsPage: React.FC = () => {
     const cfg = PUSH_TYPE_CONFIG[item.push_type] || { color: 'var(--text-tertiary)', icon: '\uD83D\uDCEC', label: item.push_type_label }
     const isSelected = selectedPushIds.has(item.id)
     return (
-      <List.Item key={item.id} style={{ background: item.is_read ? 'transparent' : '#f6f8ff', padding: '12px 16px', borderRadius: 8, marginBottom: 4 }} actions={[
+      <RowItem key={item.id} style={{ background: item.is_read ? 'transparent' : token.colorPrimaryBg, padding: '12px 16px', borderRadius: 8, marginBottom: 4 }} actions={[
         !item.is_read && <Button key="read" type="text" icon={<CheckOutlined />} onClick={async () => { await useCompanionStore.getState().markPushRead(item.id); fetchPushes() }}>{t('markAsRead')}</Button>,
         <Popconfirm key="del" title={t('confirmDelete')} onConfirm={() => handlePushDelete(item.id)}><Button type="text" danger icon={<DeleteOutlined />}>{t('delete')}</Button></Popconfirm>,
       ].filter(Boolean)}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flex: 1 }}>
           <Checkbox checked={isSelected} onChange={(e) => togglePushSelect(item.id, e.target.checked)} style={{ marginTop: 4 }} />
-          <List.Item.Meta avatar={<span style={{ fontSize: 20 }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{item.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div><Text type="secondary">{item.content}</Text><br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text></div>} />
+          <RowMeta avatar={<span style={{ fontSize: 20 }}>{cfg.icon}</span>} title={<Space><Text strong={!item.is_read}>{item.title}</Text><Tag color={cfg.color}>{cfg.label}</Tag>{!item.is_read && <Tag color="blue">{t('unread')}</Tag>}</Space>} description={<div><Text type="secondary">{item.content}</Text><br /><Text type="secondary" style={{ fontSize: 12 }}>{item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : ''}</Text></div>} />
         </div>
-      </List.Item>
+      </RowItem>
     )
   }
 
@@ -234,7 +236,8 @@ const NotificationsPage: React.FC = () => {
                       <Button size="small" danger onClick={handleBatchDeleteNotifs}>{t('deleteSelected', { count: selectedNotifIds.size })}</Button>
                       <Button size="small" onClick={() => setSelectedNotifIds(new Set())}>{t('clearSelection')}</Button>
                     </div>}
-                    <List dataSource={notifications} renderItem={renderNotifItem} pagination={{ current: page, pageSize, total, showSizeChanger: true, showTotal: (tot) => t('totalNotifications', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p, ps) => { if (ps && ps !== pageSize) { setPageSize(ps); setPage(1) } else { setPage(p) } } }} />
+                    <RowList items={notifications} renderItem={renderNotifItem} />
+                    <Pagination style={{ margin: '16px 0' }} {...{ current: page, pageSize, total, showSizeChanger: true, showTotal: (tot) => t('totalNotifications', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p, ps) => { if (ps && ps !== pageSize) { setPageSize(ps); setPage(1) } else { setPage(p) } } }} />
                   </>}
                 </Spin>
               </>
@@ -256,7 +259,8 @@ const NotificationsPage: React.FC = () => {
                       <Button size="small" danger onClick={handleBatchDeletePushes}>{t('deleteSelected', { count: selectedPushIds.size })}</Button>
                       <Button size="small" onClick={() => setSelectedPushIds(new Set())}>{t('clearSelection')}</Button>
                     </div>}
-                    <List dataSource={pushes} renderItem={renderPushItem} pagination={{ current: pushPage, pageSize: pushPageSize, total: pushTotal, showSizeChanger: true, showTotal: (tot) => t('totalMessages', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p, ps) => { if (ps && ps !== pushPageSize) { setPushPageSize(ps); setPushPage(1) } else { setPushPage(p) } } }} />
+                    <RowList items={pushes} renderItem={renderPushItem} />
+                    <Pagination style={{ margin: '16px 0' }} {...{ current: pushPage, pageSize: pushPageSize, total: pushTotal, showSizeChanger: true, showTotal: (tot) => t('totalMessages', { count: tot }), pageSizeOptions: ['10', '20', '50'], onChange: (p, ps) => { if (ps && ps !== pushPageSize) { setPushPageSize(ps); setPushPage(1) } else { setPushPage(p) } } }} />
                   </>}
                 </Spin>
               </>

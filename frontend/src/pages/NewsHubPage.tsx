@@ -1,7 +1,7 @@
 /** 热点新闻 - 独立页面 */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Card, List, Tag, Button, Space, Typography, Progress,
+  Card, Tag, Button, Space, Typography, Progress,
   message, Spin, Modal, Drawer, Tabs, Empty, Tooltip, Result,
 } from 'antd';
 import {
@@ -15,6 +15,7 @@ import { apiErrorDetail, getDailyBriefing } from '../api/news';
 import type { NewsBriefing } from '../api/news';
 import { useAuthStore } from '../stores/authStore';
 import { useTranslation } from 'react-i18next'
+import { RowList, RowItem } from '../components/RowList'
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -323,10 +324,10 @@ const NewsHubPage: React.FC = () => {
             </Button>
           </Empty>
         ) : (
-          <List
-            dataSource={articles}
+          <RowList
+            items={articles}
             renderItem={(item) => (
-              <List.Item
+              <RowItem
                 style={{ cursor: 'pointer', padding: '12px 16px' }}
                 onClick={() => handleViewDetail(item.id)}
                 actions={[
@@ -345,9 +346,7 @@ const NewsHubPage: React.FC = () => {
                     />
                   </Tooltip>,
                 ]}
-              >
-                <List.Item.Meta
-                  title={
+                title={
                     <Space size={6}>
                       <Tag color={CATEGORY_COLORS[item.category] || 'default'}
                         style={{ fontSize: 10, lineHeight: '16px' }}>
@@ -380,8 +379,7 @@ const NewsHubPage: React.FC = () => {
                       )}
                     </Space>
                   }
-                />
-              </List.Item>
+              />
             )}
           />
         )}

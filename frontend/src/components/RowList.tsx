@@ -44,10 +44,40 @@ export function RowList<T>({ items, renderItem, split = true, empty, style }: Ro
   )
 }
 
+interface RowMetaProps {
+  avatar?: ReactNode
+  title?: ReactNode
+  description?: ReactNode
+}
+
+/**
+ * 对应 antd 的 .ant-list-item-meta：图标右距 token.padding(16)，
+ * 标题与描述间距 marginXXS(4)，描述色 colorTextDescription。
+ * 复杂行（例如前面还要塞勾选框）可以把它当普通内容嵌进 RowItem。
+ */
+export function RowMeta({ avatar, title, description }: RowMetaProps) {
+  const { token } = theme.useToken()
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', flex: 1, maxWidth: '100%', minWidth: 0 }}>
+      {avatar && <span style={{ flexShrink: 0, marginInlineEnd: token.padding }}>{avatar}</span>}
+      <div style={{ flex: '1 0', width: 0, color: token.colorText }}>
+        {title && <div style={{ marginBlockEnd: description ? token.marginXXS : 0 }}>{title}</div>}
+        {description && (
+          <div style={{ color: token.colorTextDescription, fontSize: token.fontSize }}>
+            {description}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 interface RowItemProps {
   avatar?: ReactNode
   title?: ReactNode
   description?: ReactNode
+  /** 复杂行的逃生舱：直接给内容区塞自定义结构（此时忽略 avatar/title/description） */
+  children?: ReactNode
   /** 右侧操作区，元素自己带 onClick（行本身可点时记得 stopPropagation） */
   actions?: ReactNode[]
   onClick?: () => void
@@ -58,7 +88,7 @@ interface RowItemProps {
   style?: CSSProperties
 }
 
-export function RowItem({ avatar, title, description, actions, onClick, onMouseEnter, onMouseLeave, dense, style }: RowItemProps) {
+export function RowItem({ avatar, title, description, children, actions, onClick, onMouseEnter, onMouseLeave, dense, style }: RowItemProps) {
   const { token } = theme.useToken()
   const actionCount = actions?.length ?? 0
   return (
@@ -69,19 +99,9 @@ export function RowItem({ avatar, title, description, actions, onClick, onMouseE
       }}
       onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', flex: 1, maxWidth: '100%', minWidth: 0 }}>
-        {avatar && (
-          <span style={{ flexShrink: 0, marginInlineEnd: token.padding }}>{avatar}</span>
-        )}
-        <div style={{ flex: '1 0', width: 0, color: token.colorText }}>
-          {title && <div style={{ marginBlockEnd: description ? token.marginXXS : 0 }}>{title}</div>}
-          {description && (
-            <div style={{ color: token.colorTextDescription, fontSize: token.fontSize }}>
-              {description}
-            </div>
-          )}
-        </div>
-      </div>
+      {children
+        ? <div style={{ display: 'flex', alignItems: 'flex-start', flex: 1, maxWidth: '100%', minWidth: 0 }}>{children}</div>
+        : <RowMeta avatar={avatar} title={title} description={description} />}
       {actionCount > 0 && (
         <span
           style={{

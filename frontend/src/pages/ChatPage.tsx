@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Layout, Input, Button, Space, Checkbox, message, Modal,
   Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag,
-  List, Empty, theme,
+  Empty, theme,
 } from 'antd'
 import {
   SendOutlined, StopOutlined, PlusOutlined,
@@ -23,6 +23,7 @@ import * as chatApi from '../api/chat'
 import { useTranslation } from 'react-i18next'
 import CameraCapture from '../components/CameraCapture'
 import VoiceInput from '../components/VoiceInput'
+import { RowList, RowItem } from '../components/RowList'
 
 const { TextArea } = Input
 
@@ -1060,8 +1061,8 @@ const ChatPage: React.FC = () => {
             {companionPushes.length === 0 ? (
               <Empty description={t('noUnread')} style={{ padding: 24 }} />
             ) : (
-              <List
-                dataSource={companionPushes}
+              <RowList
+                items={companionPushes}
                 renderItem={(item) => {
                   const PUSH_TYPES: Record<string, { color: string; icon: string; label: string }> = {
                     morning: { color: '#fa8c16', icon: '☀️', label: t('pushMorning') },
@@ -1073,15 +1074,15 @@ const ChatPage: React.FC = () => {
                   const cfg = PUSH_TYPES[item.push_type] || { color: 'var(--text-tertiary)', icon: '💌', label: item.push_type_label }
                   const isUnread = !item.is_read
                   return (
-                    <List.Item
+                    <RowItem
                       style={{
                         padding: '8px 12px',
-                        background: isUnread ? '#f6f8ff' : 'transparent',
+                        background: isUnread ? token.colorPrimaryBg : 'transparent',
                         cursor: 'default',
                       }}
                       onMouseEnter={(e) => { e.currentTarget.style.background = token.colorFillTertiary }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.background = isUnread ? '#f6f8ff' : 'transparent'
+                        e.currentTarget.style.background = isUnread ? token.colorPrimaryBg : 'transparent'
                       }}
                       actions={[
                         isUnread ? (
@@ -1102,9 +1103,7 @@ const ChatPage: React.FC = () => {
                           <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                         </Popconfirm>,
                       ].filter(Boolean)}
-                    >
-                      <List.Item.Meta
-                        avatar={<span style={{ fontSize: 18, lineHeight: '36px' }}>{cfg.icon}</span>}
+                      avatar={<span style={{ fontSize: 18, lineHeight: '36px' }}>{cfg.icon}</span>}
                         title={
                           <Space size={4}>
                             <Typography.Text strong={isUnread} style={{ fontSize: 13 }}>{item.title}</Typography.Text>
@@ -1121,8 +1120,7 @@ const ChatPage: React.FC = () => {
                             </Typography.Text>
                           </div>
                         }
-                      />
-                    </List.Item>
+                    />
                   )
                 }}
               />

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import FormulaRenderer from '../components/FormulaRenderer'
 import MediaDisplay from '../components/MediaDisplay'
 import {
-  Card, Tabs, Button, Space, Typography, List, Tag, Modal,
+  Card, Tabs, Button, Space, Typography, Tag, Modal,
   Form, Input, InputNumber, Select, message, Empty, Spin, Radio, Result,
   Statistic, Row, Col, Table, Progress, Popconfirm, Checkbox, Pagination,
 } from 'antd'
@@ -25,6 +25,7 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
 import { confirmUnanswered, unansweredIndexes } from '../utils/submitGuard'
+import { RowList } from '../components/RowList'
 const { Title, Text } = Typography
 
 /** S-GRADING(P3): 这道题的分是谁给的 */
@@ -334,8 +335,9 @@ const InteractionPage: React.FC = () => {
           <Spin spinning={quizLoading}>
             {quizzes.length === 0 ? <Empty description={t('noPolls')} /> : (
               <>
-                <List
-                  dataSource={quizzes.slice((quizPage - 1) * quizPageSize, quizPage * quizPageSize)}
+                <RowList
+                  items={quizzes.slice((quizPage - 1) * quizPageSize, quizPage * quizPageSize)}
+                  split={false}
                   renderItem={(quiz: any) => (
                   <Card size="small" style={{ marginBottom: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
