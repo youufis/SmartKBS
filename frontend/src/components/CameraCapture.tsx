@@ -270,7 +270,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture 
   }, [open, startCamera, stopCamera])
 
   return (
-    <Modal
+    <Modal maskClosable={false}
       title={<span><CameraOutlined style={{ marginRight: 8 }} />拍照输入</span>}
       open={open}
       onCancel={handleClose}

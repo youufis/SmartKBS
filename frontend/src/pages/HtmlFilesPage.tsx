@@ -573,7 +573,7 @@ const HtmlFilesPage: React.FC = () => {
         />
 
         {/* 新建/重命名分组弹窗 */}
-        <Modal
+        <Modal maskClosable={false}
           title={groupModalTitle}
           open={groupModalOpen}
           onOk={handleGroupSubmit}

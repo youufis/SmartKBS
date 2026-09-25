@@ -601,7 +601,7 @@ const DiscussionPage: React.FC = () => {
       </Modal>
 
       {/* AI generate plan modal */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('aiGenerateTopic')}
         open={aiModal}
         onCancel={() => setAiModal(false)}

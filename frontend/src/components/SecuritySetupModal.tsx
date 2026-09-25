@@ -78,6 +78,7 @@ const SecuritySetupModal: React.FC<Props> = ({ open, onClose, onSkip }) => {
 
   return (
     <Modal
+      maskClosable={false}
       title={
         <span>
           <SafetyCertificateOutlined style={{ marginRight: 8, color: 'var(--primary-color)' }} />

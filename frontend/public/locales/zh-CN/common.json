@@ -1,4 +1,12 @@
 {
+  "noPermission": "没有访问该页面的权限",
+  "noPermissionDesc": "该页面仅教师或管理员可用；如需访问请联系管理员开通。",
+  "backPrevPage": "返回上一页",
+  "goDashboard": "回到首页",
+  "dirtyCloseTitle": "有未保存的修改",
+  "dirtyCloseContent": "关闭后本次填写的内容不会保存，确认关闭？",
+  "dirtyCloseOk": "放弃并关闭",
+  "dirtyCloseStay": "继续编辑",
   "app": {
     "name": "SmartKBS 智慧教学平台",
     "shortName": "SmartKBS",

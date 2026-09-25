@@ -408,7 +408,7 @@ const TaskPage: React.FC = () => {
       </Card>
 
       {/* 创建任务弹窗 */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('createNewTask')}
         open={createModal}
         onOk={handleCreate}

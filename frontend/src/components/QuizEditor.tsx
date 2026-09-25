@@ -194,7 +194,7 @@ const QuizEditor: React.FC<QuizEditorProps> = ({
   }
 
   return (
-    <Modal
+    <Modal maskClosable={false}
       title={<Text strong style={{ fontSize: 18 }}>📝 {t('createQuiz')}</Text>}
       open={open}
       onCancel={onCancel}

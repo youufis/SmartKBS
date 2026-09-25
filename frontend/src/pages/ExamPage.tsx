@@ -27,6 +27,7 @@ import { TYPE_OPTIONS } from '../constants/questionTypes'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
+import { closeWithDirtyGuard } from '../utils/dirtyClose'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -46,6 +47,7 @@ const ExamPage: React.FC = () => {
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
   const isStudent = user?.role === 'student'
   const { t } = useTranslation('exam')
+  const { t: tc } = useTranslation('common')
 
   // 题型标签映射
   const typeLabel = (type: string): string => {
@@ -1044,8 +1046,8 @@ const ExamPage: React.FC = () => {
       </Space>
 
       {/* ── 创建考试弹窗 ── */}
-      <Modal title={t('createExam')} open={createModal}
-        onCancel={() => setCreateModal(false)}
+      <Modal maskClosable={false} title={t('createExam')} open={createModal}
+        onCancel={() => closeWithDirtyGuard(createForm.isFieldsTouched(), tc, () => setCreateModal(false))}
         onOk={handleCreate} confirmLoading={saving}
         okText={t('createExam')} width={640}>
         <Form form={createForm} layout="vertical"
@@ -1126,8 +1128,8 @@ const ExamPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑考试弹窗 ── */}
-      <Modal title={t('editExam')} open={editModal}
-        onCancel={() => setEditModal(false)}
+      <Modal maskClosable={false} title={t('editExam')} open={editModal}
+        onCancel={() => closeWithDirtyGuard(editForm.isFieldsTouched(), tc, () => setEditModal(false))}
         onOk={handleSaveEdit} confirmLoading={saving}
         okText={t('save')} width={640}>
         <Form form={editForm} layout="vertical">
@@ -1898,7 +1900,7 @@ const StudentExamDetail: React.FC<{
       })}
 
       {/* ── 教师复核弹窗 ── */}
-      <Modal title={t('reviewAiTitle')} open={reviewModal} onCancel={() => setReviewModal(false)}
+      <Modal maskClosable={false} title={t('reviewAiTitle')} open={reviewModal} onCancel={() => setReviewModal(false)}
         onOk={handleReviewSubmit} confirmLoading={reviewing}
         okText={t('confirmRecheck')} cancelText={t('cancel')}>
         <Space orientation="vertical" style={{ width: '100%' }}>

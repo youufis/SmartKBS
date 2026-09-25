@@ -400,7 +400,7 @@ const QuickQuizPage: React.FC = () => {
       )}
 
       {/* ── 创建房间弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('createQuizModal')}
         open={createModal}
         onCancel={() => {
@@ -502,7 +502,7 @@ const QuickQuizPage: React.FC = () => {
       </Modal>
 
       {/* ── 加入房间弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('enterJoinCodeModal')}
         open={joinModal}
         onCancel={() => { setJoinModal(false); setJoinCode('') }}
@@ -527,7 +527,7 @@ const QuickQuizPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑房间弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('editQuizModal')}
         open={editModal}
         onCancel={() => {

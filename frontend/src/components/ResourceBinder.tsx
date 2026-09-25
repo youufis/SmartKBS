@@ -205,7 +205,7 @@ const ResourceBinder: React.FC<ResourceBinderProps> = ({ kpId, kpName, open, onC
   ]
 
   return (
-    <Modal
+    <Modal maskClosable={false}
       title={
         <Space>
           <PlusOutlined />

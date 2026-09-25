@@ -1466,7 +1466,7 @@ const CurriculumPage: React.FC = () => {
                 </Col>
 
                 {/* ── 挂接教材知识点：多选、带候选命中题数（提示不拦截） ── */}
-                <Modal
+                <Modal maskClosable={false}
                   open={linkOpen}
                   title={`${t('kpLinkTitle')}${linkKp ? ' · ' + linkKp.name : ''}`}
                   onCancel={() => setLinkOpen(false)}
@@ -1710,7 +1710,7 @@ const CurriculumPage: React.FC = () => {
       )}
 
       {/* ── 课程编辑弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={editingCourse ? t('editCourse') : t('newCourse')}
         open={courseModal}
         onOk={handleSaveCourse}
@@ -1753,7 +1753,7 @@ const CurriculumPage: React.FC = () => {
       </Modal>
 
       {/* ── 章节编辑弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={editingChapter ? t('editChapter') : t('addChapter')}
         open={chapterModal}
         onOk={handleSaveChapter}
@@ -1791,7 +1791,7 @@ const CurriculumPage: React.FC = () => {
       </Modal>
 
       {/* ── 知识点编辑弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={editingKp ? t('editKnowledgePoint') : t('addKnowledgePoint')}
         open={kpModal}
         onOk={handleSaveKp}

@@ -19,6 +19,7 @@ import SVGViewer from '../components/SVGViewer'
 import MediaDisplay from '../components/MediaDisplay'
 import PlaceholderManager from '../components/PlaceholderManager'
 import { TYPE_LABELS, TYPE_COLORS, TYPE_OPTIONS } from '../constants/questionTypes'
+import { closeWithDirtyGuard } from '../utils/dirtyClose'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -39,6 +40,7 @@ let subjectOptions: string[] = []
 
 const QuestionBankPage: React.FC = () => {
   const { t } = useTranslation('questions')
+  const { t: tc } = useTranslation('common')
   const user = useAuthStore((s) => s.user)
 
   // 从后端加载课程列表
@@ -1031,11 +1033,11 @@ const QuestionBankPage: React.FC = () => {
       </Space>
 
       {/* ── 编辑弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('editQuestion_', { id: editingQuestion?.id })}
         open={editModal}
         onOk={handleSaveEdit}
-        onCancel={() => setEditModal(false)}
+        onCancel={() => closeWithDirtyGuard(editForm.isFieldsTouched(), tc, () => setEditModal(false))}
         confirmLoading={saving}
         width={760}
         okText={t('save')}

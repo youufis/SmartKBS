@@ -296,7 +296,7 @@ const QuickPollPage: React.FC = () => {
       </Card>
 
       {/* ── 投票弹窗 ── */}
-      <Modal title={takingPoll?.question} open={!!takingPoll && !pollResult}
+      <Modal maskClosable={false} title={takingPoll?.question} open={!!takingPoll && !pollResult}
         onCancel={() => { setTakingPoll(null); setPollResult(null) }}
         footer={[
           <Button key="submit" type="primary" onClick={() => handleVote(takingPoll?.id)}>{t('vote')}</Button>,
@@ -362,7 +362,7 @@ const QuickPollPage: React.FC = () => {
       </Modal>
 
       {/* ── AI 生成投票弹窗 ── */}
-      <Modal title={<Space><RobotOutlined />{t('aiGeneratePoll')}</Space>} open={aiPollModal}
+      <Modal maskClosable={false} title={<Space><RobotOutlined />{t('aiGeneratePoll')}</Space>} open={aiPollModal}
         onCancel={() => { setAiPollModal(false); setAiPollResult(null) }}
         footer={aiPollResult?.poll ? [
           <Button key="cancel" onClick={() => { setAiPollModal(false); setAiPollResult(null) }}>{t('cancel')}</Button>,
@@ -401,7 +401,7 @@ const QuickPollPage: React.FC = () => {
       </Modal>
 
       {/* ── 创建投票弹窗 ── */}
-      <Modal title={t('createPoll')} open={pollModal}
+      <Modal maskClosable={false} title={t('createPoll')} open={pollModal}
         onCancel={() => { setPollModal(false); setPollScope({ target_scope: 'teacher_classes', target_grade: '', target_class: '', target_users: '' }) }}
         footer={null}
         width={640}>
@@ -426,7 +426,7 @@ const QuickPollPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑投票弹窗 ── */}
-      <Modal title={t('editPoll')} open={!!editPollModal} onCancel={() => setEditPollModal(null)}
+      <Modal maskClosable={false} title={t('editPoll')} open={!!editPollModal} onCancel={() => setEditPollModal(null)}
         onOk={handleEditPoll} okText={t('save')}>
         <Form form={editPollForm} layout="vertical">
           <Form.Item name="question" label={t('question')} rules={[{ required: true }]}>

@@ -73,7 +73,7 @@ const GenerateDialog: React.FC<Props> = ({ open, onClose, grades, onSuccess }) =
   }
 
   return (
-    <Modal
+    <Modal maskClosable={false}
       title={t('scTitle')}
       open={open}
       onCancel={onClose}

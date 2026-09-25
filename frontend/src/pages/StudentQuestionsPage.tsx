@@ -441,7 +441,7 @@ const StudentQuestionsPage: React.FC = () => {
       </Card>
 
       {/* ── 发起提问弹窗 ── */}
-      <Modal title={t('askQuestion')} open={askModal} onCancel={() => setAskModal(false)}
+      <Modal maskClosable={false} title={t('askQuestion')} open={askModal} onCancel={() => setAskModal(false)}
         footer={null}>
         <Form form={askForm} layout="vertical" onFinish={handleAskQuestion}>
           <Form.Item name="content" label={t('questionContent')} rules={[{ required: true }]}>
@@ -455,7 +455,7 @@ const StudentQuestionsPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑提问弹窗 ── */}
-      <Modal title={t('editQuestionTitle')} open={!!editQuestionModal} onCancel={() => setEditQuestionModal(null)}
+      <Modal maskClosable={false} title={t('editQuestionTitle')} open={!!editQuestionModal} onCancel={() => setEditQuestionModal(null)}
         onOk={handleEditQuestion} okText={t('save')}>
         <Form form={editQuestionForm} layout="vertical">
           <Form.Item name="content" label={t('contentLabel')} rules={[{ required: true }]}>

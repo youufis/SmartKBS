@@ -432,7 +432,7 @@ const WrongBookPage: React.FC = () => {
       </Modal>
 
       {/* ── 设置题目数量 ── */}
-      <Modal title={t('generatePractice')} open={countModal}
+      <Modal maskClosable={false} title={t('generatePractice')} open={countModal}
         onCancel={() => setCountModal(false)}
         footer={[
           <Button key="cancel" onClick={() => setCountModal(false)}>{t('cancel')}</Button>,

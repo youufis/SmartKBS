@@ -914,7 +914,7 @@ const CodePracticePage: React.FC = () => {
       </Modal>
 
       {/* ── 创建题目弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('createCodeProblem')}
         open={createModalOpen}
         onCancel={() => setCreateModalOpen(false)}
@@ -1103,7 +1103,7 @@ const CodePracticePage: React.FC = () => {
       </Modal>
 
       {/* ── AI 生成弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('aiGenerateCodeProblem')}
         open={aiGenModal}
         onCancel={() => { setAiGenModal(false); setAiGenResult(null) }}
@@ -1159,7 +1159,7 @@ const CodePracticePage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑题目弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('cpEditTitle')}
         open={editModalOpen}
         onCancel={() => setEditModalOpen(false)}

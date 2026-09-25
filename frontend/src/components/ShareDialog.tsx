@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import React, { useState, useEffect, useMemo } from 'react'
 import { Modal, message, Space, Typography, Button, Radio, Select, Divider, Tag, Checkbox } from 'antd'
 import {
@@ -328,6 +329,15 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
     return true // 'all' 和 'staff' 无需额外选择
   }, [scope, selectedTeachers, selectedGrades])
 
+  // B2: 动过共享范围再关闭要二次确认；什么都没动就直接关
+  const dirty = existingShare
+    ? Boolean(computeChanges && (computeChanges.scopeChanged
+        || computeChanges.addUsers.length || computeChanges.removeUsers.length
+        || computeChanges.addGrades.length || computeChanges.removeGrades.length
+        || computeChanges.addClasses.length || computeChanges.removeClasses.length))
+    : (scope !== 'all' || selectedTeachers.length > 0 || selectedGrades.length > 0 || selectedClasses.length > 0)
+  const requestClose = () => closeWithDirtyGuard(dirty, t, onClose)
+
   // ── 确定共享按钮文案 ──
   const shareButtonText = useMemo(() => {
     if (!existingShare) return t('sdConfirm')
@@ -485,9 +495,10 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
 
   return (
     <Modal
+      maskClosable={false}
       title={<><ShareAltOutlined style={{ color: '#ff4d4f' }} /> {isShared ? t('sdManage') : t('sdShareRes')}</>}
       open={open}
-      onCancel={onClose}
+      onCancel={requestClose}
       footer={
         <Space style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
           <div>
@@ -498,7 +509,7 @@ const ShareDialog: React.FC<ShareDialogProps> = ({
             )}
           </div>
           <Space>
-            <Button onClick={onClose}>{t('sdClose')}</Button>
+            <Button onClick={requestClose}>{t('sdClose')}</Button>
             {inheritedFromDir ? (
               <Button type="primary" icon={<ShareAltOutlined />} onClick={handleShare} loading={loading}
                 disabled={!canShare}>

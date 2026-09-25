@@ -275,7 +275,7 @@ const WhiteboardPage: React.FC = () => {
       />
 
       {/* ── 创建房间弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('createWhiteboard')}
         open={createOpen}
         onOk={handleCreate}
@@ -324,7 +324,7 @@ const WhiteboardPage: React.FC = () => {
       </Modal>
 
       {/* ── 学生加入弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('whiteboardRoom')}
         open={joinOpen}
         onOk={handleJoin}
@@ -348,7 +348,7 @@ const WhiteboardPage: React.FC = () => {
       </Modal>
 
       {/* ── 编辑房间弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={t('wpEditPrefix') + t('whiteboardRoom')}
         open={editOpen}
         onOk={handleEdit}

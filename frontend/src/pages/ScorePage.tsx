@@ -799,7 +799,7 @@ const ScorePage: React.FC = () => {
       )}
 
       {/* ── 添加/编辑学生弹窗 ── */}
-      <Modal
+      <Modal maskClosable={false}
         title={editStudent ? t('editStudent') : t('addStudent')}
         open={editModal}
         onOk={handleSaveStudent}

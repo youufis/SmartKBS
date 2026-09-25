@@ -1,9 +1,41 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
-import { Spin, message } from 'antd'
+import { Spin, message, Result, Button } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from './stores/authStore'
 import { AUTH_UNAUTHORIZED_EVENT, type UnauthorizedDetail } from './api/client'
 import LoginPage from './pages/LoginPage'
+
+/**
+ * 路由级角色守卫（B4）。
+ *
+ * 侧边菜单按角色隐藏 ≠ 地址栏进不去：学生手输 /rollcall、/console 这类教师/管理员页面，
+ * 过去会先进页面再被接口 403 打回（表现为白屏或一串报错）。这里在路由层直接挡掉，
+ * 并给出可读的 403 页面与返回入口。
+ */
+function RequireRole({ roles, children }: { roles: string[]; children: ReactNode }) {
+  const user = useAuthStore((s) => s.user)
+  const navigate = useNavigate()
+  const { t } = useTranslation('common')
+  if (!user) return null
+  if (!roles.includes(String(user.role))) {
+    return (
+      <Result
+        status="403"
+        title={t('noPermission')}
+        subTitle={t('noPermissionDesc')}
+        style={{ paddingTop: 64 }}
+        extra={[
+          <Button key="back" onClick={() => navigate(-1)}>{t('backPrevPage')}</Button>,
+          <Button key="home" type="primary" onClick={() => navigate('/dashboard')}>{t('goDashboard')}</Button>,
+        ]}
+      />
+    )
+  }
+  return <>{children}</>
+}
+
+const TA = ['admin', 'teacher']
 
 import AppLayout from './components/AppLayout'
 import DashboardPage from './pages/DashboardPage'
@@ -120,16 +152,16 @@ function App() {
             <Route path="exam" element={<ExamPage />} />
             <Route path="exam-compose/:examId" element={user?.role === 'admin' || user?.role === 'teacher' ? <ExamComposePage /> : <Navigate to="/exam" />} />
             <Route path="score" element={user?.role === 'student' ? <RewardPage /> : <ScorePage />} />
-            <Route path="rollcall" element={<RollcallManagePage />} />
+            <Route path="rollcall" element={<RequireRole roles={TA}><RollcallManagePage /></RequireRole>} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="announcements" element={<AnnouncementsPage />} />
             <Route path="portfolio" element={<PortfolioPage />} />
             <Route path="portfolio/:username" element={<PortfolioPage />} />
-            <Route path="analytics" element={<AnalyticsPage />} />
+            <Route path="analytics" element={<RequireRole roles={TA}><AnalyticsPage /></RequireRole>} />
             <Route path="interaction" element={<InteractionPage />} />
             <Route path="discussion" element={<DiscussionPage />} />
             <Route path="discussion-room/:groupId" element={<DiscussionRoomPage />} />
-            <Route path="discussion-monitor/:discId" element={<DiscussionMonitorPage />} />
+            <Route path="discussion-monitor/:discId" element={<RequireRole roles={TA}><DiscussionMonitorPage /></RequireRole>} />
             <Route path="student-exam-task" element={<StudentExamTaskPage />} />
             <Route path="curriculum" element={<CurriculumPage />} />
             <Route path="wrong-book" element={<WrongBookPage />} />
@@ -138,7 +170,7 @@ function App() {
             <Route path="quick-quiz" element={<QuickQuizPage />} />
             <Route path="quick-quiz/lobby/:roomId" element={<QuickQuizLobby />} />
             <Route path="quick-quiz/play/:roomId" element={<QuickQuizPlay />} />
-            <Route path="quick-quiz/console/:roomId" element={<QuickQuizConsole />} />
+            <Route path="quick-quiz/console/:roomId" element={<RequireRole roles={TA}><QuickQuizConsole /></RequireRole>} />
             <Route path="quick-quiz/result/:roomId" element={<QuickQuizResult />} />
             <Route path="practice" element={<PracticePage />} />
             <Route path="code-practice" element={<CodePracticePage />} />
@@ -154,7 +186,7 @@ function App() {
             <Route path="portrait" element={<PortraitPage />} />
             <Route path="showcase" element={<ShowcasePage />} />
             <Route path="about" element={<AboutPage />} />
-            <Route path="console" element={<AuthorPanelPage />} />
+            <Route path="console" element={<RequireRole roles={['admin']}><AuthorPanelPage /></RequireRole>} />
           </Route>
           <Route path="/quest/battle/:questId" element={isLoggedIn ? <QuestBattlePage /> : <Navigate to="/login" />} />
           <Route path="/quest/result/:questId" element={isLoggedIn ? <QuestResultPage /> : <Navigate to="/login" />} />
