@@ -49,7 +49,7 @@ const TaskPage: React.FC = () => {
     else next.delete('grading')
     setSearchParams(next, { replace: true })
   }
-  const visibleTasks = pendingOnly ? tasks.filter((x) => (x.pending_grade_count ?? 0) > 0) : tasks
+  const visibleTasks = pendingOnly && !isStudent ? tasks.filter((x) => (x.pending_grade_count ?? 0) > 0) : tasks
   const [loading, setLoading] = useState(false)
   const [createModal, setCreateModal] = useState(false)
   const [taskName, setTaskName] = useState('')
@@ -306,7 +306,7 @@ const TaskPage: React.FC = () => {
     ...(isStudent
       ? [studentStatusColumn]
       : [{
-          title: t('submittedCount'), key: 'submissions', width: 100,
+          title: t('submittedCount'), key: 'submissions', width: 156,
           render: (_: any, record: TaskInfo) => {
             const names = (record as any).submissions_names || []
             const count = record.submissions?.length || 0
