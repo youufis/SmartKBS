@@ -981,7 +981,7 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-### v8.3.0 (2026-09-23)
+### v8.3.0 (2026-09-26)
 
 - 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests; companion and assistant replies reassemble streamed fragments again instead of showing only the last character
 - 🤖 **AI generation and grading hardened**: explicit output length caps with truncation recorded, tolerant JSON parsing and pre-save checks so incomplete artifacts are never stored silently; answers normalised for grading and generated artifacts auto-registered
