@@ -981,5 +981,7 @@
   "graduatedArchiveLabel": "Graduated & archived (login off, data kept): ",
   "restoredLabel": "↩️ Restored {{n}} graduated account(s)",
   "upgradeFixedEffects": "Upgrade also migrates class points and roll-call data by grade, and re-assigns classes by matching names (e.g. Class 1 -> Class 1).",
-  "unmatchedClassHint": "{{n}} student(s) had no same-name class in the new grade (class cleared); create the classes first, then re-assign in User Management."
+  "unmatchedClassHint": "{{n}} student(s) had no same-name class in the new grade (class cleared); create the classes first, then re-assign in User Management.",
+  "pendingGradeFilter": "Pending grading only",
+  "pendingGradeTag": "{{n}} to grade"
 }

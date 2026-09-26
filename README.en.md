@@ -614,6 +614,7 @@ Teachers publish learning tasks, students submit AI dialogues as homework:
   - Create tasks (name/description/deadline)
   - View student submission details
   - AI smart grading (3-dimension scoring: content completeness, logical clarity, expression accuracy)
+  - Each task shows how many submissions still await grading, with a one-click pending-only filter (the home to-do badge lands here)
   - Revoke submissions, end tasks
 - **Student Side**:
   - View active tasks

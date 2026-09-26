@@ -91,6 +91,9 @@ export interface TaskInfo {
   status: 'active' | 'inactive';
   created_time: string;
   submissions: string[];
+  /** 教师端列表附带：已批改与待批改份数 */
+  graded_count?: number;
+  pending_grade_count?: number;
 }
 
 // ── 试题库类型 ──

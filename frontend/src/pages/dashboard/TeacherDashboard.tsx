@@ -52,9 +52,21 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
 
   const examStats = summary.exam_stats
 
+  // 聚合卡的数字含多类待办，跳转要落到“当前确实有事可做”的那一类，不能永远只去考试中心
+  const pendingTarget = (todo?.pending_exam_grading ?? 0) > 0 ? '/exam?grading=pending'
+    : (todo?.pending_task_grades ?? 0) > 0 ? '/tasks?grading=pending'
+    : (todo?.pending_questions ?? 0) + (todo?.pending_answer_reviews ?? 0) > 0 ? '/student-questions'
+    : '/exam?grading=pending'
+  const ongoingTarget = (todo?.active_quizzes ?? 0) > 0 ? '/interaction'
+    : (todo?.active_quick_quiz_rooms ?? 0) > 0 ? '/quick-quiz'
+    : (todo?.active_discussions ?? 0) > 0 ? '/discussion'
+    : (todo?.active_polls ?? 0) > 0 ? '/quick-poll'
+    : (todo?.active_tasks ?? 0) > 0 ? '/tasks'
+    : '/exam'
+
   return (
     <div>
-      <WelcomeBanner summary={summary} todoTotal={0} isStudent={false} isTeacher={!isAdmin} isAdmin={isAdmin} />
+      <WelcomeBanner summary={summary} todoTotal={pendingTotal} isStudent={false} isTeacher={!isAdmin} isAdmin={isAdmin} />
 
       <TeacherTodoBar data={todo} />
 
@@ -69,7 +81,7 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card hoverable size="small" style={{ height: '100%' }} onClick={() => navigate('/exam?grading=pending')}>
+          <Card hoverable size="small" style={{ height: '100%' }} onClick={() => navigate(pendingTarget)}>
             <Statistic title={t('statsT.pending')} value={pendingTotal}
               prefix={<AuditOutlined style={{ color: pendingTotal > 0 ? '#ff4d4f' : '#52c41a' }} />}
               styles={{ content: { color: pendingTotal > 0 ? '#ff4d4f' : '#52c41a' } }}
@@ -85,7 +97,7 @@ const TeacherDashboard: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
           </Card>
         </Col>
         <Col xs={12} md={6}>
-          <Card hoverable size="small" style={{ height: '100%' }} onClick={() => navigate('/interaction')}>
+          <Card hoverable size="small" style={{ height: '100%' }} onClick={() => navigate(ongoingTarget)}>
             <Statistic title={t('statsT.ongoing')} value={ongoing}
               prefix={<ThunderboltOutlined style={{ color: '#fa8c16' }} />}
               styles={{ content: { color: '#fa8c16' } }}

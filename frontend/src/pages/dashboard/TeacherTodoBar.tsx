@@ -24,7 +24,7 @@ interface ChipDef {
 
 const CHIPS: ChipDef[] = [
   { key: 'pending_exam_grading', labelKey: 'teacherTodo.grading', icon: <FormOutlined />, color: '#ff4d4f', route: '/exam?grading=pending', actionable: true },
-  { key: 'pending_task_grades', labelKey: 'teacherTodo.taskGrades', icon: <FileDoneOutlined />, color: '#fa8c16', route: '/score', actionable: true },
+  { key: 'pending_task_grades', labelKey: 'teacherTodo.taskGrades', icon: <FileDoneOutlined />, color: '#fa8c16', route: '/tasks?grading=pending', actionable: true },
   { key: 'pending_questions', labelKey: 'teacherTodo.questions', icon: <QuestionCircleOutlined />, color: '#722ed1', route: '/student-questions', actionable: true },
   { key: 'pending_answer_reviews', labelKey: 'teacherTodo.answers', icon: <MessageOutlined />, color: '#eb2f96', route: '/student-questions', actionable: true },
   { key: 'active_quizzes', labelKey: 'teacherTodo.quizzes', icon: <ThunderboltOutlined />, color: '#1677ff', route: '/interaction' },

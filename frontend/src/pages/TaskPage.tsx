@@ -1,7 +1,7 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Card, Table, Button, message, Modal, Input, Tag, Space,
+  Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox,
   Typography, Spin, Popconfirm, Popover, Drawer, Tooltip,
 } from 'antd'
 import {
@@ -10,6 +10,7 @@ import {
   RobotOutlined, BarChartOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
+import { useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
 import type { TaskInfo } from '../types'
@@ -38,6 +39,17 @@ const TaskPage: React.FC = () => {
   }
 
   const [tasks, setTasks] = useState<TaskInfo[]>([])
+  // 首页「待批改任务」带 ?grading=pending 直达：只列还有未批改提交的任务
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [pendingOnly, setPendingOnly] = useState(() => searchParams.get('grading') === 'pending')
+  const setPendingFilter = (v: boolean) => {
+    setPendingOnly(v)
+    const next = new URLSearchParams(searchParams)
+    if (v) next.set('grading', 'pending')
+    else next.delete('grading')
+    setSearchParams(next, { replace: true })
+  }
+  const visibleTasks = pendingOnly ? tasks.filter((x) => (x.pending_grade_count ?? 0) > 0) : tasks
   const [loading, setLoading] = useState(false)
   const [createModal, setCreateModal] = useState(false)
   const [taskName, setTaskName] = useState('')
@@ -299,7 +311,9 @@ const TaskPage: React.FC = () => {
             const names = (record as any).submissions_names || []
             const count = record.submissions?.length || 0
             if (count === 0) return <Typography.Text type="secondary">{t('zeroPeople')}</Typography.Text>
+            const pending = record.pending_grade_count ?? 0
             return (
+              <Space size={4}>
               <Popover
                 title={t('submittedStudents')}
                 content={
@@ -313,6 +327,10 @@ const TaskPage: React.FC = () => {
               >
                 <Button type="link" size="small">{t('peopleCount', { count })} 👤</Button>
               </Popover>
+              {pending > 0 && (
+                <Tag color="orange" style={{ marginInlineEnd: 0 }}>{t('pendingGradeTag', { n: pending })}</Tag>
+              )}
+              </Space>
             )
           },
         }]
@@ -393,11 +411,16 @@ const TaskPage: React.FC = () => {
             </Button>
           )}
           <Button icon={<ReloadOutlined />} onClick={loadTasks}>{t('refresh')}</Button>
+          {isAdminOrTeacher && (
+            <Checkbox checked={pendingOnly} onChange={(e) => setPendingFilter(e.target.checked)}>
+              {t('pendingGradeFilter')}
+            </Checkbox>
+          )}
         </Space>
 
         <Spin spinning={loading}>
           <Table
-            dataSource={tasks}
+            dataSource={visibleTasks}
             columns={columns}
             rowKey="id"
             pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('totalTasks', { count: total }), pageSizeOptions: ['10', '20', '50'] }}

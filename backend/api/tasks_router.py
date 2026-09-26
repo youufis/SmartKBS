@@ -292,6 +292,21 @@ async def get_active_tasks(request: Request):
             name_map[r[0]] = r[1] or r[0]
     for task in tasks:
         task["submissions_names"] = [name_map.get(u, u) for u in (task.get("submissions") or [])]
+
+    # 待批改份数: 有提交但还没有批改结果的（首页「待批改任务」直达本列表时按它筛选）
+    task_ids = [t["id"] for t in tasks]
+    graded_map: dict[str, int] = {}
+    if task_ids:
+        ph = ",".join("?" for _ in task_ids)
+        for r in execute_query(
+            f"SELECT task_id, COUNT(*) FROM task_grades WHERE task_id IN ({ph}) GROUP BY task_id",
+            tuple(task_ids),
+        ):
+            graded_map[r[0]] = r[1]
+    for task in tasks:
+        graded = graded_map.get(task["id"], 0)
+        task["graded_count"] = graded
+        task["pending_grade_count"] = max(0, len(task.get("submissions") or []) - graded)
     return {"tasks": tasks, "total": len(tasks)}
 
 

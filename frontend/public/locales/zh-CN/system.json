@@ -981,5 +981,7 @@
   "graduatedArchiveLabel": "毕业归档（禁登录、留数据）：",
   "restoredLabel": "↩️ 已恢复 {{n}} 个毕业归档账号",
   "upgradeFixedEffects": "升级将同步迁移课堂积分与点名数据的年级归属，并按同名班级自动归班（如 1班 → 1班）。",
-  "unmatchedClassHint": "{{n}} 人未匹配到新年级同名班级（班级已置空），请先在新年级建班，再到用户管理归班。"
+  "unmatchedClassHint": "{{n}} 人未匹配到新年级同名班级（班级已置空），请先在新年级建班，再到用户管理归班。",
+  "pendingGradeFilter": "只看待批改",
+  "pendingGradeTag": "待批改 {{n}}"
 }
