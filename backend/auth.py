@@ -413,14 +413,14 @@ def verify_security_answer(username: str, answer: str, question_index: int = 0) 
 
 # ── 频率限制 ──
 
-def check_security_locked(username: str) -> tuple[bool, str]:
-    """检查用户是否被锁定，返回 (是否锁定, 剩余等待描述)"""
+def check_security_locked(username: str) -> tuple[bool, int]:
+    """检查用户是否被锁定，返回 (是否锁定, 剩余锁定分钟数)。文案组装交给调用方做 i18n。"""
     rows = execute_query(
         "SELECT security_failed_attempts, security_locked_until FROM users WHERE username=?",
         (username,),
     )
     if not rows:
-        return False, ""
+        return False, 0
 
     locked_until_str = rows[0][1] or ""
     if locked_until_str:
@@ -430,14 +430,14 @@ def check_security_locked(username: str) -> tuple[bool, str]:
             now = datetime.now()
             if now < locked_until:
                 remaining = int((locked_until - now).total_seconds() // 60)
-                return True, f"密保验证已锁定，请{remaining}分钟后再试"
+                return True, remaining
             else:
                 # 锁定已过期，自动解锁
                 execute_insert_update(
                     "UPDATE users SET security_failed_attempts=0, security_locked_until='' WHERE username=?",
                     (username,),
                 )
-    return False, ""
+    return False, 0
 
 
 def increment_failed_attempts(username: str) -> int:

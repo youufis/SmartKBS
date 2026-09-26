@@ -11,7 +11,21 @@
     "invalid_input": "无效的输入参数",
     "session_expired": "会话已过期，请重新登录",
     "already_logged_in_elsewhere": "您的账号已在其他设备登录，您已下线",
-    "rate_limit": "操作过于频繁，请稍后重试"
+    "rate_limit": "操作过于频繁，请稍后重试",
+    "account_graduated": "账号已毕业归档，无法登录。如需查询历史学习数据，请联系管理员",
+    "user_not_found": "用户不存在",
+    "security_not_configured": "该用户未设置密保问题",
+    "security_not_configured_contact_admin": "该用户未设置密保问题，请联系管理员重置密码",
+    "username_answer_required": "用户名和答案不能为空",
+    "answer_wrong_remaining": "答案错误，还剩{remaining}次机会",
+    "answer_wrong_q1_remaining": "第一题答案错误，还剩{remaining}次机会",
+    "answer_wrong_q2_remaining": "第二题答案错误，还剩{remaining}次机会",
+    "security_locked_30min": "密保验证失败次数过多，账号已锁定30分钟",
+    "security_locked_minutes": "密保验证已锁定，请{minutes}分钟后再试",
+    "reset_fields_required": "用户名、两个答案和新密码不能为空",
+    "password_min_len_4": "新密码至少需要4个字符",
+    "ip_rate_banned_retry": "访问过于频繁，请 {seconds} 秒后重试",
+    "ip_denied": "访问被拒绝：来源地址在黑名单中"
   },
   "success": {
     "login": "登录成功",

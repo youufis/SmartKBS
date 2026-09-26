@@ -23,6 +23,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from backend.api.config_router import get_config_value
+from backend.i18n import T, resolve_lang_from_request
 from backend.logger import logger
 
 _LOCK = threading.Lock()
@@ -210,7 +211,7 @@ def block_response(request: Request) -> Optional[JSONResponse]:
         logger.warning(f"[安全] 拒绝黑名单 IP {ip}（规则 {deny}）{request.method} {request.url.path}")
         return JSONResponse(
             status_code=403,
-            content={"detail": "访问被拒绝：来源地址在黑名单中", "code": "ip_denied"},
+            content={"detail": T("messages.error.ip_denied", resolve_lang_from_request(request)), "code": "ip_denied"},
         )
 
     if not _bool("ENABLE_IP_GUARD", False):
@@ -222,7 +223,7 @@ def block_response(request: Request) -> Optional[JSONResponse]:
             retry = int(until - now) + 1
             return JSONResponse(
                 status_code=429,
-                content={"detail": f"访问过于频繁，请 {retry} 秒后重试", "code": "ip_rate_banned"},
+                content={"detail": T("messages.error.ip_rate_banned_retry", resolve_lang_from_request(request), seconds=retry), "code": "ip_rate_banned"},
                 headers={"Retry-After": str(retry)},
             )
         if until:

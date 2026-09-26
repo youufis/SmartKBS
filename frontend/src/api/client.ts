@@ -2,6 +2,7 @@
 import axios from 'axios';
 import type { AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { stopAllPollers, TOKEN_STORAGE_KEY } from '../utils/poller';
+import i18n from '../i18n';
 
 export const USER_STORAGE_KEY = 'smartkb_user';
 
@@ -83,6 +84,8 @@ function adoptRenewedToken(response: AxiosResponse | undefined): void {
 // 请求拦截器：自动添加 JWT（每次都现读 localStorage，续期后立即生效）
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    // C2: 让后端错误文案跟随界面语言（登录页/找回密码等直接展示 detail 的提示）
+    config.headers['Accept-Language'] = i18n.language || 'zh-CN';
     const token = getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;

@@ -28,6 +28,7 @@ from backend.auth import (
     is_graduated,)
 from backend.api.auth_guard import unauthorized
 from backend.api.config_router import get_config_value
+from backend.i18n import T, resolve_lang_from_request
 from backend.security_guard import record_login_failure
 from backend.logger import logger
 
@@ -44,9 +45,11 @@ async def login(req: LoginRequest, fastapi_request: Request):
     """用户登录，支持用户名或姓名"""
     username_or_name = req.username_or_name.strip()
     password = req.password
+    # C2: 错误提示按请求语言返回（前端随界面语言发送 Accept-Language）
+    lang = resolve_lang_from_request(fastapi_request)
 
     if not username_or_name or not password:
-        raise HTTPException(status_code=400, detail="用户名和密码不能为空")
+        raise HTTPException(status_code=400, detail=T('messages.error.username_password_required', lang))
 
     # 先按用户名查询
     rows = execute_query(
@@ -63,25 +66,25 @@ async def login(req: LoginRequest, fastapi_request: Request):
         if len(name_rows) > 1:
             raise HTTPException(
                 status_code=400,
-                detail="存在多个同名用户，请使用用户名登录",
+                detail=T('messages.error.duplicate_name_login', lang),
             )
         rows = name_rows
 
     if not rows:
         # 以前"用户名不存在"完全不留痕，被猜账号时无从发现
         record_login_failure(fastapi_request, username_or_name)
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        raise HTTPException(status_code=401, detail=T('messages.error.username_password_error', lang))
 
     username, hashed_password, class_val, name_val, gender_val, role_val, grade_val = rows[0]
 
     # 验证密码
     if not check_password(password, hashed_password):
         record_login_failure(fastapi_request, username)
-        raise HTTPException(status_code=401, detail="密码错误")
+        raise HTTPException(status_code=401, detail=T('messages.error.password_error', lang))
 
     # 毕业归档拦截：数据保留在平台，登录入口关闭（管理员可在用户管理恢复）
     if is_graduated(username):
-        raise HTTPException(status_code=403, detail="账号已毕业归档，无法登录。如需查询历史学习数据，请联系管理员")
+        raise HTTPException(status_code=403, detail=T('messages.error.account_graduated', lang))
 
     # 登录前递增 token_version，使旧 token 失效（强制单点登录）
     increment_token_version(username)
@@ -222,7 +225,11 @@ async def get_current_user(request: Request):
         (username,),
     )
     if not rows:
-        raise HTTPException(status_code=404, detail="用户不存在")
+        # 会话兜底路径，不经界面语言解析，保持中文
+        raise HTTPException(
+            status_code=404,
+            detail="用户不存在",
+        )
 
     username, class_val, name_val, gender_val, role_val, grade_val = rows[0]
     role_name = {0: "admin", 1: "teacher", 2: "student"}.get(role_val, "student")
@@ -302,18 +309,19 @@ async def list_security_questions():
 
 
 @router.get("/security-check/{username}")
-async def security_check(username: str):
+async def security_check(username: str, request: Request):
     """检查用户是否存在且已设置双密保问题（公开接口）"""
+    lang = resolve_lang_from_request(request)
     rows = execute_query(
         "SELECT username, security_question, security_question2 FROM users WHERE username=?",
         (username.strip(),),
     )
     if not rows:
-        raise HTTPException(status_code=404, detail="用户不存在")
+        raise HTTPException(status_code=404, detail=T('messages.error.user_not_found', lang))
     q1 = rows[0][1] or ""
     q2 = rows[0][2] or ""
     if not q1 or not q2:
-        raise HTTPException(status_code=400, detail="该用户未设置密保问题，请联系管理员重置密码")
+        raise HTTPException(status_code=400, detail=T('messages.error.security_not_configured_contact_admin', lang))
     return {"username": rows[0][0], "question1": q1, "question2": q2}
 
 
@@ -352,24 +360,25 @@ async def set_security(req: SetSecurityRequest, request: Request):
 
 
 @router.post("/verify-security")
-async def verify_security(req: VerifySecurityRequest):
+async def verify_security(req: VerifySecurityRequest, request: Request):
     """验证指定索引的密保答案（公开接口，带频率限制）"""
     username = req.username.strip()
+    lang = resolve_lang_from_request(request)
     if not username or not req.answer:
-        raise HTTPException(status_code=400, detail="用户名和答案不能为空")
+        raise HTTPException(status_code=400, detail=T('messages.error.username_answer_required', lang))
 
     # 检查用户存在
     rows = execute_query("SELECT username FROM users WHERE username=?", (username,))
     if not rows:
-        raise HTTPException(status_code=404, detail="用户不存在")
+        raise HTTPException(status_code=404, detail=T('messages.error.user_not_found', lang))
 
     if not has_security_configured(username):
-        raise HTTPException(status_code=400, detail="该用户未设置密保问题")
+        raise HTTPException(status_code=400, detail=T('messages.error.security_not_configured', lang))
 
     # 频率限制检查
-    locked, lock_msg = check_security_locked(username)
+    locked, lock_minutes = check_security_locked(username)
     if locked:
-        raise HTTPException(status_code=429, detail=lock_msg)
+        raise HTTPException(status_code=429, detail=T('messages.error.security_locked_minutes', lang, minutes=lock_minutes))
 
     if verify_security_answer(username, req.answer, req.question_index):
         return {"verified": True, "message": "答案正确"}
@@ -378,52 +387,53 @@ async def verify_security(req: VerifySecurityRequest):
         attempts = increment_failed_attempts(username)
         remaining = 5 - attempts
         if remaining > 0:
-            raise HTTPException(status_code=403, detail=f"答案错误，还剩{remaining}次机会")
+            raise HTTPException(status_code=403, detail=T('messages.error.answer_wrong_remaining', lang, remaining=remaining))
         else:
             raise HTTPException(
                 status_code=429,
-                detail=f"密保验证失败次数过多，账号已锁定30分钟",
+                detail=T('messages.error.security_locked_30min', lang),
             )
 
 
 @router.post("/reset-password-by-security")
-async def reset_password_by_security(req: ResetPasswordBySecurityRequest):
+async def reset_password_by_security(req: ResetPasswordBySecurityRequest, request: Request):
     """通过双密保答案重置密码（公开接口，需同时验证两个答案）"""
     username = req.username.strip()
+    lang = resolve_lang_from_request(request)
     if not username or not req.answer1 or not req.answer2 or not req.new_password:
-        raise HTTPException(status_code=400, detail="用户名、两个答案和新密码不能为空")
+        raise HTTPException(status_code=400, detail=T('messages.error.reset_fields_required', lang))
     if len(req.new_password) < 4:
-        raise HTTPException(status_code=400, detail="新密码至少需要4个字符")
+        raise HTTPException(status_code=400, detail=T('messages.error.password_min_len_4', lang))
 
     # 验证用户存在
     rows = execute_query("SELECT username FROM users WHERE username=?", (username,))
     if not rows:
-        raise HTTPException(status_code=404, detail="用户不存在")
+        raise HTTPException(status_code=404, detail=T('messages.error.user_not_found', lang))
 
     if not has_security_configured(username):
-        raise HTTPException(status_code=400, detail="该用户未设置密保问题")
+        raise HTTPException(status_code=400, detail=T('messages.error.security_not_configured', lang))
 
     # 频率限制检查
-    locked, lock_msg = check_security_locked(username)
+    locked, lock_minutes = check_security_locked(username)
     if locked:
-        raise HTTPException(status_code=429, detail=lock_msg)
+        raise HTTPException(status_code=429, detail=T('messages.error.security_locked_minutes', lang, minutes=lock_minutes))
 
     # 验证两个答案
     if not verify_security_answer(username, req.answer1, 0):
         attempts = increment_failed_attempts(username)
         remaining = 5 - attempts
         if remaining > 0:
-            raise HTTPException(status_code=403, detail=f"第一题答案错误，还剩{remaining}次机会")
+            raise HTTPException(status_code=403, detail=T('messages.error.answer_wrong_q1_remaining', lang, remaining=remaining))
         else:
-            raise HTTPException(status_code=429, detail="密保验证失败次数过多，账号已锁定30分钟")
+            raise HTTPException(status_code=429, detail=T('messages.error.security_locked_30min', lang))
 
     if not verify_security_answer(username, req.answer2, 1):
         attempts = increment_failed_attempts(username)
         remaining = 5 - attempts
         if remaining > 0:
-            raise HTTPException(status_code=403, detail=f"第二题答案错误，还剩{remaining}次机会")
+            raise HTTPException(status_code=403, detail=T('messages.error.answer_wrong_q2_remaining', lang, remaining=remaining))
         else:
-            raise HTTPException(status_code=429, detail="密保验证失败次数过多，账号已锁定30分钟")
+            raise HTTPException(status_code=429, detail=T('messages.error.security_locked_30min', lang))
 
     # 验证通过，重置失败次数
     reset_failed_attempts(username)

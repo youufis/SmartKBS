@@ -11,7 +11,21 @@
     "invalid_input": "Invalid input parameters",
     "session_expired": "Session expired, please login again",
     "already_logged_in_elsewhere": "Your account has logged in elsewhere, you have been disconnected",
-    "rate_limit": "Too many requests, please try again later"
+    "rate_limit": "Too many requests, please try again later",
+    "account_graduated": "This account has been archived after graduation and cannot sign in. Please contact an administrator if you need access to historical learning data.",
+    "user_not_found": "User not found",
+    "security_not_configured": "This user has no security questions set",
+    "security_not_configured_contact_admin": "This user has no security questions set. Please contact an administrator to reset the password.",
+    "username_answer_required": "Username and answer are required",
+    "answer_wrong_remaining": "Incorrect answer, {remaining} attempts left",
+    "answer_wrong_q1_remaining": "First answer is incorrect, {remaining} attempts left",
+    "answer_wrong_q2_remaining": "Second answer is incorrect, {remaining} attempts left",
+    "security_locked_30min": "Too many failed security verifications. The account is locked for 30 minutes.",
+    "security_locked_minutes": "Security verification is locked. Please try again in {minutes} minute(s).",
+    "reset_fields_required": "Username, both answers and new password are required",
+    "password_min_len_4": "New password must be at least 4 characters",
+    "ip_rate_banned_retry": "Too many requests, please retry in {seconds} second(s)",
+    "ip_denied": "Access denied: your address is on the deny list"
   },
   "success": {
     "login": "Login successful",
