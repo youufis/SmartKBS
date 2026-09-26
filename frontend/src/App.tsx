@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from './stores/authStore'
 import { AUTH_UNAUTHORIZED_EVENT, type UnauthorizedDetail } from './api/client'
 import LoginPage from './pages/LoginPage'
-import i18n from './i18n'
 import { useLocaleStore } from './stores/localeStore'
 
 /**
@@ -102,14 +101,17 @@ function App() {
   const user = useAuthStore((s) => s.user)
   const forceLogout = useAuthStore((s) => s.forceLogout)
   const lang = useLocaleStore((s) => s.current)
+  // common 命名空间由 http-backend 异步加载：直接用 i18n.t 会在未加载完成时吐回键名，
+  // 改用 hook 的 t，加载完成后组件重渲染、标题 effect 会自动重跑纠正
+  const { t: trCommon } = useTranslation('common')
   useEffect(() => {
     restoreSession()
   }, [restoreSession])
 
   // A7: 登录后的标签标题恢复为平台名（登录页标题由 LoginPage 自行设置）
   useEffect(() => {
-    if (isLoggedIn) document.title = i18n.t('common:app.name')
-  }, [isLoggedIn, lang])
+    if (isLoggedIn) document.title = trCommon('app.name')
+  }, [isLoggedIn, lang, trCommon])
 
   // W10: 错题巩固练习的阈值检查改在"进入错题本页"时后台触发(见 WrongBookPage),
   // 不再在每次应用启动时都做一次重活
