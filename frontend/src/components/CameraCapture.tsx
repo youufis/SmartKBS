@@ -206,7 +206,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture 
     canvas.toBlob(
       (blob) => {
         if (!blob) {
-          message.error(t('cameraCaptureFailed'))
+          message.error(t('app.cameraCaptureFailed'))
           return
         }
         const timestamp = Date.now()
@@ -273,7 +273,7 @@ const CameraCapture: React.FC<CameraCaptureProps> = ({ open, onClose, onCapture 
 
   return (
     <Modal maskClosable={false}
-      title={<span><CameraOutlined style={{ marginRight: 8 }} />{t('cameraInputTitle')}</span>}
+      title={<span><CameraOutlined style={{ marginRight: 8 }} />{t('app.cameraInputTitle')}</span>}
       open={open}
       onCancel={handleClose}
       footer={null}

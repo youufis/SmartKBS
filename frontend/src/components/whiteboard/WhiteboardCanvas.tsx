@@ -135,7 +135,9 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
           ws.send({
             type: 'op',
             op_id: generateUUID(),
-            page: 1,
+            // 用当前页，别写死第 1 页：多页白板把内容全存到 page 1，
+            // 后端按「当前页」读快照时就会读到空白页，AI 判定白板为空
+            page: useWhiteboardStore.getState().currentPage,
             data: { snapshot },
           })
         }
@@ -145,7 +147,10 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
         if (!didSaveRef.current) return
         didSaveRef.current = false
         if (!snapshotHashRef.current) return
-        await apiClient.put(`/api/whiteboard/rooms/${roomId}/pages/1`, { snapshot_data: snapshotHashRef.current })
+        await apiClient.put(
+          `/api/whiteboard/rooms/${roomId}/pages/${useWhiteboardStore.getState().currentPage}`,
+          { snapshot_data: snapshotHashRef.current },
+        )
       }, 30000)
       return () => { clearInterval(wsTimer); clearInterval(httpTimer); snapshotHashRef.current = ''; didSaveRef.current = false }
     } else if (store.mode === 'interactive') {
@@ -162,7 +167,9 @@ export const WhiteboardCanvas: React.FC<Props> = ({ roomId, readOnly = false, is
           ws.send({
             type: 'op',
             op_id: generateUUID(),
-            page: 1,
+            // 用当前页，别写死第 1 页：多页白板把内容全存到 page 1，
+            // 后端按「当前页」读快照时就会读到空白页，AI 判定白板为空
+            page: useWhiteboardStore.getState().currentPage,
             data: { snapshot },
           })
         }

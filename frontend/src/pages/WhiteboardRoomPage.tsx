@@ -390,8 +390,8 @@ const WhiteboardRoomPage: React.FC = () => {
           }}
           editorRef={editorRef}
           isTeacher={isTeacher}
-          kpName={wb.room?.course_kp_id ? `知识点#${wb.room.course_kp_id}` : ''}
-          subject="通用技术"
+          // 学科与知识点均由后端按当前房间与教师任教学科解析，
+          // 此处不再传任何写死的教学口径
         />
       </div>
 
@@ -410,7 +410,7 @@ const WhiteboardRoomPage: React.FC = () => {
           {mode === 'self_study' && t('wbModeSelfHint')}
         </span>
         <span>
-          {ws.isConnected ? '\ud83d\udfe2 ' + t('wbConnected') : <Tooltip title={t('wbPollTip')}>\u26a1 {t('wbPollConnected')}</Tooltip>}
+          {ws.isConnected ? '\ud83d\udfe2 ' + t('wbConnected') : <Tooltip title={t('wbPollTip')}>{'\u26a1 ' + t('wbPollConnected')}</Tooltip>}
         </span>
       </div>
 

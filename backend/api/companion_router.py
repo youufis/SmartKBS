@@ -194,11 +194,14 @@ def _companion_event_generator(
     from backend.api.chat_router import _chat_event_generator as _cg
 
     try:
-        for chunk in _cg(prompt, [], session_id, username, None, dashscope_api_key, False):
-            yield f"data: {json.dumps({'type': 'delta', 'content': chunk['text']})}\n\n"
-            session_id = chunk.get("session_id") or session_id
-
-        yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
+        # _chat_event_generator 直接产出 SSE 帧，且已是「增量 content」协议：原样透传。
+        # 不能再按累计快照二次累加（否则前端 += 后会出现重复叠加），
+        # 也不要在它之后补发第二个 done——空 session_id 会覆盖掉真实会话号。
+        # _chat_event_generator 直接产出 SSE 帧，且已是「增量 content」协议：原样透传。
+        # 不能再按累计快照二次累加（否则前端 += 后会出现重复叠加），
+        # 也不要在它之后补发第二个 done——空 session_id 会覆盖掉真实会话号。
+        for sse in _cg(prompt, [], session_id, username, None, dashscope_api_key, False):
+            yield sse
 
         # 异步保存对话记忆（不阻塞响应）
         try:

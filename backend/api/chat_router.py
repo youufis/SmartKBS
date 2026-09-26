@@ -534,9 +534,13 @@ def _chat_event_generator(
                                 yield f"data: {json.dumps({'type': 'delta', 'content': inc2}, ensure_ascii=False)}\n\n"
                         full_text += _sep + doc_content
                     else:
+                        # 本协议对前端是「增量帧」（chatStore/companionStore 会 += 累加），
+                        # 这里只能发新增片段，发累计全文会直接导致回复重复叠加。
+                        # 协议对前端是「增量帧」（chatStore/companionStore 会 += 累加），
+                        # 这里只能发新增片段，发累计全文会直接导致回复重复叠加。
                         err = f'不支持的文件类型: {fp}'
-                        combined = full_text + _sep + err
-                        yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
+                        yield f"data: {json.dumps({'type': 'delta', 'content': _sep + err}, ensure_ascii=False)}\n\n"
+                        full_text += _sep + err
 
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
             return
@@ -566,7 +570,7 @@ def _chat_event_generator(
             yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
             return
 
-        # 累积所有文件输出，前端 onDelta 是替换模式，需要传完整文本
+        # 累积所有文件输出仅用于内部记录；对前端必须逐帧发增量（前端 onDelta 是 += 追加）
         combined = ""
         for i, fp in enumerate(valid_file_paths):
             if len(valid_file_paths) > 1:
@@ -598,7 +602,7 @@ def _chat_event_generator(
             else:
                 err = f'不支持的文件类型: {fp}'
                 combined += err
-                yield f"data: {json.dumps({'type': 'delta', 'content': combined})}\n\n"
+                yield f"data: {json.dumps({'type': 'delta', 'content': err}, ensure_ascii=False)}\n\n"
         yield f"data: {json.dumps({'type': 'done', 'session_id': session_id or ''})}\n\n"
 
     except Exception as e:

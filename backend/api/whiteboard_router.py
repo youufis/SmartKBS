@@ -360,15 +360,8 @@ async def get_snapshot(room_id: int, request: Request):
     user = get_current_user(request)
     username = user["username"]
     _assert_room_access(user, room_id, what="快照")
-    # 优先从内存取快照
-    snap = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot", "")
-    if not snap:
-        rows = execute_query(
-            "SELECT snapshot_data FROM whiteboard_pages WHERE room_id=? AND is_current=1 ORDER BY updated_at DESC LIMIT 1",
-            (room_id,),
-        )
-        if rows and rows[0][0] and rows[0][0] != "{}":
-            snap = rows[0][0]
+    # 统一走 _resolve_snapshot（内存 > 数据库，且不再死要求 is_current=1）
+    snap = _resolve_snapshot(room_id)
     # 获取当前模式和学生授权状态
     mode = whiteboard_manager.get_mode(room_id)
     granted = whiteboard_manager.is_granted(room_id, username)
@@ -729,48 +722,252 @@ async def spotlight_student(room_id: int, request: Request):
 # ═══════════════════════════════════════════════════════════
 
 def _extract_text(props: dict) -> str:
-    """从形状 props 中提取文字（兼容 richText 和 text）"""
+    """从形状 props 中提取文字。
+
+    兼容三种历史格式：
+      1) TLDraw v2/v5 的 richText 文档树 {"type":"doc","content":[{"type":"paragraph","content":[{"text":...}]}]}
+         —— 层级可能是 paragraph→text，也可能再嵌一层（列表/引用/高亮），所以递归找 text 节点；
+      2) 某些版本把富文本降级成纯字符串的 richText；
+      3) 老字段的 props.text / 图形标注 props.label（geo/arrow/line 的标签在部分版本里是 label 而非 richText）。
+    以前只认第 1 种的「固定两层」结构，标签写成 label 或 richText 为字符串时文字会被整段丢掉，
+    表现为 AI 助手「看不见白板上的文字」。
+    """
+    def _from_doc(node) -> str:
+        """递归收集文档树里的 text 节点，段落之间补换行"""
+        if isinstance(node, str):
+            return node
+        if not isinstance(node, dict):
+            return ""
+        if node.get("type") == "text" and node.get("text"):
+            return str(node["text"])
+        kids = node.get("content")
+        if not isinstance(kids, list):
+            return ""
+        parts = [_from_doc(k) for k in kids]
+        parts = [x for x in parts if x]
+        if not parts:
+            return ""
+        joined = "".join(parts)
+        return joined + "\n" if node.get("type") in ("paragraph", "doc", "blockquote", "list_item") else joined
+
+    out = ""
     rt = props.get("richText")
-    if rt and isinstance(rt, dict):
+    if isinstance(rt, str):
+        out = rt.strip()
+    elif isinstance(rt, dict) and rt:
         try:
-            texts = []
-            for node in rt.get("content", []):
-                for child in node.get("content", []):
-                    t = child.get("text", "")
-                    if t:
-                        texts.append(t)
-            return "".join(texts)
+            out = _from_doc(rt).strip()
         except Exception:
-            pass
-    t = props.get("text", "")
-    return t if t else ""
+            out = ""
+    if not out:
+        for key in ("label", "text"):
+            v = props.get(key)
+            if isinstance(v, str) and v.strip():
+                out = v.strip()
+                break
+            if isinstance(v, dict) and v:
+                try:
+                    out = _from_doc(v).strip()
+                except Exception:
+                    out = ""
+                if out:
+                    break
+    return out
 
 
-def _get_snapshot_text(room_id: int) -> str:
-    """从内存或数据库获取白板当前内容的文字和图形描述"""
+def _live_snapshot(body: dict) -> str:
+    """取请求体里前端带上的「实时白板快照」。
 
-    snap = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot", "")
-    if not snap or snap == "{}":
+    白板内容是浏览器里的 TLDraw 编辑器持有权威副本的：服务端那份要等 WS op（约 1s）或
+    HTTP 兜底保存（约 30s）才落到内存/库里，且后端一重启内存房间就没了。
+    之前所有 AI 功能都只读服务端那份，于是出现「板子上明明有内容，AI 说白板是空的」。
+    现在前端每次调用 AI 都把自己的实时快照带上，服务端这份退为兜底。
+    """
+    raw = (body or {}).get("snapshot")
+    if not raw:
+        return ""
+    if isinstance(raw, (dict, list)):
+        try:
+            raw = json.dumps(raw, ensure_ascii=False)
+        except Exception:
+            return ""
+    if not isinstance(raw, str):
+        return ""
+    raw = raw.strip()
+    # 上限 8MB：白板快照里可能夹着 base64 图片，正常板书远低于此；超限直接忽略，防止被灌爆
+    # 下限只是拦掉 "{}"/"" 这类无意义值，真实的 TLDraw 快照至少上百字符
+    if len(raw) > 8_000_000:
+        logger.warning(f"[白板AI] 前端实时快照过大({len(raw)}B)，退回服务端副本解析")
+        return ""
+    if len(raw) < 10:
+        return ""
+    try:
+        json.loads(raw)
+    except Exception:
+        return ""
+    return raw
+
+
+def _resolve_snapshot(room_id, live_snapshot: str = "") -> str:
+    """按「前端实时快照 > 服务端内存 > 数据库」取白板快照原文，取不到返回空串"""
+    if live_snapshot:
+        return live_snapshot
+    rid = _as_room_id(room_id)
+    snap = whiteboard_manager.rooms.get(rid, {}).get("last_snapshot", "")
+    if snap and snap != "{}":
+        return snap
+    # 数据库兜底：is_current 可能一个都没置位（历史数据/多页面），改成优先当前页、再退最新页
+    rows = execute_query(
+        "SELECT snapshot_data FROM whiteboard_pages WHERE room_id=? "
+        "AND snapshot_data IS NOT NULL AND snapshot_data != '' AND snapshot_data != '{}' "
+        "ORDER BY is_current DESC, updated_at DESC LIMIT 1",
+        (rid,),
+    )
+    if rows and rows[0][0]:
+        return rows[0][0]
+    return ""
+
+
+def _snapshot_records(snapshot_json: str) -> dict:
+    """把快照统一解析成「记录 id → 记录」字典，兼容三种历史包装：
+       {document:{store:{...}}, session:{...}} / {store:{...}} / 直接就是记录表"""
+    try:
+        parsed = json.loads(snapshot_json)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    cand = parsed.get("document")
+    if isinstance(cand, dict):
+        inner = cand.get("store")
+        if isinstance(inner, dict) and inner:
+            return inner
+        return cand
+    inner = parsed.get("store")
+    if isinstance(inner, dict) and inner:
+        # v3+ 的 getSnapshot(): {store: {记录...}, session: {...}}
+        if any(isinstance(v, dict) and v.get("typeName") for v in inner.values()):
+            return inner
+    if any(isinstance(v, dict) and v.get("typeName") for v in parsed.values()):
+        return parsed  # 拍平的记录表
+    return {}
+
+
+_LEGACY_SUBJECT = "通用技术"
+
+
+def _teacher_subjects(username: str) -> list[str]:
+    try:
+        from backend.permission_service import get_teacher_subjects
+        return [x for x in (get_teacher_subjects(username) or []) if x]
+    except Exception:
+        return []
+
+
+def _resolve_subject(explicit, room_id=None, username: str = "") -> str:
+    """确定本次 AI 调用的学科口径：老师显式选的 > 教师任教学科 > 让模型按白板内容判断。
+
+    以前这里写死 body.get("subject", "通用技术")，前端也写死传 "通用技术"，
+    结果数学/物理/语文老师问什么都被按通用技术讲解、出题、翻译。
+    兼容旧客户端：若传来的正好是历史默认值而该老师根本不教这门课，视为未选。
+    """
+    picked = (str(explicit) if explicit else "").strip()
+    subjects = _teacher_subjects(username)
+    if picked and (picked != _LEGACY_SUBJECT or not subjects or picked in subjects):
+        return picked
+    if len(subjects) == 1:
+        return subjects[0]
+    if subjects:
+        # 多科任教的老师：把候选给出去，让模型按白板内容收敛，而不是硬套某一科
+        return "、".join(subjects[:4]) + "（请依据白板内容从中确定本节课学科）"
+    return "未指定（请依据白板内容自行判断学科，不要默认「通用技术」）"
+
+
+def _resolve_kp_name(explicit, room_id=None) -> str:
+    """知识点名：前端只拿得到 course_kp_id，别把「知识点#7」这种占位喂给模型。"""
+    name = (str(explicit) if explicit else "").strip()
+    if name and not name.startswith("知识点#"):
+        return name
+    if not room_id:
+        return ""
+    try:
         rows = execute_query(
-            "SELECT snapshot_data FROM whiteboard_pages WHERE room_id=? AND is_current=1 ORDER BY updated_at DESC LIMIT 1",
-            (room_id,),
+            "SELECT kp.name FROM knowledge_points kp"
+            " WHERE kp.id = (SELECT course_kp_id FROM whiteboard_rooms WHERE id=?)",
+            (_as_room_id(room_id),),
         )
-        if rows and rows[0][0] and rows[0][0] != "{}":
-            snap = rows[0][0]
+        if rows and rows[0][0]:
+            return rows[0][0]
+    except Exception as e:
+        logger.warning(f"[白板AI] 解析房间知识点名称失败 room={room_id}: {e}")
+    return ""
+
+
+def _plain_ai_text(raw: str) -> str:
+    """把模型返回的「纯文本回答」洗干净，挡住 json_mode 误用导致的空壳回答。
+
+    出处：教学建议接口要求模型直接回文字，却带着 json_mode=True 调用，
+    模型在 JSON 约束下只能挤出一个 `[ ]`（3 个字符），前端就显示成「[3.1 ]」这种空壳。
+    这里对仍然吐出 JSON 数组/对象的情况做兜底：能挖出文字就挖，挖不出就返回空串，
+    由调用方按「没有有效回答」处理，绝不把 `[ ]` 当成建议投给老师。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    if text[0] in "[{":
+        try:
+            data = json.loads(text)
+        except Exception:
+            data = None
+        if data is not None:
+            picked = []
+
+            def _walk(node):
+                if isinstance(node, str):
+                    if node.strip():
+                        picked.append(node.strip())
+                elif isinstance(node, dict):
+                    for v in node.values():
+                        _walk(v)
+                elif isinstance(node, list):
+                    for v in node:
+                        _walk(v)
+
+            _walk(data)
+            return "；".join(picked).strip()
+        # 解析不动的 JSON 碎片（如 "[ ]"、"{...截断"）一律视为无效回答
+        return ""
+    return text
+
+
+def _require_board_content(snapshot_text: str, room_id, detail: str) -> None:
+    """AI 功能要求白板有内容；为空时给出可诊断日志（前端是否带了 snapshot 是关键线索）"""
+    if _board_is_empty(snapshot_text):
+        logger.warning(f"[白板AI] room={room_id} 未取到白板内容，拒绝请求（{detail}）")
+        raise HTTPException(status_code=400, detail=detail)
+
+
+def _board_is_empty(snapshot_text: str) -> bool:
+    """白板内容判定为空的口径（各 AI 端点共用，别再各自字符串比较）"""
+    return not snapshot_text or snapshot_text in ("白板当前为空", "无白板内容")
+
+
+def _get_snapshot_text(room_id, live_snapshot: str = "") -> str:
+    """获取白板当前内容的文字与图形描述（优先前端实时快照，其次内存/数据库）"""
+
+    snap = _resolve_snapshot(room_id, live_snapshot)
     if not snap or snap == "{}":
-        logger.info(f"[白板AI] room={room_id} 快照为空")
+        logger.info(f"[白板AI] room={room_id} 快照为空（前端未带 snapshot，内存与数据库也没有）")
         return "白板当前为空"
 
     try:
-        parsed = json.loads(snap)
-        # TLDraw getSnapshot() 格式: { document: { store: { shapeId: {...}, ... } }, session: {...} }
-        doc = parsed.get("document", {})
-        store = doc.get("store", parsed.get("store", {}))
+        store = _snapshot_records(snap)
         # 筛选 typeName 为 shape 的记录（兼容新旧格式）
         shapes = {k: v for k, v in store.items() if isinstance(v, dict) and v.get("typeName") == "shape"}
-        if not shapes:
+        if not shapes and isinstance(store.get("shapes"), dict):
             shapes = store.get("shapes", {})
         if not shapes:
+            logger.info(f"[白板AI] room={room_id} 快照里没有 shape 记录（记录数={len(store)}）")
             return "白板当前为空"
 
         type_names = {"geo": "几何形状", "arrow": "箭头", "text": "文本", "draw": "手绘", "image": "图片", "line": "线条"}
@@ -840,6 +1037,8 @@ def _get_snapshot_text(room_id: int) -> str:
         if arrows:
             parts.append(f"## 图形之间的连线\n{chr(10).join('- ' + a for a in arrows)}")
 
+        if not parts:
+            logger.warning(f"[白板AI] room={room_id} 有 {len(shapes)} 个形状但没解析出任何可描述元素")
         result = "\n\n".join(parts) if parts else "白板当前有内容，但无法识别具体元素"
         return result
 
@@ -848,24 +1047,16 @@ def _get_snapshot_text(room_id: int) -> str:
         return "白板当前有内容"
 
 
-def _get_snapshot_images(room_id: int) -> list[str]:
+def _get_snapshot_images(room_id, live_snapshot: str = "") -> list[str]:
     """从白板快照中提取图片，保存为临时文件，返回文件路径列表"""
     import base64, tempfile, os, re
 
-    snap = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot", "")
-    if not snap or snap == "{}":
-        rows = execute_query(
-            "SELECT snapshot_data FROM whiteboard_pages WHERE room_id=? AND is_current=1 ORDER BY updated_at DESC LIMIT 1",
-            (room_id,),
-        )
-        if rows and rows[0][0] and rows[0][0] != "{}":
-            snap = rows[0][0]
+    snap = _resolve_snapshot(room_id, live_snapshot)
     if not snap or snap == "{}":
         return []
 
     try:
-        parsed = json.loads(snap)
-        store = parsed.get("document", {}).get("store", parsed.get("store", {}))
+        store = _snapshot_records(snap)
         if not store:
             return []
 
@@ -1149,7 +1340,7 @@ def _snapshot_to_base64_svg(snapshot_json: str) -> str:
 
 
 async def _understand_whiteboard_with_vision(
-    room_id: int, api_key: str, snapshot_text: str
+    room_id, api_key: str, snapshot_text: str, live_snapshot: str = ""
 ) -> str:
     """
     增强白板理解：
@@ -1157,15 +1348,8 @@ async def _understand_whiteboard_with_vision(
     2. 将白板上的真实图片发送给视觉模型识别
     3. 融合文本解析 + 图片视觉理解，返回增强描述
     """
-    # 获取快照
-    snap = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot", "")
-    if not snap or snap == "{}":
-        rows = execute_query(
-            "SELECT snapshot_data FROM whiteboard_pages WHERE room_id=? AND is_current=1 ORDER BY updated_at DESC LIMIT 1",
-            (room_id,),
-        )
-        if rows and rows[0][0] and rows[0][0] != "{}":
-            snap = rows[0][0]
+    # 获取快照（与文字解析同源：前端实时快照 > 内存 > 数据库）
+    snap = _resolve_snapshot(room_id, live_snapshot)
     if not snap or snap == "{}":
         return snapshot_text
 
@@ -1173,7 +1357,7 @@ async def _understand_whiteboard_with_vision(
     layout_desc = _snapshot_to_layout_text(snap)
 
     # 获取白板上的真实图片（PNG/JPG — 视觉模型支持这些格式）
-    image_paths = _get_snapshot_images(room_id)
+    image_paths = _get_snapshot_images(room_id, live_snapshot)
 
     if image_paths:
         import requests as sync_requests
@@ -1402,15 +1586,16 @@ async def ai_chat_stream(request: Request):
 
     # 获取白板上下文
     mode = whiteboard_manager.get_mode(room_id) if room_id else "demo"
-    kp_name = body.get("kp_name", "")
-    subject = body.get("subject", "通用技术")
+    kp_name = _resolve_kp_name(body.get("kp_name"), room_id)
+    subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     use_vision = body.get("use_vision", False)  # 前端可控制是否使用视觉理解
 
     # ── 获取白板理解文本（视觉增强版） ──
-    snapshot_text = _get_snapshot_text(room_id) if room_id else "无白板内容"
+    live_snapshot = _live_snapshot(body) if room_id else ""
+    snapshot_text = _get_snapshot_text(room_id, live_snapshot) if room_id else "无白板内容"
     if room_id and use_vision and dashscope_api_key:
         try:
-            enhanced = await _understand_whiteboard_with_vision(room_id, dashscope_api_key, snapshot_text)
+            enhanced = await _understand_whiteboard_with_vision(room_id, dashscope_api_key, snapshot_text, live_snapshot)
             if enhanced != snapshot_text:
                 snapshot_text = enhanced
                 logger.info(f"[白板AI] room={room_id} 使用视觉增强理解")
@@ -1428,7 +1613,7 @@ async def ai_chat_stream(request: Request):
     enhanced_prompt = f"{system_prompt}\n\n---\n\n用户提问：{prompt}"
 
     # 检测白板中是否有图片，有则走视觉流式（传统逻辑）
-    image_paths = _get_snapshot_images(room_id) if room_id else []
+    image_paths = _get_snapshot_images(room_id, live_snapshot) if room_id else []
     if image_paths and not use_vision:
         return StreamingResponse(
             _whiteboard_ai_vision_stream(system_prompt, prompt, image_paths, username, dashscope_api_key),
@@ -1443,13 +1628,14 @@ async def ai_chat_stream(request: Request):
 
 
 def _whiteboard_ai_stream(prompt: str, username: str, api_key: str):
-    """白板 AI 流式生成器（后端自行累加，前端只替换不追加）"""
+    """白板 AI 流式生成器（上游每帧已是全文快照，原样透传，前端只替换不追加）"""
     import asyncio
     from backend.api.chat_router import _agent_chat_stream
     try:
-        full = ""
         for chunk in _agent_chat_stream(prompt, None, api_key, username):
-            full += chunk["text"]
+            # 注意：call_ai_stream/_call_agent_stream 产出的 text 是「累计全文」而非增量，
+            # 这里绝不能再 +=，否则前端替换后会得到逐帧前缀叠加的重复文本。
+            full = chunk["text"]
             yield f"data: {json.dumps({'type': 'delta', 'content': full})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
     except GeneratorExit:
@@ -1554,7 +1740,7 @@ async def ai_generate_diagram(request: Request):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
     description = body.get("description", "")
-    subject = body.get("subject", "通用技术")
+    subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     if not description:
         raise HTTPException(status_code=400, detail="请输入描述")
 
@@ -1677,7 +1863,7 @@ async def ai_generate_board(request: Request):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
     kp_name = body.get("kp_name", "")
-    subject = body.get("subject", "通用技术")
+    subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     grade = body.get("grade", "")
     if not kp_name:
         raise HTTPException(status_code=400, detail="请指定知识点")
@@ -1718,7 +1904,7 @@ async def ai_beautify_board(request: Request):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
     room_id = body.get("room_id")
-    subject = body.get("subject", "通用技术")
+    subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
     # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
@@ -1728,9 +1914,8 @@ async def ai_beautify_board(request: Request):
     if not dashscope_api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    snapshot_text = _get_snapshot_text(room_id)
-    if not snapshot_text or snapshot_text == "白板当前为空":
-        raise HTTPException(status_code=400, detail="白板当前为空，无内容可美化")
+    snapshot_text = _get_snapshot_text(room_id, _live_snapshot(body))
+    _require_board_content(snapshot_text, room_id, "白板当前为空，无内容可美化")
 
     from backend.prompts.whiteboard_ai import BEAUTIFY_BOARD_PROMPT
     prompt = BEAUTIFY_BOARD_PROMPT.format(
@@ -1803,7 +1988,7 @@ async def ai_generate_mindmap(request: Request):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
     room_id = body.get("room_id")
-    subject = body.get("subject", "通用技术")
+    subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
     # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
@@ -1813,9 +1998,8 @@ async def ai_generate_mindmap(request: Request):
     if not dashscope_api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    snapshot_text = _get_snapshot_text(room_id)
-    if not snapshot_text or snapshot_text == "白板当前为空":
-        raise HTTPException(status_code=400, detail="白板当前为空")
+    snapshot_text = _get_snapshot_text(room_id, _live_snapshot(body))
+    _require_board_content(snapshot_text, room_id, "白板当前为空，无法生成思维导图")
 
     from backend.prompts.whiteboard_ai import MIND_MAP_PROMPT
     prompt = MIND_MAP_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
@@ -1847,9 +2031,12 @@ async def ai_suggest(request: Request):
         raise HTTPException(status_code=403, detail="仅教师和管理员可使用教学建议")
     body = await request.json()
     current_content = body.get("content", "")
-    kp_name = body.get("kp_name", "")
+    kp_name = _resolve_kp_name(body.get("kp_name"), body.get("room_id"))
     if not current_content:
-        raise HTTPException(status_code=400, detail="请提供当前白板内容")
+        # 前端只抽到了空文字（例如板上只有手绘/图片，或旧版富文本结构没解析到）时，
+        # 用同一份实时快照生成结构化描述兜住，别让「白板为空」误伤教学建议
+        current_content = _get_snapshot_text(body.get("room_id"), _live_snapshot(body))
+    _require_board_content(current_content, body.get("room_id"), "请提供当前白板内容")
 
     dashscope_api_key, _ = get_api_keys(user["username"])
     if not dashscope_api_key:
@@ -1865,12 +2052,21 @@ async def ai_suggest(request: Request):
     try:
         from backend.api.ai_service import call_ai_sync_with_timeout
         timeout = _get_ai_timeout()
-        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=True, use_kb=False)
-        return {"suggestion": result.strip()}
+        # 这是「回一段文字」的端点，必须 json_mode=False：
+        # 开了 JSON 模式，模型在 response_format 约束下只挤得出 `[ ]`，教学建议就变成空壳
+        result = await call_ai_sync_with_timeout(prompt, dashscope_api_key, timeout=timeout, json_mode=False, use_kb=False)
+        suggestion = _plain_ai_text(result)
+        if not suggestion:
+            logger.warning(f"[白板AI] 教学建议返回空壳回答，已拦截: {str(result)[:80]!r}")
+            raise HTTPException(status_code=502, detail="AI 没有给出有效建议，请重试或先在白板上补充内容")
+        return {"suggestion": suggestion}
+    except HTTPException:
+        raise
     except TimeoutError as e:
         logger.warning(f"AI 教学建议超时: {e}")
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
+        logger.error(f"AI 教学建议失败: {e}")
         raise HTTPException(status_code=500, detail=f"AI 建议失败: {str(e)}")
 
 
@@ -1888,15 +2084,14 @@ async def export_board_summary(room_id: int, request: Request):
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
     snapshot_text = _get_snapshot_text(room_id)
-    if not snapshot_text or snapshot_text == "白板当前为空":
-        raise HTTPException(status_code=400, detail="白板当前为空，无内容可导出")
+    _require_board_content(snapshot_text, room_id, "白板当前为空，无内容可导出")
 
     # 获取房间信息
     room_rows = execute_query(
         "SELECT title FROM whiteboard_rooms WHERE id=?", (room_id,),
     )
     room_title = room_rows[0][0] if room_rows else "白板"
-    subject = "通用技术"
+    subject = _resolve_subject("", room_id, username)
 
     # AI 生成总结
     from backend.prompts.whiteboard_ai import BOARD_SUMMARY_PROMPT
@@ -1996,8 +2191,9 @@ async def ai_generate_quiz(request: Request):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
     room_id = body.get("room_id")
-    subject = body.get("subject", "通用技术")
-    kp_name = body.get("kp_name", "")
+    subject = _resolve_subject(body.get("subject"), room_id, user["username"])
+    # 前端只能拿到 course_kp_id，历史上会把「知识点#7」这种占位直接喂给模型
+    kp_name = _resolve_kp_name(body.get("kp_name"), room_id)
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
     # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
@@ -2007,9 +2203,8 @@ async def ai_generate_quiz(request: Request):
     if not dashscope_api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    snapshot_text = _get_snapshot_text(room_id)
-    if not snapshot_text or snapshot_text == "白板当前为空":
-        raise HTTPException(status_code=400, detail="白板当前为空，请先在白板上书写内容")
+    snapshot_text = _get_snapshot_text(room_id, _live_snapshot(body))
+    _require_board_content(snapshot_text, room_id, "白板当前为空，请先在白板上书写内容")
 
     from backend.prompts.whiteboard_ai import QUIZ_GENERATION_PROMPT
     prompt = QUIZ_GENERATION_PROMPT.format(
@@ -2047,7 +2242,7 @@ async def ai_generate_bilingual(request: Request):
         raise HTTPException(status_code=403, detail="仅教师可使用")
     body = await request.json()
     room_id = body.get("room_id")
-    subject = body.get("subject", "通用技术")
+    subject = _resolve_subject(body.get("subject"), room_id, user["username"])
     if not room_id:
         raise HTTPException(status_code=400, detail="请提供房间 ID")
     # S8: AI 会读取整块白板内容, 需先确认调用者有权访问该房间
@@ -2057,9 +2252,8 @@ async def ai_generate_bilingual(request: Request):
     if not dashscope_api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    snapshot_text = _get_snapshot_text(room_id)
-    if not snapshot_text or snapshot_text == "白板当前为空":
-        raise HTTPException(status_code=400, detail="白板当前为空，请先在白板上书写内容")
+    snapshot_text = _get_snapshot_text(room_id, _live_snapshot(body))
+    _require_board_content(snapshot_text, room_id, "白板当前为空，请先在白板上书写内容")
 
     from backend.prompts.whiteboard_ai import BILINGUAL_BOARD_PROMPT
     prompt = BILINGUAL_BOARD_PROMPT.format(snapshot_text=snapshot_text, subject=subject)
@@ -2266,7 +2460,8 @@ async def whiteboard_websocket(websocket: WebSocket, room_id: int):
 
             # ── 学生请求同步当前快照 ──
             elif msg_type == "request_sync":
-                last_snap = whiteboard_manager.rooms.get(room_id, {}).get("last_snapshot", "")
+                # 走统一解析：后端重启后内存房间是空的，只读内存会让新加入的学生拿到空白板
+                last_snap = _resolve_snapshot(room_id)
                 if last_snap:
                     await whiteboard_manager.send_to_user(room_id, username, {
                         "type": "op_broadcast",

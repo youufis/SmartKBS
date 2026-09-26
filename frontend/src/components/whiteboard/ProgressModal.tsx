@@ -84,7 +84,7 @@ const ProgressModal: React.FC<Props> = ({
         {/* 总进度条 */}
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>{t('overallProgressLabel')}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('app.overallProgressLabel')}</Text>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {formatTime(elapsed)}
               {status === 'running' && <Spin size="small" style={{ marginLeft: 8 }} />}

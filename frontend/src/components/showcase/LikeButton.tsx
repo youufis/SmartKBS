@@ -39,7 +39,7 @@ const LikeButton: React.FC<Props> = ({ showcaseId, liked, count, onLikeChange })
   const handleClick = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (!isLoggedIn) {
-      message.warning(t('pleaseLoginFirst'))
+      message.warning(t('app.pleaseLoginFirst'))
       return
     }
     try {
@@ -50,7 +50,7 @@ const LikeButton: React.FC<Props> = ({ showcaseId, liked, count, onLikeChange })
         spawnParticles(rect.left + rect.width / 2, rect.top + rect.height / 2)
       }
     } catch {
-      message.error(t('operationFailedShort'))
+      message.error(t('app.operationFailedShort'))
     }
   }, [showcaseId, isLoggedIn, onLikeChange, spawnParticles])
 

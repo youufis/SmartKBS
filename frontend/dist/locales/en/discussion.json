@@ -408,5 +408,7 @@
   "aiStop": "Stop",
   "aiInputPh": "Type a question... (Ctrl+Enter to send)",
   "aiSendHint": "Ctrl+Enter to send",
-  "aiOpFailed": "Operation failed"
+  "aiOpFailed": "Operation failed",
+  "aiSubjectAuto": "Auto-detect",
+  "aiSubjectTip": "Subject used for AI requests. By default it follows the teacher's assigned subjects and the board content; you can pin one temporarily."
 }

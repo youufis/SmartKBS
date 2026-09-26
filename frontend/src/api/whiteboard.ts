@@ -120,6 +120,8 @@ export async function aiChatStream(
     subject?: string
     signal?: AbortSignal
     useVision?: boolean
+    /** 浏览器里的实时白板快照（服务端那份是异步落库的副本，可能过期/为空） */
+    snapshot?: string
   },
 ): Promise<void> {
   const token = localStorage.getItem('smartkb_token')
@@ -136,6 +138,7 @@ export async function aiChatStream(
         kp_name: options?.kpName || '',
         subject: options?.subject || '',
         use_vision: options?.useVision ?? false,
+        snapshot: options?.snapshot || '',
       }),
       signal: options?.signal,
     })
@@ -324,6 +327,7 @@ export async function aiGenerateBoard(
 export async function aiBeautifyBoard(
   roomId: number,
   subject?: string,
+  snapshot?: string,
 ): Promise<{
   title: string
   shapes: unknown[]
@@ -331,6 +335,7 @@ export async function aiBeautifyBoard(
   const res = await apiClient.post('/api/whiteboard/ai/beautify-board', {
     room_id: roomId,
     subject: subject || '',
+    snapshot: snapshot || '',
   }, { timeout: 320000 })
   return res.data
 }
@@ -339,6 +344,7 @@ export async function aiGenerateQuiz(
   roomId: number,
   subject?: string,
   kpName?: string,
+  snapshot?: string,
 ): Promise<{
   question: string
   options: string[]
@@ -350,6 +356,7 @@ export async function aiGenerateQuiz(
     room_id: roomId,
     subject: subject || '',
     kp_name: kpName || '',
+    snapshot: snapshot || '',
   }, { timeout: 320000 })
   return res.data
 }
@@ -373,6 +380,7 @@ export async function aiSmartAnnotation(
 export async function aiGenerateMindmap(
   roomId: number,
   subject?: string,
+  snapshot?: string,
 ): Promise<{
   title: string
   shapes: unknown[]
@@ -380,6 +388,7 @@ export async function aiGenerateMindmap(
   const res = await apiClient.post('/api/whiteboard/ai/generate-mindmap', {
     room_id: roomId,
     subject: subject || '',
+    snapshot: snapshot || '',
   }, { timeout: 320000 })
   return res.data
 }
@@ -387,6 +396,7 @@ export async function aiGenerateMindmap(
 export async function aiGenerateBilingual(
   roomId: number,
   subject?: string,
+  snapshot?: string,
 ): Promise<{
   title: string
   shapes: unknown[]
@@ -394,13 +404,22 @@ export async function aiGenerateBilingual(
   const res = await apiClient.post('/api/whiteboard/ai/generate-bilingual', {
     room_id: roomId,
     subject: subject || '',
+    snapshot: snapshot || '',
   }, { timeout: 320000 })
   return res.data
 }
 
-export async function aiSuggest(content: string, kpName?: string): Promise<{
+export async function aiSuggest(
+  content: string,
+  kpName?: string,
+  options?: { snapshot?: string; roomId?: number },
+): Promise<{
   suggestion: string
 }> {
-  const res = await apiClient.post('/api/whiteboard/ai/suggest', { content, kp_name: kpName }, { timeout: 320000 })
+  const res = await apiClient.post(
+    '/api/whiteboard/ai/suggest',
+    { content, kp_name: kpName, snapshot: options?.snapshot || '', room_id: options?.roomId },
+    { timeout: 320000 },
+  )
   return res.data
 }

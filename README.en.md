@@ -988,6 +988,13 @@ Git-based online incremental upgrade system:
 - 🏠 **Dashboard and task list rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home with star of the week; to-dos are filtered by class scope and pending grading now counts real work
 - 🗂️ **Sharing centre closed out**: resource browsing and Shared Files share one browser (categories, stats strip, grid/list, pagination, preferences) and directory shares show as folders; fixed files never counting as seen and to-do links that wouldn't open
 - 🌙 **Theme, copy and page details**: the dark-mode palette completed and hard-coded colours removed; translation placeholders and untranslated strings closed out, deprecated component warnings cleared; the wrong-answer book lets students mark each question mastered (undoable) with the three-way filter really working, and trending news gained its paging control
+- 🔧 **Whiteboard AI replies no longer repeat frame by frame**
+- 🔧 **AI reads the live board now** (text, shapes and images)
+- 🔧 **Teaching tips no longer come back as an empty bracket**
+- 🔧 **Subject is no longer pinned** to one track: auto-detected from the teacher and the board, or picked per question
+- 🩹 **Board snapshots persist reliably** and always follow the page being drawn
+- 🩹 **Status-bar icon fixed** and 9 raw i18n keys now render as text
+- 🩹 **Attachment, multimodal and companion streams** no longer duplicate their own text
 - ⚠️ **Breaking changes**: none
 
 ### v8.2.0 (2026-09-14)

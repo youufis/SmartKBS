@@ -201,13 +201,27 @@ class WhiteboardManager:
         if snap and isinstance(snap, str) and len(snap) > 100:
             if room_id in self.rooms:
                 self.rooms[room_id]["last_snapshot"] = snap
+            # 实时内容必须落库：原来只做 UPDATE，页面行还不存在时（新建房间/新增页）
+            # 影响 0 行且静默失败，后端一重启内存房间就没了，AI 就再也读不到白板内容。
+            page = data.get("page", 1)
             try:
-                execute_insert_update(
-                    "UPDATE whiteboard_pages SET snapshot_data=?, updated_at=CURRENT_TIMESTAMP WHERE room_id=? AND page_number=?",
-                    (snap, room_id, data.get("page", 1)),
+                exists = execute_query(
+                    "SELECT 1 FROM whiteboard_pages WHERE room_id=? AND page_number=? LIMIT 1",
+                    (room_id, page),
                 )
-            except Exception:
-                pass
+                if exists:
+                    execute_insert_update(
+                        "UPDATE whiteboard_pages SET snapshot_data=?, updated_at=CURRENT_TIMESTAMP WHERE room_id=? AND page_number=?",
+                        (snap, room_id, page),
+                    )
+                else:
+                    execute_insert_update(
+                        "INSERT INTO whiteboard_pages (room_id, page_number, snapshot_data, is_current, updated_at, created_at)"
+                        " VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                        (room_id, page, snap),
+                    )
+            except Exception as e:
+                logger.warning(f"[白板] 实时快照落库失败 room={room_id} page={page}: {e}")
         await self.broadcast(room_id, {
             "type": "op_broadcast",
             "op_id": op_id,

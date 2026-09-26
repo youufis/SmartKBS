@@ -7,7 +7,7 @@ import i18n from '../../i18n'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Input, Button, Typography, Space, Spin, Tag, Tooltip,
-  message, Modal,
+  message, Modal, Select,
 } from 'antd'
 import {
   SendOutlined, RobotOutlined, CloseOutlined,
@@ -26,6 +26,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import * as whiteboardApi from '../../api/whiteboard'
 import { useProgressModal } from './ProgressModal'
+import useSubjectOptions from '../../hooks/useSubjectOptions'
 import type { Editor } from 'tldraw'
 
 // ── 统一错误转换：把各种错误转为友好、可操作的提示 ──
@@ -136,6 +137,43 @@ function toRichText(text: string): any {
   }
 }
 
+/**
+ * 提取形状上的文字，与后端 _extract_text 同口径。
+ * 白板组件升级到 TLDraw v5 后，文字可能落在三种位置：
+ *   props.richText —— ProseMirror 文档树（段落里还能再嵌 link/mention/列表，必须递归）
+ *   props.richText —— 个别版本降级成的纯字符串
+ *   props.label    —— geo/arrow/line 的标签，不走 richText
+ * 之前这里只按「固定两层 content」取 richText，再退回 props.text，
+ * 结果带标签的图形和嵌套结构的文字全部被当成空，AI 就报「白板为空」。
+ */
+function richDocText(node: any): string {
+  if (typeof node === 'string') return node
+  if (!node || typeof node !== 'object') return ''
+  if (node.type === 'text' && node.text) return String(node.text)
+  const kids: any[] = Array.isArray(node.content) ? node.content : []
+  if (!kids.length) return ''
+  const joined = kids.map(richDocText).filter(Boolean).join('')
+  return ['paragraph', 'doc', 'blockquote', 'list_item'].includes(node.type) ? joined + '\n' : joined
+}
+
+function shapeText(props: Record<string, any> | undefined): string {
+  const p = props || {}
+  let out = ''
+  if (typeof p.richText === 'string') out = p.richText.trim()
+  else if (p.richText && typeof p.richText === 'object') out = richDocText(p.richText).trim()
+  if (!out) {
+    for (const key of ['label', 'text']) {
+      const v = (p as any)[key]
+      if (typeof v === 'string' && v.trim()) { out = v.trim(); break }
+      if (v && typeof v === 'object') {
+        const nested = richDocText(v).trim()
+        if (nested) { out = nested; break }
+      }
+    }
+  }
+  return out
+}
+
 // TLDraw 填充值枚举
 const TL_FILLS = ['none', 'semi', 'solid', 'pattern', 'fill', 'lined-fill'] as const
 
@@ -185,7 +223,7 @@ export const AIPanel: React.FC<Props> = ({
   editorRef,
   isTeacher = false,
   kpName,
-  subject,
+  subject: subjectProp,
   grade,
 }) => {
   const { t } = useTranslation('discussion')
@@ -200,6 +238,28 @@ export const AIPanel: React.FC<Props> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false)  // 防止并发发送
   const progressModal = useProgressModal()
+
+  // 学科口径：默认「自动判断」，由后端按教师任教学科/白板内容收敛；老师也能临时切换某一科。
+  // 以前这里由房间页写死传 "通用技术"，其他学科的老师问什么都被当成通用技术作答。
+  const [subjectSel, setSubjectSel] = useState<string>(
+    () => localStorage.getItem('smartkb_wb_subject') || '',
+  )
+  const { subjects: subjectOptions } = useSubjectOptions()
+  const subject = subjectSel || subjectProp || ''
+
+  /**
+   * AI 请求一律带上浏览器里的当前快照。
+   * 服务端那份是异步副本：WS 约 1s、HTTP 兜底 30s 才写一次，后端重启后内存房间还会清空，
+   * 只读副本就会出现「板子上明明有内容，AI 说白板是空的」。
+   */
+  const boardSnapshot = useCallback((): string => {
+    try {
+      const ed = editorRef.current
+      return ed ? JSON.stringify(ed.getSnapshot()) : ''
+    } catch {
+      return ''
+    }
+  }, [editorRef])
 
   // 计算右侧空白区域起始位置：遍历已有形状，取最右侧边界 + 间距
   const getRightSidePosition = useCallback((editor: Editor) => {
@@ -303,6 +363,7 @@ export const AIPanel: React.FC<Props> = ({
           subject,
           signal: abortController.signal,
           useVision,
+          snapshot: boardSnapshot(),
         },
       )
     } finally {
@@ -546,7 +607,7 @@ export const AIPanel: React.FC<Props> = ({
     })
 
     try {
-      const result = await whiteboardApi.aiBeautifyBoard(roomId, subject)
+      const result = await whiteboardApi.aiBeautifyBoard(roomId, subject, boardSnapshot())
       progressModal.updateStep('analyze', 'done')
       progressModal.updateStep('generate', 'done')
 
@@ -613,7 +674,7 @@ export const AIPanel: React.FC<Props> = ({
     })
 
     try {
-      const result = await whiteboardApi.aiGenerateQuiz(roomId, subject, kpName)
+      const result = await whiteboardApi.aiGenerateQuiz(roomId, subject, kpName, boardSnapshot())
       progressModal.updateStep('analyze', 'done')
       progressModal.updateStep('generate', 'done')
 
@@ -794,6 +855,7 @@ export const AIPanel: React.FC<Props> = ({
           kpName,
           subject,
           signal: abortController.signal,
+          snapshot: boardSnapshot(),
         },
       )
     } finally {
@@ -819,7 +881,7 @@ export const AIPanel: React.FC<Props> = ({
     // 提取选中形状的文字描述
     const desc = selectedShapes.map((s: any) => {
       const props = s.props || {}
-      const text = props.richText?.content?.map((n: any) => n.content?.map((c: any) => c.text).join('')).join('') || props.text || ''
+      const text = shapeText(props)
       return `[${s.type}] 位置(${Math.round(s.x)},${Math.round(s.y)}) 文字: ${text}`
     }).join('\n')
 
@@ -902,7 +964,7 @@ export const AIPanel: React.FC<Props> = ({
     })
 
     try {
-      const result = await whiteboardApi.aiGenerateMindmap(roomId, subject)
+      const result = await whiteboardApi.aiGenerateMindmap(roomId, subject, boardSnapshot())
       progressModal.updateStep('analyze', 'done')
       progressModal.updateStep('generate', 'done')
 
@@ -964,7 +1026,7 @@ export const AIPanel: React.FC<Props> = ({
     })
 
     try {
-      const result = await whiteboardApi.aiGenerateBilingual(roomId, subject)
+      const result = await whiteboardApi.aiGenerateBilingual(roomId, subject, boardSnapshot())
       progressModal.updateStep('analyze', 'done')
       progressModal.updateStep('generate', 'done')
 
@@ -1017,10 +1079,11 @@ export const AIPanel: React.FC<Props> = ({
     const allShapes = editor.getCurrentPageShapes()
     const content = allShapes.map((s: any) => {
       const props = s.props || {}
-      return props.richText?.content?.map((n: any) => n.content?.map((c: any) => c.text).join('')).join('') || props.text || ''
+      return shapeText(props)
     }).filter(Boolean).join('\n')
 
-    if (!content) {
+    // 板面上有图形/手绘但没有文字时不算空：让后端用快照描述兜底，别把功能整体判死
+    if (!content && allShapes.length === 0) {
       message.warning(t('aiBoardEmpty'))
       return
     }
@@ -1036,7 +1099,7 @@ export const AIPanel: React.FC<Props> = ({
     })
 
     try {
-      const result = await whiteboardApi.aiSuggest(content, kpName)
+      const result = await whiteboardApi.aiSuggest(content, kpName, { snapshot: boardSnapshot(), roomId })
       progressModal.updateStep('analyze', 'done')
       progressModal.updateStep('generate', 'done')
 
@@ -1162,6 +1225,21 @@ export const AIPanel: React.FC<Props> = ({
               <Button size="small" icon={<BulbOutlined />} onClick={handleSolveQuestion} />
             </Tooltip>
           )}
+          <Tooltip title={t('aiSubjectTip')}>
+            <Select
+              size="small"
+              style={{ minWidth: 104 }}
+              value={subjectSel}
+              onChange={(v: string) => {
+                setSubjectSel(v)
+                localStorage.setItem('smartkb_wb_subject', v)
+              }}
+              options={[
+                { value: '', label: t('aiSubjectAuto') },
+                ...subjectOptions.map((x) => ({ value: x, label: x })),
+              ]}
+            />
+          </Tooltip>
           {/* 视觉理解开关（切换图标样式，放在图标行） */}
           <Tooltip title={useVision ? t('aiVisionOn') : t('aiVisionOff')}>
             <Button

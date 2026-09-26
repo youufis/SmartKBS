@@ -102,22 +102,22 @@ const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled }) => {
       switch (event.error) {
         case 'not-allowed':
         case 'permission-denied':
-          message.warning(t('micDeniedTip'))
+          message.warning(t('app.micDeniedTip'))
           break
         case 'no-speech':
           // 无语音输入时静默处理，不提示
           break
         case 'audio-capture':
-          message.warning(t('micNoneTip'))
+          message.warning(t('app.micNoneTip'))
           break
         case 'network':
-          message.warning(t('micNetworkTip'))
+          message.warning(t('app.micNetworkTip'))
           break
         case 'aborted':
           // 用户手动停止，不提示
           break
         default:
-          message.warning(t('micErrorTip', { error: event.error }))
+          message.warning(t('app.micErrorTip', { error: event.error }))
       }
     }
 
