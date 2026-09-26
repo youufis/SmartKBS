@@ -91,5 +91,8 @@
   "ssAnswerMin": "答案至少需要2个字符",
   "ssAnswerPlaceholder": "请输入答案（请牢记！）",
   "ssConfirmChange": "确认修改",
-  "ssConfirmSet": "确认设置"
+  "ssConfirmSet": "确认设置",
+  "skinSwitch": "登录页配色",
+  "shuffleSkin": "🎲 随机换一个",
+  "dailySkin": "📅 恢复今日配色"
 }

@@ -91,5 +91,8 @@
   "ssAnswerMin": "At least 2 characters",
   "ssAnswerPlaceholder": "Your answer (keep it safe!)",
   "ssConfirmChange": "Confirm changes",
-  "ssConfirmSet": "Confirm setup"
+  "ssConfirmSet": "Confirm setup",
+  "skinSwitch": "Login color scheme",
+  "shuffleSkin": "🎲 Shuffle",
+  "dailySkin": "📅 Today's palette"
 }

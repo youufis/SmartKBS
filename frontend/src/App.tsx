@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from './stores/authStore'
 import { AUTH_UNAUTHORIZED_EVENT, type UnauthorizedDetail } from './api/client'
 import LoginPage from './pages/LoginPage'
+import i18n from './i18n'
+import { useLocaleStore } from './stores/localeStore'
 
 /**
  * 路由级角色守卫（B4）。
@@ -99,9 +101,15 @@ function App() {
   const sessionRestoring = useAuthStore((s) => s.sessionRestoring)
   const user = useAuthStore((s) => s.user)
   const forceLogout = useAuthStore((s) => s.forceLogout)
+  const lang = useLocaleStore((s) => s.current)
   useEffect(() => {
     restoreSession()
   }, [restoreSession])
+
+  // A7: 登录后的标签标题恢复为平台名（登录页标题由 LoginPage 自行设置）
+  useEffect(() => {
+    if (isLoggedIn) document.title = i18n.t('common:app.name')
+  }, [isLoggedIn, lang])
 
   // W10: 错题巩固练习的阈值检查改在"进入错题本页"时后台触发(见 WrongBookPage),
   // 不再在每次应用启动时都做一次重活
