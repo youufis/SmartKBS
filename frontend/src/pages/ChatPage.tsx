@@ -12,8 +12,7 @@ import {
   CopyOutlined, CameraOutlined,
 } from '@ant-design/icons'
 import type { Message, TreeNode, TaskInfo } from '../types'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import FormulaRenderer from '../components/FormulaRenderer'
 import { useChatStore, fileUploadCache, loadHistoryAsNewTopic, setTaskFilename } from '../stores/chatStore'
 import { useAuthStore } from '../stores/authStore'
 import { useCompanionStore, loadCompanionHistory } from '../stores/companionStore'
@@ -140,14 +139,7 @@ const MessageBubble: React.FC<{
             display: 'inline-block',
           }}>
             <div className="markdown-content" style={{ fontSize: 14, lineHeight: 1.7 }}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                  code: renderCode,
-                }}
-              >
-                {msg.content || ''}
-              </ReactMarkdown>
+              <FormulaRenderer content={msg.content || ''} components={{ code: renderCode }} />
               {isStreaming && (msg.content ? <TypingCursor /> : (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)', fontSize: 13 }}>
                   <Spin size="small" /> {t('aiThinking')}
@@ -176,14 +168,7 @@ const MessageBubble: React.FC<{
           <Typography.Text>{msg.content}</Typography.Text>
         ) : (
           <div className="markdown-content">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                code: renderCode,
-              }}
-            >
-              {msg.content || ''}
-            </ReactMarkdown>
+            <FormulaRenderer content={msg.content || ''} components={{ code: renderCode }} />
             {isStreaming && (msg.content ? <TypingCursor /> : (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)', fontSize: 13 }}>
                   <Spin size="small" /> {t('aiThinking')}
@@ -402,8 +387,9 @@ const ChatPage: React.FC = () => {
 
   // 检测并处理任务关键词
   const handleTaskCommand = useCallback(async (text: string): Promise<boolean> => {
-    // 模式1: "提交xxx任务" 或 "提交xxx任务：说明" → 创建任务（可选说明）
-    const createMatch = text.match(/^提交(.+?)任务(?:[：:]\s*(.*))?$/);
+    // 模式1: "提交xxx作业/任务" 或 "提交xxx作业：说明" → 创建作业（可选说明）
+    // 现名「AI 对话作业」，历史叫法「任务」继续兼容
+    const createMatch = text.match(/^提交(.+?)(?:作业|任务)(?:[：:]\s*(.*))?$/);
     if (createMatch) {
       const taskName = createMatch[1].trim();
       const taskDesc = (createMatch[2] || '').trim();
@@ -425,8 +411,8 @@ const ChatPage: React.FC = () => {
       }
     }
 
-    // 模式2: "提交到xxx任务" 或 "完成xxx任务" → 提交到指定名称的任务
-    const submitMatch = text.match(/^(?:提交到|完成)(.+?)任务$/);
+    // 模式2: "提交到xxx作业" 或 "完成xxx作业" → 提交到指定名称的作业
+    const submitMatch = text.match(/^(?:提交到|完成)(.+?)(?:作业|任务)$/);
     if (submitMatch) {
       const taskName = submitMatch[1].trim();
       if (!taskName) return false;

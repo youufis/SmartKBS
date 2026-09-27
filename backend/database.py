@@ -503,6 +503,7 @@ def init_db():
                 ai_feedback TEXT DEFAULT '',
                 ai_strengths TEXT DEFAULT '',
                 ai_weaknesses TEXT DEFAULT '',
+                ai_criteria TEXT DEFAULT '',
                 ai_graded_at TEXT,
                 UNIQUE(task_id, student_username)
             )""")
@@ -510,6 +511,8 @@ def init_db():
                 c.execute("CREATE INDEX IF NOT EXISTS idx_tg_task ON task_grades(task_id)")
             except sqlite3.OperationalError:
                 pass
+            # 按教师要求逐条判定的「要求点核对表」（旧库补列）
+            _ensure_column(c, "task_grades", "ai_criteria", "TEXT DEFAULT ''")
 
             # ── 公告表 ──
             c.execute("""CREATE TABLE IF NOT EXISTS announcements (

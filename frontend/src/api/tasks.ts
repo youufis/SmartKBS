@@ -69,6 +69,20 @@ export async function revertSubmission(task_id: string, student: string): Promis
 
 // ── AI 批改 ──
 
+/** 按教师填的作业要求拆出的「要求点」逐条判定 */
+export interface GradeCriterion {
+  item: string;
+  status?: string;
+  evidence?: string;
+}
+
+/** 全班层面：每条要求点的达成情况 */
+export interface RequirementReviewItem {
+  item: string;
+  class_status?: string;
+  note?: string;
+}
+
 export interface AIClassSummary {
   class_average?: number;
   highest_score?: number;
@@ -76,6 +90,7 @@ export interface AIClassSummary {
   total_students?: number;
   overall_comment?: string;
   teaching_suggestions?: string;
+  requirement_review?: RequirementReviewItem[];
 }
 
 export interface AIGradeResult {
@@ -85,6 +100,7 @@ export interface AIGradeResult {
   feedback: string;
   strengths: string[];
   weaknesses: string[];
+  criteria?: GradeCriterion[];
   graded_at?: string;
 }
 
@@ -95,6 +111,31 @@ export async function aiGradeTask(task_id: string): Promise<{
   message: string;
 }> {
   const { data } = await apiClient.post(`/api/tasks/ai-grade/${encodeURIComponent(task_id)}`, null, { timeout: 300000 });
+  return data;
+}
+
+/** AI 起草对话作业：返回名称与要求草稿（不落库，教师改完再创建） */
+export async function aiDraftHomework(payload: {
+  idea: string;
+  grade?: string;
+  class?: string;
+  duration_minutes?: string | number;
+}): Promise<{ name: string; description: string; duration_minutes: number; tips: string }> {
+  const { data } = await apiClient.post('/api/tasks/ai-create-draft', payload, { timeout: 180000 });
+  return data;
+}
+
+/** 只批改一位学生（不覆盖其他学生的成绩） */
+export async function aiGradeStudent(task_id: string, student: string): Promise<{
+  grade: AIGradeResult;
+  summary?: AIClassSummary;
+  message: string;
+}> {
+  const { data } = await apiClient.post(
+    `/api/tasks/ai-grade-student/${encodeURIComponent(task_id)}`,
+    { student },
+    { timeout: 300000 },
+  );
   return data;
 }
 

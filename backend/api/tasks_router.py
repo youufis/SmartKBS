@@ -359,6 +359,70 @@ async def create_task(req: CreateTaskRequest, request: Request):
     return {"task": new_task, "message": f"任务 '{task_name}' 创建成功"}
 
 
+def _strip_json_fence(text: str) -> str:
+    """去掉模型偶尔加上的 ```json 代码块围栏，否则 JSON 容错层也解不开"""
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1]
+        if "```" in cleaned:
+            cleaned = cleaned.rsplit("```", 1)[0]
+    return cleaned.strip()
+
+
+@router.post("/ai-create-draft")
+async def ai_create_homework_draft(request: Request):
+    """✨ AI 起草对话作业：教师给一句想法，返回名称与要求草稿（不落库，教师改完再创建）"""
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_create_task(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    body = await request.json()
+    idea = str(body.get("idea", "")).strip()[:500]
+    if not idea:
+        raise HTTPException(status_code=400, detail="请先描述作业主题或想法")
+
+    audience_parts = [x for x in (str(body.get("grade", "")).strip(),
+                                  str(body.get("class", "")).strip()) if x]
+    audience = "、".join(audience_parts) or "全班学生"
+    duration = str(body.get("duration_minutes", "") or "").strip() or "不限"
+
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
+
+    from backend.prompts.homework_grade import TASK_DRAFT_PROMPT
+    from backend.api.ai_service import call_ai_async
+    prompt = TASK_DRAFT_PROMPT.format(idea=idea, audience=audience, duration=duration)
+    try:
+        ai_text = await call_ai_async(prompt, api_key, json_mode=True, use_kb=False, max_tokens=1500)
+    except Exception as e:
+        logger.error(f"[作业起草] AI 调用失败 by={username}: {e}")
+        raise HTTPException(status_code=502, detail=f"AI 起草失败: {str(e)}")
+
+    from backend import ai_json
+    draft = ai_json.try_parse(_strip_json_fence(ai_text))
+    if not isinstance(draft, dict):
+        logger.error(f"[作业起草] 返回格式异常 by={username}: raw={ai_text[:300]}")
+        raise HTTPException(status_code=502, detail="AI 返回格式异常，请重试")
+
+    name = str(draft.get("name") or "").strip()[:TASK_NAME_MAX]
+    description = str(draft.get("description") or "").strip()[:TASK_DESC_MAX]
+    if not name or not description:
+        raise HTTPException(status_code=502, detail="AI 未生成有效草稿，请换个说法再试")
+    try:
+        minutes = int(draft.get("duration_minutes") or 0)
+    except (TypeError, ValueError):
+        minutes = 0
+
+    logger.info(f"[作业起草] 完成 by={username}, name={name}")
+    return {
+        "name": name,
+        "description": description,
+        "duration_minutes": minutes,
+        "tips": str(draft.get("tips") or "").strip()[:300],
+    }
+
 @router.post("/submit")
 async def submit_task(req: SubmitTaskRequest, request: Request):
     """提交到任务"""
@@ -733,6 +797,44 @@ def _remove_student_from_summary(creator: str, task_name: str, student: str, tas
 # AI 批改功能
 # ═══════════════════════════════════════════════════════════
 
+def _grading_basis(task_name: str, task_desc: str) -> str:
+    """把教师填的任务名称/任务说明渲染成 AI 的批改依据文本。
+
+    没填要求时不直接失败：让模型按任务名称推断主题，但要求它在评语里说明依据有限，
+    前端也会提示教师补写要求以提高批改准确度。
+    """
+    from backend.prompts.homework_grade import GRADING_BASIS
+    desc = (task_desc or "").strip() or "（教师未填写作业要求，请按任务名称推断主题与合理期望，并在评语中说明依据有限）"
+    return GRADING_BASIS.format(task_name=task_name, task_description=desc)
+
+
+def _normalize_criteria(raw: Any) -> list[dict[str, str]]:
+    """要求点判定归一化为 [{item, status, evidence}]，供教师逐条对照批改依据"""
+    if not isinstance(raw, list):
+        return []
+    allowed = {"met": "met", "partial": "partial", "missing": "missing",
+               "true": "met", "false": "missing",
+               "达成": "met", "部分达成": "partial", "缺失": "missing", "未达成": "missing"}
+    out: list[dict[str, str]] = []
+    for one in raw:
+        if isinstance(one, str):
+            one = {"item": one, "status": "partial", "evidence": ""}
+        if not isinstance(one, dict):
+            continue
+        item = str(one.get("item") or one.get("requirement") or "").strip()
+        if not item:
+            continue
+        status = str(one.get("status") or one.get("met") or "").strip().lower()
+        out.append({
+            "item": item[:120],
+            "status": allowed.get(status, "partial"),
+            "evidence": str(one.get("evidence") or one.get("note") or "").strip()[:200],
+        })
+        if len(out) >= 8:
+            break
+    return out
+
+
 def _find_summary_file(creator: str, task_name: str, task_id: str = "") -> str | None:
     """查找任务的 summary 汇总文件路径（K3: 统一走净化路径 + 兼容历史三种布局）"""
     # K9: 先找新的带任务指纹文件, 再兼容历史同名文件
@@ -788,13 +890,11 @@ async def ai_grade_task(task_id: str, request: Request):
         logger.error(f"文件上传失败: {e}")
         raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
 
-    # 5. 构建批改 prompt
+    # 5. 构建批改 prompt（批改依据 = 教师填的任务名称 + 任务说明）
     from backend.prompts.homework_grade import TASK_GRADING_PROMPT
     ai_role = build_ai_role()
     prompt = f"{ai_role}\n" + TASK_GRADING_PROMPT.format(
-        subject="",
-        task_name=task_name,
-        task_description=task_desc,
+        basis=_grading_basis(task_name, task_desc),
     )
     # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
 
@@ -874,6 +974,7 @@ async def ai_grade_task(task_id: str, request: Request):
         feedback = g.get("feedback", "")
         strengths = g.get("strengths", [])
         weaknesses = g.get("weaknesses", [])
+        criteria = _normalize_criteria(g.get("criteria"))
         if not student or score is None:
             continue
 
@@ -888,13 +989,14 @@ async def ai_grade_task(task_id: str, request: Request):
             # 覆盖上面检查与写入之间的竞态窗口（VALUES 写法做不到这一点）
             """INSERT OR REPLACE INTO task_grades
                (task_id, student_username, ai_score, ai_comment, ai_feedback,
-                ai_strengths, ai_weaknesses, ai_graded_at)
-               SELECT ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime')
+                ai_strengths, ai_weaknesses, ai_criteria, ai_graded_at)
+               SELECT ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime')
                WHERE EXISTS (SELECT 1 FROM task_submissions
                              WHERE task_id=? AND student_username=?)""",
             (task_id, student, score, comment, feedback,
              json.dumps(strengths, ensure_ascii=False),
              json.dumps(weaknesses, ensure_ascii=False),
+             json.dumps(criteria, ensure_ascii=False),
              task_id, student),
         )
         saved.append({
@@ -904,6 +1006,7 @@ async def ai_grade_task(task_id: str, request: Request):
             "feedback": feedback,
             "strengths": strengths,
             "weaknesses": weaknesses,
+            "criteria": criteria,
         })
 
     # 9. 保存全班总结到 tasks 表
@@ -928,6 +1031,268 @@ async def ai_grade_task(task_id: str, request: Request):
                     + (f"；{len(skipped_gone)} 人的提交已不存在，未写入成绩" if skipped_gone else "")),
     }
 
+
+# ── 单个学生 AI 批改（与全班批改互补）──
+
+def _clamp_task_score(raw: Any) -> int | None:
+    """AI 给的分可能是浮点/字符串/越界，统一夹成 0-100 整数；判不出返回 None"""
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if v != v:                      # NaN
+        return None
+    return int(max(0, min(100, round(v))))
+
+
+def _as_str_list(raw: Any) -> list[str]:
+    """优点/不足统一成字符串数组：模型偶尔会回一段用顿号连起来的话"""
+    if isinstance(raw, str):
+        import re as _re
+        return [x.strip() for x in _re.split(r"[、;；\n]+", raw) if x.strip()]
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    return []
+
+
+def _refresh_class_stats(task_id: str) -> dict[str, Any]:
+    """单人批改后同步「全班批改总结」卡片的数字口径。
+
+    分数按 task_grades 重算（平均分/最高/最低/人数），文字点评沿用上一次全班总结；
+    否则只批一个人时，教师看到的全班数字仍是旧口径。
+    """
+    summary: dict[str, Any] = {}
+    rows = execute_query("SELECT ai_summary FROM tasks WHERE id=?", (task_id,))
+    if rows and rows[0][0]:
+        try:
+            old = json.loads(rows[0][0])
+            if isinstance(old, dict):
+                summary = old
+        except json.JSONDecodeError:
+            summary = {}
+    stat = execute_query(
+        "SELECT COUNT(*), AVG(ai_score), MAX(ai_score), MIN(ai_score) "
+        "FROM task_grades WHERE task_id=?",
+        (task_id,),
+    )
+    if stat:
+        n, avg, hi, lo = stat[0]
+        summary["total_students"] = n
+        if n:
+            summary["class_average"] = round(float(avg or 0), 1)
+            summary["highest_score"] = hi
+            summary["lowest_score"] = lo
+    execute_insert_update(
+        "UPDATE tasks SET ai_summary=?, updated_at=datetime('now', 'localtime') WHERE id=?",
+        (json.dumps(summary, ensure_ascii=False), task_id),
+    )
+    return summary
+
+
+def _safe_json_list(raw: Any) -> list:
+    """老库里可能是空串或坏 JSON，解析不出来就当没有，不影响其余字段"""
+    if not raw:
+        return []
+    try:
+        val = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return val if isinstance(val, list) else []
+
+
+def _get_task_grade_row(task_id: str, student: str) -> dict[str, Any]:
+    """读回某位学生的批改结果（补姓名/年级/班级），供前端只刷新那一行"""
+    rows = execute_query(
+        "SELECT student_username, ai_score, ai_comment, ai_feedback, ai_strengths, "
+        "ai_weaknesses, ai_graded_at, ai_criteria FROM task_grades WHERE task_id=? AND student_username=?",
+        (task_id, student),
+    )
+    if not rows:
+        return {}
+    r = rows[0]
+    grade = {
+        "student": r[0], "score": r[1], "comment": r[2], "feedback": r[3],
+        "strengths": json.loads(r[4]) if r[4] else [],
+        "weaknesses": json.loads(r[5]) if r[5] else [],
+        "graded_at": r[6],
+        "criteria": _safe_json_list(r[7]),
+    }
+    from backend.permission_service import attach_student_info
+    attach_student_info([grade], key="student", prefix="")
+    return grade
+
+
+@router.post("/ai-grade-student/{task_id}")
+async def ai_grade_single_student(task_id: str, request: Request):
+    """🤖 只批改一位学生：把该学生的对话记录单独交给 AI 分析评分
+
+    与 /ai-grade/{task_id}（全班一次批完）互补：全班批完后发现某个学生批得不准、
+    或某个学生重新提交了，教师可以只重批那一个人 —— 省 token，也不覆盖其他学生的成绩。
+    """
+    user = get_current_user(request)
+    username = user["username"]
+    if not can_create_task(username):
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    body = await request.json()
+    student = str(body.get("student", "")).strip()
+    if not student:
+        raise HTTPException(status_code=400, detail="缺少 student")
+
+    rows = execute_query(
+        "SELECT id, creator_username, name, description FROM tasks WHERE id=?",
+        (task_id,),
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="任务未找到")
+    _, creator, task_name, task_desc = rows[0]
+    task_desc = task_desc or task_name
+    if not is_admin(username) and creator != username:
+        raise HTTPException(status_code=403, detail="无权限批改此任务")
+
+    # 提交记录是批改的前提（回退/重置后不再批该生）
+    if not execute_query(
+        "SELECT 1 FROM task_submissions WHERE task_id=? AND student_username=?",
+        (task_id, student),
+    ):
+        raise HTTPException(status_code=404, detail=f"未找到学生 {student} 的提交记录")
+
+    content = _read_student_submission(creator, task_name, student, task_id)
+    if not content.strip():
+        raise HTTPException(status_code=404, detail=f"学生 {student} 的提交内容读不到，无法批改")
+
+    api_key, _ = get_api_keys(username)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
+
+    api_base = get_config_value("QWEN_OPENAI_API_BASE",
+                                "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    model = get_config_value("MODEL_LONG_NAME", "qwen-long")
+
+    from backend.prompts.homework_grade import TASK_STUDENT_GRADING_PROMPT
+    prompt = f"{build_ai_role()}\n" + TASK_STUDENT_GRADING_PROMPT.format(
+        basis=_grading_basis(task_name, task_desc), student=student,
+    )
+
+    import re as _re
+    import tempfile
+    safe_student = _re.sub(r"[^A-Za-z0-9_.\-]", "_", student)[:40] or "student"
+    tmp_path = ""
+    try:
+        # 只送这一位学生的记录：临时落一个 md 换 fileid，长对话不会因为请求体过大而失败
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=f"task_grade_{_task_digest(task_id)}_{safe_student}_", suffix=".md")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"## 学生 {student}\n\n提交内容:\n\n{content}\n")
+        try:
+            file_id = await upload_file_to_dashscope(tmp_path, api_key)
+        except Exception as e:
+            logger.error(f"[单人批改] 提交内容上传失败 task={task_id} student={student}: {e}")
+            raise HTTPException(status_code=500, detail=f"提交内容上传失败: {str(e)}")
+
+        try:
+            async with httpx.AsyncClient() as client:
+                req_payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system",
+                         "content": f"{build_ai_role()}正在批改学生 {student} 提交的作业对话记录。"},
+                        {"role": "system", "content": f"fileid://{file_id}"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": False,
+                    # 与全班批改一致：网关层强制 JSON，杜绝「AI 返回格式异常」
+                    "response_format": {"type": "json_object"},
+                }
+                resp = await client.post(
+                    f"{api_base}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=req_payload,
+                    timeout=300,
+                )
+                if resp.status_code == 400 and "response_format" in req_payload:
+                    req_payload.pop("response_format")  # 网关不支持时降级重试
+                    resp = await client.post(
+                        f"{api_base}/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        json=req_payload,
+                        timeout=300,
+                    )
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=502,
+                                        detail=f"AI 模型调用失败: {resp.text[:200]}")
+                ai_text = resp.json()["choices"][0]["message"]["content"]
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="AI 模型调用超时，请稍后重试")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"[单人批改] AI 调用失败: {e}")
+            raise HTTPException(status_code=502, detail=f"AI 调用失败: {str(e)}")
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+    # 解析：兼容单对象 / {"grade": {...}} / {"grades": [{...}]} 三种回包写法
+    try:
+        cleaned = ai_text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+            if "```" in cleaned:
+                cleaned = cleaned.rsplit("```", 1)[0]
+        from backend import ai_json
+        parsed = ai_json.try_parse(cleaned.strip())
+    except Exception as e:
+        logger.warning(f"[单人批改] JSON 解析异常: {e}")
+        parsed = None
+    if not isinstance(parsed, dict):
+        logger.error(f"[单人批改] AI 返回格式异常 task={task_id} student={student}, "
+                     f"raw={ai_text[:300]}")
+        raise HTTPException(status_code=502, detail="AI 返回格式异常，请重试")
+    one = parsed.get("grade")
+    if not isinstance(one, dict):
+        lst = parsed.get("grades")
+        one = lst[0] if (isinstance(lst, list) and lst and isinstance(lst[0], dict)) else parsed
+
+    score = _clamp_task_score(one.get("score"))
+    if score is None:
+        logger.error(f"[单人批改] AI 未给出有效分数 task={task_id} student={student}")
+        raise HTTPException(status_code=502, detail="AI 未给出有效分数，请重试")
+    comment = str(one.get("comment") or "")[:500]
+    feedback = str(one.get("feedback") or "")[:500]
+    strengths = _as_str_list(one.get("strengths"))[:6]
+    weaknesses = _as_str_list(one.get("weaknesses"))[:6]
+    criteria = _normalize_criteria(one.get("criteria"))
+
+    execute_insert_update(
+        # 与全班批改同一写法：提交在批改期间被回退时不写孤儿成绩
+        """INSERT OR REPLACE INTO task_grades
+           (task_id, student_username, ai_score, ai_comment, ai_feedback,
+            ai_strengths, ai_weaknesses, ai_criteria, ai_graded_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime')
+           WHERE EXISTS (SELECT 1 FROM task_submissions
+                         WHERE task_id=? AND student_username=?)""",
+        (task_id, student, score, comment, feedback,
+         json.dumps(strengths, ensure_ascii=False),
+         json.dumps(weaknesses, ensure_ascii=False),
+         json.dumps(criteria, ensure_ascii=False),
+         task_id, student),
+    )
+
+    grade = _get_task_grade_row(task_id, student)
+    if not grade:
+        raise HTTPException(status_code=409, detail="批改结果未写入：该学生的提交可能已被回退")
+    summary = _refresh_class_stats(task_id)
+    logger.info(f"AI 单人批改完成: task={task_name}, student={student}, "
+                f"score={score}, by={username}")
+    return {
+        "grade": grade,
+        "summary": summary,
+        "message": f"已完成 {student} 的 AI 批改",
+    }
 
 @router.get("/grades/{task_id}")
 async def get_task_grades(task_id: str, request: Request):
@@ -959,8 +1324,8 @@ async def get_task_grades(task_id: str, request: Request):
         # 学生可以看自己的批改
         if not is_teacher(username) and not is_admin(username):
             rows = execute_query(
-                "SELECT ai_score, ai_comment, ai_feedback, ai_strengths, ai_weaknesses, ai_graded_at "
-                "FROM task_grades WHERE task_id=? AND student_username=?",
+                "SELECT ai_score, ai_comment, ai_feedback, ai_strengths, ai_weaknesses, ai_graded_at, "
+                "ai_criteria FROM task_grades WHERE task_id=? AND student_username=?",
                 (task_id, username),
             )
             if rows:
@@ -976,6 +1341,7 @@ async def get_task_grades(task_id: str, request: Request):
                         "strengths": json.loads(r[3]) if r[3] else [],
                         "weaknesses": json.loads(r[4]) if r[4] else [],
                         "graded_at": r[5],
+                        "criteria": _safe_json_list(r[6]),
                     }],
                     "graded_count": 1,
                 }
@@ -984,8 +1350,8 @@ async def get_task_grades(task_id: str, request: Request):
 
     # 教师/管理员查看所有
     rows = execute_query(
-        "SELECT student_username, ai_score, ai_comment, ai_feedback, ai_strengths, ai_weaknesses, ai_graded_at "
-        "FROM task_grades WHERE task_id=? ORDER BY ai_score DESC",
+        "SELECT student_username, ai_score, ai_comment, ai_feedback, ai_strengths, ai_weaknesses, "
+        "ai_graded_at, ai_criteria FROM task_grades WHERE task_id=? ORDER BY ai_score DESC",
         (task_id,),
     )
     grades = []
@@ -998,6 +1364,7 @@ async def get_task_grades(task_id: str, request: Request):
             "strengths": json.loads(r[4]) if r[4] else [],
             "weaknesses": json.loads(r[5]) if r[5] else [],
             "graded_at": r[6],
+            "criteria": _safe_json_list(r[7]),
         })
 
     # 批改名单只有学号, 补姓名/年级/班级

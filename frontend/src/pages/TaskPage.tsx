@@ -1,13 +1,13 @@
 import { studentLabel } from '../utils/studentLabel'
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox,
-  Typography, Spin, Popconfirm, Popover, Drawer, Tooltip,
+  Card, Table, Button, message, Modal, Input, Tag, Space, Checkbox, Alert,
+  Typography, Spin, Popconfirm, Popover, Drawer, Tooltip, Collapse, Select,
 } from 'antd'
 import {
   PlusOutlined, SendOutlined, ReloadOutlined, DeleteOutlined,
   CheckCircleOutlined, EyeOutlined, UndoOutlined,
-  RobotOutlined, BarChartOutlined,
+  RobotOutlined, BarChartOutlined, QuestionCircleOutlined, BulbOutlined, ExpandAltOutlined,
 } from '@ant-design/icons'
 import * as tasksApi from '../api/tasks'
 import { useSearchParams } from 'react-router-dom'
@@ -17,8 +17,7 @@ import type { TaskInfo } from '../types'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useChatStore, setTaskFilename } from '../stores/chatStore'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
 
 const TaskPage: React.FC = () => {
@@ -36,6 +35,48 @@ const TaskPage: React.FC = () => {
     if (score >= 60) return { label: t('pass'), color: 'orange' }
     if (score >= 40) return { label: t('poor'), color: 'red' }
     return { label: t('fail'), color: 'default' }
+  }
+
+  // ── 要求点（批改依据 = 教师填的任务名称/说明）──
+  const criterionMeta = (status?: string) => {
+    if (status === 'met') return { icon: '✅', color: 'success', label: t('criterionMet') }
+    if (status === 'missing') return { icon: '❌', color: 'error', label: t('criterionMissing') }
+    return { icon: '🟡', color: 'warning', label: t('criterionPartial') }
+  }
+
+  // 全班层面的要求点达成情况标签色（中英文案都能落位）
+  const reviewColor = (status?: string) => {
+    const v = status || ''
+    if (/普遍达成|全部达成|^met|good/i.test(v)) return 'success'
+    if (/普遍缺失|缺失|未达成|^missing|poor/i.test(v)) return 'error'
+    return 'warning'
+  }
+
+  const renderCriteria = (criteria?: tasksApi.GradeCriterion[]) => {
+    if (!criteria || criteria.length === 0) return null
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <Typography.Text style={{ fontSize: 12, fontWeight: 600 }}>{t('criteriaTitle')}</Typography.Text>
+        {criteria.map((cr, i) => {
+          const meta = criterionMeta(cr.status)
+          return (
+            <div key={i} style={{ marginTop: 2, paddingLeft: 4 }}>
+              <Typography.Text style={{ fontSize: 12 }}>
+                {meta.icon} {cr.item}
+                <Tag color={meta.color} style={{ marginInlineStart: 6, marginInlineEnd: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}>
+                  {meta.label}
+                </Tag>
+                {cr.evidence && (
+                  <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineStart: 6 }}>
+                    {cr.evidence}
+                  </Typography.Text>
+                )}
+              </Typography.Text>
+            </div>
+          )
+        })}
+      </div>
+    )
   }
 
   const [tasks, setTasks] = useState<TaskInfo[]>([])
@@ -81,6 +122,19 @@ const TaskPage: React.FC = () => {
   const [gradesMap, setGradesMap] = useState<Record<string, tasksApi.AIGradeResult>>({})
   const [classSummary, setClassSummary] = useState<tasksApi.AIClassSummary | null>(null)
   const [gradesLoading, setGradesLoading] = useState(false)
+  // 单个学生批改的行内 loading（键为学生用户名）
+  const [aiGradingStudent, setAiGradingStudent] = useState<string | null>(null)
+
+  // 使用说明：不占版面，点标题旁「使用说明」弹窗查看（学生端/教师端同一交互）
+  const [guideOpen, setGuideOpen] = useState(false)
+  // AI 起草作业（生成名称与要求草稿，教师改完再创建）
+  const [aiDraftOpen, setAiDraftOpen] = useState(false)
+  const [aiIdea, setAiIdea] = useState('')
+  const [aiDuration, setAiDuration] = useState('')
+  const [aiDraftLoading, setAiDraftLoading] = useState(false)
+  const [aiDraft, setAiDraft] = useState<{ name: string; description: string; tips: string } | null>(null)
+  // 作业要求全文弹窗：列表里只显示两行，长文点「查看」
+  const [reqModal, setReqModal] = useState<string | null>(null)
 
   // 学生查看自己的批改
   const [myGradeModal, setMyGradeModal] = useState(false)
@@ -212,6 +266,53 @@ const TaskPage: React.FC = () => {
     }
   }
 
+  // ── 只批改一位学生：重批某个人或补批新提交，不动其他学生的成绩 ──
+  const handleAiGradeStudent = async (taskId: string, student: string, label: string) => {
+    setAiGradingStudent(student)
+    try {
+      const res = await tasksApi.aiGradeStudent(taskId, student)
+      if (res.grade) setGradesMap((prev) => ({ ...prev, [student]: res.grade }))
+      if (res.summary) setClassSummary(res.summary)
+      message.success(t('aiGradeStudentSuccess', { name: label }))
+      loadTasks()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || err?.message || t('aiGradeFailed'))
+    } finally {
+      setAiGradingStudent(null)
+    }
+  }
+
+  const openAiDraft = () => { setAiDraft(null); setAiDraftOpen(true) }
+
+  const handleAiDraft = async () => {
+    if (!aiIdea.trim()) { message.warning(t('aiIdeaRequired')); return }
+    setAiDraftLoading(true)
+    try {
+      const res = await tasksApi.aiDraftHomework({
+        idea: aiIdea.trim(),
+        grade: taskScope.target_grade,
+        class: taskScope.target_class,
+        duration_minutes: aiDuration,
+      })
+      setAiDraft({ name: res.name, description: res.description, tips: res.tips || '' })
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || err?.message || t('aiDraftFailed'))
+    } finally {
+      setAiDraftLoading(false)
+    }
+  }
+
+  const useAiDraft = () => {
+    if (!aiDraft) return
+    setTaskName(aiDraft.name.slice(0, 60))
+    setTaskDesc(aiDraft.description)
+    setAiDraftOpen(false)
+    setCreateModal(true)
+  }
+
+  const asSteps = (v: unknown): string[] => (Array.isArray(v) ? (v as string[]) : [])
+  const guideSteps = asSteps(t(isStudent ? 'guide.studentSteps' : 'guide.teacherSteps', { returnObjects: true }))
+
   // ── 加载批改结果 ──
   const loadGrades = async (taskId: string) => {
     setGradesLoading(true)
@@ -286,11 +387,22 @@ const TaskPage: React.FC = () => {
   const columns = [
     { title: t('taskName'), dataIndex: 'name', key: 'name', width: 180 },
     {
-      title: t('taskDescription'), dataIndex: 'description', key: 'description', width: 200,
+      title: t('taskDescription'), dataIndex: 'description', key: 'description', width: 230,
       render: (d: string) => d ? (
-        <Typography.Paragraph ellipsis={{ rows: 1 }} style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)' }}>
-          {d}
-        </Typography.Paragraph>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
+          <Typography.Paragraph
+            ellipsis={{ rows: 2 }}
+            style={{ margin: 0, fontSize: 13, color: 'var(--text-secondary)', flex: 1, minWidth: 0 }}
+            title={d.length > 60 ? undefined : d}
+          >
+            {d}
+          </Typography.Paragraph>
+          <Tooltip title={t('viewRequirement')}>
+            <Button size="small" type="text" icon={<ExpandAltOutlined />}
+              style={{ flex: 'none' }} onClick={() => setReqModal(d)}
+            />
+          </Tooltip>
+        </div>
       ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>--</Typography.Text>,
     },
     { title: t('taskCreator'), dataIndex: 'creator', key: 'creator', width: 80 },
@@ -403,12 +515,18 @@ const TaskPage: React.FC = () => {
   return (
     <div>
       <Card>
-        <Space style={{ marginBottom: 16 }}>
+        <Space style={{ marginBottom: 12 }} wrap>
           <Typography.Title level={4} style={{ margin: 0 }}>{t('taskManagement')}</Typography.Title>
+          <Button size="small" type="text" icon={<QuestionCircleOutlined />} onClick={() => setGuideOpen(true)}>
+            {t('guide.showTip')}
+          </Button>
           {isAdminOrTeacher && (
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>
               {t('createTask')}
             </Button>
+          )}
+          {isAdminOrTeacher && (
+            <Button icon={<BulbOutlined />} onClick={openAiDraft}>{t('aiCreateTask')}</Button>
           )}
           <Button icon={<ReloadOutlined />} onClick={loadTasks}>{t('refresh')}</Button>
           {isAdminOrTeacher && (
@@ -451,6 +569,9 @@ const TaskPage: React.FC = () => {
           rows={3}
           style={{ marginTop: 12 }}
         />
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
+          {t('taskDescHint')}
+        </Typography.Text>
         <div style={{ marginTop: 16 }}>
           <ActivityScopeSelector value={taskScope} onChange={setTaskScope} />
         </div>
@@ -469,9 +590,12 @@ const TaskPage: React.FC = () => {
             {t('submitContentDesc')} <strong>{selectedTask?.name}</strong>？
           </Typography.Text>
           {selectedTask?.description && (
-            <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-              {t('taskDescLabel')}{selectedTask.description}
-            </Typography.Text>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('taskDescLabel')}</Typography.Text>
+              <div className="markdown-content requirement-box">
+                <FormulaRenderer content={selectedTask.description} />
+              </div>
+            </div>
           )}
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {t('totalMessagesCount', { count: messages.length })}
@@ -505,6 +629,33 @@ const TaskPage: React.FC = () => {
             )}
           </Space>
 
+          {viewTask?.description && (
+            <Collapse size="small" style={{ marginBottom: 12 }}
+              items={[{
+                key: 'requirement',
+                label: (
+                  <Space size={6}>
+                    <Typography.Text style={{ fontSize: 13 }}>{t('requirementCollapseTitle')}</Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {t('charCount', { count: (viewTask.description || '').length })}
+                    </Typography.Text>
+                  </Space>
+                ),
+                children: (
+                  <div className="markdown-content requirement-box" style={{ maxHeight: 280 }}>
+                    <FormulaRenderer content={viewTask.description} />
+                  </div>
+                ),
+              }]}
+            />
+          )}
+
+          {viewTask && !viewTask.description && (
+            <Alert type="warning" showIcon style={{ marginBottom: 16 }}
+              message={t('noRequirementWarning')}
+            />
+          )}
+
           {classSummary && (
             <Card size="small" style={{ marginBottom: 16, background: '#f0f5ff', border: '1px solid #adc6ff' }}>
               <Space orientation="vertical" style={{ width: '100%' }} size={4}>
@@ -519,9 +670,32 @@ const TaskPage: React.FC = () => {
                     <Tag>{t('totalStudents')}{classSummary.total_students}</Tag>
                   </Space>
                 )}
-                <Typography.Paragraph style={{ fontSize: 13, margin: '4px 0', color: 'var(--text-secondary)' }}>
-                  💡 {classSummary.overall_comment}
-                </Typography.Paragraph>
+                {classSummary.overall_comment && (
+                  <Typography.Paragraph style={{ fontSize: 13, margin: '4px 0', color: 'var(--text-secondary)' }}>
+                    💡 {classSummary.overall_comment}
+                  </Typography.Paragraph>
+                )}
+                {(classSummary.requirement_review?.length ?? 0) > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <Typography.Text style={{ fontSize: 12, fontWeight: 600, color: '#1d39c4' }}>
+                      {t('requirementReviewTitle')}
+                    </Typography.Text>
+                    {classSummary.requirement_review!.map((rr, i) => (
+                      <div key={i} style={{ fontSize: 12, marginTop: 2, paddingLeft: 4 }}>
+                        • {rr.item}
+                        {rr.class_status && (
+                          <Tag color={reviewColor(rr.class_status)}
+                            style={{ marginInlineStart: 6, marginInlineEnd: 0, fontSize: 11, lineHeight: '16px', padding: '0 4px' }}>
+                            {rr.class_status}
+                          </Tag>
+                        )}
+                        {rr.note && (
+                          <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineStart: 6 }}>{rr.note}</Typography.Text>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {classSummary.teaching_suggestions && (
                   <Typography.Paragraph style={{ fontSize: 13, margin: 0, color: '#1d39c4', background: '#f0f5ff', padding: '4px 8px', borderRadius: 4 }}>
                     {t('teachingSuggestions')}{classSummary.teaching_suggestions}
@@ -562,6 +736,7 @@ const TaskPage: React.FC = () => {
                     if (!r.gradeInfo) return <Typography.Text type="secondary">{t('noGradeData')}</Typography.Text>
                     return (
                       <div style={{ padding: '8px 0 4px 0' }}>
+                        {renderCriteria(r.gradeInfo.criteria)}
                         <Typography.Paragraph style={{ fontSize: 13, margin: '0 0 8px 0', color: 'var(--text-secondary)' }}>
                           💬 {r.gradeInfo.comment}
                         </Typography.Paragraph>
@@ -583,6 +758,13 @@ const TaskPage: React.FC = () => {
                           <div style={{ padding: '6px 8px', background: '#f0f5ff', borderRadius: 4, marginTop: 4 }}>
                             <Typography.Text style={{ fontSize: 12, color: '#1d39c4' }}>
                               {t('suggestions')}{r.gradeInfo.feedback}
+                            </Typography.Text>
+                          </div>
+                        )}
+                        {r.gradeInfo.graded_at && (
+                          <div style={{ marginTop: 6 }}>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {t('gradedAt')}{r.gradeInfo.graded_at}
                             </Typography.Text>
                           </div>
                         )}
@@ -614,9 +796,17 @@ const TaskPage: React.FC = () => {
                     ) : <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('pendingGrading')}</Typography.Text>,
                   },
                   {
-                    title: t('actions'), key: 'action', width: 66,
+                    title: t('actions'), key: 'action', width: 96,
                     render: (_: any, r: any) => (
                       <Space size={2}>
+                        {viewTask && (
+                          <Tooltip title={r.gradeInfo ? t('aiRegradeStudentTooltip') : t('aiGradeStudentTooltip')}>
+                            <Button size="small" type="text" icon={<RobotOutlined />}
+                              loading={aiGradingStudent === r.username}
+                              onClick={() => handleAiGradeStudent(viewTask.id, r.username, studentLabel(r))}
+                            />
+                          </Tooltip>
+                        )}
                         <Tooltip title={t('viewSubmissionContent')}>
                           <Button size="small" type="text" icon={<EyeOutlined />}
                             onClick={() => handleViewContent(r.username)}
@@ -657,15 +847,15 @@ const TaskPage: React.FC = () => {
         >
           <Spin spinning={contentLoading}>
             <div className="markdown-content">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {studentContent || t('noContent')}
-              </ReactMarkdown>
+              <FormulaRenderer content={studentContent || t('noContent')} />
             </div>
           </Spin>
         </Drawer>
       </Drawer>
 
       <style>{`
+        .requirement-box { max-height: 320px; overflow: auto; padding: 8px 10px; background: var(--bg-layout, #fafafa); border: 1px solid var(--border-color, #f0f0f0); border-radius: 4px; }
+        .requirement-box ol, .requirement-box ul { margin: 4px 0; padding-left: 20px; }
         .markdown-content p { margin-bottom: 4px; }
         .markdown-content pre { background: #f5f5f5; padding: 8px; border-radius: 4px; overflow-x: auto; }
         .markdown-content code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 0.9em; }
@@ -699,6 +889,8 @@ const TaskPage: React.FC = () => {
                   </div>
                 </Space>
               </Card>
+
+              {renderCriteria(myGrade.criteria)}
 
               {myGrade.strengths && myGrade.strengths.length > 0 && (
                 <div>
@@ -741,6 +933,106 @@ const TaskPage: React.FC = () => {
             <Typography.Text type="secondary">{t('noGradeResult')}</Typography.Text>
           )}
         </Spin>
+      </Modal>
+
+      {/* 使用说明：点标题旁「使用说明」弹出，学生端与教师端各自一套步骤 */}
+      <Modal
+        title={<Space><QuestionCircleOutlined />{isStudent ? t('guide.studentTitle') : t('guide.teacherTitle')}</Space>}
+        open={guideOpen}
+        onCancel={() => setGuideOpen(false)}
+        footer={<Button type="primary" onClick={() => setGuideOpen(false)}>{t('gotIt')}</Button>}
+        width={640}
+      >
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+          <Typography.Text style={{ fontSize: 13 }}>
+            {isStudent ? t('guide.studentIntro') : t('guide.teacherIntro')}
+          </Typography.Text>
+          <div className="requirement-box">
+            {guideSteps.map((step, i) => (
+              <Typography.Paragraph key={i} style={{ fontSize: 13, margin: '4px 0' }}>{i + 1}. {step}</Typography.Paragraph>
+            ))}
+          </div>
+        </Space>
+      </Modal>
+
+      {/* AI 起草作业：先出草稿，教师确认后填入创建表单 */}
+      <Modal
+        maskClosable={false}
+        title={<Space><BulbOutlined />{t('aiCreateTitle')}</Space>}
+        open={aiDraftOpen}
+        onCancel={() => setAiDraftOpen(false)}
+        width={700}
+        footer={
+          <Space wrap>
+            <Button onClick={() => setAiDraftOpen(false)}>{t('cancel')}</Button>
+            <Button loading={aiDraftLoading} onClick={handleAiDraft}>
+              {aiDraft ? t('aiRegenerate') : t('aiGenerate')}
+            </Button>
+            <Button type="primary" disabled={!aiDraft || aiDraftLoading} onClick={useAiDraft}>
+              {t('aiDraftUse')}
+            </Button>
+          </Space>
+        }
+      >
+        <Spin spinning={aiDraftLoading} tip={t('aiDraftLoading')}>
+          <Space orientation="vertical" size={10} style={{ width: '100%' }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('aiCreateIntro')}</Typography.Text>
+            <Input.TextArea
+              rows={3}
+              placeholder={t('aiIdeaPlaceholder')}
+              value={aiIdea}
+              onChange={(e) => setAiIdea(e.target.value)}
+              maxLength={500}
+              showCount
+            />
+            <Space wrap size={8}>
+              <Typography.Text style={{ fontSize: 13 }}>{t('aiDurationLabel')}</Typography.Text>
+              <Select
+                size="small"
+                style={{ width: 120 }}
+                value={aiDuration}
+                onChange={(v: string) => setAiDuration(v)}
+                options={[
+                  { value: '', label: t('aiDurationFree') },
+                  { value: '10', label: t('aiDuration10') },
+                  { value: '20', label: t('aiDuration20') },
+                  { value: '40', label: t('aiDuration40') },
+                ]}
+              />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('aiAudienceHint')}</Typography.Text>
+            </Space>
+            {aiDraft && (
+              <Card
+                size="small"
+                title={t('aiDraftPreview')}
+                style={{ background: '#f6ffed', borderColor: '#b7eb8f' }}
+              >
+                <Space orientation="vertical" size={6} style={{ width: '100%' }}>
+                  <Typography.Text strong>{aiDraft.name}</Typography.Text>
+                  <div className="markdown-content requirement-box">
+                    <FormulaRenderer content={aiDraft.description} />
+                  </div>
+                  {aiDraft.tips && (
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>💡 {aiDraft.tips}</Typography.Text>
+                  )}
+                </Space>
+              </Card>
+            )}
+          </Space>
+        </Spin>
+      </Modal>
+
+      {/* 作业要求全文：列表只显示两行，长文在这里完整看 */}
+      <Modal
+        title={t('requirementModalTitle')}
+        open={!!reqModal}
+        onCancel={() => setReqModal(null)}
+        footer={<Button onClick={() => setReqModal(null)}>{t('close')}</Button>}
+        width={640}
+      >
+        <div className="markdown-content requirement-box" style={{ maxHeight: 460 }}>
+          <FormulaRenderer content={reqModal || ''} />
+        </div>
       </Modal>
     </div>
   )

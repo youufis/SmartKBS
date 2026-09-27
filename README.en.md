@@ -9,12 +9,12 @@
 > points reward system (12-level titles + achievement badges), classroom points, smart roll call, attendance statistics,
 > wrong answer review, targeted practice, course exercises, daily picks, trending news, AI resource recommendations, learning analytics, growth portfolio,
 > AI self-portrait, collaborative whiteboard, class summary, activity monitoring, resource view tracking,
-> task management with AI grading, user management, system announcements, notification center,
+> dialogue homework with AI grading, user management, system announcements, notification center,
 > online incremental upgrade, multi-theme appearance system, comprehensive grade-class system, and **50+ functional modules**.
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-8.3.0-blue)
+![Version](https://img.shields.io/badge/Version-8.4.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,12 +30,12 @@
 
 ---
 
-> 📌 **V8.3.0 Highlights**:
-> 📚 **Knowledge base takeover**: Bailian retrieval fully wired in - one switch moves every former agent flow (question generation, lesson plans, grading, analytics) to "direct + knowledge retrieval", degrading gracefully so nothing blocks
-> 🧠 **Citable answers**: check "Knowledge" in chat to retrieve per message; sources with document names and relevance scores appear under answers (teachers/admins)
-> 🔌 **Three self-tests**: the config page adds Test Retrieval / Test LLM / Test Agent, catching a mismatched workspace domain, service id or API key in one click
-> ⚙️ **Config hardening**: six knowledge base knobs with float threshold validation and bilingual strings
-> 🛡️ **Zero regression**: with the master switch off, behavior is byte-identical to 8.2
+> 📌 **V8.4.0 Highlights**:
+> 📝 **Dialogue Homework**: the former "Task Management" is renamed after what it actually does - students hand in their AI conversation
+> 🎯 **Graded against the requirements**: AI splits them into 3-5 checkpoints, finds evidence for each one, then scores; results visible to teachers and students
+> 👤 **Per-student grading**: grade just one student from their row - other scores stay untouched and class stats recalculate
+> ✨ **Draft with AI**: turn one sentence into an editable title and requirement draft before creating
+> 🧮 **Math rendering**: conversations and requirements render Markdown + LaTeX, including `$$…$$` written inline
 
 ---
 
@@ -606,20 +606,22 @@ Integrated smart roll call + attendance statistics management:
 
 ---
 
-### ✅ Task Management (Homework System)
+### ✅ Dialogue Homework
 
-Teachers publish learning tasks, students submit AI dialogues as homework:
+Teachers set a topic, students work it out with the AI and hand in the conversation transcript for per-student grading:
 
 - **Teacher Side**:
-  - Create tasks (name/description/deadline)
-  - View student submission details
-  - AI smart grading (3-dimension scoring: content completeness, logical clarity, expression accuracy)
-  - Each task shows how many submissions still await grading, with a one-click pending-only filter (the home to-do badge lands here)
-  - Revoke submissions, end tasks
+  - Create homework (title/requirements/audience), or use "Draft with AI" to turn one sentence into an editable draft
+  - Requirements are the rubric: AI splits them into 3-5 checkpoints and judges each one against the transcript
+  - AI smart grading (3 dimensions: completeness, depth of understanding, expression): grade the whole class at once (with a class summary and per-checkpoint status) or grade a single student from their row
+  - Each item shows how many submissions still await grading, with a one-click pending-only filter (the home to-do badge lands here)
+  - Open details to read each student transcript and the original requirements, revoke submissions, close homework
 - **Student Side**:
-  - View active tasks
-  - Submit AI dialogue content as homework
-  - View AI grading results
+  - See active homework and its full requirements
+  - Submit the current conversation in one click after working it out in Knowledge Q&A
+  - View the AI score, checkpoint results, comments and advice
+- **📖 How to use**: the button next to the title opens step-by-step guidance for students and teachers
+- **🧮 Math rendering**: transcripts and requirements render Markdown + LaTeX, including `$$…$$` written inline
 
 > **Available to all users, differentiated by role**
 
@@ -981,6 +983,16 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
+### v8.4.0 (2026-09-27)
+
+- 📝 **Task Management renamed to Dialogue Homework**: named after what it really does (students hand in their AI conversation as the homework); teacher and student menus, page titles, home to-dos and quick entries, the role matrix and both READMEs updated together; the old "submit XX task" / "finish XX task" commands keep working alongside the new "homework" wording, and existing homework and grades are untouched
+- 🎯 **Grading follows the teacher requirements**: AI first splits the requirements into 3-5 checkpoints, looks for evidence of each one in the transcript, marks it met / partial / missing, then scores on completeness, depth of understanding and expression; the checklist is stored and shown to teachers and students, and the class summary reports each checkpoint across the class; with no requirements written, AI infers the topic from the title and the UI asks the teacher to add them
+- 👤 **Per-student analysis and grading**: a new single-student endpoint sends only that transcript to the AI, so re-grading one student never overwrites the others, while class average / highest / lowest recalculate; inline button and per-row loading in the detail drawer, pending counts refresh immediately
+- ✨ **Draft with AI**: describe the idea in one sentence to get a homework title plus checkable requirements (with suggested duration and a teaching tip), preview it and fill the create form; drafts are never stored
+- 📖 **Usage guide and long requirements**: the button next to the title opens step-by-step guidance for students and teachers; long requirements now show two lines with a full-text modal, a collapsible panel in the detail drawer and a card in the submit dialog instead of one cramped line
+- 🧮 **Math rendering fixed**: chat and companion bubbles plus homework text render Markdown + LaTeX (KaTeX); inline `$$…$$` and `\(\)` / `\[\]` delimiters are normalised into renderable math while `$$` inside code blocks stays untouched
+- ⚠️ **Breaking changes**: none (`task_grades` gains an `ai_criteria` column, migrated automatically at startup)
+
 ### v8.3.0 (2026-09-26)
 
 - 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests; companion and assistant replies reassemble streamed fragments again instead of showing only the last character
@@ -1240,7 +1252,7 @@ SmartKBS/
 | Course Exercises | ✅ Practice | ✅ Create | ✅ Create |
 | Daily Picks | ✅ | ✅ | ✅ |
 | Trending News | ✅ | ✅ | ✅ |
-| Task Management | ✅ Submit | ✅ Manage | ✅ Manage |
+| Dialogue Homework | ✅ Submit | ✅ Manage | ✅ Manage |
 | To-Do Items | ✅ | ❌ | ❌ |
 | Resource Center (Browse Shared) | ✅ | ✅ | ✅ |
 | Resource Management | ❌ | ✅ | ✅ |
