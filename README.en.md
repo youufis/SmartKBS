@@ -31,11 +31,9 @@
 ---
 
 > 📌 **V8.4.0 Highlights**:
-> 📝 **Dialogue Homework**: the former "Task Management" is renamed after what it actually does - students hand in their AI conversation
-> 🎯 **Graded against the requirements**: AI splits them into 3-5 checkpoints, finds evidence for each one, then scores; results visible to teachers and students
-> 👤 **Per-student grading**: grade just one student from their row - other scores stay untouched and class stats recalculate
-> ✨ **Draft with AI**: turn one sentence into an editable title and requirement draft before creating
-> 🧮 **Math rendering**: formulas in conversations and homework display properly, even ones written inline with the text
+> 📝 **Dialogue Homework**: renamed from "Task Management" with step-by-step guidance; grading follows the teacher requirements checkpoint by checkpoint, one student at a time, and AI can draft the homework
+> 🧮 **Math rendering everywhere**: 23 surfaces - chat, companion, homework, analytics - render LaTeX, including `$$…$$` written inline
+> 🗂 **Chat history rebuilt**: titles and message counts, today/yesterday/month grouping, search, hover preview, row menu and rename
 > 📊 **Summary export**: scores and completion across activity types, aggregated by student or class, exported to Excel or CSV
 > 🧩 **Class management**: clean up empty shell classes; classes with students or teachers stay protected
 
@@ -202,7 +200,7 @@ Core intelligent Q&A interface based on SSE streaming, providing a smooth AI con
 - **🖼️ Multimodal Dialogue**: When multimodal is enabled, supports simultaneous image + text input, directly understood by the multimodal model without file summarization
 - **📄 File Summary Enhancement**: Automatically summarizes uploaded documents to enhance AI dialogue context
 - **🔍 RAG Knowledge Enhancement**: Retrieves relevant knowledge from question bank and course syllabus to improve answer accuracy
-- **📜 History Records**: Auto-saved, browsable by date, tree view, full-text search
+- **📜 Chat History**: Auto-saved and shown by conversation title, grouped by today/yesterday/month, with title and full-text search, hover preview, rename and download
 - **👁️ HTML Preview**: One-click preview of HTML code blocks in conversations
 - **📋 Example Prompts**: Built-in multiple teaching scenario examples, one-click fill
 - **🎭 Three Modes**: Smart Answer Mode / Companion Mode (Student) / Assistant Mode (Teacher/Admin)
@@ -989,25 +987,19 @@ Git-based online incremental upgrade system:
 
 ### v8.4.0 (2026-09-27)
 
-- 📝 **Task Management renamed to Dialogue Homework**: named after what it really does (students hand in their AI conversation as the homework); teacher and student menus, page titles, home to-dos and quick entries, the role matrix and both READMEs updated together; the old "submit XX task" / "finish XX task" commands keep working alongside the new "homework" wording, and existing homework and grades are untouched
-- 🎯 **Grading follows the teacher requirements**: AI first splits the requirements into 3-5 checkpoints, looks for evidence of each one in the transcript, marks it met / partial / missing, then scores on completeness, depth of understanding and expression; the checklist is stored and shown to teachers and students, and the class summary reports each checkpoint across the class; with no requirements written, AI infers the topic from the title and the UI asks the teacher to add them
-- 👤 **Per-student analysis and grading**: a new single-student endpoint sends only that transcript to the AI, so re-grading one student never overwrites the others, while class average / highest / lowest recalculate; inline button and per-row loading in the detail drawer, pending counts refresh immediately
-- ✨ **Draft with AI**: describe the idea in one sentence to get a homework title plus checkable requirements (with suggested duration and a teaching tip), preview it and fill the create form; drafts are never stored
-- 📖 **Usage guide and long requirements**: the button next to the title opens step-by-step guidance for students and teachers; long requirements now show two lines with a full-text modal, a collapsible panel in the detail drawer and a card in the submit dialog instead of one cramped line
-- 🧮 **Math rendering fixed**: chat, companion and homework texts display formulas consistently, including ones written in the same line as the text; code content stays untouched
-- 📊 **Cross-activity score summary**: a new Summary Export page aggregates scores and completion across exams, quizzes, homework, practice, quick quizzes, quests and more; filter by grade, class, student, activity type or date range, then download a four-sheet Excel (activity detail, per-student matrix, per-activity, per-class) or a single CSV; admins cover the whole school, teachers only their own activities and their assigned students
-- 🧩 **Class management**: admins can review every class with its student and teacher counts and clean up empty shell classes auto-created during registration/import; classes that still have students or assignments cannot be deleted, and the reason is shown
-- 🔧 **Polish**: grade pickers list only grades that actually have students; CSV downloads no longer carry stray invisible characters in Excel
-- ⚠️ **Breaking changes**: none (data format upgrades happen automatically on startup)
+- 📝 **Dialogue Homework** (was "Task Management"): renamed with step-by-step guidance for both roles; AI grading now splits the teacher requirements into checkpoints, finds evidence for each one and reports met/partial/missing to teachers and students; grade a single student without touching the others, draft homework from one sentence with AI, and read long requirements in a collapsible full-text view
+- 🧮 **Math rendering unified**: 23 surfaces - chat, companion, homework, analytics, class summary, lesson plans - render Markdown + LaTeX; `$$…$$` written inline and `\(\)` / `\[\]` are normalised, code blocks untouched
+- 🗂 **Chat history rebuilt**: the list shows a real title and message count instead of a timestamp filename, grouped by today / yesterday / this week / month, with title and content search, hover preview, a row menu (open, preview, copy, download, rename, delete) and a confirm before replacing the current chat; the index is reconciled against disk so previously invisible entries reappear
+- 📊 **Cross-activity summary export**: scores and completion across exams, quizzes, homework, practice, quick quizzes and quests, filtered by grade, class, student, activity type or date range, exported as a four-sheet Excel or CSV; admins cover the school, teachers only their own activities and students
+- 🧩 **Class management and details**: user management shows the headcount and teacher assignment per class and cleans up empty shell classes (protected when students or assignments remain); grade filters only list grades that really have students; CSV no longer carries stray invisible characters
+- ⚠️ **Breaking changes**: none (data format upgrades automatically at startup)
 
 ### v8.3.0 (2026-09-26)
 
-- 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with top-K, relevance and timeout configurable and an automatic fallback; chat lists citations and the config page gained connectivity self-tests; companion and assistant replies reassemble streamed fragments again instead of showing only the last character
-- 🤖 **AI generation and grading hardened**: explicit output length caps with truncation recorded, tolerant JSON parsing and pre-save checks so incomplete artifacts are never stored silently; answers normalised for grading and generated artifacts auto-registered
-- 🏠 **Dashboard and task list rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home with star of the week; to-dos are filtered by class scope and pending grading now counts real work
-- 🗂️ **Sharing centre closed out**: resource browsing and Shared Files share one browser (categories, stats strip, grid/list, pagination, preferences) and directory shares show as folders; fixed files never counting as seen and to-do links that wouldn't open
-- 🌙 **Theme, copy and page details**: the dark-mode palette completed and hard-coded colours removed; translation placeholders and untranslated strings closed out, deprecated component warnings cleared; the wrong-answer book lets students mark each question mastered (undoable) with the three-way filter really working, and trending news gained its paging control
-- 🔧 **Whiteboard AI assistant**: now reads the live board; streaming replies no longer duplicate, teaching tips and detected subject fixed, raw i18n keys removed
+- 📚 **Knowledge base takes over the AI paths**: generation, lesson plans, grading, analytics and whiteboard retrieve first then generate, with an automatic fallback; chat lists citations and the config page gained connectivity self-tests
+- 🤖 **Generation and grading hardened**: explicit output length caps with truncation recorded, tolerant JSON parsing and pre-save checks, normalised answers for grading and duplicate-aware imports
+- 🏠 **Dashboard and sharing centre rebuilt**: students get today's agenda, learning trend and competency profile, teachers a to-do driven home; resource browsing and Shared Files share one browser, and directory shares show as folders
+- 🌙 **Theme and copy closed out**: dark-mode palette completed and deprecated warnings cleared, the wrong-answer book can mark each question mastered, news gained paging, and the whiteboard assistant now reads the live board
 - ⚠️ **Breaking changes**: none
 
 ### v8.2.0 (2026-09-14)
@@ -1034,18 +1026,12 @@ Git-based online incremental upgrade system:
 - 📊 **Experience fixes**: export pagination, announcement scope, tokens leaking into URLs, duplicated dashboard activity, resource rename residue; untranslated keys completed in both languages
 - ⚠️ **Breaking changes**: roll-call write endpoints require login and are limited to taught classes; quizzes and polls can only target your own classes; config endpoints now return masked secrets
 
-### v7.6.0 ~ v7.4.0 (2026-07)
+### v7.x and earlier (H1 2026)
 
-- 🎯 **AI skill system**: 20 modular skills injected per scenario across 40+ API routers, output runs through deep analysis -> structured output -> self review, with a skill management page
-- 🌐 **Internationalisation**: every page switches between Chinese and English (react-i18next, 13 namespaces, 4400+ keys)
-- 🏆 **Hall of Fame and UI consistency**: honour wall with 10 gradient themes; 24px spacing standard applied to 70+ pages
-- ⚠️ **Breaking changes**: none
-
-### v7.3.0 ~ v6.0.0 (H1 2026)
-
-- 📰 **Knowledge extension**: daily pick card pool (7-day de-duplication, on-demand refill) plus RSS hot-news aggregation and daily brief; zero AI / zero fetching while nobody is around
-- 🤖 **Teaching and interaction**: AI study companion and teaching assistant (lesson prep, paper generation), collaborative whiteboard in three modes, smart and course practice with auto grading, quest batch generation, multimodal chat, 5 types of AI-generated HTML resources
-- 🧱 **Platform work**: all-grade all-subject refactor, multi-theme appearance, bulk user import and grade promotion, learning analytics and growth portfolio, smart paper generation with Word export, new badges and a full security audit
+- 🎯 **AI skill system and i18n**: 20 modular skills auto-injected across 40+ routes; every page switches between Chinese and English
+- 🏆 **Hall of fame and UI pass**: honour showcase wall, 10 gradient themes, container and spacing standardised on 70+ pages
+- 📰 **Extension and interaction**: daily pick card pool plus RSS news and daily brief (all on-demand), AI companion with three personas, lesson prep and paper generation, collaborative whiteboard, auto-graded practice
+- 🧱 **Platform work**: all-grade all-subject refactor without hard-coded subjects, bulk user import and grade promotion, learning analytics and growth portfolio, smart paper generation with Word export, new badges and a full security audit
 
 ---
 
