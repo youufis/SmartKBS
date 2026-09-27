@@ -372,6 +372,93 @@ async def read_history_file(request: Request, path: str = Query(...)):
         raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
 
 
+def _read_head_text(file_path: str, chars: int) -> str:
+    """读文件开头一段并压成纯文本预览：去掉头信息与 Markdown 记号，代码块折叠成占位。
+
+    预览是给"只想看一眼"用的，不做全文解析，也不渲染公式，所以读得越少越好。
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            raw = f.read(max(int(chars), 50) * 4 + 2048)
+    except OSError:
+        return ""
+    raw = re.sub(r"^文件:.*$", "", raw, flags=re.M)
+    raw = re.sub(r"^创建时间:.*$", "", raw, flags=re.M)
+    raw = re.sub(r"```[\s\S]*?```", "（代码块）", raw)
+    raw = re.sub(r"\$+", "", raw)
+    raw = re.sub(r"[#*_>`~]", "", raw)
+    raw = re.sub(r"[ \t]+", " ", raw)
+    raw = re.sub(r"\n{3,}", "\n\n", raw).strip()
+    return raw[:chars]
+
+
+@router.get("/preview")
+async def preview_history_file(request: Request, path: str = Query(...),
+                               chars: int = Query(400, ge=50, le=4000)):
+    """悬浮/弹窗预览：只给开头一段，避免为了看一眼内容而替换当前对话"""
+    user = get_current_user(request)
+    username = user["username"]
+    chat_dir = os.path.realpath(get_account_chat_history_dir(username))
+    target = os.path.realpath(os.path.join(chat_dir, path))
+    if not path_within(chat_dir, target) or not os.path.isfile(target):
+        raise HTTPException(status_code=404, detail="文件不存在或无权访问")
+
+    rel = os.path.relpath(target, chat_dir).replace("\\", "/")
+    preview = await asyncio.to_thread(_read_head_text, target, chars)
+    row = execute_query(
+        "SELECT title, message_count, file_size, created_at FROM conversations "
+        "WHERE username=? AND filename=?", (username, rel))
+    return {
+        "title": (row[0][0] if row and row[0][0] else "") or _file_stem(rel),
+        "filename": rel.split("/")[-1],
+        "preview": preview,
+        "message_count": (row[0][1] if row else 0) or 0,
+        "size": (row[0][2] if row else 0) or os.path.getsize(target),
+        "created_at": (row[0][3] if row else "") or "",
+    }
+
+
+@router.put("/title")
+async def rename_history_title(request: Request):
+    """改历史记录的显示标题：只动索引里的 title，不改磁盘文件名（避免路径与已有引用错位）"""
+    user = get_current_user(request)
+    username = user["username"]
+    body = await request.json()
+    path = str(body.get("path", "")).strip()
+    title = re.sub(r"\s+", " ", str(body.get("title", ""))).strip()[:60]
+    if not path:
+        raise HTTPException(status_code=400, detail="缺少 path")
+    if not title:
+        raise HTTPException(status_code=400, detail="标题不能为空")
+
+    chat_dir = os.path.realpath(get_account_chat_history_dir(username))
+    target = os.path.realpath(os.path.join(chat_dir, path))
+    if not path_within(chat_dir, target) or not os.path.isfile(target):
+        raise HTTPException(status_code=404, detail="文件不存在或无权访问")
+
+    rel = os.path.relpath(target, chat_dir).replace("\\", "/")
+    rows = execute_query("SELECT id FROM conversations WHERE username=? AND filename=?",
+                         (username, rel))
+    if rows:
+        execute_insert_update(
+            "UPDATE conversations SET title=? WHERE username=? AND filename=?",
+            (title, username, rel))
+    else:
+        # 老文件可能还没进索引：补一行，别让改完标题反而在列表里看不见
+        date_str = rel.split("/")[0] if "/" in rel else time.strftime("%Y-%m-%d")
+        st = os.stat(target)
+        _, count = _derive_title_and_count(_read_head_text(target, 4000))
+        execute_insert_update(
+            """INSERT OR REPLACE INTO conversations
+               (username, session_id, date, filename, title, message_count, file_size, created_at)
+               VALUES (?, '', ?, ?, ?, ?, ?, ?)""",
+            (username, date_str, rel, title, max(count, 1), st.st_size,
+             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime))),
+        )
+
+    logger.info(f"[历史记录] 标题已更新: user={username} file={rel} title={title!r}")
+    return {"message": "标题已更新", "title": title, "path": rel}
+
 @router.delete("/file")
 async def delete_history_file(request: Request, path: str = Query(...)):
     """删除历史文件或目录(仅限本人 ChatHistory 之内)"""

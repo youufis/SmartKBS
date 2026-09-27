@@ -24,6 +24,27 @@ export async function searchHistory(q: string, limit = 30): Promise<HistorySearc
   return (data.results || []) as HistorySearchHit[];
 }
 
+export interface HistoryPreview {
+  title: string;
+  filename: string;
+  preview: string;
+  message_count: number;
+  size: number;
+  created_at: string;
+}
+
+/** 预览开头一段（悬浮或弹窗用），不替换当前对话 */
+export async function previewHistory(path: string, chars = 400): Promise<HistoryPreview> {
+  const { data } = await apiClient.get('/api/history/preview', { params: { path, chars } });
+  return data as HistoryPreview;
+}
+
+/** 改列表显示标题（只动索引 title，不改磁盘文件名） */
+export async function renameHistoryTitle(path: string, title: string): Promise<string> {
+  const { data } = await apiClient.put('/api/history/title', { path, title });
+  return data.message;
+}
+
 export async function readHistoryFile(path: string): Promise<{
   content: string;
   filename: string;

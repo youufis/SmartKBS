@@ -3,13 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import {
   Layout, Input, Button, Space, Checkbox, message, Modal,
   Typography, Tooltip, Tree, Drawer, Spin, Popconfirm, Card, Tag,
-  Empty, theme,
+  Empty, theme, Dropdown, Popover,
 } from 'antd'
 import {
   SendOutlined, StopOutlined, PlusOutlined,
   EyeOutlined, UploadOutlined,
   DeleteOutlined, CheckOutlined, RightOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
   CopyOutlined, CameraOutlined, ReloadOutlined, SearchOutlined, DownOutlined, UpOutlined,
+  MoreOutlined, EditOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import type { Message, TreeNode, TaskInfo } from '../types'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -266,6 +267,15 @@ const ChatPage: React.FC = () => {
   const [historyHits, setHistoryHits] = useState<TreeNode[]>([])
   const [historySearching, setHistorySearching] = useState(false)
   const historyInitExpandRef = useRef(true)
+  // 预览 / 重命名 / 删除：行内 ⋯ 菜单与悬浮预览的临时状态
+  const previewCacheRef = useRef<Record<string, string>>({})
+  const [hoverPreview, setHoverPreview] = useState<{ key: string; text: string } | null>(null)
+  const [previewNode, setPreviewNode] = useState<TreeNode | null>(null)
+  const [previewText, setPreviewText] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [renameNode, setRenameNode] = useState<TreeNode | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [deleteNode, setDeleteNode] = useState<TreeNode | null>(null)
   const [imagePreviewHtml, setImagePreviewHtml] = useState('')
   const [cameraOpen, setCameraOpen] = useState(false)
   // 多任务选择弹窗
@@ -488,6 +498,86 @@ const ChatPage: React.FC = () => {
     setHistoryOnlyToday(false);
     loadHistoryTree();
   }, [loadHistoryTree]);
+
+  // 悬浮预览：懒读开头一段并缓存，避免"只想看一眼"却把当前对话换掉
+  const onHoverPreview = useCallback(async (node: TreeNode, open: boolean) => {
+    if (!open) { setHoverPreview(null); return }
+    const path = node.key
+    if (!path) return
+    const cached = previewCacheRef.current[path]
+    if (cached !== undefined) { setHoverPreview({ key: path, text: cached }); return }
+    try {
+      const res = await historyApi.previewHistory(path, 300)
+      const text = res.preview || t('historyEmptyPreview')
+      previewCacheRef.current[path] = text
+      setHoverPreview({ key: path, text })
+    } catch {
+      setHoverPreview({ key: path, text: t('historyEmptyPreview') })
+    }
+  }, [t]);
+
+  const showBigPreview = useCallback(async (node: TreeNode) => {
+    setPreviewNode(node)
+    setPreviewText('')
+    setPreviewLoading(true)
+    try {
+      const res = await historyApi.previewHistory(node.key, 2000)
+      setPreviewText(res.preview || t('historyEmptyPreview'))
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      setPreviewText(err?.response?.data?.detail || t('errorLoad'))
+    } finally {
+      setPreviewLoading(false)
+    }
+  }, [t]);
+
+  // 行内 ⋯ 菜单的动作分发
+  const handleHistoryAction = useCallback(async (action: string, node: TreeNode) => {
+    const path = node.key
+    if (!path) return
+    if (action === 'open') { await handleHistorySelect([path], { node }); return }
+    if (action === 'preview') { void showBigPreview(node); return }
+    if (action === 'rename') { setRenameNode(node); setRenameValue(node.title || ''); return }
+    if (action === 'del') { setDeleteNode(node); return }
+    try {
+      const file = await historyApi.readHistoryFile(path)
+      if (action === 'copy') {
+        await navigator.clipboard.writeText(file.content || '')
+        message.success(t('copied'))
+        return
+      }
+      if (action === 'download') {
+        const blob = new Blob([file.content || ''], { type: 'text/markdown;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = file.filename || node.filename || 'history.md'
+        a.click()
+        URL.revokeObjectURL(url)
+        return
+      }
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      message.error(err?.response?.data?.detail || err?.message || t('errorLoad'))
+    }
+  }, [handleHistorySelect, showBigPreview, t]);
+
+  const doRenameHistory = useCallback(async () => {
+    const node = renameNode
+    if (!node) return
+    const title = renameValue.trim()
+    if (!title) { message.warning(t('historyRenamePh')); return }
+    try {
+      await historyApi.renameHistoryTitle(node.key, title)
+      message.success(t('historyRenamed'))
+      setRenameNode(null)
+      delete previewCacheRef.current[node.key]
+      await loadHistoryTree()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } }; message?: string }
+      message.error(err?.response?.data?.detail || err?.message || t('errorSave'))
+    }
+  }, [renameNode, renameValue, loadHistoryTree, t]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1497,21 +1587,48 @@ const ChatPage: React.FC = () => {
                       {isCompanion ? <span>🧠</span> : <FileOutlined />}
                       {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('companionLabel')}</Tag>}
                       {isTask && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('taskLabel')}</Tag>}
-                      <span style={{
-                        fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap', flex: 1, minWidth: 0,
-                        display: 'inline-block', verticalAlign: 'middle',
-                      }} title={`${displayTitle}\n${fname}`}>{displayTitle}</span>
+                      <Popover
+                        trigger="hover"
+                        mouseEnterDelay={0.45}
+                        placement="rightTop"
+                        onOpenChange={(open) => { void onHoverPreview(node, open) }}
+                        content={
+                          <div style={{
+                            maxWidth: 320, maxHeight: 220, overflow: 'auto',
+                            fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap',
+                          }}>
+                            {hoverPreview && hoverPreview.key === node.key ? hoverPreview.text : t('loadingHistory')}
+                          </div>
+                        }
+                      >
+                        <span style={{
+                          fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap', flex: 1, minWidth: 0,
+                          display: 'inline-block', verticalAlign: 'middle',
+                        }} title={`${displayTitle}\n${fname}`}>{displayTitle}</span>
+                      </Popover>
                       {meta && (
                         <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{meta}</span>
                       )}
-                      <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
-                        style={{ flexShrink: 0, opacity: 0.4, transition: 'opacity 0.2s' }}>
-                        <Popconfirm title={t('confirmDeleteFile', { type: t('file') })}
-                          onConfirm={() => handleHistoryDelete(node.key)}>
-                          <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-                        </Popconfirm>
-                      </span>
+                      <Dropdown
+                        trigger={['click']}
+                        menu={{
+                          items: [
+                            { key: 'open', icon: <HistoryOutlined />, label: t('historyOpen') },
+                            { key: 'preview', icon: <EyeOutlined />, label: t('historyPreview') },
+                            { key: 'copy', icon: <CopyOutlined />, label: t('copy') },
+                            { key: 'download', icon: <DownloadOutlined />, label: t('historyDownload') },
+                            { key: 'rename', icon: <EditOutlined />, label: t('historyRename') },
+                            { type: 'divider' },
+                            { key: 'del', danger: true, icon: <DeleteOutlined />, label: t('delete') },
+                          ],
+                          onClick: ({ key }) => { void handleHistoryAction(key, node) },
+                        }}
+                      >
+                        <span onClick={(e) => e.stopPropagation()} style={{ flexShrink: 0 }}>
+                          <Button type="text" size="small" icon={<MoreOutlined />} />
+                        </span>
+                      </Dropdown>
                     </Space>
                     {node.snippet && (
                       <span style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 18, wordBreak: 'break-all' }}>
@@ -1561,6 +1678,75 @@ const ChatPage: React.FC = () => {
             {t('historyDontAsk')}
           </Checkbox>
         </Space>
+      </Modal>
+
+      {/* 内容预览：不用替换当前对话就能看到开头 */}
+      <Modal
+        open={!!previewNode}
+        width={680}
+        title={<span style={{ fontSize: 14 }}>{previewNode?.title}</span>}
+        onCancel={() => setPreviewNode(null)}
+        footer={[
+          <Button key="close" onClick={() => setPreviewNode(null)}>{t('historyCancel')}</Button>,
+          <Button key="open" type="primary" icon={<HistoryOutlined />} onClick={() => {
+            const node = previewNode;
+            setPreviewNode(null);
+            if (node) void handleHistoryAction('open', node);
+          }}>{t('historyOpen')}</Button>,
+        ]}
+      >
+        <Spin spinning={previewLoading}>
+          <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+            {t('historyPreviewHint')}
+          </Typography.Text>
+          <div style={{
+            maxHeight: 420, overflow: 'auto', whiteSpace: 'pre-wrap',
+            fontSize: 13, lineHeight: 1.7, padding: 10, borderRadius: 4,
+            background: 'var(--bg-layout)',
+          }}>
+            {previewText}
+          </div>
+        </Spin>
+      </Modal>
+
+      {/* 重命名：只改列表显示标题，不动磁盘文件名 */}
+      <Modal
+        maskClosable={false}
+        open={!!renameNode}
+        width={480}
+        title={t('historyRename')}
+        onCancel={() => setRenameNode(null)}
+        onOk={() => { void doRenameHistory() }}
+        okText={t('historySave')}
+        cancelText={t('historyCancel')}
+      >
+        <Input
+          autoFocus
+          maxLength={60}
+          showCount
+          value={renameValue}
+          placeholder={t('historyRenamePh')}
+          onChange={(e) => setRenameValue(e.target.value)}
+        />
+      </Modal>
+
+      {/* 删除单条历史 */}
+      <Modal
+        maskClosable={false}
+        open={!!deleteNode}
+        width={420}
+        title={t('historyConfirmDelete')}
+        onCancel={() => setDeleteNode(null)}
+        okText={t('delete')}
+        okButtonProps={{ danger: true }}
+        cancelText={t('historyCancel')}
+        onOk={async () => {
+          const node = deleteNode;
+          setDeleteNode(null);
+          if (node) await handleHistoryDelete(node.key);
+        }}
+      >
+        <Typography.Text style={{ fontSize: 13 }}>{deleteNode?.title}</Typography.Text>
       </Modal>
 
       {/* 摄像头拍照 Modal */}
