@@ -35,7 +35,9 @@
 > 🎯 **Graded against the requirements**: AI splits them into 3-5 checkpoints, finds evidence for each one, then scores; results visible to teachers and students
 > 👤 **Per-student grading**: grade just one student from their row - other scores stay untouched and class stats recalculate
 > ✨ **Draft with AI**: turn one sentence into an editable title and requirement draft before creating
-> 🧮 **Math rendering**: conversations and requirements render Markdown + LaTeX, including `$$…$$` written inline
+> 🧮 **Math rendering**: formulas in conversations and homework display properly, even ones written inline with the text
+> 📊 **Summary export**: scores and completion across activity types, aggregated by student or class, exported to Excel or CSV
+> 🧩 **Class management**: clean up empty shell classes; classes with students or teachers stay protected
 
 ---
 
@@ -621,7 +623,7 @@ Teachers set a topic, students work it out with the AI and hand in the conversat
   - Submit the current conversation in one click after working it out in Knowledge Q&A
   - View the AI score, checkpoint results, comments and advice
 - **📖 How to use**: the button next to the title opens step-by-step guidance for students and teachers
-- **🧮 Math rendering**: transcripts and requirements render Markdown + LaTeX, including `$$…$$` written inline
+- **🧮 Math rendering**: formulas in transcripts and requirements display correctly, even written in the same line as the text
 
 > **Available to all users, differentiated by role**
 
@@ -743,6 +745,7 @@ Tracks student viewing of HTML and download resources:
 Supports exporting various data to Excel/CSV:
 
 - 📊 Exam score export
+- 📊 Cross-activity score summary: filter scores and completion by grade/class/student/activity type/date, export multi-sheet Excel or CSV
 - 📊 Roll call record export
 - 📊 Classroom interaction data export
 - 📊 Activity monitoring data export
@@ -850,6 +853,7 @@ Complete account management system:
 - **📤 CSV Import**: Batch import users
 - **🔍 Filter & Search**: Filter by role/grade/class, search by username/name
 - **🏫 Teacher Assignment**: Set teacher's teaching grades, classes, and subjects
+- **🧩 Class Management**: review per-class student and teacher counts, clean up empty shell classes (Admin only)
 - **📊 Batch Grade Promotion/Demotion**: One-click preview and execute, intelligently sync points and roll call data
 - **🔒 Security Settings**: Security questions (forgot password self-service recovery)
 - **🔐 Single Sign-On**: Token version control, remote login kickout
@@ -990,8 +994,11 @@ Git-based online incremental upgrade system:
 - 👤 **Per-student analysis and grading**: a new single-student endpoint sends only that transcript to the AI, so re-grading one student never overwrites the others, while class average / highest / lowest recalculate; inline button and per-row loading in the detail drawer, pending counts refresh immediately
 - ✨ **Draft with AI**: describe the idea in one sentence to get a homework title plus checkable requirements (with suggested duration and a teaching tip), preview it and fill the create form; drafts are never stored
 - 📖 **Usage guide and long requirements**: the button next to the title opens step-by-step guidance for students and teachers; long requirements now show two lines with a full-text modal, a collapsible panel in the detail drawer and a card in the submit dialog instead of one cramped line
-- 🧮 **Math rendering fixed**: chat and companion bubbles plus homework text render Markdown + LaTeX (KaTeX); inline `$$…$$` and `\(\)` / `\[\]` delimiters are normalised into renderable math while `$$` inside code blocks stays untouched
-- ⚠️ **Breaking changes**: none (`task_grades` gains an `ai_criteria` column, migrated automatically at startup)
+- 🧮 **Math rendering fixed**: chat, companion and homework texts display formulas consistently, including ones written in the same line as the text; code content stays untouched
+- 📊 **Cross-activity score summary**: a new Summary Export page aggregates scores and completion across exams, quizzes, homework, practice, quick quizzes, quests and more; filter by grade, class, student, activity type or date range, then download a four-sheet Excel (activity detail, per-student matrix, per-activity, per-class) or a single CSV; admins cover the whole school, teachers only their own activities and their assigned students
+- 🧩 **Class management**: admins can review every class with its student and teacher counts and clean up empty shell classes auto-created during registration/import; classes that still have students or assignments cannot be deleted, and the reason is shown
+- 🔧 **Polish**: grade pickers list only grades that actually have students; CSV downloads no longer carry stray invisible characters in Excel
+- ⚠️ **Breaking changes**: none (data format upgrades happen automatically on startup)
 
 ### v8.3.0 (2026-09-26)
 

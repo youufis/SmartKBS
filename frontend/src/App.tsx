@@ -59,6 +59,7 @@ import NotificationsPage from './pages/NotificationsPage'
 import AnnouncementsPage from './pages/AnnouncementsPage'
 import PortfolioPage from './pages/PortfolioPage'
 import AnalyticsPage from './pages/AnalyticsPage'
+import SummaryExportPage from './pages/SummaryExportPage'
 import InteractionPage from './pages/InteractionPage'
 import DiscussionPage from './pages/DiscussionPage'
 import DiscussionRoomPage from './pages/DiscussionRoomPage'
@@ -168,6 +169,7 @@ function App() {
             <Route path="portfolio" element={<PortfolioPage />} />
             <Route path="portfolio/:username" element={<PortfolioPage />} />
             <Route path="analytics" element={<RequireRole roles={TA}><AnalyticsPage /></RequireRole>} />
+            <Route path="summary-export" element={<RequireRole roles={TA}><SummaryExportPage /></RequireRole>} />
             <Route path="interaction" element={<InteractionPage />} />
             <Route path="discussion" element={<DiscussionPage />} />
             <Route path="discussion-room/:groupId" element={<DiscussionRoomPage />} />

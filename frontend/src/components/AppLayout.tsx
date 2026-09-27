@@ -28,6 +28,7 @@ import {
   PictureOutlined,
   GlobalOutlined,
   CrownOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -141,6 +142,7 @@ function buildTeacherMenu(t: (k: string) => string) {
       { key: '/analytics', icon: <BarChartOutlined />, label: g('analytics') },
       { key: '/class-summary', icon: <RobotOutlined />, label: g('classSummary') },
       { key: '/activity-monitor', icon: <BarChartOutlined />, label: g('activityMonitor') },
+      { key: '/summary-export', icon: <DownloadOutlined />, label: g('summaryExport') },
       { key: '/score', icon: <TrophyOutlined />, label: g('scoreManage') },
       { key: '/showcase', icon: <CrownOutlined />, label: g('showcase') },
       { key: '/portrait', icon: <PictureOutlined />, label: g('weeklyPortrait') },

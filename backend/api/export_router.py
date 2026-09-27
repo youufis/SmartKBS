@@ -5,6 +5,7 @@
 import csv
 import io
 import json
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, Query
@@ -20,6 +21,14 @@ from backend.question_db import (
     execute_query_one,
 )
 from backend.logger import logger
+from backend.permission_service import (
+    get_teacher_grades,
+    get_teacher_classes,
+    get_students_in_scope,
+    get_grade_by_name,
+    _resolve_class_id_flexible,
+)
+from backend.summary_service import SUMMARY_TYPES, build_summary
 
 router = APIRouter()
 
@@ -684,10 +693,8 @@ def _safe_sheet_name(name: str) -> str:
 def _csv_response(rows: list[list[str]], headers: list[str], filename: str) -> StreamingResponse:
     """将数据转为 CSV 响应（带 UTF-8 BOM，Excel 可直接打开）"""
     buf = io.StringIO()
-    # 写入 BOM + 内容
-    import codecs
-    bom = codecs.BOM_UTF8.decode('utf-8')
-    buf.write(bom)
+    # 注意: 下方按 utf-8-sig 编码输出时已自带 BOM, 不要再手写一个
+    # (旧实现双 BOM 会让 Excel 在 A1 单元格混入零宽字符, 影响筛选/公式)
     writer = csv.writer(buf)
     writer.writerow(headers)
     for row in rows:
@@ -802,3 +809,355 @@ def export_poll_result(poll_id: int, request: Request):
 
     filename = f"投票结果_{poll[2]}.csv"
     return _csv_response(csv_rows, csv_headers, filename)
+
+
+# ═════════════════════════════════════════════════════════════
+# 8. 跨活动成绩汇总导出 (summary_service)
+#    /summary/meta     可选筛选范围 (年级/班级/学生/活动类型/教师)
+#    /summary/preview  JSON 预览 (前 200 条明细 + 三类聚合)
+#    /summary/excel    多 Sheet Excel (明细/学生汇总/按活动/按班级)
+#    /summary/csv      单表 CSV (同参数, sheet 可选)
+#    权限: 管理员全部; 教师仅自己创建的活动 × 任教年级班级学生
+# ═════════════════════════════════════════════════════════════
+
+SUMMARY_PREVIEW_LIMIT = 200
+
+
+def _split_csv_param(v: str) -> list[str]:
+    return [x.strip() for x in (v or "").split(",") if x.strip()]
+
+
+def _summary_request_filters(
+    grade: str, cls: str, usernames: str, types: str,
+    start: str, end: str, teacher: str,
+) -> dict:
+    return {
+        "grade": (grade or "").strip(),
+        "cls": (cls or "").strip(),
+        "usernames": _split_csv_param(usernames),
+        "types": _split_csv_param(types),
+        "start": (start or "").strip(),
+        "end": (end or "").strip(),
+        "teacher": (teacher or "").strip(),
+    }
+
+
+def _summary_data(request: Request, filters: dict) -> dict:
+    """执行汇总采集并套用导出行数上限 (E5 同口径)"""
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="权限不足")
+    data = build_summary(user, **filters)
+    _guard_row_count(len(data["records"]), "学生活动汇总明细")
+    return data
+
+
+def _s(v) -> str:
+    """None → 空串, 其余转字符串 (Excel/CSV 单元格通用)"""
+    return "" if v is None else str(v)
+
+
+def _summary_sheet_rows(data: dict) -> dict[str, tuple[list[str], list[list[str]]]]:
+    """把 build_summary 结果转成 4 张表的 (headers, rows), Excel/CSV 共用"""
+    types: dict = data["types"]  # 保持注册表顺序
+    tkeys = list(types.keys())
+
+    # ── Sheet 1: 活动明细 ──
+    h1 = ["年级", "班级", "学生姓名", "学号", "活动类型", "活动名称", "创建者",
+          "得分", "满分", "得分率(%)", "状态", "时间"]
+    r1 = [[
+        rec["grade"], rec["class_name"], rec["student_name"], rec["username"],
+        rec["type_label"], rec["activity_title"], rec["creator_name"],
+        _s(rec["score"]), _s(rec["total_score"]), _s(rec["rate"]),
+        rec["status"], rec["time"],
+    ] for rec in data["records"]]
+
+    # ── Sheet 2: 学生汇总 (学生 × 活动类型矩阵) ──
+    h2 = ["年级", "班级", "学生姓名", "学号"]
+    col_getters: list = []
+    for k in tkeys:
+        kind = types[k]["kind"]
+        label = types[k]["label"]
+        if kind == "score":
+            h2 += [f"{label}·次数", f"{label}·平均得分率(%)", f"{label}·最高得分率(%)"]
+            col_getters += [("count", k), ("avg", k), ("max", k)]
+        elif kind == "participation":
+            h2 += [f"{label}·参与次数"]
+            col_getters.append(("count", k))
+        else:  # points
+            h2 += [f"{label}·总积分"]
+            col_getters.append(("points", k))
+    h2 += ["完成活动总数", "整体平均得分率(%)"]
+
+    r2 = []
+    for row in data["by_student"]:
+        cells = [row["grade"], row["class_name"], row["name"], row["username"]]
+        for mode, k in col_getters:
+            cell = row["types"].get(k) or {}
+            if mode == "count":
+                cells.append(_s(cell.get("count") or ""))
+            elif mode == "avg":
+                cells.append(_s(cell.get("avg_rate")))
+            elif mode == "max":
+                cells.append(_s(cell.get("max_rate")))
+            else:
+                cells.append(_s(cell.get("points")))
+        cells.append(_s(row["total_done"]))
+        cells.append(_s(row["overall_avg_rate"]))
+        r2.append(cells)
+
+    # ── Sheet 3: 按活动汇总 ──
+    h3 = ["活动类型", "活动ID", "活动名称", "创建者", "应参与人数", "实参与人数",
+          "参与率(%)", "平均得分率(%)", "最高得分率(%)", "最低得分率(%)", "及格率(%)", "最后参与时间"]
+    r3 = [[
+        a["type_label"], _s(a["activity_id"]), a["activity_title"], a["creator_name"],
+        _s(a["expected"]), _s(a["participants"]), _s(a["participation_rate"]),
+        _s(a["avg_rate"]), _s(a["max_rate"]), _s(a["min_rate"]),
+        _s(a["pass_rate"]), a["last_time"],
+    ] for a in data["by_activity"]]
+
+    # ── Sheet 4: 按班级汇总 ──
+    h4 = ["年级", "班级", "学生人数"]
+    for k in tkeys:
+        kind = types[k]["kind"]
+        label = types[k]["label"]
+        if kind == "score":
+            h4 += [f"{label}·完成次数", f"{label}·平均得分率(%)"]
+        else:
+            h4 += [f"{label}·次数"]
+    h4 += ["完成活动总数", "整体平均得分率(%)", "课堂积分总计"]
+    r4 = []
+    for row in data["by_class"]:
+        cells = [row["grade"], row["class_name"], _s(row["students"])]
+        for k in tkeys:
+            cell = row["types"].get(k) or {}
+            cells.append(_s(cell.get("count") or ""))
+            if types[k]["kind"] == "score":
+                cells.append(_s(cell.get("avg_rate")))
+        cells.append(_s(row["total_done"]))
+        cells.append(_s(row["overall_avg_rate"]))
+        cells.append(_s(row.get("points_total")))
+        r4.append(cells)
+
+    return {
+        "活动明细": (h1, r1),
+        "学生汇总": (h2, r2),
+        "按活动汇总": (h3, r3),
+        "按班级汇总": (h4, r4),
+    }
+
+
+_SHEET_KEYS = {"records": "活动明细", "student": "学生汇总",
+               "activity": "按活动汇总", "class": "按班级汇总"}
+
+
+def _summary_scope_label(filters: dict, data: dict) -> str:
+    parts = []
+    if filters.get("grade"):
+        parts.append(filters["grade"])
+    if filters.get("cls"):
+        parts.append(filters["cls"])
+    if filters.get("usernames"):
+        parts.append(f"{len(filters['usernames'])}名学生")
+    if not parts:
+        parts.append(f"{len(data['population'])}名学生")
+    return "_".join(parts)
+
+
+# 管理员年级下拉只列"有真实使用"的年级: grades 表被 init_db 预置了小学到高中
+# 12 个默认年级, 全量返回会让用不上的年级冒充可选项 (看起来像硬编码)。
+# 以"有在籍学生"为唯一标准: classes 表可能存在历史残留的空白班级
+# (建了班级壳但从未导入学生), 这类年级导出群体本为空集, 列入只会造成误导。
+_USABLE_GRADES_WHERE = """EXISTS (SELECT 1 FROM users u WHERE u.role = 2
+                               AND IFNULL(u.status,'active') = 'active' AND u.grade_id = g.id)"""
+
+
+@router.get("/summary/meta", summary="汇总导出-可选范围(年级/类型/教师)")
+def export_summary_meta(request: Request):
+    """年级列表与活动类型 (管理员另有教师列表); 班级/学生改用
+    /summary/classes 与 /summary/students 按年级、班级级联动态加载。
+    管理员年级=有在籍学生的年级 (数据驱动, 预置空年级与无学生的残留班级年级不展示);
+    教师年级=任教年级 (teacher_assignments 即真实数据)。"""
+    user = get_current_user(request)
+    role = user.get("role", 2)
+    username = user["username"]
+    if role == 2:
+        raise HTTPException(status_code=403, detail="权限不足")
+
+    if role == 0:
+        grade_rows = execute_query(
+            f"""SELECT g.name FROM grades g
+                WHERE g.is_active = 1 AND ({_USABLE_GRADES_WHERE})
+                ORDER BY g.sort_order, g.name""")
+        names = [r[0] for r in grade_rows]
+    else:
+        names = [g["name"] for g in get_teacher_grades(username)]
+    result: dict = {
+        "is_admin": role == 0,
+        "grades": names,
+        "activity_types": [
+            {"key": k, "label": v["label"], "kind": v["kind"]}
+            for k, v in SUMMARY_TYPES.items()
+        ],
+    }
+    if role == 0:
+        result["teachers"] = [
+            {"username": r[0], "name": r[1] or r[0]}
+            for r in execute_query(
+                "SELECT username, name FROM users WHERE role IN (0,1) "
+                "AND IFNULL(status,'active')='active' ORDER BY username"
+            )
+        ]
+    return result
+
+
+SUMMARY_STUDENT_LIMIT = 2000
+
+
+def _summary_resolve_scope(grade: str, cls: str) -> tuple[int | None, int | None]:
+    """年级名/班级名 → (grade_id, class_id), 口径与 SummaryContext 筛选一致"""
+    grade_id: int | None = None
+    class_id: int | None = None
+    gname = (grade or "").strip()
+    cname = (cls or "").strip()
+    if gname:
+        ginfo = get_grade_by_name(gname)
+        if not ginfo:
+            raise HTTPException(status_code=400, detail=f"年级不存在: {gname}")
+        grade_id = ginfo["id"]
+    if cname:
+        if grade_id is None:
+            raise HTTPException(status_code=400, detail="筛选班级时必须同时指定年级")
+        class_id = _resolve_class_id_flexible(grade_id, cname)
+        if class_id is None:
+            raise HTTPException(status_code=400, detail=f"班级不存在: {gname} {cname}")
+    return grade_id, class_id
+
+
+@router.get("/summary/classes", summary="汇总导出-班级列表(按年级动态加载)")
+def export_summary_classes(request: Request, grade: str = Query(..., description="年级名称")):
+    """指定年级下当前用户可见的班级: 管理员=全年级, 教师=任教班级"""
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="权限不足")
+    gname = (grade or "").strip()
+    ginfo = get_grade_by_name(gname)
+    if not ginfo:
+        raise HTTPException(status_code=400, detail=f"年级不存在: {gname}")
+    rows = get_teacher_classes(user["username"], ginfo["id"])
+    return {
+        "grade": gname,
+        "classes": [str(r.get("display_name") or r.get("name") or "") for r in rows],
+    }
+
+
+@router.get("/summary/students", summary="汇总导出-学生列表(按年级/班级动态加载)")
+def export_summary_students(
+    request: Request,
+    grade: str = Query("", description="年级名称"),
+    cls: str = Query("", description="班级显示名"),
+):
+    """指定年级/班级内当前用户可见的学生 (不传筛选=权限范围内全部, 有上限)"""
+    user = get_current_user(request)
+    if user.get("role", 2) == 2:
+        raise HTTPException(status_code=403, detail="权限不足")
+    grade_id, class_id = _summary_resolve_scope(grade, cls)
+    pop = get_students_in_scope(user["username"], grade_id=grade_id, class_id=class_id)
+    students = [
+        {"username": s["username"], "name": s.get("name") or "",
+         "grade": str(s.get("grade") or ""), "class_name": str(s.get("class") or "")}
+        for s in pop[:SUMMARY_STUDENT_LIMIT]
+    ]
+    return {"total": len(pop), "truncated": len(pop) > len(students), "students": students}
+
+
+@router.get("/summary/preview", summary="汇总导出-数据预览 (JSON)")
+def export_summary_preview(
+    request: Request,
+    grade: str = Query("", description="年级名称"),
+    cls: str = Query("", description="班级显示名"),
+    usernames: str = Query("", description="指定学生学号, 逗号分隔"),
+    types: str = Query("", description="活动类型 key, 逗号分隔, 空=全部"),
+    start: str = Query("", description="开始日期 YYYY-MM-DD"),
+    end: str = Query("", description="结束日期 YYYY-MM-DD"),
+    teacher: str = Query("", description="管理员按指定教师口径导出"),
+):
+    filters = _summary_request_filters(grade, cls, usernames, types, start, end, teacher)
+    data = _summary_data(request, filters)
+    return {
+        "types": data["types"],
+        "population_size": len(data["population"]),
+        "total_records": len(data["records"]),
+        "preview_limit": SUMMARY_PREVIEW_LIMIT,
+        "records": data["records"][:SUMMARY_PREVIEW_LIMIT],
+        "by_student": data["by_student"],
+        "by_activity": data["by_activity"],
+        "by_class": data["by_class"],
+    }
+
+
+@router.get("/summary/excel", summary="汇总导出-多Sheet Excel")
+def export_summary_excel(
+    request: Request,
+    grade: str = Query("", description="年级名称"),
+    cls: str = Query("", description="班级显示名"),
+    usernames: str = Query("", description="指定学生学号, 逗号分隔"),
+    types: str = Query("", description="活动类型 key, 逗号分隔, 空=全部"),
+    start: str = Query("", description="开始日期 YYYY-MM-DD"),
+    end: str = Query("", description="结束日期 YYYY-MM-DD"),
+    teacher: str = Query("", description="管理员按指定教师口径导出"),
+):
+    filters = _summary_request_filters(grade, cls, usernames, types, start, end, teacher)
+    data = _summary_data(request, filters)
+    sheets = _summary_sheet_rows(data)
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    scope = _summary_scope_label(filters, data)
+    period = ""
+    if filters["start"] or filters["end"]:
+        period = f"  ({filters['start'] or '…'} ~ {filters['end'] or '…'})"
+
+    for name, (headers, rows) in sheets.items():
+        ws = wb.create_sheet(_safe_sheet_name(name))
+        ncol = max(len(headers), 1)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
+        ws.cell(1, 1, f"学生活动汇总 - {scope}{period}").font = TITLE_FONT
+        for i, h in enumerate(headers, 1):
+            ws.cell(3, i, h)
+        _style_header(ws, 3, len(headers))
+        for ri, row in enumerate(rows):
+            for ci, val in enumerate(row, 1):
+                # 数字单元格写数值, 便于透视/公式
+                if isinstance(val, str) and val != "" and re.fullmatch(r"-?\d+(\.\d+)?", val):
+                    num = float(val)
+                    ws.cell(4 + ri, ci, int(num) if num == int(num) else num)
+                else:
+                    ws.cell(4 + ri, ci, val)
+        if rows:
+            _style_cells(ws, 4, 3 + len(rows), len(headers))
+        _auto_width(ws, len(headers))
+
+    filename = f"学生活动汇总_{scope}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return _excel_response(wb, filename)
+
+
+@router.get("/summary/csv", summary="汇总导出-单表 CSV")
+def export_summary_csv(
+    request: Request,
+    sheet: str = Query("records", description="records|student|activity|class"),
+    grade: str = Query("", description="年级名称"),
+    cls: str = Query("", description="班级显示名"),
+    usernames: str = Query("", description="指定学生学号, 逗号分隔"),
+    types: str = Query("", description="活动类型 key, 逗号分隔, 空=全部"),
+    start: str = Query("", description="开始日期 YYYY-MM-DD"),
+    end: str = Query("", description="结束日期 YYYY-MM-DD"),
+    teacher: str = Query("", description="管理员按指定教师口径导出"),
+):
+    sheet_name = _SHEET_KEYS.get((sheet or "records").strip(), "活动明细")
+    filters = _summary_request_filters(grade, cls, usernames, types, start, end, teacher)
+    data = _summary_data(request, filters)
+    headers, rows = _summary_sheet_rows(data)[sheet_name]
+    scope = _summary_scope_label(filters, data)
+    filename = f"学生活动汇总_{sheet_name}_{scope}.csv"
+    return _csv_response(rows, headers, filename)

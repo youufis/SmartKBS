@@ -332,3 +332,27 @@ export async function reversePromoteGrades(params: {
   const { data } = await apiClient.post('/api/users/promote-grades/reverse', params);
   return data;
 }
+
+
+// ── 年级/班级维护 (仅管理员) ──────────────────────────────
+export interface ClassMgmtRow {
+  class_id: number
+  grade_id: number
+  grade_name: string
+  grade_active: number
+  class_name: string
+  display_name: string
+  students: number
+  teachers: number
+  deletable: boolean
+}
+
+export async function listClassMgmt(): Promise<ClassMgmtRow[]> {
+  const { data } = await apiClient.get<{ classes: ClassMgmtRow[] }>('/api/users/class-mgmt/list')
+  return data.classes || []
+}
+
+export async function deleteClassMgmt(classId: number): Promise<string> {
+  const { data } = await apiClient.delete<{ message: string }>(`/api/users/class-mgmt/${classId}`)
+  return data.message
+}

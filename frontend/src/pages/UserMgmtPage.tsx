@@ -4,9 +4,9 @@ import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Tabs, Form, Input, Button, message,
   Modal, Progress, Table, Upload, Space, Radio, Select, Typography,
-  Tag, Checkbox, Alert, Popconfirm,
+  Tag, Checkbox, Alert, Popconfirm, Popover, Tooltip,
 } from 'antd'
-import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, RollbackOutlined } from '@ant-design/icons'
+import { UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, RiseOutlined, CheckCircleOutlined, CloseCircleOutlined, WarningOutlined, RollbackOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import * as usersApi from '../api/users'
 import type { UserItem } from '../types'
 import type {
@@ -19,6 +19,102 @@ import { reportLoadError } from '../utils/loadError'
 
 interface ApiError {
   response?: { data?: { detail?: string } }
+}
+
+/** 年级/班级维护 (仅管理员): 列出全部班级与在读人数, 支持删除自动建班残留的空壳班级 */
+const ClassMgmtTab: React.FC = () => {
+  const { t } = useTranslation('system')
+  const [rows, setRows] = useState<usersApi.ClassMgmtRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [onlyEmpty, setOnlyEmpty] = useState(true)
+  const [busyId, setBusyId] = useState<number | null>(null)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      setRows(await usersApi.listClassMgmt())
+    } catch (err) {
+      message.error((err as ApiError)?.response?.data?.detail || String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { void load() }, [])
+
+  const handleDelete = async (row: usersApi.ClassMgmtRow) => {
+    setBusyId(row.class_id)
+    try {
+      message.success(await usersApi.deleteClassMgmt(row.class_id))
+      await load()
+    } catch (err) {
+      message.error((err as ApiError)?.response?.data?.detail || String(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const shown = onlyEmpty ? rows.filter(r => r.students === 0) : rows
+  const deleteReason = (r: usersApi.ClassMgmtRow): string =>
+    r.students > 0 ? t('cmReasonStudents', { count: r.students })
+      : r.teachers > 0 ? t('cmReasonTeachers', { count: r.teachers })
+        : ''
+  const columns = [
+    { title: t('cmGrade'), dataIndex: 'grade_name', key: 'grade', width: 100 },
+    { title: t('cmClass'), dataIndex: 'display_name', key: 'class', width: 180 },
+    { title: t('cmStudents'), dataIndex: 'students', key: 'students', width: 100 },
+    { title: t('cmTeachers'), dataIndex: 'teachers', key: 'teachers', width: 90 },
+    {
+      title: t('cmStatusCol'), key: 'state', width: 150,
+      render: (_: unknown, r: usersApi.ClassMgmtRow) =>
+        r.deletable
+          ? <Tag color="warning">{t('cmEmpty')}</Tag>
+          : r.students === 0
+            ? <Tag color="processing">{t('cmNoStudentHasTeacher')}</Tag>
+            : <Tag>{t('cmInUse')}</Tag>,
+    },
+    {
+      title: t('actionsCol'), key: 'act', width: 90,
+      render: (_: unknown, r: usersApi.ClassMgmtRow) => {
+        const reason = deleteReason(r)
+        const btn = (
+          <Popconfirm
+            title={t('cmDeleteConfirm', { name: r.display_name })}
+            okText={t('confirm')} cancelText={t('cancel')}
+            onConfirm={() => void handleDelete(r)}
+          >
+            <Button danger size="small" type="link" disabled={!r.deletable} loading={busyId === r.class_id}
+              style={{ padding: 0 }}>{t('cmDelete')}</Button>
+          </Popconfirm>
+        )
+        return reason
+          ? <Tooltip title={reason}><span>{btn}</span></Tooltip>
+          : btn
+      },
+    },
+  ]
+
+  return (
+    <Space orientation="vertical" style={{ width: '100%' }}>
+      <Space>
+        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>{t('cmRefresh')}</Button>
+        <Checkbox checked={onlyEmpty} onChange={e => setOnlyEmpty(e.target.checked)}>{t('cmOnlyEmpty')}</Checkbox>
+        <Popover
+          trigger="click" placement="rightTop"
+          title={t('cmHelpTitle')}
+          content={
+            <div style={{ maxWidth: 380 }}>
+              <Typography.Paragraph style={{ marginBottom: 8 }}>{t('cmHint')}</Typography.Paragraph>
+              <Typography.Paragraph style={{ marginBottom: 0 }}>{t('cmHintDetail')}</Typography.Paragraph>
+            </div>
+          }
+        >
+          <Button type="link" size="small" icon={<QuestionCircleOutlined />}>{t('cmHelp')}</Button>
+        </Popover>
+      </Space>
+      <Table dataSource={shown} columns={columns} rowKey="class_id" size="small"
+        loading={loading} pagination={{ pageSize: 30 }} />
+    </Space>
+  )
 }
 
 const UserMgmtPage: React.FC = () => {
@@ -570,6 +666,7 @@ const UserMgmtPage: React.FC = () => {
     search: isAdmin || isTeacher,
     list: isAdmin || isTeacher,
     import: isAdmin || isTeacher,
+    classes: isAdmin,  // 班级维护仅管理员
   }
 
   const tabItems = [
@@ -1045,6 +1142,11 @@ const UserMgmtPage: React.FC = () => {
           </Card>
         </Space>
       ),
+    },
+    {
+      key: 'classes',
+      label: t('classMgmtTab'),
+      children: <ClassMgmtTab />,
     },
   ]
 

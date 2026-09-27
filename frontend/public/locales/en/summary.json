@@ -1,0 +1,77 @@
+{
+  "summaryExport": {
+    "title": "Student Activity Score Summary Export",
+    "subtitle": "Aggregate scores and completion across activity types; filter by grade / class / student / activity type / date range, then export Excel or CSV",
+    "grade": "Grade",
+    "class": "Class",
+    "students": "Pick students (optional)",
+    "pickGradeFirst": "Students: select a grade first",
+    "studentsTruncated": "{{total}} students in scope, showing first {{shown}}; pick a class to narrow down",
+    "types": "Activity types (default: all)",
+    "teacher": "By teacher",
+    "query": "Preview",
+    "excel": "Export Excel",
+    "csv": "Export CSV",
+    "reloadMetaTip": "Refresh selectable scope",
+    "scopeLabel": "Scope",
+    "stats": "{{population}} students · {{records}} detail rows · preview shows first {{preview}}",
+    "previewNote": "Preview shows only the first rows; exported Excel/CSV contain full data (you will be asked to narrow the range if the limit is exceeded)",
+    "scope": {
+      "allGrades": "All grades",
+      "pickedStudents": "{{count}} students selected",
+      "types": "Types",
+      "allTypes": "All types"
+    },
+    "tabs": {
+      "records": "Activity details",
+      "student": "By student",
+      "activity": "By activity",
+      "class": "By class"
+    },
+    "csvSheets": {
+      "records": "Activity details (CSV)",
+      "student": "By student (CSV)",
+      "activity": "By activity (CSV)",
+      "class": "By class (CSV)"
+    },
+    "col": {
+      "grade": "Grade",
+      "class": "Class",
+      "student": "Name",
+      "username": "ID",
+      "type": "Type",
+      "activity": "Activity",
+      "creator": "Creator",
+      "score": "Score",
+      "total": "Full",
+      "rate": "Rate",
+      "status": "Status",
+      "time": "Time",
+      "totalDone": "Activities done",
+      "overallRate": "Overall avg rate",
+      "expected": "Expected",
+      "participants": "Done",
+      "participationRate": "Participation",
+      "avgRate": "Avg rate",
+      "maxRate": "Max",
+      "minRate": "Min",
+      "passRate": "Pass rate",
+      "lastTime": "Last submit",
+      "studentCount": "Students",
+      "pointsTotal": "Class points"
+    },
+    "type": {
+      "exam": "Exam",
+      "quiz": "In-class Quiz",
+      "task": "Online Task",
+      "practice": "Smart Practice",
+      "code": "Code Practice",
+      "course": "Course Exercise",
+      "quick_quiz": "Quick Quiz",
+      "quest": "Quest Run",
+      "poll": "Poll",
+      "discussion": "Discussion",
+      "score_point": "Class Points"
+    }
+  }
+}

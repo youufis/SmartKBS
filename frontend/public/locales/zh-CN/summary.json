@@ -1,0 +1,77 @@
+{
+  "summaryExport": {
+    "title": "学生活动成绩汇总导出",
+    "subtitle": "跨活动类型汇总学生得分与完成情况，支持按年级 / 班级 / 学生 / 活动类型 / 时间筛选后导出 Excel 或 CSV",
+    "grade": "年级",
+    "class": "班级",
+    "students": "指定学生(可留空)",
+    "pickGradeFirst": "学生: 请先选年级",
+    "studentsTruncated": "本范围共 {{total}} 人, 仅显示前 {{shown}} 人, 请选择班级缩小范围",
+    "types": "活动类型(默认全部)",
+    "teacher": "按教师",
+    "query": "查询预览",
+    "excel": "导出 Excel",
+    "csv": "导出 CSV",
+    "reloadMetaTip": "刷新可选范围",
+    "scopeLabel": "当前范围",
+    "stats": "学生 {{population}} 人 · 明细 {{records}} 条 · 预览前 {{preview}} 条",
+    "previewNote": "预览仅显示前若干条明细，导出的 Excel/CSV 为全量数据（超过上限会提示缩小范围）",
+    "scope": {
+      "allGrades": "全校",
+      "pickedStudents": "指定 {{count}} 名学生",
+      "types": "活动类型",
+      "allTypes": "全部类型"
+    },
+    "tabs": {
+      "records": "活动明细",
+      "student": "学生汇总",
+      "activity": "按活动汇总",
+      "class": "按班级汇总"
+    },
+    "csvSheets": {
+      "records": "活动明细 (CSV)",
+      "student": "学生汇总 (CSV)",
+      "activity": "按活动汇总 (CSV)",
+      "class": "按班级汇总 (CSV)"
+    },
+    "col": {
+      "grade": "年级",
+      "class": "班级",
+      "student": "姓名",
+      "username": "学号",
+      "type": "活动类型",
+      "activity": "活动名称",
+      "creator": "创建者",
+      "score": "得分",
+      "total": "满分",
+      "rate": "得分率",
+      "status": "状态",
+      "time": "时间",
+      "totalDone": "完成活动总数",
+      "overallRate": "整体平均得分率",
+      "expected": "应参与",
+      "participants": "实参与",
+      "participationRate": "参与率",
+      "avgRate": "平均得分率",
+      "maxRate": "最高",
+      "minRate": "最低",
+      "passRate": "及格率",
+      "lastTime": "最后参与时间",
+      "studentCount": "学生人数",
+      "pointsTotal": "课堂积分总计"
+    },
+    "type": {
+      "exam": "考试",
+      "quiz": "随堂测验",
+      "task": "在线任务",
+      "practice": "智能练习",
+      "code": "代码练习",
+      "course": "课程练习",
+      "quick_quiz": "知识抢答",
+      "quest": "知识闯关",
+      "poll": "快速投票",
+      "discussion": "分组讨论",
+      "score_point": "课堂积分"
+    }
+  }
+}

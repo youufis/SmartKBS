@@ -1286,3 +1286,92 @@ async def reverse_promote_grades(req: GradePromotionRequest, request: Request):
     except Exception as e:
         logger.error(f"执行降级失败: {e}")
         raise HTTPException(status_code=500, detail=f"降级失败: {str(e)}")
+
+
+# ═════════════════════════════════════════════════════════════
+# 年级/班级主数据维护 (仅管理员)
+# 背景: 注册/导入路径会对不存在的班级自动 upsert_class, 学生被删后
+# 可能残留"空壳班级"; 学生列表按用户数据反查, 空壳班级既看不到也删不掉。
+# 这里提供 列出全部班级+在读人数 与 仅删空班级 两个入口。
+# 路径用两段式 /class-mgmt/*, 避免被 GET/DELETE /{username} 单段路由遮蔽。
+# ═════════════════════════════════════════════════════════════
+
+def _assert_admin_role(user: dict, action: str) -> None:
+    if _caller_role(user) != 0:
+        raise HTTPException(status_code=403, detail=f"权限不足：仅管理员可以{action}")
+
+
+def _count_class_students(class_id: int, grade_name: str, class_name: str) -> int:
+    """班级在籍人数: 优先 class_id 关联, 兼容仅有年级/班级文本的旧数据"""
+    students = execute_query(
+        "SELECT username, grade, class, class_id FROM users "
+        "WHERE role=2 AND IFNULL(status,'active')='active' AND (class_id=? OR grade=?)",
+        (class_id, grade_name),
+    )
+    c_num = _cls_no(class_name)
+    count = 0
+    seen = set()
+    for un, ug, uc, ucid in students:
+        if un in seen:
+            continue
+        if ucid == class_id:
+            count += 1
+            seen.add(un)
+        elif ucid is None and c_num and (ug or "") == grade_name and _cls_no(uc) == c_num:
+            count += 1
+            seen.add(un)
+    return count
+
+
+@router.get("/class-mgmt/list", summary="班级列表(含在读/任教人数, 仅管理员)")
+async def class_mgmt_list(request: Request):
+    user = get_current_user(request)
+    _assert_admin_role(user, "查看班级维护")
+    rows = execute_query(
+        """SELECT c.id, c.grade_id, c.name, c.display_name, c.sort_order,
+                  g.name, g.is_active
+           FROM classes c JOIN grades g ON c.grade_id = g.id
+           ORDER BY g.sort_order, c.sort_order, c.id""")
+    ta_counts = dict(execute_query(
+        "SELECT class_id, COUNT(*) FROM teacher_assignments "
+        "WHERE class_id IS NOT NULL GROUP BY class_id"))
+    out = []
+    for cid, gid, cname, display, _sorder, gname, gactive in rows:
+        n_students = _count_class_students(cid, gname, cname)
+        n_teachers = ta_counts.get(cid, 0)
+        out.append({
+            "class_id": cid, "grade_id": gid,
+            "grade_name": gname, "grade_active": gactive,
+            "class_name": cname, "display_name": display or cname,
+            "students": n_students, "teachers": n_teachers,
+            "deletable": n_students == 0 and n_teachers == 0,
+        })
+    return {"classes": out}
+
+
+@router.delete("/class-mgmt/{class_id}", summary="删除班级(仅限无学生且无任教的空壳班级, 仅管理员)")
+async def class_mgmt_delete(class_id: int, request: Request):
+    user = get_current_user(request)
+    _assert_admin_role(user, "删除班级")
+    row = execute_query(
+        """SELECT c.name, c.display_name, g.name
+           FROM classes c JOIN grades g ON c.grade_id = g.id WHERE c.id=?""",
+        (class_id,),
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="班级不存在")
+    cname, display, gname = row[0][0], row[0][1] or row[0][0], row[0][2]
+    n_students = _count_class_students(class_id, gname, cname)
+    if n_students:
+        raise HTTPException(
+            status_code=400,
+            detail=f"班级「{display}」还有 {n_students} 名在籍学生，请先转班或删除学生后再删除班级")
+    n_teachers = execute_query(
+        "SELECT COUNT(*) FROM teacher_assignments WHERE class_id=?", (class_id,))[0][0]
+    if n_teachers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"班级「{display}」存在 {n_teachers} 条任教安排，请先在用户管理中调整教师任教范围")
+    execute_insert_update("DELETE FROM classes WHERE id=?", (class_id,))
+    logger.info(f"[class-mgmt] 空壳班级已删除: id={class_id} {display} by={user.get('username')}")
+    return {"message": f"班级「{display}」已删除"}
