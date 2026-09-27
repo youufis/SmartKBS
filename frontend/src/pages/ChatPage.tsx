@@ -9,7 +9,7 @@ import {
   SendOutlined, StopOutlined, PlusOutlined,
   EyeOutlined, UploadOutlined,
   DeleteOutlined, CheckOutlined, RightOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
-  CopyOutlined, CameraOutlined, ReloadOutlined, SearchOutlined,
+  CopyOutlined, CameraOutlined, ReloadOutlined, SearchOutlined, DownOutlined, UpOutlined,
 } from '@ant-design/icons'
 import type { Message, TreeNode, TaskInfo } from '../types'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -369,6 +369,9 @@ const ChatPage: React.FC = () => {
     }
     return groups
   }, [historyTree, historyQuery, historyOnlyToday, historyHits, historyGroupLabel, leafDate, t])
+
+  // 展开/收起合成一个开关：全展开时再点就是收起，省一个按钮位
+  const historyAllExpanded = historyView.length > 0 && historyView.every(g => historyExpanded.includes(g.key))
 
   const runHistoryContentSearch = useCallback(async () => {
     const q = historyQuery.trim()
@@ -1416,7 +1419,12 @@ const ChatPage: React.FC = () => {
         open={historyOpen}
         onClose={() => { setHistoryOpen(false); }}
       >
-        <Space orientation="vertical" size={8} style={{ width: '100%', marginBottom: 10 }}>
+        {/* 工具条吸顶：列表一长就不怕按钮滚出视野 */}
+        <Space orientation="vertical" size={8} style={{
+          width: '100%', marginBottom: 10,
+          position: 'sticky', top: 0, zIndex: 2,
+          background: 'var(--bg-container)', paddingTop: 2, paddingBottom: 6,
+        }}>
           <Input.Search
             allowClear
             size="small"
@@ -1434,11 +1442,13 @@ const ChatPage: React.FC = () => {
             <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => { void loadHistoryTree() }}>
               {t('historyRefresh')}
             </Button>
-            <Button size="small" type="text" onClick={() => setHistoryExpanded(historyView.map(g => g.key))}>
-              {t('historyExpandAll')}
-            </Button>
-            <Button size="small" type="text" onClick={() => setHistoryExpanded([])}>
-              {t('historyCollapseAll')}
+            <Button
+              size="small"
+              type="text"
+              icon={historyAllExpanded ? <UpOutlined /> : <DownOutlined />}
+              onClick={() => setHistoryExpanded(historyAllExpanded ? [] : historyView.map(g => g.key))}
+            >
+              {t(historyAllExpanded ? 'historyCollapseAll' : 'historyExpandAll')}
             </Button>
           </Space>
         </Space>
