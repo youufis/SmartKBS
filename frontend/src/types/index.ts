@@ -71,6 +71,12 @@ export interface TreeNode {
   isLeaf: boolean;
   children?: TreeNode[];
   size?: number;
+  /** 磁盘文件名（含前缀），用于区分智答/学伴/作业存档 */
+  filename?: string;
+  /** 消息条数（历史记录列表用） */
+  message_count?: number;
+  /** 保存时间 "YYYY-MM-DD HH:MM:SS" */
+  created_at?: string;
 }
 
 // 资源文件信息

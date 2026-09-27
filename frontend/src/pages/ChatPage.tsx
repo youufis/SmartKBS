@@ -252,6 +252,13 @@ const ChatPage: React.FC = () => {
   const [showPreview, setShowPreview] = useState(false)
   const [previewHtml, setPreviewHtml] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
+  // 载入历史前确认：旧实现点一下就替换当前面板，用户以为对话丢了
+  const [historySelected, setHistorySelected] = useState<React.Key[]>([])
+  const [pendingHistoryNode, setPendingHistoryNode] = useState<TreeNode | null>(null)
+  const [historyDontAsk, setHistoryDontAsk] = useState(() => {
+    try { return localStorage.getItem('smartkb_chat_history_replace_tip') === '0' } catch { return false }
+  })
+  const [askAgain, setAskAgain] = useState(false)
   const [imagePreviewHtml, setImagePreviewHtml] = useState('')
   const [cameraOpen, setCameraOpen] = useState(false)
   // 多任务选择弹窗
@@ -293,11 +300,19 @@ const ChatPage: React.FC = () => {
     });
   }, []);
 
-  // 点击历史文件 → 清空面板，显示历史内容，并自动上传为附件方便提问
-  const handleHistorySelect = useCallback(async (selectedKeys: React.Key[], info: { node: TreeNode }) => {
-    const node = info.node as TreeNode;
-    const key = node.key || (selectedKeys.length > 0 ? String(selectedKeys[0]) : '');
-    if (node.isLeaf && key) {
+  // 历史列表右侧摘要：保存时间 + 消息条数（大小不放，一行挤不下）
+  const historyMeta = useCallback((node: TreeNode) => {
+    const parts: string[] = []
+    const hm = /\d{2}:\d{2}:\d{2}$/.exec(node.created_at || '')
+    if (hm) parts.push(hm[0].slice(0, 5))
+    if (node.message_count) parts.push(t('historyMetaMessages', { n: node.message_count }))
+    return parts.join(' · ')
+  }, [t])
+
+  // 打开一条历史记录（会替换当前面板，调用前先经过 handleHistorySelect 的确认）
+  const openHistoryNode = useCallback(async (node: TreeNode) => {
+    const key = node.key;
+    if (key) {
       message.loading({ content: t('loadingHistory'), key: 'history' });
       try {
         const result = await historyApi.readHistoryFile(key);
@@ -306,7 +321,9 @@ const ChatPage: React.FC = () => {
           return;
         }
         const msgs = parseHistoryContent(result.content);
-        const isCompanionFile = result.filename?.startsWith('companion_') || (node.title as string).startsWith('companion_');
+        // 文件名带前缀（companion_/task_/conversation_），标题改成中文后不能再拿 title 判类型
+        const fname = node.filename || result.filename || (node.title as string) || '';
+        const isCompanionFile = fname.startsWith('companion_');
 
         if (isCompanionFile) {
           // 学伴/助手模式的对话 → 载入 companionStore（通过 loadCompanionHistory 避免重复保存）
@@ -333,7 +350,9 @@ const ChatPage: React.FC = () => {
           }
         }
 
-        message.success({ content: t('copied'), key: 'history' });
+        setHistorySelected([key]);
+        setHistoryOpen(false);          // 载入后收起抽屉，直接看对话
+        message.success({ content: t('historyLoaded'), key: 'history' });
       } catch (e: unknown) {
         console.error(t('errorLoad'), e);
         const err = e as { response?: { data?: { detail?: string } }; message?: string };
@@ -341,6 +360,22 @@ const ChatPage: React.FC = () => {
       }
     }
   }, [parseHistoryContent, companionMode, t]);
+
+  // 点击历史文件：面板里还有对话时先确认，再替换
+  const handleHistorySelect = useCallback(async (selectedKeys: React.Key[], info: { node: TreeNode }) => {
+    const node = info.node as TreeNode;
+    const key = node.key || (selectedKeys.length > 0 ? String(selectedKeys[0]) : '');
+    if (!node.isLeaf || !key) return;
+    const target: TreeNode = { ...node, key };
+    const hasCurrent = useChatStore.getState().messages.length > 0
+      || useCompanionStore.getState().companionMessages.length > 0;
+    if (hasCurrent && !historyDontAsk) {
+      setAskAgain(false);
+      setPendingHistoryNode(target);
+      return;
+    }
+    await openHistoryNode(target);
+  }, [openHistoryNode, historyDontAsk]);
 
   // 删除历史文件或目录
   const handleHistoryDelete = useCallback(async (path: string) => {
@@ -1295,24 +1330,33 @@ const ChatPage: React.FC = () => {
             <Tree<TreeNode>
               treeData={historyTree}
               showLine
+              selectedKeys={historySelected}
               onSelect={handleHistorySelect}
               titleRender={(node: TreeNode) => {
-                const isCompanion = node.isLeaf && (node.title as string).startsWith('companion_')
-                const displayTitle = node.isLeaf
-                  ? (node.title as string).replace(/^companion_/, '').replace(/^conversation_/, '').replace(/\.md$/, '')
-                  : node.title
+                // 类型看文件名前缀；标题由后端给（首条学生发言），解析不出来时才回退成时间戳
+                const fname = (node.filename || node.title || '') as string
+                const isCompanion = node.isLeaf && fname.startsWith('companion_')
+                const isTask = node.isLeaf && fname.startsWith('task_')
+                const displayTitle = node.title as string
+                const meta = node.isLeaf ? historyMeta(node) : ''
                 return (
                   <Space size={4} style={{ width: '100%' }} className="history-tree-node">
                     {node.isLeaf ? (isCompanion ? <span>🧠</span> : <FileOutlined />) : <FolderOutlined />}
                     {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('companionLabel')}</Tag>}
+                    {isTask && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('taskLabel')}</Tag>}
                     <span style={{
                       fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap', maxWidth: 190,
+                      whiteSpace: 'nowrap', flex: 1, minWidth: 0,
                       display: 'inline-block', verticalAlign: 'middle',
-                    }} title={node.title as string}>{displayTitle}</span>
+                    }} title={node.isLeaf ? `${displayTitle}\n${fname}` : undefined}>{displayTitle}</span>
+                    {meta && (
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{meta}</span>
+                    )}
                     <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
-                      style={{ flexShrink: 0, opacity: 0, transition: 'opacity 0.2s' }}>
-                      <Popconfirm title={t('confirmDeleteFile', { type: node.isLeaf ? t('file') : t('directory') })}
+                      style={{ flexShrink: 0, opacity: 0.4, transition: 'opacity 0.2s' }}>
+                      <Popconfirm title={node.isLeaf
+                        ? t('confirmDeleteFile', { type: t('file') })
+                        : t('confirmDeleteDirCount', { count: node.children?.length ?? 0 })}
                         onConfirm={() => handleHistoryDelete(node.key)}>
                         <Button type="link" size="small" danger icon={<DeleteOutlined />} />
                       </Popconfirm>
@@ -1325,6 +1369,39 @@ const ChatPage: React.FC = () => {
           )}
         </Spin>
       </Drawer>
+
+      {/* 载入历史前的确认：当前对话已自动存盘，说清楚免得以为被删了 */}
+      <Modal
+        maskClosable={false}
+        open={!!pendingHistoryNode}
+        title={t('historyReplaceTitle')}
+        width={460}
+        onCancel={() => setPendingHistoryNode(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setPendingHistoryNode(null)}>{t('historyCancel')}</Button>,
+          <Button key="ok" type="primary" onClick={async () => {
+            const node = pendingHistoryNode;
+            if (askAgain) {
+              setHistoryDontAsk(true);
+              try { localStorage.setItem('smartkb_chat_history_replace_tip', '0') } catch { /* 隐私模式忽略 */ }
+            }
+            setPendingHistoryNode(null);
+            if (node) await openHistoryNode(node);
+          }}>{t('historyReplaceOk')}</Button>,
+        ]}
+      >
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+          <Typography.Text style={{ fontSize: 13 }}>{t('historyReplaceDesc')}</Typography.Text>
+          {pendingHistoryNode && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              → {pendingHistoryNode.title}
+            </Typography.Text>
+          )}
+          <Checkbox checked={askAgain} onChange={(e) => setAskAgain(e.target.checked)}>
+            {t('historyDontAsk')}
+          </Checkbox>
+        </Space>
+      </Modal>
 
       {/* 摄像头拍照 Modal */}
       <CameraCapture
