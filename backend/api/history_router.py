@@ -278,6 +278,67 @@ async def get_history_tree(request: Request):
     return {"tree": tree}
 
 
+def _make_snippet(text: str, pos: int, keyword: str, span: int = 40) -> str:
+    """取命中处前后各一段做摘要：压掉换行与 Markdown 符号，方便列表里直接看"""
+    start = max(0, pos - span)
+    end = min(len(text), pos + len(keyword) + span)
+    raw = text[start:end]
+    raw = re.sub(r"```[\s\S]*?```", " ", raw)
+    raw = re.sub(r"[#*_>`~]", "", raw)
+    raw = re.sub(r"\s+", " ", raw).strip()
+    return ("…" if start > 0 else "") + raw + ("…" if end < len(text) else "")
+
+
+def _search_files(chat_dir: str, files: list[tuple[str, int, str]],
+                  keyword: str, limit: int) -> list[dict[str, Any]]:
+    """在历史 md 里找关键词。
+
+    只搜每个文件开头 _READ_HEAD_BYTES 之内：历史文件是整段对话追加，命中基本都在
+    前半部分，全库全文扫描的收益远小于代价。
+    """
+    needle = keyword.lower()
+    out: list[dict[str, Any]] = []
+    for rel, size, mtime in files:
+        if len(out) >= limit:
+            break
+        full = os.path.join(chat_dir, *rel.split("/"))
+        try:
+            with open(full, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read(_READ_HEAD_BYTES)
+        except OSError:
+            continue
+        pos = text.lower().find(needle)
+        if pos < 0:
+            continue
+        title, count = _derive_title_and_count(text)
+        out.append({
+            "key": rel,
+            "filename": rel.split("/")[-1],
+            "title": title or _file_stem(rel),
+            "date": rel.split("/")[0] if "/" in rel else mtime[:10],
+            "created_at": mtime,
+            "size": size,
+            "message_count": count,
+            "snippet": _make_snippet(text, pos, keyword),
+        })
+    return out
+
+
+@router.get("/search")
+async def search_history(request: Request, q: str = Query(..., max_length=64),
+                         limit: int = Query(30, ge=1, le=100)):
+    """按正文检索自己的历史记录（标题/文件名过滤在前端即时做，这里只补正文命中）"""
+    user = get_current_user(request)
+    username = user["username"]
+    keyword = (q or "").strip()
+    chat_dir = os.path.realpath(get_account_chat_history_dir(username))
+    if not keyword or not os.path.isdir(chat_dir):
+        return {"results": [], "keyword": keyword}
+
+    files = await asyncio.to_thread(_iter_history_files, chat_dir)
+    hits = await asyncio.to_thread(_search_files, chat_dir, files, keyword, limit)
+    return {"results": hits, "keyword": keyword, "scanned": len(files)}
+
 @router.get("/file")
 async def read_history_file(request: Request, path: str = Query(...)):
     """读取历史文件内容"""

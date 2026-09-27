@@ -9,7 +9,7 @@ import {
   SendOutlined, StopOutlined, PlusOutlined,
   EyeOutlined, UploadOutlined,
   DeleteOutlined, CheckOutlined, RightOutlined, HistoryOutlined, FileOutlined, FolderOutlined,
-  CopyOutlined, CameraOutlined,
+  CopyOutlined, CameraOutlined, ReloadOutlined, SearchOutlined,
 } from '@ant-design/icons'
 import type { Message, TreeNode, TaskInfo } from '../types'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -259,6 +259,13 @@ const ChatPage: React.FC = () => {
     try { return localStorage.getItem('smartkb_chat_history_replace_tip') === '0' } catch { return false }
   })
   const [askAgain, setAskAgain] = useState(false)
+  // 历史列表的视图状态：搜索 / 仅看今天 / 展开项 / 正文命中
+  const [historyQuery, setHistoryQuery] = useState('')
+  const [historyOnlyToday, setHistoryOnlyToday] = useState(false)
+  const [historyExpanded, setHistoryExpanded] = useState<React.Key[]>([])
+  const [historyHits, setHistoryHits] = useState<TreeNode[]>([])
+  const [historySearching, setHistorySearching] = useState(false)
+  const historyInitExpandRef = useRef(true)
   const [imagePreviewHtml, setImagePreviewHtml] = useState('')
   const [cameraOpen, setCameraOpen] = useState(false)
   // 多任务选择弹窗
@@ -308,6 +315,87 @@ const ChatPage: React.FC = () => {
     if (node.message_count) parts.push(t('historyMetaMessages', { n: node.message_count }))
     return parts.join(' · ')
   }, [t])
+
+  // 日期 → 分组标签：今天 / 昨天 / 一周内按日 / 更早按月（后端只给裸日期）
+  const historyGroupLabel = useCallback((date: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '')
+    if (!m) return date || t('historyUndated')
+    const base = new Date()
+    const noon = new Date(base.getFullYear(), base.getMonth(), base.getDate()).getTime()
+    const day = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime()
+    const diff = Math.round((noon - day) / 86400000)
+    if (diff === 0) return t('historyToday')
+    if (diff === 1) return t('historyYesterday')
+    if (diff > 1 && diff <= 6) return t('historyMonthDay', { month: Number(m[2]), day: Number(m[3]) })
+    return `${m[1]}-${m[2]}`
+  }, [t])
+
+  const leafDate = useCallback((node: TreeNode) => {
+    if (node.date) return node.date
+    const seg = (node.key || '').split('/')[0]
+    if (/^\d{4}-\d{2}-\d{2}$/.test(seg)) return seg
+    return (node.created_at || '').slice(0, 10)
+  }, [])
+
+  // 视图树：过滤 + 重新分组（后端仍按日期返回，这里只做展示层的事）
+  const historyView = useMemo<TreeNode[]>(() => {
+    const q = historyQuery.trim().toLowerCase()
+    const now = new Date()
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    const groups: TreeNode[] = []
+    const index = new Map<string, TreeNode>()
+    for (const folder of historyTree) {
+      for (const leaf of folder.children || []) {
+        const date = leafDate(leaf)
+        if (historyOnlyToday && date !== todayStr) continue
+        if (q && !`${leaf.title || ''} ${leaf.filename || ''}`.toLowerCase().includes(q)) continue
+        const label = historyGroupLabel(date)
+        let group = index.get(label)
+        if (!group) {
+          group = { title: label, key: `group:${label}`, isLeaf: false, children: [], count: 0, isGroup: true }
+          index.set(label, group)
+          groups.push(group)
+        }
+        group.children = [...(group.children || []), { ...leaf, date }]
+        group.count = (group.count || 0) + 1
+      }
+    }
+    if (historyHits.length > 0) {
+      groups.push({
+        title: t('historyContentHits', { count: historyHits.length }),
+        key: 'group:__content__', isLeaf: false, children: historyHits,
+        count: historyHits.length, isGroup: true,
+      })
+    }
+    return groups
+  }, [historyTree, historyQuery, historyOnlyToday, historyHits, historyGroupLabel, leafDate, t])
+
+  const runHistoryContentSearch = useCallback(async () => {
+    const q = historyQuery.trim()
+    if (q.length < 2) { setHistoryHits([]); return }
+    setHistorySearching(true)
+    try {
+      const hits = await historyApi.searchHistory(q)
+      setHistoryHits(hits.map(h => ({
+        title: h.title, key: h.key, isLeaf: true, filename: h.filename, date: h.date,
+        created_at: h.created_at, size: h.size, message_count: h.message_count, snippet: h.snippet,
+      })))
+      setHistoryExpanded(prev => (prev.includes('group:__content__') ? prev : [...prev, 'group:__content__']))
+    } catch {
+      setHistoryHits([])
+    } finally {
+      setHistorySearching(false)
+    }
+  }, [historyQuery])
+
+  // 刚打开时默认展开第一组，别只给一排文件夹；用户手动收起后不再抢展开权
+  useEffect(() => {
+    if (!historyOpen) { historyInitExpandRef.current = true; return }
+    if (historyInitExpandRef.current && historyView.length > 0) {
+      setHistoryExpanded([historyView[0].key])
+      historyInitExpandRef.current = false
+    }
+  }, [historyOpen, historyView])
 
   // 打开一条历史记录（会替换当前面板，调用前先经过 handleHistorySelect 的确认）
   const openHistoryNode = useCallback(async (node: TreeNode) => {
@@ -392,6 +480,9 @@ const ChatPage: React.FC = () => {
 
   const handleOpenHistory = useCallback(() => {
     setHistoryOpen(true);
+    setHistoryQuery('');
+    setHistoryHits([]);
+    setHistoryOnlyToday(false);
     loadHistoryTree();
   }, [loadHistoryTree]);
 
@@ -1325,11 +1416,40 @@ const ChatPage: React.FC = () => {
         open={historyOpen}
         onClose={() => { setHistoryOpen(false); }}
       >
-        <Spin spinning={historyLoading}>
-          {historyTree.length > 0 ? (
+        <Space orientation="vertical" size={8} style={{ width: '100%', marginBottom: 10 }}>
+          <Input.Search
+            allowClear
+            size="small"
+            placeholder={t('historySearchPlaceholder')}
+            value={historyQuery}
+            loading={historySearching}
+            enterButton={<SearchOutlined />}
+            onChange={(e) => { setHistoryQuery(e.target.value); if (!e.target.value) setHistoryHits([]) }}
+            onSearch={() => { void runHistoryContentSearch() }}
+          />
+          <Space size={4} wrap>
+            <Checkbox checked={historyOnlyToday} onChange={(e) => setHistoryOnlyToday(e.target.checked)}>
+              {t('historyOnlyToday')}
+            </Checkbox>
+            <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => { void loadHistoryTree() }}>
+              {t('historyRefresh')}
+            </Button>
+            <Button size="small" type="text" onClick={() => setHistoryExpanded(historyView.map(g => g.key))}>
+              {t('historyExpandAll')}
+            </Button>
+            <Button size="small" type="text" onClick={() => setHistoryExpanded([])}>
+              {t('historyCollapseAll')}
+            </Button>
+          </Space>
+        </Space>
+
+        <Spin spinning={historyLoading || historySearching}>
+          {historyView.length > 0 ? (
             <Tree<TreeNode>
-              treeData={historyTree}
+              treeData={historyView}
               showLine
+              expandedKeys={historyExpanded}
+              onExpand={(keys) => setHistoryExpanded(keys as React.Key[])}
               selectedKeys={historySelected}
               onSelect={handleHistorySelect}
               titleRender={(node: TreeNode) => {
@@ -1339,33 +1459,63 @@ const ChatPage: React.FC = () => {
                 const isTask = node.isLeaf && fname.startsWith('task_')
                 const displayTitle = node.title as string
                 const meta = node.isLeaf ? historyMeta(node) : ''
+                if (node.isGroup) {
+                  // 只覆盖一个日期目录的分组才给删除键，跨月的分组不给（一次删太多天太危险）
+                  const dates = Array.from(new Set((node.children || []).map(c => c.date || '').filter(Boolean)))
+                  return (
+                    <Space size={4} style={{ width: '100%' }}>
+                      <FolderOutlined />
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>{displayTitle}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                        {node.count ?? (node.children?.length ?? 0)}
+                      </span>
+                      {dates.length === 1 && (
+                        <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
+                          style={{ flexShrink: 0, opacity: 0.4, marginLeft: 'auto' }}>
+                          <Popconfirm title={t('confirmDeleteDirCount', { count: node.children?.length ?? 0 })}
+                            onConfirm={() => handleHistoryDelete(dates[0])}>
+                            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        </span>
+                      )}
+                    </Space>
+                  )
+                }
                 return (
-                  <Space size={4} style={{ width: '100%' }} className="history-tree-node">
-                    {node.isLeaf ? (isCompanion ? <span>🧠</span> : <FileOutlined />) : <FolderOutlined />}
-                    {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('companionLabel')}</Tag>}
-                    {isTask && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('taskLabel')}</Tag>}
-                    <span style={{
-                      fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap', flex: 1, minWidth: 0,
-                      display: 'inline-block', verticalAlign: 'middle',
-                    }} title={node.isLeaf ? `${displayTitle}\n${fname}` : undefined}>{displayTitle}</span>
-                    {meta && (
-                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{meta}</span>
+                  <Space orientation="vertical" size={0} style={{ width: '100%' }} className="history-tree-node">
+                    <Space size={4} style={{ width: '100%' }}>
+                      {isCompanion ? <span>🧠</span> : <FileOutlined />}
+                      {isCompanion && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('companionLabel')}</Tag>}
+                      {isTask && <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginRight: 0 }}>{t('taskLabel')}</Tag>}
+                      <span style={{
+                        fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap', flex: 1, minWidth: 0,
+                        display: 'inline-block', verticalAlign: 'middle',
+                      }} title={`${displayTitle}\n${fname}`}>{displayTitle}</span>
+                      {meta && (
+                        <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flexShrink: 0 }}>{meta}</span>
+                      )}
+                      <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
+                        style={{ flexShrink: 0, opacity: 0.4, transition: 'opacity 0.2s' }}>
+                        <Popconfirm title={t('confirmDeleteFile', { type: t('file') })}
+                          onConfirm={() => handleHistoryDelete(node.key)}>
+                          <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+                        </Popconfirm>
+                      </span>
+                    </Space>
+                    {node.snippet && (
+                      <span style={{ fontSize: 11, color: 'var(--text-tertiary)', paddingLeft: 18, wordBreak: 'break-all' }}>
+                        {node.snippet}
+                      </span>
                     )}
-                    <span onClick={(e) => e.stopPropagation()} className="history-delete-btn"
-                      style={{ flexShrink: 0, opacity: 0.4, transition: 'opacity 0.2s' }}>
-                      <Popconfirm title={node.isLeaf
-                        ? t('confirmDeleteFile', { type: t('file') })
-                        : t('confirmDeleteDirCount', { count: node.children?.length ?? 0 })}
-                        onConfirm={() => handleHistoryDelete(node.key)}>
-                        <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-                      </Popconfirm>
-                    </span>
                   </Space>
-                )}}
+                )
+              }}
             />
           ) : (
-            <Typography.Text type="secondary">{t('noHistory')}</Typography.Text>
+            <Typography.Text type="secondary">
+              {historyQuery || historyOnlyToday || historyHits.length > 0 ? t('noHistoryMatch') : t('noHistory')}
+            </Typography.Text>
           )}
         </Spin>
       </Drawer>

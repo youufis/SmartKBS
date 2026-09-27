@@ -77,6 +77,14 @@ export interface TreeNode {
   message_count?: number;
   /** 保存时间 "YYYY-MM-DD HH:MM:SS" */
   created_at?: string;
+  /** 所属日期（分组用） */
+  date?: string;
+  /** 正文检索命中片段 */
+  snippet?: string;
+  /** 分组节点的条目数（标题右侧徽标） */
+  count?: number;
+  /** 分组节点（今天/昨天/按月） */
+  isGroup?: boolean;
 }
 
 // 资源文件信息

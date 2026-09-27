@@ -7,6 +7,23 @@ export async function getHistoryTree(): Promise<{ tree: TreeNode[]; root: string
   return data;
 }
 
+export interface HistorySearchHit {
+  key: string;
+  filename: string;
+  title: string;
+  date: string;
+  created_at: string;
+  size: number;
+  message_count: number;
+  snippet: string;
+}
+
+/** 正文检索（标题/文件名过滤在前端即时做，这里只补正文命中） */
+export async function searchHistory(q: string, limit = 30): Promise<HistorySearchHit[]> {
+  const { data } = await apiClient.get('/api/history/search', { params: { q, limit } });
+  return (data.results || []) as HistorySearchHit[];
+}
+
 export async function readHistoryFile(path: string): Promise<{
   content: string;
   filename: string;
