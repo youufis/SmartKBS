@@ -12,7 +12,6 @@ import {
   RobotOutlined,
   EditOutlined, DeleteOutlined, DownloadOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useTranslation } from 'react-i18next'
@@ -671,7 +670,7 @@ const InteractionPage: React.FC = () => {
                 {quizAiAnalysis && (
                   <Card size="small" style={{ marginTop: 12, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
                     <div className="markdown-content">
-                      <ReactMarkdown>{quizAiAnalysis}</ReactMarkdown>
+                      <FormulaRenderer content={quizAiAnalysis} />
                     </div>
                   </Card>
                 )}

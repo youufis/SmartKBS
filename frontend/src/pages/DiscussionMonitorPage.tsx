@@ -11,8 +11,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useTranslation } from 'react-i18next'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import FormulaRenderer from '../components/FormulaRenderer'
 
 const { Title, Text } = Typography
 
@@ -129,7 +128,7 @@ const DiscussionMonitorPage: React.FC = () => {
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/discussion')} />
           <Title level={4} style={{ margin: 0 }}>{t('discussionMonitor')}</Title>
           <span className="markdown-content" style={{ display: 'inline-block' }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{`— ${data.title}`}</ReactMarkdown>
+            <FormulaRenderer content={`— ${data.title}`} components={{ p: ({children}) => <>{children}</> }} />
           </span>
           <Tag color={data.status === 'active' ? 'green' : 'red'}>
             {data.status === 'active' ? t('activeDiscussions') : t('endedDiscussions')}

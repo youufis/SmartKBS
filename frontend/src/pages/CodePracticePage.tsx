@@ -14,7 +14,7 @@ import {
   EditOutlined, DeleteOutlined,
   PlusSquareOutlined, MinusSquareOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
+import FormulaRenderer from '../components/FormulaRenderer'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -146,7 +146,7 @@ const CompactCodeView: React.FC<{
                 <Button type="text" size="small" icon={<MinusSquareOutlined />} onClick={() => setDescCollapsed(true)} style={{ color: 'var(--text-tertiary)' }} />
               </div>
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: '#555' }}>
-                <ReactMarkdown>{problemData.description || ''}</ReactMarkdown>
+                <FormulaRenderer content={problemData.description || ''} />
               </div>
               {problemData.sample_cases?.length > 0 && (
                 <div style={{ marginTop: 8 }}>
@@ -1257,7 +1257,7 @@ const CodePracticePage: React.FC = () => {
           </Space>
 
           <div className="markdown-content" style={{ fontSize: 14, lineHeight: 1.7 }}>
-            <ReactMarkdown>{currentProblem.description || ''}</ReactMarkdown>
+            <FormulaRenderer content={currentProblem.description || ''} />
           </div>
 
           {/* 示例测试用例 */}

@@ -17,7 +17,6 @@ import {
   EditOutlined, DeleteOutlined,
   CheckCircleOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
@@ -500,7 +499,7 @@ const StudentQuestionsPage: React.FC = () => {
             )}
           </div>
           <div className="markdown-content">
-            <ReactMarkdown>{answerModal?.content || ''}</ReactMarkdown>
+            <FormulaRenderer content={answerModal?.content || ''} />
           </div>
         </Card>
         {/* 统一回答展示区：教师回答 + 已通过的学生回答 */}
@@ -519,7 +518,7 @@ const StudentQuestionsPage: React.FC = () => {
                   </Text>
                 </div>
                 <div className="markdown-content">
-                  <ReactMarkdown>{answerModal.answer}</ReactMarkdown>
+                  <FormulaRenderer content={answerModal.answer} />
                 </div>
               </div>
             )}

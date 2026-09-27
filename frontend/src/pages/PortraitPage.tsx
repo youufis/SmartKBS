@@ -1,3 +1,4 @@
+import FormulaRenderer from '../components/FormulaRenderer'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -377,12 +378,12 @@ const PortraitPage: React.FC = () => {
                   style={{
                     fontSize: 15,
                     lineHeight: 1.8,
-                    whiteSpace: 'pre-wrap',
                     fontStyle: 'italic',
                     color: 'var(--text-secondary)',
                   }}
                 >
-                  {todayPortrait.ai_comment || t('ptNoNote')}
+                  {/* AI 寄语按公式渲染（breaks 保留原有断行，gfm 关掉以免改动排版） */}
+                  <FormulaRenderer content={todayPortrait.ai_comment || t('ptNoNote')} breaks gfm={false} />
                 </Paragraph>
               </div>
             </Card>
@@ -861,11 +862,10 @@ const PortraitPage: React.FC = () => {
                     <Paragraph style={{
                       fontSize: 14,
                       lineHeight: 1.8,
-                      whiteSpace: 'pre-wrap',
                       fontStyle: 'italic',
                       margin: 0,
                     }}>
-                      {detailPortrait.ai_comment || t('ptNoNote')}
+                      <FormulaRenderer content={detailPortrait.ai_comment || t('ptNoNote')} breaks gfm={false} />
                     </Paragraph>
                   </div>
                 </div>

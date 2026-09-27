@@ -9,7 +9,7 @@ import {
   CheckCircleOutlined, ClockCircleOutlined, StopOutlined, ReloadOutlined, DownloadOutlined,
   BulbOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
+import FormulaRenderer from '../components/FormulaRenderer'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { pollAiTask } from '../api/aiTask'
@@ -429,8 +429,8 @@ const AnalyticsPage: React.FC = () => {
                         </Space>
                       </Space>
                       <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
-                        <div className="markdown-report">
-                          <ReactMarkdown>{report}</ReactMarkdown>
+                        <div className="markdown-content">
+                          <FormulaRenderer content={report} />
                         </div>
                       </Card>
                     </>
@@ -455,8 +455,8 @@ const AnalyticsPage: React.FC = () => {
                         }}>{t('analytics.exportWord')}</Button>
                       </Space>
                       <Card style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}>
-                        <div className="markdown-report">
-                          <ReactMarkdown>{suggestionsData.suggestions}</ReactMarkdown>
+                        <div className="markdown-content">
+                          <FormulaRenderer content={suggestionsData.suggestions} />
                         </div>
                       </Card>
                     </div>
@@ -529,8 +529,8 @@ const AnalyticsPage: React.FC = () => {
                         </Space>
                       </Space>
                       <Card style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
-                        <div className="markdown-report">
-                          <ReactMarkdown>{examAnalytics.report}</ReactMarkdown>
+                        <div className="markdown-content">
+                          <FormulaRenderer content={examAnalytics.report} />
                         </div>
                       </Card>
                     </>

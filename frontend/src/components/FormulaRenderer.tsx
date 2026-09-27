@@ -24,11 +24,30 @@ import type { Components } from 'react-markdown'
  * 把 AI 常写的「行内 $$...$$」与 \(\)、\[\] 定界符整理成 remark-math 认得的形式。
  * 代码块内部原样保留，避免把示例代码里的 $$ 也改了。
  */
+/**
+ * 屏蔽成对的 $$ 定界符后，把「既无 LaTeX 特征、又含数字或中文」的 $…$ 当货币/裸文本转义。
+ * 只按「无特征」判会误伤 $x$、$f(x)$ 这类纯字母公式，所以再加数字/中文这一条：
+ *   $x$、$f(x)$      -> 保留（仍是公式）
+ *   $5和$6、$1.2 万亿 -> 转义（是钱，不是公式）
+ */
+function maskDollars(text: string): string {
+  const MASK = '\u0000'
+  const masked = text.replace(/\$\$/g, MASK + MASK)
+  const fixed = masked.replace(/\$([^$\n]+)\$/g, (whole, body) => {
+    if (/[\\^_{}=]/.test(body)) return whole
+    if (/\d/.test(body) || /[\u4e00-\u9fff]/.test(body)) return '\\$' + body + '\\$'
+    return whole
+  })
+  return fixed.split(MASK + MASK).join('$$')
+}
+
 export function normalizeMath(src: string): string {
   if (!src) return src
   let text = src.replace(/\r\n/g, '\n')
   text = text.replace(/\\\(\s*([^)]+?)\s*\\\)/g, (_m, g) => '$' + g + '$')
   text = text.replace(/\\\[\s*([\s\S]+?)\s*\\\]/g, (_m, g) => '\n\n$$\n' + g.trim() + '\n$$\n\n')
+  // 「价格$5和$6」这类没有 LaTeX 特征的 $…$ 先转义，避免被误判成公式
+  text = maskDollars(text)
 
   const out: string[] = []
   let inFence = false
@@ -39,8 +58,8 @@ export function normalizeMath(src: string): string {
       out.push(line)
       continue
     }
-    // 纯 $$ 分隔行、没有 $$、或还在代码块里的，一律不动
-    if (inFence || t === '$$' || !line.includes('$$')) {
+    // 纯 $$ 分隔行、行内代码、没有 $$、或还在代码块里的，一律不动
+    if (inFence || t === '$$' || line.includes('`') || !line.includes('$$')) {
       out.push(line)
       continue
     }
@@ -62,6 +81,33 @@ export function normalizeMath(src: string): string {
   return out.join('\n')
 }
 
+/**
+ * 把单个换行补成 Markdown 硬换行（行尾两个空格），让原本按 pre-wrap 显示的
+ * 纯文本换到 Markdown 渲染后仍保持同样的断行；列表、标题、表格、引用、代码块等
+ * 结构化行不动，避免把语法行拆成两段。
+ */
+export function preserveBreaks(text: string): string {
+  if (!text) return text
+  const structural = /^\s*([-*+]\s|\d+[.)]\s|#{1,6}\s|>|\||```|~~~|\*\*\*|---|===)/
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const out: string[] = []
+  let inFence = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const t = line.trim()
+    if (t.startsWith('```') || t.startsWith('~~~')) {
+      inFence = !inFence
+      out.push(line)
+      continue
+    }
+    if (inFence) { out.push(line); continue }
+    const nextT = (lines[i + 1] ?? '').trim()
+    const keepAsIs = !t || t.endsWith('  ') || !nextT || structural.test(t) || structural.test(nextT)
+    out.push(keepAsIs ? line : line + '  ')
+  }
+  return out.join('\n')
+}
+
 interface FormulaRendererProps {
   /** Markdown / LaTeX 混合内容 */
   content: string
@@ -69,10 +115,16 @@ interface FormulaRendererProps {
   inline?: boolean
   /** 追加或覆盖 react-markdown 的组件渲染（如自定义 code 高亮） */
   components?: Components
+  /** 是否启用 GFM（表格、删除线等），默认 true。
+   *  原本没挂 remarkGfm 的长文本页传 false：只加公式渲染，不改现有排版 */
+  gfm?: boolean
+  /** 是否把单个换行保留成硬换行（原 pre-wrap 纯文本改渲染时用） */
+  breaks?: boolean
 }
 
-const FormulaRenderer: React.FC<FormulaRendererProps> = ({ content, inline = false, components }) => {
-  const source = normalizeMath(content || '')
+const FormulaRenderer: React.FC<FormulaRendererProps> = ({ content, inline = false, components, gfm = true, breaks = false }) => {
+  const normalized = normalizeMath(content || '')
+  const source = breaks ? preserveBreaks(normalized) : normalized
   if (!source) return null
 
   if (inline) {
@@ -97,7 +149,7 @@ const FormulaRenderer: React.FC<FormulaRendererProps> = ({ content, inline = fal
   // 完整模式：支持 GFM（表格、列表等）+ 公式
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
+      remarkPlugins={gfm ? [remarkGfm, remarkMath] : [remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={components}
     >

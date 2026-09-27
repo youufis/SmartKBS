@@ -19,7 +19,7 @@ import {
   RightOutlined, DownOutlined, SettingOutlined,
   EyeOutlined, BulbOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
+import FormulaRenderer from '../components/FormulaRenderer'
 import * as curriculumApi from '../api/curriculum'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
@@ -1885,7 +1885,7 @@ const CurriculumPage: React.FC = () => {
         ) : lessonPlanData ? (
           <div style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 14, lineHeight: 1.8, padding: '0 4px' }}>
             <div className="markdown-content">
-              <ReactMarkdown>{lessonPlanData.lesson_plan}</ReactMarkdown>
+              <FormulaRenderer content={lessonPlanData.lesson_plan} />
             </div>
           </div>
         ) : null}

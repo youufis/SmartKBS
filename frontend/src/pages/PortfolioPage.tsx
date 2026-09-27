@@ -15,7 +15,7 @@ import {
   BookOutlined, CalendarOutlined, RobotOutlined, DownloadOutlined,
   ExperimentOutlined, EyeOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
+import FormulaRenderer from '../components/FormulaRenderer'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import * as trackingApi from '../api/tracking'
@@ -650,7 +650,7 @@ const PortfolioPage: React.FC = () => {
               </Row>
             )}
             <div className="markdown-content">
-              <ReactMarkdown>{reportData.report}</ReactMarkdown>
+              <FormulaRenderer content={reportData.report} />
             </div>
           </div>
         ) : null}

@@ -13,8 +13,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import { useTranslation } from 'react-i18next'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import FormulaRenderer from '../components/FormulaRenderer'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -351,7 +350,7 @@ const DiscussionRoomPage: React.FC = () => {
               </Text>
               {discussionInfo && (
                 <div className="markdown-content" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{discussionInfo.title}</ReactMarkdown>
+                  <FormulaRenderer content={discussionInfo.title} components={{ p: ({children}) => <>{children}</> }} />
                 </div>
               )}
             </div>
@@ -434,7 +433,7 @@ const DiscussionRoomPage: React.FC = () => {
               label: <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('viewTopic')}</span>,
               children: (
                 <div className="markdown-content" style={{ fontSize: 13, color: '#555', padding: '4px 0 8px 0' }}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{discussionInfo.description}</ReactMarkdown>
+                  <FormulaRenderer content={discussionInfo.description} />
                 </div>
               ),
             },
@@ -512,9 +511,16 @@ const DiscussionRoomPage: React.FC = () => {
                         )}
                       </div>
                     )}
-                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {msg.content}
-                    </div>
+                    {isAi ? (
+                      /* AI 助教的发言按 Markdown + 公式渲染；学生发言仍是纯文本，避免把 # 和 - 当语法 */
+                      <div className="markdown-content" style={{ wordBreak: 'break-word' }}>
+                        <FormulaRenderer content={msg.content} breaks />
+                      </div>
+                    ) : (
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {msg.content}
+                      </div>
+                    )}
                     <div
                       style={{
                         fontSize: 11,

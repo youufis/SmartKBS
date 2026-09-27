@@ -18,8 +18,7 @@ import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import { useTranslation } from 'react-i18next'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import FormulaRenderer from '../components/FormulaRenderer'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { reportLoadError } from '../utils/loadError'
 
@@ -331,14 +330,14 @@ const DiscussionPage: React.FC = () => {
           <div>
             <Space>
               <div className="markdown-content" style={{ fontWeight: 600 }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{disc.title}</ReactMarkdown>
+                <FormulaRenderer content={disc.title} components={{ p: ({children}) => <>{children}</> }} />
               </div>
               <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
               {disc.subject && <Tag>{disc.subject}</Tag>}
             </Space>
             {disc.description && (
               <div className="markdown-content" style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 4 }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{disc.description}</ReactMarkdown>
+                <FormulaRenderer content={disc.description} />
               </div>
             )}
           </div>
@@ -405,7 +404,7 @@ const DiscussionPage: React.FC = () => {
                   <div style={{ padding: '8px 0 4px 32px' }}>
                     {disc.description && (
                       <div className="markdown-content" style={{ marginBottom: 10 }}>
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{disc.description}</ReactMarkdown>
+                        <FormulaRenderer content={disc.description} />
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 24, fontSize: 13, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
@@ -456,7 +455,7 @@ const DiscussionPage: React.FC = () => {
                     return (
                       <Space>
                         <div className="markdown-content" style={{ fontWeight: 600, cursor: 'pointer' }} onClick={() => handleDetail(disc.id)}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{title}</ReactMarkdown>
+                          <FormulaRenderer content={title} components={{ p: ({children}) => <>{children}</> }} />
                         </div>
                         <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
                         {disc.subject && <Tag>{disc.subject}</Tag>}
@@ -540,7 +539,7 @@ const DiscussionPage: React.FC = () => {
 
       {/* 讨论详情弹窗（教师） */}
       <Modal
-        title={<span className="markdown-content"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ p: ({children}) => <>{children}</> }}>{detailModal?.title || t('discussionDetail')}</ReactMarkdown></span>}
+        title={<span className="markdown-content"><FormulaRenderer content={detailModal?.title || t('discussionDetail')} components={{ p: ({children}) => <>{children}</> }} /></span>}
         open={!!detailModal}
         onCancel={() => setDetailModal(null)}
         footer={null}
@@ -560,7 +559,7 @@ const DiscussionPage: React.FC = () => {
 
             {detailModal.description && (
               <div className="markdown-content" style={{ marginBottom: 16, color: 'var(--text-secondary)' }}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{detailModal.description}</ReactMarkdown>
+                <FormulaRenderer content={detailModal.description} />
               </div>
             )}
 

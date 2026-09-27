@@ -10,7 +10,7 @@ import {
 import {
   RobotOutlined, BarChartOutlined, DownloadOutlined,
 } from '@ant-design/icons'
-import ReactMarkdown from 'react-markdown'
+import FormulaRenderer from '../components/FormulaRenderer'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
 import { useAuthStore } from '../stores/authStore'
@@ -137,7 +137,7 @@ const ClassSummaryPage: React.FC = () => {
             </div>
             <Card style={{ background: '#f6ffed', border: '1px solid #b7eb8f' }}>
               <div className="markdown-content">
-                <ReactMarkdown>{classSummaryData.summary}</ReactMarkdown>
+                <FormulaRenderer content={classSummaryData.summary} />
               </div>
             </Card>
           </>
