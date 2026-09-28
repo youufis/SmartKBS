@@ -20,6 +20,9 @@ from backend.logger import logger
 # H1: 单次写入与单文件上限, 防止 /save 被无限追加撑爆磁盘
 _MAX_HISTORY_APPEND_BYTES = 2 * 1024 * 1024
 _MAX_HISTORY_FILE_BYTES = 20 * 1024 * 1024
+# 读取上限：整份对话可能长到几十 MB（反复追加同一文件），
+# 全量 read() 会一次性吃掉等量内存并把响应撑爆；超限只给前一段并标记截断。
+_MAX_HISTORY_READ_CHARS = 2_000_000
 
 
 router = APIRouter()
@@ -354,8 +357,11 @@ async def read_history_file(request: Request, path: str = Query(...)):
         raise HTTPException(status_code=404, detail="文件不存在")
 
     try:
-        with open(target_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        total_size = os.path.getsize(target_path)
+        with open(target_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(_MAX_HISTORY_READ_CHARS)
+            # 还能再读到一个字符，说明文件被截断了
+            truncated = bool(f.read(1))
 
         # 检测是否包含 HTML 代码块
         import re
@@ -367,6 +373,8 @@ async def read_history_file(request: Request, path: str = Query(...)):
             "filename": os.path.basename(target_path),
             "has_html": has_html,
             "html_blocks": html_blocks[:5] if has_html else [],
+            "truncated": truncated,
+            "total_size": total_size,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")

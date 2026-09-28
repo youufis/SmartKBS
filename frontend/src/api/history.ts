@@ -50,6 +50,9 @@ export async function readHistoryFile(path: string): Promise<{
   filename: string;
   has_html: boolean;
   html_blocks: string[];
+  /** 超过读取上限时只给前一段（大文件反复追加会撑到几十 MB） */
+  truncated?: boolean;
+  total_size?: number;
 }> {
   const { data } = await apiClient.get('/api/history/file', { params: { path } });
   return data;

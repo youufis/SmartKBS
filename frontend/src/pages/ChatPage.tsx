@@ -183,6 +183,9 @@ const MessageBubble: React.FC<{
   )
 }
 
+// 字节数换算成一位小数的 MB（历史文件截断提示用）
+const toMB = (bytes: number) => (bytes / 1048576).toFixed(1)
+
 const ChatPage: React.FC = () => {
   const { t } = useTranslation('chat')
   const { token } = theme.useToken()
@@ -276,6 +279,14 @@ const ChatPage: React.FC = () => {
   const [renameNode, setRenameNode] = useState<TreeNode | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleteNode, setDeleteNode] = useState<TreeNode | null>(null)
+  // 历史抽屉宽度：可拖拽并记住；窄屏直接铺满
+  const [historyWidth, setHistoryWidth] = useState(() => {
+    if (window.innerWidth < 768) return window.innerWidth
+    const saved = Number(window.localStorage.getItem('smartkb_history_drawer_width'))
+    const max = Math.max(280, window.innerWidth - 80)
+    return Math.min(Math.max(saved || 360, 280), max)
+  })
+  const historyDragRef = useRef<{ startX: number; startW: number; last: number } | null>(null)
   const [imagePreviewHtml, setImagePreviewHtml] = useState('')
   const [cameraOpen, setCameraOpen] = useState(false)
   // 多任务选择弹窗
@@ -454,6 +465,17 @@ const ChatPage: React.FC = () => {
         setHistorySelected([key]);
         setHistoryOpen(false);          // 载入后收起抽屉，直接看对话
         message.success({ content: t('historyLoaded'), key: 'history' });
+        // 大文件只载入前一段：单独一条警告，别让人以为对话少了
+        if (result.truncated) {
+          message.warning({
+            content: t('historyTruncated', {
+              loaded: toMB(new Blob([result.content || '']).size),
+              total: toMB(result.total_size || 0),
+            }),
+            key: 'historyTrunc',
+            duration: 6,
+          })
+        }
       } catch (e: unknown) {
         console.error(t('errorLoad'), e);
         const err = e as { response?: { data?: { detail?: string } }; message?: string };
@@ -490,6 +512,45 @@ const ChatPage: React.FC = () => {
       message.error(err?.response?.data?.detail || err?.message || t('deleteFailed'));
     }
   }, [loadHistoryTree, t]);
+
+  // 拖右边缘改宽度：拖拽中只更新 state，松手才落盘（避免在 setState 里写 localStorage）
+  const startHistoryResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    historyDragRef.current = { startX: e.clientX, startW: historyWidth, last: historyWidth }
+  }, [historyWidth])
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const drag = historyDragRef.current
+      if (!drag) return
+      const max = Math.max(280, window.innerWidth - 80)
+      const next = Math.min(Math.max(drag.startW + (e.clientX - drag.startX), 280), max)
+      drag.last = next
+      setHistoryWidth(next)
+    }
+    const onUp = () => {
+      const drag = historyDragRef.current
+      if (!drag) return
+      historyDragRef.current = null
+      try { window.localStorage.setItem('smartkb_history_drawer_width', String(drag.last)) } catch { /* 隐私模式忽略 */ }
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  // 窗口尺寸变化时重新夹取：窄屏铺满，宽屏不低于 280 且留出可视区
+  useEffect(() => {
+    const onResize = () => {
+      if (window.innerWidth < 768) { setHistoryWidth(window.innerWidth); return }
+      setHistoryWidth(prev => Math.min(Math.max(prev, 280), Math.max(280, window.innerWidth - 80)))
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const handleOpenHistory = useCallback(() => {
     setHistoryOpen(true);
@@ -541,6 +602,9 @@ const ChatPage: React.FC = () => {
     if (action === 'del') { setDeleteNode(node); return }
     try {
       const file = await historyApi.readHistoryFile(path)
+      if (file.truncated && (action === 'copy' || action === 'download')) {
+        message.warning(t('historyDownloadTruncated', { loaded: toMB(new Blob([file.content || '']).size) }), 6)
+      }
       if (action === 'copy') {
         await navigator.clipboard.writeText(file.content || '')
         message.success(t('copied'))
@@ -1505,10 +1569,27 @@ const ChatPage: React.FC = () => {
       <Drawer
         title={`📋 ${t('chatHistory')}`}
         placement="left"
-        size={360}
+        size={historyWidth}
         open={historyOpen}
         onClose={() => { setHistoryOpen(false); }}
       >
+        {/* 右边缘拖拽改宽度；窄屏铺满时不显示 */}
+        {historyOpen && historyWidth < window.innerWidth - 1 && (
+          <div
+            onMouseDown={startHistoryResize}
+            title={t('historyResizeHint')}
+            style={{
+              position: 'fixed', left: historyWidth - 4, top: 0,
+              width: 8, height: '100vh', cursor: 'col-resize', zIndex: 1001,
+            }}
+          >
+            <span style={{
+              position: 'absolute', top: '50%', left: 3, transform: 'translateY(-50%)',
+              width: 2, height: 36, borderRadius: 1, background: 'var(--border-color-secondary)',
+            }} />
+          </div>
+        )}
+
         {/* 工具条吸顶：列表一长就不怕按钮滚出视野 */}
         <Space orientation="vertical" size={8} style={{
           width: '100%', marginBottom: 10,
