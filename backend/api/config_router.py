@@ -590,6 +590,12 @@ async def get_multimodal_status(request: Request):
     return {"multimodal_enabled": cfg.get("ENABLE_MULTIMODAL", False)}
 
 
+# 自检接口的等待上限：必须短于前端按钮的超时（120 秒），否则浏览器先掐断，
+# 管理员看到的是 "timeout of 30000ms exceeded" 而不是"智能体侧慢/域名连不上"这类真原因。
+MODEL_TEST_TIMEOUT_SEC = 60
+APPID_TEST_TIMEOUT_SEC = 90
+
+
 @router.post("/model-test", summary="直连大模型连通性自检（管理员）")
 async def model_connectivity_test(request: Request):
     """实测「接入地址 + MODEL_NAME + API Key」直连链路是否可用。
@@ -627,7 +633,7 @@ async def model_connectivity_test(request: Request):
                 f"{base}/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json={"model": model, "messages": [{"role": "user", "content": "回复OK"}], "max_tokens": 16},
-                timeout=30,
+                timeout=MODEL_TEST_TIMEOUT_SEC,  # 连接与读取都要在 60 秒内给出结果
             )
             item["cost_ms"] = int((time.time() - t0) * 1000)
             if resp.status_code == 200:
@@ -641,7 +647,10 @@ async def model_connectivity_test(request: Request):
                 item["error"] = "HTTP " + str(resp.status_code) + ": " + resp.text[:160]
         except Exception as exc:
             item["cost_ms"] = int((time.time() - t0) * 1000)
-            item["error"] = str(exc)[:160]
+            if "Timeout" in type(exc).__name__:
+                item["error"] = f"{MODEL_TEST_TIMEOUT_SEC} 秒内无响应（连接或模型侧超时）"
+            else:
+                item["error"] = str(exc)[:160]
         results.append(item)
 
     err_text = None
@@ -670,6 +679,7 @@ async def appid_connectivity_test(request: Request):
     """
     user = get_current_user(request)
     require_admin(user)
+    import asyncio
     import time
     cfg = load_config()
     app_id = str(cfg.get("APPID", "") or "").strip()
@@ -686,9 +696,23 @@ async def appid_connectivity_test(request: Request):
         import os
         os.environ["DASHSCOPE_API_KEY"] = key
         from dashscope import Application as DashScopeApp
-        resp = DashScopeApp.call(app_id=app_id,
-                                 messages=[{"role": "user", "content": "回复OK"}],
-                                 stream=False)
+        # 智能体应用（带知识库检索 / 深度思考）实测经常要几十秒：旧写法在 async 端点里
+        # 直接同步调用，既卡住整个事件循环，又让前端 30 秒先超时，管理员只看到
+        # "timeout of 30000ms exceeded" 而拿不到真实原因。现放线程池执行并给硬上限。
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(DashScopeApp.call, app_id=app_id,
+                              messages=[{"role": "user", "content": "回复OK"}], stream=False),
+            timeout=APPID_TEST_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        return {"ok": False, "timeout": True,
+                "cost_ms": int((time.time() - t0) * 1000),
+                "error": f"智能体 {APPID_TEST_TIMEOUT_SEC} 秒内未返回（多为应用侧知识库检索或深度思考耗时）。"
+                        + "可稍后重试，或改用「直连大模型 + 知识库」链路"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}
+
+    try:
         text = None
         output = getattr(resp, "output", None)
         if isinstance(output, str):
@@ -701,10 +725,10 @@ async def appid_connectivity_test(request: Request):
         code = str(getattr(resp, "code", "") or "")
         msg = str(getattr(resp, "message", "") or "")
         return {"ok": False,
+                "cost_ms": int((time.time() - t0) * 1000),
                 "error": (code + " " + msg).strip() or "智能体返回为空（请检查应用是否已发布、知识库是否正常）"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)[:200]}
-
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:200]}
 
 @router.post("/kb-test", summary="知识库检索连通性自检（管理员）")
 async def kb_connectivity_test(request: Request):

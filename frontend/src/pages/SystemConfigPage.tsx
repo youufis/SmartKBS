@@ -1172,6 +1172,12 @@ const SystemConfigPage: React.FC = () => {
     sample?: { doc_name: string; score: number }[]
   } | null>(null)
   // 直连大模型 / APPID 智能体连通性自检（POST /api/config/model-test | /appid-test）
+  // 自检按钮单独给 120 秒：智能体侧带知识库检索/深度思考经常要几十秒，
+  // 默认 30 秒会被浏览器掐断，管理员只看到 "timeout of 30000ms exceeded"
+  const SELF_TEST_TIMEOUT = 120000
+  const selfTestErr = (err: any) => (err?.code === 'ECONNABORTED'
+    ? t('selfTestTimeout', { sec: SELF_TEST_TIMEOUT / 1000 })
+    : (err?.response?.data?.detail || err?.message || 'request failed'))
   const [modelTesting, setModelTesting] = useState(false)
   const [modelTestResult, setModelTestResult] = useState<{
     ok: boolean; cost_ms?: number; model?: string; reply?: string; error?: string
@@ -1570,10 +1576,10 @@ const SystemConfigPage: React.FC = () => {
                 <Button size="small" loading={modelTesting} onClick={async () => {
                   setModelTesting(true); setModelTestResult(null)
                   try {
-                    const { data } = await apiClient.post('/api/config/model-test')
+                    const { data } = await apiClient.post('/api/config/model-test', null, { timeout: SELF_TEST_TIMEOUT })
                     setModelTestResult(data)
                   } catch (e: any) {
-                    setModelTestResult({ ok: false, error: e?.response?.data?.detail || e.message || 'request failed' })
+                    setModelTestResult({ ok: false, error: selfTestErr(e) })
                   } finally { setModelTesting(false) }
                 }}>{t('modelTestBtn')}</Button>
               </Tooltip>
@@ -1581,10 +1587,10 @@ const SystemConfigPage: React.FC = () => {
                 <Button size="small" loading={appidTesting} onClick={async () => {
                   setAppidTesting(true); setAppidTestResult(null)
                   try {
-                    const { data } = await apiClient.post('/api/config/appid-test')
+                    const { data } = await apiClient.post('/api/config/appid-test', null, { timeout: SELF_TEST_TIMEOUT })
                     setAppidTestResult(data)
                   } catch (e: any) {
-                    setAppidTestResult({ ok: false, error: e?.response?.data?.detail || e.message || 'request failed' })
+                    setAppidTestResult({ ok: false, error: selfTestErr(e) })
                   } finally { setAppidTesting(false) }
                 }}>{t('appidTestBtn')}</Button>
               </Tooltip>
@@ -1630,10 +1636,10 @@ const SystemConfigPage: React.FC = () => {
               <Button size="small" loading={kbTesting} onClick={async () => {
                 setKbTesting(true); setKbTestResult(null)
                 try {
-                  const { data } = await apiClient.post('/api/config/kb-test')
+                  const { data } = await apiClient.post('/api/config/kb-test', null, { timeout: SELF_TEST_TIMEOUT })
                   setKbTestResult(data)
                 } catch (e: any) {
-                  setKbTestResult({ ok: false, error: e?.response?.data?.detail || e.message || 'request failed' })
+                  setKbTestResult({ ok: false, error: selfTestErr(e) })
                 } finally { setKbTesting(false) }
               }}>{t('kbTestBtn')}</Button>
               <Text type="secondary" style={{ fontSize: 12 }}>{t('kbTestHint')}</Text>
