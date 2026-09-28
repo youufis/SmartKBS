@@ -131,6 +131,8 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // 模型与端点
   { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'models', required: false },
   { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', required: false },
+  // 接入地址：专属域名优先（非必填），普通域名备用（默认已填）；两者通用，连不上自动回落
+  { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
   { key: 'QWEN_OPENAI_API_BASE', labelKey: 'field_QWEN_OPENAI_API_BASE', descKey: 'field_QWEN_OPENAI_API_BASE_desc', type: 'text', group: 'models' },
   { key: 'MODEL_NAME', labelKey: 'field_MODEL_NAME', descKey: 'field_MODEL_NAME_desc', type: 'text', group: 'models' },
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'models' },
@@ -138,7 +140,6 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
   { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', type: 'boolean', group: 'knowledgebase', required: false },
-  { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
   { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
   { key: 'KB_TOP_K', labelKey: 'field_KB_TOP_K', descKey: 'field_KB_TOP_K_desc', type: 'number', group: 'knowledgebase', required: false },
   { key: 'KB_MIN_SCORE', labelKey: 'field_KB_MIN_SCORE', descKey: 'field_KB_MIN_SCORE_desc', type: 'float', group: 'knowledgebase', required: false },
@@ -1174,6 +1175,8 @@ const SystemConfigPage: React.FC = () => {
   const [modelTesting, setModelTesting] = useState(false)
   const [modelTestResult, setModelTestResult] = useState<{
     ok: boolean; cost_ms?: number; model?: string; reply?: string; error?: string
+    host?: string; base?: string; fallback_used?: boolean
+    results?: { base: string; host: string; primary: boolean; ok: boolean; cost_ms?: number; error?: string }[]
   } | null>(null)
   const [appidTesting, setAppidTesting] = useState(false)
   const [appidTestResult, setAppidTestResult] = useState<{
@@ -1588,11 +1591,26 @@ const SystemConfigPage: React.FC = () => {
               {modelTestResult && (
                 <Alert
                   style={{ width: '100%', marginTop: 4 }}
-                  type={modelTestResult.ok ? 'success' : 'error'}
+                  type={modelTestResult.ok ? (modelTestResult.fallback_used ? 'warning' : 'success') : 'error'}
                   showIcon
                   title={modelTestResult.ok
-                    ? t('modelTestOk', { model: modelTestResult.model, reply: modelTestResult.reply, ms: modelTestResult.cost_ms })
+                    ? t('modelTestOk', { host: modelTestResult.host, reply: modelTestResult.reply, ms: modelTestResult.cost_ms })
                     : t('modelTestFail', { err: modelTestResult.error })}
+                  description={(
+                    <div style={{ fontSize: 12 }}>
+                      {modelTestResult.fallback_used && (
+                        <div>{t('modelTestFallback', { host: modelTestResult.host })}</div>
+                      )}
+                      {(modelTestResult.results || []).map(r => (
+                        <div key={r.base}>
+                          {r.ok
+                            ? t('modelTestBaseOk', { host: r.host, ms: r.cost_ms })
+                            : t('modelTestBaseFail', { host: r.host, err: r.error })}
+                          {r.primary ? '（' + t('modelTestPrimary') + '）' : '（' + t('modelTestBackup') + '）'}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 />
               )}
               {appidTestResult && (

@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSock
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from backend.config import ai_api_base
 from backend.api.dependencies import get_current_user
 from backend.api.chat_router import get_api_keys
 from backend.api.config_router import get_config_value
@@ -1365,8 +1366,7 @@ async def _understand_whiteboard_with_vision(
         from backend.utils import encode_image_to_base64, get_image_mime_type
 
         model_name = get_cfg("MODEL_VL_NAME", "qwen3-vl-plus")
-        api_base = get_cfg("QWEN_OPENAI_API_BASE",
-                           "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        api_base = ai_api_base()
 
         content = []
         # 白板上的真实图片
@@ -1654,8 +1654,7 @@ def _whiteboard_ai_vision_stream(system_prompt: str, user_prompt: str, image_pat
     from backend.utils import encode_image_to_base64, get_image_mime_type
 
     model_name = get_cfg("MODEL_VL_NAME", "qwen3-vl-plus")
-    api_base = get_cfg("QWEN_OPENAI_API_BASE",
-                       "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    api_base = ai_api_base()
 
     # 构建多模态 content 数组
     content = []

@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Request, Query, UploadFile, File, Form
 from pydantic import BaseModel
 
+from backend.config import ai_api_base
 from backend.api.config_router import get_config_value
 from backend.question_db import (
     execute_query,
@@ -1214,7 +1215,7 @@ async def extract_questions_from_image(
 
     # 调用视觉模型提取试题
     model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-plus")
-    api_base = get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    api_base = ai_api_base()
 
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     prompt_text = f"""你是一个试题提取助手。请从图片中识别并提取出所有试题。

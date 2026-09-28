@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
+from backend.config import ai_api_base
 from backend.api.config_router import get_config_value
 from backend.api.dependencies import get_current_user
 from backend.auth import get_user_role
@@ -146,7 +147,7 @@ async def upload_file_to_dashscope(file_path: str, api_key: str) -> str:
         with open(file_path, "rb") as f:
             files = {"file": f, "purpose": (None, "file-extract")}
             resp = await client.post(
-                f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/files',
+                f'{ai_api_base()}/files',
                 headers={"Authorization": f"Bearer {api_key}"},
                 files=files,
             )
@@ -220,7 +221,7 @@ class FileSummaryCache:
                 return ""
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
+                    f'{ai_api_base()}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
                         "model": get_config_value("MODEL_LONG_NAME", "qwen-long"),
@@ -244,7 +245,7 @@ class FileSummaryCache:
             encoded = encode_image_to_base64(file_path)
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
+                    f'{ai_api_base()}/chat/completions',
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={
                         "model": get_config_value("MODEL_VL_NAME", "qwen3-vl-plus"),
@@ -494,8 +495,7 @@ def _chat_event_generator(
 
         if multimodal_enabled and image_files:
             model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-            api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                        "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            api_base = ai_api_base()
             from backend.api.ai_service import call_multimodal_stream
 
             # 如果摘要已由视觉模型生成文字描述，多模态模型无需再看原图
@@ -657,7 +657,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
         # 使用同步 requests 上传文件
         with open(file_path, "rb") as f:
             file_resp = sync_requests.post(
-                f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/files',
+                f'{ai_api_base()}/files',
                 headers={"Authorization": f"Bearer {api_key}"},
                 files={"file": f, "purpose": (None, "file-extract")},
             )
@@ -677,7 +677,7 @@ def _agent_chat_document_stream(file_path: str, prompt: str, api_key: str):
         }
 
         resp = sync_requests.post(
-            f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
+            f'{ai_api_base()}/chat/completions',
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,
@@ -729,7 +729,7 @@ def _agent_chat_image_stream(file_path: str, prompt: str, api_key: str):
             "stream": True,
         }
         resp = sync_requests.post(
-            f'{get_config_value("QWEN_OPENAI_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")}/chat/completions',
+            f'{ai_api_base()}/chat/completions',
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             stream=True,

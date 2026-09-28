@@ -22,6 +22,7 @@ from backend.config import (
     TEACHERS_SUMMARY_DIR,
     ADMIN_SUMMARY_DIR,
     BASE_DIR,
+    ai_api_base,
 )
 from backend.utils import get_account_chat_history_dir, get_admin_chat_history_dir, path_within
 
@@ -879,8 +880,7 @@ async def ai_grade_task(task_id: str, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
 
-    api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    api_base = ai_api_base()
     model = get_config_value("MODEL_LONG_NAME", "qwen-long")
 
     # 4. 上传 summary 文件到 DashScope
@@ -1165,8 +1165,7 @@ async def ai_grade_single_student(task_id: str, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="API Key 未配置，请在系统配置中设置")
 
-    api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    api_base = ai_api_base()
     model = get_config_value("MODEL_LONG_NAME", "qwen-long")
 
     from backend.prompts.homework_grade import TASK_STUDENT_GRADING_PROMPT

@@ -592,16 +592,19 @@ async def get_multimodal_status(request: Request):
 
 @router.post("/model-test", summary="直连大模型连通性自检（管理员）")
 async def model_connectivity_test(request: Request):
-    """实测「QWEN_OPENAI_API_BASE + MODEL_NAME + API Key」直连链路是否可用。
+    """实测「接入地址 + MODEL_NAME + API Key」直连链路是否可用。
 
-    返回 {ok, cost_ms, model, reply} 或 {ok:false, error}，不抛异常。
+    接入地址按「业务空间专属域名 → 普通域名」逐个实测（两个域名通用），返回每个地址的
+    结果与最终生效地址；专属域名连不上而普通域名可用时会明确提示已回落，
+    免得管理员对着 getaddrinfo 猜到底是哪个域名的问题。
     """
     user = get_current_user(request)
     require_admin(user)
     import time
+    from backend.config import ai_api_bases
+
     cfg = load_config()
-    base = str(cfg.get("QWEN_OPENAI_API_BASE", "") or "").strip().rstrip("/") \
-        or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    bases = ai_api_bases()
     model = str(cfg.get("MODEL_NAME", "") or "").strip()
     key = str(cfg.get("dashscope_api_key", "") or "").strip()
     if not key:
@@ -611,24 +614,53 @@ async def model_connectivity_test(request: Request):
         return {"ok": False, "error": "API Key 未配置"}
     if not model:
         return {"ok": False, "error": "未填写 MODEL_NAME（模型与端点 → 对话模型）"}
-    t0 = time.time()
-    try:
-        import httpx
-        resp = httpx.post(
-            f"{base}/chat/completions",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": [{"role": "user", "content": "回复OK"}], "max_tokens": 16},
-            timeout=30,
-        )
-        if resp.status_code == 200:
-            d = resp.json()
-            reply = ((d.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-            return {"ok": True, "cost_ms": int((time.time() - t0) * 1000),
-                    "model": model, "reply": str(reply).strip()[:30] or "（空回复，但链路通）"}
-        return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:180]}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)[:200]}
 
+    import httpx
+    results = []
+    winner = None
+    for i, base in enumerate(bases):
+        host = base.split("//")[-1].split("/")[0]
+        item = {"base": base, "host": host, "primary": i == 0, "ok": False}
+        t0 = time.time()
+        try:
+            resp = httpx.post(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": [{"role": "user", "content": "回复OK"}], "max_tokens": 16},
+                timeout=30,
+            )
+            item["cost_ms"] = int((time.time() - t0) * 1000)
+            if resp.status_code == 200:
+                d = resp.json()
+                reply = ((d.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+                item["ok"] = True
+                item["reply"] = str(reply).strip()[:30] or "（空回复，但链路通）"
+                if winner is None:
+                    winner = item
+            else:
+                item["error"] = "HTTP " + str(resp.status_code) + ": " + resp.text[:160]
+        except Exception as exc:
+            item["cost_ms"] = int((time.time() - t0) * 1000)
+            item["error"] = str(exc)[:160]
+        results.append(item)
+
+    err_text = None
+    if winner is None:
+        err_text = "；".join("{}：{}".format(r["host"], r.get("error") or "不可用")
+                             for r in results)[:300]
+    first = results[0] if results else {}
+    win = winner or {}
+    return {
+        "ok": winner is not None,
+        "model": model,
+        "cost_ms": win.get("cost_ms"),
+        "reply": win.get("reply"),
+        "base": win.get("base") or first.get("base") or "",
+        "host": win.get("host") or first.get("host") or "",
+        "results": results,
+        "fallback_used": bool(winner and not winner.get("primary")),
+        "error": err_text,
+    }
 
 @router.post("/appid-test", summary="智能体应用连通性自检（管理员）")
 async def appid_connectivity_test(request: Request):

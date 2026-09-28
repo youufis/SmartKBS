@@ -652,7 +652,7 @@ const TaskPage: React.FC = () => {
 
           {viewTask && !viewTask.description && (
             <Alert type="warning" showIcon style={{ marginBottom: 16 }}
-              message={t('noRequirementWarning')}
+              title={t('noRequirementWarning')}
             />
           )}
 

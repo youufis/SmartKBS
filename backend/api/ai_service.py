@@ -10,6 +10,7 @@ import concurrent.futures
 from typing import Any, Optional
 
 from backend.logger import logger
+from backend.config import ai_api_base
 
 # AI 读超时统一取系统配置 AI_REQUEST_TIMEOUT（默认 300 秒）：前端各 AI 端点的
 # 专属 timeout 不应被后端硬编码的 120/180 秒反向截断，三层（前端/后端/IIS）同向对齐。
@@ -21,7 +22,76 @@ def _ai_read_timeout() -> float:
         return 300.0
 
 
-# ── 专用线程池：隔离 AI 调用线程，防止耗尽 asyncio 默认线程池 ──
+# ── 接入地址链：专属域名优先，普通域名备用（两者通用，连不上自动换）──
+def _host_of(base: str) -> str:
+    """日志里只留主机名，一眼看出是哪个域名连不上"""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(base).netloc or base
+    except Exception:
+        return base
+
+
+def _base_chain(primary: str) -> list:
+    """候选地址链：主用在前，其余按「专属 → 普通」顺序补上（去重）"""
+    from backend.config import ai_api_bases, normalize_ai_api_base
+    out = []
+    try:
+        chain = [primary] + list(ai_api_bases())
+    except Exception:
+        chain = [primary]
+    for b in chain:
+        try:
+            nb = normalize_ai_api_base(b)
+        except Exception:
+            nb = str(b or "").strip().rstrip("/")
+        if nb and nb not in out:
+            out.append(nb)
+    return out
+
+
+def _is_connect_error(exc: Exception) -> bool:
+    """DNS/连不上这类传输层错误才值得换域名重试；HTTP 4xx/5xx 与读超时不算"""
+    if type(exc).__name__ in ("ConnectError", "ConnectTimeout", "ConnectionError"):
+        return True
+    text = str(exc).lower()
+    return ("getaddrinfo" in text or "name or service not known" in text
+            or "failed to establish a new connection" in text
+            or "connection refused" in text or "nodename nor servname" in text)
+
+
+def _post_model(bases: list, payload: dict, headers: dict, timeout, stream: bool = False):
+    """依次在候选地址上 POST，只有连接层错误才换下一个；返回 (生效地址, 响应)"""
+    import requests as sync_requests
+    for idx, base in enumerate(bases):
+        try:
+            resp = sync_requests.post(
+                f"{base}/chat/completions", headers=headers, json=payload,
+                timeout=timeout, stream=stream,
+            )
+            if idx:
+                logger.warning(f"[AI] 已回落到备用接入地址: {_host_of(base)}（主用地址连接失败）")
+            return base, resp
+        except Exception as err:
+            if not _is_connect_error(err) or idx + 1 >= len(bases):
+                raise
+            logger.warning(f"[AI] {_host_of(base)} 连接失败（{err}），尝试下一个接入地址")
+    return bases[-1], None
+
+
+async def _apost_model(bases: list, client, payload: dict, headers: dict, timeout):
+    """_post_model 的异步版（httpx）"""
+    for idx, base in enumerate(bases):
+        try:
+            resp = await client.post(f"{base}/chat/completions", headers=headers, json=payload, timeout=timeout)
+            if idx:
+                logger.warning(f"[AI] 已回落到备用接入地址: {_host_of(base)}（主用地址连接失败）")
+            return base, resp
+        except Exception as err:
+            if not _is_connect_error(err) or idx + 1 >= len(bases):
+                raise
+            logger.warning(f"[AI] {_host_of(base)} 连接失败（{err}），尝试下一个接入地址")
+    return bases[-1], None
 # 限制最大 3 个并发 AI 线程，避免长时间等待的 AI 调用阻塞数据库等其他操作
 _ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
     max_workers=3,
@@ -55,8 +125,7 @@ def get_ai_config(use_agent: bool = True):
     return {
         "mode": "direct",
         "model": get_config_value("MODEL_NAME", "deepseek-v4-flash"),
-        "api_base": get_config_value("QWEN_OPENAI_API_BASE",
-                                      "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+        "api_base": ai_api_base(),
     }
 
 
@@ -229,8 +298,7 @@ def _call_agent_sync(prompt: str, api_key: str, app_id: str) -> str:
     # 降级：直接调大模型
     from backend.api.config_router import get_config_value
     model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-    api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                 "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    api_base = ai_api_base()
     return _call_model_sync(prompt, api_key, model, api_base)
 
 
@@ -268,11 +336,10 @@ def _call_model_sync(prompt: str, api_key: str, model: str, api_base: str,
                 payload["enable_thinking"] = bool(enable_thinking)
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
-            resp = sync_requests.post(
-                f"{api_base}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-                timeout=(30, _ai_read_timeout()),  # 连接30秒；读取对齐 AI_REQUEST_TIMEOUT
+            _base, resp = _post_model(
+                _base_chain(api_base), payload,
+                {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                (30, _ai_read_timeout()),  # 连接30秒；读取对齐 AI_REQUEST_TIMEOUT
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -315,8 +382,7 @@ def call_ai_sync_direct(prompt: str, api_key: str,
 
     from backend.api.config_router import get_config_value
     model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-    api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                 "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    api_base = ai_api_base()
     logger.info(f"call_ai_sync_direct: model={model}, prompt_len={len(prompt)}, "
                 f"thinking={'默认' if enable_thinking is None else enable_thinking}, "
                 f"prompt_head={prompt[:120]}")
@@ -387,16 +453,14 @@ def _call_agent_stream(prompt: str, api_key: str, app_id: str,
             logger.warning(f"智能体流式返回为空，降级到直接调模型 (app_id={app_id})")
             from backend.api.config_router import get_config_value
             model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-            api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                         "https://dashscope.aliyuncs.com/compatible-mode/v1")
+            api_base = ai_api_base()
             for chunk in _call_model_stream(prompt, api_key, model, api_base):
                 yield chunk
     except Exception as e:
         logger.error(f"智能体流式调用失败: {e}，降级到直接调模型")
         from backend.api.config_router import get_config_value
         model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-        api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                     "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        api_base = ai_api_base()
         for chunk in _call_model_stream(prompt, api_key, model, api_base):
             yield chunk
 
@@ -425,12 +489,10 @@ def _call_model_stream(prompt: str, api_key: str, model: str, api_base: str,
             if enable_thinking is not None and "qwen" in model.lower():
                 # 仅 qwen 系列支持 enable_thinking；其他模型传了会被网关拒 400
                 payload["enable_thinking"] = bool(enable_thinking)
-            resp = sync_requests.post(
-                f"{api_base}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-                stream=True,
-                timeout=_ai_read_timeout(),
+            _base, resp = _post_model(
+                _base_chain(api_base), payload,
+                {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                _ai_read_timeout(), stream=True,
             )
             if resp.status_code == 400 and json_mode:
                 logger.warning("AI 网关拒绝 response_format=json_object，降级为普通调用重试")
@@ -517,8 +579,7 @@ async def _call_agent_async(prompt: str, api_key: str, app_id: str) -> str:
         logger.error(f"智能体异步调用失败 (app_id={app_id}): {e}，降级到直接调模型")
         from backend.api.config_router import get_config_value
         model = get_config_value("MODEL_NAME", "deepseek-v4-flash")
-        api_base = get_config_value("QWEN_OPENAI_API_BASE",
-                                      "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        api_base = ai_api_base()
         return await _call_model_async(prompt, api_key, model, api_base)
     finally:
         executor.shutdown(wait=False)
@@ -554,10 +615,10 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
             if enable_thinking is not None and "qwen" in model.lower():
                 payload["enable_thinking"] = bool(enable_thinking)
             async with httpx.AsyncClient(timeout=_ai_read_timeout()) as client:
-                resp = await client.post(
-                    f"{api_base}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json=payload,
+                _base, resp = await _apost_model(
+                    _base_chain(api_base), client, payload,
+                    {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    _ai_read_timeout(),
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -582,10 +643,10 @@ async def _call_model_async(prompt: str, api_key: str, model: str, api_base: str
                     logger.warning("AI 网关拒绝 response_format=json_object，降级为普通模式重试: %s", resp.text[:200])
                     json_mode = False
                     payload.pop("response_format", None)
-                    resp = await client.post(
-                        f"{api_base}/chat/completions",
-                        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                        json=payload,
+                    _base, resp = await _apost_model(
+                        [_base], client, payload,
+                        {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                        _ai_read_timeout(),
                     )
                     if resp.status_code == 200:
                         data = resp.json()
