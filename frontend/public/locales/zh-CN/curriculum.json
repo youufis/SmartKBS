@@ -167,6 +167,7 @@
   "chapterCreated": "章节创建成功",
   "chapterDeleted": "章节已删除",
   "sortUpdated": "排序已更新",
+  "sortInProgress": "正在保存排序，请稍候…",
   "kpUpdated": "知识点更新成功",
   "kpCreated": "知识点创建成功",
   "kpDeleted": "知识点已删除",

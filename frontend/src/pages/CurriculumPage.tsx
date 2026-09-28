@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchGrades } from '../api/gradeClass'
 import { useTranslation } from 'react-i18next'
@@ -746,47 +746,41 @@ const CurriculumPage: React.FC = () => {
     }
   }
 
-  // ── 拖动排序（支持同级重排和跨层级拖动）──
+  // ── 拖动排序（同级重排 + 跨层级移动）──
+  const reorderingRef = useRef(false)
+
   const handleTreeDrop = async (info: { dragNode: DataNode; node: DataNode; dropPosition: number; dropToGap: boolean }) => {
     if (!isTeacherOrAdmin) return
-
+    if (reorderingRef.current) { message.warning(t('sortInProgress')); return }
     const { dragNode, node, dropPosition, dropToGap } = info
     const dragKey = dragNode.key as string
     const dropKey = node.key as string
-    const [dragPrefix, dragIdStr] = dragKey.split('_')
+    const [dragPrefix] = dragKey.split('_')
     const [dropPrefix] = dropKey.split('_')
-    const dragId = parseInt(dragIdStr, 10)
-
+    const dragId = parseInt(dragKey.split('_')[1], 10)
     const course = courses.find((c) => c.id === activeCourseId)
     if (!course) return
+    const roots = course.chapters || []
 
-    // ─────────────────────────────────────────────
-    // 辅助：在树中查找某个 key 所在的同级数组
-    // ─────────────────────────────────────────────
-    const findContainerByKey = (items: any[], searchKey: string): { list: any[]; parentChapterId: number | null } | null => {
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i]
-        if (`ch_${item.id}` === searchKey) {
-          return { list: items, parentChapterId: null }
-        }
+    // 容器定位：返回同级数组 + 该数组所属的父章节（顶级为 null）。
+    // 旧实现找章节时恒返回 parentChapterId=null，配合后端"必写 parent_id"，
+    // 一次同级拖动就把整组子章节拍平成顶级章。
+    const findContainer = (
+      items: any[], searchKey: string, parentId: number | null = null,
+    ): { list: any[]; parentId: number | null } | null => {
+      for (const item of items) {
+        if (`ch_${item.id}` === searchKey) return { list: items, parentId }
         if (item.children?.length) {
-          const found = findContainerByKey(item.children, searchKey)
+          const found = findContainer(item.children, searchKey, item.id)
           if (found) return found
         }
-        if (item.knowledge_points?.length) {
-          for (const kp of item.knowledge_points) {
-            if (`kp_${kp.id}` === searchKey) {
-              return { list: item.knowledge_points, parentChapterId: item.id }
-            }
-          }
+        if (searchKey.startsWith('kp_') && item.knowledge_points?.some((k: any) => `kp_${k.id}` === searchKey)) {
+          return { list: item.knowledge_points, parentId: item.id }
         }
       }
       return null
     }
 
-    // ─────────────────────────────────────────────
-    // 辅助：在树中查找某个 ID 的章节节点（递归）
-    // ─────────────────────────────────────────────
     const findChapterById = (items: any[], id: number): any | null => {
       for (const ch of items) {
         if (ch.id === id) return ch
@@ -798,78 +792,75 @@ const CurriculumPage: React.FC = () => {
       return null
     }
 
-    // ─────────────────────────────────────────────
-    // 辅助：构建排序请求并提交
-    // ─────────────────────────────────────────────
     const submitReorder = async (orderedList: curriculumApi.ReorderItem[]) => {
+      reorderingRef.current = true
       try {
         await curriculumApi.reorderNodes(orderedList)
         message.success(t('sortUpdated'))
-        loadTree()
       } catch (err: unknown) {
+        // 后端现在是"整批校验、要么全改要么都不改"，被拒时把原因原样回给教师，
+        // 不再出现"提示成功但顺序回弹"
         const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
         message.error(detail || t('operationFailed'))
-        loadTree()
+      } finally {
+        reorderingRef.current = false
+        loadTree()   // 成败都以服务端为准刷新
       }
     }
 
-    // ─────────────────────────────────────────────
-    // CASE 1: dropToGap = true — 同级间隙拖动（重排）
-    // ─────────────────────────────────────────────
+    const isCh = dragPrefix === 'ch'
+    const mkItem = (id: number, order: number, parentId: number | null): curriculumApi.ReorderItem => (
+      isCh
+        ? { type: 'chapter', id, sort_order: order, parent_id: parentId }
+        : { type: 'knowledge_point', id, sort_order: order, chapter_id: parentId }
+    )
+    const keyOf = (x: any) => (isCh ? `ch_${x.id}` : `kp_${x.id}`)
+
+    // ── CASE 1：拖到间隙 = 重排（同父级或跨父级都支持）──
     if (dropToGap) {
       if (dragPrefix !== dropPrefix) {
         message.warning(t('cannotDragDifferentType'))
         return
       }
-
-      const container = findContainerByKey(course.chapters || [], dragKey)
-      if (!container) return
-      const siblings = container.list
-
-      const fromIdx = siblings.findIndex((s: any) => {
-        const key = dragPrefix === 'ch' ? `ch_${s.id}` : `kp_${s.id}`
-        return key === dragKey
-      })
-      const toIdx = siblings.findIndex((s: any) => {
-        const key = dragPrefix === 'ch' ? `ch_${s.id}` : `kp_${s.id}`
-        return key === dropKey
-      })
-      if (fromIdx === -1 || toIdx === -1) return
-
-      const newIndex = dropPosition === -1 ? toIdx : toIdx + 1
-      const reordered = [...siblings]
-      const [moved] = reordered.splice(fromIdx, 1)
-      const adjusted = fromIdx < newIndex ? newIndex - 1 : newIndex
-      reordered.splice(adjusted, 0, moved)
-
-      const nodeType = dragPrefix === 'ch' ? 'chapter' as const : 'knowledge_point' as const
-      return submitReorder(reordered.map((s: any, i: number) => ({
-        type: nodeType,
-        id: s.id,
-        sort_order: i,
-      })))
+      const source = findContainer(roots, dragKey)
+      const target = findContainer(roots, dropKey)
+      if (!source || !target) return
+      const moved = source.list.find((x: any) => keyOf(x) === dragKey)
+      if (!moved) return
+      const sameList = source.list === target.list
+      const rest = source.list.filter((x: any) => x.id !== dragId)
+      let tgtList = sameList ? rest : [...target.list]
+      const toIdx = tgtList.findIndex((x: any) => keyOf(x) === dropKey)
+      if (toIdx < 0) {
+        // 旧实现在这里静默 return：知识点拖到别的章节的间隙时"拖了没反应"
+        message.warning(t('cannotDragDifferentType'))
+        return
+      }
+      const insertAt = dropPosition === -1 ? toIdx : toIdx + 1
+      tgtList = [...tgtList.slice(0, insertAt), moved, ...tgtList.slice(insertAt)]
+      const items: curriculumApi.ReorderItem[] = []
+      tgtList.forEach((x: any, i: number) => items.push(mkItem(x.id, i, target.parentId)))
+      if (!sameList) rest.forEach((x: any, i: number) => items.push(mkItem(x.id, i, source.parentId)))
+      return submitReorder(items)
     }
 
-    // ─────────────────────────────────────────────
-    // CASE 2: dropToGap = false — 拖入节点内部（改变层级）
-    // ─────────────────────────────────────────────
-    // 目标必须是章节节点
+    // ── CASE 2：拖进节点内部 = 改变层级 ──
     if (dropPrefix !== 'ch') {
       message.warning(t('canOnlyDragToChapter'))
       return
     }
-
     const targetChapterId = parseInt(dropKey.split('_')[1], 10)
-    const dragContainer = findContainerByKey(course.chapters || [], dragKey)
-    if (!dragContainer) return
-    const dragSiblings = dragContainer.list
+    const source = findContainer(roots, dragKey)
+    if (!source) return
+    const moved = source.list.find((x: any) => keyOf(x) === dragKey)
+    if (!moved) return
+    const rest = source.list.filter((x: any) => x.id !== dragId)
 
-    if (dragPrefix === 'ch') {
-      // ── 章节拖入章节 → 改变 parent_id ──
-      // 循环引用检查
+    if (isCh) {
+      // 章节拖入章节 → 改 parent_id（含循环引用检查）
       const wouldCycle = (parentId: number, searchId: number): boolean => {
         if (parentId === searchId) return true
-        const parent = findChapterById(course.chapters || [], parentId)
+        const parent = findChapterById(roots, parentId)
         if (!parent?.children) return false
         return parent.children.some((c: any) => c.id === searchId || wouldCycle(c.id, searchId))
       }
@@ -877,59 +868,29 @@ const CurriculumPage: React.FC = () => {
         message.warning(t('cannotDragToSelf'))
         return
       }
-
-      // 从原位置移除
-      const fromIdx = dragSiblings.findIndex((s: any) => `ch_${s.id}` === dragKey)
-      if (fromIdx === -1) return
-      const newSiblings = [...dragSiblings]
-      newSiblings.splice(fromIdx, 1)
-
+      const targetChapter = findChapterById(roots, targetChapterId)
+      const targetChildren: any[] = (targetChapter?.children || []).filter((c: any) => c.id !== dragId)
       const items: curriculumApi.ReorderItem[] = []
-      // 原同级重排
-      newSiblings.forEach((s: any, i: number) => {
-        items.push({ type: 'chapter', id: s.id, sort_order: i })
-      })
-      // 目标章节的子章节重排（保持原顺序，追加拖入节点）
-      const targetChapter = findChapterById(course.chapters || [], targetChapterId)
-      const targetChildren = targetChapter?.children || []
-      targetChildren.forEach((child: any, i: number) => {
-        items.push({ type: 'chapter', id: child.id, sort_order: i, parent_id: targetChapterId })
-      })
+      targetChildren.forEach((c: any, i: number) => items.push({ type: 'chapter', id: c.id, sort_order: i, parent_id: targetChapterId }))
       items.push({ type: 'chapter', id: dragId, sort_order: targetChildren.length, parent_id: targetChapterId })
-
+      // 原容器也要显式带上它自己的父级（顶级传 null），否则后端会保持原值不动
+      rest.forEach((c: any, i: number) => items.push({ type: 'chapter', id: c.id, sort_order: i, parent_id: source.parentId }))
       return submitReorder(items)
     }
 
-    if (dragPrefix === 'kp') {
-      // ── 知识点拖入章节 → 改变 chapter_id ──
-      // 知识点不能拖入自身所在章节（无意义）
-      if (dragContainer.parentChapterId === targetChapterId) {
-        message.info(t('kpAlreadyInChapter'))
-        return
-      }
-
-      const fromIdx = dragSiblings.findIndex((s: any) => `kp_${s.id}` === dragKey)
-      if (fromIdx === -1) return
-      const newDragSiblings = [...dragSiblings]
-      newDragSiblings.splice(fromIdx, 1)
-
-      const items: curriculumApi.ReorderItem[] = []
-      // 原同级重排（移除后的）
-      newDragSiblings.forEach((s: any, i: number) => {
-        items.push({ type: 'knowledge_point', id: s.id, sort_order: i })
-      })
-      // 目标章节知识点重排（追加拖入节点到最后）
-      const targetChapter = findChapterById(course.chapters || [], targetChapterId)
-      const targetKps = targetChapter?.knowledge_points || []
-      targetKps.forEach((kp: any, i: number) => {
-        items.push({ type: 'knowledge_point', id: kp.id, sort_order: i, chapter_id: targetChapterId })
-      })
-      items.push({ type: 'knowledge_point', id: dragId, sort_order: targetKps.length, chapter_id: targetChapterId })
-
-      return submitReorder(items)
+    // 知识点拖入章节 → 改 chapter_id
+    if (source.parentId === targetChapterId) {
+      message.info(t('kpAlreadyInChapter'))
+      return
     }
+    const targetChapter = findChapterById(roots, targetChapterId)
+    const targetKps: any[] = (targetChapter?.knowledge_points || []).filter((k: any) => k.id !== dragId)
+    const items: curriculumApi.ReorderItem[] = []
+    targetKps.forEach((k: any, i: number) => items.push({ type: 'knowledge_point', id: k.id, sort_order: i, chapter_id: targetChapterId }))
+    items.push({ type: 'knowledge_point', id: dragId, sort_order: targetKps.length, chapter_id: targetChapterId })
+    rest.forEach((k: any, i: number) => items.push({ type: 'knowledge_point', id: k.id, sort_order: i, chapter_id: source.parentId }))
+    return submitReorder(items)
   }
-
   // ── 知识点 CRUD ──
   const handleCreateKp = (chapterId: number) => {
     setEditingKp(null)

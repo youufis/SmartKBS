@@ -12,7 +12,12 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel
 
-from backend.database import execute_query_dict as execute_query, execute_insert_update, get_connection
+from backend.database import (
+    execute_query_dict as execute_query,
+    execute_insert_update,
+    get_connection,
+    get_transaction,
+)
 from backend.question_db import execute_query as q_execute_query
 from backend.api.dependencies import get_current_user
 from backend.permission_service import (
@@ -90,7 +95,8 @@ class ChapterCreate(BaseModel):
     parent_id: int | None = None
     name: str
     description: str = ""
-    sort_order: int = 0
+    # None = 排到同级末尾；显式给值才按值插入
+    sort_order: int | None = None
 
 class ChapterUpdate(BaseModel):
     name: str | None = None
@@ -106,7 +112,8 @@ class KnowledgePointCreate(BaseModel):
     learning_objectives: str = ""
     difficulty: str = "medium"
     estimated_minutes: int = 0
-    sort_order: int = 0
+    # None = 排到本章末尾；显式给值才按值插入
+    sort_order: int | None = None
 
 class KnowledgePointUpdate(BaseModel):
     name: str | None = None
@@ -1158,6 +1165,21 @@ async def get_chapter(chapter_id: int, request: Request):
 
 
 @router.post("/chapters", summary="创建章节")
+def _next_sort_order(table: str, where_sql: str, params: tuple) -> int:
+    """同级末尾序号。
+
+    新建章/节此前固定写 0：一旦该组被拖拽重排成 0..n-1，新增项就会插到最前面，
+    看起来像"添加的节跑错位置"。不显式指定序号时一律排到末尾。
+    """
+    row = execute_query_one(
+        f"SELECT MAX(sort_order) AS mx FROM {table} WHERE {where_sql}", params)
+    mx = (row or {}).get("mx")
+    try:
+        return int(mx) + 1
+    except (TypeError, ValueError):
+        return 0
+
+
 async def create_chapter(req: ChapterCreate, request: Request):
     """创建章节（教师/管理员）"""
     user = get_current_user(request)
@@ -1182,10 +1204,15 @@ async def create_chapter(req: ChapterCreate, request: Request):
             raise HTTPException(status_code=400, detail="父章节不属于该课程")
 
     now = _now()
+    sort_order = req.sort_order if req.sort_order is not None else _next_sort_order(
+        "chapters",
+        "course_id=? AND ifnull(parent_id, 0)=? AND status='active'",
+        (req.course_id, req.parent_id or 0),
+    )
     chapter_id = execute_insert_update(
         """INSERT INTO chapters (course_id, parent_id, name, description, sort_order, status, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
-        (req.course_id, req.parent_id, req.name, req.description, req.sort_order, now, now),
+        (req.course_id, req.parent_id, req.name, req.description, sort_order, now, now),
     )
     logger.info(f"用户 {user['username']} 创建章节: {req.name} (id={chapter_id})")
     return {"message": f"章节「{req.name}」创建成功", "chapter_id": chapter_id}
@@ -1388,11 +1415,13 @@ async def create_knowledge_point(req: KnowledgePointCreate, request: Request):
     _assert_can_edit_course(user, _course_of_chapter(req.chapter_id), "创建知识点")
 
     now = _now()
+    sort_order = req.sort_order if req.sort_order is not None else _next_sort_order(
+        "knowledge_points", "chapter_id=? AND status='active'", (req.chapter_id,))
     kp_id = execute_insert_update(
         """INSERT INTO knowledge_points (chapter_id, name, description, learning_objectives, difficulty, estimated_minutes, sort_order, status, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
         (req.chapter_id, req.name, req.description, req.learning_objectives,
-         req.difficulty, req.estimated_minutes, req.sort_order, now, now),
+         req.difficulty, req.estimated_minutes, sort_order, now, now),
     )
     logger.info(f"用户 {user['username']} 创建知识点: {req.name} (id={kp_id})")
     return {"message": f"知识点「{req.name}」创建成功", "kp_id": kp_id}
@@ -1794,93 +1823,106 @@ async def get_available_resources(
 # ═══════════════════════════════════════════════════════════
 
 class ReorderItem(BaseModel):
-    """排序项"""
+    """排序项：parent_id / chapter_id 只有显式传了才改，不传就是"只改序号"。"""
     type: str  # "chapter" | "knowledge_point"
     id: int
     sort_order: int
-    parent_id: int | None = None   # 章节新父级ID（None=顶层）
+    parent_id: int | None = None   # 章节新父级ID（显式传 null = 移到顶层）
     chapter_id: int | None = None  # 知识点新所属章节ID
+
+    def sets_parent(self) -> bool:
+        return "parent_id" in self.model_fields_set
+
+    def sets_chapter(self) -> bool:
+        return "chapter_id" in self.model_fields_set
+
 
 class ReorderRequest(BaseModel):
     """拖动排序请求"""
     items: list[ReorderItem]
 
+
 @router.put("/reorder", summary="拖动排序章节/知识点")
 async def reorder_nodes(req: ReorderRequest, request: Request):
-    """拖动树节点后批量更新 sort_order（教师/管理员）
-    支持同级排序和跨层级拖动（改变 parent_id / chapter_id）
+    """拖动树节点后批量更新排序（教师/管理员），支持同级重排与跨层级移动。
+
+    两条修正（都是"章节一拖就错乱"的直接原因）：
+    1. 旧实现无条件 `SET parent_id=?`，而前端同级重排只发序号，一次拖动就把整组
+       子章节的 parent_id 清成 NULL，节被拍平成顶级章；现在 parent_id/chapter_id
+       未显式传就保持库里的原值。
+    2. 旧实现逐条提交，中途被拒就留下"半套新序"（同组出现重复/断号，顺序看起来随机）；
+       现在先整批校验、再在一个事务里落库，任何一项不合格就整批拒绝、一条都不改。
     """
     user = get_current_user(request)
     if not _can_manage(user):
         raise HTTPException(status_code=403, detail="权限不足")
-
     if not req.items:
         raise HTTPException(status_code=400, detail="排序列表为空")
 
     now = _now()
-    updated = {"chapters": 0, "knowledge_points": 0}
-    skipped: list[dict[str, Any]] = []
+    plans: list[tuple[str, tuple]] = []
+    rejected: list[dict[str, Any]] = []
 
     for item in req.items:
         if item.type == "chapter":
-            # 校验章节存在
-            ch = execute_query_one("SELECT id, course_id FROM chapters WHERE id=?", (item.id,))
+            ch = execute_query_one(
+                "SELECT id, course_id, parent_id FROM chapters WHERE id=?", (item.id,))
             if not ch:
-                skipped.append({"id": item.id, "type": "chapter", "reason": "章节不存在"})
+                rejected.append({"id": item.id, "type": "chapter", "reason": "章节不存在"})
                 continue
-            # G4: 只能拖动自己任教学科/年级内的课程结构
             denial = _course_edit_denial(user, _course_brief(ch["course_id"]))
             if denial:
-                skipped.append({"id": item.id, "type": "chapter", "reason": denial})
+                rejected.append({"id": item.id, "type": "chapter", "reason": denial})
                 continue
-            # G2: 父章节必须同课程且不是自己的子孙
-            err = _assert_chapter_parent(item.id, ch["course_id"], item.parent_id)
+            # 没传 parent_id 就沿用库里的父级：只有显式传（含 null）才改层级
+            parent_id = item.parent_id if item.sets_parent() else ch["parent_id"]
+            err = _assert_chapter_parent(item.id, ch["course_id"], parent_id)
             if err:
-                logger.warning(f"排序拒绝: 章节 {item.id} -> 父 {item.parent_id}: {err}")
-                skipped.append({"id": item.id, "type": "chapter", "reason": err})
+                logger.warning(f"排序拒绝: 章节 {item.id} -> 父 {parent_id}: {err}")
+                rejected.append({"id": item.id, "type": "chapter", "reason": err})
                 continue
-            execute_insert_update(
+            plans.append((
                 "UPDATE chapters SET sort_order=?, parent_id=?, updated_at=? WHERE id=?",
-                (item.sort_order, item.parent_id if item.parent_id and item.parent_id > 0 else None, now, item.id),
-            )
-            updated["chapters"] += 1
+                (item.sort_order,
+                 parent_id if parent_id and parent_id > 0 else None, now, item.id),
+            ))
         elif item.type == "knowledge_point":
-            # 校验知识点存在
             kp = execute_query_one(
-                "SELECT kp.id, ch.course_id FROM knowledge_points kp"
-                " JOIN chapters ch ON ch.id = kp.chapter_id WHERE kp.id=?",
-                (item.id,),
-            )
+                "SELECT kp.id, kp.chapter_id, ch.course_id FROM knowledge_points kp"
+                " JOIN chapters ch ON ch.id = kp.chapter_id WHERE kp.id=?", (item.id,))
             if not kp:
-                logger.warning(f"排序跳过: 知识点 id={item.id} 不存在")
-                skipped.append({"id": item.id, "type": "knowledge_point", "reason": "知识点不存在"})
+                rejected.append({"id": item.id, "type": "knowledge_point", "reason": "知识点不存在"})
                 continue
             denial = _course_edit_denial(user, _course_brief(kp["course_id"]))
             if denial:
-                skipped.append({"id": item.id, "type": "knowledge_point", "reason": denial})
+                rejected.append({"id": item.id, "type": "knowledge_point", "reason": denial})
                 continue
-            # 校验目标章节存在
-            if item.chapter_id is not None:
-                target_ch = execute_query_one("SELECT id FROM chapters WHERE id=?", (item.chapter_id,))
-                if not target_ch:
-                    logger.warning(f"排序跳过: 目标章节 id={item.chapter_id} 不存在")
-                    continue
-                execute_insert_update(
-                    "UPDATE knowledge_points SET sort_order=?, chapter_id=?, updated_at=? WHERE id=?",
-                    (item.sort_order, item.chapter_id, now, item.id),
-                )
-            else:
-                execute_insert_update(
-                    "UPDATE knowledge_points SET sort_order=?, updated_at=? WHERE id=?",
-                    (item.sort_order, now, item.id),
-                )
-            updated["knowledge_points"] += 1
+            chapter_id = item.chapter_id if item.sets_chapter() else kp["chapter_id"]
+            if not execute_query_one("SELECT id FROM chapters WHERE id=?", (chapter_id,)):
+                rejected.append({"id": item.id, "type": "knowledge_point",
+                                 "reason": f"目标章节 {chapter_id} 不存在"})
+                continue
+            plans.append((
+                "UPDATE knowledge_points SET sort_order=?, chapter_id=?, updated_at=? WHERE id=?",
+                (item.sort_order, chapter_id, now, item.id),
+            ))
+        else:
+            rejected.append({"id": item.id, "type": item.type, "reason": "类型无效"})
 
-    if skipped:
-        logger.warning(f"用户 {user['username']} 拖动排序被拒 {len(skipped)} 项: {skipped[:5]}")
+    if rejected:
+        detail = "；".join(f"{r['id']}({r['type']}): {r['reason']}" for r in rejected[:5])
+        logger.warning(f"用户 {user['username']} 拖动排序整批未生效（{len(rejected)} 项不合格）: {detail}")
+        raise HTTPException(status_code=400, detail=f"排序未生效：{detail}")
+
+    with get_transaction() as conn:
+        cur = conn.cursor()
+        for sql, params in plans:
+            cur.execute(sql, params)
+
+    updated = {"chapters": sum(1 for sql, _ in plans if sql.startswith("UPDATE chapters")),
+               "knowledge_points": sum(1 for sql, _ in plans if sql.startswith("UPDATE knowledge_points"))}
     logger.info(f"用户 {user['username']} 拖动排序: {updated}")
-    return {"message": "排序已更新", "updated": updated, "skipped": skipped}
-
+    return {"message": "排序已更新", "updated": updated}
 
 # ═══════════════════════════════════════════════════════════
 # 学习进度
