@@ -1164,7 +1164,11 @@ async def get_chapter(chapter_id: int, request: Request):
     return _build_chapter_node(ch)
 
 
-@router.post("/chapters", summary="创建章节")
+# 同级序号留出间隔：插一条只需要改这一条的序号（取前后中值），
+# 不必像 0..n-1 那样整组重写 —— 组里少一次写入，就少一次"部分失败留下重复序号"的机会。
+SORT_GAP = 100
+
+
 def _next_sort_order(table: str, where_sql: str, params: tuple) -> int:
     """同级末尾序号。
 
@@ -1175,11 +1179,12 @@ def _next_sort_order(table: str, where_sql: str, params: tuple) -> int:
         f"SELECT MAX(sort_order) AS mx FROM {table} WHERE {where_sql}", params)
     mx = (row or {}).get("mx")
     try:
-        return int(mx) + 1
+        return int(mx) + SORT_GAP
     except (TypeError, ValueError):
         return 0
 
 
+@router.post("/chapters", summary="创建章节")
 async def create_chapter(req: ChapterCreate, request: Request):
     """创建章节（教师/管理员）"""
     user = get_current_user(request)
@@ -1230,11 +1235,15 @@ async def update_chapter(chapter_id: int, req: ChapterUpdate, request: Request):
         raise HTTPException(status_code=404, detail="章节不存在")
     _assert_can_edit_course(user, _course_of_chapter(chapter_id), "更新章节")
 
+    # parent_id 用「是否显式传了」判断，而不是「是否为 None」：
+    # 清空父级下拉框就是要移回顶级，旧写法会把 null 当成"没改"，导致移不回去。
     updates = {}
-    for field in ["name", "description", "parent_id", "sort_order", "status"]:
+    for field in ["name", "description", "sort_order", "status"]:
         val = getattr(req, field, None)
         if val is not None:
             updates[field] = val
+    if 'parent_id' in req.model_fields_set:
+        updates["parent_id"] = req.parent_id or None
 
     # G2: 改父章节时同样要求同课程且不是自己的子孙
     if "parent_id" in updates:

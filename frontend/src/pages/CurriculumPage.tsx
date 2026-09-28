@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import {
   Layout, Card, Tree, Button, message, Modal, Form, Input, Select, InputNumber,
   Tag, Space, Typography, Tooltip, Popconfirm, Row, Col, Spin, Empty, Progress,
-  Dropdown,
+  Dropdown, Collapse,
 } from 'antd'
 
 const { Sider, Content } = Layout
@@ -17,6 +17,7 @@ import {
   MenuOutlined, NodeIndexOutlined, RobotOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
   RightOutlined, DownOutlined, SettingOutlined,
+  ArrowUpOutlined, ArrowDownOutlined,
   EyeOutlined, BulbOutlined,
 } from '@ant-design/icons'
 import FormulaRenderer from '../components/FormulaRenderer'
@@ -746,12 +747,108 @@ const CurriculumPage: React.FC = () => {
     }
   }
 
-  // ── 拖动排序（同级重排 + 跨层级移动）──
+  // ── 排序公共逻辑（拖拽与上移/下移共用）──
+  // 同级序号留间隔：移动一条只需要改这一条（取前后中值），不再整组重写；
+  // 源组留个空洞无所谓，少一次批量写入就少一次"部分失败留下重复序号"的机会。
+  const SORT_GAP = 100
   const reorderingRef = useRef(false)
 
+  // 容器定位：返回同级数组 + 该数组所属的父章节（顶级为 null）
+  const findContainer = (
+    items: any[], searchKey: string, parentId: number | null = null,
+  ): { list: any[]; parentId: number | null } | null => {
+    for (const item of items) {
+      if (`ch_${item.id}` === searchKey) return { list: items, parentId }
+      if (item.children?.length) {
+        const found = findContainer(item.children, searchKey, item.id)
+        if (found) return found
+      }
+      if (searchKey.startsWith('kp_') && item.knowledge_points?.some((k: any) => `kp_${k.id}` === searchKey)) {
+        return { list: item.knowledge_points, parentId: item.id }
+      }
+    }
+    return null
+  }
+
+  const findChapterById = (items: any[], id: number): any | null => {
+    for (const ch of items) {
+      if (ch.id === id) return ch
+      if (ch.children) {
+        const found = findChapterById(ch.children, id)
+        if (found) return found
+      }
+    }
+    return null
+  }
+
+  const orderBetween = (prev: number | null, next: number | null): number => {
+    if (prev === null && next === null) return SORT_GAP
+    if (prev === null) return (next as number) - SORT_GAP
+    if (next === null) return (prev as number) + SORT_GAP
+    return Math.round(((prev as number) + (next as number)) / 2)
+  }
+
+  /** 目标顺序数组 -> 最小改动计划（缝隙不够时整组按步长重排，且只提交有变化的行） */
+  const planForMove = (
+    type: 'chapter' | 'knowledge_point',
+    targetList: any[], movedId: number, parentId: number | null,
+  ): curriculumApi.ReorderItem[] => {
+    const idx = targetList.findIndex(x => x.id === movedId)
+    if (idx < 0) return []
+    const prev = idx > 0 ? Number(targetList[idx - 1].sort_order ?? 0) : null
+    const next = idx < targetList.length - 1 ? Number(targetList[idx + 1].sort_order ?? 0) : null
+    const mk = (id: number, order: number): curriculumApi.ReorderItem => (
+      type === 'chapter'
+        ? { type: 'chapter', id, sort_order: order, parent_id: parentId }
+        : { type: 'knowledge_point', id, sort_order: order, chapter_id: parentId }
+    )
+    const want = orderBetween(prev, next)
+    const fits = (prev === null || want > prev) && (next === null || want < next)
+    if (fits) return [mk(movedId, want)]
+    const items: curriculumApi.ReorderItem[] = []
+    targetList.forEach((x, i) => {
+      const order = i * SORT_GAP
+      if (Number(x.sort_order ?? -1) !== order) items.push(mk(x.id, order))
+    })
+    return items
+  }
+
+  const submitReorder = async (orderedList: curriculumApi.ReorderItem[]) => {
+    if (!orderedList.length) return
+    if (reorderingRef.current) { message.warning(t('sortInProgress')); return }
+    reorderingRef.current = true
+    try {
+      await curriculumApi.reorderNodes(orderedList)
+      message.success(t('sortUpdated'))
+    } catch (err: unknown) {
+      // 后端"整批校验、要么全改要么都不改"，被拒时把原因原样回给教师
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      message.error(detail || t('operationFailed'))
+    } finally {
+      reorderingRef.current = false
+      loadTree()   // 无论成败都以服务端为准刷新
+    }
+  }
+
+  /** 上移 / 下移：不依赖拖拽，触屏与键盘也能精确定位 */
+  const moveSibling = async (kind: 'ch' | 'kp', node: any, dir: -1 | 1) => {
+    const course = courses.find((c) => c.id === activeCourseId)
+    if (!course) return
+    const container = findContainer(course.chapters || [], `${kind}_${node.id}`)
+    if (!container) return
+    const list = container.list
+    const idx = list.findIndex(x => x.id === node.id)
+    const to = idx + dir
+    if (idx < 0 || to < 0 || to >= list.length) return
+    const swapped = [...list]
+    swapped[idx] = list[to]
+    swapped[to] = list[idx]
+    await submitReorder(planForMove(kind === 'ch' ? 'chapter' : 'knowledge_point', swapped, node.id, container.parentId))
+  }
+
+  // ── 拖动排序（同级重排 + 跨层级移动）──
   const handleTreeDrop = async (info: { dragNode: DataNode; node: DataNode; dropPosition: number; dropToGap: boolean }) => {
     if (!isTeacherOrAdmin) return
-    if (reorderingRef.current) { message.warning(t('sortInProgress')); return }
     const { dragNode, node, dropPosition, dropToGap } = info
     const dragKey = dragNode.key as string
     const dropKey = node.key as string
@@ -761,62 +858,10 @@ const CurriculumPage: React.FC = () => {
     const course = courses.find((c) => c.id === activeCourseId)
     if (!course) return
     const roots = course.chapters || []
-
-    // 容器定位：返回同级数组 + 该数组所属的父章节（顶级为 null）。
-    // 旧实现找章节时恒返回 parentChapterId=null，配合后端"必写 parent_id"，
-    // 一次同级拖动就把整组子章节拍平成顶级章。
-    const findContainer = (
-      items: any[], searchKey: string, parentId: number | null = null,
-    ): { list: any[]; parentId: number | null } | null => {
-      for (const item of items) {
-        if (`ch_${item.id}` === searchKey) return { list: items, parentId }
-        if (item.children?.length) {
-          const found = findContainer(item.children, searchKey, item.id)
-          if (found) return found
-        }
-        if (searchKey.startsWith('kp_') && item.knowledge_points?.some((k: any) => `kp_${k.id}` === searchKey)) {
-          return { list: item.knowledge_points, parentId: item.id }
-        }
-      }
-      return null
-    }
-
-    const findChapterById = (items: any[], id: number): any | null => {
-      for (const ch of items) {
-        if (ch.id === id) return ch
-        if (ch.children) {
-          const found = findChapterById(ch.children, id)
-          if (found) return found
-        }
-      }
-      return null
-    }
-
-    const submitReorder = async (orderedList: curriculumApi.ReorderItem[]) => {
-      reorderingRef.current = true
-      try {
-        await curriculumApi.reorderNodes(orderedList)
-        message.success(t('sortUpdated'))
-      } catch (err: unknown) {
-        // 后端现在是"整批校验、要么全改要么都不改"，被拒时把原因原样回给教师，
-        // 不再出现"提示成功但顺序回弹"
-        const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        message.error(detail || t('operationFailed'))
-      } finally {
-        reorderingRef.current = false
-        loadTree()   // 成败都以服务端为准刷新
-      }
-    }
-
     const isCh = dragPrefix === 'ch'
-    const mkItem = (id: number, order: number, parentId: number | null): curriculumApi.ReorderItem => (
-      isCh
-        ? { type: 'chapter', id, sort_order: order, parent_id: parentId }
-        : { type: 'knowledge_point', id, sort_order: order, chapter_id: parentId }
-    )
     const keyOf = (x: any) => (isCh ? `ch_${x.id}` : `kp_${x.id}`)
 
-    // ── CASE 1：拖到间隙 = 重排（同父级或跨父级都支持）──
+    // CASE 1：拖到间隙 = 重排（同父级或跨父级都支持）
     if (dropToGap) {
       if (dragPrefix !== dropPrefix) {
         message.warning(t('cannotDragDifferentType'))
@@ -829,22 +874,19 @@ const CurriculumPage: React.FC = () => {
       if (!moved) return
       const sameList = source.list === target.list
       const rest = source.list.filter((x: any) => x.id !== dragId)
-      let tgtList = sameList ? rest : [...target.list]
-      const toIdx = tgtList.findIndex((x: any) => keyOf(x) === dropKey)
+      const base = sameList ? rest : target.list
+      const toIdx = base.findIndex((x: any) => keyOf(x) === dropKey)
       if (toIdx < 0) {
-        // 旧实现在这里静默 return：知识点拖到别的章节的间隙时"拖了没反应"
         message.warning(t('cannotDragDifferentType'))
         return
       }
       const insertAt = dropPosition === -1 ? toIdx : toIdx + 1
-      tgtList = [...tgtList.slice(0, insertAt), moved, ...tgtList.slice(insertAt)]
-      const items: curriculumApi.ReorderItem[] = []
-      tgtList.forEach((x: any, i: number) => items.push(mkItem(x.id, i, target.parentId)))
-      if (!sameList) rest.forEach((x: any, i: number) => items.push(mkItem(x.id, i, source.parentId)))
-      return submitReorder(items)
+      const targetList = [...base.slice(0, insertAt), moved, ...base.slice(insertAt)]
+      await submitReorder(planForMove(isCh ? 'chapter' : 'knowledge_point', targetList, dragId, target.parentId))
+      return
     }
 
-    // ── CASE 2：拖进节点内部 = 改变层级 ──
+    // CASE 2：拖进节点内部 = 改变层级（追加到该章末尾）
     if (dropPrefix !== 'ch') {
       message.warning(t('canOnlyDragToChapter'))
       return
@@ -854,10 +896,8 @@ const CurriculumPage: React.FC = () => {
     if (!source) return
     const moved = source.list.find((x: any) => keyOf(x) === dragKey)
     if (!moved) return
-    const rest = source.list.filter((x: any) => x.id !== dragId)
 
     if (isCh) {
-      // 章节拖入章节 → 改 parent_id（含循环引用检查）
       const wouldCycle = (parentId: number, searchId: number): boolean => {
         if (parentId === searchId) return true
         const parent = findChapterById(roots, parentId)
@@ -868,28 +908,17 @@ const CurriculumPage: React.FC = () => {
         message.warning(t('cannotDragToSelf'))
         return
       }
-      const targetChapter = findChapterById(roots, targetChapterId)
-      const targetChildren: any[] = (targetChapter?.children || []).filter((c: any) => c.id !== dragId)
-      const items: curriculumApi.ReorderItem[] = []
-      targetChildren.forEach((c: any, i: number) => items.push({ type: 'chapter', id: c.id, sort_order: i, parent_id: targetChapterId }))
-      items.push({ type: 'chapter', id: dragId, sort_order: targetChildren.length, parent_id: targetChapterId })
-      // 原容器也要显式带上它自己的父级（顶级传 null），否则后端会保持原值不动
-      rest.forEach((c: any, i: number) => items.push({ type: 'chapter', id: c.id, sort_order: i, parent_id: source.parentId }))
-      return submitReorder(items)
+      const targetChildren = (findChapterById(roots, targetChapterId)?.children || []).filter((c: any) => c.id !== dragId)
+      await submitReorder(planForMove('chapter', [...targetChildren, moved], dragId, targetChapterId))
+      return
     }
 
-    // 知识点拖入章节 → 改 chapter_id
     if (source.parentId === targetChapterId) {
       message.info(t('kpAlreadyInChapter'))
       return
     }
-    const targetChapter = findChapterById(roots, targetChapterId)
-    const targetKps: any[] = (targetChapter?.knowledge_points || []).filter((k: any) => k.id !== dragId)
-    const items: curriculumApi.ReorderItem[] = []
-    targetKps.forEach((k: any, i: number) => items.push({ type: 'knowledge_point', id: k.id, sort_order: i, chapter_id: targetChapterId }))
-    items.push({ type: 'knowledge_point', id: dragId, sort_order: targetKps.length, chapter_id: targetChapterId })
-    rest.forEach((k: any, i: number) => items.push({ type: 'knowledge_point', id: k.id, sort_order: i, chapter_id: source.parentId }))
-    return submitReorder(items)
+    const targetKps = (findChapterById(roots, targetChapterId)?.knowledge_points || []).filter((k: any) => k.id !== dragId)
+    await submitReorder(planForMove('knowledge_point', [...targetKps, moved], dragId, targetChapterId))
   }
   // ── 知识点 CRUD ──
   const handleCreateKp = (chapterId: number) => {
@@ -996,12 +1025,35 @@ const CurriculumPage: React.FC = () => {
     return node
   }
 
+  // 上移 / 下移：不依赖拖拽，触屏和键盘也能精确定位
+  const renderMoveButtons = (kind: 'ch' | 'kp', node: any) => (
+    <>
+      <Tooltip title={t('moveUp')}>
+        <Button
+          type="text"
+          size="small"
+          icon={<ArrowUpOutlined />}
+          onClick={(ev) => { ev.stopPropagation(); void moveSibling(kind, node, -1) }}
+        />
+      </Tooltip>
+      <Tooltip title={t('moveDown')}>
+        <Button
+          type="text"
+          size="small"
+          icon={<ArrowDownOutlined />}
+          onClick={(ev) => { ev.stopPropagation(); void moveSibling(kind, node, 1) }}
+        />
+      </Tooltip>
+    </>
+  )
+
   const renderChapterTitle = (ch: ChapterTreeNode) => (
     <Space size="small">
       <MenuOutlined style={{ fontSize: 12, opacity: 0.5 }} />
       <Typography.Text strong>{ch.name}</Typography.Text>
       {isTeacherOrAdmin && showActions && (
         <Space size="small" style={{ marginLeft: 8 }}>
+          {renderMoveButtons('ch', ch)}
           <Tooltip title={t('addSubChapter')}>
             <Button
               type="text"
@@ -1066,6 +1118,7 @@ const CurriculumPage: React.FC = () => {
       )}
       {isTeacherOrAdmin && showActions && (
         <Space size="small" style={{ marginLeft: 4 }}>
+          {renderMoveButtons('kp', kp)}
           <Tooltip title={t('cyEditKp')}>
             <Button
               type="text"
@@ -1716,9 +1769,19 @@ const CurriculumPage: React.FC = () => {
               {gradeOptions.map(g => <Option key={g} value={g}>{g}</Option>)}
             </Select>
           </Form.Item>
-          <Form.Item name="sort_order" label={t('sortOrder')}>
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'advanced',
+              label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('advancedOptions')}</Typography.Text>,
+              children: (
+                <Form.Item name="sort_order" label={t('sortOrder')} style={{ marginBottom: 0 }}>
+                  <InputNumber min={0} style={{ width: '100%' }} placeholder={t('sortOrderAutoHint')} />
+                </Form.Item>
+              ),
+            }]}
+          />
         </Form>
       </Modal>
 
@@ -1754,9 +1817,19 @@ const CurriculumPage: React.FC = () => {
           <Form.Item name="description" label={t('description')}>
             <TextArea rows={2} />
           </Form.Item>
-          <Form.Item name="sort_order" label={t('cySortOrder')}>
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'advanced',
+              label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('advancedOptions')}</Typography.Text>,
+              children: (
+                <Form.Item name="sort_order" label={t('cySortOrder')} style={{ marginBottom: 0 }}>
+                  <InputNumber min={0} style={{ width: '100%' }} placeholder={t('sortOrderAutoHint')} />
+                </Form.Item>
+              ),
+            }]}
+          />
         </Form>
       </Modal>
 
@@ -1795,9 +1868,19 @@ const CurriculumPage: React.FC = () => {
           <Form.Item name="estimated_minutes" label={t('estimatedMinutes')}>
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="sort_order" label={t('sortOrder')}>
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
+          <Collapse
+            ghost
+            size="small"
+            items={[{
+              key: 'advanced',
+              label: <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('advancedOptions')}</Typography.Text>,
+              children: (
+                <Form.Item name="sort_order" label={t('sortOrder')} style={{ marginBottom: 0 }}>
+                  <InputNumber min={0} style={{ width: '100%' }} placeholder={t('sortOrderAutoHint')} />
+                </Form.Item>
+              ),
+            }]}
+          />
         </Form>
       </Modal>
       {/* ── AI 生成课程弹窗 ── */}
