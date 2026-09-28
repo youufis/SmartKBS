@@ -183,8 +183,10 @@ export interface AiPracticeTheme {
 }
 
 /** AI 生成练习（异步任务） */
-export async function generateAiPractice(kpId: number, theme?: string): Promise<{ task_id: string; message: string }> {
-  const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`, { theme });
+export async function generateAiPractice(kpId: number, opts?: {
+  theme?: string; topic?: string; subject?: string; grade?: string;
+}): Promise<{ task_id: string; message: string }> {
+  const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}`, opts || {});
   return data;
 }
 

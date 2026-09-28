@@ -344,8 +344,12 @@ const CurriculumPage: React.FC = () => {
     setPracticeDone(null)
     setPracticeHtmlUrl('')
     try {
+      // 教师手改的知识点/学科/年级必须发出去，否则后端只会按课程里的知识点名出题
       const { data } = await apiClient.post(`/api/curriculum/ai-practice/${selectedKp.id}`, {
         theme: practiceTheme || undefined,
+        topic: practiceTopic.trim() || undefined,
+        subject: practiceSubject || undefined,
+        grade: practiceGrade || undefined,
       })
       message.info(t('aiGeneratingPractice'))
       const result = await pollAiTask(data.task_id, 180000)
@@ -501,7 +505,11 @@ const CurriculumPage: React.FC = () => {
       // 1. 多渠道搜索题库（knowledge_points + question_text 双重匹配）
       // 2. AI 补全差额（最多10题）
       // 3. 去重合并、创建练习、生成HTML
-      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/smart-generate`, null, { timeout: 180000 })
+      const { data } = await apiClient.post(`/api/curriculum/ai-practice/${kpId}/smart-generate`, {
+        topic: practiceTopic.trim() || undefined,
+        subject: practiceSubject || undefined,
+        grade: practiceGrade || undefined,
+      }, { timeout: 180000 })
       if (data.file_url) {
         setPracticeHtmlUrl(data.file_url)
         setMixedAiQuestions([])

@@ -2755,6 +2755,18 @@ def _ai_strict_parse() -> bool:
         return True
 
 
+def _practice_overrides(body: dict) -> tuple[str, str, str]:
+    """读练习弹窗里教师手改的出题知识点 / 学科 / 年级。
+
+    这三个输入框此前只填了前端 state，请求里根本没带，教师把「知识复习」改成
+    「结构及其设计」也照样按课程里的旧名出题——改动的输入被静默丢弃。
+    """
+    topic = str(body.get("topic", "") or "").strip()[:80]
+    subject = str(body.get("subject", "") or "").strip()[:40]
+    grade = str(body.get("grade", "") or "").strip()[:40]
+    return topic, subject, grade
+
+
 @router.post("/ai-practice/{kp_id}")
 async def ai_generate_practice(kp_id: int, request: Request):
     """[教师] AI 根据知识点生成10道单选题 + 创建练习任务 + 生成HTML答题页面"""
@@ -2769,9 +2781,10 @@ async def ai_generate_practice(kp_id: int, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
-    # 读取请求体（可选主题）
+    # 读取请求体：theme 是答题页视觉主题；topic/subject/grade 是教师手改的出题参数
     body = await request.json() if request.headers.get("content-type") else {}
     theme = (body.get("theme", "") or "").strip()
+    topic, subject_ov, grade_ov = _practice_overrides(body)
 
     # 获取知识点信息
     kp_rows = execute_query(
@@ -2793,19 +2806,28 @@ async def ai_generate_practice(kp_id: int, request: Request):
     from backend.question_db import execute_insert as q_insert, execute_update as q_update
     from backend.config import BASE_DIR
 
-    subject = kp.get("subject") or kp["course_name"] or ""
+    subject = subject_ov or kp.get("subject") or kp["course_name"] or ""
+    # 教师手填的知识点优先：课程里那条笼统的名字（如「知识复习」）往往不是他要的主题
+    kp_name = (topic or kp["name"]).strip()
     difficulty_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
     difficulty_desc = difficulty_map.get(kp.get("difficulty", "medium"), "中等")
 
     def _safe(s):
         return str(s or "").replace('{', '{{').replace('}', '}}')
 
+    hints = []
+    if topic:
+        hints.append(f"教师指定的出题主题：{topic}（以它为准，课程里的知识点名只作范围参考）")
+    if grade_ov:
+        hints.append(f"适用年级：{grade_ov}")
+    kp_desc = "\n".join(hints + [kp.get("description", "") or ""]).strip()
+
     prompt = PRACTICE_SINGLE_CHOICE_PROMPT.format(
         subject=_safe(subject),
         course_name=_safe(kp["course_name"]),
         chapter_name=_safe(kp["chapter_name"]),
-        knowledge_point=_safe(kp["name"]),
-        kp_description=_safe(kp.get("description", "")),
+        knowledge_point=_safe(kp_name),
+        kp_description=_safe(kp_desc),
         difficulty_desc=_safe(difficulty_desc),
     )
 
@@ -2816,7 +2838,6 @@ async def ai_generate_practice(kp_id: int, request: Request):
             logger.info(f"AI 练习开始生成: kp_id={kp_id}, kp_name={kp['name']}")
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            kp_name = kp["name"]
 
             # ══════════════════════════════════════════════════════════
             # 第1步：多渠道搜索题库，优先复用已有题目
@@ -2829,7 +2850,7 @@ async def ai_generate_practice(kp_id: int, request: Request):
                 kp_name=kp_name, kp_id=kp_id, subject=subject,
                 types=("single",), count=10, seed="ai_practice:%s" % kp_id,
             )
-            _log_audit("ai_practice(kp=%s)" % kp_id, _bank_audit)
+            _log_audit("ai_practice(kp=%s%s)" % (kp_id, (" topic=%s" % topic) if topic else ""), _bank_audit)
 
             # 解析 JSON 字段
             for q in bank_questions:
@@ -3061,7 +3082,8 @@ async def ai_generate_practice(kp_id: int, request: Request):
 
             # 生成 HTML 答题页面（AI练习独立存储，不创建 practice_sessions）
             _save_practice_key(kp_id, [q.get("id") for q in final_questions if q.get("id")])
-            html_content = _generate_practice_html(kp, final_questions, session_id=0, subject=subject, kp_id=kp_id, theme=theme)
+            html_content = _generate_practice_html({**kp, "name": kp_name}, final_questions,
+                                     session_id=0, subject=subject, kp_id=kp_id, theme=theme)
             html_dir = get_account_html_dir(username)
             os.makedirs(html_dir, exist_ok=True)
             safe_name = _safe_artifact_name(kp["name"])
@@ -3758,6 +3780,10 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
     if not api_key:
         raise HTTPException(status_code=400, detail="未配置 API Key")
 
+    # 教师手改的出题参数（与 /ai-practice 同一套语义）
+    body = await request.json() if request.headers.get("content-type") else {}
+    topic, subject_ov, grade_ov = _practice_overrides(body)
+
     # ── 获取知识点信息 ──
     kp_rows = execute_query(
         """SELECT kp.id, kp.name, kp.description, kp.learning_objectives, kp.difficulty,
@@ -3772,8 +3798,14 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         raise HTTPException(status_code=404, detail="知识点不存在")
     kp = kp_rows[0]
 
-    subject = kp.get("subject") or kp["course_name"] or ""
-    kp_name = kp["name"]
+    subject = subject_ov or kp.get("subject") or kp["course_name"] or ""
+    kp_name = (topic or kp["name"]).strip()
+    _hints = []
+    if topic:
+        _hints.append(f"教师指定的出题主题：{topic}（以它为准，课程里的知识点名只作范围参考）")
+    if grade_ov:
+        _hints.append(f"适用年级：{grade_ov}")
+    kp_desc = "\n".join(_hints + [kp.get("description", "") or ""]).strip()
 
     # ── 第1步：多渠道搜索题库 ──
     from backend.question_db import execute_query as q_exec, execute_insert as q_insert, execute_update as q_update
@@ -3787,7 +3819,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         kp_name=kp_name, kp_id=kp_id, subject=subject,
         types=("single",), count=10, seed="smart_practice:%s" % kp_id,
     )
-    _log_audit("smart_practice(kp=%s)" % kp_id, _bank_audit)
+    _log_audit("smart_practice(kp=%s%s)" % (kp_id, (" topic=%s" % topic) if topic else ""), _bank_audit)
 
     # 解析 JSON 字段
     for q in bank_questions:
@@ -3833,14 +3865,14 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
                 if gap <= 0:
                     break
 
-                ai_role = build_ai_role(subject=subject, grade=kp.get('grade', ''), role_type="expert")
+                ai_role = build_ai_role(subject=subject, grade=kp.get("grade") or grade_ov or "", role_type="expert")
                 smart_prompt = f"""{ai_role}请根据以下知识点，生成{gap}道单项选择题（每题4个选项），用于学生课后练习巩固。
 
 ## 课程信息
 - 课程名称：{_safe(kp['course_name'])}
 - 章节名称：{_safe(kp['chapter_name'])}
 - 知识点：{_safe(kp_name)}
-- 知识点描述：{_safe(kp.get('description', ''))}
+- 知识点描述：{_safe(kp_desc)}
 - 难度：{_safe(difficulty_desc)}
 
 ## 出题要求
@@ -4046,7 +4078,7 @@ async def ai_practice_smart_generate(kp_id: int, request: Request):
         raise HTTPException(status_code=500, detail="创建练习任务失败")
 
     _save_practice_key(kp_id, [q.get("id") for q in final_questions if q.get("id")])  # G3
-    html_content = _generate_practice_html(kp, final_questions, session_id, subject, kp_id)
+    html_content = _generate_practice_html({**kp, "name": kp_name}, final_questions, session_id, subject, kp_id)
     from backend.utils import get_account_html_dir
     from backend.config import BASE_DIR
     html_dir = get_account_html_dir(username)
