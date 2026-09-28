@@ -992,7 +992,7 @@ Git-based online incremental upgrade system:
 - 🗂 **Chat history rebuilt**: the list shows a real title and message count instead of a timestamp filename, grouped by today / yesterday / this week / month, with title and content search, hover preview, a row menu (open, preview, copy, download, rename, delete) and a confirm before replacing the current chat; the index is reconciled against disk so previously invisible entries reappear
 - 📊 **Cross-activity summary export**: scores and completion across exams, quizzes, homework, practice, quick quizzes and quests, filtered by grade, class, student, activity type or date range, exported as a four-sheet Excel or CSV; admins cover the school, teachers only their own activities and students
 - 🧩 **Class management and details**: user management shows the headcount and teacher assignment per class and cleans up empty shell classes (protected when students or assignments remain); grade filters only list grades that really have students; CSV no longer carries stray invisible characters
-- 🧭 **Chapter ordering fixed**: dragging no longer flattens child chapters, cross-chapter gap drops work, and a batch is validated then applied atomically; new `tools/fix_curriculum_order.py` audits and renumbers legacy ordering (report-only by default, writes with `--apply`)
+- 🧭 **Chapter ordering fixed**: dragging no longer flattens child chapters, cross-chapter gap drops work, and a batch is validated then applied atomically; a companion audit script renumbers legacy ordering and flags suspicious hierarchy (report-only by default, writes with `--apply`)
 - ⚠️ **Breaking changes**: none (data format upgrades automatically at startup)
 
 ### v8.3.0 (2026-09-26)
