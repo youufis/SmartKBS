@@ -645,9 +645,9 @@ const SkillManagePanel: React.FC = () => {
         footer={null}
         width={720}
       >
-        {statsLoading || !stats ? (
+        {statsLoading ? (
           <Spin style={{ display: 'block', margin: '24px auto' }} />
-        ) : stats.total_injections === 0 ? (
+        ) : !stats || stats.total_injections === 0 ? (
           <Alert type="info" showIcon title={t('skillStatsEmpty')} />
         ) : (
           <>
