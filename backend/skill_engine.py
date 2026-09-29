@@ -65,6 +65,32 @@ class SkillDoc:
 # YAML 解析（轻量级，不依赖 PyYAML）
 # ═══════════════════════════════════════════════
 
+def _coerce_value(raw: str) -> Any:
+    """把 YAML 标量/内联列表/内联对象字符串转成 Python 值（顶层与嵌套共用）"""
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        return raw[1:-1]
+    if raw and raw[0] == "[" and raw[-1] == "]":
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return [x.strip().strip("'\"") for x in raw[1:-1].split(",") if x.strip()]
+    if raw and raw[0] == "{" and raw[-1] == "}":
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return raw
+    low = raw.lower()
+    if low in ("true", "yes"):
+        return True
+    if low in ("false", "no"):
+        return False
+    if re.match(r"^-?\d+$", raw):
+        return int(raw)
+    if re.match(r"^-?\d+\.\d+$", raw):
+        return float(raw)
+    return raw
+
+
 def _parse_yaml_frontmatter(text: str) -> tuple[dict[str, Any], str, Optional[str]]:
     """解析 YAML 前件和 Markdown 正文
 
@@ -86,101 +112,43 @@ def _parse_yaml_frontmatter(text: str) -> tuple[dict[str, Any], str, Optional[st
     yaml_text = text[3:end_idx].strip()
     markdown_body = text[end_idx + 3:].strip()
 
-    # 逐行解析简单的 YAML（仅支持 skill.md 需要的子集）
-    yaml_dict = {}
+    # 逐行解析 YAML 子集：顶层 key: value、空值键后的嵌套 key: value（如 compose:）、
+    # 顶层块列表（- item）。引号/内联 JSON/布尔/数字的转换与旧实现一致。
+    yaml_dict: dict[str, Any] = {}
     error = None
-    current_key = None
-    current_list = None
-    list_indent = -1
+    current_key: Optional[str] = None
 
     for line in yaml_text.split("\n"):
-        # 忽略空行和注释
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
 
-        # 检测列表项
-        list_match = re.match(r"^(\s+)-\s+(.+)$", line)
-        if list_match:
-            indent = len(list_match.group(1))
-            value = list_match.group(2).strip()
-            if current_key and indent > list_indent:
-                if current_list is not None:
-                    current_list.append(value)
-                else:
-                    current_list = [value]
-                    yaml_dict[current_key] = current_list
-                    list_indent = indent
-            else:
-                # 新列表开始
-                current_list = [value]
-                # 找前面的 key
-                for k, v in list(yaml_dict.items()):
-                    if isinstance(v, list) and v is not current_list:
-                        current_list = None
-                continue
-        else:
-            current_list = None
-            list_indent = -1
+        indent = len(line) - len(line.lstrip())
+        kv = re.match(r"^([A-Za-z_][\w-]*)\s*:\s*(.*)$", stripped)
 
-        # 检测 key: value
-        kv_match = re.match(r"^(\w[\w_-]*)\s*:\s*(.*)$", line)
-        if kv_match:
-            current_key = kv_match.group(1)
-            raw_value = kv_match.group(2).strip()
+        # 顶层 key: value（含空值 → 占位 dict，供后续嵌套写入）
+        if kv and indent == 0:
+            current_key = kv.group(1)
+            raw = kv.group(2).strip()
+            yaml_dict[current_key] = {} if raw == "" else _coerce_value(raw)
+            continue
 
-            # 处理引号
-            if raw_value.startswith('"') and raw_value.endswith('"'):
-                raw_value = raw_value[1:-1]
-            elif raw_value.startswith("'") and raw_value.endswith("'"):
-                raw_value = raw_value[1:-1]
+        # 嵌套 key: value（仅当上级是空值键形成的 dict 时生效，如 compose: 下的 priority）
+        if kv and indent > 0 and current_key is not None and isinstance(yaml_dict.get(current_key), dict):
+            yaml_dict[current_key][kv.group(1)] = _coerce_value(kv.group(2).strip())
+            continue
 
-            # 处理嵌套结构（优先）
-            nested_match = re.match(r"^\{(\w[\w_-]*)\s*:\s*(.+)\}$", line)
-            if nested_match:
-                # 简单嵌套对象
-                pass
+        # 顶层块列表项：- item
+        if indent > 0 and stripped.startswith("- ") and current_key is not None:
+            item = _coerce_value(stripped[2:].strip())
+            cur = yaml_dict.get(current_key)
+            if isinstance(cur, dict) and not cur:
+                yaml_dict[current_key] = [item]
+            elif isinstance(cur, list):
+                cur.append(item)
+            continue
 
-            # 尝试 JSON 解析（用于复杂值）
-            if raw_value and raw_value[0] in ("[", "{"):
-                try:
-                    yaml_dict[current_key] = json.loads(raw_value)
-                    continue
-                except json.JSONDecodeError:
-                    pass
-
-            # 布尔值
-            if raw_value.lower() in ("true", "yes"):
-                yaml_dict[current_key] = True
-            elif raw_value.lower() in ("false", "no"):
-                yaml_dict[current_key] = False
-            # 数字
-            elif raw_value.isdigit():
-                yaml_dict[current_key] = int(raw_value)
-            elif re.match(r"^\d+\.\d+$", raw_value):
-                yaml_dict[current_key] = float(raw_value)
-            elif raw_value == "" or raw_value is None:
-                yaml_dict[current_key] = ""
-            else:
-                yaml_dict[current_key] = raw_value
-
-            # 处理内联列表
-            if isinstance(yaml_dict.get(current_key), str):
-                v = yaml_dict[current_key]
-                if v.startswith("[") and v.endswith("]"):
-                    try:
-                        yaml_dict[current_key] = json.loads(v)
-                    except json.JSONDecodeError:
-                        yaml_dict[current_key] = [x.strip().strip("'\"") for x in v[1:-1].split(",") if x.strip()]
-
-        # 检测多行字符串（缩进内容）
-        elif current_key and stripped and not line.startswith(" "):
-            # 新 key 开始，之前的 key 可能是多行
-            pass
-
-    # 后处理：修正列表的缩进识别
-    # 递归处理嵌套字典
-    _deep_parse(yaml_dict)
+        # 其余行（多行文本等）忽略，与旧行为一致
 
     return yaml_dict, markdown_body, error
 
