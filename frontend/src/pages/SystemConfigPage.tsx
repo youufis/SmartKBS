@@ -42,7 +42,7 @@ interface ConfigField {
   key: string
   labelKey: string
   descKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle' | 'scene_map'
   group: string
   required?: boolean
   placeholderKey?: string
@@ -139,6 +139,8 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'models' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'text', group: 'models' },
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
+  // 技能场景映射：按 AI 场景裁剪实际注入的技能（后端 skill_engine 消费；空映射=全部场景默认行为）
+  { key: 'skill_scene_map', labelKey: 'field_skill_scene_map', descKey: 'field_skill_scene_map_desc', type: 'scene_map', group: 'models', required: false },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
   { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', type: 'boolean', group: 'knowledgebase', required: false },
   { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
@@ -244,12 +246,99 @@ const normVal = (v: unknown): string => {
   if (v === undefined || v === null || v === '') return ''
   if (typeof v === 'boolean') return v ? '1' : '0'
   if (Array.isArray(v)) return v.join(',')
+  if (typeof v === 'object') return JSON.stringify(v)
   return String(v)
 }
 
 // ═══════════════════════════════════════════════
 //  技能管理 Tab 组件（必须定义在组件外部，避免渲染时重复创建）
 // ═══════════════════════════════════════════════
+
+// ── 技能场景映射编辑器（Form.Item 受控：value/onChange 由表单注入）──
+interface SceneRule { include?: string[]; exclude?: string[] }
+type SceneMapValue = Record<string, SceneRule>
+
+const SceneMapEditor: React.FC<{
+  value?: SceneMapValue
+  onChange?: (v: SceneMapValue) => void
+}> = ({ value, onChange }) => {
+  const { t } = useTranslation('system')
+  const [skills, setSkills] = useState<{ name: string; display_name: string }[]>([])
+  const [rows, setRows] = useState<{ scene: string; include: string[]; exclude: string[] }[]>([])
+  const lastEmitted = useRef<string>('')
+
+  useEffect(() => {
+    fetchSkills().then(d => setSkills(d.skills.map(s => ({ name: s.name, display_name: s.display_name })))).catch(() => { /* 选项拉取失败不阻塞编辑 */ })
+  }, [])
+
+  // 外部值变化(加载/放弃修改)时重建行；自己 emit 的回声跳过，避免打断正在编辑的行
+  useEffect(() => {
+    const cur = JSON.stringify(value ?? {})
+    if (cur !== lastEmitted.current) {
+      setRows(Object.entries(value ?? {}).map(([scene, r]) => ({ scene, include: r?.include ?? [], exclude: r?.exclude ?? [] })))
+      lastEmitted.current = cur
+    }
+  }, [value])
+
+  const emit = (rs: { scene: string; include: string[]; exclude: string[] }[]) => {
+    const obj: SceneMapValue = {}
+    for (const r of rs) {
+      const key = r.scene.trim()
+      if (!key) continue
+      const rule: SceneRule = {}
+      if (r.include.length) rule.include = r.include
+      if (r.exclude.length) rule.exclude = r.exclude
+      obj[key] = rule
+    }
+    lastEmitted.current = JSON.stringify(obj)
+    onChange?.(obj)
+  }
+
+  const update = (i: number, patch: Partial<{ scene: string; include: string[]; exclude: string[] }>) => {
+    const rs = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
+    setRows(rs); emit(rs)
+  }
+  const remove = (i: number) => { const rs = rows.filter((_, j) => j !== i); setRows(rs); emit(rs) }
+  const add = () => setRows([...rows, { scene: '', include: [], exclude: [] }])
+
+  const skillOptions = skills.map(s => ({ value: s.name, label: `${s.display_name} (${s.name})` }))
+
+  return (
+    <div>
+      {rows.map((r, i) => (
+        <Space key={i} style={{ display: 'flex', marginBottom: 8 }} align='start'>
+          <Input
+            placeholder={t('sceneMapScene')}
+            value={r.scene}
+            onChange={e => update(i, { scene: e.target.value })}
+            style={{ width: 180 }}
+            maxLength={60}
+          />
+          <Select
+            mode="multiple" allowClear showSearch optionFilterProp="label"
+            placeholder={t('sceneMapExclude')}
+            value={r.exclude}
+            onChange={v => update(i, { exclude: v })}
+            options={skillOptions}
+            style={{ minWidth: 240, flex: 1 }}
+            maxTagCount="responsive"
+          />
+          <Select
+            mode="multiple" allowClear showSearch optionFilterProp="label"
+            placeholder={t('sceneMapInclude')}
+            value={r.include}
+            onChange={v => update(i, { include: v })}
+            options={skillOptions}
+            style={{ minWidth: 180 }}
+            maxTagCount="responsive"
+          />
+          <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} />
+        </Space>
+      ))}
+      <Button size="small" type="dashed" block onClick={add}>+ {t('sceneMapAdd')}</Button>
+    </div>
+  )
+}
 
 const TYPE_COLORS: Record<string, string> = {
   core: 'blue',
@@ -1616,6 +1705,14 @@ const SystemConfigPage: React.FC = () => {
                   <Checkbox>
                     {t('multimodalCheckbox')}
                   </Checkbox>
+                </Form.Item>
+              ) : field.type === 'scene_map' ? (
+                <Form.Item
+                  name={field.key}
+                  label={getLabelNode(field)}
+                  extra={getDesc(field)}
+                >
+                  <SceneMapEditor />
                 </Form.Item>
               ) : (
                 <Form.Item

@@ -1074,5 +1074,11 @@
   "skillStatsScenesCol": "Scenes",
   "skillStatsEmpty": "No usage data yet (recorded automatically after skill injection)",
   "placeholder_ORG_NAME": "e.g. Sunshine City Experimental High School",
-  "placeholder_APPID": "e.g. 3f2a…b91c (32-hex)"
+  "placeholder_APPID": "e.g. 3f2a…b91c (32-hex)",
+  "field_skill_scene_map": "Skill scene mapping",
+  "field_skill_scene_map_desc": "Trim injected skills per AI scene: Exclude removes the selected skills from that scene; Include-only keeps only the selected ones (both empty = no limit). Scenes not listed keep default behavior.",
+  "sceneMapScene": "Scene key, e.g. chat / quiz",
+  "sceneMapExclude": "Excluded skills (optional)",
+  "sceneMapInclude": "Include only (optional)",
+  "sceneMapAdd": "Add scene mapping"
 }

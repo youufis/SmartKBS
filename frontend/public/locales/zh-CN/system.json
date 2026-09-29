@@ -1074,5 +1074,11 @@
   "skillStatsScenesCol": "出现场景",
   "skillStatsEmpty": "暂无统计数据（技能注入发生后自动记录）",
   "placeholder_ORG_NAME": "例如：XX市实验中学",
-  "placeholder_APPID": "例如：3f2a…b91c（32 位十六进制）"
+  "placeholder_APPID": "例如：3f2a…b91c（32 位十六进制）",
+  "field_skill_scene_map": "技能场景映射",
+  "field_skill_scene_map_desc": "按 AI 场景裁剪实际注入的技能：「排除」=该场景不注入所选技能；「仅保留」=只注入所选技能（两者都留空=该场景不限制）。未列出的场景保持默认行为。",
+  "sceneMapScene": "场景标识，如 chat / quiz",
+  "sceneMapExclude": "排除技能（可选）",
+  "sceneMapInclude": "仅保留（可选）",
+  "sceneMapAdd": "添加场景映射"
 }
