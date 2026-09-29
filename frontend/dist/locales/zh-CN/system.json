@@ -1072,5 +1072,7 @@
   "skillStatsCharsCol": "字符",
   "skillStatsLastUsed": "最近使用",
   "skillStatsScenesCol": "出现场景",
-  "skillStatsEmpty": "暂无统计数据（技能注入发生后自动记录）"
+  "skillStatsEmpty": "暂无统计数据（技能注入发生后自动记录）",
+  "placeholder_ORG_NAME": "例如：XX市实验中学",
+  "placeholder_APPID": "例如：3f2a…b91c（32 位十六进制）"
 }

@@ -1072,5 +1072,7 @@
   "skillStatsCharsCol": "Chars",
   "skillStatsLastUsed": "Last used",
   "skillStatsScenesCol": "Scenes",
-  "skillStatsEmpty": "No usage data yet (recorded automatically after skill injection)"
+  "skillStatsEmpty": "No usage data yet (recorded automatically after skill injection)",
+  "placeholder_ORG_NAME": "e.g. Sunshine City Experimental High School",
+  "placeholder_APPID": "e.g. 3f2a…b91c (32-hex)"
 }

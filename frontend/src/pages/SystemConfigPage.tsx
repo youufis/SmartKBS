@@ -113,8 +113,8 @@ const MANAGED_ELSEWHERE_KEYS = ['enabled_skills', 'TITLE_CONFIG', 'SUBJECT_TITLE
 const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // ══ ① 基础与内容 ══
   // 品牌信息
-  { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', type: 'text', group: 'brand' },
-  { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', required: false },
+  { key: 'AGENT_EDITION', labelKey: 'field_AGENT_EDITION', descKey: 'field_AGENT_EDITION_desc', type: 'text', group: 'brand', required: false },
+  { key: 'ORG_NAME', labelKey: 'field_ORG_NAME', descKey: 'field_ORG_NAME_desc', type: 'text', group: 'brand', required: false, placeholderKey: 'placeholder_ORG_NAME' },
   // 课程与题型
   { key: 'SUBJECTS', labelKey: 'field_SUBJECTS', descKey: 'field_SUBJECTS_desc', type: 'tags', group: 'curriculum' },
   { key: 'QUESTION_TYPES', labelKey: 'field_QUESTION_TYPES', descKey: 'field_QUESTION_TYPES_desc', type: 'question_types', group: 'curriculum' },
@@ -130,7 +130,7 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'dashscope_api_key', labelKey: 'field_dashscope_api_key', descKey: 'field_dashscope_api_key_desc', type: 'password', group: 'credentials' },
   { key: 'AI_REQUEST_TIMEOUT', labelKey: 'field_AI_REQUEST_TIMEOUT', descKey: 'field_AI_REQUEST_TIMEOUT_desc', type: 'number', group: 'credentials', unitKey: 'unitSecond' },
   // 模型与端点
-  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'models', required: false },
+  { key: 'APPID', labelKey: 'field_APPID', descKey: 'field_APPID_desc', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_APPID' },
   { key: 'AGENT_ENABLED', labelKey: 'field_AGENT_ENABLED', descKey: 'field_AGENT_ENABLED_desc', type: 'boolean', group: 'models', required: false },
   // 接入地址：专属域名优先（非必填），普通域名备用（默认已填）；两者通用，连不上自动回落
   { key: 'KB_API_BASE', labelKey: 'field_KB_API_BASE', descKey: 'field_KB_API_BASE_desc', type: 'text', group: 'models', required: false, placeholderKey: 'placeholder_KB_API_BASE' },
@@ -1627,7 +1627,10 @@ const SystemConfigPage: React.FC = () => {
                   {field.key === 'AGENT_EDITION' ? (
                     <Input placeholder={t('placeholder_agentEdition')} maxLength={meta?.str_limits?.[field.key]} />
                   ) : (
-                    <Input maxLength={meta?.str_limits?.[field.key]} />
+                    <Input
+                      placeholder={field.placeholderKey ? t(field.placeholderKey) : undefined}
+                      maxLength={meta?.str_limits?.[field.key]}
+                    />
                   )}
                 </Form.Item>
               )}
