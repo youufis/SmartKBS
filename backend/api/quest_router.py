@@ -161,12 +161,12 @@ def _save_question_to_bank(question_data: dict[str, Any]):
     if not question_data.get("question"):
         return
     try:
-        # 先检查是否已存在相同题目
-        existing = execute_query(
-            "SELECT id FROM quest_question_bank WHERE question_text=?",
-            (question_data["question"],),
-        )
-        if existing:
+        # 统一查重(B): 规范化题干比对(旧口径为精确等值, 空格/标点变体会漏网)
+        from backend.question_select import find_duplicate_question
+        _rows = execute_query("SELECT id, question_text FROM quest_question_bank") or []
+        _pairs = [((r["id"] if isinstance(r, dict) else r[0]),
+                   (r["question_text"] if isinstance(r, dict) else r[1])) for r in _rows]
+        if find_duplicate_question(_pairs, question_data["question"]) is not None:
             return  # 已存在，跳过
         execute_insert_update(
             """INSERT INTO quest_question_bank

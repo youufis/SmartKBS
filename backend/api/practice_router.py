@@ -376,16 +376,26 @@ async def _compose_practice_questions(req: PracticeGenerateRequest,
 async def _persist_generated_questions(questions: list[dict], req: PracticeGenerateRequest,
                                        username: str) -> list[dict]:
     """P11: 同步/异步两个出题端点共用一套入库逻辑(P10: 命中重复题时回填题库已有的图与媒体)"""
+    from backend.question_select import family_members, find_duplicate_question
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _dup_scope_cache: dict[str, list[dict]] = {}
     for q in questions:
         q_text = (q.get("question") or "").strip()
         if not q_text:
             continue
-        dup = execute_query(
-            """SELECT id, svg_content, has_svg, media_files FROM question_bank
-               WHERE knowledge_points LIKE ? AND question_text=? AND status='active' LIMIT 1""",
-            (f"%{req.knowledge_points}%", q_text),
-        )
+        # 统一查重(B): 学科族+题型+规范化题干。旧口径「标签 LIKE + 题干精确」会漏掉
+        # 换标签的同题与空格/标点变体, 导致同一道题反复入库、选题时靠运行时折叠兜底。
+        _t = q.get("type", "single")
+        if _t not in _dup_scope_cache:
+            _fam = family_members(req.subject)
+            _cond = (" AND subject IN (" + ",".join("?" * len(_fam)) + ")") if _fam else ""
+            _prm = ([_t] + list(_fam)) if _fam else [_t]
+            _dup_scope_cache[_t] = [dict(r) for r in (execute_query(
+                "SELECT id, svg_content, has_svg, media_files, question_text FROM question_bank"
+                " WHERE status='active' AND type=?" + _cond, tuple(_prm)) or [])]
+        _rows = _dup_scope_cache[_t]
+        _hit = find_duplicate_question([(r["id"], r["question_text"]) for r in _rows], q_text)
+        dup = [r for r in _rows if r["id"] == _hit][:1] if _hit is not None else []
         if dup:
             logger.info(f"跳过重复题目 (kp={req.knowledge_points}): {q_text[:40]}...")
             old = dict(dup[0])

@@ -268,13 +268,17 @@ async def ai_generate_quiz(req: AiGenerateQuiz, request: Request):
                 try:
                     q_text = (q.get("question") or "").strip()
                     if q_text:
-                        # 去重：相同题目文本不再重复插入
-                        dup = qb_execute_query(
-                            "SELECT id FROM question_bank WHERE question_text=? AND status='active'",
-                            (q_text,),
-                        )
-                        if dup:
-                            qid = dup[0]["id"]
+                        # 统一查重(B): 学科族+题型+规范化题干(旧口径为全局题干精确)
+                        from backend.question_select import family_members, find_duplicate_question
+                        _fam = family_members(req.subject)
+                        _cond = (" AND subject IN (" + ",".join("?" * len(_fam)) + ")") if _fam else ""
+                        _prm = ([q.get("type", "single")] + list(_fam)) if _fam else [q.get("type", "single")]
+                        _rows = [dict(r) for r in (qb_execute_query(
+                            "SELECT id, question_text FROM question_bank WHERE status='active' AND type=?" + _cond,
+                            tuple(_prm)) or [])]
+                        _hit = find_duplicate_question([(r["id"], r["question_text"]) for r in _rows], q_text)
+                        if _hit is not None:
+                            qid = _hit
                             q["id"] = qid
                             q["media_files"] = []
                             logger.info(f"跳过重复题目 (topic={req.topic}): {q_text[:40]}...")

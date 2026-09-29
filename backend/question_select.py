@@ -106,6 +106,21 @@ def key_terms(name: str, min_len: int = 2) -> list[str]:
     return uniq
 
 
+def find_duplicate_question(pairs: Iterable[tuple[Any, Any]], text: str) -> Any | None:
+    """入库统一查重（与 fold_near_duplicates 同口径：去标点空白+小写）。
+
+    pairs 传 (句柄, 题干) 可迭代对象——调用方自己决定句柄是行 dict 还是 id，
+    避免本模块耦合具体数据库。命中返回该句柄，未命中返回 None。
+    """
+    key = norm(text)
+    if not key:
+        return None
+    for handle, q_text in pairs:
+        if norm(q_text) == key:
+            return handle
+    return None
+
+
 def fold_near_duplicates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """同题型 + 规范化题干完全一致的题只留一条。
 
