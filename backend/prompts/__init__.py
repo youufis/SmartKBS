@@ -159,11 +159,21 @@ def apply_skills(base_prompt: str, scene_type: str) -> str:
         enabled = get_config_value("enabled_skills", [])
         scene_map = get_config_value("skill_scene_map", {})
         effective = resolve_scene_skills(scene_type, enabled, scene_map)
-        return build_prompt_with_skills(
+        out = build_prompt_with_skills(
             base_prompt=base_prompt,
             skill_names=effective,
             context={"type": scene_type},
             enabled_names=enabled,
         )
+        if out != base_prompt and effective:
+            # C: 使用统计(内部自带 try/except, 失败静默, 不影响主流程)
+            # 口径: 记录"实际注入"的技能(以段落标记为准), 而非仅候选列表
+            from backend import skill_stats
+            from backend.skill_engine import get_engine
+            _eng = get_engine()
+            fired = [n for n in effective
+                     if (lambda s: bool(s) and f"<!-- {s.display_name} v" in out)(_eng.get(n))]
+            skill_stats.record_usage(scene_type, fired or effective, len(out) - len(base_prompt))
+        return out
     except Exception:
         return base_prompt

@@ -97,3 +97,22 @@ export async function updateSkillContent(name: string, rawContent: string): Prom
   const res = await apiClient.put(`/api/skills/${encodeURIComponent(name)}`, { raw_content: rawContent })
   return res.data
 }
+
+export interface SkillStatsSceneRow { count: number; chars: number; last_used: string }
+export interface SkillStatsSkillRow { count: number; scenes: string[] }
+
+export interface SkillStatsResponse {
+  days: number
+  total_injections: number
+  total_chars: number
+  by_scene: Record<string, SkillStatsSceneRow>
+  by_skill: Record<string, SkillStatsSkillRow>
+}
+
+/**
+ * 技能使用统计（管理员，近 N 天注入流水）
+ */
+export async function fetchSkillStats(days = 30): Promise<SkillStatsResponse> {
+  const res = await apiClient.get('/api/skills/stats', { params: { days } })
+  return res.data
+}

@@ -1061,5 +1061,16 @@
   "cmNoStudentHasTeacher": "无人·有任教",
   "cmInUse": "使用中",
   "cmReasonStudents": "该班还有 {{count}} 名在籍学生，请先转班或删除学生",
-  "cmReasonTeachers": "该班有 {{count}} 条任教安排，请先在「修改用户」中调整教师任教范围"
+  "cmReasonTeachers": "该班有 {{count}} 条任教安排，请先在「修改用户」中调整教师任教范围",
+  "skillStats": "使用统计",
+  "skillStatsTitle": "技能使用统计（近 {{days}} 天）",
+  "skillStatsInjections": "注入次数",
+  "skillStatsChars": "累计注入字符",
+  "skillStatsScene": "场景",
+  "skillStatsSkill": "技能",
+  "skillStatsCount": "次数",
+  "skillStatsCharsCol": "字符",
+  "skillStatsLastUsed": "最近使用",
+  "skillStatsScenesCol": "出现场景",
+  "skillStatsEmpty": "暂无统计数据（技能注入发生后自动记录）"
 }

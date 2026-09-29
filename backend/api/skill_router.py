@@ -8,6 +8,7 @@
 - POST /api/skills/reload   — 重新加载技能（管理员）
 - POST /api/skills/validate — 验证技能组合是否合法（登录）
 - GET  /api/skills/preview  — 预览指定场景实际注入的技能段（管理员，只读）
+- GET  /api/skills/stats    — 技能使用统计（管理员，只读）
 - GET  /api/skills/{name}   — 获取技能详情，含原始文档（管理员）
 - PUT  /api/skills/{name}   — 更新技能文档内容（管理员）
 
@@ -250,6 +251,15 @@ async def preview_scene_skills(scene: str, request: Request, mode: str = "curren
         }
 
     return result
+
+
+@router.get("/stats", summary="技能使用统计（管理员）")
+async def get_skill_stats(request: Request, days: int = 30):
+    """近 N 天(默认 30, 上限 90)的技能注入统计: 按场景 / 按技能 / 总量。只读。"""
+    user = get_current_user(request)
+    require_admin(user)
+    from backend import skill_stats
+    return skill_stats.query_stats(days=max(1, min(days, 90)))
 
 @router.get("/{name}", summary="获取技能详情（管理员）")
 async def get_skill_detail(name: str, request: Request):

@@ -8,14 +8,15 @@ import {
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
   SyncOutlined, DownloadOutlined, RollbackOutlined, SearchOutlined, DeleteOutlined, EyeOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, EditOutlined, DownOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, EditOutlined, DownOutlined, BarChartOutlined,
 } from '@ant-design/icons'
 import { Modal, Timeline, Progress, Descriptions, Table } from 'antd'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 import {
   fetchSkills, fetchSkillDetail, updateEnabledSkills, reloadSkills, updateSkillContent,
-  type SkillInfo, type SkillDetail,
+  fetchSkillStats,
+  type SkillInfo, type SkillDetail, type SkillStatsResponse,
 } from '../api/skills'
 import {
   checkVersion, startUpgrade, getUpgradeStatus,
@@ -280,6 +281,9 @@ const SkillManagePanel: React.FC = () => {
   const [editing, setEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
   const [savingContent, setSavingContent] = useState(false)
+  const [stats, setStats] = useState<SkillStatsResponse | null>(null)
+  const [statsVisible, setStatsVisible] = useState(false)
+  const [statsLoading, setStatsLoading] = useState(false)
 
   const loadSkills = useCallback(async () => {
     setLoading(true)
@@ -299,6 +303,18 @@ const SkillManagePanel: React.FC = () => {
   useEffect(() => {
     loadSkills()
   }, [loadSkills])
+
+  // 打开使用统计弹窗（失败静默，不影响技能管理主功能）
+  const openStats = async () => {
+    setStatsVisible(true)
+    setStatsLoading(true)
+    try {
+      setStats(await fetchSkillStats())
+    } catch {
+      /* ignore */
+    }
+    setStatsLoading(false)
+  }
 
   // 切换单个技能启用状态
   const toggleSkill = async (name: string, currentEnabled: boolean) => {
@@ -406,6 +422,9 @@ const SkillManagePanel: React.FC = () => {
         />
         <Button icon={<ReloadOutlined />} onClick={handleReload} loading={loading}>
           {t('reload')}
+        </Button>
+        <Button icon={<BarChartOutlined />} onClick={openStats}>
+          {t('skillStats')}
         </Button>
         <Divider type="vertical" />
         <Space>
@@ -612,6 +631,46 @@ const SkillManagePanel: React.FC = () => {
               )
             )}
           </div>
+        )}
+      </Modal>
+      {/* 使用统计弹窗 */}
+      <Modal
+        title={t('skillStatsTitle', { days: stats?.days ?? 30 })}
+        open={statsVisible}
+        onCancel={() => setStatsVisible(false)}
+        footer={null}
+        width={720}
+      >
+        {statsLoading || !stats ? (
+          <Spin style={{ display: 'block', margin: '24px auto' }} />
+        ) : stats.total_injections === 0 ? (
+          <Alert type="info" showIcon title={t('skillStatsEmpty')} />
+        ) : (
+          <>
+            <Descriptions size="small" column={2} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label={t('skillStatsInjections')}>{stats.total_injections}</Descriptions.Item>
+              <Descriptions.Item label={t('skillStatsChars')}>{stats.total_chars}</Descriptions.Item>
+            </Descriptions>
+            <Table
+              size="small" rowKey="scene" pagination={false} style={{ marginBottom: 16 }}
+              dataSource={Object.entries(stats.by_scene).map(([scene, v]) => ({ scene, ...v }))}
+              columns={[
+                { title: t('skillStatsScene'), dataIndex: 'scene' },
+                { title: t('skillStatsCount'), dataIndex: 'count' },
+                { title: t('skillStatsCharsCol'), dataIndex: 'chars' },
+                { title: t('skillStatsLastUsed'), dataIndex: 'last_used' },
+              ]}
+            />
+            <Table
+              size="small" rowKey="skill" pagination={{ pageSize: 10, size: 'small' }}
+              dataSource={Object.entries(stats.by_skill).map(([skill, v]) => ({ skill, ...v }))}
+              columns={[
+                { title: t('skillStatsSkill'), dataIndex: 'skill' },
+                { title: t('skillStatsCount'), dataIndex: 'count' },
+                { title: t('skillStatsScenesCol'), dataIndex: 'scenes', render: (ss: string[]) => ss.map((s) => <Tag key={s}>{s}</Tag>) },
+              ]}
+            />
+          </>
         )}
       </Modal>
     </div>
