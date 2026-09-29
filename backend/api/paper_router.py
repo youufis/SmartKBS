@@ -194,10 +194,21 @@ def _select_questions_by_rules(
         medium_pool = [q for q in candidates if q["difficulty"] == "medium"]
         hard_pool = [q for q in candidates if q["difficulty"] == "hard"]
 
-        # 计算每种难度应选题数
-        target_easy = max(1, round(target_count * easy_ratio / 100))
-        target_medium = max(1, round(target_count * medium_ratio / 100))
-        target_hard = target_count - target_easy - target_medium
+        # 计算每种难度应选题数 —— 最大余数法，三档之和恒等于 target_count。
+        # （旧写法 max(1, round(...)) 在比例含 0 时会让计划总数超过题数：
+        #   实测 target=3、难度比 0/90/10 会抽出 4 题，卷面题量与总分双双错位）
+        _raw = {"easy": target_count * easy_ratio / 100,
+                "medium": target_count * medium_ratio / 100,
+                "hard": target_count * hard_ratio / 100}
+        _quota = {d: int(v) for d, v in _raw.items()}
+        _rem = target_count - sum(_quota.values())
+        for d in sorted(_raw, key=lambda x: (_raw[x] - _quota[x], _raw[x]), reverse=True):
+            if _rem <= 0:
+                break
+            if _raw[d] > 0:
+                _quota[d] += 1
+                _rem -= 1
+        target_easy, target_medium, target_hard = _quota["easy"], _quota["medium"], _quota["hard"]
 
         # 调整：如果某种难度的题不够，均分给其他难度
         chosen: list[dict[str, Any]] = []
@@ -213,7 +224,8 @@ def _select_questions_by_rules(
 
         # 如果还不够，从剩余中随机补足
         if len(chosen) < target_count:
-            remaining = [q for q in candidates if q not in chosen]
+            _chosen_ids = {q["id"] for q in chosen}
+            remaining = [q for q in candidates if q["id"] not in _chosen_ids]
             additional = _pick_from(remaining, target_count - len(chosen))
             chosen.extend(additional)
 
@@ -269,8 +281,19 @@ async def _select_questions_by_ai(
                  "fill": "填空题", "essay": "作文", "subjective": "主观题"}
     diff_map = {"easy": "简单", "medium": "中等", "hard": "困难"}
 
+    # 候选池按题型截断后再进 prompt（池子本身已按相关度分层排序，取每型前若干题）：
+    # 整池上千题全量塞给模型会推高成本/超时并拉低选题质量。
+    _quota_types = [tc.type for tc in type_configs if tc.count > 0]
+    _per_type_cap = max(20, 120 // max(1, len(_quota_types)))
+    _ai_cnt: dict[str, int] = {}
+    ai_pool = []
+    for q in pool:
+        if _ai_cnt.get(q["type"], 0) < _per_type_cap:
+            ai_pool.append(q)
+            _ai_cnt[q["type"]] = _ai_cnt.get(q["type"], 0) + 1
+
     candidate_lines = []
-    for i, q in enumerate(pool, 1):
+    for i, q in enumerate(ai_pool, 1):
         q_type = type_map.get(q["type"], q["type"])
         q_diff = diff_map.get(q["difficulty"], q["difficulty"])
         q_text = q["question_text"][:100]
@@ -343,15 +366,47 @@ async def _select_questions_by_ai(
         logger.warning("AI 未选择任何题目，回退到规则选题")
         return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
 
-    # 匹配选中的题目
+    # 匹配选中的题目：按配置配额校验（去重、丢配置外题型、超配额截断），
+    # 缺额按候选池顺序（相关度优先）补同题型题 —— AI 结果不再原样入库。
     pool_map = {q["id"]: q for q in pool}
-    selected = []
+    quota_by_type = {tc.type: tc.count for tc in type_configs if tc.count > 0}
+    seen: set[int] = set()
+    selected: list[dict[str, Any]] = []
+    dropped_dup = dropped_offquota = 0
     for sid in selected_ids:
-        if sid in pool_map:
-            selected.append(pool_map[sid])
+        q = pool_map.get(sid)
+        if not q:
+            continue
+        if q["id"] in seen:
+            dropped_dup += 1
+            continue
+        t_type = q["type"]
+        if t_type not in quota_by_type or sum(1 for x in selected if x["type"] == t_type) >= quota_by_type[t_type]:
+            dropped_offquota += 1
+            continue
+        seen.add(q["id"])
+        selected.append(q)
 
     if not selected:
+        logger.warning("AI 组卷结果经配额校验后为空，回退到规则选题")
         return _select_questions_by_rules(pool, type_configs, easy_ratio, medium_ratio, hard_ratio)
+
+    filled = 0
+    for t_type, want in quota_by_type.items():
+        for q in pool:
+            if sum(1 for x in selected if x["type"] == t_type) >= want:
+                break
+            if q["type"] == t_type and q["id"] not in seen:
+                seen.add(q["id"])
+                selected.append(q)
+                filled += 1
+    notes = []
+    if filled:
+        notes.append(f"AI 选题不足，已按题库相关度补齐 {filled} 题")
+    if dropped_dup or dropped_offquota:
+        notes.append(f"AI 结果中 {dropped_dup} 题重复、{dropped_offquota} 题超出题型配额，已剔除")
+    if notes:
+        reason = reason + "（" + "；".join(notes) + "）"
 
     return selected, reason
 
@@ -475,6 +530,14 @@ async def compose_exam_paper(exam_id: int, req: ComposeRequest, request: Request
     if req.target_grade:
         pass  # grade 字段在 exams 表中可能没有，暂不更新
 
+    # 总分同步：实际入卷分数合计与设定总分不一致时以实际为准（与考试自动选题同一口径）
+    _sum_row = execute_query_one(
+        "SELECT COALESCE(SUM(score), 0) AS s FROM exam_questions WHERE exam_id = ?", (exam_id,))
+    _actual_total = round(float(_sum_row["s"] if _sum_row else 0), 2)
+    if _actual_total > 0 and abs(_actual_total - float(exam["total_score"] or 0)) > 0.05:
+        update_fields.append("total_score = ?")
+        update_params.append(_actual_total)
+        logger.info(f"智能组卷同步总分: {exam['total_score']} → {_actual_total}")
     update_params.append(exam_id)
     execute_update(
         f"UPDATE exams SET {', '.join(update_fields)} WHERE id = ?",
