@@ -1061,5 +1061,16 @@
   "cmNoStudentHasTeacher": "No students · assigned",
   "cmInUse": "In use",
   "cmReasonStudents": "{{count}} enrolled student(s) remain; move or delete them first",
-  "cmReasonTeachers": "{{count}} teacher assignment(s) exist; adjust teaching scope in Edit User first"
+  "cmReasonTeachers": "{{count}} teacher assignment(s) exist; adjust teaching scope in Edit User first",
+  "skillStats": "Usage stats",
+  "skillStatsTitle": "Skill usage stats (last {{days}} days)",
+  "skillStatsInjections": "Injections",
+  "skillStatsChars": "Total injected chars",
+  "skillStatsScene": "Scene",
+  "skillStatsSkill": "Skill",
+  "skillStatsCount": "Count",
+  "skillStatsCharsCol": "Chars",
+  "skillStatsLastUsed": "Last used",
+  "skillStatsScenesCol": "Scenes",
+  "skillStatsEmpty": "No usage data yet (recorded automatically after skill injection)"
 }
