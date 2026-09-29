@@ -36,6 +36,7 @@
 > 🗂 **Chat history rebuilt**: titles and message counts, today/yesterday/month grouping, search, hover preview, row menu and rename
 > 📊 **Summary export**: scores and completion across activity types, aggregated by student or class, exported to Excel or CSV
 > 🧩 **Class management**: clean up empty shell classes; classes with students or teachers stay protected
+> 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
 
 ---
 
@@ -985,7 +986,7 @@ Git-based online incremental upgrade system:
 
 ## 📦 Changelog
 
-### v8.4.0 (2026-09-27)
+### v8.4.0 (2026-09-29)
 
 - 📝 **Dialogue Homework** (was "Task Management"): renamed with step-by-step guidance for both roles; AI grading now splits the teacher requirements into checkpoints, finds evidence for each one and reports met/partial/missing to teachers and students; grade a single student without touching the others, draft homework from one sentence with AI, and read long requirements in a collapsible full-text view
 - 🧮 **Math rendering unified**: 23 surfaces - chat, companion, homework, analytics, class summary, lesson plans - render Markdown + LaTeX; `$$…$$` written inline and `\(\)` / `\[\]` are normalised, code blocks untouched
@@ -993,6 +994,7 @@ Git-based online incremental upgrade system:
 - 📊 **Cross-activity summary export**: scores and completion across exams, quizzes, homework, practice, quick quizzes and quests, filtered by grade, class, student, activity type or date range, exported as a four-sheet Excel or CSV; admins cover the school, teachers only their own activities and students
 - 🧩 **Class management and details**: user management shows the headcount and teacher assignment per class and cleans up empty shell classes (protected when students or assignments remain); grade filters only list grades that really have students; CSV no longer carries stray invisible characters
 - 🧭 **Chapter ordering fixed**: dragging no longer flattens child chapters, cross-chapter gap drops work, and a batch is validated then applied atomically; a companion audit script renumbers legacy ordering and flags suspicious hierarchy (report-only by default, writes with `--apply`)
+- 🧠 **Skill system hardened**: skill injection removed from five JSON-output endpoints (question generation, grading and friends) so structured output can no longer be skewed; added per-scene skill mapping (Socratic guidance / step-by-step reasoning no longer injected into reports, daily cards, profiles or HTML pages) and an injected-section whitelist that finally activates the content-safety rules; repaired priority/dependency parsing that had never taken effect; the skill management page gained a usage-stats dialog and a per-scene injection preview
 - ⚠️ **Breaking changes**: none (data format upgrades automatically at startup)
 
 ### v8.3.0 (2026-09-26)
