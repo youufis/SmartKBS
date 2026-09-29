@@ -1097,5 +1097,13 @@
   "scene_whiteboard": "Whiteboard",
   "scene_wrong-book": "Wrong-Answer Book",
   "scene_portrait": "Self Profile",
-  "scene_html-generation": "Resource Pages"
+  "scene_html-generation": "Resource Pages",
+  "sceneMapDesc": "Sensible defaults are pre-configured - normally you never need to change anything. Expand a scene only if its output style feels wrong: uncheck a skill to skip it there (e.g. analytics reports do not need Socratic guidance). Greyed-out skills are not applicable to this scene.",
+  "sceneMapColInject": "Skills",
+  "sceneMapColMode": "Mode",
+  "sceneMapFollow": "Global default",
+  "sceneMapCustom": "Customized",
+  "sceneMapReset": "Reset this scene",
+  "sceneMapOrphanTitle": "These mappings use scene keys that are not wired up (no effect); click × to remove:",
+  "sceneMapIncompatible": "Not applicable to this scene (never injected anyway)"
 }

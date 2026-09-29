@@ -253,15 +253,17 @@ const normVal = (v: unknown): string => {
 //  技能管理 Tab 组件（必须定义在组件外部，避免渲染时重复创建）
 // ═══════════════════════════════════════════════
 
-// ── 技能场景映射编辑器（Form.Item 受控：value/onChange 由表单注入）──
-// 当前有注入调用点的场景(与后端 apply_skills 调用一致)；不在列表内的键不会命中任何注入路径
+// ── 技能场景映射编辑器：场景×技能勾选矩阵 ──
+// 面向普通管理员的心智模型：「这个场景要不要用这个技能」，勾选=注入，取消=跳过。
+// 存储仍用后端 skill_scene_map 的 exclude 语义（取消勾选归一为排除项，include 高级规则被就地归一）。
+
+// 当前有注入调用点的场景(与后端 apply_skills 调用一致)
 const SCENE_SUGGESTIONS = [
   'chat', 'companion', 'analytics', 'portfolio', 'curriculum', 'discussion',
   'exam', 'quiz', 'whiteboard', 'wrong-book', 'portrait', 'html-generation',
 ]
 
 interface SceneRule { include?: string[]; exclude?: string[] }
-
 type SceneMapValue = Record<string, SceneRule>
 
 const SceneMapEditor: React.FC<{
@@ -269,94 +271,116 @@ const SceneMapEditor: React.FC<{
   onChange?: (v: SceneMapValue) => void
 }> = ({ value, onChange }) => {
   const { t } = useTranslation('system')
-  const [skills, setSkills] = useState<{ name: string; display_name: string }[]>([])
-  const [rows, setRows] = useState<{ scene: string; include: string[]; exclude: string[] }[]>([])
-  const lastEmitted = useRef<string>('')
+  const [skills, setSkills] = useState<SkillInfo[]>([])
 
   useEffect(() => {
-    fetchSkills().then(d => setSkills(d.skills.map(s => ({ name: s.name, display_name: s.display_name })))).catch(() => { /* 选项拉取失败不阻塞编辑 */ })
+    fetchSkills().then(d => setSkills(d.skills)).catch(() => { /* 拉取失败不阻塞弹窗 */ })
   }, [])
 
-  // 外部值变化(加载/放弃修改)时重建行；自己 emit 的回声跳过，避免打断正在编辑的行
-  useEffect(() => {
-    const cur = JSON.stringify(value ?? {})
-    if (cur !== lastEmitted.current) {
-      setRows(Object.entries(value ?? {}).map(([scene, r]) => ({ scene, include: r?.include ?? [], exclude: r?.exclude ?? [] })))
-      lastEmitted.current = cur
-    }
-  }, [value])
+  const map = value ?? {}
+  const enabledSkills = skills.filter(s => s.enabled)
+  const enabledNames = enabledSkills.map(s => s.name)
+  // 与引擎 compose 同口径: 域技能声明了 compatible_with 时, 只在匹配场景注入(矩阵里灰显不可勾)
+  const compatibleIn = (s: SkillInfo, scene: string) =>
+    !s.compatible_with || s.compatible_with.length === 0 || s.compatible_with.includes(scene)
 
-  const emit = (rs: { scene: string; include: string[]; exclude: string[] }[]) => {
+  // 该场景当前实际注入集合：enabled ∩ (include 若有) − exclude
+  const effectiveOf = (scene: string): string[] => {
+    const rule = map[scene] ?? {}
+    let base = enabledNames
+    if (rule.include?.length) base = base.filter(n => rule.include!.includes(n))
+    if (rule.exclude?.length) base = base.filter(n => !rule.exclude!.includes(n))
+    return base
+  }
+
+  // 勾选变化 -> 归一写回为 exclude（include 一并转换掉，保持存储最简）
+  const setEffective = (scene: string, next: string[]) => {
     const obj: SceneMapValue = {}
-    for (const r of rs) {
-      const key = r.scene.trim()
-      if (!key) continue
-      const rule: SceneRule = {}
-      if (r.include.length) rule.include = r.include
-      if (r.exclude.length) rule.exclude = r.exclude
-      obj[key] = rule
+    for (const [k, r] of Object.entries(map)) {
+      if (k === scene) continue
+      const rr: SceneRule = {}
+      if (r.include?.length) rr.include = r.include
+      if (r.exclude?.length) rr.exclude = r.exclude
+      obj[k] = rr
     }
-    lastEmitted.current = JSON.stringify(obj)
+    // 只把「该场景本可注入但被取消」的记入排除; 不兼容技能本就不注入, 无需记录
+    const compat = enabledSkills.filter(s => compatibleIn(s, scene)).map(s => s.name)
+    const removed = compat.filter(n => !next.includes(n))
+    if (removed.length) obj[scene] = { exclude: removed }
     onChange?.(obj)
   }
 
-  const update = (i: number, patch: Partial<{ scene: string; include: string[]; exclude: string[] }>) => {
-    const rs = rows.map((r, j) => (j === i ? { ...r, ...patch } : r))
-    setRows(rs); emit(rs)
+  const removeScene = (scene: string) => {
+    const obj: SceneMapValue = {}
+    for (const [k, r] of Object.entries(map)) if (k !== scene) obj[k] = r
+    onChange?.(obj)
   }
-  const remove = (i: number) => { const rs = rows.filter((_, j) => j !== i); setRows(rs); emit(rs) }
-  const add = () => setRows([...rows, { scene: '', include: [], exclude: [] }])
 
-  const skillOptions = skills.map(s => ({ value: s.name, label: `${s.display_name} (${s.name})` }))
+  const rows = SCENE_SUGGESTIONS.map(scene => {
+    const compat = enabledSkills.filter(s => compatibleIn(s, scene))
+    const eff = effectiveOf(scene).filter(n => compat.some(s => s.name === n))
+    return {
+      scene,
+      eff,
+      compatCount: compat.length,
+      custom: Boolean(map[scene]?.include?.length || map[scene]?.exclude?.length),
+    }
+  })
+  const orphanScenes = Object.keys(map).filter(s => !SCENE_SUGGESTIONS.includes(s))
 
   return (
     <div>
-      {rows.map((r, i) => (
-        <div key={i} style={{ marginBottom: 8 }}>
-        <Space style={{ display: 'flex' }} align='start'>
-          <AutoComplete
-            options={SCENE_SUGGESTIONS.map(s => ({ value: s, label: `${t('scene_' + s)} (${s})` }))}
-            placeholder={t('sceneMapScene')}
-            value={r.scene}
-            onChange={v => update(i, { scene: String(v ?? '') })}
-            style={{ width: 180 }}
-            status={r.scene.trim() && !SCENE_SUGGESTIONS.includes(r.scene.trim()) ? 'warning' : undefined}
-          />
-          <Select
-            mode="multiple" allowClear showSearch optionFilterProp="label"
-            placeholder={t('sceneMapExclude')}
-            value={r.exclude}
-            onChange={v => update(i, { exclude: v })}
-            options={skillOptions}
-            style={{ minWidth: 240, flex: 1 }}
-            maxTagCount="responsive"
-          />
-          <Select
-            mode="multiple" allowClear showSearch optionFilterProp="label"
-            placeholder={t('sceneMapInclude')}
-            value={r.include}
-            onChange={v => update(i, { include: v })}
-            options={skillOptions}
-            style={{ minWidth: 180 }}
-            maxTagCount="responsive"
-          />
-          <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} />
-        </Space>
-        {r.scene.trim() && SCENE_SUGGESTIONS.includes(r.scene.trim()) && (
-          <Tag style={{ marginTop: 4 }}>{t('scene_' + r.scene.trim())}</Tag>
-        )}
-        {r.scene.trim() && !SCENE_SUGGESTIONS.includes(r.scene.trim()) && (
-          <Tag color="orange" style={{ marginTop: 4 }}>{t('sceneMapUnknownScene')}</Tag>
-        )}
-        {r.exclude.includes('safety-guard') && (
-          <Tag color="red" style={{ marginTop: 4 }}>{t('sceneMapSafetyWarn')}</Tag>
-        )}
-        {r.include.length > 0 && (
-          <Tag color="blue" style={{ marginTop: 4 }}>{t('sceneMapIncludeNote')}</Tag>
-        )}
+      <Table
+        size="small" rowKey="scene" pagination={false} dataSource={rows}
+        columns={[
+          {
+            title: t('skillStatsScene'), dataIndex: 'scene', width: 220,
+            render: (s: string) => (<span><Text strong>{t('scene_' + s)}</Text> <Text type="secondary" style={{ fontSize: 12 }}>{s}</Text></span>),
+          },
+          { title: t('sceneMapColInject'), key: 'count', width: 110, render: (_: unknown, r) => `${r.eff.length} / ${r.compatCount}` },
+          { title: t('sceneMapColMode'), key: 'mode', width: 110, render: (_: unknown, r) => (r.custom ? <Tag color="blue">{t('sceneMapCustom')}</Tag> : <Tag>{t('sceneMapFollow')}</Tag>) },
+        ]}
+        expandable={{
+          expandedRowRender: (r) => (
+            <div>
+              {(['core', 'domain'] as const).map(tp => {
+                const list = enabledSkills.filter(s => s.type === tp)
+                if (!list.length) return null
+                return (
+                  <div key={tp} style={{ marginBottom: 8 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{tp === 'core' ? t('skillCoreType') : t('skillDomainType')}</Text>
+                    <Checkbox.Group
+                      value={r.eff}
+                      onChange={v => setEffective(r.scene, v as string[])}
+                      style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))', rowGap: 4, marginTop: 4 }}
+                    >
+                      {list.map(s => (
+                        <Tooltip key={s.name} title={compatibleIn(s, r.scene) ? s.description : t('sceneMapIncompatible')}>
+                          <Checkbox value={s.name} disabled={!compatibleIn(s, r.scene)}>{s.display_name}</Checkbox>
+                        </Tooltip>
+                      ))}
+                    </Checkbox.Group>
+                  </div>
+                )
+              })}
+              {!r.eff.includes('safety-guard') && (
+                <Alert type="warning" showIcon title={t('sceneMapSafetyWarn')} style={{ marginTop: 4 }} />
+              )}
+              <Button size="small" disabled={!r.custom} onClick={() => removeScene(r.scene)} style={{ marginTop: 8 }}>
+                {t('sceneMapReset')}
+              </Button>
+            </div>
+          ),
+        }}
+      />
+      {orphanScenes.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <Text type="secondary">{t('sceneMapOrphanTitle')}</Text>
+          {orphanScenes.map(s => (
+            <Tag key={s} color="orange" closable onClose={() => removeScene(s)} style={{ marginLeft: 8 }}>{s}</Tag>
+          ))}
         </div>
-      ))}
-      <Button size="small" type="dashed" block onClick={add}>+ {t('sceneMapAdd')}</Button>
+      )}
     </div>
   )
 }
@@ -834,7 +858,7 @@ const SkillManagePanel: React.FC = () => {
           <Spin style={{ display: 'block', margin: '24px auto' }} />
         ) : (
           <>
-            <Alert type="info" showIcon title={t('field_skill_scene_map_desc')} style={{ marginBottom: 12 }} />
+            <Alert type="info" showIcon title={t('sceneMapDesc')} style={{ marginBottom: 12 }} />
             <SceneMapEditor value={mapValue} onChange={setMapValue} />
           </>
         )}

@@ -1097,5 +1097,13 @@
   "scene_whiteboard": "白板助手",
   "scene_wrong-book": "错题本讲解",
   "scene_portrait": "自我画像",
-  "scene_html-generation": "资源页生成"
+  "scene_html-generation": "资源页生成",
+  "sceneMapDesc": "已按教学场景配好默认值，正常无需更改。仅当某场景输出风格明显不合适时再展开调整：取消勾选=该场景跳过该技能（例如学情报告不需要「苏格拉底引导」）。灰色技能与该场景无关，不会注入。",
+  "sceneMapColInject": "注入技能数",
+  "sceneMapColMode": "状态",
+  "sceneMapFollow": "跟随全局",
+  "sceneMapCustom": "已自定义",
+  "sceneMapReset": "恢复该场景默认",
+  "sceneMapOrphanTitle": "以下映射项的场景当前未接入（不会生效），可点 × 删除：",
+  "sceneMapIncompatible": "该技能不适用于此场景（本来就不会注入）"
 }
