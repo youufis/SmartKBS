@@ -793,6 +793,26 @@ class DedupRequest(BaseModel):
     include_all_creators: bool = False
 
 
+def _group_duplicate_questions(rows_all: list[dict]) -> list[dict]:
+    """按 (题型, 规范化题干, 参考答案) 分组出重复候选。
+
+    题干比较与入库查重(B)同用 question_select.norm 口径：空格/全半角标点变体
+    也能归到一组；题型与答案仍要求精确一致，保持"同题干不同答案不误删"的旧保护。
+    """
+    from backend.question_select import norm as _norm_q
+    grouped: dict[tuple, list[int]] = {}
+    sample: dict[tuple, str] = {}
+    for r in rows_all:
+        key = (r["type"], _norm_q(r["question_text"]), r["ans"])
+        grouped.setdefault(key, []).append(r["id"])
+        sample.setdefault(key, r["question_text"])
+    groups = [{"question_text": sample[k], "type": k[0], "ans": k[2],
+               "ids": ",".join(str(i) for i in v), "cnt": len(v)}
+              for k, v in grouped.items() if len(v) > 1]
+    groups.sort(key=lambda g: (-g["cnt"], int(g["ids"].split(",")[0])))
+    return groups
+
+
 @router.post("/dedup", summary="查找/清理重复试题(默认仅预览)")
 async def dedup_questions(req: DedupRequest | None = Body(default=None), request: Request = None):
     """查找重复试题; `confirm=false` 只返回清单, `confirm=true` 才执行软删除。
@@ -808,15 +828,10 @@ async def dedup_questions(req: DedupRequest | None = Body(default=None), request
     if not can_manage_html_files(username):
         raise HTTPException(status_code=403, detail="权限不足：需要教师或管理员权限")
 
-    groups = execute_query(
-        """SELECT question_text, type, IFNULL(correct_answer, '') AS ans,
-                  COUNT(*) AS cnt, GROUP_CONCAT(id) AS ids
-           FROM question_bank
-           WHERE status = 'active'
-           GROUP BY question_text, type, ans
-           HAVING cnt > 1
-           ORDER BY cnt DESC, MIN(id) ASC"""
-    )
+    rows_all = [dict(r) for r in (execute_query(
+        """SELECT id, question_text, type, IFNULL(correct_answer, '') AS ans
+           FROM question_bank WHERE status = 'active' ORDER BY id ASC""") or [])]
+    groups = _group_duplicate_questions(rows_all)
     candidate_ids: list[int] = []
     for g in groups:
         candidate_ids.extend(int(x) for x in (g["ids"] or "").split(",") if x)
@@ -914,6 +929,99 @@ async def dedup_questions(req: DedupRequest | None = Body(default=None), request
         "message": msg,
     }
 
+
+class TagFillRequest(BaseModel):
+    limit: int = 50        # 本次最多处理的无标题数(1~200)
+    batch_size: int = 10   # 每次 AI 调用题数(1~20)
+    confirm: bool = False  # False=只预览建议; True=写入(仅补空标签, 不覆盖已有)
+
+
+@router.post("/tag-fill", summary="[管理员] AI 补标无标签题目(默认预览)")
+async def tag_fill_questions(req: TagFillRequest | None = Body(default=None), request: Request = None):
+    """给题库中没有知识点标签的题补 1~3 个教材知识点标签。
+
+    - 默认 dry-run 只返回建议; confirm=true 才写库, 且只写当前仍无标签的题(不覆盖)。
+    - 标签只能从教材知识点清单里选, 清单外的返回一律丢弃(防幻觉造词)。
+    - 写入后自动重建 题目↔知识点 ID 映射, 选题引擎 T0 层立即受益。
+    """
+    req = req or TagFillRequest()
+    user = get_current_user(request)
+    if user.get("role", 2) != 0:
+        raise HTTPException(status_code=403, detail="仅管理员可执行批量补标")
+    api_key, _ = get_api_keys(user["username"])
+    if not api_key:
+        raise HTTPException(status_code=400, detail="未配置 API Key")
+    from backend.database import execute_query as main_exec
+    try:
+        kp_names = sorted({r["name"] for r in main_exec(
+            "SELECT name FROM knowledge_points WHERE COALESCE(status,'') <> 'deleted'") or [] if r["name"]})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取教材知识点失败: {e}")
+    if not kp_names:
+        raise HTTPException(status_code=400, detail="教材知识点库为空，没有可挑选的标签")
+    limit = max(1, min(int(req.limit or 50), 200))
+    rows = execute_query(
+        "SELECT id, subject, question_text FROM question_bank"
+        " WHERE status='active' AND (knowledge_points IS NULL OR TRIM(knowledge_points)='')"
+        " ORDER BY id LIMIT ?", (limit,)) or []
+    if not rows:
+        return {"dry_run": not req.confirm, "scanned": 0, "suggested": 0, "written": 0,
+                "message": "没有缺标签的题目"}
+    from backend.prompts.tag_fill import TAG_FILL_PROMPT
+    from backend.api.ai_service import call_ai_async
+    from backend import ai_json
+    allowed = set(kp_names)
+    kp_list_text = "\n".join("- " + n for n in kp_names[:300])
+    bs = max(1, min(int(req.batch_size or 10), 20))
+    suggestions: list[dict] = []
+    errors = 0
+    for i in range(0, len(rows), bs):
+        batch = rows[i:i + bs]
+        lines = "\n\n".join(
+            f"[{r['id']}] ({r['subject'] or '无学科'}) {(r['question_text'] or '')[:150]}" for r in batch)
+        prompt = TAG_FILL_PROMPT.format(kp_list=kp_list_text, questions=lines)
+        try:
+            text = await call_ai_async(prompt, api_key, json_mode=True)
+            parsed = ai_json.try_parse(str(text or ""))
+            items = parsed.get("items") if isinstance(parsed, dict) else None
+            if not isinstance(items, list):
+                items = parsed if isinstance(parsed, list) else []
+        except Exception as e:
+            errors += 1
+            logger.warning(f"[tag-fill] 第 {i // bs + 1} 批 AI 调用/解析失败: {e}")
+            continue
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            try:
+                qid = int(it.get("id"))
+            except (TypeError, ValueError):
+                continue
+            tags = [str(x).strip() for x in (it.get("tags") or []) if str(x).strip() in allowed][:3]
+            if tags:
+                suggestions.append({"id": qid, "tags": tags})
+    if not req.confirm:
+        return {"dry_run": True, "scanned": len(rows), "suggested": len(suggestions),
+                "failed_batches": errors, "items": suggestions[:100],
+                "message": "预览模式：传 confirm=true 才写入(只补无标签题)"}
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    written = 0
+    for s in suggestions:
+        n = execute_update(
+            "UPDATE question_bank SET knowledge_points=?, updated_at=?"
+            " WHERE id=? AND status='active' AND (knowledge_points IS NULL OR TRIM(knowledge_points)='')",
+            (",".join(s["tags"]), now, s["id"]))
+        if n:
+            written += 1
+    map_stat = {}
+    try:
+        from backend.question_select import rebuild_kp_map
+        map_stat = rebuild_kp_map()
+    except Exception as e:
+        logger.warning(f"[tag-fill] 重建知识点映射失败: {e}")
+    logger.info(f"[tag-fill] {user['username']} 扫描 {len(rows)} 题, 建议 {len(suggestions)}, 写入 {written}")
+    return {"dry_run": False, "scanned": len(rows), "suggested": len(suggestions),
+            "written": written, "failed_batches": errors, "kp_map": map_stat}
 
 @router.get("/types/list")
 async def list_question_types():
