@@ -110,7 +110,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ENABLE_BADGES": True,
     "ENABLE_SUBJECT_TITLES": True,
     # 闯关挑战出题模式：false=AI 出题（默认）, true=从题库出题
-    "QUEST_USE_BANK": False,
+    "QUEST_USE_BANK": True,  # 闯关优先从题库取题(used_count 轮换)，题库取不到才调 AI 生成 —— 成本随题量而非人数增长；可在系统配置-激励与闯关改回
     # 版本管理：后台检测到新提交时，是否自动快进同步运行代码。
     # 涉及数据库迁移或 requirements.txt 变更时不会自动同步，仍走人工升级。
     "auto_pull_enabled": True,
