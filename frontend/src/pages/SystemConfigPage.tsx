@@ -398,6 +398,10 @@ const SkillManagePanel: React.FC = () => {
     return acc
   }, {} as Record<string, number>)
 
+  // 统计弹窗用: 技能内部名 → 显示名（与主列表同源数据，无需另建 i18n 键）
+  const skillDisplayName: Record<string, string> = {}
+  skills.forEach((s) => { skillDisplayName[s.name] = s.display_name })
+
   return (
     <div>
       {/* 工具栏 */}
@@ -665,7 +669,7 @@ const SkillManagePanel: React.FC = () => {
               size="small" rowKey="skill" pagination={{ pageSize: 10, size: 'small' }}
               dataSource={Object.entries(stats.by_skill).map(([skill, v]) => ({ skill, ...v }))}
               columns={[
-                { title: t('skillStatsSkill'), dataIndex: 'skill' },
+                { title: t('skillStatsSkill'), dataIndex: 'skill', render: (name: string) => skillDisplayName[name] || name },
                 { title: t('skillStatsCount'), dataIndex: 'count' },
                 { title: t('skillStatsScenesCol'), dataIndex: 'scenes', render: (ss: string[]) => ss.map((s) => <Tag key={s}>{s}</Tag>) },
               ]}
