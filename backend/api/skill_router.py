@@ -208,8 +208,10 @@ async def preview_scene_skills(scene: str, request: Request, mode: str = "curren
     engine.ensure_fresh(SKILL_CACHE_TTL)
     config = _load_global_config()
     enabled = config.get("enabled_skills", [])
+    from backend.prompts import resolve_scene_skills
+    effective = resolve_scene_skills(scene, enabled, config.get("skill_scene_map", {}))
 
-    seg = engine.compose(enabled, context={"type": scene}, enabled_names=enabled)
+    seg = engine.compose(effective, context={"type": scene}, enabled_names=enabled)
     fired = re.findall(r"<!--\s*(.+?)\s*v[\d.]+\s*-->", seg)
     result: dict[str, Any] = {
         "scene": scene,
@@ -223,7 +225,7 @@ async def preview_scene_skills(scene: str, request: Request, mode: str = "curren
         # 预览用组合：Overview + 全部正文章节（含 Quality Constraints），
         # 章节顺序保持文档原序；仅在此函数内计算，不触碰引擎行为。
         parts = []
-        for name in enabled:
+        for name in effective:
             skill = engine.get(name)
             if not skill:
                 continue

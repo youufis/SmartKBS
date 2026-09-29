@@ -118,6 +118,30 @@ def build_prompt_with_skills(
         return base_prompt
 
 
+def resolve_scene_skills(scene_type: str, enabled: list[str], scene_map: dict) -> list[str]:
+    """场景×技能映射：按 skill_scene_map 声明过滤某场景实际生效的技能列表。
+
+    - 场景未出现在映射中 → 原样返回（与无映射时行为完全一致）
+    - include: 仅保留列表内技能（取交集，保持原顺序）
+    - exclude: 在 include 之后再剔除列表内技能
+    """
+    if not isinstance(scene_map, dict) or not scene_map:
+        return list(enabled)
+    rule = scene_map.get(scene_type)
+    if not isinstance(rule, dict):
+        return list(enabled)
+    eff = list(enabled)
+    inc = rule.get("include")
+    if isinstance(inc, list) and inc:
+        inc_set = {str(x) for x in inc}
+        eff = [n for n in eff if n in inc_set]
+    exc = rule.get("exclude")
+    if isinstance(exc, list) and exc:
+        exc_set = {str(x) for x in exc}
+        eff = [n for n in eff if n not in exc_set]
+    return eff
+
+
 def apply_skills(base_prompt: str, scene_type: str) -> str:
     """一键注入：读取已启用的技能并按场景过滤后注入到 Prompt
 
@@ -133,9 +157,11 @@ def apply_skills(base_prompt: str, scene_type: str) -> str:
     try:
         from backend.api.config_router import get_config_value
         enabled = get_config_value("enabled_skills", [])
+        scene_map = get_config_value("skill_scene_map", {})
+        effective = resolve_scene_skills(scene_type, enabled, scene_map)
         return build_prompt_with_skills(
             base_prompt=base_prompt,
-            skill_names=enabled,
+            skill_names=effective,
             context={"type": scene_type},
             enabled_names=enabled,
         )

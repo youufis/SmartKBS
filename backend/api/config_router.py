@@ -86,6 +86,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     ],
     # 技能系统：已启用的技能名称列表（空列表=关闭所有技能）
     "enabled_skills": [],
+    # 场景×技能映射：{场景: {"exclude":[...], "include":[...]}}，未列出的场景行为不变
+    "skill_scene_map": {},
     # 课程名称列表
     "SUBJECTS": ["人工智能"],
     # 启用的试题题型（可在此增删，前端自动同步）
@@ -334,6 +336,28 @@ def _bad_ext(ext: Any) -> bool:
     return not (isinstance(ext, str) and _EXT_RE.match(ext))
 
 
+def _validate_skill_scene_map(value: Any) -> None:
+    """场景×技能映射结构校验: {scene: {include?/exclude?: [技能名]}}"""
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="skill_scene_map 必须是对象（场景→映射规则）")
+    if len(value) > 50:
+        raise HTTPException(status_code=400, detail="skill_scene_map 最多 50 个场景")
+    for scene, rule in value.items():
+        if not isinstance(scene, str) or not scene.strip() or len(scene) > 60:
+            raise HTTPException(status_code=400, detail="skill_scene_map 场景名需为不超过 60 字的非空字符串")
+        if not isinstance(rule, dict):
+            raise HTTPException(status_code=400, detail=f"skill_scene_map.{scene} 必须是含 include/exclude 的对象")
+        unknown = set(rule) - {"include", "exclude"}
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"skill_scene_map.{scene} 仅支持 include/exclude 字段")
+        for fld in ("include", "exclude"):
+            lst = rule.get(fld, [])
+            if not isinstance(lst, list) or not all(isinstance(x, str) and x.strip() for x in lst):
+                raise HTTPException(status_code=400, detail=f"skill_scene_map.{scene}.{fld} 必须是非空字符串列表")
+            if len(lst) > 100:
+                raise HTTPException(status_code=400, detail=f"skill_scene_map.{scene}.{fld} 最多 100 项")
+
+
 def _validate_title_config(key: str, value: Any) -> None:
     """C5: 称号/徽章配置结构校验, 避免写坏后称号子系统全线报错"""
     if not isinstance(value, list) or not value:
@@ -431,6 +455,9 @@ def _validate_config_updates(updates: dict[str, Any]) -> dict[str, Any]:
             out[key] = value
         elif key in _TITLE_LIST_KEYS:
             _validate_title_config(key, value)
+            out[key] = value
+        elif key == "skill_scene_map":
+            _validate_skill_scene_map(value)
             out[key] = value
     dropped = [k for k in updates if k not in out]
     if dropped:
