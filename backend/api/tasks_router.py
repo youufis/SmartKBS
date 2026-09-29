@@ -28,7 +28,6 @@ from backend.utils import get_account_chat_history_dir, get_admin_chat_history_d
 
 from backend.database import execute_query, execute_insert_update, get_connection
 from backend.logger import logger
-from backend.prompts import apply_skills
 
 # K4: 任务字段上限与目标范围白名单
 TASK_NAME_MAX = 60

@@ -28,7 +28,6 @@ from backend.prompts.chat import SVG_GENERATE_PROMPT, IMAGE_GEN_PROMPT_TEMPLATE
 from backend.logger import logger
 from backend.reward_engine import award_participation, award_grade, update_student_total
 from backend.title_system import check_and_unlock_badges
-from backend.prompts import apply_skills
 
 router = APIRouter()
 
@@ -332,10 +331,10 @@ def _call_ai_phone_friend(api_key: str, question: str, options: dict[str, Any]) 
         option_c=opts.get("C", ""),
         option_d=opts.get("D", ""),
     )
-    prompt = apply_skills(prompt, "quest")
+    # 注意：不注入技能 — 技能段与「30-50字纯文本、无格式标记」要求冲突；json_mode 一并改回文本模式
     try:
         from backend.api.ai_service import _ai_thread_pool, call_ai_sync_direct
-        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False, json_mode=True)
+        future = _ai_thread_pool.submit(call_ai_sync_direct, prompt, api_key, False)
         text = future.result(timeout=30)
         return text.strip().strip('"').strip("'")
     except Exception as e:
@@ -1724,7 +1723,7 @@ async def quest_bank_generate_svg(question_id: int, request: Request):
         description=row["question_text"],
         subject=row.get("category", "百科")
     )
-    prompt = apply_skills(prompt, "quest")
+    # 注意：不注入技能 — 技能的结构化输出指令与 JSON 格式要求冲突
     try:
         # 同步 AI 调用放线程里跑, 避免阻塞事件循环（同闯关出题口径）
         text = await asyncio.to_thread(call_ai_sync_direct, prompt, api_key, json_mode=True)

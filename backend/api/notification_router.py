@@ -526,7 +526,6 @@ async def ai_generate_announcement(req: AiGenerateAnnouncement, request: Request
     if not api_key:
         return {"status": "error", "content": "AI 功能不可用：请配置 API Key"}
 
-    from backend.prompts import apply_skills
     from backend.api.ai_service import call_ai_async
     from backend.ai_task_manager import task_manager
 

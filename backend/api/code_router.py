@@ -23,7 +23,7 @@ from backend.database import execute_query as db_query, execute_query_dict as db
 from backend.logger import logger
 from backend.api.chat_router import get_api_keys
 from backend.api.ai_service import call_ai_async
-from backend.prompts import apply_skills, build_ai_role
+from backend.prompts import build_ai_role
 from backend.utils import extract_json_from_text
 from backend.code_runner import run_python, run_javascript, get_supported_languages
 from backend.code_grader import grade_submission

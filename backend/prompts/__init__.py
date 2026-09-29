@@ -111,8 +111,8 @@ def build_prompt_with_skills(
         # 技能增强段注入到基础 Prompt 之前
         return f"{segment}\n\n---\n\n{base_prompt}"
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(
+        from backend.logger import logger
+        logger.error(
             f"技能注入失败，已降级为原始 Prompt: {e}", exc_info=True
         )
         return base_prompt
