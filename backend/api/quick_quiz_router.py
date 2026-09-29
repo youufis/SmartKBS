@@ -985,14 +985,22 @@ async def list_bank_questions(
         total = count_row["cnt"] if count_row else 0
 
         offset = (page - 1) * page_size
-        rows = execute_query_dict(
-            f"""SELECT id, category, question_text, options, correct_answer, explanation
-                FROM quest_question_bank
-                WHERE {where}
-                ORDER BY RANDOM()
-                LIMIT ? OFFSET ?""",
-            tuple(params) + (page_size, offset),
-        )
+        # 分页浏览防重复/漏题：旧写法 ORDER BY RANDOM()+OFFSET 每页都是全新随机序，
+        # 翻页会重复或跳过题目。改为当天固定种子打乱 id 后按页切片（隔天自动换序）。
+        _id_rows = execute_query(
+            f"SELECT id FROM quest_question_bank WHERE {where} ORDER BY id", tuple(params)) or []
+        _ids = [(r["id"] if isinstance(r, dict) else r[0]) for r in _id_rows]
+        random.Random("qq-browse|" + datetime.now().strftime("%Y-%m-%d")).shuffle(_ids)
+        _page_ids = _ids[offset:offset + page_size]
+        rows = []
+        if _page_ids:
+            _marks = ",".join("?" * len(_page_ids))
+            _by_id = {r["id"]: r for r in execute_query_dict(
+                f"""SELECT id, category, question_text, options, correct_answer, explanation
+                    FROM quest_question_bank WHERE id IN ({_marks})""",
+                tuple(_page_ids),
+            ) or []}
+            rows = [_by_id[i] for i in _page_ids if i in _by_id]
 
         questions = []
         for r in rows:

@@ -214,9 +214,12 @@ def _select_questions_by_rules(
         chosen: list[dict[str, Any]] = []
 
         def _pick_from(pool_list: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+            # 按候选池顺序取前 n：池子由 select_questions 生成——层级按相关度排序(T0 最前)、
+            # 层内已按每次调用的随机种子打乱。旧写法 random.sample 等概率抽样，
+            # 会让 T5 同学科兜底题和 T1 命中题同率入卷；切片既保相关度优先又每次换一批。
             if not pool_list or n <= 0:
                 return []
-            return random.sample(pool_list, min(n, len(pool_list)))
+            return pool_list[:n]
 
         chosen.extend(_pick_from(easy_pool, target_easy))
         chosen.extend(_pick_from(medium_pool, target_medium))
