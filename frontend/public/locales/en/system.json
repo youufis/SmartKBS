@@ -1080,5 +1080,22 @@
   "sceneMapScene": "Scene key, e.g. chat / quiz",
   "sceneMapExclude": "Excluded skills (optional)",
   "sceneMapInclude": "Include only (optional)",
-  "sceneMapAdd": "Add scene mapping"
+  "sceneMapAdd": "Add scene mapping",
+  "sceneMapBtn": "Scene mapping",
+  "sceneMapTitle": "Skill scene mapping",
+  "sceneMapUnknownScene": "Not a wired scene key - it may never take effect",
+  "sceneMapSafetyWarn": "Content-safety skill will NOT be injected in this scene",
+  "sceneMapIncludeNote": "Include-only mode: unselected skills are not injected here",
+  "scene_chat": "AI Chat",
+  "scene_companion": "AI Companion",
+  "scene_analytics": "Learning Analytics",
+  "scene_portfolio": "Growth Portfolio",
+  "scene_curriculum": "Lesson Planning",
+  "scene_discussion": "Class Discussion",
+  "scene_exam": "Exam Explainers",
+  "scene_quiz": "Quizzes & Questions",
+  "scene_whiteboard": "Whiteboard",
+  "scene_wrong-book": "Wrong-Answer Book",
+  "scene_portrait": "Self Profile",
+  "scene_html-generation": "Resource Pages"
 }

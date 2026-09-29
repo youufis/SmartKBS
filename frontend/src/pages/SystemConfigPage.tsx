@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Card, Tabs, Form, Input, InputNumber, Button, message, Switch,
   Spin, Typography, Divider, Space, Alert, Tag, Checkbox, Select, Tooltip,
+  AutoComplete,
 } from 'antd'
 import {
   SaveOutlined, SettingOutlined, ReloadOutlined, WarningOutlined, ExclamationCircleOutlined,
@@ -42,7 +43,7 @@ interface ConfigField {
   key: string
   labelKey: string
   descKey?: string
-  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle' | 'scene_map'
+  type: 'text' | 'password' | 'number' | 'float' | 'boolean' | 'tags' | 'roles' | 'notifications' | 'question_types' | 'multimodal_toggle'
   group: string
   required?: boolean
   placeholderKey?: string
@@ -108,7 +109,7 @@ interface ConfigMeta {
 }
 
 // 有专属管理入口、不算「本表单漏收」的配置键
-const MANAGED_ELSEWHERE_KEYS = ['enabled_skills', 'TITLE_CONFIG', 'SUBJECT_TITLE_CONFIG', 'BADGE_CONFIG']
+const MANAGED_ELSEWHERE_KEYS = ['enabled_skills', 'skill_scene_map', 'TITLE_CONFIG', 'SUBJECT_TITLE_CONFIG', 'BADGE_CONFIG']
 
 const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   // ══ ① 基础与内容 ══
@@ -139,8 +140,6 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'MODEL_LONG_NAME', labelKey: 'field_MODEL_LONG_NAME', descKey: 'field_MODEL_LONG_NAME_desc', type: 'text', group: 'models' },
   { key: 'MODEL_VL_NAME', labelKey: 'field_MODEL_VL_NAME', descKey: 'field_MODEL_VL_NAME_desc', type: 'text', group: 'models' },
   { key: 'ENABLE_MULTIMODAL', labelKey: 'field_ENABLE_MULTIMODAL', descKey: 'field_ENABLE_MULTIMODAL_desc', type: 'multimodal_toggle', group: 'models' },
-  // 技能场景映射：按 AI 场景裁剪实际注入的技能（后端 skill_engine 消费；空映射=全部场景默认行为）
-  { key: 'skill_scene_map', labelKey: 'field_skill_scene_map', descKey: 'field_skill_scene_map_desc', type: 'scene_map', group: 'models', required: false },
   // 百炼知识库检索（backend/bailian_kb.py；「直连 + 知识库」模式，与 APPID 智能体相互独立）
   { key: 'KB_ENABLED', labelKey: 'field_KB_ENABLED', descKey: 'field_KB_ENABLED_desc', type: 'boolean', group: 'knowledgebase', required: false },
   { key: 'KB_AGENT_ID', labelKey: 'field_KB_AGENT_ID', descKey: 'field_KB_AGENT_ID_desc', type: 'text', group: 'knowledgebase', required: false, placeholderKey: 'placeholder_KB_AGENT_ID' },
@@ -255,7 +254,14 @@ const normVal = (v: unknown): string => {
 // ═══════════════════════════════════════════════
 
 // ── 技能场景映射编辑器（Form.Item 受控：value/onChange 由表单注入）──
+// 当前有注入调用点的场景(与后端 apply_skills 调用一致)；不在列表内的键不会命中任何注入路径
+const SCENE_SUGGESTIONS = [
+  'chat', 'companion', 'analytics', 'portfolio', 'curriculum', 'discussion',
+  'exam', 'quiz', 'whiteboard', 'wrong-book', 'portrait', 'html-generation',
+]
+
 interface SceneRule { include?: string[]; exclude?: string[] }
+
 type SceneMapValue = Record<string, SceneRule>
 
 const SceneMapEditor: React.FC<{
@@ -306,13 +312,15 @@ const SceneMapEditor: React.FC<{
   return (
     <div>
       {rows.map((r, i) => (
-        <Space key={i} style={{ display: 'flex', marginBottom: 8 }} align='start'>
-          <Input
+        <div key={i} style={{ marginBottom: 8 }}>
+        <Space style={{ display: 'flex' }} align='start'>
+          <AutoComplete
+            options={SCENE_SUGGESTIONS.map(s => ({ value: s, label: `${t('scene_' + s)} (${s})` }))}
             placeholder={t('sceneMapScene')}
             value={r.scene}
-            onChange={e => update(i, { scene: e.target.value })}
+            onChange={v => update(i, { scene: String(v ?? '') })}
             style={{ width: 180 }}
-            maxLength={60}
+            status={r.scene.trim() && !SCENE_SUGGESTIONS.includes(r.scene.trim()) ? 'warning' : undefined}
           />
           <Select
             mode="multiple" allowClear showSearch optionFilterProp="label"
@@ -334,6 +342,19 @@ const SceneMapEditor: React.FC<{
           />
           <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(i)} />
         </Space>
+        {r.scene.trim() && SCENE_SUGGESTIONS.includes(r.scene.trim()) && (
+          <Tag style={{ marginTop: 4 }}>{t('scene_' + r.scene.trim())}</Tag>
+        )}
+        {r.scene.trim() && !SCENE_SUGGESTIONS.includes(r.scene.trim()) && (
+          <Tag color="orange" style={{ marginTop: 4 }}>{t('sceneMapUnknownScene')}</Tag>
+        )}
+        {r.exclude.includes('safety-guard') && (
+          <Tag color="red" style={{ marginTop: 4 }}>{t('sceneMapSafetyWarn')}</Tag>
+        )}
+        {r.include.length > 0 && (
+          <Tag color="blue" style={{ marginTop: 4 }}>{t('sceneMapIncludeNote')}</Tag>
+        )}
+        </div>
       ))}
       <Button size="small" type="dashed" block onClick={add}>+ {t('sceneMapAdd')}</Button>
     </div>
@@ -373,6 +394,10 @@ const SkillManagePanel: React.FC = () => {
   const [stats, setStats] = useState<SkillStatsResponse | null>(null)
   const [statsVisible, setStatsVisible] = useState(false)
   const [statsLoading, setStatsLoading] = useState(false)
+  const [mapVisible, setMapVisible] = useState(false)
+  const [mapValue, setMapValue] = useState<SceneMapValue>({})
+  const [mapLoading, setMapLoading] = useState(false)
+  const [mapSaving, setMapSaving] = useState(false)
 
   const loadSkills = useCallback(async () => {
     setLoading(true)
@@ -403,6 +428,31 @@ const SkillManagePanel: React.FC = () => {
       /* ignore */
     }
     setStatsLoading(false)
+  }
+
+  // 场景映射编辑：打开时从系统配置拉取，保存走 PUT /api/config（后端有结构校验）
+  const openSceneMap = async () => {
+    setMapVisible(true)
+    setMapLoading(true)
+    try {
+      const { data } = await apiClient.get('/api/config')
+      setMapValue((data?.skill_scene_map as SceneMapValue) ?? {})
+    } catch (e: any) {
+      message.error(t('loadFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    }
+    setMapLoading(false)
+  }
+
+  const saveSceneMap = async () => {
+    setMapSaving(true)
+    try {
+      await apiClient.put('/api/config', { config: { skill_scene_map: mapValue } })
+      message.success(t('configSavedMsg'))
+      setMapVisible(false)
+    } catch (e: any) {
+      message.error(t('saveFailed') + ': ' + (e?.response?.data?.detail || e.message))
+    }
+    setMapSaving(false)
   }
 
   // 切换单个技能启用状态
@@ -518,6 +568,9 @@ const SkillManagePanel: React.FC = () => {
         </Button>
         <Button icon={<BarChartOutlined />} onClick={openStats}>
           {t('skillStats')}
+        </Button>
+        <Button icon={<SettingOutlined />} onClick={openSceneMap}>
+          {t('sceneMapBtn')}
         </Button>
         <Divider type="vertical" />
         <Space>
@@ -748,7 +801,7 @@ const SkillManagePanel: React.FC = () => {
               size="small" rowKey="scene" pagination={false} style={{ marginBottom: 16 }}
               dataSource={Object.entries(stats.by_scene).map(([scene, v]) => ({ scene, ...v }))}
               columns={[
-                { title: t('skillStatsScene'), dataIndex: 'scene' },
+                { title: t('skillStatsScene'), dataIndex: 'scene', render: (s: string) => (SCENE_SUGGESTIONS.includes(s) ? t('scene_' + s) : s) },
                 { title: t('skillStatsCount'), dataIndex: 'count' },
                 { title: t('skillStatsCharsCol'), dataIndex: 'chars' },
                 { title: t('skillStatsLastUsed'), dataIndex: 'last_used' },
@@ -760,9 +813,29 @@ const SkillManagePanel: React.FC = () => {
               columns={[
                 { title: t('skillStatsSkill'), dataIndex: 'skill', render: (name: string) => skillDisplayName[name] || name },
                 { title: t('skillStatsCount'), dataIndex: 'count' },
-                { title: t('skillStatsScenesCol'), dataIndex: 'scenes', render: (ss: string[]) => ss.map((s) => <Tag key={s}>{s}</Tag>) },
+                { title: t('skillStatsScenesCol'), dataIndex: 'scenes', render: (ss: string[]) => ss.map((s) => <Tag key={s}>{SCENE_SUGGESTIONS.includes(s) ? t('scene_' + s) : s}</Tag>) },
               ]}
             />
+          </>
+        )}
+      </Modal>
+
+      {/* 场景映射编辑弹窗 */}
+      <Modal
+        title={t('sceneMapTitle')}
+        open={mapVisible}
+        onCancel={() => setMapVisible(false)}
+        onOk={saveSceneMap}
+        okText={t('save')}
+        confirmLoading={mapSaving}
+        width={860}
+      >
+        {mapLoading ? (
+          <Spin style={{ display: 'block', margin: '24px auto' }} />
+        ) : (
+          <>
+            <Alert type="info" showIcon title={t('field_skill_scene_map_desc')} style={{ marginBottom: 12 }} />
+            <SceneMapEditor value={mapValue} onChange={setMapValue} />
           </>
         )}
       </Modal>
@@ -1705,14 +1778,6 @@ const SystemConfigPage: React.FC = () => {
                   <Checkbox>
                     {t('multimodalCheckbox')}
                   </Checkbox>
-                </Form.Item>
-              ) : field.type === 'scene_map' ? (
-                <Form.Item
-                  name={field.key}
-                  label={getLabelNode(field)}
-                  extra={getDesc(field)}
-                >
-                  <SceneMapEditor />
                 </Form.Item>
               ) : (
                 <Form.Item

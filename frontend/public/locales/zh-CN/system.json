@@ -1080,5 +1080,22 @@
   "sceneMapScene": "场景标识，如 chat / quiz",
   "sceneMapExclude": "排除技能（可选）",
   "sceneMapInclude": "仅保留（可选）",
-  "sceneMapAdd": "添加场景映射"
+  "sceneMapAdd": "添加场景映射",
+  "sceneMapBtn": "场景映射",
+  "sceneMapTitle": "技能场景映射",
+  "sceneMapUnknownScene": "不在当前已接入场景列表内，可能不会生效",
+  "sceneMapSafetyWarn": "该场景将不注入内容安全过滤，请确认",
+  "sceneMapIncludeNote": "仅保留模式：未选中的技能都不会注入该场景",
+  "scene_chat": "智能问答",
+  "scene_companion": "AI 学伴",
+  "scene_analytics": "学情分析",
+  "scene_portfolio": "成长档案",
+  "scene_curriculum": "智能备课",
+  "scene_discussion": "课堂讨论",
+  "scene_exam": "考试讲解",
+  "scene_quiz": "测验与试题",
+  "scene_whiteboard": "白板助手",
+  "scene_wrong-book": "错题本讲解",
+  "scene_portrait": "自我画像",
+  "scene_html-generation": "资源页生成"
 }
