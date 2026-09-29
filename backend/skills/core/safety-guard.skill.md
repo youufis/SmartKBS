@@ -5,6 +5,7 @@ display_name: "内容安全过滤"
 description: "在 AI 生成内容时自动过滤不当信息，确保内容适合教育场景使用"
 type: core
 tags: [safety, filter, content-moderation, compliance]
+inject_sections: ["Safety Rules", "Quality Constraints"]
 compose:
   priority: 200
   position: prefix

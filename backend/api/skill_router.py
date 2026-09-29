@@ -7,6 +7,7 @@
 - PUT  /api/skills/enabled  — 更新已启用的技能列表（管理员）
 - POST /api/skills/reload   — 重新加载技能（管理员）
 - POST /api/skills/validate — 验证技能组合是否合法（登录）
+- GET  /api/skills/preview  — 预览指定场景实际注入的技能段（管理员，只读）
 - GET  /api/skills/{name}   — 获取技能详情，含原始文档（管理员）
 - PUT  /api/skills/{name}   — 更新技能文档内容（管理员）
 
@@ -21,6 +22,7 @@
 - S4 写接口加上大小/结构校验，写入后解析失败自动回滚原文件，避免改坏技能库。
 - S5 读路径改用惰性缓存 ensure_fresh()，不再每个请求全量重扫磁盘。
 """
+import re
 from pathlib import Path
 from typing import Any
 
@@ -189,6 +191,63 @@ async def validate_skills(req: EnabledSkillsUpdate, request: Request):
     engine.ensure_fresh(SKILL_CACHE_TTL)
     return engine.validate(req.enabled_skills)
 
+
+
+@router.get("/preview", summary="预览场景技能注入段（管理员）")
+async def preview_scene_skills(scene: str, request: Request, mode: str = "current"):
+    """只读预览：返回指定场景当前会实际注入的 Prompt 增强段，不产生任何写操作。
+
+    mode=current: 引擎现行行为（仅注入 Phase/Quality Constraints 等白名单章节）
+    mode=full:    P1 方案预览 — 在 current 基础上补齐 Overview 与全部正文章节
+    （full 仅为预览计算，不改变任何真实调用路径）
+    """
+    user = get_current_user(request)
+    require_admin(user)
+
+    engine = _get_engine()
+    engine.ensure_fresh(SKILL_CACHE_TTL)
+    config = _load_global_config()
+    enabled = config.get("enabled_skills", [])
+
+    seg = engine.compose(enabled, context={"type": scene}, enabled_names=enabled)
+    fired = re.findall(r"<!--\s*(.+?)\s*v[\d.]+\s*-->", seg)
+    result: dict[str, Any] = {
+        "scene": scene,
+        "mode": "current",
+        "length": len(seg),
+        "fired_skills": [x.strip() for x in fired],
+        "segment": seg,
+    }
+
+    if mode == "full":
+        # 预览用组合：Overview + 全部正文章节（含 Quality Constraints），
+        # 章节顺序保持文档原序；仅在此函数内计算，不触碰引擎行为。
+        parts = []
+        for name in enabled:
+            skill = engine.get(name)
+            if not skill:
+                continue
+            if scene and skill.compatible_with and scene not in skill.compatible_with:
+                continue
+            secs = []
+            ov = skill.sections.get("_overview") or skill.sections.get("Overview") or ""
+            if ov:
+                secs.append(ov)
+            for title, content in skill.sections.items():
+                if title in ("_overview", "Overview") or not content:
+                    continue
+                secs.append("## " + title + "\n\n" + content)
+            if secs:
+                parts.append(f"<!-- {skill.display_name} v{skill.version} -->" + "\n\n" + "\n\n".join(secs))
+        full_seg = "\n\n---\n\n".join(parts)
+        fired_full = re.findall(r"<!--\s*(.+?)\s*v[\d.]+\s*-->", full_seg)
+        result["full"] = {
+            "length": len(full_seg),
+            "fired_skills": [x.strip() for x in fired_full],
+            "segment": full_seg,
+        }
+
+    return result
 
 @router.get("/{name}", summary="获取技能详情（管理员）")
 async def get_skill_detail(name: str, request: Request):

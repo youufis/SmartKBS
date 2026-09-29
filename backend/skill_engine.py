@@ -18,12 +18,11 @@ import os
 import re
 import json
 import time
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
+from backend.logger import logger
 
 # ── 技能文档目录 ──
 # 优先使用环境变量，默认相对于 backend 目录
@@ -41,6 +40,7 @@ class ComposeConfig:
     position: str = "prefix"     # 注入位置：prefix=基础 Prompt 前, suffix=后
     requires: list[str] = field(default_factory=list)   # 前置依赖技能
     conflicts_with: list[str] = field(default_factory=list)  # 冲突技能
+    inject_sections: list[str] = field(default_factory=list)  # 章节白名单（非空=只按声明顺序注入这些章节）
 
 
 @dataclass
@@ -498,6 +498,13 @@ class SkillEngine:
             compose_config.conflicts_with = compose_raw.get("conflicts_with", [])
 
         # 提取兼容场景
+        # 章节白名单：顶层 inject_sections 字段（mini 解析器仅可靠支持顶层内联列表；
+        # 嵌套 compose 块当前不被解析，priority/requires 等均为默认值——修复属行为变更，另行灰度）
+        inj = yaml_dict.get("inject_sections", [])
+        if isinstance(inj, str):
+            inj = [inj]
+        compose_config.inject_sections = [str(x).strip() for x in inj if str(x).strip()]
+
         compatible = yaml_dict.get("compatible_with", [])
         if isinstance(compatible, str):
             compatible = [compatible]
@@ -568,6 +575,16 @@ class SkillEngine:
         """构建单个技能的 Prompt 增强段"""
         parts = [f"<!-- {skill.display_name} v{skill.version} -->"]
 
+        # 章节白名单模式：声明了 inject_sections 的技能只注入指定章节（按声明顺序）
+        if skill.compose.inject_sections:
+            for want in skill.compose.inject_sections:
+                content = self._get_section(skill, want)
+                if content:
+                    parts.append(f"## {want}\n\n{content}")
+                else:
+                    logger.warning(f"技能 {skill.name} 声明注入章节「{want}」未找到或为空，跳过")
+            return "\n\n".join(parts)
+
         # 添加 Overview
         overview = self._get_section(skill, "_overview")
         if overview:
@@ -610,6 +627,7 @@ class SkillEngine:
             "priority": skill.compose.priority,
             "requires": skill.compose.requires,
             "conflicts_with": skill.compose.conflicts_with,
+            "inject_sections": skill.compose.inject_sections,
             "sections": list(skill.sections.keys()),
             "parse_error": skill.parse_error if include_private else None,
         }
