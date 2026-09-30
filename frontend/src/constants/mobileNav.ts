@@ -23,6 +23,12 @@ const STUDENT_ALLOWED = [
   '/exam',                 // 首页「待完成考试 / 考试成绩」（教师侧考试管理仍不开放）
   '/portrait',             // 首页「AI 周画像」
   '/companion-settings',   // 学伴设置
+  // ── 第二批 B 档：刷题与课堂活动 ──
+  '/quest',                // 知识闯关（学生侧 QuestPage；教师侧闯关管理仍不开放）
+  '/practice',             // 同步练习
+  '/interaction',          // 课堂互动（随堂测验参与）
+  '/quick-poll',           // 课堂投票参与
+  '/downloads',            // 文件中心
 ]
 
 /** 教师/管理员端：首批仅轻场景（题库/组卷/用户管理等保持桌面专属） */
@@ -32,6 +38,7 @@ const STAFF_ALLOWED = [
   '/notifications',
   '/announcements',
   '/student-questions',
+  '/downloads',          // 文件中心：教师取用资料，轻场景
 ]
 
 /**

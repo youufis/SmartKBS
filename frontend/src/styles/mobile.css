@@ -76,7 +76,14 @@
   .ant-card .ant-space-horizontal,
   .ant-card-meta-title .ant-space,
   .ant-card-meta-description .ant-space { flex-wrap: wrap; row-gap: 4px; }
+
+  /* 闯关统计面板：5 个 flex:1 卡片在 390px 各得 ~66px，标题被挤成一字一行。
+     窄屏允许换行并给每卡最小宽度 -> 手机三列/两行；桌面每卡 ~180px 远高于该下限，版式不变 */
+  .quest-stats { flex-wrap: wrap; gap: 8px !important; }
+  /* 注意: 卡片带行内 flex:1/minWidth:0, 行内样式优先级更高, 必须 !important 才能覆盖 */
+  .quest-stats > .ant-card { flex: 1 1 30% !important; min-width: 104px !important; }
 }
+
 
 
 

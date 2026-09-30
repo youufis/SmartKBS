@@ -300,8 +300,8 @@ const QuestPage: React.FC = () => {
         </div>
       </Card>
 
-      {/* ── 统计面板（一行显示） ── */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
+      {/* ── 统计面板（一行显示；窄屏由 mobile.css 允许换行） ── */}
+      <div className="quest-stats" style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
         <Card hoverable size="small" style={{ flex: 1, minWidth: 0 }}>
           <Statistic
             title={t('quest.totalQuests')}
