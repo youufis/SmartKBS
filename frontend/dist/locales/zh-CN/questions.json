@@ -415,5 +415,6 @@
   "tagFillFailed": "{{count}} 批 AI 调用失败，可再次点击补标重试",
   "tagFillTruncated": "建议列表最多展示 100 条；确认写入会处理全部建议",
   "tagFillColText": "题干",
-  "tagFillEditTip": "标签可增删改（只能选教材知识点，最多 3 个）；清空表示该题不写入。"
+  "tagFillEditTip": "标签可增删改（只能选教材知识点，最多 3 个）；清空表示该题不写入。",
+  "imageExtractHint": "长截图会自动分片识别；多页试卷请逐张上传，重复题目自动判重回填。"
 }

@@ -857,6 +857,9 @@ const QuestionBankPage: React.FC = () => {
                       </Row>
                       <div style={{ marginTop: 12 }}>
                         <Typography.Text strong style={{ fontSize: 13 }}>📷 {t('imageExtract')}</Typography.Text>
+                        <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+                          {t('imageExtractHint')}
+                        </Typography.Text>
                         <div style={{ marginTop: 4 }}>
                           <Upload
                             accept=".jpg,.jpeg,.png,.gif,.webp,.bmp"

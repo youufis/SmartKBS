@@ -1380,6 +1380,36 @@ async def extract_questions_from_text(
     }
 
 
+def _slice_tall_image(image_bytes: bytes, mime_type: str) -> list[tuple[bytes, str]]:
+    """长截图(高>1.8倍宽)自动横向切成多片, 片间留 15% 重叠防切断题干。
+
+    视觉模型对细长图会整体缩放丢细节, 分片既保分辨率又天然把输出预算分摊到各片;
+    普通截图原样返回单片。PIL 缺失/异常一律回退原图, 不影响主流程。"""
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(image_bytes))
+        w, h = im.size
+        if w <= 0 or h <= 1.8 * w:
+            return [(image_bytes, mime_type)]
+        chunk = max(400, int(w * 1.4))
+        step = max(200, int(chunk * 0.85))
+        out: list[tuple[bytes, str]] = []
+        top = 0
+        while top < h:
+            bottom = min(top + chunk, h)
+            buf = io.BytesIO()
+            im.crop((0, top, w, bottom)).convert("RGB").save(buf, format="PNG")
+            out.append((buf.getvalue(), "image/png"))
+            if bottom >= h:
+                break
+            top += step
+        logger.info(f"[图片提取] 长图 {w}x{h} 自动切为 {len(out)} 片")
+        return out or [(image_bytes, mime_type)]
+    except Exception as e:
+        logger.warning(f"长图切片失败，按原图提取: {e}")
+        return [(image_bytes, mime_type)]
+
 def _build_image_extract_prompt(subject: str, difficulty_desc: str,
                                 allow_svg: bool = True,
                                 extra_hint: str = "") -> str:
@@ -1527,43 +1557,53 @@ async def extract_questions_from_image(
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
     prompt_text = _build_image_extract_prompt(subject, difficulty_desc)
 
-    # ── 逐轮提取: 首轮全图; 若模型在末尾要求"截断了, 请给裁剪图"则按行号裁图续提, 最多 3 轮 ──
+    # ── 外层逐片(长图自动切), 内层逐轮(截断续提), 最后规范化去重合并 ──
     from backend.question_extract import merge_questions
     MAX_IMG_ROUNDS = 3
     all_q: list[dict] = []
-    cur_bytes, cur_mime = file_bytes, mime_type
-    note = ""
-    for round_no in range(MAX_IMG_ROUNDS):
-        try:
-            result_text, finish = await _call_vision_extract(
-                cur_bytes, cur_mime, prompt_text, api_key, model_name)
-        except HTTPException:
-            if round_no == 0:
-                raise
-            note = f"第 {round_no + 1} 轮续提失败，保留已提取结果"
-            break
-        questions = _parse_ai_response(result_text)
-        if not questions:
-            # 整轮解析失败(如模型生成的 SVG 转义破损): 不连坐, 换纯文字重提一轮
-            if round_no == 0:
-                prompt_text = _build_image_extract_prompt(subject, difficulty_desc, allow_svg=False)
-                note = "首轮输出解析失败，已按纯文字模式重提"
-                continue
-            break
-        all_q.extend(questions)
-        cont = None
-        for q in questions:
-            if isinstance(q, dict) and str(q.get("continue_from_line") or "").isdigit():
-                cont = int(q["continue_from_line"])
-        if not cont:
-            break
-        cur_bytes, cur_mime = _crop_image_from_line(file_bytes, mime_type, cont)
-        if not cur_bytes:
-            note = "模型要求续提，但图片裁剪失败，已保留前几轮结果"
-            break
-        if round_no + 1 < MAX_IMG_ROUNDS - 1:
-            prompt_text = _build_image_extract_prompt(subject, difficulty_desc,
-                                                      extra_hint=f"注意：本图从第 {cont + 1} 行开始，只需提取其后的新题，前面已提取过的不要重复。")
+    notes: list[str] = []
+    slices = _slice_tall_image(file_bytes, mime_type)
+    if len(slices) > 1:
+        notes.append(f"长图已自动切为 {len(slices)} 片")
+
+    for _si, (img_bytes, img_mime) in enumerate(slices):
+        cur_bytes, cur_mime = img_bytes, img_mime
+        note = ""
+        prompt_text = _build_image_extract_prompt(subject, difficulty_desc)
+        for round_no in range(MAX_IMG_ROUNDS):
+            try:
+                result_text, finish = await _call_vision_extract(
+                    cur_bytes, cur_mime, prompt_text, api_key, model_name)
+            except HTTPException:
+                if round_no == 0:
+                    raise
+                note = f"第 {round_no + 1} 轮续提失败，保留已提取结果"
+                break
+            questions = _parse_ai_response(result_text)
+            if not questions:
+                # 整轮解析失败(如模型生成的 SVG 转义破损): 不连坐, 换纯文字重提一轮
+                if round_no == 0:
+                    prompt_text = _build_image_extract_prompt(subject, difficulty_desc, allow_svg=False)
+                    note = "首轮输出解析失败，已按纯文字模式重提"
+                    continue
+                break
+            all_q.extend(questions)
+            cont = None
+            for q in questions:
+                if isinstance(q, dict) and str(q.get("continue_from_line") or "").isdigit():
+                    cont = int(q["continue_from_line"])
+            if not cont:
+                break
+            cur_bytes, cur_mime = _crop_image_from_line(file_bytes, mime_type, cont)
+            if not cur_bytes:
+                note = "模型要求续提，但图片裁剪失败，已保留前几轮结果"
+                break
+            if round_no + 1 < MAX_IMG_ROUNDS - 1:
+                prompt_text = _build_image_extract_prompt(subject, difficulty_desc,
+                                                          extra_hint=f"注意：本图从第 {cont + 1} 行开始，只需提取其后的新题，前面已提取过的不要重复。")
+
+        if note:
+            notes.append(f"第 {_si + 1} 片: {note}")
 
     merged = merge_questions([all_q])
     if not merged:
@@ -1575,7 +1615,7 @@ async def extract_questions_from_image(
         "message": f"成功从图片提取 {len(saved_questions)} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
-        "note": note,
+        "note": "；".join(notes),
     }
 
 

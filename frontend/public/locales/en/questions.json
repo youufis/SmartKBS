@@ -415,5 +415,6 @@
   "tagFillFailed": "{{count}} AI batches failed - click again to retry",
   "tagFillTruncated": "Showing at most 100 suggestions; confirming writes all of them",
   "tagFillColText": "Question",
-  "tagFillEditTip": "Tags are editable (textbook knowledge points only, max 3); clear a row to skip that question."
+  "tagFillEditTip": "Tags are editable (textbook knowledge points only, max 3); clear a row to skip that question.",
+  "imageExtractHint": "Tall screenshots are auto-sliced; upload pages one by one — duplicates are detected and reused."
 }
