@@ -87,7 +87,7 @@ const QuickQuizResult: React.FC = () => {
               {room.status === 'ended' ? t('ended') : room.status}
             </Tag>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <div className="qq-result-meta" style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>{t('totalQuestions')}</div>
               <div style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>{room.question_count}</div>
@@ -112,18 +112,18 @@ const QuickQuizResult: React.FC = () => {
 
       {my_info && (
         <Card style={{ borderRadius: 12, marginBottom: 16 }} size="small">
-          <Row gutter={24} style={{ textAlign: 'center' }}>
-            <Col span={4}>
+          <Row gutter={[24, 12]} style={{ textAlign: 'center' }}>
+            <Col xs={12} sm={8} span={4}>
               <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('myRank')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: myRank === 1 ? '#ff4d4f' : '#1677ff' }}>
                 {myRank ? `#${myRank}` : '-'}
               </div>
             </Col>
-            <Col span={5}>
+            <Col xs={12} sm={8} span={5}>
               <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('totalScore')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: '#faad14' }}>{my_info.total_score}</div>
             </Col>
-            <Col span={5}>
+            <Col xs={12} sm={8} span={5}>
               <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('correctWrong')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold' }}>
                 <span style={{ color: '#52c41a' }}>{my_info.correct_count}</span>
@@ -131,7 +131,7 @@ const QuickQuizResult: React.FC = () => {
                 <span style={{ color: '#ff4d4f' }}>{my_info.wrong_count}</span>
               </div>
             </Col>
-            <Col span={5}>
+            <Col xs={12} sm={8} span={5}>
               <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('accuracy')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: '#1677ff' }}>
                 {my_info.correct_count + my_info.wrong_count > 0
@@ -140,7 +140,7 @@ const QuickQuizResult: React.FC = () => {
                 }
               </div>
             </Col>
-            <Col span={5}>
+            <Col xs={12} sm={8} span={5}>
               <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{t('maxStreak')}</div>
               <div style={{ fontSize: 28, fontWeight: 'bold', color: '#eb2f96' }}>
                 {my_info.max_streak > 1 ? `🔥 ${my_info.max_streak}` : '-'}
@@ -222,7 +222,7 @@ const QuickQuizResult: React.FC = () => {
                 .map((q: any, idx: number) => ({
               key: String(idx),
               label: (
-                <Space>
+                <Space className="wrap-space">
                     <Text strong>{t('questionN', { n: q.sort_order })}</Text>
                   <Tag color={q.correct_count > q.total_answers / 2 ? '#52c41a' : '#faad14'}>
                     {t('accuracy')}: {q.total_answers > 0 ? Math.round(q.correct_count / q.total_answers * 100) : 0}%

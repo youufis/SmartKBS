@@ -60,7 +60,12 @@
     width: min(320px, 88vw) !important;
     box-shadow: -4px 0 16px rgba(0, 0, 0, 0.18);
   }
+
+  /* 抢答结算页头部 meta：窄屏换行且每项不拆字 */
+  .qq-result-meta { flex-wrap: wrap; gap: 12px !important; justify-content: flex-start; }
+  .qq-result-meta > div { white-space: nowrap; }
 }
+
 
 
 
