@@ -28,12 +28,31 @@ router = APIRouter()
 
 # ── 常量 ──
 REMOTE_VERSION_URL = "https://raw.githubusercontent.com/youufis/SmartKBS/master/version.json"
+
+# ── 远程 version.json 候选地址（顺序=优先级）──
+# 现场最常见的网络形状：github.com 通（管理员手动 git pull 能升级），但
+# raw.githubusercontent.com 被 DNS 污染/防火墙掐断。只试 raw 一个域名就会出现
+# 「页面说连不上 GitHub、git 却能拉」的矛盾，所以多镜像退避 + git 兜底。
+REMOTE_VERSION_URLS: list[str] = [
+    REMOTE_VERSION_URL,
+    "https://github.com/youufis/SmartKBS/raw/master/version.json",
+    "https://cdn.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
+    "https://fastly.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
+    "https://gcore.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
+]
+VERSION_FETCH_TIMEOUT = 6  # 单个候选的超时：页面要等得起，连不上就快点换下一个
+VERSION_CACHE_TTL = 60  # 秒：页面轮询 + 后台自动检查都会调，缓存住别反复打网络
 BACKUP_DIR = BASE_DIR / ".upgrade_backups"
 STATE_FILE = BASE_DIR / ".upgrade_state.json"
 LOCK_FILE = BASE_DIR / ".upgrade_lock"  # 文件锁，防止多 IIS worker 并发升级
 MIGRATIONS_DIR = BASE_DIR / "backend" / "migrations"
 GIT_DOWNLOAD_URL = "https://git-scm.com/downloads/win"
 REMOTE_REPO_URL = "https://github.com/youufis/SmartKBS.git"
+
+# ── Git 仓库垃圾：中断 fetch 留下的 tmp_* / 孤立 .idx ──
+PACK_DIR = BASE_DIR / ".git" / "objects" / "pack"
+# 只清理 10 分钟前的残留：并发 fetch 正在写的临时文件绝不能碰
+RESIDUE_MIN_AGE_SECONDS = 600
 
 # Git 常见错误 → 中文解决方案
 GIT_ERROR_TIPS: dict[str, str] = {
@@ -169,7 +188,128 @@ def _check_git_env() -> list[str]:
     except Exception as e:
         issues.append(f"无法检查 Git 远程配置: {e}")
 
+    # 注意：仓库垃圾（中断 fetch 的 tmp_*/孤立 .idx）刻意不进 issues。
+    # issues 非空会被 start_upgrade 直接 400 拒绝、并让后台自动检查整轮跳过——
+    # 残留只是脏，不是坏；它由 version-check 的 pack_residue 字段单独报给前端。
     return issues
+
+# ═══════════════════════════════════════════════════════
+#  Git 仓库垃圾清理
+#  被掐断的 git fetch（子进程超时被 kill、IIS 应用池回收、服务重启）会在
+#  .git/objects/pack/ 落下 tmp_pack_* / tmp_idx_*。失败几十次就能堆到十几 MB，
+#  之后每条 git 命令都要扫一遍这些半截文件并吐警告，fetch 本身也越跑越慢。
+#  删除范围刻意很窄：只动"过期 tmp_*"和"找不到同名 .pack 的 .idx/.rev"；
+#  *.pack 是对象数据本体，永远不删（缺 .idx 时 git 会自己重建，不算垃圾）。
+# ═══════════════════════════════════════════════════════
+
+
+def _scan_pack_residue(*, min_age: int = RESIDUE_MIN_AGE_SECONDS) -> dict[str, Any]:
+    """只读清点 pack 目录里的中断残留，不做任何改动"""
+    out: dict[str, Any] = {
+        "pack_dir": str(PACK_DIR),
+        "count": 0,
+        "bytes": 0,
+        "mb": 0.0,
+        "tmp": [],
+        "orphan_idx": [],
+        "pack_wo_idx": [],
+        "skipped_recent": 0,
+        "removable": [],
+    }
+    if not PACK_DIR.exists():
+        return out
+    try:
+        files = [p for p in PACK_DIR.iterdir() if p.is_file()]
+    except OSError as e:
+        logger.warning(f"[git] 无法读取 pack 目录: {e}")
+        return out
+
+    names = {p.name.lower() for p in files}
+    now = time.time()
+    for p in files:
+        low = p.name.lower()
+        try:
+            size = p.stat().st_size
+            age = now - p.stat().st_mtime
+        except OSError:
+            continue
+        if low.startswith("tmp_"):
+            if age < min_age:
+                out["skipped_recent"] += 1  # 可能是并发 fetch 正在写的临时包
+                continue
+            out["tmp"].append(p.name)
+        elif low.endswith((".idx", ".rev")):
+            if low[:-4] + ".pack" in names:
+                continue
+            out["orphan_idx"].append(p.name)  # 索引指向不存在的数据包 = 纯垃圾
+        elif low.endswith(".pack"):
+            if low[:-5] + ".idx" not in names:
+                out["pack_wo_idx"].append(p.name)  # 仅提示，git 能重建索引
+            continue
+        else:
+            continue
+        out["removable"].append((p.name, size))
+
+    out["count"] = len(out["removable"])
+    out["bytes"] = sum(sz for _, sz in out["removable"])
+    out["mb"] = round(out["bytes"] / 1024 / 1024, 2)
+    return out
+
+
+def _cleanup_pack_residue(*, dry_run: bool = False, gc_after: bool = False) -> dict[str, Any]:
+    """删除中断残留。dry_run 只报告；gc_after 额外跑一次 git gc 重排 pack"""
+    residue = _scan_pack_residue()
+    try:
+        pack_dir = PACK_DIR.resolve()
+    except OSError:
+        pack_dir = PACK_DIR
+    removed: list[str] = []
+    failed: list[str] = []
+    freed = 0
+
+    for name, size in residue["removable"]:
+        target = PACK_DIR / name
+        try:
+            resolved = target.resolve()
+            if resolved.parent != pack_dir:
+                logger.warning(f"[git] 残留路径异常，跳过: {name}")
+                failed.append(name)
+                continue
+            if not dry_run:
+                resolved.unlink()
+            removed.append(name)
+            freed += size
+        except OSError as e:
+            logger.warning(f"[git] 删除残留失败 {name}: {e}")
+            failed.append(name)
+
+    gc_msg = ""
+    if gc_after and removed and not dry_run:
+        try:
+            _run_subprocess_sync(
+                ["git", "gc", "--quiet"], timeout=900, env=_make_git_env()
+            )
+            gc_msg = "git gc 完成，pack 已重排"
+        except Exception as e:
+            gc_msg = f"git gc 失败（已清理的残留不受影响）: {e}"
+
+    result: dict[str, Any] = {
+        "dry_run": dry_run,
+        "removed": removed,
+        "removed_count": len(removed),
+        "freed_mb": round(freed / 1024 / 1024, 2),
+        "failed": failed,
+        "gc": gc_msg,
+        "pack_wo_idx": residue["pack_wo_idx"],
+        "skipped_recent": residue["skipped_recent"],
+    }
+    if removed:
+        logger.info(
+            f"[git] 清理 fetch 残留 {len(removed)} 个文件，释放 {result['freed_mb']:.2f} MB"
+            + (f"；{gc_msg}" if gc_msg else "")
+        )
+    return result
+
 
 # 所有运行时数据（数据库、配置、上传文件等）已在 .gitignore 中，
 # git reset --hard 不会影响它们，无需额外保护
@@ -202,6 +342,9 @@ class VersionCheckResult(BaseModel):
     git_available: bool = True
     git_download_url: str = ""  # Git 未安装时提供下载链接
     git_issues: list[str] = []  # Git 环境问题列表（中文提示）
+    pack_residue: dict[str, Any] | None = None  # .git 中断 fetch 残留（数量/大小），前端据此显示「清理仓库垃圾」
+    version_source: str = ""  # 远程版本的来源（raw/jsdelivr/git 兜底），排查「检测不到新版本」
+    remote_errors: list[str] = []  # 各候选地址的失败原因，前端可展开
     prefetched: bool = False  # 是否已预缓存代码到本地（升级可跳过网络拉取）
 
 
@@ -276,6 +419,14 @@ def _run_subprocess(
 
 async def _run_git(args: list[str], timeout: int = 120, capture_output: bool = True) -> str:
     """执行 Git 命令（subprocess.run + asyncio.to_thread）"""
+    if args and args[0] == "fetch":
+        # 拉取之前先扫掉历史中断留下的 tmp_*/孤立索引：不扫的话垃圾只增不减，
+        # 每次 fetch 更慢、警告更多，最后看起来像"GitHub 连不上"。
+        try:
+            await asyncio.to_thread(_cleanup_pack_residue)
+        except Exception as e:
+            logger.warning(f"[git] fetch 前清理残留失败（继续执行 fetch）: {e}")
+
     def _run() -> str:
         return _run_subprocess(
             ["git", *args],
@@ -780,27 +931,115 @@ async def _restart_service():
     _state["message"] = "✅ 升级完成，如需加载新代码请手动重启服务"
 
 
-async def _fetch_remote_version() -> dict[str, Any] | None:
-    """从 GitHub 获取 version.json 元数据"""
-    try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
-            resp = await c.get(REMOTE_VERSION_URL)
+# 上一轮远程版本的取值结果：data=内容，source=从哪拿到的，errors=每个候选的失败原因。
+# 前端靠 source 解释「为什么检测不到新版本」，靠 errors 给出可操作的排查线索。
+_remote_version_cache: dict[str, Any] = {"ts": 0.0, "data": None, "source": "", "errors": []}
+_version_url_rotation = 0  # 上轮命中的地址挪到首位，避免每次先撞一遍被墙的域名
+_git_fetched_at = 0.0  # git 兜底 fetch 过的时刻：同一轮 behind 计算不再重复 fetch
+
+
+def _version_url_candidates() -> list[str]:
+    """内置镜像 + 自定义地址（环境变量 SMARTKBS_VERSION_URLS，逗号分隔，自定义优先）"""
+    urls = [u.strip() for u in os.environ.get("SMARTKBS_VERSION_URLS", "").split(",") if u.strip()]
+    urls.extend(REMOTE_VERSION_URLS)
+    return urls
+
+
+async def _fetch_version_http() -> tuple[dict[str, Any] | None, str, list[str]]:
+    """逐个试候选地址，返回（数据, 命中来源, 失败原因列表）"""
+    global _version_url_rotation
+    candidates = _version_url_candidates()
+    r = _version_url_rotation % len(candidates) if candidates else 0
+    if r:
+        candidates = candidates[r:] + candidates[:r]
+    errors: list[str] = []
+    for idx, url in enumerate(candidates):
+        try:
+            async with httpx.AsyncClient(timeout=VERSION_FETCH_TIMEOUT, follow_redirects=True) as c:
+                resp = await c.get(url)
             if resp.status_code == 200:
-                return resp.json()
-            logger.warning(f"[upgrade] 远程版本获取失败，HTTP {resp.status_code}")
-    except httpx.TimeoutException:
-        logger.warning("[upgrade] 远程版本获取超时（30s），无法连接 GitHub")
-    except httpx.ConnectError:
-        logger.warning("[upgrade] 远程版本连接失败，服务器可能无法访问 GitHub")
+                data = resp.json()
+                if isinstance(data, dict) and data.get("latest_version"):
+                    _version_url_rotation = (idx + r) % len(candidates)
+                    return data, url, errors
+                errors.append(f"{url} → 响应里没有 latest_version")
+            else:
+                errors.append(f"{url} → HTTP {resp.status_code}")
+        except httpx.TimeoutException:
+            errors.append(f"{url} → 超时 {VERSION_FETCH_TIMEOUT}s")
+        except httpx.ConnectError:
+            errors.append(f"{url} → 连接失败")
+        except Exception as e:
+            errors.append(f"{url} → {type(e).__name__}: {e}")
+    return None, "", errors
+
+
+async def _fetch_version_via_git() -> tuple[dict[str, Any] | None, str]:
+    """git 兜底：直接从远程仓库的对象里读 version.json。
+
+    传输走 git 智能 HTTP，跟管理员手动执行的 git pull origin master 是同一条路。
+    部署机正是这个场景：github.com 通、raw 域名不通，没有这段就只能永远手动升级。
+    """
+    if not (_check_git_installed() and (BASE_DIR / ".git").exists()):
+        return None, ""
+    try:
+        await _git_fetch_latest(timeout=60)
     except Exception as e:
-        logger.warning(f"[upgrade] 远程版本获取异常: {e}")
-    return None
+        logger.warning(f"[upgrade] git 兜底 fetch 失败，改用本地已有对象: {e}")
+    for candidate in (_origin_ref(), "origin/master", "FETCH_HEAD"):
+        try:
+            out = await _run_git(["show", f"{candidate}:version.json"], timeout=20)
+            data = json.loads(out)
+        except Exception:
+            continue
+        if isinstance(data, dict) and data.get("latest_version"):
+            return data, f"git:{candidate}"
+    return None, ""
+
+
+async def _fetch_remote_version(*, use_cache: bool = True) -> dict[str, Any] | None:
+    """获取远程 version.json：HTTP 多镜像 → 全部失败再走 git 兜底（结果缓存 60s）"""
+    now = time.time()
+    if use_cache and _remote_version_cache["data"] and now - _remote_version_cache["ts"] < VERSION_CACHE_TTL:
+        return _remote_version_cache["data"]
+
+    data, source, errors = await _fetch_version_http()
+    if data is None:
+        data, git_source = await _fetch_version_via_git()
+        if data is not None:
+            source = git_source
+            logger.info("[upgrade] HTTP 各镜像全部不通，已用 git 兜底拿到远程版本")
+
+    _remote_version_cache.update({"ts": now, "data": data, "source": source, "errors": errors})
+    if data is None:
+        logger.warning("[upgrade] 远程版本获取失败（含 git 兜底）：" + " | ".join(errors[:4]))
+        return None
+    logger.info(f"[upgrade] 远程版本 {data.get('latest_version')} 来源={source}")
+    return data
+
+
+async def _git_fetch_latest(*, timeout: int = 120) -> str:
+    """拉取远程最新代码：只 fetch origin master，不用 --all。
+
+    `git fetch --all` 会把每一个 remote 都拉一遍，任何一个连不上（早期配的
+    ssh://github-443 别名、失效镜像、内网备用源）都会让整条命令非零退出。
+    表现就是"手动 git pull origin master 能升级，页面升级却报连不上 GitHub"。
+    origin/master 才是升级唯一要的东西，坏 remote 不该有权否决升级。
+    """
+    global _git_fetched_at
+    try:
+        out = await _run_git(["fetch", "origin", "master", "--quiet"], timeout=timeout)
+    except Exception as e:
+        logger.warning(f"[upgrade] git fetch origin master 失败，退回 --all 再试一次: {e}")
+        out = await _run_git(["fetch", "--all"], timeout=timeout)
+    _git_fetched_at = time.time()
+    return out
 
 
 async def _count_behind() -> int:
     """获取远程最新并计算落后 commit 数（用于升级前确认）"""
     try:
-        await _run_git(["fetch", "--all"], timeout=120)
+        await _git_fetch_latest(timeout=120)
         out = await _run_git(
             ["rev-list", "--count", "HEAD..origin/master"], timeout=30
         )
@@ -1008,10 +1247,26 @@ async def check_version(request: Request) -> VersionCheckResult:
         except Exception:
             pass
     git_issues = _check_git_env() if git_ok else []
+    # 仓库垃圾单独回传（不是"错误"，是给前端一个可一键清理的数据）
+    residue: dict[str, Any] | None = None
+    if git_ok:
+        try:
+            scan = await asyncio.to_thread(_scan_pack_residue)
+            if scan["count"]:
+                scan.pop("removable", None)
+                residue = scan
+        except Exception as e:
+            logger.warning(f"[version-check] 扫描 pack 残留失败: {e}")
     remote = await _fetch_remote_version()
     current = APP_VERSION
 
     if remote is None:
+        hint = (
+            "远程版本获取失败（HTTP 镜像与 git 兜底都没通）：\n"
+            + "\n".join(_remote_version_cache["errors"][:3])
+            + "\n若服务器只能访问 github.com，多半已是 git 兜底成功；"
+            "仍失败时可设环境变量 SMARTKBS_VERSION_URLS 指向内网可达的镜像地址。"
+        )
         return VersionCheckResult(
             current_version=current,
             latest_version=current,
@@ -1021,6 +1276,9 @@ async def check_version(request: Request) -> VersionCheckResult:
             release_date="",
             git_available=git_ok,
             git_download_url="https://git-scm.com/downloads/win" if not git_ok else "",
+            pack_residue=residue,
+            git_issues=git_issues + [hint],
+            remote_errors=list(_remote_version_cache["errors"]),
         )
 
     latest = remote.get("latest_version", current)
@@ -1029,7 +1287,9 @@ async def check_version(request: Request) -> VersionCheckResult:
     behind = 0
     if git_ok and not git_issues:
         try:
-            await _run_git(["fetch", "--all"], timeout=120)
+            # git 兜底刚 fetch 过就别再拉一次：同一轮 fetch 两次只是拖慢页面
+            if time.time() - _git_fetched_at > VERSION_CACHE_TTL:
+                await _git_fetch_latest(timeout=120)
             out = await _run_git(
                 ["rev-list", "--count", "HEAD..origin/master"], timeout=30
             )
@@ -1067,7 +1327,42 @@ async def check_version(request: Request) -> VersionCheckResult:
         git_download_url="https://git-scm.com/downloads/win" if not git_ok else "",
         git_issues=git_issues,
         prefetched=prefetched,
+        pack_residue=residue,
+        version_source=_remote_version_cache["source"],
     )
+
+
+@router.get("/repo-hygiene")
+async def get_repo_hygiene(request: Request) -> dict[str, Any]:
+    """①-d 仓库体检（只读）：.git 里堆了多少中断 fetch 的残留"""
+    require_admin(get_current_user(request))
+    scan = await asyncio.to_thread(_scan_pack_residue)
+    scan.pop("removable", None)
+    return scan
+
+
+@router.post("/repo-hygiene/clean")
+async def clean_repo_hygiene(request: Request, deep: bool = False) -> dict[str, Any]:
+    """①-e 清理仓库垃圾：删中断 fetch 残留；deep=true 再跑一次 git gc 重排 pack
+
+    安全边界：只删 10 分钟没动过的 tmp_* 和没有同名 .pack 的 .idx/.rev。
+    正在进行的升级（内存状态或锁文件）会直接拒绝，避免误删并发 fetch 的临时包。
+    """
+    require_admin(get_current_user(request))
+    if _state["running"] or _live_lock_owner():
+        raise HTTPException(status_code=409, detail="升级正在进行中，等它结束再清理")
+    result = await asyncio.to_thread(_cleanup_pack_residue, gc_after=deep)
+    if result["removed_count"]:
+        result["message"] = (
+            f"已清理 {result['removed_count']} 个残留文件，释放 {result['freed_mb']:.2f} MB"
+            + (f"；{result['gc']}" if result["gc"] else "")
+        )
+    else:
+        result["message"] = "没有需要清理的残留（只删过期临时文件与孤立索引，*.pack 不会动）"
+    scan = await asyncio.to_thread(_scan_pack_residue)
+    scan.pop("removable", None)
+    result["remaining"] = {"count": scan["count"], "mb": scan["mb"]}
+    return result
 
 
 @router.post("/backup")
@@ -1202,8 +1497,8 @@ async def _upgrade_pipeline(task_id: str, admin: str, client_ip: str,
             _mutate_state(_drop_prefetch)
         else:
             _set_progress("fetch", "正在获取远程更新（增量传输差异代码）...", 10)
-            logger.info("[upgrade] Step 1/7: git fetch --all")
-            await _run_git(["fetch", "--all"], timeout=180)
+            logger.info("[upgrade] Step 1/7: git fetch origin master")
+            await _git_fetch_latest(timeout=180)
             logger.info("[upgrade] Step 1/7: fetch 完成")
 
         # Step 1b: 如果 start_upgrade 未传入 behind，则重新计算
@@ -1806,7 +2101,7 @@ async def _perform_version_check():
             logger.debug(f"[auto-upgrade] Git 环境问题，跳过热修复检查: {'; '.join(git_issues)}")
         else:
             try:
-                await _run_git(["fetch", "--all"], timeout=120)
+                await _git_fetch_latest(timeout=120)
                 out = await _run_git(
                     ["rev-list", "--count", "HEAD..origin/master"], timeout=30
                 )
