@@ -36,6 +36,11 @@ REMOTE_VERSION_URL = "https://raw.githubusercontent.com/youufis/SmartKBS/master/
 REMOTE_VERSION_URLS: list[str] = [
     REMOTE_VERSION_URL,
     "https://github.com/youufis/SmartKBS/raw/master/version.json",
+]
+# 公共 CDN 镜像排最后才用：边缘节点有缓存，版本回退或同版本号重发时会继续吐旧值。
+# 本项目 8.6.0 回退 8.5.0 当天，fastly 节点缓存了二十多分钟的 8.6.0，
+# 部署机于是"检测到"一个仓库里根本不存在的版本。
+REMOTE_VERSION_MIRRORS: list[str] = [
     "https://cdn.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
     "https://fastly.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
     "https://gcore.jsdelivr.net/gh/youufis/SmartKBS@master/version.json",
@@ -939,17 +944,26 @@ _git_fetched_at = 0.0  # git 兜底 fetch 过的时刻：同一轮 behind 计算
 
 
 def _version_url_candidates() -> list[str]:
-    """内置镜像 + 自定义地址（环境变量 SMARTKBS_VERSION_URLS，逗号分隔，自定义优先）"""
+    """权威地址 + 自定义地址（环境变量 SMARTKBS_VERSION_URLS，逗号分隔，自定义优先）"""
     urls = [u.strip() for u in os.environ.get("SMARTKBS_VERSION_URLS", "").split(",") if u.strip()]
     urls.extend(REMOTE_VERSION_URLS)
     return urls
 
 
-async def _fetch_version_http() -> tuple[dict[str, Any] | None, str, list[str]]:
-    """逐个试候选地址，返回（数据, 命中来源, 失败原因列表）"""
+def _version_mirror_candidates() -> list[str]:
+    """公共 CDN 镜像（环境变量 SMARTKBS_VERSION_MIRRORS 可覆盖）——只在 git 也用不上时才试"""
+    urls = [u.strip() for u in os.environ.get("SMARTKBS_VERSION_MIRRORS", "").split(",") if u.strip()]
+    urls.extend(REMOTE_VERSION_MIRRORS)
+    return urls
+
+
+async def _fetch_version_http(
+    urls: list[str] | None = None, *, rotate: bool = True
+) -> tuple[dict[str, Any] | None, str, list[str]]:
+    """逐个试地址，返回（数据, 命中来源, 失败原因列表）"""
     global _version_url_rotation
-    candidates = _version_url_candidates()
-    r = _version_url_rotation % len(candidates) if candidates else 0
+    candidates = urls if urls is not None else _version_url_candidates()
+    r = _version_url_rotation % len(candidates) if (rotate and candidates) else 0
     if r:
         candidates = candidates[r:] + candidates[:r]
     errors: list[str] = []
@@ -960,7 +974,8 @@ async def _fetch_version_http() -> tuple[dict[str, Any] | None, str, list[str]]:
             if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, dict) and data.get("latest_version"):
-                    _version_url_rotation = (idx + r) % len(candidates)
+                    if rotate:  # 只有权威列表参与"命中地址提前"的轮转
+                        _version_url_rotation = (idx + r) % len(candidates)
                     return data, url, errors
                 errors.append(f"{url} → 响应里没有 latest_version")
             else:
@@ -1003,16 +1018,31 @@ async def _fetch_remote_version(*, use_cache: bool = True) -> dict[str, Any] | N
     if use_cache and _remote_version_cache["data"] and now - _remote_version_cache["ts"] < VERSION_CACHE_TTL:
         return _remote_version_cache["data"]
 
+    # 顺序＝可信度：① 权威 HTTP（raw / github.com）② git 仓库真值 ③ 公共 CDN 镜像。
+    # CDN 必须排在 git 之后：它有边缘缓存，会在版本回退/同版本号重发时吐旧值，
+    # 让页面提示一个仓库里不存在的版本；git 读的就是 origin/master，不可能滞后。
     data, source, errors = await _fetch_version_http()
     if data is None:
         data, git_source = await _fetch_version_via_git()
         if data is not None:
             source = git_source
-            logger.info("[upgrade] HTTP 各镜像全部不通，已用 git 兜底拿到远程版本")
+            logger.info("[upgrade] 权威 HTTP 不通，已用 git 读到仓库真值")
+    if data is None:
+        mirror_data, mirror_url, mirror_errors = await _fetch_version_http(
+            _version_mirror_candidates(), rotate=False
+        )
+        errors.extend(mirror_errors)
+        if mirror_data is not None:
+            data = mirror_data
+            source = f"{mirror_url}（CDN 缓存可能滞后）"
+            logger.warning(
+                f"[upgrade] git 兜底也不通，退回公共镜像 {mirror_url}；"
+                "镜像有缓存，报出的版本可能偏旧或偏新，以 git 恢复后的结果为准"
+            )
 
     _remote_version_cache.update({"ts": now, "data": data, "source": source, "errors": errors})
     if data is None:
-        logger.warning("[upgrade] 远程版本获取失败（含 git 兜底）：" + " | ".join(errors[:4]))
+        logger.warning("[upgrade] 远程版本获取失败（权威 HTTP / git / CDN 全试）：" + " | ".join(errors[:4]))
         return None
     logger.info(f"[upgrade] 远程版本 {data.get('latest_version')} 来源={source}")
     return data
@@ -1299,7 +1329,16 @@ async def check_version(request: Request) -> VersionCheckResult:
 
     # 有更新条件：版本号不同 或 同版本内有新提交（热修复）
     version_changed = latest != current
-    has_update = version_changed or (behind > 0)
+    # 护栏：版本号不同、但 git 里一个待拉取提交都没有，说明拿到的 version.json 与
+    # 仓库 HEAD 不同步（典型成因是 CDN 边缘缓存滞后）。此时不能提示"有更新"——
+    # 点下去只会对着同一个 HEAD 空跑一次 reset，还会写进一条假的升级历史。
+    stale_remote = bool(git_ok and not git_issues and version_changed and behind == 0)
+    if stale_remote:
+        logger.warning(
+            f"[version-check] 远程版本 {latest} 与本地 HEAD 不同步（落后 0 个提交），"
+            f"判定来源滞后：{_remote_version_cache['source']}"
+        )
+    has_update = (version_changed and not stale_remote) or (behind > 0)
 
     # 检查是否有预缓存
     prefetched = False
@@ -2089,6 +2128,8 @@ async def _perform_version_check():
 
     # 也检查同版本内的新提交（热修复检测）
     behind = 0
+    # 只有真的比过 HEAD..origin/master，才有资格判定"版本与提交不同步"
+    git_head_compared = False
     if _check_git_installed():
         # 自动初始化 Git 仓库（.git 缺失时 git init + remote add）
         try:
@@ -2106,11 +2147,22 @@ async def _perform_version_check():
                     ["rev-list", "--count", "HEAD..origin/master"], timeout=30
                 )
                 behind = int(out) if out else 0
+                git_head_compared = True
             except Exception as e:
                 logger.debug(f"[auto-upgrade] Git 检测落后提交失败（网络或仓库问题）: {e}")
                 # 网络异常不阻止后续，behind 保持为 0
     else:
         logger.debug("[auto-upgrade] Git 未安装，跳过热修复提交检测")
+
+    # 滞后护栏（与 version-check 同一判据）：版本号不同却没有任何待拉取提交，
+    # 说明拿到的 version.json 与仓库 HEAD 不同步（多为 CDN 边缘缓存滞后），
+    # 不能据此给管理员推一个仓库里不存在的版本号。
+    if has_new_version and git_head_compared and behind == 0:
+        logger.warning(
+            f"[auto-upgrade] 远程版本 {latest} 与本地 HEAD 不同步（落后 0 个提交），"
+            f"判定来源滞后：{_remote_version_cache['source']}；不发新版本通知"
+        )
+        has_new_version = False
 
     has_update = has_new_version or (behind > 0)
     if not has_update:

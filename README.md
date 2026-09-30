@@ -1002,6 +1002,7 @@ AI 对课堂互动数据进行综合分析：
 - 🧱 **坏 remote 不再否决升级**：代码同步由 `git fetch --all` 改为只 `git fetch origin master`（`--all` 仅作退回方案）。`--all` 会拉取每一个 remote，只要有一个连不上（早期配置的 `ssh://github-443` 别名、失效镜像、内网备用源）整条命令就非零退出、在线升级失败，而手动 `git pull origin master` 却正常；两条路径行为现已统一
 - 🧹 **`.git` 仓库垃圾自动清理**：每次 fetch 前清除历史中断留下的 `tmp_pack_*` / `tmp_idx_*` 以及没有同名 `.pack` 的孤立 `.idx`/`.rev`。删除范围刻意很窄——只动 10 分钟前生成的残留（并发 fetch 正在写的临时包不碰），**正式 `.pack` 永不删除**（缺索引时 git 自行重建）。新增 `GET /api/system/upgrade/repo-hygiene`（只读体检）与 `POST /api/system/upgrade/repo-hygiene/clean`（一键清理，`?deep=true` 追加一次保守 `git gc`，刻意不带 `--prune=now`，以免回收回滚所需的 `HEAD@{1}` 对象）；升级进行中或存在升级锁时直接 409 拒绝
 - ⚡ **升级页更快、更可诊断**：远程版本结果缓存 60 秒（页面轮询与后台自动检查共用），git 兜底 fetch 过之后同一轮不再重复 fetch，上一轮命中的镜像自动提到首位；`version-check` 响应新增 `version_source`（raw / jsDelivr / git 兜底）、`remote_errors`（各候选失败原因）、`pack_residue`（仓库垃圾数量与体积）——仓库垃圾仅作提示，不写入 `git_issues`（后者非空会让 `start_upgrade` 直接拒绝，"脏"不等于"坏"）
+- 🛡 **版本来源按可信度排序**：`raw.githubusercontent.com` / `github.com` → **git 仓库真值**（`git show origin/master:version.json`）→ 公共 CDN 镜像（jsDelivr 三节点）。CDN 排在最后是因为边缘节点有缓存——版本回退当天 fastly 节点继续吐了二十多分钟的旧 `8.6.0`，部署机于是"检测到"一个仓库里不存在的版本。另加一致性护栏：版本号与本地 HEAD 不同步（`behind == 0`）即判定来源滞后，**不提示「有更新」**，避免对着同一个 HEAD 空跑一次 reset、并写入一条假的升级历史；页面与日志通过 `version_source` 明示版本究竟从哪取到（CDN 来源会带「缓存可能滞后」标注）
 - ⚠️ **破坏性变更**：无（移动端样式与逻辑均包在 `max-width: 767px` 断点内，桌面端代码路径不变；同日增补的在线升级修复只改后端升级链路，接口仅新增向后兼容字段，无数据库变更）
 
 ### v8.4.0 (2026-09-29)
