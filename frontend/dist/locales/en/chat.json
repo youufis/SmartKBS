@@ -64,6 +64,7 @@
   "smartMode": "Smart Q&A",
   "companionMode": "Companion Mode",
   "assistantMode": "Assistant Mode",
+  "assistantTagline": "Lesson prep · Questions · Grading · Insights",
   "modeLabelSmart": "💬 Smart Q&A",
   "modeLabelCompanionStudent": "🧠 Companion Mode",
   "modeLabelCompanionTeacher": "🎓 Assistant Mode",

@@ -936,7 +936,7 @@ const ChatPage: React.FC = () => {
                     {curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
                   </Typography.Text>
                   <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6, color: '#8c7fbf' }}>
-                    {curRole === 'teacher' || curRole === 'admin' ? `🎓 ${t('assistant')}` : (companionConfig?.personality_label || t('companionName'))}
+                    {curRole === 'teacher' || curRole === 'admin' ? `🎓 ${t('assistantTagline', { defaultValue: '备课 · 出题 · 批改 · 学情' })}` : (companionConfig?.personality_label || t('companionName'))}
                   </Typography.Text>
                 </div>
                 <div style={{ flex: 1 }} />

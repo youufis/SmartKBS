@@ -64,6 +64,7 @@
   "smartMode": "智答模式",
   "companionMode": "学伴模式",
   "assistantMode": "助手模式",
+  "assistantTagline": "备课 · 出题 · 批改 · 学情",
   "modeLabelSmart": "💬 智答模式",
   "modeLabelCompanionStudent": "🧠 学伴模式",
   "modeLabelCompanionTeacher": "🎓 助手模式",
