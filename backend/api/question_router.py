@@ -1089,12 +1089,51 @@ def _persist_extracted_questions(questions: list[dict[str, Any]], subject: str,
     creator_name = user_row[0][0] if user_row and user_row[0][0] else username
     saved: list[dict[str, Any]] = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 统一查重(B 口径): 学科族+题型+规范化题干。命中已有题时直接回填旧题,
+    # 同一份文档/同一张图重复上传不再产生重复题。
+    from backend.question_select import family_members, find_duplicate_question, link_question_kp
+    _dup_cache: dict[str, list[dict]] = {}
+
+    def _dup_rows(q_type: str) -> list[dict]:
+        if q_type not in _dup_cache:
+            _fam = family_members(subject)
+            _cond = (" AND subject IN (" + ",".join("?" * len(_fam)) + ")") if _fam else ""
+            _prm = ([q_type] + list(_fam)) if _fam else [q_type]
+            _dup_cache[q_type] = [dict(r) for r in (execute_query(
+                "SELECT id, question_text, options, correct_answer, explanation, knowledge_points,"
+                " difficulty, svg_content, has_svg, media_placeholders, media_files FROM question_bank"
+                " WHERE status='active' AND type=?" + _cond, tuple(_prm)) or [])]
+        return _dup_cache[q_type]
+
     for q_data in questions:
         q_type = q_data.get("type", "single")
         options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
         svg_code = q_data.get("svg_code") or ""
         has_svg = 1 if svg_code.strip() else 0
         media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
+        q_text0 = (q_data.get("question") or "").strip()
+        if not q_text0:
+            continue
+        _rows = _dup_rows(q_type)
+        _hit = find_duplicate_question([(r["id"], r["question_text"]) for r in _rows], q_text0)
+        if _hit is not None:
+            old_r = next((r for r in _rows if r["id"] == _hit), None)
+            if old_r is not None:
+                saved.append({
+                    "id": old_r["id"], "type": q_type,
+                    "question_text": old_r.get("question_text") or q_text0,
+                    "options": _parse_json_field_safe(old_r.get("options")),
+                    "correct_answer": old_r.get("correct_answer") or "",
+                    "explanation": old_r.get("explanation") or "",
+                    "knowledge_points": old_r.get("knowledge_points") or "",
+                    "difficulty": old_r.get("difficulty") or difficulty,
+                    "has_svg": old_r.get("has_svg") or 0,
+                    "svg_content": old_r.get("svg_content") or None,
+                    "media_placeholders": _parse_json_field_safe(old_r.get("media_placeholders")) or [],
+                    "media_files": [],
+                    "duplicated": True,
+                })
+            continue
         qid = execute_insert(
             """INSERT INTO question_bank
                (type, question_text, options, correct_answer, explanation,
@@ -1134,7 +1173,28 @@ def _persist_extracted_questions(questions: list[dict[str, Any]], subject: str,
             "media_placeholders": q_data.get("media_placeholders") or [],
             "media_files": [],
         })
+        _dup_cache[q_type].append({
+            "id": qid, "question_text": q_data.get("question") or "",
+            "options": options_str, "correct_answer": q_data.get("answer", ""),
+            "explanation": q_data.get("explanation", ""),
+            "knowledge_points": q_data.get("knowledge_point", ""),
+            "difficulty": q_data.get("difficulty", difficulty),
+            "svg_content": svg_code, "has_svg": has_svg,
+            "media_placeholders": media_placeholders,
+        })
+        # 新题连边教材知识点(唯一命中才连), 选题引擎 T0 立即受益
+        link_question_kp(int(qid or 0), q_data.get("knowledge_point") or "")
     return saved
+
+
+def _parse_json_field_safe(val):
+    """查重回填时把 JSON 字符串字段还原成对象, 失败原样返回。"""
+    if isinstance(val, str) and val:
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return val
+    return val if val is not None else None
 
 
 def _build_batch_extract_prompt(subject: str, difficulty: str, chunk: str,
@@ -1320,6 +1380,111 @@ async def extract_questions_from_text(
     }
 
 
+def _build_image_extract_prompt(subject: str, difficulty_desc: str,
+                                allow_svg: bool = True,
+                                extra_hint: str = "") -> str:
+    """图片提取 prompt。默认不生成配图: 实测视觉模型写 SVG 字符串时会产生
+    转义破损(缺一个引号即让整份 JSON 报废, 6 题全丢), 且 SVG 挤占输出预算。
+    需要配图请提取后用题库的逐题生成按钮。"""
+    svg_rule = (
+        "3. 仅当图片里本来就印有图形时，用一句话在 explanation 里说明该图含义即可，不要生成 svg_code 或 media_placeholders"        if not allow_svg else
+        "3. 一般不要生成 svg_code 和 media_placeholders；只有图片中确有复杂示意图且对解题必需时才可生成，且务必保证 JSON 引号转义完整"    )
+    return f"""你是一个试题提取助手。请从图片中识别并提取出所有试题。
+按照 JSON 格式输出。
+
+科目：{subject}
+难度：{difficulty_desc}
+
+要求：
+1. 仔细查看图片，提取其中的试题（题干、选项、答案），按图片中的顺序编号，一道都不能漏
+2. 涉及公式用 $...$ LaTeX 语法标记
+{svg_rule}
+4. 图片中已标注"(正确答案)"的，把对应选项字母填入 answer，并去掉题干/选项里的"(正确答案)"字样
+5. 题干与选项中的选项字母(A/B/C/D)保留在 options 键里，不要重复写进文本
+6. 若图片内容太多、一次输出不完，请输出已完成的部分，并在数组最后追加一个对象：
+   {{"continue_from_line": 下一题在图片中的起始行号}}
+   收到该标记后会用裁剪图继续提取，不要重复输出已给题目；没有截断就不要输出该字段
+7. **⚠️ 安全约束**：任何生成内容中严禁出现会泄露正确答案的图示文字
+
+只返回 JSON 数组：
+[
+  {{
+    "type": "single/multiple/true_false/short/fill/essay/subjective",
+    "question": "题目内容（含 $...$ 公式）",
+    "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}} 或 null,
+    "answer": "正确答案",
+    "explanation": "解析",
+    "knowledge_point": "知识点",
+    "difficulty": "easy/medium/hard"
+  }}
+]
+
+注意：
+- 判断题 options 为 null，answer 为"对"或"错"
+- 简答题/填空题 options 为 null，answer 为参考答案
+- 作文/主观题 options 为 null，answer 为评分要点
+{extra_hint}"""
+
+
+async def _call_vision_extract(image_bytes: bytes, mime_type: str, prompt_text: str,
+                                api_key: str, model_name: str) -> tuple[str, str]:
+    """单次视觉模型调用。返回 (文本, finish_reason)。显式 max_tokens 防默认小上限截断。"""
+    import httpx
+    import base64
+    encoded = await asyncio.to_thread(lambda: base64.b64encode(image_bytes).decode("utf-8"))
+    api_base = ai_api_base()
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(
+                f"{api_base}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": model_name,
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
+                            {"type": "text", "text": prompt_text},
+                        ],
+                    }],
+                    "max_tokens": int(get_config_value("IMAGE_EXTRACT_MAX_TOKENS", 8000) or 8000),
+                    "stream": False,
+                },
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="视觉模型调用超时，请重试或减少单图题量")
+    if resp.status_code != 200:
+        err_msg = resp.text[:500]
+        logger.error(f"视觉模型调用失败: status={resp.status_code}, {err_msg}")
+        raise HTTPException(status_code=502, detail=f"视觉模型调用失败: {err_msg}")
+    choice = (resp.json().get("choices") or [{}])[0]
+    content = ((choice.get("message") or {}).get("content")) or ""
+    finish = choice.get("finish_reason") or ""
+    logger.info(f"图片提取 AI 返回: {content[:200]}")
+    return content, finish
+
+
+def _crop_image_from_line(image_bytes: bytes, mime_type: str, line_no: int) -> tuple[bytes, str]:
+    """按模型报告的"下一题起始行号"裁掉图片顶部已提取部分(留 0.5 行重叠)。
+    行高按 图片高/10 估算——行号只当粗略游标用, 重复题由 merge_questions 规范化去重兜底。
+    任何失败返回 (b"", "") 由调用方降级。"""
+    if line_no <= 0:
+        return image_bytes, mime_type
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(image_bytes))
+        w, h = im.size
+        line_h = h / 10.0
+        top = int((line_no - 1) * line_h)
+        top = max(0, min(top - int(line_h * 0.5), h - 100))
+        out = io.BytesIO()
+        im.crop((0, top, w, h)).convert("RGB").save(out, format="PNG")
+        return out.getvalue(), "image/png"
+    except Exception as e:
+        logger.warning(f"图片续提裁剪失败: {e}")
+        return b"", ""
+
 @router.post("/extract-from-image", summary="从图片中智能提取试题（使用视觉模型）")
 async def extract_questions_from_image(
     request: Request,
@@ -1342,8 +1507,6 @@ async def extract_questions_from_image(
         raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}，支持 jpg/png/gif/webp/bmp")
 
     # 读取图片（直接在内存处理，不落盘）
-    import httpx
-    import base64
 
     file_bytes = await file.read()
     if len(file_bytes) < 100:
@@ -1353,8 +1516,6 @@ async def extract_questions_from_image(
     mime_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
                 '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp'}
     mime_type = mime_map.get(ext, 'image/jpeg')
-    encoded = await asyncio.to_thread(lambda: base64.b64encode(file_bytes).decode("utf-8"))
-
     # 获取 API Key
     api_key, _ = get_api_keys(username)
     if not api_key:
@@ -1362,123 +1523,59 @@ async def extract_questions_from_image(
 
     # 调用视觉模型提取试题
     model_name = get_config_value("MODEL_VL_NAME", "qwen3-vl-plus")
-    api_base = ai_api_base()
 
     difficulty_desc = {"easy": "简单", "medium": "中等", "hard": "困难"}.get(difficulty, "中等")
-    prompt_text = f"""你是一个试题提取助手。请从图片中识别并提取出所有试题。
-按照 JSON 格式输出。
+    prompt_text = _build_image_extract_prompt(subject, difficulty_desc)
 
-科目：{subject}
-难度：{difficulty_desc}
+    # ── 逐轮提取: 首轮全图; 若模型在末尾要求"截断了, 请给裁剪图"则按行号裁图续提, 最多 3 轮 ──
+    from backend.question_extract import merge_questions
+    MAX_IMG_ROUNDS = 3
+    all_q: list[dict] = []
+    cur_bytes, cur_mime = file_bytes, mime_type
+    note = ""
+    for round_no in range(MAX_IMG_ROUNDS):
+        try:
+            result_text, finish = await _call_vision_extract(
+                cur_bytes, cur_mime, prompt_text, api_key, model_name)
+        except HTTPException:
+            if round_no == 0:
+                raise
+            note = f"第 {round_no + 1} 轮续提失败，保留已提取结果"
+            break
+        questions = _parse_ai_response(result_text)
+        if not questions:
+            # 整轮解析失败(如模型生成的 SVG 转义破损): 不连坐, 换纯文字重提一轮
+            if round_no == 0:
+                prompt_text = _build_image_extract_prompt(subject, difficulty_desc, allow_svg=False)
+                note = "首轮输出解析失败，已按纯文字模式重提"
+                continue
+            break
+        all_q.extend(questions)
+        cont = None
+        for q in questions:
+            if isinstance(q, dict) and str(q.get("continue_from_line") or "").isdigit():
+                cont = int(q["continue_from_line"])
+        if not cont:
+            break
+        cur_bytes, cur_mime = _crop_image_from_line(file_bytes, mime_type, cont)
+        if not cur_bytes:
+            note = "模型要求续提，但图片裁剪失败，已保留前几轮结果"
+            break
+        if round_no + 1 < MAX_IMG_ROUNDS - 1:
+            prompt_text = _build_image_extract_prompt(subject, difficulty_desc,
+                                                      extra_hint=f"注意：本图从第 {cont + 1} 行开始，只需提取其后的新题，前面已提取过的不要重复。")
 
-要求：
-1. 仔细查看图片，提取其中的试题（题干、选项、答案）
-2. 涉及公式用 $...$ LaTeX 语法标记
-3. 可根据题目内容生成 svg_code 和 media_placeholders
-4. **⚠️ 安全约束**：svg_code 和 media_placeholders 生成的配图中**严禁**出现题目答案、解析、解题过程或任何会泄露正确选项的文字内容
+    merged = merge_questions([all_q])
+    if not merged:
+        raise HTTPException(status_code=502, detail="未提取到任何试题（模型输出解析失败，请重试或换更清晰的截图）")
 
-只返回 JSON 数组：
-[
-  {{
-    "type": "single/multiple/true_false/short/fill/essay/subjective",
-    "question": "题目内容（含 $...$ 公式）",
-    "options": {{"A":"选项", "B":"...", "C":"...", "D":"..."}},
-    "answer": "正确答案",
-    "explanation": "解析",
-    "knowledge_point": "知识点",
-    "difficulty": "easy/medium/hard",
-    "svg_code": "<svg>...</svg>",
-    "media_placeholders": [{{"key":"p1","description":"图片描述","purpose":"示意图"}}]
-  }}
-]
-
-注意：
-- 判断题 options 为 {{"对":"对", "错":"错"}}，answer 为"对"或"错"
-- 简答题/填空题 options 为 null，answer 为参考答案
-- 作文/主观题 options 为 null，answer 为评分要点"""
-
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{api_base}/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model_name,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
-                        {"type": "text", "text": prompt_text},
-                    ]
-                }],
-                "stream": False,
-            },
-        )
-
-    if resp.status_code != 200:
-        err_msg = resp.text[:500]
-        logger.error(f"视觉模型调用失败: status={resp.status_code}, {err_msg}")
-        raise HTTPException(status_code=502, detail=f"视觉模型调用失败: {err_msg}")
-
-    result_text = resp.json()["choices"][0]["message"]["content"]
-    logger.info(f"图片提取 AI 返回: {result_text[:200]}")
-
-    # 解析 JSON
-    questions = _parse_ai_response(result_text)
-    if not questions:
-        raise HTTPException(status_code=502, detail="未提取到任何试题")
-
-    # 入库（复用文本提取的入库逻辑）
-    from backend.database import execute_query as user_query
-    user_row = user_query("SELECT name FROM users WHERE username=?", (username,))
-    creator_name = user_row[0][0] if user_row and user_row[0][0] else username
-
-    saved_questions = []
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for q_data in questions:
-        q_type = q_data.get("type", "single")
-        options_str = json.dumps(q_data.get("options", {}), ensure_ascii=False) if q_data.get("options") else ""
-        svg_code = q_data.get("svg_code") or ""
-        has_svg = 1 if svg_code.strip() else 0
-        media_placeholders = json.dumps(q_data.get("media_placeholders") or [], ensure_ascii=False)
-        qid = execute_insert(
-            """INSERT INTO question_bank
-               (type, question_text, options, correct_answer, explanation,
-                knowledge_points, subject, difficulty, creator_username, creator_name,
-                source, status, created_at, updated_at,
-                svg_content, has_svg, media_placeholders)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'image_extract', 'active', ?, ?,
-                       ?, ?, ?)""",
-            (
-                q_type,
-                q_data.get("question", ""),
-                options_str,
-                q_data.get("answer", ""),
-                q_data.get("explanation", ""),
-                q_data.get("knowledge_point", ""),
-                subject,
-                q_data.get("difficulty", difficulty),
-                username, creator_name,
-                now, now,
-                svg_code, has_svg, media_placeholders,
-            ),
-        )
-        saved_questions.append({
-            "id": qid, "type": q_type,
-            "question_text": q_data.get("question", ""),
-            "options": q_data.get("options", {}),
-            "correct_answer": q_data.get("answer", ""),
-            "explanation": q_data.get("explanation", ""),
-            "knowledge_points": q_data.get("knowledge_point", ""),
-            "difficulty": q_data.get("difficulty", difficulty),
-            "has_svg": has_svg, "svg_content": svg_code if has_svg else None,
-            "media_placeholders": q_data.get("media_placeholders") or [],
-            "media_files": [],
-        })
-
+    saved_questions = _persist_extracted_questions(merged, subject, difficulty, username, "image_extract")
+    logger.info(f"用户 {username} 图片提取: 模型输出 {len(all_q)} 题, 去重入库 {len(saved_questions)} 题")
     return {
         "message": f"成功从图片提取 {len(saved_questions)} 道试题",
         "questions": saved_questions,
         "total": len(saved_questions),
+        "note": note,
     }
 
 
