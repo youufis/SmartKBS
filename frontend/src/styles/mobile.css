@@ -48,7 +48,20 @@
   .row-item { flex-direction: column; align-items: stretch !important; gap: 4px; }
   .row-item-actions { margin-inline-start: 0 !important; width: 100%; justify-content: flex-end; }
   .row-meta-title .ant-space { flex-wrap: wrap; row-gap: 4px; }
+
+  /* 聊天页学伴/助手模式：头部条换行、侧栏浮层化、整体高度修正（152=头48+留白8+TabBar区72+内边距24） */
+  .chat-layout { height: calc(100dvh - 152px) !important; }
+  .chat-mode-bar { padding: 8px 12px !important; flex-wrap: wrap; row-gap: 6px; }
+  .chat-companion-id { white-space: nowrap; }
+  .chat-body { position: relative; }
+  .chat-messages { padding: 12px !important; }
+  .companion-sidebar {
+    position: absolute; right: 0; top: 0; bottom: 0; z-index: 50;
+    width: min(320px, 88vw) !important;
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.18);
+  }
 }
+
 
 
 

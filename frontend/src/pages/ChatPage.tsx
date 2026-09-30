@@ -880,9 +880,9 @@ const ChatPage: React.FC = () => {
   const isAnyStreaming = companionMode ? companionIsStreaming : isStreaming
   const activeMessages = companionMode ? companionMessages : messages
   return (
-    <Layout style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'hidden' }}>
+    <Layout className="chat-layout" style={{ height: 'calc(100vh - 112px)', background: token.colorBgContainer, borderRadius: 8, overflow: 'hidden' }}>
       {/* 顶部模式切换 */}
-      <div style={{
+      <div className="chat-mode-bar" style={{
         padding: '8px 24px',
         borderBottom: companionMode ? '1px solid #d6d0f0' : '1px solid #f0f0f0',
         display: 'flex', alignItems: 'center', gap: 12,
@@ -931,7 +931,7 @@ const ChatPage: React.FC = () => {
                 }}>
                   {curRole === 'teacher' || curRole === 'admin' ? '🎓' : (COMPANION_AVATARS[companionConfig?.personality || 'encouraging'] || '🧠')}
                 </div>
-                <div>
+                <div className="chat-companion-id">
                   <Typography.Text strong style={{ fontSize: 14, color: curRole === 'teacher' || curRole === 'admin' ? '#13c2c2' : '#5b4fa0' }}>
                     {curRole === 'teacher' || curRole === 'admin' ? t('assistant') : (companionConfig?.companion_name || t('companionName'))}
                   </Typography.Text>
@@ -959,9 +959,9 @@ const ChatPage: React.FC = () => {
         )}
       </div>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="chat-body" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* 消息列表 */}
-        <div ref={messagesRef} style={{
+        <div ref={messagesRef} className="chat-messages" style={{
           flex: 1, overflow: 'auto', padding: 24,
           background: companionMode
             ? 'linear-gradient(135deg, #f5f0ff 0%, #f0f4ff 50%, #f5f8ff 100%)'
@@ -1097,7 +1097,7 @@ const ChatPage: React.FC = () => {
 
       {/* 学伴侧边栏 */}
       {companionMode && companionSidebar && (
-        <div style={{
+        <div className="companion-sidebar" style={{
           width: 280, borderLeft: '1px solid #e0daf5', padding: 16,
           overflow: 'auto', background: 'linear-gradient(180deg, #faf8ff 0%, #ffffff 100%)',
         }}>
