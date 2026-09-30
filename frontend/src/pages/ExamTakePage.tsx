@@ -576,12 +576,15 @@ const ExamTakePage: React.FC = () => {
   return (
     <Layout style={{ minHeight: '100vh', background: token.colorBgLayout }}>
       {/* ── 顶栏 ── */}
-      <div style={{
-        background: token.colorBgContainer, padding: '12px 24px',
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        position: 'sticky', top: 0, zIndex: 100,
-      }}>
+      <div
+        className="exam-topbar"
+        style={{
+          background: token.colorBgContainer, padding: '12px 24px',
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          position: 'sticky', top: 0, zIndex: 100,
+        }}
+      >
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>{t('exitBtn')}</Button>
           <Title level={5} style={{ margin: 0 }}>{exam.title}</Title>

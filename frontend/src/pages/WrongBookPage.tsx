@@ -256,7 +256,7 @@ const WrongBookPage: React.FC = () => {
   return (
     <Layout style={{ height: 'calc(100vh - 112px)', background: 'var(--bg-container)', borderRadius: 8, overflow: 'auto', padding: 24 }}>
       <Space orientation="vertical" style={{ width: '100%' }} size={16}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="page-header-flex" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Space>
             <Title level={4} style={{ margin: 0 }}>📕 {t('wrongBook')}</Title>
             {data && (
@@ -335,7 +335,7 @@ const WrongBookPage: React.FC = () => {
                 items={[{
                   key: String(exam.exam_id),
                   label: (
-                    <Space>
+                    <Space className="wrap-space">
                       <Text strong>{exam.exam_title}</Text>
                       <Tag>{exam.exam_subject}</Tag>
                       <Tag color="red">{t('wrongCountLabel', { count: exam.wrong_count })}</Tag>

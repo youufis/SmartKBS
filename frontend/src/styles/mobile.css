@@ -20,4 +20,28 @@
   .ant-drawer-body {
     -webkit-overflow-scrolling: touch;
   }
+
+  /* ── 首批页面精修（第 2 步）────────────────────────── */
+
+  /* 表格兜底：未设 scroll.x 的表在窄屏允许横向滚动，列不再被压扁裁切 */
+  .ant-table-content { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .ant-table-content table { min-width: max-content; }
+
+  /* 通用页头行：允许换行；左块可收缩，杜绝标题一字一行竖排 */
+  .page-header-flex { flex-wrap: wrap; row-gap: 8px; }
+  .page-header-flex > * { min-width: 0; }
+  .page-header-flex .ant-space { flex-wrap: wrap; row-gap: 6px; }
+
+  /* 考试作答顶栏：窄屏纵向堆叠（返回+标题 / 倒计时+进度+提交 两行） */
+  .exam-topbar { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px 12px !important; }
+  .exam-topbar > .ant-space { width: 100%; justify-content: space-between; flex-wrap: wrap; row-gap: 6px; }
+
+  /* 列表项操作区 Space：允许换行（答题/编辑/删除 不再挤压正文） */
+  .wrap-space.ant-space, .wrap-space.ant-space-horizontal { flex-wrap: wrap; row-gap: 4px; }
+
+  /* 答疑卡片：窄屏纵向堆叠（标题+元信息在上，操作按钮在下），杜绝标题被挤成竖排 */
+  .sq-card-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .sq-card-row > .ant-space { justify-content: flex-start; }
 }
+
+

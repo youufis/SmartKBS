@@ -58,7 +58,7 @@ const QuestionItem: React.FC<QuestionItemProps> = ({ q, isTeacherOrAdmin, isStud
 
   return (
     <Card size="small" style={{ marginBottom: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className="page-header-flex sq-card-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ flex: 1 }}>
           <Text strong>{qContent}</Text>
           <div style={{ marginTop: 4 }}>
@@ -348,7 +348,7 @@ const StudentQuestionsPage: React.FC = () => {
   return (
     <Card style={{ borderRadius: 8 }}>
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="page-header-flex" style={{ color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Space>
             <QuestionCircleOutlined style={{ fontSize: 28 }} />
             <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('studentQuestions')}</Title>
