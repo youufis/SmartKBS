@@ -247,8 +247,8 @@ const QuestionBankPage: React.FC = () => {
     setTagFillLoading(true)
     try {
       setTagFillResult(await questionsApi.tagFillQuestions(false))
-    } catch {
-      message.error(t('tagFillFail'))
+    } catch (e: any) {
+      message.error(t('tagFillFail') + ': ' + (e?.response?.data?.detail || e?.message || tc('failed')))
     } finally {
       setTagFillLoading(false)
     }
@@ -260,8 +260,8 @@ const QuestionBankPage: React.FC = () => {
       const res = await questionsApi.tagFillQuestions(true)
       setTagFillResult(res)
       if ((res.written ?? 0) > 0) loadQuestions()
-    } catch {
-      message.error(t('tagFillFail'))
+    } catch (e: any) {
+      message.error(t('tagFillFail') + ': ' + (e?.response?.data?.detail || e?.message || tc('failed')))
     } finally {
       setTagFillLoading(false)
     }

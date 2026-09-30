@@ -953,8 +953,11 @@ async def tag_fill_questions(req: TagFillRequest | None = Body(default=None), re
         raise HTTPException(status_code=400, detail="未配置 API Key")
     from backend.database import execute_query as main_exec
     try:
-        kp_names = sorted({r["name"] for r in main_exec(
-            "SELECT name FROM knowledge_points WHERE COALESCE(status,'') <> 'deleted'") or [] if r["name"]})
+        # 主库 execute_query 返回元组列表(无 row_factory)，兼容 元组/Row/dict 三种形态
+        _kp_rows = main_exec(
+            "SELECT name FROM knowledge_points WHERE COALESCE(status,'') <> 'deleted'") or []
+        kp_names = sorted({str((r["name"] if isinstance(r, dict) else r[0]) or "").strip()
+                            for r in _kp_rows} - {""})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"读取教材知识点失败: {e}")
     if not kp_names:
