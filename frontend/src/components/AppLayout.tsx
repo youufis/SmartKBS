@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Layout, Menu, Dropdown, Avatar, Space, Typography } from 'antd'
+import { Layout, Menu, Dropdown, Avatar, Space, Typography, Drawer } from 'antd'
 import {
   HomeOutlined,
   MessageOutlined,
@@ -40,6 +40,10 @@ import ThemeSwitcher from './ThemeSwitcher'
 import LanguageSwitcher from './LanguageSwitcher'
 import SecuritySetupModal from './SecuritySetupModal'
 import { startPoller, stopPoller } from '../utils/poller'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { isMobileAllowedPath } from '../constants/mobileNav'
+import MobileTabBar from './MobileTabBar'
+import DesktopOnlyGuide from './DesktopOnlyGuide'
 
 const { Header, Sider, Content } = Layout
 
@@ -164,6 +168,9 @@ const AppLayout: React.FC = () => {
   const location = useLocation()
   const { user, onlineCount, logout, fetchOnlineCount, isLoggedIn } = useAuthStore()
   const [collapsed, setCollapsed] = React.useState(false)
+  // 移动端地基：仅 <768px 生效，桌面/Electron(>=1024px) 恒走原分支
+  const isMobile = useIsMobile()
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const [openKeys, setOpenKeys] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('smartkb_menu_openkeys')
@@ -212,6 +219,19 @@ const AppLayout: React.FC = () => {
       return { key: group.key, label: group.label, icon: group.icon, children }
     })
   }
+
+  // ── 移动端抽屉菜单：仅白名单内路由（组内叶子过滤 + 丢空组） ──
+  const buildMobileMenuItems = () =>
+    buildMenuItems()
+      .map((g) => {
+        const group = g as unknown as { children?: Array<{ key: string }> }
+        if (!group.children) return g
+        return { ...g, children: group.children.filter((c) => isMobileAllowedPath(user?.role, c.key)) }
+      })
+      .filter((g) => {
+        const group = g as unknown as { children?: unknown[] }
+        return Array.isArray(group.children) ? group.children.length > 0 : true
+      })
 
   // 记住展开状态到 localStorage
   useEffect(() => {
@@ -312,7 +332,7 @@ const AppLayout: React.FC = () => {
       <Header
         style={{
           background: 'var(--bg-container)',
-          padding: '0 24px',
+          ...(isMobile ? { padding: '0 12px', height: 48, lineHeight: '48px' } : { padding: '0 24px' }),
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -324,35 +344,44 @@ const AppLayout: React.FC = () => {
         }}
       >
         <Space>
-          <Typography.Title level={4} style={{ margin: 0, color: 'var(--primary-color)' }}>
+          <Typography.Title level={4} style={{ margin: 0, color: 'var(--primary-color)', fontSize: isMobile ? 16 : undefined }}>
             🤖 SmartKB
           </Typography.Title>
-          {orgName && (
+          {!isMobile && orgName && (
             <Typography.Text style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
               {orgName}
             </Typography.Text>
           )}
-          <Typography.Text style={{ fontSize: 13, color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)' }}>
-            🟢 {t('onlineCount', { count: onlineCount })}
-          </Typography.Text>
+          {!isMobile && (
+            <Typography.Text style={{ fontSize: 13, color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)' }}>
+              🟢 {t('onlineCount', { count: onlineCount })}
+            </Typography.Text>
+          )}
         </Space>
 
-        <Space size={16}>
-          <LanguageSwitcher />
-          <ThemeSwitcher />
+        <Space size={isMobile ? 10 : 16}>
+          {!isMobile && <LanguageSwitcher />}
+          {!isMobile && <ThemeSwitcher />}
           <NotificationBell />
           <Dropdown menu={userMenu} placement="bottomRight">
             <Space style={{ cursor: 'pointer' }}>
               <Avatar style={{ backgroundColor: avatarBg, verticalAlign: 'middle', fontSize: 18, lineHeight: '40px' }}>
                 {avatarEmoji}
               </Avatar>
-              <span>{user?.name || user?.username}</span>
+              {!isMobile && <span>{user?.name || user?.username}</span>}
             </Space>
           </Dropdown>
         </Space>
       </Header>
 
-      <Layout style={{ height: 'calc(100vh - 64px)', padding: 12, gap: 12, background: 'var(--bg-layout)' }}>
+      <Layout
+        style={
+          isMobile
+            ? { height: 'calc(100dvh - 48px)', padding: '8px 8px 72px', background: 'var(--bg-layout)' }
+            : { height: 'calc(100vh - 64px)', padding: 12, gap: 12, background: 'var(--bg-layout)' }
+        }
+      >
+        {!isMobile && (
         <Sider
           width={200}
           collapsedWidth={64}
@@ -398,14 +427,57 @@ const AppLayout: React.FC = () => {
             style={{ height: '100%', borderRight: 0, padding: '4px 0' }}
           />
         </Sider>
+        )}
 
-        <Content style={{ padding: 24, background: 'var(--bg-layout)', overflow: 'auto', height: '100%', borderRadius: 8, flex: 1 }}>
-          <Outlet />
-          <div style={{ textAlign: 'center', padding: '16px 0 0', color: 'var(--footer-text)', fontSize: 12 }}>
-            © 2026 UNET. All rights reserved.
-          </div>
+        <Content style={{ padding: isMobile ? 12 : 24, background: 'var(--bg-layout)', overflow: 'auto', height: '100%', borderRadius: 8, flex: 1 }}>
+          {isMobile && !isMobileAllowedPath(user?.role, location.pathname) ? (
+            <DesktopOnlyGuide />
+          ) : (
+          <>
+            <Outlet />
+            <div style={{ textAlign: 'center', padding: '16px 0 0', color: 'var(--footer-text)', fontSize: 12 }}>
+              © 2026 UNET. All rights reserved.
+            </div>
+          </>
+          )}
         </Content>
       </Layout>
+
+      {/* ── 移动端地基：底部 TabBar + 白名单抽屉菜单（仅窄屏渲染） ── */}
+      {isMobile && (
+        <>
+          <MobileTabBar
+            role={user?.role || 'student'}
+            activePath={location.pathname}
+            onOpenMenu={() => setMobileMenuOpen(true)}
+          />
+          <Drawer
+            placement="left"
+            width="78%"
+            open={mobileMenuOpen}
+            onClose={() => setMobileMenuOpen(false)}
+            title={t('mobileDrawerTitle', { defaultValue: '全部功能' })}
+            styles={{ body: { padding: '8px 0' } }}
+            extra={<span style={{ fontSize: 12, color: onlineCount > 0 ? 'var(--success-color)' : 'var(--text-tertiary)' }}>🟢 {t('onlineCount', { count: onlineCount })}</span>}
+          >
+            <Menu
+              mode="inline"
+              items={buildMobileMenuItems() as never}
+              selectedKeys={[location.pathname]}
+              defaultOpenKeys={['overview', 'learn', 'learnCenter', 'exam-practice', 'interactive', 'growth', 'explore', 'teach', 'classroom', 'analytics', 'coding']}
+              onClick={({ key }) => {
+                navigate(key)
+                setMobileMenuOpen(false)
+              }}
+              style={{ borderRight: 0 }}
+            />
+            <div style={{ marginTop: 12, padding: '10px 16px', borderTop: '1px solid var(--border-color)', display: 'flex', gap: 14, alignItems: 'center' }}>
+              <LanguageSwitcher />
+              <ThemeSwitcher />
+            </div>
+          </Drawer>
+        </>
+      )}
 
       {/* 密保设置弹窗 */}
       <SecuritySetupModal

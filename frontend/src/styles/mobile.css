@@ -1,0 +1,23 @@
+/**
+ * 移动端地基全局样式（仅 <768px 生效，桌面端零影响——红线纪律：本文件所有规则必须包在 media query 内）
+ */
+@media (max-width: 767px) {
+  /* 弹窗宽度兜底：不覆盖各页内联 width，仅钳制最大宽度 */
+  .ant-modal {
+    max-width: calc(100vw - 16px);
+    top: 8px;
+  }
+  .ant-modal .ant-modal-content {
+    padding: 16px;
+  }
+  /* iOS Safari 聚焦自动缩放兜底：原生可编辑控件字号不小于 16px */
+  input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']):not([type='file']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+  /* 抽屉/弹层滚动更顺手 */
+  .ant-drawer-body {
+    -webkit-overflow-scrolling: touch;
+  }
+}
