@@ -930,10 +930,17 @@ async def dedup_questions(req: DedupRequest | None = Body(default=None), request
     }
 
 
+class TagFillItemIn(BaseModel):
+    id: int
+    tags: list[str] = []
+
+
 class TagFillRequest(BaseModel):
     limit: int = 50        # 本次最多处理的无标题数(1~200)
     batch_size: int = 10   # 每次 AI 调用题数(1~20)
     confirm: bool = False  # False=只预览建议; True=写入(仅补空标签, 不覆盖已有)
+    # 编辑后确认写入: 前端把用户修改过的建议列表传回, 后端仍逐字校验教材清单
+    items: list[TagFillItemIn] | None = None
 
 
 @router.post("/tag-fill", summary="[管理员] AI 补标无标签题目(默认预览)")
@@ -978,6 +985,7 @@ async def tag_fill_questions(req: TagFillRequest | None = Body(default=None), re
     bs = max(1, min(int(req.batch_size or 10), 20))
     suggestions: list[dict] = []
     errors = 0
+    qtext = {int(r["id"]): str(r["question_text"] or "") for r in rows}
     for i in range(0, len(rows), bs):
         batch = rows[i:i + bs]
         lines = "\n\n".join(
@@ -1002,11 +1010,39 @@ async def tag_fill_questions(req: TagFillRequest | None = Body(default=None), re
                 continue
             tags = [str(x).strip() for x in (it.get("tags") or []) if str(x).strip() in allowed][:3]
             if tags:
-                suggestions.append({"id": qid, "tags": tags})
+                q0 = qtext.get(qid, "")
+                suggestions.append({"id": qid, "tags": tags,
+                                    "question": q0[:120] + ("..." if len(q0) > 120 else "")})
     if not req.confirm:
         return {"dry_run": True, "scanned": len(rows), "suggested": len(suggestions),
                 "failed_batches": errors, "items": suggestions[:100],
-                "message": "预览模式：传 confirm=true 才写入(只补无标签题)"}
+                "allowed_tags": sorted(allowed),
+                "message": "预览模式：可编辑建议标签后确认写入(只补无标签题)"}
+    # 编辑后写入: 前端传回用户改过的建议列表时以其为准(仍逐字校验清单、只补空标签)
+    if req.items is not None:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        written = 0
+        dropped = 0
+        for it in req.items[:300]:
+            tags = [t.strip() for t in it.tags if t.strip() in allowed][:3]
+            if not tags:
+                dropped += 1
+                continue
+            n = execute_update(
+                "UPDATE question_bank SET knowledge_points=?, updated_at=?"
+                " WHERE id=? AND status='active' AND (knowledge_points IS NULL OR TRIM(knowledge_points)='')",
+                (",".join(tags), now, int(it.id)))
+            if n:
+                written += 1
+        map_stat = {}
+        try:
+            from backend.question_select import rebuild_kp_map
+            map_stat = rebuild_kp_map()
+        except Exception as e:
+            logger.warning(f"[tag-fill] 重建知识点映射失败: {e}")
+        logger.info(f"[tag-fill] {user['username']} 按编辑结果写入 {written} 题(跳过空/非法 {dropped})")
+        return {"dry_run": False, "scanned": len(rows), "suggested": len(req.items),
+                "written": written, "dropped": dropped, "kp_map": map_stat}
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     written = 0
     for s in suggestions:

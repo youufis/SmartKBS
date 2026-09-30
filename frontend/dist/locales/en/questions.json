@@ -413,5 +413,7 @@
   "tagFillTags": "Suggested tags",
   "tagFillColId": "Question ID",
   "tagFillFailed": "{{count}} AI batches failed - click again to retry",
-  "tagFillTruncated": "Showing at most 100 suggestions; confirming writes all of them"
+  "tagFillTruncated": "Showing at most 100 suggestions; confirming writes all of them",
+  "tagFillColText": "Question",
+  "tagFillEditTip": "Tags are editable (textbook knowledge points only, max 3); clear a row to skip that question."
 }

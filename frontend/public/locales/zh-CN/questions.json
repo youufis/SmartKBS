@@ -413,5 +413,7 @@
   "tagFillTags": "建议标签",
   "tagFillColId": "题目 ID",
   "tagFillFailed": "{{count}} 批 AI 调用失败，可再次点击补标重试",
-  "tagFillTruncated": "建议列表最多展示 100 条；确认写入会处理全部建议"
+  "tagFillTruncated": "建议列表最多展示 100 条；确认写入会处理全部建议",
+  "tagFillColText": "题干",
+  "tagFillEditTip": "标签可增删改（只能选教材知识点，最多 3 个）；清空表示该题不写入。"
 }

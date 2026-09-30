@@ -106,7 +106,7 @@ export async function dedupQuestions(confirm = false): Promise<DedupResult> {
   return data;
 }
 
-export interface TagFillItem { id: number; tags: string[] }
+export interface TagFillItem { id: number; tags: string[]; question?: string }
 
 export interface TagFillResult {
   dry_run: boolean;
@@ -115,13 +115,24 @@ export interface TagFillResult {
   written?: number;
   failed_batches?: number;
   items?: TagFillItem[];
+  dropped?: number;
+  allowed_tags?: string[];
   kp_map?: Record<string, unknown>;
   message?: string;
 }
 
-/** AI 补标：默认只做预览，confirm=true 才写入(仅管理员；多批 AI 调用，超时放宽) */
-export async function tagFillQuestions(confirm = false, limit = 50): Promise<TagFillResult> {
-  const { data } = await apiClient.post('/api/questions/tag-fill', { confirm, limit }, { timeout: 300000 });
+/**
+ * AI 补标：默认只做预览；confirm=true 且带 items 时按用户编辑后的建议写入，
+ * 不带 items 则走"AI 生成即写入"旧路径(仅管理员；多批 AI 调用，超时放宽)
+ */
+export async function tagFillQuestions(
+  confirm = false, limit = 50, items?: { id: number; tags: string[] }[],
+): Promise<TagFillResult> {
+  const { data } = await apiClient.post(
+    '/api/questions/tag-fill',
+    { confirm, limit, ...(items ? { items } : {}) },
+    { timeout: 300000 },
+  );
   return data;
 }
 

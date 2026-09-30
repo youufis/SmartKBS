@@ -242,11 +242,15 @@ const QuestionBankPage: React.FC = () => {
   // ── AI 补标（仅管理员；先预览建议，确认后才写入） ──
   const [tagFillResult, setTagFillResult] = useState<questionsApi.TagFillResult | null>(null)
   const [tagFillLoading, setTagFillLoading] = useState(false)
+  // 可编辑的建议清单(预览返回后本地维护, 确认时回传后端二次校验)
+  const [tagFillItems, setTagFillItems] = useState<questionsApi.TagFillItem[]>([])
 
   const handleTagFill = async () => {
     setTagFillLoading(true)
     try {
-      setTagFillResult(await questionsApi.tagFillQuestions(false))
+      const res = await questionsApi.tagFillQuestions(false)
+      setTagFillResult(res)
+      setTagFillItems(res.items ?? [])
     } catch (e: any) {
       message.error(t('tagFillFail') + ': ' + (e?.response?.data?.detail || e?.message || tc('failed')))
     } finally {
@@ -257,7 +261,10 @@ const QuestionBankPage: React.FC = () => {
   const runTagFillConfirm = async () => {
     setTagFillLoading(true)
     try {
-      const res = await questionsApi.tagFillQuestions(true)
+      const edited = tagFillItems
+        .filter((it) => it.tags.length > 0)
+        .map((it) => ({ id: it.id, tags: it.tags.slice(0, 3) }))
+      const res = await questionsApi.tagFillQuestions(true, edited.length ? 0 : 50, edited.length ? edited : undefined)
       setTagFillResult(res)
       if ((res.written ?? 0) > 0) loadQuestions()
     } catch (e: any) {
@@ -1388,15 +1395,39 @@ const QuestionBankPage: React.FC = () => {
               <Tag color="orange">{t('tagFillFailed', { count: tagFillResult.failed_batches ?? 0 })}</Tag>
             )}
             {(tagFillResult.items ?? []).length > 0 && (
-              <Table
-                size="small" rowKey="id" pagination={{ pageSize: 10, size: 'small' }}
-                dataSource={tagFillResult.items}
-                columns={[
-                  { title: t('tagFillColId'), dataIndex: 'id', width: 80 },
-                  { title: t('tagFillTags'), dataIndex: 'tags', render: (tags: string[]) => tags.map((x) => <Tag color="blue" key={x}>{x}</Tag>) },
-                ]}
-                style={{ marginTop: 8 }}
-              />
+              <>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('tagFillEditTip')}</Typography.Text>
+                <Table
+                  size="small" rowKey="id" pagination={{ pageSize: 8, size: 'small' }}
+                  dataSource={tagFillItems}
+                  columns={[
+                    { title: t('tagFillColId'), dataIndex: 'id', width: 64 },
+                    {
+                      title: t('tagFillColText'), dataIndex: 'question', ellipsis: true,
+                      render: (s: string) => <Tooltip title={s}><span>{s}</span></Tooltip>,
+                    },
+                    {
+                      title: t('tagFillTags'), dataIndex: 'tags', width: 260,
+                      render: (tags: string[], row) => (
+                        <Select
+                          mode="tags"
+                          size="small"
+                          style={{ width: '100%' }}
+                          value={tags}
+                          maxCount={3}
+                          showSearch
+                          options={(tagFillResult.allowed_tags ?? []).map((n) => ({ value: n }))}
+                          filterOption={(inp, opt) => String(opt?.value ?? '').toLowerCase().includes(inp.toLowerCase())}
+                          onChange={(v) => setTagFillItems((prev) => prev.map((x) => (
+                            x.id === row.id ? { ...x, tags: (v as string[]).slice(0, 3) } : x
+                          )))}
+                        />
+                      ),
+                    },
+                  ]}
+                  style={{ marginTop: 4 }}
+                />
+              </>
             )}
             {tagFillResult.dry_run && (tagFillResult.items?.length ?? 0) >= 100 && (
               <Typography.Text type="secondary">{t('tagFillTruncated')}</Typography.Text>
