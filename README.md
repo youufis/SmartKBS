@@ -14,7 +14,7 @@
 >
 > 基于 **FastAPI + React** 构建，深度集成阿里云 DashScope 与 DeepSeek AI 能力。
 
-![版本](https://img.shields.io/badge/版本-8.5.0-blue)
+![版本](https://img.shields.io/badge/版本-8.6.0-blue)
 ![后端](https://img.shields.io/badge/后端-FastAPI-green)
 ![前端](https://img.shields.io/badge/前端-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,14 +30,13 @@
 
 ---
 
-> 📌 **V8.5.0 更新亮点**：
-> 📱 **手机适配首批落地**：手机浏览器打开即可登录、导航、看通知；侧边栏变底部标签栏，未适配的功能在手机端自动隐藏并给出「请用电脑端」引导，桌面端版式零变化
-> 💬 **学伴 / 助手模式**：手机端头部不再挤压，「教学数据」改为浮层面板，聊天区高度适配手机视口
-> ⚡ **抢答全链路**：加入房间 → 答题 → 结算排行在手机上实测可用，答题大按钮、倒计时、自动跳题体验良好
-> 🔔 **列表与表格**：通知列表、公告与抢答表格在窄屏自动换行或横向滚动，标题不再一字一行竖排
-> 📝 **考试作答**：手机顶栏改两行，卷名、倒计时与交卷按钮清晰可见
-> 🎓 **助手模式副标签**：教师端头部标语改为「备课 · 出题 · 批改 · 学情」，不再重复显示「AI 助手」
-> 🧠 **技能系统加固**：AI 技能按场景精准注入、不再带偏输出格式，内容安全清单真正生效，技能管理页可查使用统计
+> 📌 **V8.6.0 更新亮点**：
+> 🔗 **在线升级更耐网络限制**：远程版本改走多镜像，全部不通时直接用 git 兜底——部署机「git pull 能升、页面说连不上 GitHub」的情况已修复
+> 🧱 **坏 remote 不再拖垮升级**：拉取只针对 origin master，遗留的备用远程不会再把整次在线升级判死
+> 🧹 **自动清理 `.git` 垃圾**：中断 fetch 留下的临时包与孤立索引每次拉取前自动清除，正式 pack 绝不动
+> ⚡ **升级页打开更快**：版本检测结果缓存 60 秒，已 fetch 过不重复拉取
+> 🩺 **失败原因可查**：检测不通时返回各镜像的失败原因与版本实际来源，仓库垃圾只提示不阻断
+> 📦 本版只改后端在线升级链路，前端、数据库与接口均向后兼容，无破坏性变更
 
 ---
 
@@ -986,6 +985,16 @@ AI 对课堂互动数据进行综合分析：
 | 🗑️ **临时文件清理** | 自动清理超过 24 小时的临时上传文件 |
 
 ## 📦 更新日志
+
+### v8.6.0 (2026-09-30)
+
+- 🔗 **在线升级链路加固**：远程 `version.json` 依次尝试 `raw.githubusercontent.com` → `github.com/<repo>/raw` → jsDelivr（`cdn` / `fastly` / `gcore`）三个镜像，全部不通时改用 **git 兜底**（`git show origin/master:version.json`），与管理员手动 `git pull origin master` 走同一条传输路径。此前部署机最常见的矛盾——github.com 可达、`raw` 域名被 DNS 污染或防火墙掐断，于是「页面提示无法连接 GitHub，但 git 能升级」——现已消除；也可用环境变量 `SMARTKBS_VERSION_URLS`（逗号分隔）指定内网可达的镜像地址
+- 🧱 **坏 remote 不再否决升级**：代码同步由 `git fetch --all` 改为只 `git fetch origin master`（`--all` 降为退回方案）。`--all` 会拉取每一个 remote，只要有一个连不上（早期配置的 `ssh://github-443` 别名、失效镜像、内网备用源）整条命令就非零退出，在线升级随之失败，而手动 `git pull origin master` 却正常；两条路径行为现已统一
+- 🧹 **`.git` 仓库垃圾自动清理**：每次 fetch 前清除历史中断留下的 `tmp_pack_*` / `tmp_idx_*` 以及没有同名 `.pack` 的孤立 `.idx`/`.rev`。删除范围刻意很窄：只动 10 分钟前生成的残留（并发 fetch 正在写的临时包不碰），**正式 `.pack` 永不删除**（缺索引时 git 会自行重建）
+- 🩺 **新增仓库体检与一键清理**：`GET /api/system/upgrade/repo-hygiene`（只读，报告数量与体积）、`POST /api/system/upgrade/repo-hygiene/clean`（清理；`?deep=true` 追加一次保守 `git gc`，刻意不带 `--prune=now`，以免回收回滚所需的 `HEAD@{1}` 对象）。升级进行中或存在升级锁时直接 409 拒绝，保证不会误删正在写入的文件
+- ⚡ **升级页更快**：远程版本结果缓存 60 秒（页面轮询与后台自动检查共用），git 兜底 fetch 过之后同一轮不再重复 fetch；上一轮命中的镜像地址自动提到首位，避免每次都先撞被墙的域名
+- 🔍 **可诊断**：`version-check` 响应新增 `version_source`（raw / jsDelivr / git 兜底）、`remote_errors`（各候选地址的失败原因）、`pack_residue`（仓库垃圾数量与体积）。仓库垃圾仅作提示、不再写入 `git_issues`——后者非空会让 `start_upgrade` 直接拒绝升级，"脏"不等于"坏"
+- ⚠️ **破坏性变更**：无。改动全部集中在后端在线升级链路（`backend/api/upgrade_router.py`），前端、数据库与接口返回字段均为向后兼容的可选新增
 
 ### v8.5.0 (2026-09-30)
 

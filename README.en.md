@@ -14,7 +14,7 @@
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-8.5.0-blue)
+![Version](https://img.shields.io/badge/Version-8.6.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,14 +30,13 @@
 
 ---
 
-> 📌 **V8.5.0 Highlights**:
-> 📱 **First mobile pass lands**: open the platform in a phone browser and you can sign in, navigate and read notifications; the sidebar becomes a bottom tab bar, un-adapted features hide their entry and show a "use the desktop app" guide, while desktop stays pixel-identical
-> 💬 **Companion & assistant modes**: the header no longer collapses on narrow screens, "teaching data" becomes an overlay panel and the chat area now fits the phone viewport
-> ⚡ **Quick quiz end to end**: join a room, answer, and read the results on a phone - big touch targets, live countdown, auto-advance to the next question
-> 🔔 **Lists and tables**: notification rows reflow to content-over-actions, and wide tables scroll sideways instead of squashing their columns
-> 📝 **Exam taking**: the top bar wraps to two rows so the paper title, countdown and submit button stay readable
-> 🎓 **Assistant subtitle**: the teacher header now reads "Lesson prep · Questions · Grading · Insights" instead of repeating "AI Assistant"
-> 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
+> 📌 **V8.6.0 Highlights**:
+> 🔗 **Online upgrade survives restricted networks**: the remote version now walks raw / github.com / jsDelivr mirrors and finally falls back to git itself - sites where `git pull` worked while the page claimed "cannot reach GitHub" can upgrade in place again
+> 🧱 **A dead remote no longer blocks upgrades**: code sync only touches `origin master`, so a leftover backup remote that cannot be reached can no longer veto the whole upgrade
+> 🧹 **`.git` junk cleaned automatically**: half-finished fetch packs and orphan indexes are swept before every fetch; real `.pack` files are never touched
+> ⚡ **Faster upgrade page**: the remote version is cached for 60s and never fetched twice in one round, and the mirror that worked last time goes first
+> 🩺 **Actionable diagnostics**: a failed check now returns why every mirror failed plus where the version actually came from; repo junk is a hint, never a blocker
+> 📦 Backend upgrade path only - frontend, database and API stay backward compatible, no breaking changes
 
 ---
 
@@ -986,6 +985,16 @@ Git-based online incremental upgrade system:
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
 ## 📦 Changelog
+
+### v8.6.0 (2026-09-30)
+
+- 🔗 **Online upgrade hardened for restricted networks**: the remote `version.json` is now fetched from `raw.githubusercontent.com` → `github.com/<repo>/raw` → jsDelivr (`cdn` / `fastly` / `gcore`), and if every mirror fails it falls back to **git itself** (`git show origin/master:version.json`) - the same transport an admin uses when running `git pull origin master`. This removes the classic deployment-site contradiction where github.com was reachable, `raw` was DNS-poisoned or firewalled, and the page claimed "cannot connect to GitHub" while manual git upgrades worked. Set `SMARTKBS_VERSION_URLS` (comma separated) to point at an intranet-reachable mirror
+- 🧱 **A dead remote can no longer veto upgrades**: code sync moved from `git fetch --all` to `git fetch origin master` (`--all` kept only as a fallback). `--all` fetches every remote, so a single unreachable one (an old `ssh://github-443` alias, a stale mirror, an intranet backup) made the whole command exit non-zero and killed the in-app upgrade, while `git pull origin master` still worked. Both paths now behave the same
+- 🧹 **Automatic `.git` junk cleanup**: before every fetch, half-finished `tmp_pack_*` / `tmp_idx_*` files and orphan `.idx`/`.rev` without a matching `.pack` are removed. The scope is deliberately narrow - only residue older than 10 minutes (a concurrent fetch's temp pack is never touched) and **real `.pack` files are never deleted** (git rebuilds a missing index on its own)
+- 🩺 **New repo health endpoints**: `GET /api/system/upgrade/repo-hygiene` (read-only report of count and size) and `POST /api/system/upgrade/repo-hygiene/clean` (sweeps the junk; `?deep=true` adds one conservative `git gc`, deliberately without `--prune=now` so objects needed for `HEAD@{1}` rollback are not reclaimed). Both refuse to run with 409 while an upgrade is in progress or the upgrade lock exists
+- ⚡ **Faster upgrade page**: the remote version result is cached for 60s (shared by page polling and the background checker), the same round never fetches twice after the git fallback already did, and the mirror that last succeeded is moved to the front instead of always hitting the blocked domain first
+- 🔍 **Actionable diagnostics**: `version-check` now returns `version_source` (raw / jsDelivr / git fallback), `remote_errors` (why each candidate failed) and `pack_residue` (junk count and size). Repo junk is surfaced as a hint rather than pushed into `git_issues`, because a non-empty `git_issues` makes `start_upgrade` reject the request outright - "dirty" is not "broken"
+- ⚠️ **Breaking changes**: none. Everything lives in the backend upgrade path (`backend/api/upgrade_router.py`); frontend, database and API fields are optional, backward-compatible additions
 
 ### v8.5.0 (2026-09-30)
 
