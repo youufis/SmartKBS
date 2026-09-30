@@ -64,7 +64,20 @@
   /* 抢答结算页头部 meta：窄屏换行且每项不拆字 */
   .qq-result-meta { flex-wrap: wrap; gap: 12px !important; justify-content: flex-start; }
   .qq-result-meta > div { white-space: nowrap; }
+
+  /* ── 第二批 A 档补充规则 ────────────────────────────── */
+
+  /* 分段控件（待办清单的"全部/即将截止/课堂进行中/课后待办"）窄屏不折行，改为可横滑 */
+  .ant-segmented { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* 卡片内的横向 Space（画像卡的日期/风格标签、各类元信息行）窄屏允许换行。
+     实测画像卡 body 244px 而标签行 247px，不换行就会被裁切；
+     限定在 .ant-card 内，避免影响聊天气泡等其他布局 */
+  .ant-card .ant-space-horizontal,
+  .ant-card-meta-title .ant-space,
+  .ant-card-meta-description .ant-space { flex-wrap: wrap; row-gap: 4px; }
 }
+
 
 
 

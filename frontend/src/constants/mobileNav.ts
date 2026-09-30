@@ -17,6 +17,12 @@ const STUDENT_ALLOWED = [
   '/announcements',
   '/student-questions',
   '/quick-quiz',
+  // ── 第二批 A 档：补首页卡片已暴露的死胡同入口 ──
+  '/task-todo',            // 首页「任务清单 N」徽标
+  '/score',                // 首页「我的积分 / 称号」（学生侧为 RewardPage）
+  '/exam',                 // 首页「待完成考试 / 考试成绩」（教师侧考试管理仍不开放）
+  '/portrait',             // 首页「AI 周画像」
+  '/companion-settings',   // 学伴设置
 ]
 
 /** 教师/管理员端：首批仅轻场景（题库/组卷/用户管理等保持桌面专属） */

@@ -922,7 +922,7 @@ const ExamPage: React.FC = () => {
           <Col>
             <Typography.Text type="secondary" style={{ fontSize: 13 }}>{t('status')}：</Typography.Text>
           </Col>
-          <Col span={3}>
+          <Col xs={12} sm={6} md={3}>
             <Select allowClear placeholder={t('all')} style={{ width: '100%' }}
               value={statusFilter}
               onChange={(val) => { setStatusFilter(val); setPage(1) }}>
