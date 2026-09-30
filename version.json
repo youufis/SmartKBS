@@ -1,14 +1,20 @@
 {
-  "latest_version": "8.6.0",
+  "latest_version": "8.5.0",
   "minimum_version": "7.0.0",
   "release_date": "2026-09-30",
   "changelog": [
-    "🔗 在线升级链路加固：远程版本依次试 raw → github.com → jsDelivr 三个镜像，全部不通时改用 git 直接从 origin/master 读取 version.json（与手动 git pull 同一条传输路径），「页面说连不上 GitHub、git pull 却能升级」的部署机现已可正常在线升级",
+    "📱 手机适配首批落地：新增统一断点体系与移动端外壳（侧边栏改底部 TabBar + 抽屉菜单），按角色维护移动开放白名单，未适配功能在手机端显示「请用电脑端」引导页；桌面端与 Electron 版式零变化",
+    "💬 学伴/助手模式手机可用：模式头部条窄屏自动换行（学伴名不再被挤成一字一行），「教学数据」面板改右侧浮层不再挤压聊天区，聊天区高度按手机视口修正",
+    "🔔 行式列表适配：通知中心、热点新闻、聊天历史、铃铛面板在窄屏改为内容在上、操作按钮在下，标题不再一字一行竖排",
+    "⚡ 抢答全链路实测通过：加入房间→答题→结算排行手机端可用；结算页战绩栅格改响应式（手机两列/平板三列/桌面五列不变），每题回顾标题不再竖排",
+    "📐 表格与弹窗兜底：未设横向滚动的表格窄屏自动横滑（公告、抢答列表的列不再被压扁裁切），弹窗宽度钳制、iOS 聚焦不再自动放大",
+    "📝 考试作答顶栏：窄屏改两行布局（返回+卷名 / 倒计时+进度+交卷），标题与倒计时不再竖排",
+    "🎓 助手模式副标签：教师端头部由重复的「AI 助手」改为功能标语「备课 · 出题 · 批改 · 学情」（中英双语）",
+    "🧠 技能系统加固：AI 技能按场景精准注入、不再带偏输出格式，内容安全清单真正生效，技能管理页可查使用统计",
+    "🔗 在线升级同日增补：远程版本依次试 raw → github.com → jsDelivr 三个镜像，全部不通时改用 git 从 origin/master 直接读取 version.json（与手动 git pull 同一条传输路径）。「git pull 能升、页面却说连不上 GitHub」的部署机现已可正常在线升级；可用环境变量 SMARTKBS_VERSION_URLS 指定内网可达镜像",
     "🧱 git 拉取只针对 origin master（--all 降为退回方案）：仓库里遗留的备用 remote 连不上时，不再把整次在线升级判死",
-    "🧹 自动清理 .git 中中断 fetch 留下的临时包与孤立 .idx/.rev（每次拉取前执行，只删 10 分钟前的残留，正式 .pack 绝不动）",
-    "🩺 新增仓库体检与一键清理接口 GET/POST /api/system/upgrade/repo-hygiene[/clean]，deep=true 时附带一次保守 git gc",
-    "⚡ 升级页更快：远程版本结果缓存 60 秒，git 兜底已 fetch 过时同一轮不再重复拉取，命中的镜像自动提到首位",
-    "🔍 检测响应新增 version_source（版本从哪取到）、remote_errors（各地址失败原因）、pack_residue（仓库垃圾体积），排查「检测不到新版本」不再靠猜"
+    "🧹 自动清理 .git 中中断 fetch 留下的临时包与孤立 .idx/.rev（每次拉取前执行，只删 10 分钟前的残留，正式 .pack 绝不动）；新增仓库体检与一键清理接口 GET/POST /api/system/upgrade/repo-hygiene[/clean]",
+    "⚡ 远程版本结果缓存 60 秒、同一轮不重复 fetch；version-check 响应新增 version_source / remote_errors / pack_residue，仓库垃圾只作提示、不再被当成阻断升级的错误"
   ],
   "breaking_changes": []
 }
