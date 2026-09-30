@@ -61,7 +61,7 @@ export function RowMeta({ avatar, title, description }: RowMetaProps) {
     <div style={{ display: 'flex', alignItems: 'flex-start', flex: 1, maxWidth: '100%', minWidth: 0 }}>
       {avatar && <span style={{ flexShrink: 0, marginInlineEnd: token.padding }}>{avatar}</span>}
       <div style={{ flex: '1 0', width: 0, color: token.colorText }}>
-        {title && <div style={{ marginBlockEnd: description ? token.marginXXS : 0 }}>{title}</div>}
+        {title && <div className="row-meta-title" style={{ marginBlockEnd: description ? token.marginXXS : 0 }}>{title}</div>}
         {description && (
           <div style={{ color: token.colorTextDescription, fontSize: token.fontSize }}>
             {description}
@@ -93,6 +93,7 @@ export function RowItem({ avatar, title, description, children, actions, onClick
   const actionCount = actions?.length ?? 0
   return (
     <div
+      className="row-item"
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: dense ? '4px 16px' : '8px 0', color: token.colorText, ...style,
@@ -104,6 +105,7 @@ export function RowItem({ avatar, title, description, children, actions, onClick
         : <RowMeta avatar={avatar} title={title} description={description} />}
       {actionCount > 0 && (
         <span
+          className="row-item-actions"
           style={{
             display: 'inline-flex', alignItems: 'center', flex: '0 0 auto',
             marginInlineStart: token.marginXXL,

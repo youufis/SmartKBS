@@ -42,6 +42,13 @@
   /* 答疑卡片：窄屏纵向堆叠（标题+元信息在上，操作按钮在下），杜绝标题被挤成竖排 */
   .sq-card-row { flex-direction: column; align-items: stretch; gap: 8px; }
   .sq-card-row > .ant-space { justify-content: flex-start; }
+
+  /* 行式列表（RowList，通知/新闻/聊天历史等共用）：
+     窄屏把行操作按钮移到内容下方，标题区允许换行，杜绝标题被挤成一字一行 */
+  .row-item { flex-direction: column; align-items: stretch !important; gap: 4px; }
+  .row-item-actions { margin-inline-start: 0 !important; width: 100%; justify-content: flex-end; }
+  .row-meta-title .ant-space { flex-wrap: wrap; row-gap: 4px; }
 }
+
 
 
