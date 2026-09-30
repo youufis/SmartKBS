@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined, ClearOutlined,
-  LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined,
+  LoadingOutlined, BookOutlined, FilterOutlined, FileTextOutlined, UploadOutlined, TagsOutlined,
 } from '@ant-design/icons'
 import * as questionsApi from '../api/questions'
 import apiClient from '../api/client'
@@ -236,6 +236,34 @@ const QuestionBankPage: React.FC = () => {
       message.error(t('dedupFail'))
     } finally {
       setDedupLoading(false)
+    }
+  }
+
+  // ── AI 补标（仅管理员；先预览建议，确认后才写入） ──
+  const [tagFillResult, setTagFillResult] = useState<questionsApi.TagFillResult | null>(null)
+  const [tagFillLoading, setTagFillLoading] = useState(false)
+
+  const handleTagFill = async () => {
+    setTagFillLoading(true)
+    try {
+      setTagFillResult(await questionsApi.tagFillQuestions(false))
+    } catch {
+      message.error(t('tagFillFail'))
+    } finally {
+      setTagFillLoading(false)
+    }
+  }
+
+  const runTagFillConfirm = async () => {
+    setTagFillLoading(true)
+    try {
+      const res = await questionsApi.tagFillQuestions(true)
+      setTagFillResult(res)
+      if ((res.written ?? 0) > 0) loadQuestions()
+    } catch {
+      message.error(t('tagFillFail'))
+    } finally {
+      setTagFillLoading(false)
     }
   }
 
@@ -618,6 +646,13 @@ const QuestionBankPage: React.FC = () => {
               <Button icon={<ClearOutlined />} onClick={handleDedup} loading={dedupLoading}>
                 {t('dedup')}
               </Button>
+              {user?.role === 'admin' && (
+                <Tooltip title={t('tagFillTip')}>
+                  <Button icon={<TagsOutlined />} onClick={handleTagFill} loading={tagFillLoading}>
+                    {t('tagFill')}
+                  </Button>
+                </Tooltip>
+              )}
             </Space>
           </Col>
         </Row>
@@ -1324,6 +1359,51 @@ const QuestionBankPage: React.FC = () => {
       </Modal>
 
       {/* ── 生成进度弹窗（已改为内联显示） ── */}
+
+      {/* ── AI 补标结果弹窗（预览 -> 确认两步式） ── */}
+      <Modal
+        title={t('tagFillTitle')}
+        open={tagFillResult !== null}
+        onCancel={() => setTagFillResult(null)}
+        footer={
+          <Space>
+            <Button onClick={() => setTagFillResult(null)}>{t('close')}</Button>
+            {tagFillResult?.dry_run && (tagFillResult?.suggested ?? 0) > 0 && (
+              <Button type="primary" loading={tagFillLoading} onClick={runTagFillConfirm}>
+                {t('tagFillRun')}
+              </Button>
+            )}
+          </Space>
+        }
+        width={640}
+      >
+        {tagFillResult && (
+          <div>
+            <Typography.Paragraph>
+              {tagFillResult.dry_run
+                ? t('tagFillFound', { scanned: tagFillResult.scanned, suggested: tagFillResult.suggested })
+                : t('tagFillWritten', { count: tagFillResult.written ?? 0 })}
+            </Typography.Paragraph>
+            {(tagFillResult.failed_batches ?? 0) > 0 && (
+              <Tag color="orange">{t('tagFillFailed', { count: tagFillResult.failed_batches ?? 0 })}</Tag>
+            )}
+            {(tagFillResult.items ?? []).length > 0 && (
+              <Table
+                size="small" rowKey="id" pagination={{ pageSize: 10, size: 'small' }}
+                dataSource={tagFillResult.items}
+                columns={[
+                  { title: t('tagFillColId'), dataIndex: 'id', width: 80 },
+                  { title: t('tagFillTags'), dataIndex: 'tags', render: (tags: string[]) => tags.map((x) => <Tag color="blue" key={x}>{x}</Tag>) },
+                ]}
+                style={{ marginTop: 8 }}
+              />
+            )}
+            {tagFillResult.dry_run && (tagFillResult.items?.length ?? 0) >= 100 && (
+              <Typography.Text type="secondary">{t('tagFillTruncated')}</Typography.Text>
+            )}
+          </div>
+        )}
+      </Modal>
 
       {/* ── 去重结果弹窗 ── */}
       <Modal

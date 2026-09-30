@@ -106,6 +106,25 @@ export async function dedupQuestions(confirm = false): Promise<DedupResult> {
   return data;
 }
 
+export interface TagFillItem { id: number; tags: string[] }
+
+export interface TagFillResult {
+  dry_run: boolean;
+  scanned: number;
+  suggested: number;
+  written?: number;
+  failed_batches?: number;
+  items?: TagFillItem[];
+  kp_map?: Record<string, unknown>;
+  message?: string;
+}
+
+/** AI 补标：默认只做预览，confirm=true 才写入(仅管理员；多批 AI 调用，超时放宽) */
+export async function tagFillQuestions(confirm = false, limit = 50): Promise<TagFillResult> {
+  const { data } = await apiClient.post('/api/questions/tag-fill', { confirm, limit }, { timeout: 300000 });
+  return data;
+}
+
 /** 提取响应: 短内容同步返回; 长文档转后台任务(mode=task)需轮询 task_id */
 export interface ExtractResponse {
   mode?: 'task';
