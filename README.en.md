@@ -14,7 +14,7 @@
 >
 > Built with **FastAPI + React**, deeply integrated with Alibaba Cloud DashScope and DeepSeek AI capabilities.
 
-![Version](https://img.shields.io/badge/Version-8.4.0-blue)
+![Version](https://img.shields.io/badge/Version-8.5.0-blue)
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-green)
 ![Frontend](https://img.shields.io/badge/Frontend-React%2BTypeScript-blue)
 ![AI](https://img.shields.io/badge/AI-DashScope%20%7C%20DeepSeek-orange)
@@ -30,12 +30,13 @@
 
 ---
 
-> 📌 **V8.4.0 Highlights**:
-> 📝 **Dialogue Homework**: renamed from "Task Management" with step-by-step guidance; grading follows the teacher requirements checkpoint by checkpoint, one student at a time, and AI can draft the homework
-> 🧮 **Math rendering everywhere**: 23 surfaces - chat, companion, homework, analytics - render LaTeX, including `$$…$$` written inline
-> 🗂 **Chat history rebuilt**: titles and message counts, today/yesterday/month grouping, search, hover preview, row menu and rename
-> 📊 **Summary export**: scores and completion across activity types, aggregated by student or class, exported to Excel or CSV
-> 🧩 **Class management**: clean up empty shell classes; classes with students or teachers stay protected
+> 📌 **V8.5.0 Highlights**:
+> 📱 **First mobile pass lands**: open the platform in a phone browser and you can sign in, navigate and read notifications; the sidebar becomes a bottom tab bar, un-adapted features hide their entry and show a "use the desktop app" guide, while desktop stays pixel-identical
+> 💬 **Companion & assistant modes**: the header no longer collapses on narrow screens, "teaching data" becomes an overlay panel and the chat area now fits the phone viewport
+> ⚡ **Quick quiz end to end**: join a room, answer, and read the results on a phone - big touch targets, live countdown, auto-advance to the next question
+> 🔔 **Lists and tables**: notification rows reflow to content-over-actions, and wide tables scroll sideways instead of squashing their columns
+> 📝 **Exam taking**: the top bar wraps to two rows so the paper title, countdown and submit button stay readable
+> 🎓 **Assistant subtitle**: the teacher header now reads "Lesson prep · Questions · Grading · Insights" instead of repeating "AI Assistant"
 > 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
 
 ---
@@ -985,6 +986,18 @@ Git-based online incremental upgrade system:
 | 🗑️ **Temp File Cleanup** | Automatically cleans temporary upload files older than 24 hours |
 
 ## 📦 Changelog
+
+### v8.5.0 (2026-09-30)
+
+- 📱 **First mobile adaptation pass**: added a single site-wide breakpoint system (`<768px`) and a mobile shell - the sidebar becomes a bottom tab bar plus a whitelisted drawer menu, and a per-role "mobile allowed routes" list hides entries that are not adapted yet, replacing a direct visit with a "please use the desktop app" guide. The web desktop layout and the Electron app stay pixel-identical (the Electron window has `minWidth:1024`, so it can never reach the mobile breakpoint)
+- 💬 **Companion and assistant modes now usable on a phone**: the mode header wraps instead of squeezing the companion name into one character per line, the "teaching data" panel changed from a 280px inline column to a right-side overlay so it no longer squeezes the chat area, and the chat height moved from the desktop `calc(100vh - 112px)` to a phone-viewport measure so the input box and the bottom navigation share one screen
+- 🔔 **Row lists reflow on narrow screens**: the shared row-list component used by the notification centre, hot news, chat history and the bell dropdown now stacks content above its action buttons, so titles and metadata no longer run vertically; the chat history panel presents as a full-screen overlay with grouping, search and the row menu all usable
+- ⚡ **Quick quiz verified end to end**: enter a room code, wait in the lobby, answer (large touch targets, countdown, correct-answer highlight), advance automatically over WebSocket and read the results and leaderboard - the whole chain was tested at a 390px viewport; the result page score grid became responsive (two columns on phones, three on tablets, five unchanged on desktop) and the per-question review titles no longer stack vertically
+- 📐 **Global table and dialog fallbacks**: tables without an explicit horizontal scroll now scroll sideways on narrow screens (announcement and quiz list columns are no longer crushed or clipped), dialog widths are clamped to the viewport, and focusing an input on iOS no longer zooms the page
+- 📝 **Exam top bar**: wraps to two rows on narrow screens (back + paper title / countdown + progress + submit); the wrong-question book and classroom-question page headers got the same vertical-stacking fix
+- 🎓 **Assistant subtitle**: the teacher header secondary label changed from a duplicate of "AI Assistant" to the capability line "Lesson prep · Questions · Grading · Insights", backed by a new `chat.assistantTagline` key in both languages
+- 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs such as question generation and grading, the content-safety rules finally take effect, and the skill management page shows usage stats and a per-scene injection preview
+- ⚠️ **Breaking changes**: none (every mobile style rule and branch sits inside a `max-width: 767px` breakpoint, so the desktop code path is untouched; no database or API changes)
 
 ### v8.4.0 (2026-09-29)
 
