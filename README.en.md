@@ -133,12 +133,6 @@ The platform runs directly in a phone browser - **no app to install**. On a phon
 
 Question bank management and paper composing, question maintenance, user management, system configuration, roll call, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
 
-#### Known limits
-
-- No PWA yet (add to home screen / offline use) - that needs a registered domain with a trusted HTTPS certificate first
-- After the phone locks or the tab is backgrounded, quizzes and quests re-fetch the current state on return
-- Camera and microphone features require HTTPS
-
 #### 🏠 Home Overview
 
 ### 📊 Dashboard (System Home)
