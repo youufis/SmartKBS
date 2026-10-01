@@ -968,7 +968,7 @@ const ExamPage: React.FC = () => {
               key: 'results',
               label: <Space><BarChartOutlined />{t('result')}</Space>,
               children: (
-                <Table dataSource={myResults} rowKey="id" loading={myResultsLoading} size="small"
+                <Table className="nowrap-cells-table" dataSource={myResults} rowKey="id" loading={myResultsLoading} size="small"
                   columns={[
                     { title: t('examTitle'), dataIndex: 'exam_title', key: 'exam_title', ellipsis: true },
                     { title: t('subject'), dataIndex: 'exam_subject', key: 'exam_subject', width: 80 },

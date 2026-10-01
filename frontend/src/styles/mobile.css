@@ -84,7 +84,22 @@
   .quest-stats { flex-wrap: wrap; gap: 8px !important; }
   /* 注意: 卡片带行内 flex:1/minWidth:0, 行内样式优先级更高, 必须 !important 才能覆盖 */
   .quest-stats > .ant-card { flex: 1 1 30% !important; min-width: 104px !important; }
+
+  /* 显式列宽的表（如考试成绩的"得分"列 100px）在窄屏会把 "40 / 100" 挤成三行。
+     挂此类的表格窄屏单元格不折行，配合上面的横滑兜底：宁可左右滚，也不要竖排 */
+  .nowrap-cells-table .ant-table-cell { white-space: nowrap; }
+
+  /* 公告表固定列合计 550px，把没有宽度的标题列压到 72px（标题完全读不出）。
+     窄屏给标题列最小宽度，配合横滑兜底：宁可左右滚，也要能读出标题。桌面不受影响 */
+  .col-min-190 { min-width: 190px; }
+
+  /* antd 因 ellipsis 启用 table-layout:fixed，此时列宽只认 <colgroup>、单元格 min-width 被忽略。
+     窄屏把公告表切回 auto 布局，标题列的 min-width 才能生效（桌面仍为 fixed，不受影响） */
+  .announce-table .ant-table-content table { table-layout: auto !important; }
 }
+
+
+
 
 
 

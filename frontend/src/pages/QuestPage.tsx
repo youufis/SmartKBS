@@ -356,7 +356,7 @@ const QuestPage: React.FC = () => {
 
       {/* ── 历史记录（分页 + 展开） ── */}
       <Card title={<Space><HistoryOutlined /> {t('questRecords')}</Space>}>
-        <Table
+        <Table className="nowrap-cells-table"
           dataSource={records}
           columns={columns}
           rowKey="id"

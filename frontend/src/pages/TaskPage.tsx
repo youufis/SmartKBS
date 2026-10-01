@@ -537,7 +537,7 @@ const TaskPage: React.FC = () => {
         </Space>
 
         <Spin spinning={loading}>
-          <Table
+          <Table className="nowrap-cells-table"
             dataSource={visibleTasks}
             columns={columns}
             rowKey="id"

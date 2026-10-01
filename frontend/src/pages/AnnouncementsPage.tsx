@@ -204,6 +204,7 @@ const AnnouncementsPage: React.FC = () => {
       title: t('announcementTitle'),
       dataIndex: 'title',
       key: 'title',
+      className: 'col-min-190',
       ellipsis: true,
       render: (title: string, record: AnnouncementItem) => (
         <Space>
@@ -283,7 +284,7 @@ const AnnouncementsPage: React.FC = () => {
           </Space>
         }
       >
-        <Table
+        <Table className="nowrap-cells-table announce-table"
           dataSource={announcements}
           columns={columns}
           rowKey="id"
