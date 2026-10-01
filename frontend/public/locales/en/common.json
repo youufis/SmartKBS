@@ -314,5 +314,7 @@
         "body": "{{operator}} has cleared all participation records for this activity, so you can take part again"
       }
     }
-  }
+  },
+  "desktopOnlyTitle": "Please use the desktop version for this feature",
+  "desktopOnlySub": "Mobile support is being rolled out page by page, and this page has no phone layout yet. Please open it on a classroom PC, an office computer or the desktop app for the full experience."
 }

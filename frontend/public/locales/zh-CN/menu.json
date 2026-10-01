@@ -187,5 +187,7 @@
   "kind.text": "文本",
   "kind.code": "代码",
   "kind.other": "其他",
-  "kind.dir": "文件夹"
+  "kind.dir": "文件夹",
+  "mobileMore": "菜单",
+  "mobileDrawerTitle": "全部功能"
 }

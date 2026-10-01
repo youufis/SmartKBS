@@ -106,7 +106,7 @@ const WelcomeBanner: React.FC<Props> = ({ summary, todoTotal, isStudent, isTeach
           </span>
         )}
         {isStudent && (
-          <span style={{ marginLeft: 'auto', fontSize: 14, color: '#fff', whiteSpace: 'nowrap' }}>
+          <span className="banner-student-meta" style={{ marginLeft: 'auto', fontSize: 14, color: '#fff', whiteSpace: 'nowrap' }}>
             <TrophyOutlined style={{ marginRight: 4 }} />
             {t('welcome.score')} <Text strong style={{ color: '#fff', fontSize: 18 }}>{summary.total_score ?? 0}</Text>
             <Text style={{ color: 'rgba(255,255,255,0.7)', marginLeft: 8, fontSize: 13 }}>

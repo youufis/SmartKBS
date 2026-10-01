@@ -98,7 +98,18 @@
   /* antd 因 ellipsis 启用 table-layout:fixed，此时列宽只认 <colgroup>、单元格 min-width 被忽略。
      窄屏把公告表切回 auto 布局，标题列的 min-width 才能生效（桌面仍为 fixed，不受影响） */
   .announce-table .ant-table-content table { table-layout: auto !important; }
+
+  /* 首页横幅右侧信息块（积分·排名·进度 | 任务清单 | AI学伴）原本整体 white-space:nowrap，
+     390px 下内容 360px 撑成一行且超出父容器 109px。窄屏改为可换行的 flex 容器。
+     行内样式优先级更高，需 !important */
+  .banner-student-meta {
+    white-space: normal !important;
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 4px 10px; margin-left: 0 !important; width: 100%;
+    justify-content: flex-start;
+  }
 }
+
 
 
 
