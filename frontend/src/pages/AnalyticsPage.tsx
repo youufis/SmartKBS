@@ -362,7 +362,7 @@ const AnalyticsPage: React.FC = () => {
   return (
     <Card style={{ borderRadius: 8 }}>
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', border: 'none' }}>
-        <div style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className="page-header-flex" style={{ color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
           <RobotOutlined style={{ fontSize: 28 }} />
           <Title level={3} style={{ color: '#fff', margin: 0 }}>{t('analytics.title')}</Title>
           <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14, marginTop: 4 }}>

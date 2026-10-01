@@ -39,6 +39,12 @@ const STAFF_ALLOWED = [
   '/announcements',
   '/student-questions',
   '/downloads',          // 文件中心：教师取用资料，轻场景
+  // ── 第二批 C 档：教师移动轻只读（看数据、走审批，不做重管理） ──
+  '/class-summary',      // AI 课堂总结
+  '/analytics',          // 学情分析（只读）
+  '/portrait',           // 班级/AI 画像（教师侧同样使用，首页有入口）
+  '/tasks',              // 对话作业：批改结果确认与发布
+  '/score',              // 课堂积分查看
 ]
 
 /**

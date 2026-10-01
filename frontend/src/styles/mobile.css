@@ -40,8 +40,10 @@
   .wrap-space.ant-space, .wrap-space.ant-space-horizontal { flex-wrap: wrap; row-gap: 4px; }
 
   /* 答疑卡片：窄屏纵向堆叠（标题+元信息在上，操作按钮在下），杜绝标题被挤成竖排 */
-  .sq-card-row { flex-direction: column; align-items: stretch; gap: 8px; }
-  .sq-card-row > .ant-space { justify-content: flex-start; }
+  .sq-card-row,
+  .stack-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .sq-card-row > .ant-space,
+  .stack-row > .ant-space { justify-content: flex-start; }
 
   /* 行式列表（RowList，通知/新闻/聊天历史等共用）：
      窄屏把行操作按钮移到内容下方，标题区允许换行，杜绝标题被挤成一字一行 */

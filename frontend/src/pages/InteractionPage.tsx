@@ -339,7 +339,7 @@ const InteractionPage: React.FC = () => {
                   split={false}
                   renderItem={(quiz: any) => (
                   <Card size="small" style={{ marginBottom: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div className="page-header-flex stack-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1 }}>
                         <Text strong>{quiz.title}</Text>
                         <div style={{ marginTop: 4 }}>

@@ -111,7 +111,7 @@ const ClassSummaryPage: React.FC = () => {
 
         {classSummaryData && (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+            <div className="page-header-flex" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
               <Row gutter={12} style={{ flex: 1 }}>
                 <Col span={6}><Statistic title={t('quizCount')} value={classSummaryData.data?.quiz_count || 0} /></Col>
                 <Col span={6}><Statistic title={t('pollCount')} value={classSummaryData.data?.poll_count || 0} /></Col>

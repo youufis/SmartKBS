@@ -236,7 +236,7 @@ const QuickPollPage: React.FC = () => {
                 const hasVoted = poll.voted ?? votedPolls[poll.id]
                 return (
                   <Card size="small" style={{ marginBottom: 8 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div className="page-header-flex stack-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ flex: 1 }}>
                         <Text strong><FormulaRenderer content={poll.question} /></Text>
                         <div style={{ marginTop: 4 }}>
