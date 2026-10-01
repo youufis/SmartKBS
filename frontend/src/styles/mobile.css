@@ -88,6 +88,8 @@
   /* 显式列宽的表（如考试成绩的"得分"列 100px）在窄屏会把 "40 / 100" 挤成三行。
      挂此类的表格窄屏单元格不折行，配合上面的横滑兜底：宁可左右滚，也不要竖排 */
   .nowrap-cells-table .ant-table-cell { white-space: nowrap; }
+  /* 单元格内 Space（emoji + 文字）自身是 flex 容器，white-space 管不住它，需单独禁止换行 */
+  .nowrap-cells-table .ant-table-cell .ant-space { flex-wrap: nowrap; }
 
   /* 公告表固定列合计 550px，把没有宽度的标题列压到 72px（标题完全读不出）。
      窄屏给标题列最小宽度，配合横滑兜底：宁可左右滚，也要能读出标题。桌面不受影响 */

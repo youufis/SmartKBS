@@ -317,7 +317,7 @@ const TeacherMyPoints: React.FC = () => {
           </Card>
         </Col>
       </Row>
-      <Table dataSource={tMyHistory} rowKey="id" size="small" pagination={{ pageSize: 15 }}
+      <Table className="nowrap-cells-table" dataSource={tMyHistory} rowKey="id" size="small" pagination={{ pageSize: 15 }}
         columns={[
           { title: t('time'), dataIndex: 'created_at', render: (val: string) => val?.slice(0, 16) || '', width: 140 },
           { title: t('activity'), dataIndex: 'activity_type', width: 96,
@@ -535,7 +535,7 @@ const RewardPage: React.FC = () => {
   // ── 积分规则弹窗 ──
   const renderRulesModal = () => (
     <Modal title={t('reward.rulesTitle')} open={rulesOpen} onCancel={() => setRulesOpen(false)} footer={null} width={640}>
-      <Table dataSource={RULES} rowKey="type" size="small" pagination={false}
+      <Table className="nowrap-cells-table" dataSource={RULES} rowKey="type" size="small" pagination={false}
         columns={[
           { title: t('activity'), dataIndex: 'type', width: 150,
             render: (type: string, record: any) => (
@@ -549,7 +549,7 @@ const RewardPage: React.FC = () => {
         ]} />
       <Divider />
       <Text strong style={{ fontSize: 14 }}>{t('reward.levelAvatarEvolution')}</Text>
-      <Table dataSource={LEVEL_AVATARS} rowKey="level" size="small" pagination={false} style={{ marginTop: 8 }}
+      <Table className="nowrap-cells-table" dataSource={LEVEL_AVATARS} rowKey="level" size="small" pagination={false} style={{ marginTop: 8 }}
         columns={[
           { title: t('levelLabel'), dataIndex: 'level', width: 60, render: (lvl: string) => <Tag>{lvl}</Tag> },
           { title: t('reward.avatar'), dataIndex: 'emoji', width: 60, render: (em: string) => <span style={{ fontSize: 22 }}>{em}</span> },
@@ -670,7 +670,7 @@ const RewardPage: React.FC = () => {
         {myHistory.length === 0 ? (
           <Empty description={t('reward.noPointRecords')} />
         ) : (
-          <Table dataSource={myHistory} rowKey="id" size="small"
+          <Table className="nowrap-cells-table" dataSource={myHistory} rowKey="id" size="small"
             pagination={{ pageSize: 15, showTotal: (total) => t('totalRecords', { count: total }) }}
             columns={[
               { title: t('time'), dataIndex: 'created_at', width: 140, render: (val: string) => val ? val.slice(0, 16) : '' },
@@ -757,7 +757,7 @@ const RewardPage: React.FC = () => {
           {ranking.length === 0 ? (
             <Empty description={selectedGrade ? t('noData') : t('reward.selectGradeFirst')} />
           ) : (
-            <Table
+            <Table className="nowrap-cells-table"
               dataSource={ranking}
               rowKey="username"
               size="small"
