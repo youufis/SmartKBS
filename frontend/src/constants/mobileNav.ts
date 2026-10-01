@@ -29,6 +29,9 @@ const STUDENT_ALLOWED = [
   '/interaction',          // 课堂互动（随堂测验参与）
   '/quick-poll',           // 课堂投票参与
   '/downloads',            // 文件中心
+  // ── 第二批 D 档：成长档案与风采 ──
+  '/portfolio',            // 成长档案（/portfolio/:username 查看他人）
+  '/showcase',             // 风采展示
 ]
 
 /** 教师/管理员端：首批仅轻场景（题库/组卷/用户管理等保持桌面专属） */
@@ -45,6 +48,9 @@ const STAFF_ALLOWED = [
   '/portrait',           // 班级/AI 画像（教师侧同样使用，首页有入口）
   '/tasks',              // 对话作业：批改结果确认与发布
   '/score',              // 课堂积分查看
+  // ── 第二批 D 档：成长档案与风采 ──
+  '/portfolio',
+  '/showcase',
 ]
 
 /**

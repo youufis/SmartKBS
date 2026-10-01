@@ -395,7 +395,7 @@ const PortfolioPage: React.FC = () => {
                 </div>
               )}
 
-              <Table
+              <Table className="nowrap-cells-table"
                 dataSource={exams.results}
                 rowKey="id"
                 size="small"
@@ -458,7 +458,7 @@ const PortfolioPage: React.FC = () => {
                 </div>
               )}
 
-              <Table
+              <Table className="nowrap-cells-table"
                 dataSource={scores.records}
                 rowKey={(_, i) => String(i)}
                 size="small"
@@ -483,7 +483,7 @@ const PortfolioPage: React.FC = () => {
                 </Col>
               </Row>
               {reward_history?.length > 0 && (
-                <Table
+                <Table className="nowrap-cells-table"
                   dataSource={reward_history}
                   rowKey={(_, i) => String(i)}
                   size="small"
@@ -548,7 +548,7 @@ const PortfolioPage: React.FC = () => {
                 <Col span={8}><Statistic title={t('portfolio.avgAccuracy')} value={course_practice.avg_accuracy} suffix="%" styles={{ content: { color: '#1677ff' } }} /></Col>
                 <Col span={8}><Statistic title={t('totalScore')} value={course_practice.total_score} styles={{ content: { color: '#faad14' } }} /></Col>
               </Row>
-              <Table
+              <Table className="nowrap-cells-table"
                 dataSource={course_practice.records}
                 rowKey="id"
                 size="small"
