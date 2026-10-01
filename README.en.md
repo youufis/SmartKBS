@@ -111,6 +111,34 @@ Built with **FastAPI + React**, the system adopts a modern front-end/back-end se
 
 ## ✨ Complete Feature Overview
 
+### 📱 Mobile access
+
+The platform runs directly in a phone browser - **no app to install**. On a phone the focus is "students practise and check, teachers review and approve"; heavy management pages stay desktop-only.
+
+#### Pages open on mobile
+
+| Role | Count | Pages |
+| --- | --- | --- |
+| Student | 24 | dashboard, AI companion, wrong questions, daily picks, hot news, notifications, announcements, classroom questions, quick quiz, to-dos, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction, classroom polls, file centre, growth portfolio, showcase, my resources, resource centre, about |
+| Teacher / admin | 17 | dashboard, AI assistant, notifications, announcements, question management, AI class summary, learning analytics, homework grading confirmation, classroom points, weekly AI profile, file centre, growth portfolio, showcase, my resources, resource centre, resource management, about |
+
+#### How it behaves on a phone
+
+- A fixed five-slot bottom bar: home / companion (assistant for teachers) / wrong questions (questions for teachers) / notifications / **menu**, which lists everything available for the current role
+- Features that are not adapted hide their entry; opening one by URL shows a "use the desktop app" notice with a one-tap way back
+- Exam taking, quiz answering and quest battles are standalone full-screen pages with enlarged touch targets and a persistent countdown and progress bar
+- Lists (notifications, announcements, exams, quiz records, homework, resources) switch to cards or scroll sideways on narrow screens, so titles never collapse into one character per line
+
+#### Desktop only
+
+Question bank management and paper composing, question maintenance, user management, system configuration, roll call, activity monitor, summary export, curriculum maintenance, group discussions, quest administration, code practice, collaborative whiteboard, admin console
+
+#### Known limits
+
+- No PWA yet (add to home screen / offline use) - that needs a registered domain with a trusted HTTPS certificate first
+- After the phone locks or the tab is backgrounded, quizzes and quests re-fetch the current state on return
+- Camera and microphone features require HTTPS
+
 #### 🏠 Home Overview
 
 ### 📊 Dashboard (System Home)
