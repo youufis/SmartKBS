@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Card, Table, Typography, Button, Space, Modal, Form, Input,
-  Select, message, Empty, Tag, Switch, Popconfirm,
+  Select, message, Empty, Tag, Switch, Popconfirm, Pagination,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, PushpinOutlined,
@@ -12,6 +12,7 @@ import * as notificationsApi from '../api/notifications'
 import type { AnnouncementItem } from '../api/notifications'
 import apiClient from '../api/client'
 import { pollAiTask } from '../api/aiTask'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuthStore } from '../stores/authStore'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
@@ -192,6 +193,9 @@ const AnnouncementsPage: React.FC = () => {
     fetchAnnouncements(pagination.current, pagination.pageSize)
   }
 
+  // 窄屏用卡片列表替代六列表格：免横滑即可读全标题与关键信息（桌面仍为表格）
+  const isMobile = useIsMobile()
+
   const columns = [
     {
       title: t('pinned'),
@@ -284,6 +288,53 @@ const AnnouncementsPage: React.FC = () => {
           </Space>
         }
       >
+        {isMobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {announcements.length === 0 && !loading && <Empty description={t('noAnnouncements')} />}
+            {announcements.map((record: AnnouncementItem) => (
+              <Card key={record.id} size="small" styles={{ body: { padding: '10px 12px' } }}>
+                <Text strong style={{ cursor: 'pointer', display: 'block' }} onClick={() => setDetailModal(record)}>
+                  {record.is_pinned && <PushpinOutlined style={{ color: '#fa8c16', marginRight: 4 }} />}
+                  {record.title}
+                </Text>
+                <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                  <Tag color={PRIORITY_COLORS[record.priority] || 'default'}>
+                    {PRIORITY_LABELS[record.priority] || record.priority}
+                  </Tag>
+                  {record.target_role !== 'all' && (
+                    <Tag>{record.target_role === 'teacher' ? t('anRoleTeacher') : record.target_role === 'student' ? t('anRoleStudent') : record.target_role}</Tag>
+                  )}
+                  {record.target_grade && <Tag>{record.target_grade}</Tag>}
+                  {record.target_class && <Tag>{classText(record.target_class)}</Tag>}
+                </div>
+                <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }} className="page-header-flex">
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {record.creator_name || '-'} · {record.created_at ? new Date(record.created_at).toLocaleString('zh-CN') : '-'}
+                  </Text>
+                  <Space size={4}>
+                    <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => setDetailModal(record)} />
+                    {isAdminOrTeacher && (
+                      <>
+                        <Button type="text" size="small" icon={<EditOutlined />}
+                          onClick={() => { setEditModal(record); editForm.setFieldsValue(record) }} />
+                        <Popconfirm title={t('confirmDeleteAnnouncement')} onConfirm={() => handleDelete(record.id)}>
+                          <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                        </Popconfirm>
+                      </>
+                    )}
+                  </Space>
+                </div>
+              </Card>
+            ))}
+            {total > 0 && (
+              <Pagination
+                current={page} pageSize={pageSize} total={total} simple size="small"
+                onChange={(p) => fetchAnnouncements(p, pageSize)}
+                style={{ textAlign: 'center', paddingTop: 4 }}
+              />
+            )}
+          </div>
+        ) : (
         <Table className="nowrap-cells-table announce-table"
           dataSource={announcements}
           columns={columns}
@@ -301,6 +352,7 @@ const AnnouncementsPage: React.FC = () => {
           onChange={handleTableChange}
           locale={{ emptyText: <Empty description={t('noAnnouncements')} /> }}
         />
+        )}
       </Card>
 
       {/* ── 查看公告详情弹窗 ── */}
