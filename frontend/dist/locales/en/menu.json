@@ -187,5 +187,7 @@
   "kind.text": "Text",
   "kind.code": "Code",
   "kind.other": "Other",
-  "kind.dir": "Folder"
+  "kind.dir": "Folder",
+  "mobileMore": "Menu",
+  "mobileDrawerTitle": "All features"
 }

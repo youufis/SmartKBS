@@ -83,7 +83,7 @@
   "activity": "课堂活动",
   "eresponsedatadetailFailed": "e?.response?.data?.detail || 刷新失败",
   "Failed": "生成简报失败",
-  "subj": "即将跳转到「${{subj}}」相关学习资源",
+  "subj": "即将跳转到「{{subj}}」相关学习资源",
   "refreshLimitReached": "今日刷新次数已用完，明天再来吧！",
   "loadFailed": "加载失败",
   "refreshed": "已刷新",
@@ -314,5 +314,7 @@
         "body": "{{operator}} 已清空该活动的全部参与记录，你可以重新参与"
       }
     }
-  }
+  },
+  "desktopOnlyTitle": "此功能请在电脑端使用",
+  "desktopOnlySub": "手机端的适配正在逐步推进，该页面暂未开放手机视图。请在教室电脑、办公 PC 或桌面版中使用完整功能。"
 }

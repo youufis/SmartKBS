@@ -114,6 +114,12 @@ const PortraitPage: React.FC = () => {
   const [themeKey, setThemeKey] = useState<string>(DEFAULT_THEME_KEY)
   const [themeLoaded, setThemeLoaded] = useState(false)
   const theme = getTheme(themeKey, todayPortrait?.style)
+  // 主题名走 score.json 的 themeXxx 键（中英齐全），避免英文界面显示中文主题名
+  const themeLabel = (key: string, fallback: string) => {
+    const k = 'theme' + key.charAt(0).toUpperCase() + key.slice(1)
+    const v = t(k, { defaultValue: '' })
+    return v || fallback
+  }
   const [themePickerOpen, setThemePickerOpen] = useState(false)
   // 分页状态
   const [historyPage, setHistoryPage] = useState(1)
@@ -1010,7 +1016,7 @@ const PortraitPage: React.FC = () => {
           }} />}
           onClick={() => setThemePickerOpen(!themePickerOpen)}
         >
-          {themeKey === 'auto' ? '🎨 ' + t('ptAutoTheme') : `🎨 ${theme.name}`}
+          {themeKey === 'auto' ? '🎨 ' + t('ptAutoTheme') : `🎨 ${themeLabel(theme.key, theme.name)}`}
         </Button>
       </div>
       {themePickerOpen && (
@@ -1039,15 +1045,15 @@ const PortraitPage: React.FC = () => {
                 ✨
               </div>
             </Tooltip>
-            {PRESET_THEMES.map(t => (
-              <Tooltip key={t.key} title={t.name}>
+            {PRESET_THEMES.map((pt) => (
+              <Tooltip key={pt.key} title={themeLabel(pt.key, pt.name)}>
                 <div
-                  onClick={() => { setThemeKey(t.key); setThemePickerOpen(false) }}
+                  onClick={() => { setThemeKey(pt.key); setThemePickerOpen(false) }}
                   style={{
                     width: 36, height: 36, borderRadius: '50%', cursor: 'pointer',
-                    background: t.gradient,
-                    border: themeKey === t.key ? `3px solid ${t.color}` : '3px solid transparent',
-                    boxShadow: themeKey === t.key ? `0 0 0 2px ${t.borderColor}` : 'none',
+                    background: pt.gradient,
+                    border: themeKey === pt.key ? `3px solid ${pt.color}` : '3px solid transparent',
+                    boxShadow: themeKey === pt.key ? `0 0 0 2px ${pt.borderColor}` : 'none',
                     transition: 'all 0.2s',
                   }}
                 />
