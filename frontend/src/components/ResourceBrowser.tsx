@@ -84,7 +84,9 @@ const ResourceBrowser: React.FC<{
   const [view, setView] = useState<'grid' | 'list'>('grid')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(24)
-  const [collapsed, setCollapsed] = useState(false)
+  // 窄屏默认折叠左侧分类栏：196px 的面板在 390px 屏上会把文件卡片挤到屏幕外，
+  // 文件名与发布者完全看不到。桌面(>=768px)仍为 false，行为与之前一致。
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768)
   const [nowMs, setNowMs] = useState(0)
 
   // 时间基准放进 state：渲染期不取时间，倒计时/相对时间随数据刷新推进

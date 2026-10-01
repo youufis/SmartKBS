@@ -62,7 +62,9 @@ const HtmlFilesPage: React.FC = () => {
   const [editingGroup, setEditingGroup] = useState<resourcesApi.ResourceGroup | null>(null)
   const [groupInput, setGroupInput] = useState('')
   const [dragOverGroup, setDragOverGroup] = useState<number | null>(null) // 资源拖入：存 group_id
-  const [groupCollapsed, setGroupCollapsed] = useState(false) // 分组列表折叠
+  // 窄屏默认折叠分组栏：200px 面板在 390px 屏上会把文件卡片挤出屏幕，文件名与发布者看不见。
+  // 桌面(>=768px)仍为 false，行为不变。
+  const [groupCollapsed, setGroupCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768) // 分组列表折叠
 
   // ── 拖拽状态 ──
   const [draggedFile, setDraggedFile] = useState<string | null>(null)
