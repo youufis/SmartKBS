@@ -102,7 +102,7 @@ const TodoFocusCard: React.FC<Props> = ({ todo, loading }) => {
               </div>
               <Button size="small" type="primary" ghost style={{ flexShrink: 0 }}
                 onClick={(e) => { e.stopPropagation(); navigate(item.url) }}>
-                {item.action_label || t('todoCard.go')}
+                {t(`todo.action.${item.type}`, { defaultValue: item.action_label || t('todoCard.go') })}
               </Button>
             </div>
           )
