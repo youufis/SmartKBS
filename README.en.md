@@ -38,6 +38,7 @@
 > 📝 **Exam taking**: the top bar wraps to two rows so the paper title, countdown and submit button stay readable
 > 🎓 **Assistant subtitle**: the teacher header now reads "Lesson prep · Questions · Grading · Insights" instead of repeating "AI Assistant"
 > 📱 **Second mobile pass (10-01)**: students additionally get to-dos, points, exam results, the weekly AI profile, quests, practice, classroom quizzes and polls, and the file centre; teachers gain class summary, analytics and grading confirmation
+> 📱 **Third mobile pass (10-01)**: exam results, announcements, quick quiz and homework lists now render as cards or have collapsed column widths fixed on narrow screens, and the growth portfolio and showcase join mobile - 21 student pages and 13 teacher pages in total
 > 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
 > 🔗 **Same-day upgrade addendum**: multiple mirrors with a git fallback, a dead remote can no longer veto the upgrade, and `.git` fetch residue is swept automatically
 
@@ -992,10 +993,11 @@ Git-based online incremental upgrade system:
 ### v8.5.0 (2026-09-30)
 
 - 📱 **Mobile adaptation lands**: a `<768px` breakpoint system with a mobile shell (bottom tab bar + drawer menu), a per-role route whitelist, and a "use the desktop app" guide for everything not adapted yet
-- 🧒 **19 student pages open**: dashboard, companion, wrong questions, daily picks, news, notifications, announcements, classroom questions, quick quiz, to-dos, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction and polls, file centre
-- 👥 **11 teacher pages open**: dashboard, AI assistant, notifications, announcements, question management, class summary, learning analytics, homework grading confirmation, classroom points, weekly AI profile, file centre
+- 🧒 **21 student pages open**: dashboard, companion, wrong questions, daily picks, news, notifications, announcements, classroom questions, quick quiz, to-dos, points and titles, exams and results, weekly AI profile, companion settings, knowledge quests, synced practice, classroom interaction and polls, file centre, growth portfolio, showcase
+- 👥 **13 teacher pages open**: dashboard, AI assistant, notifications, announcements, question management, class summary, learning analytics, homework grading confirmation, classroom points, weekly AI profile, file centre, growth portfolio, showcase
 - ⚡ **Quick quiz and knowledge quests work end to end**: joining a room, answering, the leaderboard, quest battles and the review all verified at a 390px viewport
 - 🛠 **Narrow-screen layout fixes**: tables scroll sideways, dialog widths are clamped, iOS no longer zooms on focus; vertically stacked titles in notifications, the exam bar, the companion header, quest stats and the poll/question list cards are all resolved
+- 🛠 **Third pass (added 2026-10-01)**: a shared table-to-card component now renders exam results, announcements, quick quiz lists and homework as cards on narrow screens, and fixes collapsed column widths (the announcement title column had been squeezed to 72 px and was unreadable, exam scores wrapped onto three lines); the growth portfolio and showcase join mobile; desktop stays pixel-identical against the same-day baseline
 - 🔗 **Upgrade chain hardened**: multiple mirrors with the git truth as fallback, a broken remote no longer vetoes an update, stale `.git` fetch residue is cleaned automatically, and version lookups are cached for 60 s with their source reported
 - 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
 - ⚠️ **Breaking changes**: none (every mobile change sits inside the breakpoint, so desktop and Electron are untouched; the upgrade work only adds backward-compatible fields)
