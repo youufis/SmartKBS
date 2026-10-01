@@ -29,6 +29,8 @@ import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
 import ResetActivityButton from '../components/ResetActivityButton'
 import { closeWithDirtyGuard } from '../utils/dirtyClose'
 import { reportLoadError } from '../utils/loadError'
+import MobileCardTable from '../components/MobileCardTable'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const { TextArea } = Input
 const { Option } = Select
@@ -43,6 +45,8 @@ const STATUS_COLORS: Record<string, string> = {
 let subjectOptions: string[] = []
 
 const ExamPage: React.FC = () => {
+  // 窄屏：列表类表格改卡片渲染（复用同一套 columns，桌面仍为 Table）
+  const isMobile = useIsMobile()
   const user = useAuthStore((s) => s.user)
   const navigate = useNavigate()
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
@@ -952,6 +956,13 @@ const ExamPage: React.FC = () => {
               key: 'exams',
               label: <Space><FileAddOutlined />{t('examList')}</Space>,
               children: (
+                isMobile ? (
+                  <MobileCardTable
+                    dataSource={exams} columns={studentColumns} rowKey="id" loading={loading}
+                    pagination={{ current: page, pageSize, total, onChange: (p) => setPage(p) }}
+                    emptyText={<Empty description={t('noExams')} />}
+                  />
+                ) : (
                 <Table dataSource={exams} columns={studentColumns} rowKey="id"
                   loading={loading} size="small"
                   pagination={{
@@ -962,6 +973,7 @@ const ExamPage: React.FC = () => {
                   }}
                   locale={{ emptyText: <Empty description={t('noExams')} /> }}
                 />
+                )
               ),
             },
             {

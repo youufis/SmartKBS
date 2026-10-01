@@ -17,6 +17,8 @@ import {
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import { useAuthStore } from '../stores/authStore'
+import MobileCardTable from '../components/MobileCardTable'
+import { useIsMobile } from '../hooks/useIsMobile'
 import useSubjectOptions from '../hooks/useSubjectOptions'
 import ActivityScopeSelector from '../components/ActivityScopeSelector'
 import type { ActivityScopeValue } from '../components/ActivityScopeSelector'
@@ -29,6 +31,8 @@ const { TextArea } = Input
 
 const QuickQuizPage: React.FC = () => {
   const { t } = useTranslation('interaction')
+  // 窄屏：活动列表与历史记录改卡片渲染（桌面仍为 Table）
+  const isMobile = useIsMobile()
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const isTeacherOrAdmin = user?.role === 'admin' || user?.role === 'teacher'
@@ -313,6 +317,29 @@ const QuickQuizPage: React.FC = () => {
     },
   ]
 
+  // 抢答历史记录列定义（桌面表格与窄屏卡片共用同一份）
+  const historyColumns = [
+                { title: t('title'), dataIndex: 'title', key: 'title' },
+                { title: t('status'), dataIndex: 'status', key: 'status', render: getStatusTag },
+                { title: t('score'), dataIndex: 'total_score', key: 'score',
+                  render: (s: number) => <Text strong style={{ color: '#faad14' }}>{s}</Text>
+                },
+                { title: t('correct'), dataIndex: 'correct_count', key: 'correct' },
+                { title: t('wrong'), dataIndex: 'wrong_count', key: 'wrong' },
+                { title: t('maxStreak'), dataIndex: 'max_streak', key: 'streak',
+                  render: (s: number) => s > 1 ? <Tag color="volcano">🔥 x{s}</Tag> : '-'
+                },
+                { title: t('teacher'), dataIndex: 'creator_name', key: 'teacher' },
+                {
+                  title: t('actions'), key: 'action',
+                  render: (_: any, r: any) => (
+                    <Button size="small" onClick={() => navigate(`/quick-quiz/result/${r.id}`)}>
+                      {t('viewDetails')}
+                    </Button>
+                  )
+                },
+                ]
+
   return (
     <Card style={{ borderRadius: 8 }}>
       {/* 顶栏 */}
@@ -353,6 +380,13 @@ const QuickQuizPage: React.FC = () => {
         ) : rooms.length === 0 ? (
           <Empty description={isTeacherOrAdmin ? t('noActivitiesTeacher') : t('noActivitiesStudent')} />
         ) : (
+          isMobile ? (
+            <MobileCardTable
+              dataSource={rooms}
+              columns={isTeacherOrAdmin ? teacherColumns : studentColumns}
+              rowKey="id"
+            />
+          ) : (
           <Table
             dataSource={rooms}
             columns={isTeacherOrAdmin ? teacherColumns : studentColumns}
@@ -360,6 +394,7 @@ const QuickQuizPage: React.FC = () => {
             pagination={{ pageSize: 20 }}
             size="small"
           />
+          )
         )}
       </Card>
 
@@ -369,33 +404,17 @@ const QuickQuizPage: React.FC = () => {
           {historyLoading ? <Spin /> : history.length === 0 ? (
             <Empty description={t('noHistory')} />
           ) : (
+            isMobile ? (
+              <MobileCardTable dataSource={history} columns={historyColumns} rowKey="id" />
+            ) : (
             <Table
               dataSource={history}
               rowKey="id"
               size="small"
               pagination={{ pageSize: 10 }}
-              columns={[
-                { title: t('title'), dataIndex: 'title', key: 'title' },
-                { title: t('status'), dataIndex: 'status', key: 'status', render: getStatusTag },
-                { title: t('score'), dataIndex: 'total_score', key: 'score',
-                  render: (s: number) => <Text strong style={{ color: '#faad14' }}>{s}</Text>
-                },
-                { title: t('correct'), dataIndex: 'correct_count', key: 'correct' },
-                { title: t('wrong'), dataIndex: 'wrong_count', key: 'wrong' },
-                { title: t('maxStreak'), dataIndex: 'max_streak', key: 'streak',
-                  render: (s: number) => s > 1 ? <Tag color="volcano">🔥 x{s}</Tag> : '-'
-                },
-                { title: t('teacher'), dataIndex: 'creator_name', key: 'teacher' },
-                {
-                  title: t('actions'), key: 'action',
-                  render: (_: any, r: any) => (
-                    <Button size="small" onClick={() => navigate(`/quick-quiz/result/${r.id}`)}>
-                      {t('viewDetails')}
-                    </Button>
-                  )
-                },
-              ]}
+              columns={historyColumns}
             />
+            )
           )}
         </Card>
       )}
