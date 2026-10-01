@@ -31,15 +31,12 @@
 ---
 
 > 📌 **V8.5.0 Highlights**:
-> 📱 **First mobile pass lands**: open the platform in a phone browser and you can sign in, navigate and read notifications; the sidebar becomes a bottom tab bar, un-adapted features hide their entry and show a "use the desktop app" guide, while desktop stays pixel-identical
+> 📱 **Mobile adaptation lands**: works straight from a phone browser with no app to install; the sidebar becomes a bottom tab bar and a per-role route whitelist now covers 24 student pages and 17 teacher pages (homework, exams, practice, quests, quizzes and polls, notifications, resources and analytics), un-adapted features hide their entry behind a "use the desktop app" guide, and desktop and Electron stay pixel-identical
 > 💬 **Companion & assistant modes**: the header no longer collapses on narrow screens, "teaching data" becomes an overlay panel and the chat area now fits the phone viewport
 > ⚡ **Quick quiz end to end**: join a room, answer, and read the results on a phone - big touch targets, live countdown, auto-advance to the next question
 > 🔔 **Lists and tables**: notification rows reflow to content-over-actions, and wide tables scroll sideways instead of squashing their columns
 > 📝 **Exam taking**: the top bar wraps to two rows so the paper title, countdown and submit button stay readable
 > 🎓 **Assistant subtitle**: the teacher header now reads "Lesson prep · Questions · Grading · Insights" instead of repeating "AI Assistant"
-> 📱 **Second mobile pass (10-01)**: students additionally get to-dos, points, exam results, the weekly AI profile, quests, practice, classroom quizzes and polls, and the file centre; teachers gain class summary, analytics and grading confirmation
-> 📱 **Third mobile pass (10-01)**: exam results, announcements, quick quiz and homework lists now render as cards or have collapsed column widths fixed on narrow screens, and the growth portfolio and showcase join mobile
-> 📱 **Fourth mobile pass (10-01)**: my resources, resource centre, resource management and the about page join mobile, and the group panel now starts collapsed on narrow screens (its 200 px width used to push file names off screen) - 24 student pages and 17 teacher pages in total
 > 🧠 **Skill system hardened**: per-scene skill injection no longer skews structured outputs, content-safety rules truly take effect, and the skill page shows usage stats
 > 🔗 **Same-day upgrade addendum**: multiple mirrors with a git fallback, a dead remote can no longer veto the upgrade, and `.git` fetch residue is swept automatically
 
