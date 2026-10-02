@@ -27,6 +27,7 @@ from backend.auth import (
 
     is_graduated,)
 from backend.api.auth_guard import unauthorized
+from backend.auth_errors import login_block_message_key
 from backend.api.config_router import get_config_value
 from backend.i18n import T, resolve_lang_from_request
 from backend.security_guard import record_login_failure
@@ -85,6 +86,13 @@ async def login(req: LoginRequest, fastapi_request: Request):
     # 毕业归档拦截：数据保留在平台，登录入口关闭（管理员可在用户管理恢复）
     if is_graduated(username):
         raise HTTPException(status_code=403, detail=T('messages.error.account_graduated', lang))
+
+    # ── 角色登录闸门（系统升级维护用）：挡新登录 ──
+    # 与 middleware.py 的在途会话闸门共用 login_block_message_key() 一处判定；
+    # 管理员(role 0)永不受限，防止把自己锁死。
+    _blocked_key = login_block_message_key(role_val)
+    if _blocked_key:
+        raise HTTPException(status_code=403, detail=T(_blocked_key, lang))
 
     # 登录前递增 token_version，使旧 token 失效（强制单点登录）
     increment_token_version(username)

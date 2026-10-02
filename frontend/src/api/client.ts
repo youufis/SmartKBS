@@ -15,7 +15,8 @@ export type AuthErrorCode =
   | 'token_expired'
   | 'token_invalid'
   | 'token_stale'
-  | 'account_missing';
+  | 'account_missing'
+  | 'login_blocked';
 
 /** 会话失效广播事件：App.tsx 监听后统一 forceLogout + 跳登录页 */
 export const AUTH_UNAUTHORIZED_EVENT = 'auth:unauthorized';

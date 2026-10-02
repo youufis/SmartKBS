@@ -19,7 +19,13 @@ from backend.auth import (
     verify_token,
     verify_token_version,
 )
-from backend.auth_errors import auth_error_response, log_auth_reject
+from backend.auth_errors import (
+    AUTH_LOGIN_BLOCKED,
+    auth_error_response,
+    log_auth_reject,
+    login_block_message_key,
+)
+from backend.i18n import T, resolve_lang_from_request
 from backend.security_guard import block_response
 from backend.logger import logger
 from backend.request_ctx import set_current_user
@@ -97,6 +103,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if payload:
                 request.state.user = payload
                 set_current_user(payload)
+                # ── 角色登录闸门（系统升级维护用）：把已在途的会话也挡下 ──
+                # 与 auth_router 的"挡新登录"共用同一处判定，管理员(role 0)永不受限。
+                # 放在 update_active_token 之前：被挡的人不该再算进在线人数。
+                _blocked_key = login_block_message_key(payload.get("role"))
+                if _blocked_key:
+                    log_auth_reject(request, AUTH_LOGIN_BLOCKED, where="middleware_gate")
+                    return auth_error_response(
+                        AUTH_LOGIN_BLOCKED,
+                        T(_blocked_key, resolve_lang_from_request(request)),
+                    )
                 update_active_token(token)
                 # 滑动续期：令牌剩余寿命不足阈值时，借这次请求换一张新令牌
                 try:

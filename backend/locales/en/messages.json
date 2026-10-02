@@ -25,7 +25,9 @@
     "reset_fields_required": "Username, both answers and new password are required",
     "password_min_len_4": "New password must be at least 4 characters",
     "ip_rate_banned_retry": "Too many requests, please retry in {seconds} second(s)",
-    "ip_denied": "Access denied: your address is on the deny list"
+    "ip_denied": "Access denied: your address is on the deny list",
+    "login_block_student": "Student login is temporarily disabled",
+    "login_block_teacher": "Teacher login is temporarily disabled"
   },
   "success": {
     "login": "Login successful",

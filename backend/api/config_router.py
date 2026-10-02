@@ -70,6 +70,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "LOGIN_FAIL_WINDOW_SECONDS": 600,       # 登录失败统计窗口（猜密码场景）
     "LOGIN_FAIL_LIMIT": 10,                 # 窗口内登录失败次数上限
     "IP_DENYLIST": [],                      # 永久拒绝的来源：精确 IP / 前缀(14.112.) / 网段(14.112.131.0/24)
+    # ── 角色登录闸门（升级维护用）：默认全部允许，管理员永不受此项影响 ──
+    # 开启后该类账号既不能新登录，已在登录中的会话也会被请回登录页（下一次请求即生效）
+    "LOGIN_BLOCK_STUDENT": False,           # 暂停学生登录
+    "LOGIN_BLOCK_TEACHER": False,           # 暂停教师登录
     # AI 对话权限（可多选角色：1=教师, 2=学生；管理员始终可用）
     "ENABLE_AI_CHAT_FOR_ROLES": [1, 2],
     # 请求限制
@@ -314,6 +318,7 @@ _BOOL_KEYS = {
     "ENABLE_IP_GUARD", "TRUST_PROXY_HEADERS",
     "ENABLE_BADGES", "ENABLE_SUBJECT_TITLES", "QUEST_USE_BANK",
     "auto_pull_enabled", "CHAT_MEMORY_ENABLED", "KB_ENABLED", "AGENT_ENABLED",
+    "LOGIN_BLOCK_STUDENT", "LOGIN_BLOCK_TEACHER",
 }
 _STR_LIMITS: dict[str, int] = {
     "AGENT_EDITION": 64, "ORG_NAME": 100, "QWEN_OPENAI_API_BASE": 300,

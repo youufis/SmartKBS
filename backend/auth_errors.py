@@ -19,6 +19,7 @@ AUTH_EXPIRED = "token_expired"         # 签名有效，但 exp 已到
 AUTH_INVALID = "token_invalid"         # 签名或格式不对（密钥换过、伪造、串了别站 token）
 AUTH_STALE = "token_stale"             # 签名有效但 token_version 不符 —— 被同账号顶下线 / 已登出
 AUTH_NO_ACCOUNT = "account_missing"    # token 里的账号已不存在
+AUTH_LOGIN_BLOCKED = "login_blocked"   # 角色被"暂停登录"闸门挡住（升级维护），不是凭证问题
 
 _MESSAGES = {
     AUTH_MISSING: "未登录，请先登录",
@@ -27,10 +28,49 @@ _MESSAGES = {
     # 措辞保留"在其他地方登录"这个旧短语：老版本前端(缓存里的旧 bundle)按这句话识别被顶号
     AUTH_STALE: "账号已在其他地方登录或已退出，请重新登录",
     AUTH_NO_ACCOUNT: "账号不存在或已被删除，请重新登录",
+    AUTH_LOGIN_BLOCKED: "该角色已暂停登录，请稍后再试",
 }
 
 #: 需要前端"停轮询 + 跳登录"的 401（区别于登录接口自身报的"密码错误"）
-REAUTH_CODES = {AUTH_MISSING, AUTH_EXPIRED, AUTH_INVALID, AUTH_STALE, AUTH_NO_ACCOUNT}
+REAUTH_CODES = {AUTH_MISSING, AUTH_EXPIRED, AUTH_INVALID, AUTH_STALE, AUTH_NO_ACCOUNT, AUTH_LOGIN_BLOCKED}
+
+
+#: 角色 -> (配置键, 提示文案 i18n 键)。管理员(0)不在此表内，永不被挡。
+_LOGIN_GATE_BY_ROLE = {
+    2: ("LOGIN_BLOCK_STUDENT", "messages.error.login_block_student"),
+    1: ("LOGIN_BLOCK_TEACHER", "messages.error.login_block_teacher"),
+}
+
+
+def _gate_flag(value: Any) -> bool:
+    """容忍手改 JSON 时写成字符串 "true"/"1"；读不到配置一律按"允许"处理。"""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def login_block_message_key(role: Any) -> Optional[str]:
+    """该角色是否被"暂停登录"闸门挡住；命中则返回提示文案的 i18n 键，否则 None。
+
+    登录接口与认证中间件共用这一份判定：前者挡新登录，后者挡已在途的会话，
+    两处逻辑必须一致，所以只在这里写一次。配置异常时放行——
+    宁可在读不到配置时放过，也不能因为一个坏配置把全校挡在门外。
+    """
+    from backend.api.config_router import get_config_value  # 局部导入，避开启动期循环依赖
+
+    try:
+        role_int = int(role)
+    except (TypeError, ValueError):
+        return None
+    entry = _LOGIN_GATE_BY_ROLE.get(role_int)
+    if not entry:
+        return None
+    cfg_key, msg_key = entry
+    try:
+        on = _gate_flag(get_config_value(cfg_key, False))
+    except Exception:
+        return None
+    return msg_key if on else None
 
 
 def auth_message(code: str) -> str:
