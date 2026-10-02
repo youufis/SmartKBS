@@ -190,8 +190,9 @@ const GLOBAL_CONFIG_FIELDS: ConfigField[] = [
   { key: 'AUTH_FAIL_BAN_SECONDS', labelKey: 'field_AUTH_FAIL_BAN_SECONDS', descKey: 'field_AUTH_FAIL_BAN_SECONDS_desc', type: 'number', group: 'guard', unitKey: 'unitSecond' },
   { key: 'IP_DENYLIST', labelKey: 'field_IP_DENYLIST', descKey: 'field_IP_DENYLIST_desc', type: 'tags', group: 'guard', required: false, placeholderKey: 'placeholder_ipDenylist', danger: true },
   // 角色登录闸门：升级维护时关掉某类账号的新登录入口，管理员不受影响
-  { key: 'LOGIN_BLOCK_STUDENT', labelKey: 'field_LOGIN_BLOCK_STUDENT', descKey: 'field_LOGIN_BLOCK_STUDENT_desc', type: 'boolean', group: 'guard', danger: true },
-  { key: 'LOGIN_BLOCK_TEACHER', labelKey: 'field_LOGIN_BLOCK_TEACHER', descKey: 'field_LOGIN_BLOCK_TEACHER_desc', type: 'boolean', group: 'guard', danger: true },
+  // 两个开关行为同构，只保留一条说明（挂在第一个开关下），避免同一段文字重复出现两次
+  { key: 'LOGIN_BLOCK_STUDENT', labelKey: 'field_LOGIN_BLOCK_STUDENT', descKey: 'field_LOGIN_BLOCK_desc', type: 'boolean', group: 'guard', danger: true },
+  { key: 'LOGIN_BLOCK_TEACHER', labelKey: 'field_LOGIN_BLOCK_TEACHER', type: 'boolean', group: 'guard', danger: true },
   // 流量限制
   { key: 'ENABLE_REQUEST_LIMIT', labelKey: 'field_ENABLE_REQUEST_LIMIT', descKey: 'field_ENABLE_REQUEST_LIMIT_desc', type: 'boolean', group: 'ratelimit' },
   { key: 'MAX_ALLOWED_REQUESTS', labelKey: 'field_MAX_ALLOWED_REQUESTS', descKey: 'field_MAX_ALLOWED_REQUESTS_desc', type: 'number', group: 'ratelimit', unitKey: 'unitTime' },

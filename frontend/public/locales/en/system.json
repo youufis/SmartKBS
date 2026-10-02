@@ -1107,7 +1107,6 @@
   "sceneMapOrphanTitle": "These mappings use scene keys that are not wired up (no effect); click × to remove:",
   "sceneMapIncompatible": "Not applicable to this scene (never injected anyway)",
   "field_LOGIN_BLOCK_STUDENT": "Disable student sign-in",
-  "field_LOGIN_BLOCK_STUDENT_desc": "When on, students cannot sign in and any signed-in student is also sent back to the login page on their next request, seeing \"Student login is temporarily disabled\". Admins are unaffected and are never blocked by this switch. Intended for upgrades and maintenance.",
   "field_LOGIN_BLOCK_TEACHER": "Disable teacher sign-in",
-  "field_LOGIN_BLOCK_TEACHER_desc": "When on, teachers cannot sign in and any signed-in teacher is also sent back to the login page on their next request, seeing \"Teacher login is temporarily disabled\". Admins are unaffected. Intended for upgrades and maintenance."
+  "field_LOGIN_BLOCK_desc": "When on, this kind of account cannot sign in: new logins are refused, and anyone already signed in is sent back to the login page on their next request. Admins are unaffected and are never blocked by these two switches. Intended for upgrades and maintenance."
 }
